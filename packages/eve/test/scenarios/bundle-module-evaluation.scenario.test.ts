@@ -94,18 +94,16 @@ describe("eve dist single-chunk module evaluation", () => {
     expect(loaded.__steps_registered).toBe(true);
   }, 180_000);
 
-  it("every framework tool definition is defined in the concatenated chunk (no silent `undefined` slots)", async () => {
-    // Defense in depth: catches any future cycle that lands a
-    // `*_TOOL_DEFINITION` after the registry in the bundle.
-    const scratch = await createScratchDirectory("eve-framework-tools-eval-");
+  it("loads every framework programmatic namespace from the concatenated chunk", async () => {
+    const scratch = await createScratchDirectory("eve-framework-sources-eval-");
     const outDir = join(scratch, "out");
     await mkdir(outDir, { recursive: true });
 
     const entryFile = join(scratch, "entry.mjs");
-    const eveEntry = resolvePackageSourceFilePath("src/runtime/framework-tools/index.ts");
+    const eveEntry = resolvePackageSourceFilePath("src/framework/sources/registry.ts");
     await writeFile(
       entryFile,
-      `import * as ft from ${JSON.stringify(eveEntry)};\nexport default ft;\n`,
+      `import * as sources from ${JSON.stringify(eveEntry)};\nexport default sources;\n`,
     );
 
     const outfile = await bundleEveDistAsSingleChunk({
@@ -115,12 +113,14 @@ describe("eve dist single-chunk module evaluation", () => {
     });
 
     const loaded = await import(pathToFileURL(outfile).href);
-    const tools = loaded.default.getAllFrameworkToolDefinitions();
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool, "framework tool entry must be defined").toBeDefined();
-      expect(typeof tool.name).toBe("string");
-      expect(tool.name.length).toBeGreaterThan(0);
+    const registry = loaded.default.frameworkAgentSourceRegistry;
+    const modules = registry.registrations.flatMap(
+      (registration: { source: { modules: Array<{ loadNamespace(): Promise<unknown> }> } }) =>
+        registration.source.modules,
+    );
+    expect(modules.length).toBeGreaterThan(0);
+    for (const module of modules) {
+      await expect(module.loadNamespace()).resolves.toMatchObject({ default: expect.anything() });
     }
   }, 180_000);
 });

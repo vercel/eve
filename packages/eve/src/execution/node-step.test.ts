@@ -13,10 +13,10 @@ import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
-import { countLocalSubagentCalls } from "#runtime/framework-tools/subagent/local.js";
+import { countLocalSubagentCalls } from "#execution/tools/subagent/local.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -198,10 +198,7 @@ function createTestNode(
   const agent = {} as ResolvedRuntimeAgentNode["agent"];
 
   return {
-    agent: {
-      ...agent,
-      disabledFrameworkTools: [],
-    },
+    agent,
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
@@ -216,6 +213,42 @@ function createTestNode(
     toolRegistry: createEmptyToolRegistry(),
     turnAgent: turnAgent ?? createTestTurnAgent(),
     ...overrides,
+  };
+}
+
+async function createNodeWithSourceOwnedTools(input: {
+  readonly names: readonly string[];
+  readonly tasks?: boolean;
+  readonly turnTools?: StaticRuntimeTurnAgent["tools"];
+}): Promise<ResolvedRuntimeAgentNode> {
+  const toolRegistry = await createRuntimeToolRegistry({
+    tools: input.names.map((name) => ({
+      description: `${name} programmatic tool.`,
+      execute: async () => `${name}-sentinel`,
+      inputSchema: null,
+      logicalPath: `tools/${name}.ts`,
+      name,
+      owner: { feature: "test", kind: "framework" },
+      sourceId: `framework:tools/${name}.ts`,
+      sourceKind: "module",
+    })),
+  });
+  const node = createTestNode(
+    createTestTurnAgent({
+      tools: [...toolRegistry.preparedTools, ...(input.turnTools ?? [])],
+    }),
+    { toolRegistry },
+  );
+  return {
+    ...node,
+    agent: {
+      ...node.agent,
+      config: {
+        experimental: { tasks: input.tasks === true },
+        model: { id: "test-model" },
+        name: "test",
+      },
+    },
   };
 }
 
@@ -237,8 +270,15 @@ function createNoopRuntime(): Runtime {
 }
 
 describe("createNodeHarnessTools", () => {
-  it("guides the model to split large tasks across parallel agent calls", () => {
-    const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
+  it("keeps the compiled framework question tool client-side", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["ask_question"] });
+
+    expect(createNodeHarnessTools({ node }).get("ask_question")?.execute).toBeUndefined();
+  });
+
+  it("lowers the compiled framework agent tool to the canonical dispatch action", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["agent"] });
+    const agentTool = createNodeHarnessTools({ node }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
     expect(agentTool?.description).toContain("multiple `agent` calls in one response");
@@ -253,47 +293,23 @@ describe("createNodeHarnessTools", () => {
     });
   });
 
-  it("does not give declared subagent nodes the built-in agent tool", () => {
-    const tools = createNodeHarnessTools({
-      node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+  it("omits compiled task-control tools unless experimental.tasks is on", async () => {
+    const node = await createNodeWithSourceOwnedTools({
+      names: ["task_cancel", "task_update"],
     });
-
-    expect(tools.has("agent")).toBe(false);
-  });
-
-  it("does not give the root node the built-in agent tool when it is disabled", () => {
-    const node = createTestNode();
-    const tools = createNodeHarnessTools({
-      node: {
-        ...node,
-        agent: {
-          ...node.agent,
-          disabledFrameworkTools: ["agent"],
-        },
-      },
-    });
-
-    expect(tools.has("agent")).toBe(false);
-  });
-
-  it("does not inject task tools without experimental.tasks", () => {
-    const tools = createNodeHarnessTools({ node: createTestNode() });
+    const tools = createNodeHarnessTools({ node });
 
     for (const name of ["task_cancel", "task_update"]) {
       expect(tools.has(name)).toBe(false);
     }
   });
 
-  it("injects the task tools when experimental.tasks is on", () => {
-    const node = createTestNode();
+  it("lowers compiled task-control tools when experimental.tasks is on", async () => {
     const tools = createNodeHarnessTools({
-      node: {
-        ...node,
-        agent: {
-          ...node.agent,
-          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
-        },
-      },
+      node: await createNodeWithSourceOwnedTools({
+        names: ["task_cancel", "task_update"],
+        tasks: true,
+      }),
     });
 
     for (const name of ["task_cancel", "task_update"]) {
@@ -303,7 +319,7 @@ describe("createNodeHarnessTools", () => {
     expect(tools.has("task_sleep")).toBe(false);
   });
 
-  it("executes local and remote subagents as background tools only with experimental.tasks", () => {
+  it("executes compiled local and remote delegation tools in the selected task mode", async () => {
     const delegationTools: StaticRuntimeTurnAgent["tools"] = [
       {
         description: "Delegate local research.",
@@ -324,28 +340,24 @@ describe("createNodeHarnessTools", () => {
         sourceId: "remote-agents/reviewer",
       },
     ];
-    const createNode = (tasks: boolean) => {
-      const node = createTestNode(createTestTurnAgent({ tools: delegationTools }));
-      return {
-        ...node,
-        agent: {
-          ...node.agent,
-          config: {
-            experimental: { tasks },
-            model: { id: "test-model" },
-            name: "test",
-          },
-        },
-      };
-    };
-
-    const legacy = createNodeHarnessTools({ node: createNode(false) });
+    const legacy = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({
+        names: ["agent"],
+        turnTools: delegationTools,
+      }),
+    });
     expect(legacy.get("research")?.runtimeAction?.kind).toBe("subagent-call");
     expect(legacy.get("reviewer")?.runtimeAction?.kind).toBe("remote-agent-call");
     expect(legacy.get("research")?.execution).toBeUndefined();
     expect(legacy.get("reviewer")?.execution).toBeUndefined();
 
-    const background = createNodeHarnessTools({ node: createNode(true) });
+    const background = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({
+        names: ["agent"],
+        tasks: true,
+        turnTools: delegationTools,
+      }),
+    });
     for (const name of ["agent", "research", "reviewer"]) {
       expect(background.get(name)?.execution).toBe("background");
       expect(background.get(name)?.execute).toBeDefined();
@@ -362,17 +374,9 @@ describe("createNodeHarnessTools", () => {
     ).toBe(2);
   });
 
-  it("respects disableTool for individual task tools", () => {
-    const node = createTestNode();
+  it("does not recreate task tools absent from the compiled graph", async () => {
     const tools = createNodeHarnessTools({
-      node: {
-        ...node,
-        agent: {
-          ...node.agent,
-          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
-          disabledFrameworkTools: ["task_cancel"],
-        },
-      },
+      node: await createNodeWithSourceOwnedTools({ names: ["task_update"], tasks: true }),
     });
 
     expect(tools.has("task_update")).toBe(true);
@@ -392,6 +396,7 @@ describe("createExecutionNodeStep", () => {
           inputSchema: toInputSchema({ type: "object" }),
           logicalPath: "tools/regular-tool.ts",
           name: "regular-tool",
+          owner: { kind: "application" },
           sourceId: "tools/regular-tool.ts",
           sourceKind: "module",
         },

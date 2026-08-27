@@ -19,6 +19,7 @@ import {
   Client,
   ClientSession,
 } from "#client/index.js";
+import { renderApplicationInfo } from "#cli/commands/info.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
@@ -27,6 +28,7 @@ import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
+import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
@@ -226,16 +228,15 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line shown under the brand line (local sessions only). */
+  /** Message-of-the-day line shown below the startup card (local sessions only). */
   tip?: string;
 };
 
 export type AgentTUIRenderer = {
   /**
-   * Commits a startup header describing the connected agent (brand mark,
-   * model, instructions, tools, skills, subagents) to the transcript before
-   * the first prompt, and refreshes it after local dev artifact changes.
-   * Optional — renderers without a header simply skip it.
+   * Commits the startup card to the transcript before the first prompt and
+   * refreshes it after local dev artifact changes. Optional — renderers
+   * without a header simply skip it.
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
   /**
@@ -455,6 +456,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   bootDetections?: readonly BootDetection[];
   /** Test seam for the status line's Vercel link probe; defaults to the real one. */
   detectProjectIdentity?: typeof detectProjectIdentity;
+  /** Test seam for `/info`; defaults to the filesystem application inspector. */
+  inspectApplication?: typeof inspectApplication;
   /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
   getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
@@ -497,6 +500,7 @@ export class EveTUIRunner {
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
+  readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
@@ -626,6 +630,7 @@ export class EveTUIRunner {
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
+    this.#inspectApplication = options.inspectApplication ?? inspectApplication;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
     if (options.serverUrl !== undefined && options.remote === undefined) {
@@ -931,6 +936,14 @@ export class EveTUIRunner {
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {
           this.#renderCommandOutcome(formatPromptCommandHelp(this.#availablePromptCommands));
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
+        if (command?.type === "info") {
+          await this.#showApplicationInfo();
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1752,6 +1765,22 @@ export class EveTUIRunner {
     } catch (error) {
       if (isInterruptedError(error)) return;
       throw error;
+    }
+  }
+
+  async #showApplicationInfo(): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) {
+      this.#renderCommandOutcome("/info is only available in local dev sessions.");
+      return;
+    }
+    try {
+      this.#renderCommandOutcome(renderApplicationInfo(await this.#inspectApplication(appRoot)));
+    } catch (error) {
+      this.#renderCommandOutcome(
+        `Couldn't inspect the application: ${toErrorMessage(error)}`,
+        "error",
+      );
     }
   }
 

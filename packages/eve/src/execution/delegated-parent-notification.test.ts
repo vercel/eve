@@ -16,7 +16,7 @@ import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 
 vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
   getCompiledRuntimeAgentBundle: vi.fn(),
@@ -469,7 +469,58 @@ describe("turn caller notification", () => {
   });
 });
 
-describe("task turn caller binding", () => {
+describe("turn caller binding", () => {
+  it("rebinds local adapter forwarding to a non-task continuation caller", async () => {
+    await expect(
+      bindTurnCallerContextStep({
+        caller: {
+          callId: "call-new",
+          replyTo: { kind: "hook", token: "turn-new" },
+          subagentName: "research",
+        },
+        serializedContext: {
+          [ChannelKey.name]: {
+            kind: SUBAGENT_ADAPTER_KIND,
+            state: {
+              callId: "call-old",
+              parentContinuationToken: "turn-old",
+              parentSessionId: "parent",
+              subagentName: "research",
+            },
+          },
+        },
+      }),
+    ).resolves.toMatchObject({
+      [ChannelKey.name]: {
+        state: { callId: "call-new", parentContinuationToken: "turn-new" },
+      },
+    });
+  });
+
+  it("rebinds remote callback forwarding to a non-task continuation caller", async () => {
+    await expect(
+      bindTurnCallerContextStep({
+        caller: {
+          callId: "call-new",
+          replyTo: {
+            kind: "callback",
+            token: "turn-new",
+            url: "https://parent.example/eve/v1/callback/turn-new",
+          },
+          subagentName: "research",
+        },
+        serializedContext: {},
+      }),
+    ).resolves.toEqual({
+      [SessionCallbackKey.name]: {
+        callId: "call-new",
+        subagentName: "research",
+        token: "turn-new",
+        url: "https://parent.example/eve/v1/callback/turn-new",
+      },
+    });
+  });
+
   it("rebinds local adapter forwarding to the current task", async () => {
     const serializedContext = {
       [ChannelKey.name]: {

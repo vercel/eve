@@ -16,7 +16,7 @@ import {
 } from "#execution/tasks/parent/delegate.js";
 import { describeTaskAgent } from "#execution/tasks/parent/agent-identity.js";
 import { AGENT_BUSY } from "#harness/agent-handle-errors.js";
-import type { RuntimeSubagentDispatchFailure } from "#runtime/actions/types.js";
+import type { RuntimeSubagentDispatchFailure } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 
 export type PersistedContinuationTask = Awaited<ReturnType<typeof settleDelegatedDispatch>>;

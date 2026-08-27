@@ -79,6 +79,7 @@ function createCancelledTurnSession(handles: readonly AgentHandle[]): HarnessSes
       compaction: { recentWindowSize: 10, threshold: 100_000 },
       continuationToken: CONTINUATION_TOKEN,
       history: [],
+      outputSchema: { type: "object" },
       sessionId: PARENT_SESSION_ID,
       state: { [AGENT_HANDLES_STATE_KEY]: { handles } },
     },
@@ -99,7 +100,7 @@ function buildSerializedContext(): Record<string, unknown> {
 
 describe("settleCancelledTurnStep handle store", () => {
   it("parks abandoned running handles as cancelled and keeps parked ones", async () => {
-    const runtime = createTestRuntime({ agent: { name: "settle-cancel-handles" } });
+    const runtime = await createTestRuntime({ agent: { name: "settle-cancel-handles" } });
 
     await runtime.run(async () => {
       const result = await settleCancelledTurnStep({
@@ -121,6 +122,7 @@ describe("settleCancelledTurnStep handle store", () => {
           PARKED_HANDLE,
         ],
       });
+      expect(result.sessionState.snapshot?.session.outputSchema).toBeUndefined();
     });
   });
 });

@@ -3,11 +3,7 @@ import {
   expectObjectRecord,
   expectOnlyKnownKeys,
 } from "#internal/authored-module.js";
-import type {
-  Approval,
-  ApprovalPolicy,
-  ApprovalResponsePolicy,
-} from "#public/definitions/approval.js";
+import type { Approval, ApprovalPolicy, ApprovalResponsePolicy } from "#approval/definition.js";
 
 /** Validates the function shorthand or explicit request/response approval shape. */
 export function normalizeApproval(value: unknown, message: string): Approval {

@@ -1,9 +1,10 @@
 import {
   applyInitialVercelNetworkPolicy,
+  createVercelNetworkPolicySetter,
   ensureVercelSandboxBaseRuntime,
+  withBaseSetupNetworkPolicy,
 } from "#execution/sandbox/bindings/vercel-base-runtime.js";
 import type { SandboxBootstrapContext } from "#public/definitions/sandbox.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type {
   InternalSandboxSession,
   SandboxProcess,
@@ -44,10 +45,15 @@ import {
   isVercelSnapshotUnavailableError,
 } from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
+import {
+  deleteVercelSandbox,
+  stopVercelSandbox,
+} from "#execution/sandbox/bindings/vercel-lifecycle.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
 import { resolveSandboxModelPath } from "#shared/skill-paths.js";
 import type {
   VercelCreateOptions,
+  VercelDeleteModule,
   VercelModule,
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
@@ -55,6 +61,7 @@ import type {
 export interface CreateVercelSandboxInput {
   readonly createSandbox?: CreateVercelSandbox;
   readonly createOptions?: VercelCreateOptions;
+  readonly loadDeleteSandboxModule?: () => Promise<VercelDeleteModule>;
   readonly loadSandboxModule?: () => Promise<VercelModule>;
   readonly resolveSessionCreateOptions?: (
     context: VercelSandboxSessionCreateContext,
@@ -73,6 +80,9 @@ export function createVercelSandbox(
 ): SandboxBackend<VercelSandboxBootstrapUseOptions, VercelSandboxSessionUseOptions> {
   const loadSandboxModule =
     input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
+  const loadDeleteSandboxModule =
+    input.loadDeleteSandboxModule ??
+    (async () => await import("#compiled/@vercel/sandbox-delete/index.js"));
   const createOptions: VercelCreateOptions = {
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
     ...input.createOptions,
@@ -136,12 +146,17 @@ export function createVercelSandbox(
         );
       }
 
+      await ensureVercelSandboxBaseRuntime(session.sandbox);
       if (template === null && session.created) {
-        await ensureVercelSandboxBaseRuntime(session.sandbox);
         await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
       }
 
-      return createHandle(session.sandbox, createInput.sessionKey);
+      return createHandle({
+        createOptions,
+        loadDeleteSandboxModule,
+        sandbox: session.sandbox,
+        sessionKey: createInput.sessionKey,
+      });
     },
     async prewarm(
       prewarmInput: SandboxBackendPrewarmInput<VercelSandboxBootstrapUseOptions>,
@@ -443,16 +458,13 @@ function createSessionCreateParams(
   };
 }
 
-function withBaseSetupNetworkPolicy(
-  createOptions: VercelSandboxCreateParams,
-): VercelSandboxCreateParams {
-  return { ...createOptions, networkPolicy: "allow-all" };
-}
-
-function createHandle(
-  sandbox: VercelSandbox,
-  sessionKey: string,
-): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
+function createHandle(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly loadDeleteSandboxModule: () => Promise<VercelDeleteModule>;
+  readonly sandbox: VercelSandbox;
+  readonly sessionKey: string;
+}): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
+  const { sandbox, sessionKey } = input;
   return {
     session: buildSandboxSession(
       createVercelInternalSandboxSession(sandbox, sessionKey),
@@ -474,6 +486,14 @@ function createHandle(
         sessionKey,
       };
     },
+    async delete(options) {
+      await deleteVercelSandbox({
+        createOptions: input.createOptions,
+        loadDeleteSandboxModule: input.loadDeleteSandboxModule,
+        sandbox,
+        signal: options?.abortSignal,
+      });
+    },
     async stop() {
       await stopVercelSandbox(sandbox);
     },
@@ -484,21 +504,6 @@ function createHandle(
         // Provider-side timeout is the backstop when the sandbox is unreachable.
       }
     },
-  };
-}
-
-async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {
-  if (sandbox.status !== "running" && sandbox.status !== "pending") {
-    return;
-  }
-  await sandbox.stop();
-}
-
-function createVercelNetworkPolicySetter(
-  sandbox: VercelSandbox,
-): (policy: SandboxNetworkPolicy) => Promise<void> {
-  return async (policy) => {
-    await sandbox.update({ networkPolicy: policy });
   };
 }
 

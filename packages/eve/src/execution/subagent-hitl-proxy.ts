@@ -12,7 +12,7 @@ import type { ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession, SessionStateMap } from "#harness/types.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import { SESSION_LIMIT_STOP_OPTION_ID } from "#harness/session-limit-continuation.js";
 
 // ---------------------------------------------------------------------------

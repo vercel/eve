@@ -1,7 +1,7 @@
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-import type { TaskExec } from "#shared/tool-task.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
+import type { TaskExec } from "#tools/task.js";
 
 export interface BackgroundExecutableTool {
   readonly execute: (input: unknown, options: ToolExecuteOptions, task: TaskExec) => unknown;

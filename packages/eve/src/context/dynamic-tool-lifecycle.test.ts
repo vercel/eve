@@ -1,12 +1,12 @@
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
-import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
+import type { DynamicToolEntry } from "#tools/dynamic.js";
 import type { DurableDynamicToolMetadata } from "#context/keys.js";
-import { resolveApprovalPolicy, type ApprovalContext } from "#public/definitions/approval.js";
-import { defineTool, type ToolContext } from "#public/definitions/tool.js";
+import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
+import { defineTool, type ToolContext } from "#tools/definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeOutputSchema, type ToolSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema, type ToolSchema } from "#tools/schema.js";
 
 vi.mock("#context/build-callback-context.js", () => ({
   buildCallbackContext: () => ({
@@ -37,7 +37,7 @@ import {
   lookupDurableDynamicCallback,
   registerDurableDynamicCallback,
   stampDurableDynamicToolCallbacks,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+} from "#tools/durable-callbacks.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 
@@ -1026,22 +1026,22 @@ describe("dispatchDynamicToolEvent", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Framework dynamic tools — no bundler transform, auto-registered
+// Programmatic dynamic tools — no bundler transform, auto-registered
 // ---------------------------------------------------------------------------
 
-function createFrameworkTool(
+function createProgrammaticTool(
   description = "framework stub",
   executeFn: (input: Record<string, unknown>) => unknown = () => ({ ok: true }),
 ): DynamicToolEntry {
   return createReplayableTool(description, executeFn);
 }
 
-describe("framework dynamic tools (no bundler transform)", () => {
-  it("session-scoped framework tool is replayable across steps", async () => {
+describe("programmatic dynamic tools (no bundler transform)", () => {
+  it("session-scoped programmatic tool is replayable across steps", async () => {
     const ctx = createCtx();
-    const executeFn = vi.fn(() => ({ data: "from-framework" }));
+    const executeFn = vi.fn(() => ({ data: "from-programmatic" }));
     const resolver = createResolver("fwk", ["session.started"], () => ({
-      search: createFrameworkTool("framework search", executeFn),
+      search: createProgrammaticTool("programmatic search", executeFn),
     }));
 
     await dispatchDynamicToolEvent({
@@ -1070,11 +1070,11 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(executeFn).toHaveBeenCalledWith({ query: "test" });
   });
 
-  it("turn-scoped framework tool is replayable", async () => {
+  it("turn-scoped programmatic tool is replayable", async () => {
     const ctx = createCtx();
     const executeFn = vi.fn(() => ({ result: "turn-tool" }));
     const resolver = createResolver("helper", ["turn.started"], () => ({
-      assist: createFrameworkTool("turn helper", executeFn),
+      assist: createProgrammaticTool("turn helper", executeFn),
     }));
 
     await dispatchDynamicToolEvent({
@@ -1100,7 +1100,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
   it("framework and authored tools coexist in session scope", async () => {
     const ctx = createCtx();
     const frameworkResolver = createResolver("fwk", ["session.started"], () => ({
-      search: createFrameworkTool("framework search"),
+      search: createProgrammaticTool("programmatic search"),
     }));
     const authoredResolver = createResolver("authored", ["session.started"], () => ({
       query: createReplayableTool("authored query"),
@@ -1121,10 +1121,10 @@ describe("framework dynamic tools (no bundler transform)", () => {
     expect(tools.map((t) => t.name).sort()).toEqual(["query", "search"]);
   });
 
-  it("single-entry framework tool uses slug as name", async () => {
+  it("single-entry programmatic tool uses slug as name", async () => {
     const ctx = createCtx();
     const resolver = createResolver("analytics", ["session.started"], () =>
-      createFrameworkTool("single tool"),
+      createProgrammaticTool("single tool"),
     );
 
     await dispatchDynamicToolEvent({
@@ -1343,7 +1343,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
   it("leaves approval undefined when a step-scoped entry omits it", async () => {
     const ctx = createCtx();
     const resolver = createResolver("connection", ["step.started"], () => ({
-      safe: createFrameworkTool("read-only op"),
+      safe: createProgrammaticTool("read-only op"),
     }));
 
     await dispatchDynamicToolEvent({
@@ -1365,7 +1365,7 @@ describe("framework dynamic tools (no bundler transform)", () => {
       callCount++;
       const current = callCount;
       return {
-        count: createFrameworkTool(`v${current}`, () => ({ version: current })),
+        count: createProgrammaticTool(`v${current}`, () => ({ version: current })),
       };
     });
 

@@ -24,7 +24,18 @@ interface PreparedApplicationHostStub {
   appRoot: string;
   compileResult: {
     manifest: {
-      channels: [];
+      channelRoutes: {
+        effective: Array<{
+          logicalPath: string;
+          method: "GET" | "HEAD";
+          name: string;
+          sourceId: string;
+          sourceKind: "module";
+          urlPath: string;
+        }>;
+        preflight: [];
+        shadowed: [];
+      };
       config: {
         name: string;
         experimental?: { workflow?: { world?: string } };
@@ -131,7 +142,36 @@ function createPreparedHost(
     appRoot,
     compileResult: {
       manifest: {
-        channels: [],
+        channelRoutes: {
+          effective: [
+            ...["GET", "HEAD"].map((method) => ({
+              logicalPath: "channels/home.ts",
+              method: method as "GET" | "HEAD",
+              name: "home",
+              sourceId: "framework:home",
+              sourceKind: "module" as const,
+              urlPath: "/",
+            })),
+            ...["GET", "HEAD"].map((method) => ({
+              logicalPath: "channels/eve.ts",
+              method: method as "GET" | "HEAD",
+              name: "eve",
+              sourceId: "framework:eve",
+              sourceKind: "module" as const,
+              urlPath: EVE_HEALTH_ROUTE_PATH,
+            })),
+            {
+              logicalPath: "channels/eve.ts",
+              method: "GET",
+              name: "eve",
+              sourceId: "framework:eve",
+              sourceKind: "module",
+              urlPath: EVE_INFO_ROUTE_PATH,
+            },
+          ],
+          preflight: [],
+          shadowed: [],
+        },
         config:
           input.workflowWorld === undefined
             ? { name: input.agentName ?? "test-agent" }
@@ -168,7 +208,7 @@ describe("Nitro route configuration", () => {
     vi.unstubAllEnvs();
   });
 
-  it("registers package-owned route files through file-url virtual handlers", async () => {
+  it("registers compiler-owned routes through channel virtual handlers", async () => {
     const nitro = createNitroStub();
 
     await configureProductionNitroRoutes(nitro, createPreparedHost());
@@ -176,16 +216,14 @@ describe("Nitro route configuration", () => {
     const healthHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "GET",
     );
-    expect(healthHandler?.handler).toBe(`#eve-route-handler/GET ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(healthHandler?.handler).toBe(`#nitro/virtual/eve-channel/GET ${EVE_HEALTH_ROUTE_PATH}`);
 
     const virtualSource = nitro.options.virtual[healthHandler?.handler ?? ""];
-    expect(virtualSource).toContain(
-      'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
-    );
+    expect(virtualSource).toContain("dispatchChannelRequest");
     expect(virtualSource).not.toContain('"G:\\');
   });
 
-  it("bakes the agent name into the home page route", async () => {
+  it("routes the compiled home channel through the same dispatcher", async () => {
     const nitro = createNitroStub();
 
     await configureProductionNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }));
@@ -193,11 +231,11 @@ describe("Nitro route configuration", () => {
     const homeHandler = nitro.options.handlers.find(
       (handler) => handler.route === "/" && handler.method === "GET",
     );
-    expect(homeHandler?.handler).toBe("#eve-route/");
+    expect(homeHandler?.handler).toBe("#nitro/virtual/eve-channel/GET /");
 
     const virtualSource = nitro.options.virtual[homeHandler?.handler ?? ""];
-    expect(virtualSource).toContain("handleHomePageRequest");
-    expect(virtualSource).toContain('{"agentName":"support-agent"}');
+    expect(virtualSource).toContain("dispatchChannelRequest");
+    expect(virtualSource).not.toContain("support-agent");
   });
 
   it("registers the health route for HEAD so load balancers probing with HEAD see 200", async () => {
@@ -214,12 +252,10 @@ describe("Nitro route configuration", () => {
     const headHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "HEAD",
     );
-    expect(headHandler?.handler).toBe(`#eve-route-handler/HEAD ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(headHandler?.handler).toBe(`#nitro/virtual/eve-channel/HEAD ${EVE_HEALTH_ROUTE_PATH}`);
 
     const virtualSource = nitro.options.virtual[headHandler?.handler ?? ""];
-    expect(virtualSource).toContain(
-      'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
-    );
+    expect(virtualSource).toContain("dispatchChannelRequest");
   });
 
   it("registers workflow routes through physical handlers with relative bundle imports", async () => {

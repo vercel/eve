@@ -9,13 +9,13 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { createCompiledAgentManifest, ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
-import { createCompiledModuleMapSource } from "#compiler/module-map.js";
+import { compileAgent } from "#compiler/compile-agent.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { useTemporaryDirectories } from "#internal/testing/use-temporary-app-roots.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -55,13 +55,15 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   const appRoot = await createScratchDirectory("eve-dev-runtime-next-imports-");
   const agentRoot = join(appRoot, "agent");
   const compileDirectoryPath = join(appRoot, ".eve", "compile");
-  const manifestPath = join(compileDirectoryPath, "compiled-agent-manifest.json");
   const moduleMapPath = join(compileDirectoryPath, "module-map.mjs");
 
   await mkdir(agentRoot, { recursive: true });
+  await mkdir(join(agentRoot, "tools"), { recursive: true });
+  await mkdir(join(appRoot, "node_modules"), { recursive: true });
   await mkdir(join(appRoot, "src", "features", "editor", "eve"), { recursive: true });
   await mkdir(compileDirectoryPath, { recursive: true });
   await writeFile(join(appRoot, "package.json"), '{"name":"next-agent","type":"module"}\n');
+  await symlink(resolve(import.meta.dirname, "../../.."), join(appRoot, "node_modules", "eve"));
   await writeFile(
     join(appRoot, "tsconfig.json"),
     `${JSON.stringify(
@@ -79,13 +81,7 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
   );
   await writeFile(
     join(agentRoot, "agent.ts"),
-    [
-      'import { createEveModelRouter } from "./model-router";',
-      'import { authSessionAuth } from "@/features/editor/eve/auth-session";',
-      "",
-      "export const routed = createEveModelRouter(authSessionAuth);",
-      "",
-    ].join("\n"),
+    ['export default { model: "openai/gpt-5.4-mini" };', ""].join("\n"),
   );
   await writeFile(
     join(agentRoot, "model-router.ts"),
@@ -100,49 +96,30 @@ async function createNextStyleImportSnapshotFixture(): Promise<{ readonly appRoo
     join(appRoot, "src", "features", "editor", "eve", "auth-session.ts"),
     'export const authSessionAuth = "session-auth";\n',
   );
-
-  const manifest = createCompiledAgentManifest({
-    agentRoot,
-    appRoot,
-    config: {
-      model: {
-        id: "openai/gpt-5.4-mini",
-        routing: {
-          kind: "gateway",
-          target: "openai/gpt-5.4-mini",
-        },
-      },
-      name: "Next Imports Agent",
-      source: {
-        logicalPath: "agent.ts",
-        sourceId: "agent.ts",
-        sourceKind: "module",
-      },
-    },
-    instructions: [
-      {
-        content: "Use the routed model.",
-        logicalPath: "instructions.md",
-        name: "instructions",
-        role: "system",
-        sourceId: "instructions.md",
-        sourceKind: "markdown",
-      },
-    ],
-  });
-
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(
-    moduleMapPath,
-    createCompiledModuleMapSource({
-      manifest,
-      moduleMapPath,
-    }),
+    join(agentRoot, "tools", "routed.ts"),
+    [
+      'import { defineTool } from "eve/tools";',
+      'import { createEveModelRouter } from "../model-router";',
+      'import { authSessionAuth } from "@/features/editor/eve/auth-session";',
+      "",
+      "export const routed = createEveModelRouter(authSessionAuth);",
+      "",
+      "export default defineTool({",
+      '  description: "Return the routed session auth value.",',
+      '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+      "  async execute() { return routed; },",
+      "});",
+      "",
+    ].join("\n"),
   );
+  await writeFile(join(agentRoot, "instructions.md"), "Use the routed model.\n");
+
+  const compileResult = await compileAgent({ startPath: appRoot });
 
   await publishDevelopmentGeneration({
-    manifest,
-    paths: { compileDirectoryPath, moduleMapPath },
+    ...compileResult,
+    paths: { ...compileResult.paths, compileDirectoryPath, moduleMapPath },
     project: { appRoot },
   } as CompileAgentResult);
 
@@ -291,7 +268,8 @@ describe("development runtime artifact snapshots", () => {
     );
     expect(existsSync(join(snapshot.runtimeAppRoot, "agent"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".devtools"))).toBe(false);
-    expect(existsSync(join(snapshot.runtimeAppRoot, "node_modules"))).toBe(false);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "node_modules", "eve"))).toBe(true);
+    expect(existsSync(join(snapshot.runtimeAppRoot, "node_modules", "heavy-package"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".env"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".env.local"))).toBe(false);
     expect(existsSync(join(snapshot.runtimeAppRoot, ".env.example"))).toBe(false);
@@ -777,9 +755,10 @@ describe("development runtime artifact snapshots", () => {
           createDevelopmentNitroArtifactsConfig({ appRoot }),
         ),
       });
-      const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
+      const routedToolModule =
+        bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["tools/routed.ts"];
 
-      expect(agentModule).toMatchObject({
+      expect(routedToolModule).toMatchObject({
         routed: "router:session-auth",
       });
     });
@@ -797,9 +776,10 @@ describe("development runtime artifact snapshots", () => {
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(runtimeAppRoot!),
       });
-      const agentModule = bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["agent.ts"];
+      const routedToolModule =
+        bundle.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]?.modules["tools/routed.ts"];
 
-      expect(agentModule).toMatchObject({
+      expect(routedToolModule).toMatchObject({
         routed: "router:session-auth",
       });
     });

@@ -116,6 +116,25 @@ describe("assertPersistableAgentHandleStore", () => {
     });
   });
 
+  it("preserves a remote child's creation-time credential resolver", () => {
+    const remoteHandle: AgentHandle = {
+      address: {
+        callbackBaseUrl: "https://parent.example.com",
+        credentialResolver: { resolverId: "dynamic-credentials-step" },
+        kind: "agent/remote",
+        sessionId: "remote-child",
+        url: "https://remote.example.com",
+      },
+      identity,
+      lastStatus: "waiting",
+      phase: "parked",
+    };
+
+    expect(assertPersistableAgentHandleStore({ handles: [remoteHandle] })).toEqual({
+      handles: [remoteHandle],
+    });
+  });
+
   it("refuses to persist a malformed store", () => {
     const corrupt = {
       handles: [{ ...parkedHandle, lastStatus: "x".repeat(121) }],

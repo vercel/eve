@@ -18,11 +18,18 @@
       "isIgnored": true
     },
     {
-      "label": "The Buzz adapter accepts compatible eve patch releases",
+      "label": "Separately published eve packages accept compatible eve patch releases",
       "dependencies": ["eve"],
-      "packages": ["@eve/buzz-acp-adapter"],
+      "packages": ["@eve/buzz-acp-adapter", "@eve/self-modification"],
       "dependencyTypes": ["prod"],
       "pinVersion": "workspace:^"
+    },
+    {
+      "label": "Blooio is an externally published integration",
+      "dependencies": ["eve-channel-blooio"],
+      "packages": ["eve-docs"],
+      "dependencyTypes": ["dev"],
+      "isIgnored": true
     },
     {
       "label": "Workspace packages must use the workspace: protocol",

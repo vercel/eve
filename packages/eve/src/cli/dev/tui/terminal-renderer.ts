@@ -295,7 +295,7 @@ export type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line under the brand line (local sessions only). */
+  /** Message-of-the-day line below the startup card (local sessions only). */
   tip?: string;
 };
 
@@ -629,8 +629,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Commits the startup agent header (brand mark + resolved configuration) to
    * scrollback before the first prompt. Later calls (dev HMR refreshing fields
-   * such as the agent name) commit a fresh header beneath the existing
-   * transcript only when the rendered header actually changed — every source
+   * such as the model) commit a fresh header beneath the existing transcript
+   * only when the rendered header actually changed — every source
    * reload re-sends it, and an identical banner repeated per reload is noise.
    * Committed scrollback is never cleared or replayed.
    */
@@ -1245,6 +1245,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
 
         if (mode === "overlay") {
+          const textNavigation = setupSelectionIntent(key, {
+            textNavigation: !isOnFreeformRow(),
+          });
+          if (textNavigation?.kind === "move") {
+            moveCursor(textNavigation.direction === "up" ? -1 : 1);
+            return;
+          }
+
           switch (key.type) {
             case "up":
             case "ctrl-p":
@@ -1993,7 +2001,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const question = this.#captureSetupQuestion<string | undefined>(
       (key, settle) => {
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: true });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2111,7 +2119,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           );
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: !onEditableRow() });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2239,7 +2247,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           }
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, {
+          textNavigation: interaction.phase.kind === "inactive",
+        });
         switch (intent?.kind) {
           case "cancel":
             dispatch({ type: "cancel" });

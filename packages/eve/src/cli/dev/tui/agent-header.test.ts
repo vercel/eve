@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
+import type {
+  AgentInfoInstructionsEntry,
+  AgentInfoRemoteAgentEntry,
+  AgentInfoResult,
+  AgentInfoScheduleEntry,
+  AgentInfoSkillEntry,
+  AgentInfoToolEntry,
+} from "#client/index.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
 import { createTheme } from "./theme.js";
@@ -15,11 +23,10 @@ const FRAMEWORK_TOOL: AgentInfoToolEntry = {
   inputSchema: { type: "object" },
   logicalPath: "eve:framework/bash",
   name: "bash",
-  origin: "framework",
+  owner: { feature: "test", kind: "framework" },
   outputSchema: { type: "object" },
-  replacesFrameworkTool: false,
   requiresApproval: false,
-  sourceId: "eve:bash-tool",
+  sourceId: "eve:defaults:tools/bash.ts",
   sourceKind: "module",
 };
 
@@ -32,128 +39,141 @@ const AUTHORED_TOOL: AgentInfoToolEntry = {
   inputSchema: { type: "object" },
   logicalPath: "agent/tools/get_weather.ts",
   name: "get_weather",
-  origin: "authored",
+  owner: { kind: "application" },
   outputSchema: null,
-  replacesFrameworkTool: false,
   requiresApproval: false,
+  sourceId: "tools/get_weather.ts",
   sourceKind: "module",
 };
 
+const TEST_INFO = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  modelId: "anthropic/claude-opus-4.7",
+  name: "Weather Agent",
+});
 const INFO: AgentInfoResult = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: {
-      id: "anthropic/claude-opus-4.7",
-      routing: { kind: "gateway", target: "anthropic" },
-    },
-    name: "Weather Agent",
-  },
-  capabilities: {
-    devRoutes: true,
-  },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
-  connections: [],
-  diagnostics: {
-    discoveryErrors: 0,
-    discoveryWarnings: 0,
-  },
-  hooks: [],
-  instructions: {
-    dynamic: [],
-    static: [
-      {
-        content: "You are a weather assistant.",
-        logicalPath: "instructions.md",
-        name: "instructions",
-        role: "system",
-        sourceKind: "markdown",
-      },
-    ],
-  },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: {
-    dynamic: [],
-    static: [],
-  },
-  subagents: {
-    local: [],
-    total: 0,
-  },
-  tools: {
-    authored: [AUTHORED_TOOL],
-    available: [FRAMEWORK_TOOL, AUTHORED_TOOL],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [
-      {
-        ...FRAMEWORK_TOOL,
-        disabledByAuthor: false,
-        replacedByAuthoredTool: false,
-        status: "active",
-      },
-    ],
-    reserved: [],
-  },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
-  workspace: {
-    resourceRoot: null,
-    rootEntries: [],
-  },
+  ...TEST_INFO,
+  tools: { dynamic: [], static: [FRAMEWORK_TOOL, AUTHORED_TOOL] },
 };
 
 describe("buildAgentHeader", () => {
   const theme = createTheme({ color: false, unicode: false });
 
-  it("renders the brand line with the agent name", () => {
-    const lines = buildAgentHeader({ name: "agent-subagents", info: INFO, theme, width: 120 });
+  it("renders the startup card", () => {
+    const colorTheme = createTheme({ color: true, unicode: true });
+    const info: AgentInfoResult = {
+      ...INFO,
+      agent: {
+        ...INFO.agent,
+        model: {
+          id: "zai/glm-5.2",
+          routing: { kind: "gateway", target: "zai" },
+          endpoint: { kind: "gateway", connected: true, credential: "api-key" },
+        },
+      },
+    };
+    const lines = buildAgentHeader({ info, theme: colorTheme, width: 120 });
+    const plain = lines.map(stripAnsi);
 
-    expect(lines).toEqual([" eve agent-subagents"]);
+    const card = plain.join("\n");
+    const titleIndex = plain.findIndex((line) => line.includes("Weather Agent"));
+    const logoIndex = plain.findIndex((line) => line.includes("⣿⣿⣿⣿⣿⣿⣿⣿⣿"));
+    const modelIndex = plain.findIndex((line) => line.includes("model"));
+
+    expect(plain[0]).toBe(`╭${"─".repeat(66)}╮`);
+    expect(plain[titleIndex]).toMatch(/^│ ☰eve \(v\d+\.\d+\.\d+\) +Weather Agent │$/u);
+    expect(titleIndex).toBeLessThan(logoIndex);
+    expect(logoIndex).toBeLessThan(modelIndex);
+    expect(card).toContain("model         zai/glm-5.2 via ai-gateway(api-key)");
+    expect(card).toContain("instructions  none");
+    expect(card).toContain("agent       get_weather");
+    expect(card).toContain("eve         bash");
+    expect(card).toContain("skills        none");
+    expect(card).toContain("subagents     none");
+    expect(card).toContain("schedules     none");
+    expect(plain.at(-2)).toContain("schedules     none");
+    expect(lines[0]).toBe(colorTheme.colors.dim(plain[0]!));
+    expect(lines[logoIndex]).toContain(colorTheme.colors.cyan("⣿⣿⣿⣿⣿⣿⣿⣿⣿    ⠏⣿⣿⣿⣿⣿⣿⣿⣿⣿"));
+    expect(lines[modelIndex]).toContain(colorTheme.colors.dim("via "));
   });
 
-  it("renders just the brand line when info is unavailable", () => {
-    expect(buildAgentHeader({ name: "weather-agent", theme, width: 120 })).toEqual([
-      " eve weather-agent",
-    ]);
-  });
+  it("bounds every collection for large agents", () => {
+    const source = (name: string) => ({
+      logicalPath: `${name}.ts`,
+      owner: { kind: "application" as const },
+      sourceId: `${name}.ts`,
+      sourceKind: "module" as const,
+    });
+    const instructions: AgentInfoInstructionsEntry[] = Array.from({ length: 12 }, (_, index) => ({
+      ...source(`instructions-${index}`),
+      content: "Instructions.",
+      name: `instructions-${index}`,
+      role: "system",
+    }));
+    const skills: AgentInfoSkillEntry[] = Array.from({ length: 12 }, (_, index) => ({
+      ...source(`skill-${index}`),
+      description: "Skill.",
+      markdown: "# Skill",
+      name: `skill-${index}`,
+    }));
+    const schedules: AgentInfoScheduleEntry[] = Array.from({ length: 12 }, (_, index) => ({
+      ...source(`schedule-${index}`),
+      cron: "0 0 * * *",
+      hasRun: true,
+      name: `schedule-${index}`,
+    }));
+    const remoteAgents: AgentInfoRemoteAgentEntry[] = Array.from({ length: 12 }, (_, index) => ({
+      ...source(`subagent-${index}`),
+      description: "Subagent.",
+      name: `subagent-${index}`,
+      nodeId: `remote-${index}`,
+      parentNodeId: "__root__",
+    }));
+    const extensionTools = Array.from({ length: 6 }, (_, index): AgentInfoToolEntry => ({
+      ...AUTHORED_TOOL,
+      logicalPath: `extension-${index}/tool.ts`,
+      name: `extension_tool_${index}`,
+      owner: {
+        kind: "extension",
+        namespace: `extension-${index}`,
+        packageName: `@example/extension-${index}`,
+      },
+      sourceId: `extension-${index}/tool.ts`,
+    }));
+    const info: AgentInfoResult = {
+      ...INFO,
+      instructions: { dynamic: [], static: instructions },
+      remoteAgents: { entries: remoteAgents, total: remoteAgents.length },
+      schedules,
+      skills: { dynamic: [], static: skills },
+      tools: { dynamic: [], static: [AUTHORED_TOOL, ...extensionTools, FRAMEWORK_TOOL] },
+    };
 
-  it("renders the tip line for local sessions only", () => {
-    const tip = AGENT_HEADER_TIPS[0]!;
-    const local = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120, tip });
-    expect(local).toEqual([" eve weather-agent", ` ${tip}`]);
+    const card = buildAgentHeader({ info, theme, width: 120 }).join("\n");
 
-    const remote = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120 });
-    expect(remote.join("\n")).not.toContain("/channels");
+    for (const label of ["instructions", "skills", "subagents", "schedules"]) {
+      expect(card.match(new RegExp(`${label}.*\\+\\d+ more`, "u"))).not.toBeNull();
+    }
+    expect(card).toContain("  +4 groups");
+    expect(card).not.toContain("  eve         bash");
   });
 
   it("renders the /add tip with a blue command", () => {
     const colorTheme = createTheme({ color: true, unicode: false });
     const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
 
-    expect(tip).toBe("Use /add to install integrations from the registry.");
+    expect(tip).toBe("Use the /add command to install an integration.");
     if (tip === undefined) return;
 
     const line = buildAgentHeader({
-      name: "weather-agent",
       info: INFO,
       theme: colorTheme,
       width: 120,
       tip,
     }).at(-1);
 
-    expect(stripAnsi(line ?? "")).toBe(` ${tip}`);
+    expect(stripAnsi(line ?? "")).toBe(`  Tip: ${tip}`);
     expect(line).toContain(colorTheme.colors.blue("/add"));
   });
 
@@ -162,7 +182,7 @@ describe("buildAgentHeader", () => {
       ...INFO,
       diagnostics: { discoveryErrors: 1, discoveryWarnings: 2 },
     };
-    const lines = buildAgentHeader({ name: "weather-agent", info, theme, width: 120 });
+    const lines = buildAgentHeader({ info, theme, width: 120 });
 
     expect(lines.some((line) => line.includes("1 error"))).toBe(true);
     expect(lines.some((line) => line.includes("2 warnings"))).toBe(true);

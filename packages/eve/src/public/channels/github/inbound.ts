@@ -180,10 +180,12 @@ function readHeader(headers: Headers, name: string): string | undefined {
 
 /** Renders deterministic GitHub metadata for the model-visible turn. */
 export function formatGitHubContextBlock(input: {
+  readonly botName?: string;
   readonly commentUrl?: string;
   readonly deliveryId: string;
   readonly headSha?: string | null;
   readonly issueNumber?: number | null;
+  readonly isMentioned?: boolean;
   readonly pullRequestNumber?: number | null;
   readonly repository: GitHubRepositoryRef;
   readonly sender: GitHubUser;
@@ -198,6 +200,8 @@ export function formatGitHubContextBlock(input: {
     ...(input.pullRequestNumber !== undefined && input.pullRequestNumber !== null
       ? [`pull_request_number: ${input.pullRequestNumber}`]
       : []),
+    ...(input.botName ? [`bot_name: ${input.botName}`] : []),
+    ...(input.isMentioned !== undefined ? [`is_mentioned: ${input.isMentioned}`] : []),
     `sender: ${input.sender.login}`,
     `sender_type: ${input.sender.type}`,
     ...(input.commentUrl ? [`comment_url: ${input.commentUrl}`] : []),

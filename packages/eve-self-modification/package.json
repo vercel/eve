@@ -1,6 +1,6 @@
 {
   "name": "@eve/self-modification",
-  "version": "5.0.4",
+  "version": "0.0.2",
   "description": "Development-only source editing subagent for eve applications.",
   "keywords": [
     "agents",
@@ -64,16 +64,13 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
   },
   "dependencies": {
+    "eve": "workspace:^",
     "just-bash": "3.1.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "eve": "workspace:*",
     "typescript": "catalog:",
     "vitest": "catalog:"
-  },
-  "peerDependencies": {
-    "eve": "workspace:*"
   },
   "engines": {
     "node": ">=24"

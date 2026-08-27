@@ -3,11 +3,12 @@ import type { UserContent } from "ai";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TaskView } from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
@@ -83,6 +84,7 @@ export interface SessionParent {
  * free of tracing dependencies.
  */
 export interface SessionTraceContext {
+  readonly decision?: InstrumentationDecision;
   readonly spanId: string;
   readonly traceFlags: number;
   readonly traceId: string;

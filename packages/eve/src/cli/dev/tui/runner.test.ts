@@ -8,7 +8,9 @@ import {
   type ClientSession,
   type MessageStreamEvent,
 } from "#client/index.js";
+import { getApplicationInfo } from "#internal/application/paths.js";
 import { stampTestEvent } from "#internal/testing/events.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
@@ -98,89 +100,12 @@ function isStamped(event: unknown): event is MessageStreamEvent {
   return typeof (event as MessageStreamEvent).meta?.id === "string";
 }
 
-const AGENT_INFO: AgentInfoResult = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: {
-      id: "gpt-5",
-      routing: { kind: "gateway", target: "openai" },
-    },
-    name: "Weather Agent",
-  },
-  capabilities: {
-    devRoutes: true,
-  },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
-  connections: [],
-  diagnostics: {
-    discoveryErrors: 0,
-    discoveryWarnings: 0,
-  },
-  hooks: [],
-  instructions: {
-    dynamic: [],
-    static: [
-      {
-        content: "You are a weather assistant.",
-        logicalPath: "agent/instructions.md",
-        name: "instructions",
-        role: "system",
-        sourceKind: "markdown",
-      },
-    ],
-  },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: {
-    dynamic: [],
-    static: [],
-  },
-  subagents: {
-    local: [],
-    total: 0,
-  },
-  tools: {
-    authored: [
-      {
-        description: "Get the weather.",
-        hasAuth: false,
-        hasExecute: true,
-        hasModelOutputProjection: false,
-        hasOutputSchema: false,
-        inputSchema: { type: "object" },
-        logicalPath: "agent/tools/get_weather.ts",
-        name: "get_weather",
-        origin: "authored",
-        outputSchema: null,
-        replacesFrameworkTool: false,
-        requiresApproval: false,
-        sourceKind: "module",
-      },
-    ],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
-  workspace: {
-    resourceRoot: null,
-    rootEntries: [],
-  },
-};
+const AGENT_INFO: AgentInfoResult = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  modelId: "gpt-5",
+  name: "Weather Agent",
+});
 
 beforeEach(() => {
   // The runner normalizes header endpoints from the real process.env; a
@@ -3491,6 +3416,39 @@ describe("EveTUIRunner command outcome rendering", () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toContain("/model");
     expect(results[0]).not.toContain("/channels");
+    expect(session.send).not.toHaveBeenCalled();
+  });
+
+  it("renders /info from the local application inspector", async () => {
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/info", undefined];
+    const session = sessionYielding([]);
+    const inspectApplication = vi.fn(async () => ({
+      application: getApplicationInfo("/tmp/weather-agent"),
+      compiledState: null,
+      messaging: {
+        createSessionRoutePath: "/eve/v1/session",
+        sessionMessagesRoutePattern: "/eve/v1/session/:sessionId",
+        streamRoutePattern: "/eve/v1/session/:sessionId/stream",
+      },
+    }));
+
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      inspectApplication,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (text) => results.push(text),
+        renderStream: vi.fn(async () => {}),
+      },
+      session,
+    });
+    await runner.run();
+
+    expect(inspectApplication).toHaveBeenCalledWith("/tmp/weather-agent");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatch(/^Application\n/u);
     expect(session.send).not.toHaveBeenCalled();
   });
 

@@ -21,11 +21,12 @@ For a static AI Gateway model ID, you can make the same source change from the
 project root with `eve set --model anthropic/claude-opus-4.8` or from the local
 dev TUI with `/model anthropic/claude-opus-4.8`.
 
-The root `agent.ts` can be omitted when no runtime config is needed. In that case, eve defaults
-to `zai/glm-5.2`. GLM 5.2 does not support image input; choose a
+The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `zai/glm-5.2`; authoring the file replaces that source. GLM 5.2 does not support image input; choose a
 vision-capable model or [route image inputs to Gemini
 Flash](./guides/dynamic-capabilities#route-image-inputs-to-a-vision-model).
 When `agent.ts` is present, `model` is required.
+
+A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
 
 `model` accepts a gateway model id string, which routes through the [Vercel AI Gateway](https://vercel.com/docs/ai-gateway). To call a provider directly and configure the model in code, pass a provider-authored `LanguageModel`.
 
@@ -49,6 +50,19 @@ version uses hyphens (`claude-opus-4-8`), while the Gateway id above uses a dot
 (`anthropic/claude-opus-4.8`).
 
 Model use is subject to the terms, data-processing commitments, retention behavior, and available controls of the selected provider and routing path. Review the [AI Gateway model catalog](https://vercel.com/ai-gateway/models) for gateway-routed models, and review the provider's terms when you configure a direct `LanguageModel`.
+
+For every OpenAI or Anthropic model call, eve fills the provider's end-user
+safety identifier from the active turn's
+[`auth.current`](./guides/auth-and-route-protection#what-reaches-ctxsessionauth)
+principal when you have not configured it. For OpenAI, the option is
+`providerOptions.openai.safetyIdentifier`; for Anthropic, it is
+`providerOptions.anthropic.metadata.userId`. The default value is a SHA-256
+fingerprint of the principal's authenticator, issuer, type, id, and subject;
+eve does not send the raw principal fields or attributes. The fingerprint
+follows the current caller when a later turn changes users. An authored value
+at either provider path takes precedence and is forwarded unchanged. When
+`auth.current` is `null`, eve does not add an identifier. The same rules apply
+to compaction calls.
 
 ### Choose the model dynamically
 
@@ -173,7 +187,7 @@ is queued while the existing prompt stays pending; eve does not raise another
 copy. The reply is processed once the budget is granted.
 
 Sessions that cannot reach a human — task-mode runs such as schedules and
-subagents without input proxying — skip the prompt and fail the next model
+delegated runs without input proxying — skip the prompt and fail the next model
 call with `SESSION_TOKEN_LIMIT_REACHED`. A delegated task with no inherited
 quota also fails instead of raising a continuation prompt that could only
 grant another zero-token window.
@@ -240,7 +254,7 @@ installed package must stay external in hosted output, list it in
 | `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
 | `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
 | `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
-| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for task-mode runs (a subagent, schedule, or remote job). Interactive conversation turns ignore it unless the client supplies a per-message schema.                                    |
+| `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                  |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |
 
 `externalDependencies` is a packaging control only. It keeps selected packages as runtime dependencies in the hosted output; it does not authorize, configure, or review any third-party service those packages may call.

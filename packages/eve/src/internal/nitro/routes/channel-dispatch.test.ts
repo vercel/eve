@@ -27,7 +27,7 @@ import {
 } from "#harness/instrumentation/config.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { resolveVercelOidcCurrentProject } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {
   dispatchChannelRequest,
@@ -113,6 +113,7 @@ describe("dispatchChannelRequest", () => {
       .mockResolvedValueOnce({ orgId: "team_1", projectId: "prj_second" });
     const currentProjects: Array<Awaited<ReturnType<typeof resolveVercelOidcCurrentProject>>> = [];
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           handler: async (request) => {
@@ -155,6 +156,7 @@ describe("dispatchChannelRequest", () => {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           fetch: async (_request: Request, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
@@ -233,6 +235,7 @@ describe("dispatchChannelRequest", () => {
 
     let capturedArgs: RouteHandlerArgs | undefined;
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           handler: async (_req, args) => {
@@ -297,6 +300,7 @@ describe("dispatchChannelRequest", () => {
     });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           handler: async (_req, args) => {
@@ -342,6 +346,7 @@ describe("dispatchChannelRequest", () => {
     });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           handler: async (_req, args) =>
@@ -386,6 +391,7 @@ describe("dispatchChannelRequest", () => {
     });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           handler: async (_req, args) =>
@@ -427,6 +433,7 @@ describe("dispatchChannelRequest", () => {
     });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           handler: async (_req, args) => {
@@ -465,6 +472,7 @@ describe("dispatchChannelRequest", () => {
     let capturedArgs: RouteHandlerArgs | undefined;
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           fetch: async () => new Response("not used"),
@@ -509,6 +517,7 @@ describe("dispatchChannelRequest", () => {
 
   it("rejects websocket upgrades when no websocket channel matches", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [],
       runtime,
     });
@@ -532,6 +541,7 @@ describe("dispatchChannelRequest", () => {
   it("logs and returns a 500 with an errorId when a handler throws", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           fetch: async () => {
@@ -575,6 +585,7 @@ describe("dispatchChannelRequest", () => {
     });
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           fetch: async (_req, ctx: { waitUntil: (t: Promise<unknown>) => void }) => {
@@ -614,6 +625,7 @@ describe("dispatchChannelRequest", () => {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           fetch: async () => new Response("ok"),
@@ -725,6 +737,7 @@ describe("dispatchChannelRequest tracing", () => {
   it("emits one SERVER span named for the route with method, channel, and status attributes", async () => {
     let spansDuringHandler = -1;
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         slackChannel(
           async () => {
@@ -775,6 +788,7 @@ describe("dispatchChannelRequest tracing", () => {
     setChannelInstrumentationKind(definition, "channel:support");
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         slackChannel(async () => new Response("ok"), {
           adapter: { kind: "http" },
@@ -792,6 +806,7 @@ describe("dispatchChannelRequest tracing", () => {
 
   it("makes a span created inside the handler a child of the request span", async () => {
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         slackChannel(async () => {
           // Model hook.resume: a nested span opened under the active context.
@@ -821,6 +836,7 @@ describe("dispatchChannelRequest tracing", () => {
         .mockResolvedValue({ sessionId: "session-1", status: "accepted" }),
     });
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         slackChannel(async () => new Response("unused"), {
           adapter: { kind: "channel:slack" },
@@ -866,6 +882,7 @@ describe("dispatchChannelRequest tracing", () => {
     const traceId = "0af7651916cd43dd8448eb211c80319c";
     const parentId = "b7ad6b7169203331";
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [slackChannel(async () => new Response("ok"))],
       runtime,
     });
@@ -887,6 +904,7 @@ describe("dispatchChannelRequest tracing", () => {
   it("marks the span an error and records the exception once for a handler that throws", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         slackChannel(async () => {
           throw new Error("handler exploded");
@@ -931,7 +949,11 @@ describe("dispatchChannelRequest tracing", () => {
   });
 
   it("still emits a 404 span with the route but no channel identity when nothing matches", async () => {
-    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({ channels: [], runtime });
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [],
+      runtime,
+    });
 
     const response = await dispatchChannelRequest(
       createEvent({ waitUntil: vi.fn() }),
@@ -956,6 +978,7 @@ describe("dispatchChannelRequest tracing", () => {
     const bodySecret = "body_payload_secret";
 
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [
         {
           fetch: async () => new Response("ok"),
@@ -1019,6 +1042,7 @@ describe("dispatchChannelRequest without an OTel provider", () => {
   it("handles the request identically and records no spans", async () => {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [slackChannel(async () => new Response("ok"))],
       runtime,
     });
@@ -1063,6 +1087,7 @@ describe("dispatchChannelRequest with request tracing not enabled", () => {
   async function expectNoSpan(): Promise<void> {
     const waitUntil = vi.fn<(task: Promise<unknown>) => void>();
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
       channels: [slackChannel(async () => new Response("ok"))],
       runtime,
     });

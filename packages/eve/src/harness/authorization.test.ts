@@ -11,7 +11,7 @@ import {
   PendingAuthorizationResultKey,
   setPendingAuthorization,
 } from "#harness/authorization.js";
-import type { ConnectionPrincipal } from "#runtime/connections/types.js";
+import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();

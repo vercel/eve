@@ -1,31 +1,62 @@
 import type { InstrumentationEvent } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
 /** Returns an immutable event projection with conversation content removed. */
 export function withoutInstrumentationContent(event: InstrumentationEvent): InstrumentationEvent {
+  return withInstrumentationDecision(event, {
+    action: "record",
+    recordInputs: false,
+    recordOutputs: false,
+  });
+}
+
+/**
+ * Projects lifecycle content by direction.
+ *
+ * Inputs are data entering the agent: delivery/action/tool/model starts and a
+ * resolved user's response. Outputs are data produced by the agent: requests
+ * for user input, action/tool/model terminals, provider metadata, and errors.
+ */
+export function withInstrumentationDecision(
+  event: InstrumentationEvent,
+  decision: Extract<InstrumentationDecision, { action: "record" }>,
+): InstrumentationEvent {
   switch (event.type) {
     case "channel.delivery.started":
-      return Object.freeze({ ...event, input: undefined });
+      return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "action.started":
-      return Object.freeze({ ...event, input: undefined });
+      return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "action.completed":
-      return Object.freeze({ ...event, output: Object.freeze({ type: event.output.type }) });
+      return decision.recordOutputs
+        ? event
+        : Object.freeze({ ...event, output: Object.freeze({ type: event.output.type }) });
     case "input.requested":
-      return Object.freeze({ ...event, request: undefined });
+      return decision.recordOutputs ? event : Object.freeze({ ...event, request: undefined });
     case "input.resolved":
-      return Object.freeze({ ...event, error: undefined, response: undefined });
+      return decision.recordInputs && decision.recordOutputs
+        ? event
+        : Object.freeze({
+            ...event,
+            error: decision.recordOutputs ? event.error : undefined,
+            response: decision.recordInputs ? event.response : undefined,
+          });
     case "tool.call.started":
-      return Object.freeze({ ...event, input: undefined });
+      return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "tool.call.completed":
-      return Object.freeze({ ...event, output: Object.freeze({ type: event.output.type }) });
+      return decision.recordOutputs
+        ? event
+        : Object.freeze({ ...event, output: Object.freeze({ type: event.output.type }) });
     case "model.call.started":
-      return Object.freeze({ ...event, input: undefined });
+      return decision.recordInputs ? event : Object.freeze({ ...event, input: undefined });
     case "model.call.completed":
-      return Object.freeze({ ...event, content: undefined });
+      return decision.recordOutputs ? event : Object.freeze({ ...event, content: undefined });
     case "step.attempt.metadata":
-      return Object.freeze({
-        ...event,
-        providerMetadata: structuralProviderMetadata(event.providerMetadata),
-      });
+      return decision.recordOutputs
+        ? event
+        : Object.freeze({
+            ...event,
+            providerMetadata: structuralProviderMetadata(event.providerMetadata),
+          });
     case "action.failed":
     case "model.call.failed":
     case "session.failed":
@@ -33,7 +64,7 @@ export function withoutInstrumentationContent(event: InstrumentationEvent): Inst
     case "tool.call.failed":
     case "turn.failed":
     case "channel.delivery.failed":
-      return Object.freeze({ ...event, error: undefined });
+      return decision.recordOutputs ? event : Object.freeze({ ...event, error: undefined });
     default:
       return event;
   }

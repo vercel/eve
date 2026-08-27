@@ -47,7 +47,7 @@ import type {
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
-import { parseInputResponse } from "#runtime/input/types.js";
+import { parseInputResponse } from "#shared/input.js";
 
 const log = createLogger("slack.interactions");
 

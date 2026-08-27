@@ -25,6 +25,8 @@ import {
   type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import {
   buildSingleRolldownChunk,
   buildWithNitroRolldown,
@@ -204,7 +206,7 @@ export async function bundleExtensionDistributionGraph(input: {
   const plugins = [
     createAuthoredDirectiveGuardPlugin(),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin(),
+    createAuthoredAssetImportPlugin({ packageRoot: input.packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: input.packageRoot,
       extensions: RESOLVE_EXTENSIONS,
@@ -259,6 +261,9 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly moduleMapPath: string;
 }): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
+  const programmaticLoaderImportSpecifier = resolvePackageSourceFilePath(
+    "src/internal/programmatic-source-loader.ts",
+  );
   const externalDependencies = normalizeExternalDependencies([
     ...(input.manifest.config.build?.externalDependencies ?? []),
     ...input.manifest.subagents.flatMap((subagent) =>
@@ -270,6 +275,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   const moduleMapSource = createCompiledModuleMapSource({
     manifest: input.manifest,
     moduleMapPath: input.moduleMapPath,
+    programmaticLoaderImportSpecifier,
   });
   const extensionScopePlugin = createExtensionScopePlugin(
     [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
@@ -285,11 +291,12 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
+    createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
     createDynamicCapabilityTransformPlugin(),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin(),
+    createAuthoredAssetImportPlugin({ packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: packageRoot,
       extensions: RESOLVE_EXTENSIONS,
@@ -319,6 +326,18 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   } catch (error) {
     throw createAuthoredModuleBundleError(input.moduleMapPath, error);
   }
+}
+
+function createExternalRuntimeImportPlugin(importSpecifier: string): Record<string, unknown> {
+  const normalizedImportSpecifier = normalizeEsmImportSpecifier(importSpecifier);
+  return {
+    name: "eve-external-runtime-import",
+    resolveId(id: string) {
+      return id === normalizedImportSpecifier
+        ? { external: true, id: normalizedImportSpecifier }
+        : undefined;
+    },
+  };
 }
 
 function createVirtualGenerationModuleMapPlugin(input: {
@@ -403,7 +422,7 @@ async function buildAuthoredModuleBundle(
       ? null
       : createFixedNamespaceScopePlugin(options.extensionScopeNamespace),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin(),
+    createAuthoredAssetImportPlugin({ packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: packageRoot,
       extensions: RESOLVE_EXTENSIONS,

@@ -3,7 +3,7 @@ import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";

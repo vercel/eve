@@ -5,6 +5,8 @@ description: "Resolve models, subagents, tools, skills, and instructions at runt
 
 `defineDynamic` resolves the model, subagents, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
+eve evaluates a dynamic definition module once during compilation to classify and validate it, then retains that module as a runtime entry so its event handlers can run. Its top-level code therefore runs in both phases; keep caller-specific work inside the handlers. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
+
 ## Dynamic models
 
 The `model` field in `agent.ts` accepts `defineDynamic({ events })`. Resolvers
@@ -166,7 +168,7 @@ Write callback properties as inline function expressions, arrows, method shortha
 
 Closure values must be JSON-serializable. Plain objects, arrays, strings, finite numbers, booleans, and `null` are supported; `undefined` object properties are omitted. Functions, class instances, `Date`, `Map`, symbols, non-finite numbers, and cyclic values fail resolution with the tool name and callback phase instead of being serialized lossily.
 
-Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata.
+Call expressions such as `execute: makeExecutor()` are not transformed. Put the callback body directly in `defineTool()` inside an authored module; eve-provided factories, including [memory provider tools](../memory), may also supply pre-registered callbacks. eve rejects a dynamic tool if any present callback lacks durable metadata.
 
 ### Identity and redeploys
 
@@ -174,7 +176,7 @@ A parked call binds to its callback by **tool name and phase** — the same iden
 
 - Editing a callback body (or anything else that does not change tool names) is safe: replaying a parked call runs the latest deployed code with the closure values snapshotted when the call was made.
 - If a persisted callback has no registered implementation (fresh process after a crash, or after a redeploy), eve re-runs `session.started` resolvers once to rebind it, then replays.
-- If the tool no longer exists under that name, replay fails closed with an explicit error instead of invoking something else. Turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors.
+- If the tool no longer exists under that name, replay fails closed with an explicit error instead of invoking something else. Ordinary turn-scoped and step-scoped tools are not rebound; a parked call to a missing one errors. Framework-provided resolvers such as memory provider-tool wrappers opt into the same generic missing-callback rebind while preserving their locked scope.
 
 ### Naming
 
@@ -312,3 +314,4 @@ Dynamic system content that changes frequently can reduce provider prompt-cache 
 - The built-in tools and how to override them → [Built-in tools](../concepts/built-in-tools)
 - Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)
 - Durable per-session memory for resolvers to read → [State](../concepts/state)
+- Cross-session recall and provider-generated tools → [Memory](../memory)

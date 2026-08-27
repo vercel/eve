@@ -11,6 +11,8 @@
   type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
   let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isResuming = $derived(agent.status === "resuming");
+  let isInputDisabled = $derived(isBusy || isResuming);
   let isEmpty = $derived(agent.data.messages.length === 0);
   let cancellationError = $state<string>();
   let errorMessage = $derived(cancellationError ?? agent.error?.message);
@@ -45,7 +47,7 @@
 
   function submitMessage() {
     const text = messageText.trim();
-    if (!text || isBusy) return;
+    if (!text || isInputDisabled) return;
     cancellationError = undefined;
     messageText = "";
     void agent.send(text);
@@ -235,7 +237,7 @@
                   {:else if part.type === "dynamic-tool"}
                     <ToolBlock
                       {part}
-                      canRespond={!isBusy}
+                      canRespond={!isInputDisabled}
                       onInputResponses={handleInputResponses}
                     />
                   {/if}
@@ -257,7 +259,7 @@
       >
         <textarea
           bind:value={messageText}
-          disabled={isBusy}
+          disabled={isInputDisabled}
           placeholder="Send a message..."
           rows="1"
           class="min-h-20 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -278,7 +280,7 @@
           <button
             type="submit"
             aria-label="Send message"
-            disabled={!messageText.trim()}
+            disabled={isInputDisabled || !messageText.trim()}
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
             <svg

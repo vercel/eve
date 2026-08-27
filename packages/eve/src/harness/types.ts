@@ -4,13 +4,13 @@ import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js"
 import type { AlsContext } from "#context/container.js";
 import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -326,12 +326,6 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
-  /**
-   * Whether the agent opted into `experimental.subagentPersistentSessions`.
-   * Gates delegated-agent handle tracking and the model-visible `<agents>`
-   * listing appended after runtime-action batches resolve.
-   */
-  readonly persistentSubagentSessions?: boolean;
   /** Resolves step-scoped dynamic tools once for approval policy and model work. */
   readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;

@@ -10,9 +10,9 @@ import {
   compactClientSession,
   resetClientSession,
 } from "#client/session-controls.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type {
   CancelSessionResult,
   ClearResult,

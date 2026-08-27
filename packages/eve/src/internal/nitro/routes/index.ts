@@ -1,5 +1,3 @@
-import type { H3Event } from "nitro";
-
 /**
  * Public docs URL surfaced from the barebones home page. Kept in source
  * so the deployment output is a fully static, build-time-baked HTML
@@ -14,6 +12,9 @@ const EVE_LOGO_SVG = `<svg aria-hidden="true" class="logo" fill="none" viewBox="
     <path d="M169 8.47h-51.39L81.73 53H70.36L113 0H169zM169 44.51v8.47h-45.87V44.5zM45.87 52.98H0V44.5h45.87zM38.66 30.55H0v-8.47h38.66z" fill="currentColor"></path>
     <path d="M169 30.55h-38.66v-8.47H169zM75.52 8.47H0V0h75.52z" fill="currentColor"></path>
   </svg>`;
+
+const EVE_FAVICON_DATA_URL =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 102 102'%3E%3Cpath fill='%23000' d='M0 0h102v102H0z'/%3E%3Cpath fill='%23fff' d='M49.28 66.94 75.03 34.96h-6.89L47.91 60.11l-5.49 6.83h6.86ZM0 34.96h42.4v5.11H0zm0 13.32h27.66v5.11H0zm0 13.54h27.66v5.11H0zm69.63-26.86H102v5.11H69.63zm4.71 13.32H102v5.11H74.34zm0 13.54H102v5.11H74.34z'/%3E%3C/svg%3E";
 
 /**
  * Barebones HTML served at `GET /`.
@@ -39,6 +40,7 @@ const HOME_PAGE_HTML_TEMPLATE = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex">
 <meta name="referrer" content="no-referrer">
+<link rel="icon" href="${EVE_FAVICON_DATA_URL}" type="image/svg+xml">
 <title>eve</title>
 <style>
   :root {
@@ -274,21 +276,4 @@ export function buildHomePageResponse(
       "content-type": "text/html; charset=utf-8",
     },
   });
-}
-
-/**
- * Nitro route handler for `GET /`. Adapts the Nitro event shape into
- * {@link buildHomePageResponse}.
- */
-export function handleHomePageRequest(
-  input: {
-    readonly agentName: string;
-  },
-  request: Request,
-): Response {
-  return buildHomePageResponse(input, request);
-}
-
-export default function handleStaticHomePageRequest(event: H3Event): Response {
-  return buildHomePageResponse({ agentName: "eve" }, event.req);
 }

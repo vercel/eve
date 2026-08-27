@@ -41,7 +41,6 @@ import type {
   InstrumentationModelCallStartedEvent,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
-  InstrumentationParentLineage,
   InstrumentationTraceContext,
   InstrumentationSessionTransitionEvent,
   InstrumentationTurnStartedEvent,
@@ -163,7 +162,6 @@ export function createAgentOtelInstrumentation(
               "agent.session.id": event.scope.sessionId,
               "agent.framework.name": "eve",
               "agent.framework.version": input.frameworkVersion,
-              "agent.root.session.id": event.scope.rootSessionId ?? event.scope.sessionId,
               "agent.step.attempt": event.scope.attemptIndex,
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
@@ -268,10 +266,8 @@ export function createAgentOtelInstrumentation(
                   "agent.framework.name": "eve",
                   "agent.framework.version": input.frameworkVersion,
                   "agent.name": session?.agentName,
-                  ...parentLineageAttributes(turn.lineage),
-                  "agent.root.session.id": turn.rootSessionId,
                   "agent.session.id": event.sessionId,
-                  "agent.session.window": session?.window,
+                  "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
                 },
@@ -533,21 +529,6 @@ function takeSpanState<T>(
   scoped.delete(id);
   if (scoped.size === 0) spans.delete(scope);
   return state;
-}
-
-function parentLineageAttributes(
-  lineage: InstrumentationParentLineage | undefined,
-): Record<string, string> {
-  if (lineage === undefined) return {};
-  const attributes: Record<string, string> = {
-    "agent.parent.call_id": lineage.callId,
-    "agent.parent.session.id": lineage.sessionId,
-    "agent.parent.turn.id": lineage.turnId,
-  };
-  if (lineage.subagentName !== undefined) {
-    attributes["agent.subagent.name"] = lineage.subagentName;
-  }
-  return attributes;
 }
 
 function contextFromSpanContext(spanContext: SpanContext): Context {

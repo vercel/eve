@@ -1,5 +1,78 @@
 # eve
 
+## 0.46.1
+
+### Patch Changes
+
+- 16c8b63: Expose a replay-stable `callId` to MCP and OpenAPI `providedArguments` callbacks so connection tools can derive per-call idempotency keys.
+- e2d9162: Update the Linq channel adapter to preserve supported text decorations, including bold, italic, strikethrough, and underline, in outbound messages.
+- fbc3080: Add Shopify registry setup for searching products and building UCP carts and checkouts. Setup now generates an anonymous UCP profile that the connection advertises in production.
+- 2af4a4c: Tool inputs now stream through the durable event protocol as `action.input.appended` before the matching validated `actions.requested` event. Each event stores only its raw delta and UTF-16 offset, while the default message reducer exposes cumulative raw input on `dynamic-tool.inputText` in the `input-streaming` state. This advances the stream protocol to version 24; when assistant text precedes a tool call, `message.completed` now arrives before that call's streamed input events.
+- 122f565: Add a local dev TUI `/info` command that shows the same application, artifact, diagnostic, and messaging details as `eve info`. The human-readable report now begins directly with its application details instead of repeating an `eve Info` heading.
+
+## 0.46.0
+
+### Minor Changes
+
+- 1d79217: Emit traces for every audience by default while recording content only for public conversations. `tracePolicy` can explicitly disable emission or select directional content capture, and existing boolean policies retain their current behavior.
+
+### Patch Changes
+
+- 47b3e48: Static authored definitions now remain build-only, while runtime entries and their assets use the same bundling semantics in development and production.
+- 9c0a138: Replace the eve TUI's separate banner and text header with a startup card showing the installed version, active model, and the instructions, tools, skills, subagents, and schedules loaded by the agent.
+- 7acb4ec: Include the original message body when Slack users share a message into an eve conversation. Agents now receive Slack crosspost content alongside distinct top-level comments without repeating content already present in the comment.
+
+## 0.45.2
+
+### Patch Changes
+
+- 295e534: Add a bounded `fileMemory()` provider with scope-partitioned indexed documents, a 4,000-character recalled-context budget by default, and model-facing save and remove tools. `eve dev` uses shared process-local storage, configured Vercel deployments use Blob, and every other environment requires an explicit backend.
+- 5934d69: Prevent long local Workflow deliveries from timing out and replaying an in-flight turn. Explicit local delivery timeout overrides continue to take precedence.
+- 8d2d91e: GitHub, Linear Agent, and Linq registry items now install Vercel CLI 58.5.1 or newer for guided setup. Linq setup no longer tries to infer CLI compatibility from connector creation errors.
+- 295e534: Upgrade the vendored Vercel Blob SDK to 2.8.0 and copy its upstream TypeScript declarations so blob-backed file memory stays aligned with the installed SDK.
+- 79c5514: Cache AI Gateway model metadata for five minutes and refresh immediately on a cache miss, while continuing to fall back to cached metadata when refreshes fail.
+- 17e37f1: Stop producing AI SDK telemetry spans when `tracePolicy` rejects an agent trace.
+- a5917cd: Identify pending tool approvals as trusted runtime state so newer user messages can revise or supersede them without being mistaken for injected approval text.
+
+## 0.45.1
+
+### Patch Changes
+
+- a3a5ddd: Show the eve favicon in browser tabs for the default deployed app and generated Web Chat apps. Web Chat scaffolds also include an Apple touch icon.
+- 5664cc0: Add first-class path-authored memory providers with scoped recall, capture, replayable provider tools, and compaction-safe recalled context.
+- b55d036: Agentcard setup now uses the correct MCP discovery and creation identifiers, then writes the selected connector into the installed connection template.
+- fdba4e0: Scope every extension contribution through one mount-namespace policy so multiple extensions can contribute flat `instructions.md` files without collisions. Extension-owned agent singleton slots such as instrumentation are now rejected during discovery.
+
+## 0.45.0
+
+### Minor Changes
+
+- b3cf8ee: eve now compiles framework defaults, authored files, extensions, overrides, and in-memory modules through one authoritative source graph, with replaceable default config, sandbox, home, health, and inspection routes plus agent-info v3. Built-in tool definitions move from `eve/tools/defaults` to individual `eve/tools/<name>` subpaths.
+- 6252784: Move provided tool definitions and capability-specific helpers to dedicated `eve/tools/*` entrypoints. Replace the removed `defineBashTool`, `defineReadFileTool`, `defineWriteFileTool`, `defineGlobTool`, and `defineGrepTool` factories with the corresponding reusable definitions.
+- f439e3d: Persistent subagent sessions are now the default: subagent tools expose `agentId`, completed children remain available for follow-up messages, and eve publishes the `<agents>` listing automatically. Remove `experimental.subagentPersistentSessions` from agent configuration; `false` is no longer an opt-out.
+
+### Patch Changes
+
+- 4a18994: Keep tools available during follow-up turns while an earlier tool approval remains unresolved, allowing unrelated work to continue without resolving the pending call.
+- d2995e1: Stamp Workflow runs with whether eve-managed OTEL tracing is enabled so dashboards can distinguish Workflow-only runs from enabled but unsampled traces. Session titles remain available alongside that metadata.
+- dfe0d18: Expose resumed session catch-up as a distinct `resuming` frontend lifecycle state so hydrated conversations do not show active-turn controls before an in-flight turn is confirmed.
+- 659774f: Refine generated Web Chat with a single Send or Stop composer action, faster question controls, and compact tool calls. Bash commands get a terminal view, while focus states, spacing, typography, and the composer backdrop are polished.
+- fc52796: Allow framework features to derive ordinary source slots from other selected modules through dependency-aware programmatic templates, with consistent composition and module-map hydration.
+- 2be67fa: Agent trace identity is now established before workflow execution begins, allowing workflow runs and OpenTelemetry spans to refer to the same trace from the outset. Delegated agents inherit the parent trace, while already-running sessions retain their current behavior.
+- 7ed4fb1: Workflow session, subagent, and turn rows now include `$eve.trace_id` when a sampled agent trace is available, allowing workflow views to open the corresponding OpenTelemetry trace directly. Rows without an exported agent trace omit the attribute.
+- 0bc8432: Integration setup banners now describe the integration being configured instead of showing eve's generic framework tagline.
+- 3274eee: Send remote-agent Vercel OIDC credentials in both the bearer and trusted-OIDC headers so `vercelOidc()` can reach eve agents behind Vercel Deployment Protection.
+- ae83a08: Update the generated Web Chat starter to close completed reasoning without delay, soften the header-to-content boundary only while content scrolls beneath it, and enable global font antialiasing.
+- 80571ee: Show declared environment variables and an eve setup link after adding a registry integration from the dev TUI. Chat SDK adapter links open the integration page's Configure section.
+- 7c5a69e: Keep durable agent sessions on their persisted OpenTelemetry trace instead of rotating after 200 turns. Agent Trace schema version 2 relies on native trace parentage instead of window, root-session, and duplicated parent-lineage attributes.
+- f38eaf1: Internal cleanup of the experimental background-tasks plumbing: centralized task-view schemas while preserving strict projection and broad tool-output contracts, removed a duplicate task tool-name set, established one task inbox-token import path, and shared serialized-context key-name constants. No behavior change.
+- cfa90d6: Telegram now supports HITL authorization challenges.
+- d79de0b: Expose channel-native receiver identity in model context, plus exact mention state for Slack, Teams, Telegram, and GitHub comments.
+- 687c371: OpenAI and Anthropic model calls now receive privacy-preserving end-user safety identifiers derived from the active session caller when the agent has not provided one, including calls made during context compaction.
+- 8e5d9b2: Add `j` and `k` as down and up shortcuts in non-editing TUI menus and the trace viewer while preserving normal text input in prompts, search fields, and editors.
+- 7eae011: Accept Vercel OIDC tokens issued from the global issuer in `vercelOidc()` and `verifyVercelOidc()`.
+- c6f9c85: Trace capture policies now receive the originating channel's type, letting a policy sample by channel (for example retaining interactive traffic while dropping scheduled runs). Policies that ignore the field are unaffected.
+
 ## 0.44.4
 
 ### Patch Changes

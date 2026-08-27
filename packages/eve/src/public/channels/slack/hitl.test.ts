@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,

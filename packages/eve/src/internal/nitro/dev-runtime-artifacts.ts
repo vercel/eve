@@ -18,6 +18,7 @@ import {
   recordRetiredDevelopmentRuntimeArtifactsSnapshot,
 } from "#internal/nitro/dev-runtime-artifacts-retention.js";
 import { renameWithTransientBusyRetry } from "#shared/rename-with-retry.js";
+import { resolvePackageRoot } from "#internal/application/package.js";
 
 const DEV_RUNTIME_ARTIFACTS_DIRECTORY = "dev-runtime";
 const DEV_RUNTIME_ARTIFACTS_GENERATION_METADATA = "generation.json";
@@ -95,6 +96,7 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
 
   try {
     await copyDevelopmentSourceSnapshot(sourceSnapshotPlan);
+    await mountFrameworkPackage(sourceSnapshotPlan.runtimeAppRoot);
     await mountExtensionExternalDependencies({
       manifest: compileResult.manifest,
       runtimeAppRoot: sourceSnapshotPlan.runtimeAppRoot,
@@ -142,6 +144,13 @@ export async function stageDevelopmentRuntimeArtifactsSnapshot(
     snapshotSourceRoot: sourceSnapshotPlan.snapshotSourceRoot,
     sourceRoot: sourceSnapshotPlan.sourceRoot,
   };
+}
+
+async function mountFrameworkPackage(runtimeAppRoot: string): Promise<void> {
+  const mountPath = join(runtimeAppRoot, "node_modules", "eve");
+  await mkdir(dirname(mountPath), { recursive: true });
+  await rm(mountPath, { force: true, recursive: true });
+  await symlink(resolvePackageRoot(), mountPath, "junction");
 }
 
 async function mountExtensionExternalDependencies(input: {

@@ -21,7 +21,7 @@ The route-auth policy lives on the HTTP channel factory (`agent/channels/eve.ts`
 
 These routes are protected by the channel's auth policy. eve fails closed by default: production traffic is rejected unless you configure an authenticator that accepts it, and anonymous access requires an explicit `none()`.
 
-`GET /eve/v1/health` is always public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials.
+The health route created by `eveChannel()` is public and skips the walk entirely, so load balancers and uptime monitors can probe it without credentials. Replacing `agent/channels/eve.ts` with a custom `defineChannel(...)` or disabling that slot also replaces or removes the health route.
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -215,7 +215,7 @@ export default eveChannel({
 });
 ```
 
-In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve falls back to the framework default `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
+In production, `placeholderAuth()` returns a structured `401` so a generated web chat app can say "auth isn't configured yet" instead of throwing an internal error. Replace it before a browser caller submits a production request: swap in your app's `AuthFn` or one of the shipped helpers. Delete the authored channel file entirely and eve selects the default channel source with `[vercelOidc(), localDev(), placeholderAuth()]`, which also rejects production traffic.
 
 You do not have to keep `vercelOidc()` in the final policy. For a self-hosted app, an app-embedded frontend, or any deployment that uses a non-Vercel identity system, use `httpBasic()`, `jwtHmac()`, `jwtEcdsa()`, generic `oidc()`, or a custom `AuthFn` that maps your verified user/session/API key into a `SessionAuthContext`.
 
@@ -243,7 +243,7 @@ When the predicate accepts a create request, `ctx.session.auth.current` and `.in
 
 > ⚠️ Both deployments must support continuation forwarding before you resume persistent remote sessions. A create-only receiver rejects a forwarded continuation with HTTP 400; the sender does not fall back to service authority. See [Forwarding the caller identity](./remote-agents#forwarding-the-caller-identity) for the upgrade behavior.
 
-Persistent sessions do not preserve caller authority between turns. Every accepted follow-up replaces `auth.current`, including replacing it with no authenticated caller on internal local delivery; per-user connection lookup is then keyed from that current principal. This prevents a later caller from resolving a prior caller's OAuth grant. It does not hide the persistent session's conversation history or artifacts from a caller who is otherwise allowed to continue that session; session ownership remains an application policy.
+Subagent sessions are persistent by default, but they do not preserve caller authority between turns. Every accepted follow-up replaces `auth.current`, including replacing it with no authenticated caller on internal local delivery; per-user connection lookup is then keyed from that current principal. This prevents a later caller from resolving a prior caller's OAuth grant. It does not hide the persistent session's conversation history or artifacts from a caller who is otherwise allowed to continue that session; session ownership remains an application policy.
 
 ## What reaches `ctx.session.auth`
 

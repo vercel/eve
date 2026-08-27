@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2347
 status: in-progress
-last_updated: "2026-08-24"
+last_updated: "2026-08-25"
 ---
 
 # Programmatic agent sources
@@ -94,7 +94,7 @@ extension features work around that assumption at different layers:
 Native dispatch itself is a layer of magic strings. Execution branches on
 `sourceId.startsWith("eve:")` to decide how a tool executor is called; the
 harness recognizes `ask_question` and `final_output` by tool-name comparison;
-task control is classified through the `TASK_CONTROL_TOOL_NAMES` name set;
+task control is classified through the `TASK_TOOL_NAMES` name set;
 `load_skill` carries a `frameworkAction` marker even though it runs an
 ordinary inline executor; and advertisement rules such as root-only and
 delegated-caller-only visibility are name checks inside the harness.
@@ -150,9 +150,16 @@ virtual agent-relative paths:
 ```ts
 type ProgrammaticModuleNamespace = Readonly<Record<string, unknown>>;
 
+interface ProgrammaticModuleLoadContext {
+  readonly dependencies: Readonly<Record<string, ProgrammaticModuleNamespace>>;
+  readonly parameters: JsonObject;
+}
+
 interface ProgrammaticAgentModule {
   readonly exportName?: string;
-  readonly loadNamespace: () => Promise<ProgrammaticModuleNamespace>;
+  readonly loadNamespace: (
+    context: ProgrammaticModuleLoadContext,
+  ) => Promise<ProgrammaticModuleNamespace>;
   readonly logicalPath: string;
   readonly semanticRevision?: string;
 }
@@ -170,8 +177,24 @@ interface AgentSourceRegistration {
   readonly source: ProgrammaticAgentSource;
 }
 
+interface AgentSourceRegistryOptions {
+  readonly templates?: readonly ProgrammaticAgentSource[];
+}
+
+interface RegisteredProgrammaticTemplate {
+  readonly module: ProgrammaticAgentModule;
+  readonly source: ProgrammaticAgentSource;
+}
+
+interface AgentSourceRegistry {
+  readonly registrations: readonly AgentSourceRegistration[];
+  readonly sources: ReadonlyMap<string, ProgrammaticAgentSource>;
+  readonly templates: ReadonlyMap<string, RegisteredProgrammaticTemplate>;
+}
+
 function createAgentSourceRegistry(
   registrations: readonly AgentSourceRegistration[],
+  options?: AgentSourceRegistryOptions,
 ): AgentSourceRegistry;
 ```
 
@@ -181,10 +204,12 @@ select only module-backed slots. The path derives identity; there is no `name`,
 slug, kind, protocol, or precedence field.
 
 The selected export follows existing ESM semantics and may be a zero-argument
-sync or async factory. Construction shallow-copies and freezes source and
-module metadata without invoking `loadNamespace`. The loader returns the exact
-namespace and preserves brands, symbols, functions, and durable callback
-metadata. Programmatic source IDs derive deterministically as
+sync or async factory. A namespace loader may ignore its context when it is an
+ordinary overlay; a derived module receives selected dependency namespaces and
+serialized parameters through that context. Construction shallow-copies and
+freezes source and module data without invoking `loadNamespace`. The loader
+returns the exact namespace and preserves brands, symbols, functions, and
+durable callback metadata. Programmatic source IDs derive deterministically as
 `<source.id>:<logicalPath>` and must be unique within each node.
 
 Each source also declares a non-empty immutable `revision`. The revision
@@ -205,14 +230,17 @@ default sandbox uses an explicit stable token so unrelated eve source changes
 do not discard durable sandbox state.
 
 Registries are explicitly assembled, statically imported, and immutable before
-compilation. They are not global, side-effect-populated, or mutable runtime
-registries. `root` applies only to the application root. `all-local-nodes` is a
-finite overlay applied after filesystem and extension nodes are discovered; it
-rejects `agent.ts`, `subagents/**`, `channels/**`, `schedules/**`, and
-`extensions/**`. A closed internal framework registration is the narrow
-exception that may provide the default `agent.ts` for every already-discovered
-local node. Arbitrary programmatic sources cannot use config to expand the
-graph recursively.
+compilation. Registrations are source overlays; each template is a single
+loadable module implementation used only by derived candidates and never
+injects a candidate on its own. Registration returns an opaque template handle,
+so candidate construction cannot accept an arbitrary unregistered source.
+Registries are not global, side-effect-populated, or mutable at runtime. `root`
+applies only to the application root. `all-local-nodes` is a finite overlay
+applied after filesystem and extension nodes are discovered; it rejects
+`agent.ts`, `subagents/**`, `channels/**`, `schedules/**`, and `extensions/**`.
+A closed internal framework registration is the narrow exception that may
+provide the default `agent.ts` for every already-discovered local node.
+Arbitrary programmatic sources cannot use config to expand the graph recursively.
 
 Framework registry modules contain literal dynamic imports inside namespace
 loaders. They do not statically import or evaluate definition modules while
@@ -238,6 +266,8 @@ type AgentSourceOwner =
 type AgentSourceLayer =
   "framework-default" | "extension-package" | "extension-override" | "application";
 
+type AgentSourceForm = "derived" | "direct";
+
 interface AgentModuleCandidate {
   readonly backing:
     | {
@@ -250,12 +280,15 @@ interface AgentModuleCandidate {
         readonly sourcePath: string;
       }
     | {
+        readonly dependencies?: Readonly<Record<string, string>>;
         readonly kind: "programmatic";
         readonly moduleId: string;
+        readonly parameters?: JsonObject;
         readonly registryId: string;
         readonly revision: string;
         readonly semanticRevision?: string;
       };
+  readonly form: AgentSourceForm;
   readonly layer: AgentSourceLayer;
   readonly logicalPath: string;
   readonly nodeId: string;
@@ -263,6 +296,9 @@ interface AgentModuleCandidate {
   readonly sourceId: string;
 }
 ```
+
+`direct` means contributed to a slot without derivation; it does not imply a
+filesystem-authored or application-owned source.
 
 `logicalPath` is never used as an import path. Filesystem loading uses
 `sourcePath` plus its external-dependency and extension scope. Programmatic
@@ -274,6 +310,50 @@ provider kind and precedence are never inferred from it.
 Raw filesystem resources retain their physical source paths and participate in
 the same slot composition, but they do not gain a programmatic backing in this
 version.
+
+### Derived slot composition
+
+A selected module may induce an ordinary candidate in another logical slot by
+instantiating a registered programmatic template:
+
+```text
+selected memory/profile.ts ──dependency "memory"──> derived tools/profile.ts
+                                                        │
+                                     ordinary slot composition and binding
+```
+
+```ts
+function instantiateProgrammaticTemplate(input: {
+  readonly anchor: AgentModuleCandidate;
+  readonly dependencies: Readonly<Record<string, AgentModuleCandidate>>;
+  readonly logicalPath: string;
+  readonly owner: AgentSourceOwner;
+  readonly parameters?: JsonObject;
+  readonly template: RegisteredProgrammaticTemplate;
+}): AgentModuleCandidate;
+```
+
+`instantiateProgrammaticTemplate` requires a registry-issued template and an
+anchor candidate. It inherits the anchor's node and layer, derives stable
+provenance from the template, target path, and anchor source ID, and records
+dependency aliases as selected source IDs plus behavior-critical JSON
+`parameters` in the programmatic backing. The anchor must be one of those
+dependencies, every dependency must belong to its node, and all dependencies
+must remain selected after composition. The constructor does not evaluate any
+module. A direct candidate wins over a derived candidate within the same source
+layer. Normal cross-layer precedence still applies, so an application-derived
+capability can replace an extension contribution while a direct application
+source can replace or disable the derived capability.
+
+Templates are not an open projection callback or a mutable registry. A closed
+compiler feature decides when to instantiate one from the already-discovered
+source graph, then the ordinary composer, binding table, normalizers, and
+module maps take over. Compiled dependency graphs reject missing bindings and
+cycles. Compilation, in-memory hydration, and generated module maps resolve
+dependencies in order and cache each selected namespace once per phase.
+Namespace caching does not cache materialized zero-argument definition exports;
+a feature that requires one shared definition instance across multiple slots
+must provide a separate per-phase materialization boundary.
 
 ### Required compiled bindings
 
@@ -360,6 +440,7 @@ definitions. Precedence is:
 
 ```text
 framework default < extension package < extension override < application
+derived < direct within one layer
 ```
 
 For each slot it:
@@ -880,7 +961,7 @@ the implementation, not a condition to police with new guards.
 
 This deletes the magic-string dispatch layer: `sourceId.startsWith("eve:")`
 execution branching, `toolName === "ask_question"` and
-`toolName === "final_output"` harness checks, the `TASK_CONTROL_TOOL_NAMES`
+`toolName === "final_output"` harness checks, the `TASK_TOOL_NAMES`
 name set, the `frameworkAction: "load-skill"` marker, and name-based
 visibility rules in tool advertisement.
 
@@ -970,14 +1051,14 @@ executes a caller-owned definition instead of the selected installed tool.
 
 ## Downstream memory integration
 
-The wrapper-namespace path — an authored memory slot compiled to a
-programmatic binding whose virtual `tools/<slot>.ts` exports `defineDynamic`,
-producing an ordinary compiled resolver and qualified provider tools — is the
-intended mechanism for a future first-class memory integration. Proving that
-path, including cold-start namespace reconstruction and resuming a parked
-provider-tool call, is an acceptance item for the future memory research doc,
-which must use this same source graph and binding table rather than a
-memory-only registry or runtime contributor seam.
+The wrapper-namespace path uses derived slot composition: a selected authored
+memory slot instantiates a registered template whose virtual
+`tools/<slot>.ts` exports `defineDynamic`, depends on the selected memory
+binding, and carries the slot as serialized parameters. The result is an
+ordinary compiled resolver producing qualified provider tools. The memory
+implementation must prove cold-start namespace reconstruction and resuming a
+parked provider-tool call through this source graph and binding table rather
+than a memory-only registry or runtime contributor seam.
 
 ## Delivery
 
@@ -1020,7 +1101,7 @@ version 1 to version 2 in the same PR. Disk and bundled loaders reject
 earlier serialized shapes rather than repairing them. The complete version 42
 schema, its single semantic validator, and serialization fixtures land first
 inside the PR, and the serialized shape does not change again within it; the
-same rule applies to version 43 in PR 2. Kernel preparation
+same rule applies to version 44 in PR 2. Kernel preparation
 switches from catalog membership to slot survival: a capability prepares only
 when its canonical source survived composition, and agent-info v3 derives its
 prepared kernel entries from that survival plus the static kind mapping.
@@ -1039,6 +1120,14 @@ the health and info routes into the replaceable eve channel, and replaces the
 and updates tool, config, channel, health, sandbox, and agent-info
 documentation.
 
+### Follow-up — derived slot composition
+
+Programmatic templates, derived-vs-direct precedence within a layer, binding
+dependencies, serialized parameters, and dependency-aware namespace loading
+land as one focused source-graph extension before memory builds on the graph.
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43. This follow-up carries a
+`patch` changeset because it changes only internal compiler capabilities.
+
 ### PR 2 — kernel effects
 
 Dispatch becomes declared effects, and the seam is deleted:
@@ -1046,10 +1135,12 @@ Dispatch becomes declared effects, and the seam is deleted:
 1. effect declarations and visibility conditions consumed by the kernel;
 2. the exhaustive effect-kind lifecycle, with approvals riding
    `request-input`;
-3. deletion of the complete magic-string dispatch layer listed in the
+3. replacement of `localSubagentExecutors` function-identity classification
+   with prepared `dispatch` effect state;
+4. deletion of the complete magic-string dispatch layer listed in the
    deletion ledger's kernel row.
 
-`COMPILED_AGENT_MANIFEST_VERSION` moves from 42 to 43 with the serialized
+`COMPILED_AGENT_MANIFEST_VERSION` moves from 43 to 44 with the serialized
 kernel effect plan. PR 2 is `patch` when externally observable behavior is
 preserved, and updates the dynamic capability documentation.
 
@@ -1070,7 +1161,7 @@ remains:
 | Framework-source graph       | Runtime no-source sandbox construction; `PACKAGE_ROUTES` and the native home, health, and info route defaults; host lifecycle probes using the public health route; silent post-compile ordinary route drops; discovery-only diagnostics that lose compiler warnings; module-global subagent executor-identity state and discarded subagent composition; prompt ownership parsed from source IDs; `public/tools/internal.ts` and `toPublicToolDefinition`. |
 | Primitive ownership          | The mixed `runtime/framework-tools` directory, the `eve/tools/defaults` barrel export, transitional re-export wrappers, public-to-runtime imports, duplicate default definition values, and ordinary “framework tool catalog” terminology.                                                                                                                                                                                                                 |
 | Default config authority     | Synthesized default config in `normalize-agent-config.ts`, undefined-config-source inspection conventions, and config loading outside the total binding table.                                                                                                                                                                                                                                                                                             |
-| Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_CONTROL_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                                                 |
+| Kernel effects               | `sourceId.startsWith("eve:")` execution branching; `ask_question` and `final_output` tool-name checks in the harness; the `TASK_TOOL_NAMES` name set; the `frameworkAction: "load-skill"` marker; name-based advertisement visibility; kernel conditionals, literal name lists, or registries outside the exhaustive integration points; native fabrication of ordinary resources.                                                                         |
 | Inspection and memory parity | Inspection owner fallback or framework-state reconstruction; omitted dynamic-resolver or remote-agent provenance; `createMemorySourceId`, mirrored memory manifest references, and other in-memory descriptor shortcuts; harness execution of caller-owned tool objects; downstream source catalogs, composers, merges, or compatibility readers.                                                                                                          |
 
 This ledger also removes the old framework tool and channel catalogs, duplicate
@@ -1184,8 +1275,9 @@ The implementation is complete only when:
   per-primitive precedence, disable implementation, or separate subagent
   composer.
 - Required compiled bindings are the only authority for namespace loading.
-  Optional metadata, inferred physical paths, and virtual disk fallback cannot
-  affect behavior.
+  Inferred physical paths, diagnostic metadata, and virtual disk fallback
+  cannot affect behavior; derived module dependencies and parameters are
+  required backing data because they do affect behavior.
 - Programmatic construction is explicit, immutable, statically reachable, and
   lazy. There is no global registry, runtime graph mutation, function
   serialization, generated temporary source, or unselected namespace

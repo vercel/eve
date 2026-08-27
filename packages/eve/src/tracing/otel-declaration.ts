@@ -60,8 +60,12 @@ export interface OtelOptions {
    */
   readonly traceChannelRequests?: boolean;
   /**
-   * Process-wide head gate for an agent session trace. Defaults to retaining
-   * only public conversations. A thrown error rejects the trace.
+   * Process-wide trace and content decision. Boolean returns preserve the
+   * existing audience-aware behavior; explicit decisions can disable emission
+   * or select input and output capture independently. Defaults to emitting
+   * every audience, with content only for public conversations. The result is a capture ceiling:
+   * per-delivery audience and destination settings can only narrow it. A thrown
+   * error rejects trace production without silencing lifecycle providers.
    */
   readonly tracePolicy?: TraceCapturePolicy;
   /**
@@ -107,11 +111,18 @@ export interface ContentOptions {
 export interface TraceCaptureContext {
   readonly agentName?: string;
   readonly audience: ChannelAudience;
-  readonly rootSessionId: string;
-  readonly sessionId: string;
+  readonly channelType?: string;
 }
 
-export type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;
+export type TracePolicyDecision =
+  | { readonly emit: false }
+  | {
+      readonly emit: true;
+      readonly recordInputs: boolean;
+      readonly recordOutputs: boolean;
+    };
+
+export type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 
 /** Where one `otelIntegration()` sends spans. */
 export interface OtelIntegrationOptions extends ContentOptions {

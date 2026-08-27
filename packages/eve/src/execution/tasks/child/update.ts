@@ -7,8 +7,8 @@ import {
 } from "#execution/subagent-adapter-state.js";
 import { createTaskControlError } from "#execution/tasks/parent/control-shared.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
+import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 
 /** Sends one child-authored progress update over its existing parent transport. */

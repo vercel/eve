@@ -10,7 +10,7 @@ import type {
   FieldPatch,
 } from "#source-change/apply-agent-model-settings.js";
 
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { AI_GATEWAY_API_KEY_ENV_VAR } from "../ai-gateway-api-key.js";
 import {

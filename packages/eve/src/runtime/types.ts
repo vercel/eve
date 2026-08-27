@@ -8,8 +8,8 @@ import type { ChannelRouteMethod, RouteContext } from "#public/definitions/chann
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { Approval } from "#public/definitions/approval.js";
-import type { ToolModelOutput } from "#public/definitions/tool.js";
+import type { Approval } from "#approval/definition.js";
+import type { ToolModelOutput } from "#tools/definition.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
   AuthorizationDefinition,
@@ -17,7 +17,7 @@ import type {
   ConnectionProtocol,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
@@ -33,11 +33,13 @@ import type {
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
-import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
-import type { ToolSchema } from "#shared/tool-schema.js";
+import type { ToolSchema } from "#tools/schema.js";
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
+import type { MemoryDefinition } from "#public/memory/index.js";
 
 /**
  * Runtime-owned source ref describing one additive config module import.
@@ -56,6 +58,7 @@ export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
     content: string;
     name: string;
+    owner: AgentSourceOwner;
     role: "system" | "user";
   } & (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef)
 >;
@@ -127,7 +130,7 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
  *
  * The resolved `backend` is non-optional: every sandbox in the runtime
  * graph carries a concrete SandboxBackend value, even when the
- * authored definition omits `backend`. The unauthored case is filled
+ * authored definition omits `backend`. The omitted field is filled
  * in by `defaultSandbox()` (which itself selects between
  * `vercel()`, `docker()`, `microsandbox()`, and `justbash()` based on the current
  * environment).
@@ -150,8 +153,7 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
 };
 
 /**
- * Runtime-owned tool definition resolved from a compiled module map or
- * declared by the framework catalog.
+ * Runtime-owned tool definition resolved from the selected compiled source graph.
  * A tool without `execute` is surfaced to the client and never executed by eve.
  */
 export type ResolvedToolDefinition = Readonly<
@@ -161,6 +163,7 @@ export type ResolvedToolDefinition = Readonly<
   >
 > &
   ResolvedModuleSourceRef & {
+    readonly owner: AgentSourceOwner;
     /**
      * Validated runtime input schema. Compiled and durable JSON Schemas are
      * rehydrated before entering this runtime-owned definition.
@@ -361,12 +364,21 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
+  readonly rebindMissingCallbacks?: boolean;
   /**
    * Mount namespace when this resolver comes from an extension. Names of tools
    * the resolver produces are prefixed with `${extensionNamespace}__`.
    */
   readonly extensionNamespace?: string;
 }
+
+export type ResolvedMemoryDefinition = Readonly<
+  MemoryDefinition &
+    ModuleSourceRef & {
+      readonly slot: string;
+      readonly visibility: "scope" | "session";
+    }
+>;
 
 /**
  * Runtime resolver for dynamic skills declared via `defineDynamic({ events })`
@@ -407,20 +419,6 @@ export interface ResolvedAgent {
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
   /**
-   * Logical names of framework-provided channels the author opted out of by
-   * exporting `disableRoute()` from a file in `agent/channels/`. Each
-   * entry is the slash-joined slug path of one such file. The graph
-   * resolver uses this list to filter the framework default channel set.
-   */
-  readonly disabledFrameworkChannels: readonly string[];
-  /**
-   * Names of framework-provided tools the author opted out of by exporting
-   * `disableTool()` from a file in `agent/tools/`. Each entry is the
-   * filename slug of one such file. The graph resolver uses this list to
-   * filter the framework default tool set.
-   */
-  readonly disabledFrameworkTools: readonly string[];
-  /**
    * Configuration for the experimental framework `Workflow` orchestration
    * tool. Present when an authored tool module exports
    * `experimental_workflow(...)`.
@@ -440,11 +438,7 @@ export interface ResolvedAgent {
    * declare one.
    */
   readonly instructions: readonly ResolvedInstructionsDefinition[];
-  /**
-   * Authored sandbox override for this agent, when one exists. `null`
-   * means the agent uses the framework default sandbox unchanged.
-   */
-  readonly sandbox: ResolvedSandboxDefinition | null;
+  readonly sandbox: ResolvedSandboxDefinition;
   /**
    * Byte-free descriptor for the compiled workspace resource tree owned
    * by this agent's graph node. The prewarm orchestrator resolves the
@@ -453,6 +447,7 @@ export interface ResolvedAgent {
    */
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
   readonly hooks: readonly ResolvedHookDefinition[];
+  readonly memories: readonly ResolvedMemoryDefinition[];
   readonly skills: readonly ResolvedSkillDefinition[];
   readonly tools: readonly ResolvedToolDefinition[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;

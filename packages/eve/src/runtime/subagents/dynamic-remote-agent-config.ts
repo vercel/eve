@@ -9,7 +9,7 @@ import {
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeOutputSchema, type ToolSchemaSource } from "#shared/tool-schema.js";
+import { serializeOutputSchema, type ToolSchemaSource } from "#tools/schema.js";
 
 export interface DynamicRemoteAgentConfig {
   readonly credentialsStepId?: string;

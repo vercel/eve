@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { replayDynamicTools } from "#context/build-dynamic-tools.js";
-import type { ContextContainer } from "#context/container.js";
+import { contextStorage, type ContextContainer } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -14,11 +14,8 @@ import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
 import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { DynamicToolEntry } from "#shared/dynamic-tool-definition.js";
-import {
-  ALLOWED_DYNAMIC_TOOL_EVENTS,
-  isBrandedToolEntry,
-} from "#shared/dynamic-tool-definition.js";
+import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
+import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
 import {
   hasUnregisteredDurableDynamicCallbacks,
   type DurableDynamicCallbackPhase,
@@ -27,10 +24,10 @@ import {
   type StampedDurableDynamicCallback,
   readDurableDynamicToolCallbacks,
   registerDurableDynamicCallback,
-} from "#shared/durable-dynamic-tool-callbacks.js";
+} from "#tools/durable-callbacks.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject } from "#shared/json.js";
-import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
 
 const log = createLogger("dynamic-tools");
@@ -379,4 +376,32 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
       : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
   input.ctx.set(SessionDynamicToolMetadataKey, metadata);
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
+}
+
+/** Re-registers callbacks for compiled resolvers that explicitly support cold replay. */
+export async function rebindMissingCompiledDynamicToolCallbacks(input: {
+  readonly ctx: ContextContainer;
+  readonly event: UnstampedMessageStreamEvent;
+  readonly messages: readonly ModelMessage[];
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+}): Promise<void> {
+  const persisted = input.ctx.get(TurnDynamicToolMetadataKey) ?? [];
+  const missing = persisted.filter((entry) => hasUnregisteredDurableDynamicCallbacks([entry]));
+  if (missing.length === 0) return;
+  const missingSlugs = new Set(missing.map((entry) => entry.resolverSlug));
+  const matching = input.resolvers.filter(
+    (resolver) => resolver.rebindMissingCallbacks === true && missingSlugs.has(resolver.slug),
+  );
+  if (matching.length === 0) return;
+
+  await contextStorage.run(
+    input.ctx,
+    async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
+  );
+  const unresolved = missing.filter((entry) => hasUnregisteredDurableDynamicCallbacks([entry]));
+  if (unresolved.length > 0) {
+    throw new Error(
+      `Dynamic tool callback rebind did not restore: ${unresolved.map((entry) => entry.name).join(", ")}. The tool may have been renamed or removed.`,
+    );
+  }
 }

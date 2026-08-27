@@ -3,6 +3,7 @@ import {
   ChannelInstrumentationKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  SessionTraceSeedKey,
 } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
@@ -25,6 +26,7 @@ export async function prepareWorkflowPreambleTrace(input: {
   return await prepareTurnTraceContext({
     agentName: input.runtimeIdentity.agentName,
     channelAudience: normalizeChannelAudience(channel?.metadata.audience),
+    channelType: channel?.channelType,
     instrumentation: getInstrumentationRuntime(),
     parentLineage: resolveParentLineage(parent, input.ctx.get(ChannelKey)),
     parentTraceContext: input.ctx.get(ParentTraceContextKey),
@@ -32,6 +34,7 @@ export async function prepareWorkflowPreambleTrace(input: {
     sequence: input.emissionState.sequence,
     sessionId: input.session.sessionId,
     sessionStarted: input.emissionState.sessionStarted,
+    traceSeed: input.ctx.get(SessionTraceSeedKey),
     turnId: `turn_${input.emissionState.sequence}`,
   });
 }

@@ -5,6 +5,7 @@ import type {
   ComponentProps,
   FormEvent,
   HTMLAttributes,
+  KeyboardEvent,
   MouseEvent,
   ReactNode,
 } from "react";
@@ -156,7 +157,7 @@ export const Question = ({
   return (
     <QuestionContext.Provider value={contextValue}>
       <form
-        className={cn("space-y-4 rounded-lg border bg-background p-4", className)}
+        className={cn("space-y-3 rounded-xl border bg-card p-4", className)}
         onSubmit={handleSubmit}
         {...props}
       >
@@ -169,7 +170,7 @@ export const Question = ({
 export type QuestionPromptProps = HTMLAttributes<HTMLParagraphElement>;
 
 export const QuestionPrompt = ({ className, ...props }: QuestionPromptProps) => (
-  <p className={cn("font-medium text-sm", className)} {...props} />
+  <p className={cn("font-medium text-sm leading-snug", className)} {...props} />
 );
 
 export type QuestionDescriptionProps = HTMLAttributes<HTMLParagraphElement>;
@@ -185,7 +186,7 @@ export const QuestionOptions = ({ className, ...props }: QuestionOptionsProps) =
 
   return (
     <div
-      className={cn("flex flex-wrap gap-2", className)}
+      className={cn("flex flex-wrap gap-1.5", className)}
       role={selectionMode === "single" ? "radiogroup" : "group"}
       {...props}
     />
@@ -219,12 +220,21 @@ export const QuestionOption = ({
   return (
     <Button
       aria-checked={isSelected}
-      className={cn("h-auto whitespace-normal", className)}
+      // Selection only changes colors: the border is always present so the
+      // layout never shifts when an option is picked.
+      className={cn(
+        "group/option h-auto whitespace-normal border border-input font-normal shadow-none transition-colors",
+        isSelected
+          ? "border-foreground/20 bg-accent text-accent-foreground disabled:opacity-100"
+          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+        className,
+      )}
+      data-state={isSelected ? "checked" : "unchecked"}
       disabled={question.disabled || disabled}
       onClick={handleClick}
       role={role}
       type="button"
-      variant={variant ?? (isSelected ? "default" : "outline")}
+      variant={variant ?? "ghost"}
       {...props}
     >
       {children ?? value}
@@ -234,7 +244,13 @@ export const QuestionOption = ({
 
 export type QuestionInputProps = Omit<ComponentProps<typeof Textarea>, "defaultValue" | "value">;
 
-export const QuestionInput = ({ className, disabled, onChange, ...props }: QuestionInputProps) => {
+export const QuestionInput = ({
+  className,
+  disabled,
+  onChange,
+  onKeyDown,
+  ...props
+}: QuestionInputProps) => {
   const question = useQuestion();
   const handleChange = useCallback(
     (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -243,12 +259,33 @@ export const QuestionInput = ({ className, disabled, onChange, ...props }: Quest
     },
     [onChange, question],
   );
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      onKeyDown?.(event);
+      if (
+        event.defaultPrevented ||
+        event.key !== "Enter" ||
+        event.shiftKey ||
+        event.nativeEvent.isComposing
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    },
+    [onKeyDown],
+  );
 
   return (
     <Textarea
-      className={cn("min-h-20", className)}
+      className={cn(
+        "min-h-16 resize-none rounded-lg text-sm shadow-none focus-visible:border-foreground!",
+        className,
+      )}
       disabled={question.disabled || disabled}
       onChange={handleChange}
+      onKeyDown={handleKeyDown}
       value={question.text}
       {...props}
     />
@@ -267,14 +304,22 @@ export type QuestionSubmitProps = ComponentProps<typeof Button> & {
 
 export const QuestionSubmit = ({
   children = "Submit",
+  className,
   disabled,
+  size = "sm",
   ...props
 }: QuestionSubmitProps) => {
   const question = useQuestion();
   const hasResponse = question.selectedValues.length > 0 || question.text.trim().length > 0;
 
   return (
-    <Button disabled={question.disabled || disabled || !hasResponse} type="submit" {...props}>
+    <Button
+      className={cn("text-sm! shadow-none", className)}
+      disabled={question.disabled || disabled || !hasResponse}
+      size={size}
+      type="submit"
+      {...props}
+    >
       {children}
     </Button>
   );

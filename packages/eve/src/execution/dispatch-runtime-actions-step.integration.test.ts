@@ -191,7 +191,9 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     ctx.set(ChannelKey, ADAPTER);
     ctx.set(BundleKey, {
       compiledArtifactsSource: {},
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
       subagentRegistry: {
         subagentsByNodeId: new Map([
           ["remote/research", { definition: REMOTE_REGISTRY_DEFINITION }],
@@ -645,6 +647,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         expect.objectContaining({
           address: {
             callbackBaseUrl: "https://caller.example.com",
+            credentialResolver: { resolverId: "remote/research" },
             kind: "agent/remote",
             sessionId: "remote-session-123456789012",
             url: "https://registry.example.com",
@@ -1278,7 +1281,9 @@ function installContext(
   }
   const bundle = {
     compiledArtifactsSource: {},
-    resolvedAgent: { config: tasks ? { experimental: { tasks: true } } : {} },
+    resolvedAgent: {
+      config: tasks ? { experimental: { tasks: true } } : {},
+    },
     subagentRegistry: { subagentsByNodeId },
     turnAgent: {
       id: "test-agent",
@@ -1315,6 +1320,7 @@ function createSandboxBackend() {
       metadata: {},
       sessionKey: input.sessionKey,
     }),
+    delete: async () => {},
     session: sandbox.session,
     shutdown: async () => {},
     stop: async () => {},

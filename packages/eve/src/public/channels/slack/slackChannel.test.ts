@@ -42,7 +42,7 @@ import {
   type SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { type InputResponse, parseInputResponses } from "#runtime/input/types.js";
+import { type InputResponse, parseInputResponses } from "#shared/input.js";
 
 function slackRespondTypeChecks(
   interaction: SlackInteractionContext,
@@ -1603,6 +1603,74 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(message).toContain("sender_id: U01");
     expect(message).toContain("message_ts:");
     expect(input.title).toBe("hello");
+  });
+
+  it("includes the receiving bot user id in the inbound model message", async () => {
+    const onAppMention = vi.fn((_ctx, _message) => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention,
+    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: "1700000000.000001",
+        text: "<@U_BOT> Could you investigate?",
+        ts: "1700000000.000001",
+        type: "app_mention",
+        user: "U_REQUESTER",
+      },
+      { authorizations: [{ user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(onAppMention.mock.calls[0]![1].text).toBe("<@U_BOT> Could you investigate?");
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
+    expect(message).toContain(
+      [
+        "<slack_message>",
+        "sender_type: user",
+        "sender_id: U_REQUESTER",
+        "bot_user_id: U_BOT",
+        "is_mentioned: true",
+        "channel_id: C01",
+        "thread_ts: 1700000000.000001",
+        "message_ts: 1700000000.000001",
+        "team_id: T01",
+        "<content>",
+        "<@U_BOT> Could you investigate?",
+        "</content>",
+        "</slack_message>",
+      ].join("\n"),
+    );
+  });
+
+  it("marks an accepted unmentioned direct message as not mentioned", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: null }),
+    });
+    const body = buildEventBody(
+      {
+        channel: "D01",
+        channel_type: "im",
+        event_ts: "1700000000.000002",
+        text: "Could you investigate?",
+        ts: "1700000000.000002",
+        type: "message",
+        user: "U_REQUESTER",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
+    expect(message).toContain("bot_user_id: U_BOT");
+    expect(message).toContain("is_mentioned: false");
   });
 
   it("uses the run title returned by onAppMention for a public channel", async () => {

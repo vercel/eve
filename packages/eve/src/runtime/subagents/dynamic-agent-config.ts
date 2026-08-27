@@ -9,7 +9,7 @@ import {
   type AgentReasoningDefinition,
 } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
 
 export interface DynamicSubagentAgentConfig {
   readonly compaction?: {

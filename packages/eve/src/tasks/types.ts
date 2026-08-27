@@ -1,6 +1,6 @@
 import type { AgentAddress, AgentIdentity } from "#harness/handles/store.js";
 import { isJsonObjectValue, type JsonValue } from "#shared/json.js";
-import type { TaskExecutorBinding } from "#shared/tool-task.js";
+import type { TaskExecutorBinding } from "#tools/task.js";
 import type { SubagentAuthorizationEvent } from "#channel/types.js";
 
 /**
@@ -116,7 +116,7 @@ function readAgentIdentity(value: JsonValue | undefined): AgentIdentity | undefi
 
 function readAgentAddress(value: JsonValue | undefined): AgentAddress | undefined {
   if (value === undefined || !isJsonObjectValue(value)) return undefined;
-  const { callbackBaseUrl, continuationToken, kind, sessionId, url } = value;
+  const { callbackBaseUrl, continuationToken, credentialResolver, kind, sessionId, url } = value;
   if (typeof sessionId !== "string") return undefined;
   if (kind === "agent/local" || kind === "agent/self") {
     return typeof continuationToken === "string"
@@ -124,11 +124,30 @@ function readAgentAddress(value: JsonValue | undefined): AgentAddress | undefine
       : undefined;
   }
   if (kind === "agent/remote") {
-    return typeof url === "string" && typeof callbackBaseUrl === "string"
-      ? { callbackBaseUrl, kind, sessionId, url }
-      : undefined;
+    const resolver = readCredentialResolver(credentialResolver);
+    if (credentialResolver !== undefined && resolver === undefined) return undefined;
+    if (typeof url !== "string" || typeof callbackBaseUrl !== "string") return undefined;
+    const address: {
+      callbackBaseUrl: string;
+      credentialResolver?: { readonly resolverId?: string };
+      kind: "agent/remote";
+      sessionId: string;
+      url: string;
+    } = { callbackBaseUrl, kind, sessionId, url };
+    if (resolver !== undefined) address.credentialResolver = resolver;
+    return address;
   }
   return undefined;
+}
+
+function readCredentialResolver(
+  value: JsonValue | undefined,
+): { readonly resolverId?: string } | undefined {
+  if (value === undefined) return undefined;
+  if (!isJsonObjectValue(value)) return undefined;
+  const { resolverId } = value;
+  if (resolverId !== undefined && typeof resolverId !== "string") return undefined;
+  return resolverId === undefined ? {} : { resolverId };
 }
 
 export function sameTaskMetadata(left: DurableTaskMetadata, right: DurableTaskMetadata): boolean {

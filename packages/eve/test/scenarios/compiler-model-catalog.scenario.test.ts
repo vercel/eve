@@ -177,6 +177,72 @@ describe("compiler model catalog", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("reuses fresh metadata and refreshes early for a missing model", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-model-catalog-refresh-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      ["export default {", '  model: "example/cached-model",', "};", ""].join("\n"),
+    );
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy.mockImplementationOnce(async () =>
+      mockCatalogResponse([
+        {
+          slug: "example/cached-model",
+          providers: [
+            {
+              provider: "example",
+              providerModelId: "cached-model",
+              contextWindowTokens: 100_000,
+              maxOutputTokens: 10_000,
+            },
+          ],
+        },
+      ]),
+    );
+    fetchSpy.mockImplementationOnce(async () =>
+      mockCatalogResponse([
+        {
+          slug: "example/new-model",
+          providers: [
+            {
+              provider: "example",
+              providerModelId: "new-model",
+              contextWindowTokens: 200_000,
+              maxOutputTokens: 20_000,
+            },
+          ],
+        },
+      ]),
+    );
+
+    const first = await compileAgent({ startPath: appRoot });
+    const second = await compileAgent({ startPath: appRoot });
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      ["export default {", '  model: "example/new-model",', "};", ""].join("\n"),
+    );
+    const third = await compileAgent({ startPath: appRoot });
+
+    expect(first.manifest.config.model).toMatchObject({
+      contextWindowTokens: 100_000,
+      id: "example/cached-model",
+    });
+    expect(second.manifest.config.model).toMatchObject({
+      contextWindowTokens: 100_000,
+      id: "example/cached-model",
+    });
+    expect(third.manifest.config.model).toMatchObject({
+      contextWindowTokens: 200_000,
+      id: "example/new-model",
+    });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("hydrates compaction limits when model IDs end in -thinking", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-model-catalog-thinking-",
@@ -316,6 +382,43 @@ describe("compiler model catalog", () => {
         id: "example/stale-summary-model",
       },
     });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses fresh cached metadata when a cache-miss refresh fails", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-model-catalog-cache-miss-",
+      APP_ROOT_OPTIONS,
+    );
+
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      ["export default {", '  model: "example/missing-model",', "};", ""].join("\n"),
+    );
+    await mkdir(join(appRoot, ".eve", "cache"), {
+      recursive: true,
+    });
+    await writeFile(
+      resolveCompiledRuntimeModelCatalogCachePath(appRoot),
+      `${JSON.stringify(
+        {
+          fetchedAt: new Date().toISOString(),
+          kind: "eve-model-catalog-cache",
+          models: [],
+          providerAliases: {},
+          version: 2,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+
+    await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
+      'Cannot compile agent compaction because the primary compaction trigger model "example/missing-model" does not have known AI Gateway context window metadata.',
+    );
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 

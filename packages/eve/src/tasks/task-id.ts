@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
-export { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 /**
  * Derives the stable task id for one originating subagent call.

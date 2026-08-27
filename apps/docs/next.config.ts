@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { createMDX } from "fumadocs-mdx/next";
+import { createGeistdocs } from "@vercel/geistdocs/next";
 import type { NextConfig } from "next";
 import {
   compatibilityRedirects,
@@ -8,7 +8,7 @@ import {
   rootMarkdownRedirects,
 } from "./lib/geistdocs/redirects";
 
-const withMDX = createMDX();
+const withGeistdocs = createGeistdocs();
 const require = createRequire(import.meta.url);
 const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 
@@ -68,4 +68,4 @@ const config: NextConfig = {
   },
 };
 
-export default withMDX(config);
+export default withGeistdocs(config);

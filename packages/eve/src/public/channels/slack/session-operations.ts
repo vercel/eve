@@ -6,7 +6,7 @@ import type {
   ChannelSource,
 } from "#channel/channel-operations.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import type { InputResponse, StrictInputResponses } from "#runtime/input/types.js";
+import type { InputResponse, StrictInputResponses } from "#shared/input.js";
 import type { UserContent } from "ai";
 import type { SlackChannelState } from "#public/channels/slack/slackChannel.js";
 

@@ -48,8 +48,8 @@ import { createTurnWorkflowInput } from "#execution/durable-session-migrations/t
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { defineTool } from "#public/definitions/tool.js";
-import { stampDurableDynamicCallback } from "#shared/durable-dynamic-tool-callbacks.js";
+import { defineTool } from "#tools/definition.js";
+import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
@@ -680,6 +680,7 @@ describe("dispatchTurnStep", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
           "$eve.is_trace_content_visible": "false",
@@ -719,6 +720,7 @@ describe("dispatchTurnStep", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
           "$eve.is_trace_content_visible": "false",
@@ -742,6 +744,7 @@ describe("dispatchTurnStep", () => {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
+        "$eve.is_otel_trace_enabled": "false",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
         "$eve.is_trace_content_visible": "false",
@@ -753,6 +756,7 @@ describe("dispatchTurnStep", () => {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
+        "$eve.is_otel_trace_enabled": "false",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
         "$eve.is_trace_content_visible": "false",
@@ -1677,7 +1681,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1930,7 +1936,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -1992,7 +2000,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -2389,7 +2399,9 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: { experimental: { tasks: true } } },
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,

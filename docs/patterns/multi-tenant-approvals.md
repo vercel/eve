@@ -21,7 +21,7 @@ Tenant policy storage remains yours. It might be a few columns in PostgreSQL, a 
 The current caller and initiating caller are both available on the session. This example requires them to belong to the same tenant before consulting policy:
 
 ```ts title="agent/lib/tenant-approval.ts"
-import type { ApprovalContext, ApprovalStatus } from "eve/tools";
+import type { ApprovalContext, ApprovalStatus } from "eve/tools/approval";
 import { approvalPolicies } from "./approval-policies";
 
 type Surface = "connection" | "tool";

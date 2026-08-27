@@ -2,6 +2,9 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunHandle, RunInput } from "#channel/types.js";
 
 type AgentInfoRouteResponse = () => Promise<Response>;
+export interface HomeRouteMetadata {
+  readonly agentName: string;
+}
 /**
  * Creates one session from a route handler. `continuationToken` is
  * channel-local (the dispatcher prepends the channel name), so ownership
@@ -18,12 +21,14 @@ export type RemoteAgentStreamHeadersResolver = (input: {
 }) => Promise<Record<string, string>>;
 
 const agentInfoRouteResponseKey = "__eveAgentInfoRouteResponse";
+const homeRouteMetadataKey = "__eveHomeRouteMetadata";
 const routeChannelNameKey = "__eveRouteChannelName";
 const remoteAgentStreamHeadersResolverKey = "__eveRemoteAgentStreamHeadersResolver";
 const routeSessionCreatorKey = "__eveRouteSessionCreator";
 
 type InternalRouteArgs = RouteHandlerArgs & {
   [agentInfoRouteResponseKey]?: AgentInfoRouteResponse;
+  [homeRouteMetadataKey]?: HomeRouteMetadata;
   [routeChannelNameKey]?: string;
   [remoteAgentStreamHeadersResolverKey]?: RemoteAgentStreamHeadersResolver;
   [routeSessionCreatorKey]?: RouteSessionCreator;
@@ -57,6 +62,20 @@ export function readAgentInfoRouteResponse(
 ): AgentInfoRouteResponse | undefined {
   const routeArgs: InternalRouteArgs = args;
   return routeArgs[agentInfoRouteResponseKey];
+}
+
+export function attachHomeRouteMetadata<TArgs extends RouteHandlerArgs>(
+  args: TArgs,
+  metadata: HomeRouteMetadata,
+): TArgs {
+  const routeArgs: InternalRouteArgs = args;
+  routeArgs[homeRouteMetadataKey] = metadata;
+  return args;
+}
+
+export function readHomeRouteMetadata(args: RouteHandlerArgs): HomeRouteMetadata | undefined {
+  const routeArgs: InternalRouteArgs = args;
+  return routeArgs[homeRouteMetadataKey];
 }
 
 export function attachRouteSessionCreator<TArgs extends RouteHandlerArgs>(

@@ -71,7 +71,7 @@ Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC ove
 
 ### Dispatch
 
-The default hook dispatches `created` and `prompted` Agent Session events. eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
+The default hook dispatches `created` and `prompted` Agent Session events. The Linear context includes `app_user_id` when available, plus the agent session, issue, comment, and organization identifiers. The session continues with `agent-session:<id>`.
 
 ### Delivery
 

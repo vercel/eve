@@ -55,18 +55,19 @@ my-agent/
 
 Every authored directory has a typed helper. Import each from the matching subpath:
 
-| Helper                                                                                                              | Subpath                               | Authored Location                                |
-| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
-| `defineAgent(...)`                                                                                                  | `eve`                                 | `agent.ts`, `subagents/<id>/agent.ts`            |
-| `defineInstructions(...)`                                                                                           | `eve/instructions`                    | `instructions.ts` (or `instructions.md`)         |
-| `defineTool(...)`, `defineBashTool(...)`, `defineReadFileTool(...)`, `defineWriteFileTool(...)`, `disableTool(...)` | `eve/tools`                           | `tools/<name>.ts`                                |
-| `defineSkill(...)`, `getSkill(...)`                                                                                 | `eve/skills`                          | `skills/<name>.ts` (or `skills/<name>.md`)       |
-| `defineHook(...)`                                                                                                   | `eve/hooks`                           | `hooks/<slug>.ts`                                |
-| `defineChannel(...)`, `POST`, `GET`                                                                                 | `eve/channels`                        | `channels/<name>.ts`                             |
-| `eveChannel(...)`, `slackChannel(...)`, `vercelOidc(...)`                                                           | `eve/channels/eve`, `/slack`, `/auth` | reused from `channels/<name>.ts`                 |
-| `defineSandbox(...)`                                                                                                | `eve/sandbox`                         | `sandbox.ts` (or `sandbox/sandbox.ts`)           |
-| `defineSchedule(...)`                                                                                               | `eve/schedules`                       | `schedules/<name>.ts` (or `schedules/<name>.md`) |
-| `defineEval(...)`, `defineEvalConfig(...)`                                                                          | `eve/evals`                           | `evals/<name>.eval.ts`, `evals/evals.config.ts`  |
+| Helper                                                          | Subpath                               | Authored Location                                |
+| --------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
+| `defineAgent(...)`                                              | `eve`                                 | `agent.ts`, `subagents/<id>/agent.ts`            |
+| `defineInstructions(...)`                                       | `eve/instructions`                    | `instructions.ts` (or `instructions.md`)         |
+| `defineTool(...)`, `defineDynamic(...)`, `disableTool(...)`     | `eve/tools`                           | `tools/<name>.ts`                                |
+| `bash`, `readFile`, `writeFile`, and other provided definitions | `eve/tools/<name>`                    | `tools/<name>.ts`                                |
+| `defineSkill(...)`, `getSkill(...)`                             | `eve/skills`                          | `skills/<name>.ts` (or `skills/<name>.md`)       |
+| `defineHook(...)`                                               | `eve/hooks`                           | `hooks/<slug>.ts`                                |
+| `defineChannel(...)`, `POST`, `GET`                             | `eve/channels`                        | `channels/<name>.ts`                             |
+| `eveChannel(...)`, `slackChannel(...)`, `vercelOidc(...)`       | `eve/channels/eve`, `/slack`, `/auth` | reused from `channels/<name>.ts`                 |
+| `defineSandbox(...)`                                            | `eve/sandbox`                         | `sandbox.ts` (or `sandbox/sandbox.ts`)           |
+| `defineSchedule(...)`                                           | `eve/schedules`                       | `schedules/<name>.ts` (or `schedules/<name>.md`) |
+| `defineEval(...)`, `defineEvalConfig(...)`                      | `eve/evals`                           | `evals/<name>.eval.ts`, `evals/evals.config.ts`  |
 
 Runtime accessors live on the subpath that owns the concern:
 

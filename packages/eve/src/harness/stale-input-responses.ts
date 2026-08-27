@@ -5,7 +5,7 @@ import { isApprovalRequest } from "#harness/input-request-class.js";
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
 import { isSessionLimitContinuationRequestId } from "#harness/session-limit-continuation.js";
 import type { StepInput } from "#harness/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 
 type StaleResponseConversion =
   | {

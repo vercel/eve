@@ -99,10 +99,13 @@ describe("writeCompiledArtifactsFiles", () => {
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
 
     expect(instrumentationPluginSource).toContain(
-      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
+      join(outDir, "compiled-artifacts-module-map.mjs").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).toContain(
-      `import * as instrumentationModule from ${JSON.stringify(join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"))};`,
+      `moduleMap.nodes["__root__"].modules["instrumentation.ts"]`,
+    );
+    expect(instrumentationPluginSource).not.toContain(
+      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).toContain("registerInstrumentationConfig");
 
@@ -169,8 +172,8 @@ describe("writeCompiledArtifactsFiles", () => {
     }
 
     expect(generatedArtifacts.instrumentationSourcePaths).toEqual([
-      join(agentRoot, "instrumentation", "local.ts"),
-      join(agentRoot, "instrumentation", "otel.ts"),
+      join(outDir, "compiled-artifacts-instrumentation-local.mjs"),
+      join(outDir, "compiled-artifacts-instrumentation-otel.mjs"),
     ]);
 
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
@@ -318,6 +321,9 @@ describe("writeCompiledArtifactsFiles", () => {
 
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
 
+    expect(compileResult.manifest.skills).toContainEqual(
+      expect.objectContaining({ name: "research", sourceKind: "skill-package" }),
+    );
     expect(bootstrapSource).not.toContain("workspaceResources");
     expect(bootstrapSource).not.toContain("contentBase64");
     expect(bootstrapSource).not.toContain("Always confirm the source of truth.");

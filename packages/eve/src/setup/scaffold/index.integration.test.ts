@@ -245,10 +245,18 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/agent-chat.tsx"),
       "utf8",
     );
-    expect(agentChatSource).toContain("<PromptInputTextarea disabled={isRestoring}");
+    expect(agentChatSource).toMatch(/<PromptInputTextarea\s+disabled=\{isResuming\}/);
     expect(agentChatSource).toContain('turnPolicy: "steer"');
+    expect(agentChatSource).toContain('const isResuming = agent.status === "resuming"');
+    expect(agentChatSource).toContain("canRespond={!isBusy && !isResuming}");
     expect(agentChatSource).toContain("{showPendingThinking ? <PendingThinking /> : null}");
     expect(agentChatSource).not.toContain("StatusDot");
+    await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
+      'viewBox="0 0 102 102"',
+    );
+    await expect(readFile(join(projectRoot, "app/apple-icon.tsx"), "utf8")).resolves.toContain(
+      'export const contentType = "image/png"',
+    );
     await expect(readFile(join(projectRoot, "next.config.ts"), "utf8")).resolves.toContain(
       "withEve",
     );
@@ -328,6 +336,12 @@ describe("ensureChannel", () => {
     expect(authenticatedChatSource).toContain("auth.api.getSession");
     expect(authenticatedChatSource).toContain("<SignIn />");
     expect(authenticatedChatSource).toContain("<AccountControl");
+    await expect(readFile(join(projectRoot, "app/icon.svg"), "utf8")).resolves.toContain(
+      'viewBox="0 0 102 102"',
+    );
+    await expect(readFile(join(projectRoot, "app/apple-icon.tsx"), "utf8")).resolves.toContain(
+      'export const contentType = "image/png"',
+    );
 
     const authSource = await readFile(join(projectRoot, "lib/auth.ts"), "utf8");
     expect(authSource).toContain('requireEnvironmentVariable("BETTER_AUTH_SECRET")');
