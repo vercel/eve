@@ -151,16 +151,26 @@ standalone deployment would have broken every parent's build.
 
 ```ts
 interface LocalAgentOverrides {
-  /** Surfaced to the parent as the delegation tool's description. */
-  readonly description: string;
+  /**
+   * Surfaced to the parent as the delegation tool's description. Optional
+   * when the referenced agent authors `description` in its own config
+   * (legal on root configs today); required otherwise. An override lets
+   * the parent reframe the delegation in its own terms.
+   */
+  readonly description?: string;
   // Later, mirroring remote agents: outputSchema, etc.
 }
 
 export function defineLocalAgent(
   agent: AgentDefinition, // link only; the value is never read
-  overrides: LocalAgentOverrides,
+  overrides?: LocalAgentOverrides,
 ): LocalAgentDefinition; // { kind: "local", ... }
 ```
+
+Missing `description` in both the referenced config and the overrides stays
+a compile error, as for any subagent today. In practice agents designed for
+delegation (the factory's stations) author their description at the source,
+so most mounts are one import and one call.
 
 The first argument exists for the type system and the editor — a compile
 error if the sibling's `agent.ts` moves or stops exporting a config,

@@ -2,12 +2,26 @@
   "name": "eve-example-factory",
   "version": "0.0.0",
   "private": true,
+  "description": "The eve software factory restructured as a workspace of peer agents composed with defineLocalAgent (proposed).",
+  "license": "MIT",
   "type": "module",
   "imports": {
-    "#agents/*": "./agents/*"
+    "#agents/*": "./agents/*",
+    "#lib/*": "./lib/*"
   },
   "dependencies": {
-    "eve": "workspace:*",
-    "zod": "catalog:"
+    "@github-tools/eve-extension": "^0.3.2",
+    "@vercel/blob": "^2.8.0",
+    "@vercel/connect": "0.8.0",
+    "ai": "^7.0.70",
+    "eve": "^0.39.3",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "~24.13.3",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }

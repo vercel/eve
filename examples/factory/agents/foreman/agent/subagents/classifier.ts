@@ -1,15 +1,13 @@
 // PROPOSED API — see research/local-agents.md. `defineLocalAgent` does not
 // exist yet; this file illustrates the authoring experience.
 import { defineLocalAgent } from "eve";
-import classifier from "#agents/classifier/agent/agent.ts";
+import classifier from "#agents/classifier/agent/agent.js";
 
 /**
- * The entire mount: an import (the address) and a description (the
- * parent-facing delegation hint). The classifier's config, instructions,
- * and tools come from `agents/classifier/` — the value imported above is
- * a statically traceable link and is never read at runtime.
+ * Mounts the classifier station from this workspace. The import is the address:
+ * config, instructions, tools, and sandbox come from `agents/classifier/`,
+ * compiled once for this deployment. The station's own `description` and
+ * `outputSchema` (authored in its agent.ts) carry over; pass an override
+ * here only to reframe the delegation in Foreman's terms.
  */
-export default defineLocalAgent(classifier, {
-  description:
-    "Classifies a unit of incoming work as a bug, feature, or documentation change. Call this first for every new issue or pull request.",
-});
+export default defineLocalAgent(classifier);
