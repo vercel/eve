@@ -2,7 +2,7 @@
  * Limit variant: a session-limit continuation prompt. The complete rule set
  * for #1224's `owner.limit.*` rows.
  *
- * The one licensed irregularity in the whole model lives here: a message
+ * The one special case in the whole model lives here: a message
  * while a limit prompt is open is CONSUMED (its text never reaches the
  * model — the prompt exists to stop spend) and the prompt reopens at the
  * next generation. Stale generations never reach this reducer: generation

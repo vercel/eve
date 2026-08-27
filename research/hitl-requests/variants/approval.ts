@@ -15,7 +15,7 @@
  *                 policy when it asked", today's
  *                 `PendingInputBatch.responseAuthRequiredRequestIds`.
  *
- *   response time seam re-resolves toolName → policy from the live
+ *   response time  the caller re-resolves toolName → policy from the live
  *                 HarnessToolMap (`bindApprovalPolicy`), the same lookup
  *                 `authorizeCandidate` does today
  *                 (approval-delivery-coordinator.ts:334). The reducer sees
@@ -55,7 +55,7 @@ export interface ApprovalSpec {
   readonly intentKey?: string;
   /**
    * Late-bound, never persisted: re-resolved from the live HarnessToolMap
-   * by the seam on every pass. Undefined when the tool is currently absent
+   * by the caller on every pass. Undefined when the tool is currently absent
    * (ephemeral dynamic tool, redeploy) or authored no response policy.
    */
   readonly responsePolicy?: ApprovalResponsePolicy;
@@ -79,7 +79,7 @@ export const approval: Variant<ApprovalSpec, ApprovalOutcome> = {
     if (input.kind === "linked") {
       // The sign-in this candidate was blocked on completed.
       return input.outcome === "authorized"
-        ? adjudicate(row, input.heldResponse.optionId, input.heldResponse.responder ?? null)
+        ? runResponsePolicy(row, input.heldResponse.optionId, input.heldResponse.responder ?? null)
         : { reject: input.outcome === "declined" ? "unauthorized" : "policy-failed" };
     }
 
@@ -93,11 +93,11 @@ export const approval: Variant<ApprovalSpec, ApprovalOutcome> = {
       // Authenticated cancel bypasses the allow-authorizer.
       return input.responder !== null ? { settle: "cancelled" } : { reject: "unauthorized" };
 
-    return adjudicate(row, option, input.responder);
+    return runResponsePolicy(row, option, input.responder);
   },
 };
 
-async function adjudicate(
+async function runResponsePolicy(
   row: Row<ApprovalSpec>,
   option: string | undefined,
   responder: SessionAuthContext | null,

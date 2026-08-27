@@ -6,7 +6,7 @@
  * `InputResponse`, `ResolvePendingInputResult`) so every claim in the doc is
  * checkable against the code it must replace. See ledger.ts for how interpreter
  * state derives from the EXISTING batch state without a new store, and
- * seam.ts for where this runs in the step loop (unchanged: between steps).
+ * call-site.ts for where this runs in the step loop (unchanged: between steps).
  */
 
 import type { InputResponse } from "./harness-types.js";
@@ -64,7 +64,7 @@ export async function interpretDelivery(input: {
     }
     if (row.state.phase !== "open") {
       // Tombstone: single-winner already decided. Visibility is the
-      // variant's one modulation (staleResponses).
+      // variant's one per-variant setting (staleResponses).
       const visibility = input.variants[row.kind].staleResponses ?? "context-turn";
       effects.push({ kind: "reject-response", reason: "stale", response, visibility });
       continue;
@@ -150,7 +150,7 @@ async function dispatchToRow(
 /**
  * Re-feeds every row whose held candidate's linked row reached terminal
  * state in this pass, with the linked outcome as data. The blocking variant
- * re-adjudicates (pend-authorization: authorized re-runs the authorizer;
+ * re-runs the response policy (pend-authorization: authorized re-runs the authorizer;
  * declined → unauthorized; failed/timed-out → policy-failed).
  */
 async function refeedUnblockedCandidates(

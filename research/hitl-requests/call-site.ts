@@ -1,7 +1,7 @@
 /**
- * Where the interpreter runs: the SAME seam as today. This file is the answer to
+ * Where the interpreter runs: the same call site as today. This file is the answer to
  * "HITL logic runs after the current step loop ends and before the next one
- * — we'd need to converge": we do not move the seam, we replace what runs
+ * — we would need to converge": we do not move the call site, we replace what runs
  * inside it.
  *
  * Today (tool-loop.ts:1050):
@@ -24,7 +24,7 @@
  * pass). Nothing about WHEN HITL runs changes — mid-step approval gating
  * still surfaces at step end via AI SDK approval parts, and the body-run
  * owner is only reachable in background tasks where the step already ended
- * with a receipt. Convergence is: one interpreter inside the existing seam,
+ * with a receipt. Convergence is: one interpreter behind the existing call site,
  * instead of coordinator + router + three domain resolvers.
  */
 
@@ -92,7 +92,7 @@ export async function resolvePendingInputViaInterpreter(input: {
 }
 
 /**
- * Owner delivery is the second half of the seam. Effects targeting rows whose
+ * Owner delivery is the second half of the call site. Effects targeting rows whose
  * owner is not "session" do not splice into the transcript — they serialize
  * to the owner's hook token:
  *

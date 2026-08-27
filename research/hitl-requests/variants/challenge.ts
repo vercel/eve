@@ -3,7 +3,7 @@
  * credentials, not consent). The complete rule set for #1224's
  * `owner.auth.*` rows.
  *
- * Challenges keep the `authorization.*` wire vocabulary; the interpreter
+ * Challenges keep the `authorization.*` event names; the interpreter
  * translates a forced dismissal to `completed(cancelled)` — the one place
  * kind leaks into interpreter output. Deadlines are interpreter-scheduled
  * from `deadlineAt`; the reducer only ever sees them as inputs.

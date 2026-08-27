@@ -51,7 +51,7 @@ export type RowInput =
   | { readonly kind: "deadline" }
   | { readonly kind: "linked"; readonly outcome: string; readonly heldResponse: InputResponse };
 
-/** Complete verdict vocabulary — nothing else exists. */
+/** Every verdict a reducer can return — the closed set. */
 export type Verdict<Outcome = unknown> =
   | "ignore"
   | { readonly settle: Outcome }

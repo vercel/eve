@@ -15,7 +15,7 @@ is re-implemented per surface and fused to each surface's rules. The HITL
 request lifecycle research
 ([#1224](https://github.com/vercel/eve/issues/1224)) measured the cost:
 interpretation smeared across ~6,800 lines in 14 principal modules, with no
-single seam that sees the whole state — which is exactly how both
+single place that sees the whole state — which is exactly how both
 wedge-class bugs shipped (#1224, #1830, #1868: an obligation encoded as a
 blocked continuation instead of as data).
 
@@ -31,16 +31,16 @@ blocked continuation instead of as data).
 | projection routing | `harness/proxy-input-requests.ts`, `execution/subagent-hitl-proxy.ts` |
 
 #1224 proposes the fix: one obligation state machine, one pure interpreter,
-everything else an adapter. This doc refines that target with one more seam —
+everything else an adapter. This doc refines that target with one more split —
 **the interpreter splits into a variant-agnostic core and four independent
 reducers** — and adds an owner axis that turns the same machine into a
 user-facing capability: tools that park on human input mid-task.
 
 ## The factoring
 
-Two orthogonal axes, entangled today:
+Two independent axes, entangled today:
 
-- **Variant** — _what is owed_: adjudication rules, outcome vocabulary,
+- **Variant** — _what is owed_: response-handling rules, outcome names,
   supersession. Approval, Question, Limit, Challenge.
 - **Owner** — _who waits_: the parked session turn, the framework approval
   gate, or a durable tool-body run. An owner is a hook token — nothing more.
@@ -72,7 +72,7 @@ A compiling prototype lives in [`hitl-requests/`](./hitl-requests/):
 - `variants/{approval,question,limit,challenge}.ts` — the complete rule set
   for each #1224 catalog family, one file each
 - `ledger.ts` — derivation from the existing batch state
-- `seam.ts` — the `tool-loop.ts` call site, unchanged
+- `call-site.ts` — the `tool-loop.ts` integration point, unchanged
 - `types.ts` — the three exported concepts below
 
 ## Model
@@ -96,7 +96,7 @@ type Input =
   | { kind: "deadline" }
   | { kind: "linked"; outcome: string }; // a row this one blocked on completed
 
-/** Complete verdict vocabulary — nothing else exists. */
+/** Every verdict a reducer can return — the closed set. */
 type Verdict<Outcome> =
   | "ignore"
   | { settle: Outcome }
@@ -113,12 +113,12 @@ flat-table uniqueness, removal-only shrinkage is open → terminal. During
 migration the batch collection stays the persisted representation; the
 ledger is derived (`ledgerFromSessionState`), only interpretation moves.
 
-Boundary rules, each the collapse of a module from the fragment table:
+Boundary rules — each one deletes a module from the table above:
 
 - **Staleness is interpreter-side** — a response naming a terminal row
   rejects against the tombstone before any reducer runs (`stale` for
   tombstones, `invalid` for unknown ids). Deletes
-  `stale-input-responses.ts`. The one per-variant modulation is visibility:
+  `stale-input-responses.ts`. The one per-variant setting is visibility:
   Limit drops stale answers silently; others produce a context turn.
 - **Races are interpreter-side** — candidate identity is
   `{requestId, deliveryId}`; single-winner before `resolve`; redeliveries
@@ -144,16 +144,16 @@ row. Specs store durable facts only (the gated `action`, the computed
 `approvalKey` string, and `responseAuthRequired`: "this tool had a response
 policy when it asked" — today's `responseAuthRequiredRequestIds`). The
 policy is late-bound every pass from the live `HarnessToolMap`
-(`seam.ts:bindApprovalPolicy` — the `authorizeCandidate` lookup at
+(`call-site.ts:bindApprovalPolicy` — the `authorizeCandidate` lookup at
 `approval-delivery-coordinator.ts:334`, generalized). When the lookup finds
 nothing (ephemeral tool, redeploy), the park-time flag decides: no policy
 ever required → settle directly; policy required but unavailable → fail
 closed with `policy-failed`, row stays open and answerable after a redeploy.
 
-## The seam does not move
+## The call site does not move
 
 HITL interpretation runs today between harness steps; the interpreter
-replaces what runs inside that seam, not where it sits:
+replaces what runs behind that call site, not where it sits:
 
 ```text
 today:   coordinateApprovalDelivery → routePendingInput → one of three
@@ -246,7 +246,7 @@ and its eval anchors remain the conformance suite, re-anchored by axis
 (interpreter rows proven once, variant rows per variant, composites as
 unions).
 
-1. **Interpreter + variants** — #1224 stages 1–3 with the variant seam.
+1. **Interpreter + variants** — #1224 stages 1–3 with the variant split.
 2. **Body-run owner** — new executor kind on the task child wire;
    `ctx.request` / `ctx.auth`; responder forwarding on the task input wire
    (additive). Depends on workflow functions as `defineTool.execute`
@@ -257,7 +257,7 @@ unions).
 ## Open questions
 
 1. **Async `resolve` vs. pure interpreter** — policy evaluation inside the
-   reducer trades #1224's strict purity for one seam; the alternative
+   reducer trades #1224's strict purity in one place; the alternative
    (pre-resolved policy as input) doubles the input alphabet. Decide at
    stage-2 extraction.
 2. **Deployment pinning for parked bodies** — multi-hour parks across
