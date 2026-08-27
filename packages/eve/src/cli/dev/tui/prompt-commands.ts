@@ -10,6 +10,7 @@ export type PromptCommand =
   | { type: "compact" }
   | { type: "exit" }
   | { type: "help" }
+  | { type: "info" }
   | { type: "loglevel"; argument: string }
   | { type: "traces"; argument: string }
   | { type: "extension"; name: PromptCommandExtensionName; argument: string };
@@ -52,6 +53,14 @@ const PROMPT_COMMAND_DEFINITIONS = [
     takesArgument: false,
     build: () => ({ type: "help" }),
     targets: ["local", "remote"],
+  },
+  {
+    name: "info",
+    aliases: [],
+    description: "Show application and messaging information",
+    takesArgument: false,
+    build: () => ({ type: "info" }),
+    targets: ["local"],
   },
   {
     name: "reset",

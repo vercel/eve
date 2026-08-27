@@ -4735,9 +4735,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /help → /reset; history recall would have submitted the
+    // Down moved /help → /info; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/reset");
+    expect(await second).toBe("/info");
     renderer.shutdown();
   });
 

@@ -8,6 +8,7 @@ import {
   type ClientSession,
   type MessageStreamEvent,
 } from "#client/index.js";
+import { getApplicationInfo } from "#internal/application/paths.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
@@ -3415,6 +3416,39 @@ describe("EveTUIRunner command outcome rendering", () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toContain("/model");
     expect(results[0]).not.toContain("/channels");
+    expect(session.send).not.toHaveBeenCalled();
+  });
+
+  it("renders /info from the local application inspector", async () => {
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/info", undefined];
+    const session = sessionYielding([]);
+    const inspectApplication = vi.fn(async () => ({
+      application: getApplicationInfo("/tmp/weather-agent"),
+      compiledState: null,
+      messaging: {
+        createSessionRoutePath: "/eve/v1/session",
+        sessionMessagesRoutePattern: "/eve/v1/session/:sessionId",
+        streamRoutePattern: "/eve/v1/session/:sessionId/stream",
+      },
+    }));
+
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      inspectApplication,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (text) => results.push(text),
+        renderStream: vi.fn(async () => {}),
+      },
+      session,
+    });
+    await runner.run();
+
+    expect(inspectApplication).toHaveBeenCalledWith("/tmp/weather-agent");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatch(/^Application\n/u);
     expect(session.send).not.toHaveBeenCalled();
   });
 
