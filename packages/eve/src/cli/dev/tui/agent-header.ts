@@ -28,14 +28,6 @@ export const AGENT_HEADER_TIPS: readonly string[] = [
   "Use the /help command to see every command.",
 ];
 
-const EVE_LOGO = [
-  "⣿⣿⣿⣿⣿⣿⣿⣿⣿    ⠏⣿⣿⣿⣿⣿⣿⣿⣿⣿",
-  "            ⠇⣿⠏",
-  "⣿⣿⣿⣿⣿⣿⠇    ⠇⣿⠏   ⠇⣿⣿⣿⣿⣿",
-  "          ⠃⣿⠏",
-  "⣿⣿⣿⣿⣿⣿⠏  ⠃⣿⠏   ⠇⣿⣿⣿⣿⣿⣿⣿",
-] as const;
-
 /** Picks one tip; `random` is a test seam over Math.random. */
 export function pickAgentHeaderTip(random: () => number = Math.random): string {
   const index = Math.min(
@@ -79,14 +71,7 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   // U+2630 is East Asian Ambiguous and renders as two cells in some
   // terminals, so reserve its second cell explicitly inside the card.
   lines.push(row(title, 1));
-  const logoWidth = Math.max(...EVE_LOGO.map((line) => visibleLength(line)));
-  if (theme.unicode && innerWidth - 2 >= logoWidth) {
-    lines.push(
-      ...EVE_LOGO.map((line) => row(centerLogoLine(line, logoWidth, innerWidth - 2, theme))),
-      row(),
-    );
-  }
-
+  lines.push(row());
   if (input.tip !== undefined) {
     lines.push(row(`${c.bold("Tip:")} ${renderTip(input.tip, innerWidth - 7, theme)}`));
   }
@@ -114,11 +99,6 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
   }
 
   return lines;
-}
-
-function centerLogoLine(text: string, logoWidth: number, width: number, theme: Theme): string {
-  const padding = Math.max(0, Math.floor((width - logoWidth) / 2));
-  return `${" ".repeat(padding)}${theme.colors.cyan(text)}`;
 }
 
 function spreadRow(left: string, right: string, width: number, ambiguousWidth: number): string {

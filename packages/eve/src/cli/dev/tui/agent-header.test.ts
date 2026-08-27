@@ -21,15 +21,13 @@ describe("buildAgentHeader", () => {
     const plain = lines.map(stripAnsi);
     const card = plain.join("\n");
     const titleIndex = plain.findIndex((line) => line.includes("Weather Agent"));
-    const logoIndex = plain.findIndex((line) => line.includes("⣿⣿⣿⣿⣿⣿⣿⣿⣿"));
 
     expect(plain[0]).toBe(`╭${"─".repeat(66)}╮`);
     expect(plain[titleIndex]).toMatch(/^│ ☰eve \(v\d+\.\d+\.\d+\) +Weather Agent │$/u);
-    expect(titleIndex).toBeLessThan(logoIndex);
     expect(card).not.toContain("model");
     expect(card).not.toContain("instructions");
+    expect(card).not.toContain("⣿");
     expect(lines[0]).toBe(theme.colors.dim(plain[0]!));
-    expect(lines[logoIndex]).toContain(theme.colors.cyan("⣿⣿⣿⣿⣿⣿⣿⣿⣿    ⠏⣿⣿⣿⣿⣿⣿⣿⣿⣿"));
   });
 
   it("renders only known fields before agent inspection", () => {
