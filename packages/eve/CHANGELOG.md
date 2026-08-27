@@ -1,5 +1,12 @@
 # eve
 
+## 0.47.2
+
+### Patch Changes
+
+- c77faa5: Use `openai/gpt-5.6-luna-fast` as the default model for config-less agents, new projects, and the setup model picker.
+- edc6127: Large authored dependency graphs no longer crash `eve dev` or `eve eval` while preparing the final host. Dynamic capabilities are now transformed only while preparing the authored generation.
+
 ## 0.47.1
 
 ### Patch Changes
