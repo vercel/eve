@@ -39,9 +39,9 @@ interface TraceCaptureContext {
 }
 
 type TracePolicyDecision =
-  | { readonly action: "drop" }
+  | { readonly emit: false }
   | {
-      readonly action: "record";
+      readonly emit: true;
       readonly recordInputs: boolean;
       readonly recordOutputs: boolean;
     };
@@ -120,7 +120,7 @@ For example, this retains every conversation while capturing content only for pu
 // agent/instrumentation/otel.ts
 export default otel({
   tracePolicy: ({ audience }) => ({
-    action: "record",
+    emit: true,
     recordInputs: audience === "public",
     recordOutputs: audience === "public",
   }),

@@ -10961,7 +10961,7 @@ describe("createToolLoopHarness", () => {
         recordInputs: true,
         recordOutputs: true,
         tracePolicy: () => ({
-          action: "record",
+          emit: true,
           recordInputs: inputs,
           recordOutputs: outputs,
         }),
@@ -10996,7 +10996,7 @@ describe("createToolLoopHarness", () => {
         recordInputs: false,
         recordOutputs: true,
         tracePolicy: () => ({
-          action: "record",
+          emit: true,
           recordInputs: true,
           recordOutputs: true,
         }),

@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Allow `tracePolicy` to return an explicit drop or directional record decision while preserving existing boolean policies, lifecycle delivery, and per-delivery audience ceilings.
+Allow `tracePolicy` to explicitly disable emission or select directional content capture while preserving existing boolean policies, lifecycle delivery, and per-delivery audience ceilings.

@@ -9,7 +9,6 @@ import type {
 import { PROVIDER, type InstrumentationProvider } from "#public/instrumentation/provider.js";
 import type { InstrumentationRuntimeContextInput } from "#public/instrumentation/index.js";
 import type { JsonObject } from "#shared/json.js";
-import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
 import type { ResolvedContentOptions } from "#tracing/content-attributes.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
@@ -62,8 +61,8 @@ export interface OtelOptions {
   readonly traceChannelRequests?: boolean;
   /**
    * Process-wide trace and content decision. Boolean returns preserve the
-   * existing audience-aware behavior; explicit decisions can drop a trace or
-   * retain metadata, inputs, outputs, or all content. Defaults to retaining
+   * existing audience-aware behavior; explicit decisions can disable emission
+   * or select input and output capture independently. Defaults to retaining
    * public conversations with content. The result is a capture ceiling:
    * per-delivery audience and destination settings can only narrow it. A thrown
    * error rejects trace production without silencing lifecycle providers.
@@ -115,7 +114,13 @@ export interface TraceCaptureContext {
   readonly channelType?: string;
 }
 
-export type TracePolicyDecision = InstrumentationDecision;
+export type TracePolicyDecision =
+  | { readonly emit: false }
+  | {
+      readonly emit: true;
+      readonly recordInputs: boolean;
+      readonly recordOutputs: boolean;
+    };
 
 export type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 

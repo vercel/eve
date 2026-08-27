@@ -6,13 +6,25 @@ describe("resolveTracePolicyDecision", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it.each([
-    { action: "drop" },
-    { action: "record", recordInputs: false, recordOutputs: false },
-    { action: "record", recordInputs: true, recordOutputs: false },
-    { action: "record", recordInputs: false, recordOutputs: true },
-    { action: "record", recordInputs: true, recordOutputs: true },
-  ] as const)("preserves the explicit $action decision", (decision) => {
-    expect(resolveTracePolicyDecision(decision, "private")).toEqual(decision);
+    [{ emit: false }, { action: "drop" }],
+    [
+      { emit: true, recordInputs: false, recordOutputs: false },
+      { action: "record", recordInputs: false, recordOutputs: false },
+    ],
+    [
+      { emit: true, recordInputs: true, recordOutputs: false },
+      { action: "record", recordInputs: true, recordOutputs: false },
+    ],
+    [
+      { emit: true, recordInputs: false, recordOutputs: true },
+      { action: "record", recordInputs: false, recordOutputs: true },
+    ],
+    [
+      { emit: true, recordInputs: true, recordOutputs: true },
+      { action: "record", recordInputs: true, recordOutputs: true },
+    ],
+  ] as const)("normalizes the explicit $decision.emit decision", (decision, expected) => {
+    expect(resolveTracePolicyDecision(decision, "private")).toEqual(expected);
   });
 
   it("maps false to the legacy drop behavior", () => {

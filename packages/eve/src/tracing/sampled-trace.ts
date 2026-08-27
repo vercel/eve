@@ -56,5 +56,10 @@ export function resolveTracePolicyDecision(
     const content = shouldCaptureInstrumentationContent(audience);
     return { action: "record", recordInputs: content, recordOutputs: content };
   }
-  return decision;
+  if (!decision.emit) return DROP_INSTRUMENTATION;
+  return {
+    action: "record",
+    recordInputs: decision.recordInputs,
+    recordOutputs: decision.recordOutputs,
+  };
 }
