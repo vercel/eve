@@ -46,7 +46,26 @@ through the same kernel that implements eve's internal permissioning.
 ## Model
 
 Three exported concepts. Everything else is kernel-internal or an existing
-eve concept reused.
+eve concept reused. A compiling prototype lives beside this doc in
+[`hitl-obligation-kernel/`](./hitl-obligation-kernel/): `kernel.ts` (the
+interpreter), `variants.ts` (all four reducers against real harness shapes),
+`ledger.ts` (derivation from the existing batch state), and `seam.ts` (the
+`tool-loop.ts` call site, unchanged).
+
+**A row is one element of today's `PendingInputBatch.requests`** — one open
+obligation, flattened out of the batch it arrived in. A batch is not a state
+shape of its own: it is the set of rows sharing a `groupId`, and the batch's
+withheld `responseMessages` become that group's continuation payload. The
+existing batch semantics are preserved by construction, not reimplemented:
+independent answerability across batches (`appendPendingInputBatch`) is rows
+in different groups never interacting; request-id uniqueness
+(`assertUniqueRequestIds`) is uniqueness in the flat table; removal-only
+shrinkage (`removePendingInputBatches`) is rows transitioning open → terminal
+with nothing overwriting rows it never resolved; withheld output appearing
+zero times until closure is the continuation payload spliced exactly at
+claim. During migration the batch collection remains the persisted
+representation — the kernel derives its ledger from it
+(`ledgerFromSessionState`); only interpretation moves.
 
 ```ts
 /** One open item, durably stored. Kernel-owned shape. */
@@ -209,6 +228,16 @@ async function adjudicate(row, input): Promise<Verdict<ApprovalOutcome>> {
 }
 ```
 
+Per-tool dynamic approval semantics stay where they live today. The reducer
+owns no policy: `row.spec.responsePolicy` is the tool's resolved authored
+`Approval`, injected per-row at interpretation time from the live
+`HarnessToolMap` — the same late binding `resolveApprovalKeyFromTools` and
+`coordinateApprovalDelivery` perform now, generalized from the approval key
+to the whole policy surface (prototype `seam.ts`, `bindApprovalPolicy`). A
+tool changing its approval semantics between park and response is
+adjudicated by the current policy, exactly as today; the kernel never
+touches the tool registry.
+
 ```ts
 export const limit = defineVariant<LimitSpec, LimitOutcome>({
   present: (row) => inputRequest("session-limit", promptFor(row.spec)),
@@ -250,6 +279,35 @@ Stale generations never reach the Limit reducer: the generation is part of
 the request id, so a `gen-1` response hits a tombstone. Forced closure of a
 Challenge maps to `completed(cancelled)` in the kernel's dismissal-to-
 vocabulary translation — the one place kind leaks into kernel output.
+
+## Where the kernel runs: the existing seam
+
+HITL interpretation runs today between harness steps — the model step ends,
+the harness parks (`appendPendingInputBatch`, `tool-loop.ts:2806`), and the
+next step begins by resolving pending input (`resolvePendingInput`,
+`tool-loop.ts:1050`, preceded by `coordinateApprovalDelivery`). The kernel
+does not move that seam; it replaces what runs inside it:
+
+```text
+today:   coordinateApprovalDelivery → routePendingInput → one of three
+         domain resolvers (approval / question / session-limit)
+         → ResolvePendingInputResult
+
+target:  ledgerFromSessionState → interpretDelivery → translateEffects
+         → ResolvePendingInputResult          (same call site, same contract)
+```
+
+Convergence means one interpreter inside the existing seam instead of
+coordinator + router + three domain resolvers — not a new execution point.
+Mid-step approval gating still surfaces at step end via AI SDK approval
+parts; the park side (`appendPendingInputBatch`) is consumed by `raiseRows`
+at the next pass. The body-run owner introduces no second seam either: it is
+reachable only in background tasks where the step already ended with a
+receipt, and its deliveries arrive through its own inbox, interpreted by the
+same kernel pass. The prototype's `seam.ts` states the exact call-site
+contract, including how each `LedgerEffect` translates into today's
+`ResolvePendingInputResult` fields (`rejectedActions`, `resolvedInputs`,
+`deferredMessage`, `limitContinuation`).
 
 ## Owners
 
