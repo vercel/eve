@@ -251,6 +251,10 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
 
+    metadata(state) {
+      return { audience: state.audience ?? "unknown" };
+    },
+
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
     },

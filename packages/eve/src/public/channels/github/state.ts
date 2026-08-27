@@ -9,6 +9,7 @@ import {
   type GitHubPullRequestReviewCommentEvent,
   type GitHubPullRequestWebhookEvent,
 } from "#public/channels/github/inbound.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 /**
  * Durable, mutable per-conversation GitHub channel state, persisted as JSON.
@@ -24,6 +25,7 @@ import {
  * the repository, which is why the fields are mutable.
  */
 export interface GitHubChannelState {
+  audience: ChannelAudience;
   baseRef: string | null;
   baseSha: string | null;
   checkoutPath: string | null;
@@ -53,6 +55,7 @@ export interface GitHubReceiveStateTarget {
 /** Initial empty GitHub channel state. */
 export function initialGitHubState(): GitHubChannelState {
   return {
+    audience: "unknown",
     baseRef: null,
     baseSha: null,
     checkoutPath: null,
@@ -77,6 +80,7 @@ export function initialGitHubState(): GitHubChannelState {
 export function stateFromIssueCommentEvent(event: GitHubIssueCommentEvent): GitHubChannelState {
   return {
     ...initialGitHubState(),
+    audience: event.audience,
     baseRef: event.baseRef,
     baseSha: event.baseSha,
     conversationKind: event.conversation.kind,
@@ -100,6 +104,7 @@ export function stateFromPullRequestReviewCommentEvent(
 ): GitHubChannelState {
   return {
     ...initialGitHubState(),
+    audience: event.audience,
     baseRef: event.baseRef,
     baseSha: event.baseSha,
     conversationKind: "review_thread",
@@ -122,6 +127,7 @@ export function stateFromPullRequestReviewCommentEvent(
 export function stateFromIssueEvent(event: GitHubIssueWebhookEvent): GitHubChannelState {
   return {
     ...initialGitHubState(),
+    audience: event.audience,
     conversationKind: "issue",
     installationId: event.installationId ?? null,
     issueNumber: event.issue.issueNumber,
@@ -138,6 +144,7 @@ export function stateFromPullRequestEvent(
 ): GitHubChannelState {
   return {
     ...initialGitHubState(),
+    audience: event.audience,
     baseRef: event.baseRef,
     baseSha: event.baseSha,
     conversationKind: "pull_request",
@@ -160,6 +167,7 @@ export function stateFromCiEvent(event: GitHubCiWebhookEvent): GitHubChannelStat
   const pullRequestNumber = ci.pullRequests[0] ?? null;
   return {
     ...initialGitHubState(),
+    audience: event.audience,
     conversationKind: "pull_request",
     headSha: ci.headSha,
     installationId: event.installationId ?? null,

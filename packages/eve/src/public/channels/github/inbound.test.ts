@@ -52,6 +52,45 @@ function parseWithoutGitHubHeaders(payload: Record<string, unknown>) {
 }
 
 describe("GitHub inbound parsing", () => {
+  it("classifies repository visibility without assuming missing metadata is public", () => {
+    const comment = {
+      action: "created",
+      comment: { body: "@testbot hello", id: 10, user: { id: 1, login: "octocat" } },
+      issue: { number: 5 },
+    };
+    const repository = {
+      full_name: "vercel/eve",
+      id: 123,
+      name: "eve",
+      owner: { login: "vercel" },
+    };
+
+    expect(
+      parse(
+        "issue_comment",
+        basePayload({ ...comment, repository: { ...repository, private: false } }),
+      )?.audience,
+    ).toBe("public");
+    expect(
+      parse(
+        "issue_comment",
+        basePayload({ ...comment, repository: { ...repository, private: true } }),
+      )?.audience,
+    ).toBe("private");
+    expect(parse("issue_comment", basePayload({ ...comment, repository }))?.audience).toBe(
+      "unknown",
+    );
+    expect(
+      parse(
+        "issue_comment",
+        basePayload({
+          ...comment,
+          repository: { ...repository, private: false, visibility: "internal" },
+        }),
+      )?.audience,
+    ).toBe("private");
+  });
+
   it("detects issue comments versus PR timeline comments", () => {
     const issue = parse(
       "issue_comment",
