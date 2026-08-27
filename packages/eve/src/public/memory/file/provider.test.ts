@@ -409,6 +409,11 @@ function operationContext() {
     getSkill: () => {
       throw new Error("not available");
     },
+    sandbox: {
+      delete: async () => {
+        throw new Error("not available");
+      },
+    },
     memory: {
       scope: { key: "mem_scope", namespace: "test", value: "scope-1" },
       slot: "facts",

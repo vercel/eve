@@ -23,6 +23,22 @@ export function buildCallbackContext(): SessionContext {
       parent: session.parent,
     },
 
+    sandbox: {
+      async delete(options) {
+        const access = ctx.get(SandboxKey);
+        if (access === undefined) {
+          throw new Error(
+            "eve sandbox runtime access is unavailable in the current async context. " +
+              "Call ctx.sandbox.delete() only from authored runtime functions such as tools, hooks, and channel events.",
+          );
+        }
+        if (access.delete === undefined) {
+          throw new Error("The active sandbox runtime does not support deletion.");
+        }
+        await access.delete(options);
+      },
+    },
+
     getSandbox(): Promise<RuntimeSandboxSession> {
       const access = ctx.get(SandboxKey);
       if (access === undefined) {

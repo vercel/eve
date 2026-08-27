@@ -76,6 +76,7 @@ function createSessionSandboxHarness() {
           metadata: {},
           sessionKey: input.sessionKey,
         }),
+        delete: async () => {},
         session: sandbox.session,
         stop: async () => {},
         shutdown: async () => {},

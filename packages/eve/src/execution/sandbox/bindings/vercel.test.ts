@@ -1097,6 +1097,60 @@ describe("createVercelSandbox", () => {
     );
   });
 
+  it("asks Vercel to delete orphan snapshots when deleting the sandbox", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const order: string[] = [];
+    sessionSandbox.stop.mockImplementation(async () => {
+      order.push("stop");
+    });
+    const stableDelete = vi.fn(async () => {
+      order.push("sandbox-delete");
+    });
+    const stableGet = vi.fn(async () => {
+      order.push("sandbox-get");
+      return { delete: stableDelete };
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(templateSandbox)
+          .mockResolvedValueOnce(sessionSandbox),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadDeleteSandboxModule: async () => ({ Sandbox: { get: stableGet } }) as never,
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    const handle = await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+    const abortSignal = new AbortController().signal;
+
+    await expect(handle.delete({ abortSignal })).resolves.toBeUndefined();
+
+    expect(order).toEqual(["stop", "sandbox-get", "sandbox-delete"]);
+    expect(stableGet).toHaveBeenCalledWith({
+      fetch: expect.any(Function),
+      name: "session",
+      resume: false,
+      signal: abortSignal,
+    });
+    expect(stableDelete).toHaveBeenCalledWith({
+      deleteOrphanSnapshots: true,
+      signal: abortSignal,
+    });
+  });
+
   it("skips the stop call on shutdown when the sandbox is not running", async () => {
     const templateSandbox = createMockSandbox({ name: "template" });
     const sessionSandbox = createMockSandbox({ name: "session", status: "stopped" });

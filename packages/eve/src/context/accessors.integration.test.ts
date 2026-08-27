@@ -139,6 +139,30 @@ describe("buildCallbackContext – getSandbox", () => {
 
     expect(stops).toBe(1);
   });
+
+  it("deletes the active sandbox through the callback lifecycle facade", async () => {
+    let deletions = 0;
+    const sandbox = mockSandbox({
+      delete: () => {
+        deletions += 1;
+      },
+    });
+    const runtime = await createTestRuntime();
+
+    await runtime.runAsSession({ sandbox }, async () => {
+      await buildCallbackContext().sandbox.delete();
+    });
+
+    expect(deletions).toBe(1);
+  });
+
+  it("rejects deletion when sandbox access is unavailable", async () => {
+    const runtime = await createTestRuntime();
+
+    await expect(
+      runtime.runAsSession({}, async () => await buildCallbackContext().sandbox.delete()),
+    ).rejects.toThrow("Call ctx.sandbox.delete() only from authored runtime functions");
+  });
 });
 
 describe("buildCallbackContext – getSkill", () => {

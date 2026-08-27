@@ -54,6 +54,9 @@ catalogs:
     '@vercel/sandbox':
       specifier: 2.8.0
       version: 2.8.0
+    '@vercel/sandbox-delete':
+      specifier: npm:@vercel/sandbox@3.2.0
+      version: 3.2.0
     '@vercel/sandbox-drives':
       specifier: npm:@vercel/sandbox@2.10.0-beta.0
       version: 2.10.0-beta.0
@@ -247,7 +250,7 @@ importers:
     devDependencies:
       '@agent-browser/eve':
         specifier: ^0.33.0
-        version: 0.33.0(@vercel/sandbox@2.8.0)(eve@packages+eve)
+        version: 0.33.0(@vercel/sandbox@3.2.0)(eve@packages+eve)
       '@agentphone/chat-sdk-adapter':
         specifier: 0.1.0
         version: 0.1.0(ai@7.0.66(zod@4.4.3))(chat@4.34.0(ai@7.0.66(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3)
@@ -1373,6 +1376,9 @@ importers:
       '@vercel/sandbox':
         specifier: 'catalog:'
         version: 2.8.0
+      '@vercel/sandbox-delete':
+        specifier: 'catalog:'
+        version: '@vercel/sandbox@3.2.0'
       '@vercel/sandbox-drives':
         specifier: 'catalog:'
         version: '@vercel/sandbox@2.10.0-beta.0'
@@ -8131,6 +8137,9 @@ packages:
 
   '@vercel/sandbox@3.0.0':
     resolution: {integrity: sha512-1pF3id7LIG2GfjkEAZW+ZngMDdywJw7aFLOyIlry/lj8v3b4GMn3WCuBbvG4N4wTmYUfFzHaVHfdwVpqALEFkw==}
+
+  '@vercel/sandbox@3.2.0':
+    resolution: {integrity: sha512-aIOd8Z+NgpdS8k4Y1EEvVoEml4+mtBmJVtfw4rJpL5j5K2gS70YfR6LbnT7/bfHbsRsFZhp/JSTB3TeOw/pgsw==}
 
   '@vercel/sdk@1.28.8':
     resolution: {integrity: sha512-uAl+pEZZnFYRFzE/43ihP3aYTJ+4v0+coiMYobYMqtaERWknYKuRZWEj9Dk9r87yWXfxclsQugXkN42kaOcySw==}
@@ -15879,17 +15888,17 @@ ignoredOptionalDependencies:
 
 snapshots:
 
-  '@agent-browser/eve@0.33.0(@vercel/sandbox@2.8.0)(eve@packages+eve)':
+  '@agent-browser/eve@0.33.0(@vercel/sandbox@3.2.0)(eve@packages+eve)':
     dependencies:
-      '@agent-browser/sandbox': 0.33.0(@vercel/sandbox@2.8.0)
+      '@agent-browser/sandbox': 0.33.0(@vercel/sandbox@3.2.0)
       eve: link:packages/eve
       zod: 4.4.3
     transitivePeerDependencies:
       - '@vercel/sandbox'
 
-  '@agent-browser/sandbox@0.33.0(@vercel/sandbox@2.8.0)':
+  '@agent-browser/sandbox@0.33.0(@vercel/sandbox@3.2.0)':
     optionalDependencies:
-      '@vercel/sandbox': 2.8.0
+      '@vercel/sandbox': 3.2.0
 
   '@agentclientprotocol/sdk@1.3.0(zod@4.4.3)':
     dependencies:
@@ -22857,6 +22866,24 @@ snapshots:
       async-retry: 1.3.3
       jose: 6.2.3
       jsonlines: 0.1.1
+      ms: 2.1.3
+      picocolors: 1.1.1
+      tar-stream: 3.1.7
+      undici: 7.29.0
+      xdg-app-paths: 5.1.0
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - react-native-b4a
+
+  '@vercel/sandbox@3.2.0':
+    dependencies:
+      '@vercel/oidc': 3.2.0
+      '@workflow/serde': 4.1.0-beta.2
+      async-retry: 1.3.3
+      jose: 6.2.3
+      jsonlines: 0.1.1
+      lru-cache: 10.4.3
       ms: 2.1.3
       picocolors: 1.1.1
       tar-stream: 3.1.7
