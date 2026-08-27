@@ -1,12 +1,15 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
-import { loadAuthoredModuleNamespace } from "#internal/authored-module-loader.js";
+import {
+  bundleAuthoredModuleForGeneration,
+  loadAuthoredModuleNamespace,
+} from "#internal/authored-module-loader.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("loadAuthoredModuleNamespace", () => {
@@ -52,6 +55,113 @@ describe("loadAuthoredModuleNamespace", () => {
         globals[cacheKey] = previousCache;
       }
     }
+  });
+
+  it("explains when an installed package contains Node-incompatible extensionless ESM", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/channels/eve.ts": [
+          'import { matchRoute } from "compiler-oriented-sdk/server";',
+          "",
+          'export const result = matchRoute("/");',
+          "",
+        ].join("\n"),
+        "node_modules/compiler-oriented-sdk/dist/server/index.js":
+          'export { matchRoute } from "./routeMatcher";\n',
+        "node_modules/compiler-oriented-sdk/dist/server/routeMatcher.js":
+          "export const matchRoute = () => true;\n",
+        "node_modules/compiler-oriented-sdk/package.json": JSON.stringify({
+          exports: { "./server": "./dist/server/index.js" },
+          name: "compiler-oriented-sdk",
+          type: "module",
+        }),
+      },
+      name: "compiler-oriented-external-package",
+    });
+    const modulePath = join(app.appRoot, "agent", "channels", "eve.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain(`Failed to evaluate authored module:\n  ${modulePath}`);
+    expect(error.message).toContain("Failed to load an installed package:");
+    expect(error.message).toContain(
+      "  Package: compiler-oriented-sdk (loaded outside the authored bundle)",
+    );
+    expect(error.message).toContain("  Import: dist/server/routeMatcher");
+    expect(error.message).not.toContain("routeMatcher.js");
+    expect(error.message).toContain(
+      "  Reason: Node's ESM loader does not infer file extensions for relative imports.",
+    );
+    expect(error.message).toContain("  Hint: Use a Node-compatible package or entrypoint");
+    expect(error.cause).toBeInstanceOf(Error);
+    expect((error.cause as NodeJS.ErrnoException).code).toBe("ERR_MODULE_NOT_FOUND");
+  });
+
+  it("does not infer a compiler requirement when package output is simply missing", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_sdk.ts": 'import "incomplete-sdk";\nexport const result = true;\n',
+        "node_modules/incomplete-sdk/index.js": 'import "./generated";\n',
+        "node_modules/incomplete-sdk/package.json": JSON.stringify({
+          exports: "./index.js",
+          name: "incomplete-sdk",
+          type: "module",
+        }),
+      },
+      name: "incomplete-external-package",
+    });
+    const modulePath = join(app.appRoot, "agent", "tools", "use_sdk.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain("Failed to load an installed package:");
+    expect(error.message).toContain(
+      "  Package: incomplete-sdk (loaded outside the authored bundle)",
+    );
+    expect(error.message).toContain("  Missing: generated");
+    expect(error.message).toContain(
+      "  Reason: Package output may be incomplete, incorrectly installed",
+    );
+    expect(error.message).not.toContain("ESM loader does not infer");
+    expect(error.cause).toMatchObject({ code: "ERR_MODULE_NOT_FOUND" });
+  });
+
+  it("preserves an authored module initialization failure as the evaluation cause", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/throws.ts": 'throw new Error("authored initialization failed");\n',
+      },
+      name: "authored-initialization-failure",
+    });
+    const modulePath = join(app.appRoot, "agent", "tools", "throws.ts");
+
+    let thrown: unknown;
+    try {
+      await loadAuthoredModuleNamespace(modulePath);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const error = thrown as Error;
+    expect(error.message).toContain(`Failed to evaluate authored module:\n  ${modulePath}`);
+    expect(error.message).not.toContain("Failed to load an installed package:");
+    expect(error.message).not.toContain("Package:");
+    expect(error.cause).toMatchObject({ message: "authored initialization failed" });
   });
 
   it("resolves extensionless relative imports with dotted TypeScript basenames", async () => {
@@ -206,7 +316,10 @@ describe("loadAuthoredModuleNamespace", () => {
         JSON.stringify(
           {
             exports: {
-              "./exa-linkedin": "./src/exa-linkedin.ts",
+              "./exa-linkedin": {
+                "eve-source": "./src/exa-linkedin.ts",
+                default: "./dist/exa-linkedin.js",
+              },
             },
             name: "@repo/enrichment",
             type: "module",
@@ -397,6 +510,40 @@ describe("loadAuthoredModuleNamespace", () => {
     }
   });
 
+  it("loads a linked package tsconfig from its real workspace location", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-linked-package-tsconfig-"));
+
+    try {
+      const workspaceRoot = join(root, "workspace");
+      const packageRoot = join(workspaceRoot, "packages", "extension");
+      const linkedPackageRoot = join(root, "app", "node_modules", "@repo", "extension");
+      await mkdir(join(packageRoot, "dist"), { recursive: true });
+      await mkdir(join(linkedPackageRoot, ".."), { recursive: true });
+      await writeFile(
+        join(workspaceRoot, "tsconfig.json"),
+        JSON.stringify({ compilerOptions: { target: "ES2024" } }),
+      );
+      await writeFile(
+        join(packageRoot, "tsconfig.json"),
+        JSON.stringify({ extends: "../../tsconfig.json" }),
+      );
+      await writeFile(
+        join(packageRoot, "package.json"),
+        JSON.stringify({ name: "@repo/extension", type: "module" }),
+      );
+      await writeFile(join(packageRoot, "dist", "entry.mjs"), 'export const result = "linked";\n');
+      await symlink(packageRoot, linkedPackageRoot, "junction");
+
+      const moduleNamespace = await loadAuthoredModuleNamespace(
+        join(linkedPackageRoot, "dist", "entry.mjs"),
+      );
+
+      expect(moduleNamespace.result).toBe("linked");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("keeps configured dependencies external when they are imported from workspace packages", async () => {
     const app = await scenarioApp({
       files: {
@@ -477,7 +624,7 @@ describe("loadAuthoredModuleNamespace", () => {
     }
   });
 
-  it("keeps default external dependencies external when imported from workspace packages", async () => {
+  it("bundles unconfigured dependencies imported from workspace packages", async () => {
     const app = await scenarioApp({
       files: {
         "agent/channels/api/contact-sales/webhook.ts": [
@@ -487,9 +634,9 @@ describe("loadAuthoredModuleNamespace", () => {
           "",
         ].join("\n"),
       },
-      name: "workspace-package-default-external",
+      name: "workspace-package-bundled-dependency",
     });
-    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-default-external-"));
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-workspace-bundled-dependency-"));
 
     try {
       const packageRoot = join(workspaceRoot, "packages", "enrichment");
@@ -532,7 +679,7 @@ describe("loadAuthoredModuleNamespace", () => {
       );
       await writeFile(
         join(externalPackageRoot, "runtimeConfig.shared.js"),
-        "module.exports = { value: 'default-externalized' };\n",
+        "module.exports = { value: 'bundled-dependency' };\n",
       );
 
       await mkdir(join(app.appRoot, "node_modules", "@repo"), { recursive: true });
@@ -546,9 +693,136 @@ describe("loadAuthoredModuleNamespace", () => {
         join(app.appRoot, "agent", "channels", "api", "contact-sales", "webhook.ts"),
       );
 
-      expect(moduleNamespace.result).toBe("default-externalized");
+      expect(moduleNamespace.result).toBe("bundled-dependency");
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
+    }
+  });
+
+  // pnpm's store layout: an installed package's dependencies are store
+  // siblings, only resolvable from the package's real location. The compiled
+  // module map imports extension modules by literal path through the app's
+  // node_modules symlink (a dev-generation snapshot preserves that symlink
+  // while relocating every importer path), so bare imports must resolve from
+  // the module's realpath.
+  async function createStoreSiblingInstall(input: {
+    readonly appRoot: string;
+    readonly storeRoot: string;
+    readonly consumerDecoy?: boolean;
+  }): Promise<void> {
+    const storeNodeModules = join(input.storeRoot, "node_modules");
+    const packageRoot = join(storeNodeModules, "gadget-extension");
+    await mkdir(join(packageRoot, "extension", "tools"), { recursive: true });
+    await mkdir(join(storeNodeModules, "store-sibling"), { recursive: true });
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify({ name: "gadget-extension", type: "module" }, null, 2),
+    );
+    await writeFile(
+      join(packageRoot, "extension", "tools", "echo.ts"),
+      ['import sibling from "store-sibling";', "", "export const result = sibling.value;", ""].join(
+        "\n",
+      ),
+    );
+    await writeFile(
+      join(storeNodeModules, "store-sibling", "package.json"),
+      JSON.stringify({ main: "index.cjs", name: "store-sibling" }, null, 2),
+    );
+    await writeFile(
+      join(storeNodeModules, "store-sibling", "index.cjs"),
+      "module.exports = { value: 'store-sibling-value' };\n",
+    );
+
+    await mkdir(join(input.appRoot, "node_modules"), { recursive: true });
+    await symlink(packageRoot, join(input.appRoot, "node_modules", "gadget-extension"), "junction");
+
+    if (input.consumerDecoy === true) {
+      const decoyRoot = join(input.appRoot, "node_modules", "store-sibling");
+      await mkdir(decoyRoot, { recursive: true });
+      await writeFile(
+        join(decoyRoot, "package.json"),
+        JSON.stringify({ main: "index.cjs", name: "store-sibling" }, null, 2),
+      );
+      await writeFile(join(decoyRoot, "index.cjs"), "module.exports = { value: 'decoy-value' };\n");
+    }
+  }
+
+  it("inlines store-sibling dependencies of modules reached through literal symlink paths", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_echo.ts": [
+          'import { result } from "../../node_modules/gadget-extension/extension/tools/echo.ts";',
+          "",
+          "export const toolResult = result;",
+          "",
+        ].join("\n"),
+      },
+      name: "store-sibling-generation",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-generation-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, storeRoot });
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "tools", "use_echo.ts"),
+      );
+
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toMatch(/from\s*["']store-sibling["']/);
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("prefers a package's store sibling over a consumer copy of the same dependency", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/use_echo.ts": [
+          'import { result } from "../../node_modules/gadget-extension/extension/tools/echo.ts";',
+          "",
+          "export const toolResult = result;",
+          "",
+        ].join("\n"),
+      },
+      name: "store-sibling-precedence",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-precedence-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, consumerDecoy: true, storeRoot });
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "agent", "tools", "use_echo.ts"),
+      );
+
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toContain("decoy-value");
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("resolves store siblings for generation bundles entered at node_modules paths", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/instructions.md": "Store-sibling entry scenario.\n",
+      },
+      name: "store-sibling-entry",
+    });
+    const storeRoot = await mkdtemp(join(tmpdir(), "eve-store-sibling-entry-"));
+
+    try {
+      await createStoreSiblingInstall({ appRoot: app.appRoot, consumerDecoy: true, storeRoot });
+
+      const code = await bundleAuthoredModuleForGeneration(
+        join(app.appRoot, "node_modules", "gadget-extension", "extension", "tools", "echo.ts"),
+      );
+
+      expect(code).toContain("store-sibling-value");
+      expect(code).not.toContain("decoy-value");
+    } finally {
+      await rm(storeRoot, { force: true, recursive: true });
     }
   });
 
@@ -783,7 +1057,11 @@ describe("loadAuthoredModuleNamespace", () => {
       const manifest = await compileAgentManifest(discovered.manifest);
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.tools).toHaveLength(1);
+      expect(
+        manifest.tools.filter(
+          (tool) => manifest.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -882,12 +1160,18 @@ describe("loadAuthoredModuleNamespace", () => {
         appRoot: app.appRoot,
       });
       const manifest = await compileAgentManifest(discovered.manifest);
+      const subagent = manifest.subagents[0];
+      if (subagent?.configResolver !== undefined) {
+        throw new Error("expected a static subagent");
+      }
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.subagents[0]?.agent.config.build?.externalDependencies).toEqual([
-        "external-only",
-      ]);
-      expect(manifest.subagents[0]?.agent.tools).toHaveLength(1);
+      expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
+      expect(
+        subagent?.agent.tools.filter(
+          (tool) => subagent.agent.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -936,6 +1220,34 @@ describe("loadAuthoredModuleNamespace", () => {
       logoUrl: "data:application/octet-stream;base64,bG9nby1ieXRlcw==",
       rawText: "asset text",
     });
+  });
+
+  it("rejects asset imports outside the authored package", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/outside_asset.ts": "export default {};\n",
+      },
+      name: "outside-asset-import",
+    });
+    const outsideFileName = `${basename(app.appRoot)}.txt`;
+    const outsidePath = join(app.appRoot, "..", outsideFileName);
+    const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
+
+    try {
+      await Promise.all([
+        writeFile(outsidePath, "outside\n"),
+        writeFile(
+          modulePath,
+          `import value from "../../../${outsideFileName}?raw";\nexport default value;\n`,
+        ),
+      ]);
+
+      await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+        /resolves outside package root/,
+      );
+    } finally {
+      await rm(outsidePath, { force: true });
+    }
   });
 
   it("recovers in the same process once a missing package is installed", async () => {

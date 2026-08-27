@@ -1,8 +1,10 @@
-import { jsonSchema, type ToolSet } from "ai";
+import type { ToolSet } from "ai";
+import { z } from "#compiled/zod/index.js";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
+import { DEFAULT_WORKFLOW_MAX_SUBAGENTS } from "#harness/workflow-subagent-limit.js";
 import { workflowToolDescription } from "#harness/workflow-tool-description.js";
 import {
   createWorkflowSandboxTool,
@@ -17,6 +19,16 @@ interface WorkflowToolSet {
   readonly hostTools: ToolSet;
   readonly modelTools: ToolSet;
 }
+
+const DEFAULT_WORKFLOW_SANDBOX_BRIDGE_REQUEST_LIMIT = 256;
+
+const workflowInputSchema = z.strictObject({
+  js: z
+    .string()
+    .describe(
+      "Complete JavaScript orchestration program. Call only the agents listed in the Workflow description and return one JSON-serializable result.",
+    ),
+});
 
 /**
  * Adds the dynamic `Workflow` tool while leaving every ordinary model tool
@@ -36,6 +48,7 @@ export async function applyWorkflowTool(input: {
   }
 
   const workflowTool = await createWorkflowSandboxTool({
+    bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(input.maxSubagents),
     continuationSecurity: input.continuationSecurity,
     hostTools,
     lifecycle: input.lifecycle,
@@ -49,24 +62,23 @@ export async function applyWorkflowTool(input: {
   modelTools[WORKFLOW_TOOL_NAME] = {
     ...workflowTool,
     description: apiReference.length > 0 ? `${framing}\n\n${apiReference}` : framing,
-    inputSchema: jsonSchema({
-      type: "object",
-      properties: {
-        js: {
-          type: "string",
-          description:
-            "Complete JavaScript orchestration program. Call only the agents listed in the Workflow description and return one JSON-serializable result.",
-        },
-      },
-      required: ["js"],
-      additionalProperties: false,
-    }),
+    inputSchema: workflowInputSchema,
   } as ToolSet[string];
 
   return {
     hostTools,
     modelTools: modelTools as ToolSet,
   };
+}
+
+/**
+ * Keeps code mode's bridge capacity strictly above eve's dispatch budget.
+ * The extra request lets the first over-budget call resolve through eve's
+ * `WORKFLOW_SUBAGENT_LIMIT_REACHED` result instead of failing the sandbox.
+ */
+export function resolveWorkflowSandboxBridgeRequestLimit(maxSubagents?: number): number {
+  const dispatchBudget = maxSubagents ?? DEFAULT_WORKFLOW_MAX_SUBAGENTS;
+  return Math.max(DEFAULT_WORKFLOW_SANDBOX_BRIDGE_REQUEST_LIMIT, dispatchBudget + 1);
 }
 
 function workflowApiReference(generatedDescription: string): string {

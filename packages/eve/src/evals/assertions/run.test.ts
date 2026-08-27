@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
 import type {
   EveEvalDerivedFacts,
@@ -12,7 +13,7 @@ import * as Run from "#evals/assertions/run.js";
 
 function makeResult(overrides: {
   status?: EveEvalTaskResult["status"];
-  events?: readonly HandleMessageStreamEvent[];
+  events?: readonly UnstampedMessageStreamEvent[];
   derived?: Partial<EveEvalDerivedFacts>;
   output?: unknown;
 }): EveEvalTaskResult {
@@ -20,8 +21,9 @@ function makeResult(overrides: {
     output: overrides.output ?? null,
     finalMessage: null,
     status: overrides.status ?? "completed",
-    events: overrides.events ?? [],
+    events: stampTestEvents(overrides.events ?? []),
     derived: { ...createEmptyDerivedFacts(), ...overrides.derived },
+    traceContexts: [],
   };
 }
 
@@ -35,6 +37,8 @@ function completedToolCall(name: string): EveEvalToolCall {
 
 function subagentCall(name: string, status: EveEvalSubagentCall["status"]): EveEvalSubagentCall {
   return {
+    callId: `call-${status}`,
+    childSessionId: `session-${status}`,
     name,
     output: status === "completed" ? "ok" : undefined,
     status,
@@ -42,16 +46,16 @@ function subagentCall(name: string, status: EveEvalSubagentCall["status"]): EveE
   };
 }
 
-function message(text: string): HandleMessageStreamEvent {
+function message(text: string): UnstampedMessageStreamEvent {
   return {
     type: "message.completed",
     data: { finishReason: "stop", message: text, sequence: 1, stepIndex: 0, turnId: "t1" },
-  } as HandleMessageStreamEvent;
+  } as UnstampedMessageStreamEvent;
 }
 
 function actionsRequested(
   actions: readonly { readonly callId: string; readonly toolName: string }[],
-): HandleMessageStreamEvent {
+): UnstampedMessageStreamEvent {
   return {
     type: "actions.requested",
     data: {
@@ -63,7 +67,7 @@ function actionsRequested(
   };
 }
 
-function actionResult(callId: string, toolName: string): HandleMessageStreamEvent {
+function actionResult(callId: string, toolName: string): UnstampedMessageStreamEvent {
   return {
     type: "action.result",
     data: {
@@ -80,7 +84,7 @@ function failedSubagentResult(input: {
   callId: string;
   output: unknown;
   subagentName: string;
-}): HandleMessageStreamEvent {
+}): UnstampedMessageStreamEvent {
   return {
     type: "action.result",
     data: {
@@ -92,6 +96,7 @@ function failedSubagentResult(input: {
         callId: input.callId,
         isError: true,
         kind: "subagent-result",
+        origin: "dispatch",
         output: input.output as never,
         subagentName: input.subagentName,
       },
@@ -122,7 +127,7 @@ describe("run assertions", () => {
         stepIndex: 0,
         turnId: "t1",
       },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
 
     expect(
       (await Run.succeeded().evaluate(makeResult({ status: "completed", events: [failedEvent] })))
@@ -162,6 +167,28 @@ describe("run assertions", () => {
     expect((await Run.calledTool("missing").evaluate(result)).score).toBe(0);
   });
 
+  it("calledTool accepts a predicate over the matching call count", async () => {
+    const result = makeResult({
+      derived: {
+        toolCalls: [completedToolCall("get_weather"), completedToolCall("get_weather")],
+        toolCallCount: 2,
+      },
+    });
+
+    expect(
+      (await Run.calledTool("get_weather", { count: (count) => count >= 2 }).evaluate(result))
+        .score,
+    ).toBe(1);
+    expect(
+      (await Run.calledTool("missing", { count: (count) => count === 0 }).evaluate(result)).score,
+    ).toBe(1);
+    const failed = await Run.calledTool("get_weather", {
+      count: (count) => count > 2,
+    }).evaluate(result);
+    expect(failed.score).toBe(0);
+    expect(failed.message).toContain("count predicate");
+  });
+
   it("calledTool defaults to completed while notCalledTool rejects every lifecycle state", async () => {
     const result = makeResult({
       derived: {
@@ -180,6 +207,9 @@ describe("run assertions", () => {
 
   it("validates exact-count options", () => {
     expect(() => Run.calledTool("search", { count: -1 })).toThrow(/non-negative integer/);
+    expect(() => Run.calledTool("search", { count: "1" as never })).toThrow(
+      /non-negative integer or predicate/,
+    );
     expect(() => Run.calledSubagent("child", { count: 1.5 })).toThrow(/non-negative integer/);
     expect(() => Run.typedEvent({ type: "turn.completed", count: Number.NaN })).toThrow(
       /non-negative integer/,
@@ -208,6 +238,27 @@ describe("run assertions", () => {
     expect(
       (await Run.calledSubagent("child", { status: "completed", count: 2 }).evaluate(result)).score,
     ).toBe(0);
+    expect(
+      (
+        await Run.calledSubagent("child", {
+          count: (count) => count >= 4,
+          status: "pending",
+        }).evaluate(result)
+      ).score,
+    ).toBe(0);
+    expect(
+      (await Run.calledSubagent("child", { count: (count) => count === 1 }).evaluate(result)).score,
+    ).toBe(1);
+    expect(
+      (
+        await Run.calledSubagent("child", {
+          callId: "call-completed",
+          childSessionId: "session-completed",
+          count: 1,
+          status: "completed",
+        }).evaluate(result)
+      ).score,
+    ).toBe(1);
   });
 
   it("toolOrder checks request order", async () => {
@@ -275,11 +326,11 @@ describe("run assertions", () => {
         turnId: "t",
         workflowId: "w",
       },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const completed = {
       type: "subagent.completed",
       data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const result = makeResult({ events: [called, called, completed] });
 
     expect(
@@ -291,12 +342,37 @@ describe("run assertions", () => {
         }).evaluate(result)
       ).score,
     ).toBe(1);
+    expect(
+      (
+        await Run.typedEvent({
+          type: "subagent.called",
+          data: { name: "child" },
+          count: (count) => count >= 2,
+        }).evaluate(result)
+      ).score,
+    ).toBe(1);
     expect((await Run.notEvent({ type: "turn.failed" }).evaluate(result)).score).toBe(1);
     expect(
       (
         await Run.eventOrder([
           { type: "subagent.called", data: { name: "child" }, count: 2 },
           { type: "subagent.completed", data: { subagentName: "child" } },
+        ]).evaluate(result)
+      ).score,
+    ).toBe(1);
+    expect(
+      (
+        await Run.eventOrder([
+          {
+            type: "subagent.called",
+            data: { name: "child" },
+            count: (count) => count >= 2,
+          },
+          {
+            type: "subagent.completed",
+            data: { subagentName: "child" },
+            count: (count) => count >= 1,
+          },
         ]).evaluate(result)
       ).score,
     ).toBe(1);
@@ -323,11 +399,11 @@ describe("run assertions", () => {
         turnId: "t",
         workflowId: "w",
       },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const completed = {
       type: "subagent.completed",
       data: { callId: "c", output: "ok", sequence: 2, subagentName: "child", turnId: "t" },
-    } as HandleMessageStreamEvent;
+    } as UnstampedMessageStreamEvent;
     const result = makeResult({ events: [called, completed, called] });
 
     expect(

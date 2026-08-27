@@ -4,8 +4,10 @@ import { isNextJsProject, type ChannelKind } from "#setup/scaffold/index.js";
 import type { DisabledChannelReasons } from "#setup/cli/index.js";
 
 import { compileChannelDefinition } from "#compiler/normalize-channel.js";
+import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
+import type { AgentModuleBinding } from "#compiler/source-graph.js";
 import { discoverAgent } from "#discover/discover-agent.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 
 const SCAFFOLDED_WEB_CHANNEL_LOGICAL_PATH = "channels/eve.ts";
 const SCAFFOLDED_SLACK_CHANNEL_LOGICAL_PATH = "channels/slack.ts";
@@ -43,13 +45,28 @@ export async function inspectExistingChannelRegistrations(
   const slackOwners = new Set<string>();
 
   for (const source of manifest.channels) {
-    const compiled = await compileChannelDefinition(agentRoot, source);
-    const definitions = Array.isArray(compiled) ? compiled : [compiled];
-    for (const definition of definitions) {
+    const binding: AgentModuleBinding = {
+      backing: {
+        externalDependencies: [],
+        kind: "filesystem",
+        sourcePath: join(agentRoot, source.logicalPath),
+      },
+      logicalPath: source.logicalPath,
+      owner: { kind: "application" },
+    };
+    const compiled = await compileChannelDefinition(agentRoot, source, {
+      binding,
+      loadNamespace: createCompiledBindingNamespaceLoader({
+        bindings: { [source.sourceId]: binding },
+        registries: [],
+      }),
+    });
+    if (compiled.kind !== "channel") continue;
+    for (const definition of compiled.definitions) {
       if (definition.kind !== "channel") {
         continue;
       }
-      if (definition.method === "POST" && definition.urlPath === EVE_CREATE_SESSION_ROUTE_PATH) {
+      if (definition.method === "POST" && definition.urlPath === EVE_SESSION_ROUTE_PATH) {
         webRouteOwners.add(source.logicalPath);
       }
       if (definition.adapterKind === "slack") {
@@ -62,7 +79,7 @@ export async function inspectExistingChannelRegistrations(
   if (
     [...webRouteOwners].some((logicalPath) => logicalPath !== SCAFFOLDED_WEB_CHANNEL_LOGICAL_PATH)
   ) {
-    disabledChannelReasons.web = `POST ${EVE_CREATE_SESSION_ROUTE_PATH} already registered`;
+    disabledChannelReasons.web = `POST ${EVE_SESSION_ROUTE_PATH} already registered`;
   }
   if (slackOwners.size > 0) {
     disabledChannelReasons.slack = "Slack channel already registered";
@@ -90,7 +107,7 @@ export function assertCanAddSelectedChannels(
     );
     if (conflictingOwner !== undefined) {
       throw new Error(
-        `Cannot scaffold Web Chat because agent/${conflictingOwner} already defines POST ${EVE_CREATE_SESSION_ROUTE_PATH}. Web Chat scaffolds the same eve session routes.`,
+        `Cannot scaffold Web Chat because agent/${conflictingOwner} already defines POST ${EVE_SESSION_ROUTE_PATH}. Web Chat scaffolds the same eve session routes.`,
       );
     }
   }

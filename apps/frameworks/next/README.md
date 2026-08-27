@@ -14,10 +14,9 @@ Set `EVE_BASE_URL` before starting Next.js to reuse an already-running eve
 server instead of letting `withEve()` start one.
 
 When a linked Vercel project is detected, `withEve()` writes generated
-`experimentalServices` to `.vercel/output/config.json` for Next.js at `/` and
-eve behind the private `/_eve_internal/eve` service prefix. Next.js rewrites
-the public eve endpoints to that private service so the eve index route is not
-exposed at the site root.
+`services` and `routes` to `.vercel/output/config.json`. The Next.js app stays
+the default app, while Vercel routes public eve endpoints directly to the eve
+service before filesystem routing.
 
 For non-Vercel production hosts, set `EVE_NEXT_PRODUCTION_ORIGIN` to the public
 origin that serves the eve service namespace before building the Next.js app.

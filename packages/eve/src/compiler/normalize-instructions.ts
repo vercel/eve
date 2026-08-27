@@ -3,13 +3,19 @@ import type { InstructionsSourceRef } from "#discover/manifest.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
 import type {
   CompiledDynamicInstructionsDefinition,
-  CompiledInstructions,
+  CompiledInstructionsDefinition,
 } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
+  requireModuleBackedDefinitionLoadOptions,
+  type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import {
+  assertResolverOnlyDynamicSentinel,
+  ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
+  isDynamicSentinel,
+  type DynamicToolEventName,
+} from "#dynamic/definition.js";
 
 /**
  * Compiled instructions entry produced from one authored `instructions/*`
@@ -19,7 +25,7 @@ import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-to
  * produces model messages at runtime.
  */
 export type CompiledInstructionsEntry =
-  | { readonly kind: "instructions"; readonly definition: CompiledInstructions }
+  | { readonly kind: "instructions"; readonly definition: CompiledInstructionsDefinition }
   | {
       readonly kind: "dynamic-instructions";
       readonly definition: CompiledDynamicInstructionsDefinition;
@@ -31,7 +37,7 @@ export type CompiledInstructionsEntry =
  * by the runtime.
  *
  * Module-backed static instructions sources execute once at build time —
- * the resulting markdown is captured into the compiled manifest. There is
+ * the resulting content is captured into the compiled manifest. There is
  * no per-session re-evaluation at runtime.
  *
  * Module-backed dynamic instructions (exporting `defineDynamic`) are
@@ -39,9 +45,9 @@ export type CompiledInstructionsEntry =
  * runtime.
  */
 export async function compileInstructionsEntry(
-  agentRoot: string,
+  _agentRoot: string,
   source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: SourceDefinitionCompileOptions,
 ): Promise<CompiledInstructionsEntry> {
   if (source.sourceKind === "markdown") {
     const definition = normalizeInstructionsDefinition(
@@ -53,26 +59,42 @@ export async function compileInstructionsEntry(
       definition: {
         name: stripLogicalPathExtension(source.logicalPath),
         logicalPath: source.logicalPath,
-        markdown: definition.markdown,
+        owner: options.owner,
+        content: definition.content,
+        role: definition.role,
         sourceId: source.sourceId,
         sourceKind: source.sourceKind,
       },
     };
   }
 
+  const loadOptions = requireModuleBackedDefinitionLoadOptions(options, source.logicalPath);
   const exportValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: loadOptions.binding,
     kind: "instructions",
+    loadNamespace: loadOptions.loadNamespace,
     source,
   });
 
   if (isDynamicSentinel(exportValue)) {
+    assertResolverOnlyDynamicSentinel(
+      exportValue,
+      `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
+    );
+    const eventNames = Object.keys(exportValue.events);
+    const unsupportedEvent = eventNames.find(
+      (eventName) => !ALLOWED_DYNAMIC_INSTRUCTION_EVENTS.has(eventName),
+    );
+    if (unsupportedEvent !== undefined) {
+      throw new Error(
+        `Expected the instructions export "${source.exportName ?? "default"}" from "${source.logicalPath}" to use only "session.started" or "turn.started" events. Unsupported event: "${unsupportedEvent}".`,
+      );
+    }
     const slug = stripLogicalPathExtension(source.logicalPath).replace(/^instructions\//, "");
     return {
       kind: "dynamic-instructions",
       definition: {
-        eventNames: Object.keys(exportValue.events) as DynamicToolEventName[],
+        eventNames: eventNames as DynamicToolEventName[],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
         slug,
@@ -92,7 +114,8 @@ export async function compileInstructionsEntry(
     definition: {
       name: stripLogicalPathExtension(source.logicalPath),
       logicalPath: source.logicalPath,
-      markdown: definition.markdown,
+      content: definition.content,
+      role: definition.role,
       sourceId: source.sourceId,
       sourceKind: source.sourceKind,
     },
@@ -106,8 +129,8 @@ export async function compileInstructionsEntry(
 export async function compileInstructions(
   agentRoot: string,
   source: InstructionsSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledInstructions> {
+  options: SourceDefinitionCompileOptions,
+): Promise<CompiledInstructionsDefinition> {
   const entry = await compileInstructionsEntry(agentRoot, source, options);
   if (entry.kind === "dynamic-instructions") {
     throw new Error(

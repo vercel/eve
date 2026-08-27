@@ -4,4 +4,4 @@
 
 ### Patch Changes
 
-- @vercel/eve-catalog@0.0.1
+- @eve/catalog@0.0.1

@@ -1,279 +1,225 @@
 import { z } from "#compiled/zod/index.js";
-import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { CompiledAgentManifest, CompiledAgentNodeManifest } from "#compiler/manifest.js";
+import type {
+  CompiledAgentManifest,
+  CompiledAgentNodeManifest,
+  CompiledAgentResources,
+} from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import {
+  type AgentSourceRegistry,
+  type CompiledModuleBinding,
+  type ProgrammaticModuleNamespace,
+} from "#compiler/source-graph.js";
+import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
 
-/**
- * Compiled module ownership for one runtime graph node.
- */
-export type CompiledModuleNodeScope = z.infer<typeof compiledModuleNodeScopeSchema>;
+export { resolveCompiledModuleExtensionScopeNamespace } from "#compiler/load-binding-namespace.js";
 
-/**
- * Flattened compiled authored module map keyed by stable node ids.
- */
+export type CompiledModuleNodeScope = z.infer<typeof compiledModuleNodeScopeSchema>;
 export type CompiledModuleMap = z.infer<typeof compiledModuleMapSchema>;
 
 const compiledModuleNodeScopeSchema = z
-  .object({
-    modules: z.record(z.string(), z.object({}).passthrough()),
-  })
+  .object({ modules: z.record(z.string(), z.object({}).passthrough()) })
   .strict();
 
-/**
- * Zod schema for the flattened compiled authored module map.
- */
 export const compiledModuleMapSchema = z
-  .object({
-    nodes: z.record(z.string(), compiledModuleNodeScopeSchema),
-  })
+  .object({ nodes: z.record(z.string(), compiledModuleNodeScopeSchema) })
   .strict();
 
-/**
- * Input for generating the compiled authored module map artifact.
- */
 export interface CreateCompiledModuleMapSourceInput {
-  /**
-   * Controls how generated authored-module imports are written. Relative
-   * specifiers are the compiler default; absolute specifiers are useful when a
-   * bundler consumes the module map from a virtual module id.
-   */
   importSpecifierStyle?: "absolute" | "relative";
   manifest: CompiledAgentManifest;
   moduleMapPath: string;
+  programmaticLoaderImportSpecifier?: string;
 }
 
-interface CollectedModuleImport {
-  readonly bindingName: string;
-  readonly importSpecifier: string;
+interface BoundModule {
+  readonly binding: CompiledModuleBinding;
   readonly sourceId: string;
 }
 
-interface CollectedModuleNodeScope {
-  readonly modules: readonly CollectedModuleImport[];
+interface BoundNodeScope {
+  readonly modules: readonly BoundModule[];
   readonly nodeId: string;
 }
 
-/**
- * Generates the compiler-owned module map artifact that statically imports
- * every module-backed authored source.
- */
+interface RenderedModule {
+  readonly bindingName: string;
+  readonly initializer?: string;
+  readonly importSpecifier?: string;
+  readonly sourceId: string;
+}
+
+interface RenderedNodeScope {
+  readonly modules: readonly RenderedModule[];
+  readonly nodeId: string;
+}
+
+/** Generates the authoritative module-map artifact from required bindings. */
 export function createCompiledModuleMapSource(input: CreateCompiledModuleMapSourceInput): string {
   const moduleMapDirectory = dirnameFilesystemPath(input.moduleMapPath);
   const importSpecifierStyle = input.importSpecifierStyle ?? "relative";
-  let nextBindingIndex = 0;
-  const collectedScopes: CollectedModuleNodeScope[] = [
-    collectModuleNodeScope({
-      agentRoot: input.manifest.agentRoot,
-      importSpecifierStyle,
-      manifest: input.manifest,
-      moduleMapDirectory,
-      nextBindingName() {
-        return `module_${nextBindingIndex++}`;
-      },
-      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
-    }),
-    ...[...input.manifest.subagents]
-      .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
-      .map((subagent) =>
-        collectModuleNodeScope({
-          agentRoot: subagent.agent.agentRoot,
-          importSpecifierStyle,
-          manifest: subagent.agent,
-          moduleMapDirectory,
-          nextBindingName() {
-            return `module_${nextBindingIndex++}`;
-          },
-          nodeId: subagent.nodeId,
-        }),
-      ),
-  ];
-  const imports = collectedScopes.flatMap((scope) =>
-    scope.modules.map((moduleImport) => {
-      return `import * as ${moduleImport.bindingName} from ${JSON.stringify(moduleImport.importSpecifier)};`;
-    }),
+  let index = 0;
+  let usesProgrammaticLoader = false;
+  const scopes: RenderedNodeScope[] = collectBoundNodeScopes(input.manifest).map((scope) => {
+    const bindingNames = new Map(
+      scope.modules.map((module) => [module.sourceId, `module_${index++}`] as const),
+    );
+    return {
+      modules: scope.modules.map(({ binding, sourceId }) => {
+        const bindingName = bindingNames.get(sourceId)!;
+        if (binding.backing.kind === "filesystem") {
+          return {
+            bindingName,
+            importSpecifier: createImportSpecifier({
+              fromDirectory: moduleMapDirectory,
+              importSpecifierStyle,
+              targetPath: binding.backing.sourcePath,
+            }),
+            initializer: `memoizeModuleNamespaceFactories(imported_${bindingName})`,
+            sourceId,
+          };
+        }
+        usesProgrammaticLoader = true;
+        return {
+          bindingName,
+          initializer: `await loadProgrammaticModule(${JSON.stringify(binding.backing)}, ${renderProgrammaticDependencies(binding.backing.dependencies, bindingNames)})`,
+          sourceId,
+        };
+      }),
+      nodeId: scope.nodeId,
+    };
+  });
+  const modules = scopes.flatMap((scope) => scope.modules);
+  const imports = modules.flatMap((module) =>
+    module.importSpecifier === undefined
+      ? []
+      : [
+          `import * as imported_${module.bindingName} from ${JSON.stringify(module.importSpecifier)};`,
+        ],
+  );
+  const initializers = modules.flatMap((module) =>
+    module.initializer === undefined
+      ? []
+      : [`const ${module.bindingName} = ${module.initializer};`],
   );
 
   return [
     "// Generated by eve. Do not edit by hand.",
-    "",
+    ...(usesProgrammaticLoader || imports.length > 0
+      ? [
+          `import { loadFrameworkProgrammaticModule as loadProgrammaticModule, memoizeModuleNamespaceFactories } from ${JSON.stringify(normalizeEsmImportSpecifier(input.programmaticLoaderImportSpecifier ?? "eve/internal/programmatic-source-loader"))};`,
+        ]
+      : []),
     ...imports,
-    ...(imports.length > 0 ? [""] : []),
-    `export const moduleMap = ${renderModuleMap(collectedScopes)};`,
+    ...(usesProgrammaticLoader || imports.length > 0 ? [""] : []),
+    ...initializers,
+    ...(initializers.length > 0 ? [""] : []),
+    `export const moduleMap = ${renderModuleMap(scopes)};`,
     "",
     "export default moduleMap;",
     "",
   ].join("\n");
 }
 
-function collectModuleNodeScope(input: {
-  readonly agentRoot: string;
-  readonly importSpecifierStyle: "absolute" | "relative";
-  readonly manifest: CompiledAgentNodeManifest;
-  readonly moduleMapDirectory: string;
-  readonly nextBindingName: () => string;
-  readonly nodeId: string;
-}): CollectedModuleNodeScope {
-  return {
-    modules: collectModuleRefsForManifest(input.manifest)
-      .sort((left, right) => left.sourceId.localeCompare(right.sourceId))
-      .map((moduleSourceRef) => ({
-        bindingName: input.nextBindingName(),
-        importSpecifier: createImportSpecifier({
-          fromDirectory: input.moduleMapDirectory,
-          importSpecifierStyle: input.importSpecifierStyle,
-          targetPath: joinFilesystemPath(input.agentRoot, moduleSourceRef.logicalPath),
-        }),
-        sourceId: moduleSourceRef.sourceId,
-      })),
-    nodeId: input.nodeId,
+/** Loads the same binding set used by generated maps without fabricating descriptors. */
+export async function createProgrammaticCompiledModuleMap(
+  manifest: CompiledAgentManifest,
+  registries: readonly AgentSourceRegistry[],
+): Promise<CompiledModuleMap> {
+  const nodes: CompiledModuleMap["nodes"] = {};
+  for (const scope of collectBoundNodeScopes(manifest)) {
+    const modules: Record<string, ProgrammaticModuleNamespace> = {};
+    const bindings = Object.fromEntries(
+      scope.modules.map(({ binding, sourceId }) => [sourceId, binding]),
+    );
+    const loadNamespace = createCompiledBindingNamespaceLoader({ bindings, registries });
+    for (const { sourceId } of scope.modules) {
+      modules[sourceId] = await loadNamespace(sourceId);
+    }
+    nodes[scope.nodeId] = { modules };
+  }
+  return { nodes };
+}
+
+/** Returns one compiled node's finalized runtime entries, including remote config modules. */
+export function collectRuntimeModuleBindingsForManifest(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+): readonly BoundModule[] {
+  const modules = new Map<string, CompiledModuleBinding>(
+    Object.entries(manifest.bindings).filter(([, binding]) => binding.usage.runtimeEntry),
+  );
+  for (const remote of manifest.remoteAgents) {
+    if (!remote.binding.usage.runtimeEntry) continue;
+    if (modules.has(remote.sourceId)) {
+      throw new Error(`Remote agent binding "${remote.sourceId}" collides with a node binding.`);
+    }
+    modules.set(remote.sourceId, remote.binding);
+  }
+  return orderBoundModules(
+    [...modules]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceId, binding]) => ({ binding, sourceId })),
+  );
+}
+
+function orderBoundModules(modules: readonly BoundModule[]): readonly BoundModule[] {
+  const bySourceId = new Map(modules.map((module) => [module.sourceId, module]));
+  const ordered: BoundModule[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (module: BoundModule): void => {
+    if (visited.has(module.sourceId)) return;
+    if (visiting.has(module.sourceId)) {
+      throw new Error(`Compiled module dependency cycle includes "${module.sourceId}".`);
+    }
+    visiting.add(module.sourceId);
+    if (module.binding.backing.kind === "programmatic") {
+      for (const dependencySourceId of Object.values(module.binding.backing.dependencies ?? {})) {
+        const dependency = bySourceId.get(dependencySourceId);
+        if (dependency === undefined) {
+          throw new Error(
+            `Programmatic binding "${module.sourceId}" depends on missing binding "${dependencySourceId}".`,
+          );
+        }
+        visit(dependency);
+      }
+    }
+    visiting.delete(module.sourceId);
+    visited.add(module.sourceId);
+    ordered.push(module);
   };
+  for (const module of modules) visit(module);
+  return ordered;
 }
 
-/**
- * Collects every module-backed source reference from a single compiled
- * agent node manifest. Used by both the compiler (to generate the static
- * module-map artifact) and the runtime loader (to hydrate a module map
- * from the manifest when the pre-built artifact is unavailable).
- */
-export function collectModuleRefsForManifest(
-  manifest: CompiledAgentNodeManifest,
-): ModuleSourceRef[] {
-  const moduleSourceRefs = new Map<string, ModuleSourceRef>();
-
-  if (manifest.config.source !== undefined) {
-    moduleSourceRefs.set(manifest.config.source.sourceId, manifest.config.source);
-  }
-
-  if (manifest.config.model.source !== undefined) {
-    moduleSourceRefs.set(manifest.config.model.source.sourceId, manifest.config.model.source);
-  }
-
-  for (const channel of manifest.channels) {
-    // Disabled channel entries don't have a source module — they're a
-    // marker that the matching framework default should be removed.
-    if (channel.kind === "disabled") {
-      continue;
-    }
-    moduleSourceRefs.set(channel.sourceId, {
-      exportName: channel.exportName,
-      sourceKind: "module",
-      logicalPath: channel.logicalPath,
-      sourceId: channel.sourceId,
-    });
-  }
-
-  for (const connection of manifest.connections) {
-    moduleSourceRefs.set(connection.sourceId, {
-      exportName: connection.exportName,
-      sourceKind: "module",
-      logicalPath: connection.logicalPath,
-      sourceId: connection.sourceId,
-    });
-  }
-
-  for (const tool of manifest.tools) {
-    moduleSourceRefs.set(tool.sourceId, {
-      exportName: tool.exportName,
-      sourceKind: "module",
-      logicalPath: tool.logicalPath,
-      sourceId: tool.sourceId,
-    });
-  }
-
-  for (const dynamicInstruction of manifest.dynamicInstructions) {
-    moduleSourceRefs.set(dynamicInstruction.sourceId, {
-      exportName: dynamicInstruction.exportName,
-      sourceKind: "module",
-      logicalPath: dynamicInstruction.logicalPath,
-      sourceId: dynamicInstruction.sourceId,
-    });
-  }
-
-  for (const dynamicSkill of manifest.dynamicSkills) {
-    moduleSourceRefs.set(dynamicSkill.sourceId, {
-      exportName: dynamicSkill.exportName,
-      sourceKind: "module",
-      logicalPath: dynamicSkill.logicalPath,
-      sourceId: dynamicSkill.sourceId,
-    });
-  }
-
-  for (const dynamicTool of manifest.dynamicTools) {
-    moduleSourceRefs.set(dynamicTool.sourceId, {
-      exportName: dynamicTool.exportName,
-      sourceKind: "module",
-      logicalPath: dynamicTool.logicalPath,
-      sourceId: dynamicTool.sourceId,
-    });
-  }
-
-  for (const remoteAgent of manifest.remoteAgents) {
-    moduleSourceRefs.set(remoteAgent.sourceId, {
-      exportName: remoteAgent.exportName,
-      sourceKind: "module",
-      logicalPath: remoteAgent.logicalPath,
-      sourceId: remoteAgent.sourceId,
-    });
-  }
-
-  for (const hook of manifest.hooks) {
-    moduleSourceRefs.set(hook.sourceId, {
-      exportName: hook.exportName,
-      sourceKind: "module",
-      logicalPath: hook.logicalPath,
-      sourceId: hook.sourceId,
-    });
-  }
-
-  for (const schedule of manifest.schedules) {
-    // Only `run`-handler schedules need their source loaded at dispatch
-    // time. Markdown schedules execute from `manifest.markdown`.
-    if (schedule.sourceKind !== "module" || !schedule.hasRun) {
-      continue;
-    }
-    moduleSourceRefs.set(schedule.sourceId, {
-      sourceKind: "module",
-      logicalPath: schedule.logicalPath,
-      sourceId: schedule.sourceId,
-    });
-  }
-
-  if (manifest.sandbox !== null) {
-    moduleSourceRefs.set(manifest.sandbox.sourceId, {
-      exportName: manifest.sandbox.exportName,
-      sourceKind: "module",
-      logicalPath: manifest.sandbox.logicalPath,
-      sourceId: manifest.sandbox.sourceId,
-    });
-  }
-
-  // Authored system modules execute once at build time. The compiled markdown
-  // is captured into the manifest, so there is no need to include them in the
-  // runtime module map.
-
-  return [...moduleSourceRefs.values()];
+function renderProgrammaticDependencies(
+  dependencies: Readonly<Record<string, string>> | undefined,
+  bindingNames: ReadonlyMap<string, string>,
+): string {
+  const entries = Object.entries(dependencies ?? {});
+  if (entries.length === 0) return "Object.freeze({})";
+  return `Object.freeze({ ${entries
+    .map(([alias, sourceId]) => `${JSON.stringify(alias)}: ${bindingNames.get(sourceId)!}`)
+    .join(", ")} })`;
 }
 
-function createImportSpecifier(input: {
-  fromDirectory: string;
-  importSpecifierStyle: "absolute" | "relative";
-  targetPath: string;
-}): string {
-  if (input.importSpecifierStyle === "absolute") {
-    return normalizeEsmImportSpecifier(normalizeFilesystemPath(input.targetPath));
-  }
-
-  const relativeSpecifier = relativeFilesystemPath(input.fromDirectory, input.targetPath);
-
-  if (relativeSpecifier.startsWith(".")) {
-    return relativeSpecifier;
-  }
-
-  return `./${relativeSpecifier}`;
+function collectBoundNodeScopes(manifest: CompiledAgentManifest): readonly BoundNodeScope[] {
+  return [
+    {
+      modules: collectRuntimeModuleBindingsForManifest(manifest),
+      nodeId: ROOT_COMPILED_AGENT_NODE_ID,
+    },
+    ...[...manifest.subagents]
+      .sort((left, right) => left.nodeId.localeCompare(right.nodeId))
+      .map((subagent) => ({
+        modules: collectRuntimeModuleBindingsForManifest(subagent.agent),
+        nodeId: subagent.nodeId,
+      })),
+  ];
 }
 
-function renderModuleMap(scopes: readonly CollectedModuleNodeScope[]): string {
+function renderModuleMap(scopes: readonly RenderedNodeScope[]): string {
   return renderFrozenObject(
     [
       {
@@ -286,9 +232,9 @@ function renderModuleMap(scopes: readonly CollectedModuleNodeScope[]): string {
                 {
                   key: "modules",
                   value: renderFrozenObject(
-                    scope.modules.map((moduleImport) => ({
-                      key: moduleImport.sourceId,
-                      value: moduleImport.bindingName,
+                    scope.modules.map((module) => ({
+                      key: module.sourceId,
+                      value: module.bindingName,
                     })),
                   ),
                 },
@@ -304,61 +250,47 @@ function renderModuleMap(scopes: readonly CollectedModuleNodeScope[]): string {
 }
 
 function renderFrozenObject(
-  entries: ReadonlyArray<{
-    key: string;
-    value: string;
-  }>,
+  entries: ReadonlyArray<{ readonly key: string; readonly value: string }>,
   depth: number = 1,
 ): string {
-  if (entries.length === 0) {
-    return "Object.freeze({})";
-  }
-
+  if (entries.length === 0) return "Object.freeze({})";
   const indentation = "  ".repeat(depth);
   const nestedIndentation = "  ".repeat(depth + 1);
-
   return [
     "Object.freeze({",
     entries
-      .map((entry) => {
-        return `${nestedIndentation}${JSON.stringify(entry.key)}: ${entry.value.replaceAll("\n", `\n${nestedIndentation}`)}`;
-      })
+      .map(
+        (entry) =>
+          `${nestedIndentation}${JSON.stringify(entry.key)}: ${entry.value.replaceAll("\n", `\n${nestedIndentation}`)}`,
+      )
       .join(",\n"),
     `${indentation}})`,
   ].join("\n");
 }
 
-function dirnameFilesystemPath(path: string): string {
-  const parsed = splitFilesystemPath(path);
-
-  if (parsed.segments.length === 0) {
-    return parsed.root.length === 0 ? "." : parsed.root;
+function createImportSpecifier(input: {
+  readonly fromDirectory: string;
+  readonly importSpecifierStyle: "absolute" | "relative";
+  readonly targetPath: string;
+}): string {
+  if (input.importSpecifierStyle === "absolute") {
+    return normalizeEsmImportSpecifier(normalizeFilesystemPath(input.targetPath));
   }
-
-  return createFilesystemPath(parsed.root, parsed.segments.slice(0, -1));
+  const relativeSpecifier = relativeFilesystemPath(input.fromDirectory, input.targetPath);
+  return relativeSpecifier.startsWith(".") ? relativeSpecifier : `./${relativeSpecifier}`;
 }
 
-function joinFilesystemPath(base: string, next: string): string {
-  const parsedBase = splitFilesystemPath(base);
-  const parsedNext = splitFilesystemPath(next);
-
-  if (parsedNext.root.length > 0) {
-    return createFilesystemPath(parsedNext.root, parsedNext.segments);
-  }
-
-  return createFilesystemPath(parsedBase.root, [...parsedBase.segments, ...parsedNext.segments]);
+function dirnameFilesystemPath(path: string): string {
+  const parsed = splitFilesystemPath(path);
+  if (parsed.segments.length === 0) return parsed.root.length === 0 ? "." : parsed.root;
+  return createFilesystemPath(parsed.root, parsed.segments.slice(0, -1));
 }
 
 function relativeFilesystemPath(fromDirectory: string, targetPath: string): string {
   const from = splitFilesystemPath(fromDirectory);
   const target = splitFilesystemPath(targetPath);
-
-  if (from.root !== target.root) {
-    return normalizeFilesystemPath(targetPath);
-  }
-
+  if (from.root !== target.root) return normalizeFilesystemPath(targetPath);
   let sharedIndex = 0;
-
   while (
     sharedIndex < from.segments.length &&
     sharedIndex < target.segments.length &&
@@ -366,13 +298,12 @@ function relativeFilesystemPath(fromDirectory: string, targetPath: string): stri
   ) {
     sharedIndex += 1;
   }
-
-  const relativeSegments = [
-    ...Array.from({ length: from.segments.length - sharedIndex }, () => ".."),
-    ...target.segments.slice(sharedIndex),
-  ];
-
-  return relativeSegments.length === 0 ? "." : relativeSegments.join("/");
+  return (
+    [
+      ...Array.from({ length: from.segments.length - sharedIndex }, () => ".."),
+      ...target.segments.slice(sharedIndex),
+    ].join("/") || "."
+  );
 }
 
 function normalizeFilesystemPath(path: string): string {
@@ -380,70 +311,36 @@ function normalizeFilesystemPath(path: string): string {
   return createFilesystemPath(parsed.root, parsed.segments);
 }
 
-function splitFilesystemPath(path: string): {
-  readonly root: string;
-  readonly segments: string[];
-} {
+function splitFilesystemPath(path: string): { readonly root: string; readonly segments: string[] } {
   const normalized = path.replaceAll("\\", "/");
   let root = "";
   let remainder = normalized;
-
-  const windowsDriveMatch = normalized.match(/^[A-Za-z]:/);
-
-  if (windowsDriveMatch !== null) {
-    root = windowsDriveMatch[0];
+  const windowsDrive = normalized.match(/^[A-Za-z]:/);
+  if (windowsDrive !== null) {
+    root = windowsDrive[0];
     remainder = normalized.slice(root.length);
-
     if (remainder.startsWith("/")) {
-      root = `${root}/`;
+      root += "/";
       remainder = remainder.slice(1);
     }
   } else if (normalized.startsWith("/")) {
     root = "/";
     remainder = normalized.slice(1);
   }
-
   const segments: string[] = [];
-
   for (const segment of remainder.split("/")) {
-    if (segment.length === 0 || segment === ".") {
-      continue;
-    }
-
+    if (segment.length === 0 || segment === ".") continue;
     if (segment === "..") {
-      if (segments.length > 0 && segments[segments.length - 1] !== "..") {
-        segments.pop();
-        continue;
-      }
-
-      if (root.length === 0) {
-        segments.push(segment);
-      }
-
-      continue;
-    }
-
-    segments.push(segment);
+      if (segments.length > 0 && segments.at(-1) !== "..") segments.pop();
+      else if (root.length === 0) segments.push(segment);
+    } else segments.push(segment);
   }
-
-  return {
-    root,
-    segments,
-  };
+  return { root, segments };
 }
 
 function createFilesystemPath(root: string, segments: readonly string[]): string {
-  if (root === "/") {
-    return segments.length === 0 ? "/" : `/${segments.join("/")}`;
-  }
-
-  if (root.endsWith("/")) {
-    return segments.length === 0 ? root : `${root}${segments.join("/")}`;
-  }
-
-  if (root.length > 0) {
-    return segments.length === 0 ? root : `${root}/${segments.join("/")}`;
-  }
-
+  if (root === "/") return segments.length === 0 ? "/" : `/${segments.join("/")}`;
+  if (root.endsWith("/")) return segments.length === 0 ? root : `${root}${segments.join("/")}`;
+  if (root.length > 0) return segments.length === 0 ? root : `${root}/${segments.join("/")}`;
   return segments.length === 0 ? "." : segments.join("/");
 }

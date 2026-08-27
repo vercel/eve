@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 
 import { isObject } from "#shared/guards.js";
+import { readProviderSelectionSync } from "#setup/provider-settings.js";
 
 /**
  * Development environment files loaded by local CLI commands such as
@@ -22,6 +23,12 @@ function isMissingEnvironmentFileError(error: unknown): error is NodeJS.ErrnoExc
 
 interface DevelopmentEnvironmentLoader {
   reload(): void;
+  stageReload(): DevelopmentEnvironmentReload;
+}
+
+export interface DevelopmentEnvironmentReload {
+  commit(): void;
+  rollback(): void;
 }
 
 const developmentEnvironmentLoaders = new Map<string, DevelopmentEnvironmentLoader>();
@@ -48,6 +55,27 @@ export function loadDevelopmentEnvironmentFiles(appRoot: string): void {
   getDevelopmentEnvironmentLoader(appRoot).reload();
 }
 
+export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {
+  return getDevelopmentEnvironmentLoader(appRoot).stageReload();
+}
+
+export function readDevelopmentEnvironmentHostValues(
+  appRoot: string,
+): Readonly<Record<string, string | null>> {
+  const values: Record<string, string | null> = {};
+  const fileValues = readDevelopmentEnvironmentValues(resolve(appRoot));
+  const hostKeys = new Set(fileValues.keys());
+  // Project selection can suppress a shell-only key. Keep that transition in
+  // the host fingerprint so the worker that inherited the key is replaced.
+  hostKeys.add("AI_GATEWAY_API_KEY");
+
+  for (const key of [...hostKeys].sort((left, right) => left.localeCompare(right))) {
+    values[key] = process.env[key] ?? null;
+  }
+
+  return values;
+}
+
 function getDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
   const resolvedAppRoot = resolve(appRoot);
   const existingLoader = developmentEnvironmentLoaders.get(resolvedAppRoot);
@@ -62,35 +90,97 @@ function getDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmen
 }
 
 function createDevelopmentEnvironmentLoader(appRoot: string): DevelopmentEnvironmentLoader {
-  const protectedKeys = new Set(Object.keys(process.env));
+  const protectedValues = new Map(Object.entries(process.env));
+  const protectedKeys = new Set(protectedValues.keys());
   const managedValues = new Map<string, string>();
+
+  const stageReload = (): DevelopmentEnvironmentReload => {
+    const previousManagedValues = new Map(managedValues);
+    const nextValues = readDevelopmentEnvironmentValues(appRoot);
+    const preferProjectOidc = applyProviderSelection(appRoot, nextValues);
+    const affectedKeys = new Set([...managedValues.keys(), ...nextValues.keys()]);
+    if (preferProjectOidc) {
+      affectedKeys.add("AI_GATEWAY_API_KEY");
+      protectedKeys.delete("AI_GATEWAY_API_KEY");
+    } else if (protectedValues.has("AI_GATEWAY_API_KEY")) {
+      protectedKeys.add("AI_GATEWAY_API_KEY");
+      process.env.AI_GATEWAY_API_KEY = protectedValues.get("AI_GATEWAY_API_KEY");
+    }
+    const previousEnvironment = new Map(
+      [...affectedKeys].map((key) => [key, process.env[key]] as const),
+    );
+    let settled = false;
+
+    if (preferProjectOidc) delete process.env.AI_GATEWAY_API_KEY;
+    applyDevelopmentEnvironmentValues({
+      managedValues,
+      nextValues,
+      protectedKeys,
+    });
+
+    return {
+      commit() {
+        settled = true;
+      },
+      rollback() {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        managedValues.clear();
+        for (const [key, value] of previousManagedValues) {
+          managedValues.set(key, value);
+        }
+        for (const [key, value] of previousEnvironment) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
+      },
+    };
+  };
 
   return {
     reload() {
-      const nextValues = readDevelopmentEnvironmentValues(appRoot);
-
-      for (const [key, previousValue] of managedValues) {
-        if (nextValues.has(key) || protectedKeys.has(key)) {
-          continue;
-        }
-
-        if (process.env[key] === previousValue) {
-          delete process.env[key];
-        }
-
-        managedValues.delete(key);
-      }
-
-      for (const [key, value] of nextValues) {
-        if (protectedKeys.has(key)) {
-          continue;
-        }
-
-        process.env[key] = value;
-        managedValues.set(key, value);
-      }
+      stageReload().commit();
     },
+    stageReload,
   };
+}
+
+function applyProviderSelection(appRoot: string, values: Map<string, string>): boolean {
+  if (readProviderSelectionSync(appRoot) !== "ai-gateway-project") return false;
+  values.delete("AI_GATEWAY_API_KEY");
+  return true;
+}
+
+function applyDevelopmentEnvironmentValues(input: {
+  readonly managedValues: Map<string, string>;
+  readonly nextValues: ReadonlyMap<string, string>;
+  readonly protectedKeys: ReadonlySet<string>;
+}): void {
+  for (const [key, previousValue] of input.managedValues) {
+    if (input.nextValues.has(key) || input.protectedKeys.has(key)) {
+      continue;
+    }
+
+    if (process.env[key] === previousValue) {
+      delete process.env[key];
+    }
+
+    input.managedValues.delete(key);
+  }
+
+  for (const [key, value] of input.nextValues) {
+    if (input.protectedKeys.has(key)) {
+      continue;
+    }
+
+    process.env[key] = value;
+    input.managedValues.set(key, value);
+  }
 }
 
 function readDevelopmentEnvironmentValues(appRoot: string): Map<string, string> {

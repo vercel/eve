@@ -9,6 +9,7 @@ const ECHO_MARKER_TOKEN = "skill-echo-marker-ok-V8Y2";
  * the reply: the skill instructs an exact-token response.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "Skills smoke: markdown skill auto-invocation via load_skill.",
   async test(t) {
     await t.send("Please use the echo marker skill and follow its instructions exactly.");

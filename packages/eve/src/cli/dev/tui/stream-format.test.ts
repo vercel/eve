@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   formatCompactTokenCount,
   formatTokenFlow,
+  formatTurnDuration,
+  typewriterText,
   isIncompletePaste,
   nextKey,
   parseKey,
@@ -70,6 +72,27 @@ describe("formatTokenFlow", () => {
       ),
     ).toBe("↑ 24K ↓ 300 12%");
     expect(formatTokenFlow({ inputTokens: 0, outputTokens: 0 }, FLOW_GLYPHS)).toBe("↑ 0 ↓ 0");
+  });
+});
+
+describe("typewriterText", () => {
+  it("reveals one character per step, then holds the full text", () => {
+    expect(typewriterText("Working…", 0, 80)).toBe("W");
+    expect(typewriterText("Working…", 79, 80)).toBe("W");
+    expect(typewriterText("Working…", 160, 80)).toBe("Wor");
+    expect(typewriterText("Working…", 560, 80)).toBe("Working…");
+    expect(typewriterText("Working…", 60_000, 80)).toBe("Working…");
+  });
+});
+
+describe("formatTurnDuration", () => {
+  it("scales through seconds, minutes, and hours", () => {
+    expect(formatTurnDuration(400)).toBe("1s");
+    expect(formatTurnDuration(42_000)).toBe("42s");
+    expect(formatTurnDuration(204_000)).toBe("3min 24s");
+    expect(formatTurnDuration(300_000)).toBe("5min");
+    expect(formatTurnDuration(4_320_000)).toBe("1h 12min");
+    expect(formatTurnDuration(3_600_000)).toBe("1h");
   });
 });
 
@@ -145,6 +168,31 @@ describe("nextKey", () => {
     expect(nextKey("\r")).toEqual({ key: { type: "enter" }, consumed: 1 });
     expect(nextKey("\u007f")).toEqual({ key: { type: "backspace" }, consumed: 1 });
   });
+
+  it("decodes a BEL-terminated OSC reply as one token", () => {
+    const buffer = "\x1b]11;rgb:1e1e/2a2a/3b3b\x07";
+    expect(nextKey(buffer)).toEqual({
+      key: { type: "osc", value: "11;rgb:1e1e/2a2a/3b3b" },
+      consumed: buffer.length,
+    });
+  });
+
+  it("decodes an ST-terminated OSC reply and re-tokenizes what follows", () => {
+    const buffer = "\x1b]11;rgb:0000/0000/0000\x1b\\\x1b[A";
+    const token = nextKey(buffer);
+    expect(token).toEqual({
+      key: { type: "osc", value: "11;rgb:0000/0000/0000" },
+      consumed: buffer.length - 3,
+    });
+    expect(nextKey(buffer.slice(token.consumed))).toEqual({ key: { type: "up" }, consumed: 3 });
+  });
+
+  it("waits for an OSC terminator that is still arriving", () => {
+    expect(nextKey("\x1b]")).toEqual({ consumed: 0, incomplete: true });
+    expect(nextKey("\x1b]11;rgb:1e1e")).toEqual({ consumed: 0, incomplete: true });
+    // A trailing ESC may be the start of the ST terminator.
+    expect(nextKey("\x1b]11;rgb:1e1e/2a2a/3b3b\x1b")).toEqual({ consumed: 0, incomplete: true });
+  });
 });
 
 describe("parseKey", () => {
@@ -158,8 +206,25 @@ describe("parseKey", () => {
   });
 
   it("decodes ctrl-n and ctrl-p for emacs-style navigation", () => {
-    expect(parseKey(Buffer.from("\u000e"))).toEqual({ type: "ctrl-n" });
-    expect(parseKey(Buffer.from("\u0010"))).toEqual({ type: "ctrl-p" });
+    expect(parseKey(Buffer.from(""))).toEqual({ type: "ctrl-n" });
+    expect(parseKey(Buffer.from(""))).toEqual({ type: "ctrl-p" });
+  });
+
+  it("decodes SGR mouse press and release with cell coordinates", () => {
+    expect(parseKey(Buffer.from("\x1b[<0;35;12M"))).toEqual({
+      type: "mouse",
+      action: "press",
+      button: 0,
+      x: 35,
+      y: 12,
+    });
+    expect(parseKey(Buffer.from("\x1b[<0;35;12m"))).toEqual({
+      type: "mouse",
+      action: "release",
+      button: 0,
+      x: 35,
+      y: 12,
+    });
   });
 });
 
@@ -244,8 +309,8 @@ describe("takeUntil", () => {
     expect(cleaned).toBe(false);
 
     // The caller aborting the underlying stream settles the pull (mirrors the
-    // renderer's Ctrl+C firing `result.abort()`); only then does the
-    // generator's cleanup run.
+    // renderer firing `result.abort()` on lifecycle interruption); only then
+    // does the generator's cleanup run.
     rejectPull(new Error("aborted"));
     await new Promise((resolve) => setImmediate(resolve));
     expect(cleaned).toBe(true);

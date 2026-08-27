@@ -19,7 +19,6 @@ function createDeps() {
     getVercelAuthStatus: vi.fn(async (): Promise<VercelAuthStatus> => "authenticated"),
     runLinkFlow: vi.fn<ProviderFlowDeps["runLinkFlow"]>(async () => ({
       kind: "done",
-      credential: "VERCEL_OIDC_TOKEN",
     })),
     appendEnv: vi.fn<ProviderFlowDeps["appendEnv"]>(async () => ({
       written: ["AI_GATEWAY_API_KEY"],
@@ -31,34 +30,214 @@ function createDeps() {
   };
 }
 
+type ProviderFlowInput = Parameters<typeof runProviderFlow>[0];
+
+function runTestProviderFlow(
+  input: Omit<ProviderFlowInput, "availableProviders" | "selectedProvider"> &
+    Partial<Pick<ProviderFlowInput, "availableProviders" | "selectedProvider">>,
+) {
+  return runProviderFlow({
+    availableProviders: ["chatgpt", "ai-gateway-project"],
+    selectedProvider: "ai-gateway-project",
+    ...input,
+  });
+}
+
 describe("runProviderFlow", () => {
-  it("hands the Dev TUI one project, inline-key, and direct-provider menu", async () => {
+  it("hands the Dev TUI one menu and lets the active project be replaced", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async (request) => {
       expect(request.message).toBe(PROVIDER_QUESTION);
       expect(request.options.map((option) => option.value)).toEqual([
-        "project",
-        "own-key",
+        "ai-gateway-project",
+        "ai-gateway-key",
+        "chatgpt",
         "external",
       ]);
-      expect(request.initialValue).toBe("project");
-      return { kind: "project" };
+      expect(request.options[2]).toMatchObject({
+        value: "chatgpt",
+        label: "ChatGPT subscription",
+      });
+      expect(request.options[3]).toMatchObject({
+        value: "external",
+        label: "Other providers",
+      });
+      expect(request.initialValue).toBe("ai-gateway-project");
+      return { kind: "ai-gateway-project" };
     };
 
-    const result = await runProviderFlow({
+    const result = await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
       deps,
     });
 
-    expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
+    expect(result).toEqual({ kind: "ai-gateway-project" });
     expect(deps.runLinkFlow).toHaveBeenCalledExactlyOnceWith({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       projectSelection: "create-or-link",
     });
+  });
+
+  it("returns ChatGPT without touching Gateway setup", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+
+    const result = await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: async (request) => {
+        expect(request.options.map((option) => option.value)).toEqual([
+          "ai-gateway-project",
+          "ai-gateway-key",
+          "chatgpt",
+          "external",
+        ]);
+        return { kind: "chatgpt" };
+      },
+      deps,
+    });
+
+    expect(result).toEqual({ kind: "chatgpt" });
+    expect(deps.getVercelAuthStatus).not.toHaveBeenCalled();
+    expect(deps.runLinkFlow).not.toHaveBeenCalled();
+    expect(deps.appendEnv).not.toHaveBeenCalled();
+  });
+
+  it("selects an available linked project without opening the link flow", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+
+    const result = await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: async () => ({ kind: "ai-gateway-project" }),
+      selectedProvider: "chatgpt",
+      deps,
+    });
+
+    expect(result).toEqual({ kind: "ai-gateway-project" });
+    expect(deps.getVercelAuthStatus).not.toHaveBeenCalled();
+    expect(deps.runLinkFlow).not.toHaveBeenCalled();
+  });
+
+  it("checks and describes the active provider, opening the cursor on it", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    const linked: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("ai-gateway-project");
+      expect(request.options[0]).toMatchObject({
+        value: "ai-gateway-project",
+        checked: true,
+        hint: "Current",
+      });
+      expect(request.options[1]?.checked).toBeUndefined();
+      return undefined;
+    };
+    await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: linked,
+      selectedProvider: "ai-gateway-project",
+      deps,
+    });
+
+    const keyed: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("ai-gateway-key");
+      expect(request.options[1]).toMatchObject({
+        value: "ai-gateway-key",
+        checked: true,
+        hint: "Current",
+      });
+      return undefined;
+    };
+    await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: keyed,
+      selectedProvider: "ai-gateway-key",
+      deps,
+    });
+  });
+
+  it("uses the stored selection when multiple providers are available", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    const picker: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("ai-gateway-project");
+      expect(request.options.find((option) => option.value === "ai-gateway-project")?.checked).toBe(
+        true,
+      );
+      expect(
+        request.options.find((option) => option.value === "ai-gateway-key")?.checked,
+      ).toBeUndefined();
+      return undefined;
+    };
+
+    await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker,
+      selectedProvider: "ai-gateway-project",
+      deps,
+    });
+  });
+
+  it("preserves cancellation from the project link flow", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    deps.runLinkFlow.mockResolvedValueOnce({ kind: "cancelled" });
+
+    await expect(
+      runTestProviderFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        picker: async () => ({ kind: "ai-gateway-project" }),
+        deps,
+      }),
+    ).resolves.toEqual({ kind: "cancelled" });
+  });
+
+  it("opens on ChatGPT when it is the selected provider", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    const picker: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("chatgpt");
+      expect(request.options.find((option) => option.value === "chatgpt")).toMatchObject({
+        checked: true,
+        hint: "Current",
+      });
+      return undefined;
+    };
+
+    await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker,
+      selectedProvider: "chatgpt",
+      deps,
+    });
+  });
+
+  it("reports a committed key as one set line", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+
+    await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker: async () => ({
+        kind: "ai-gateway-key",
+        key: "sk-inline",
+        validation: { kind: "valid" },
+      }),
+      deps,
+    });
+
+    expect(fake.prompter.log.success).toHaveBeenCalledExactlyOnceWith("AI_GATEWAY_API_KEY set.");
   });
 
   it("persists the accepted inline key and does not revalidate it after submission", async () => {
@@ -68,17 +247,17 @@ describe("runProviderFlow", () => {
       const signal = new AbortController().signal;
       const validation = await request.validateInlineKey("sk-inline", signal);
       if (validation.kind === "invalid") throw new Error(validation.message);
-      return { kind: "inline-key", key: "sk-inline", validation };
+      return { kind: "ai-gateway-key", key: "sk-inline", validation };
     };
 
-    const result = await runProviderFlow({
+    const result = await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
       deps,
     });
 
-    expect(result).toEqual({ kind: "done", credential: "AI_GATEWAY_API_KEY" });
+    expect(result).toEqual({ kind: "ai-gateway-key" });
     expect(deps.validateGatewayApiKey).toHaveBeenCalledExactlyOnceWith(
       "sk-inline",
       expect.any(AbortSignal),
@@ -94,7 +273,7 @@ describe("runProviderFlow", () => {
     const fake = createFakePrompter();
     const deps = createDeps();
     const picker: ProviderPicker = async () => ({
-      kind: "inline-key",
+      kind: "ai-gateway-key",
       key: "sk-committed",
       validation: { kind: "valid" },
     });
@@ -107,7 +286,7 @@ describe("runProviderFlow", () => {
     });
     const controller = new AbortController();
 
-    const execution = runProviderFlow({
+    const execution = runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker,
@@ -118,17 +297,14 @@ describe("runProviderFlow", () => {
     controller.abort();
     releaseWrite.resolve();
 
-    await expect(execution).resolves.toEqual({
-      kind: "done",
-      credential: "AI_GATEWAY_API_KEY",
-    });
+    await expect(execution).resolves.toEqual({ kind: "ai-gateway-key" });
   });
 
   it("shows direct-provider instructions without changing credentials", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
 
-    const result = await runProviderFlow({
+    const result = await runTestProviderFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
       picker: async () => ({ kind: "external" }),
@@ -148,7 +324,7 @@ describe("runProviderFlow", () => {
     const deps = createDeps();
 
     await expect(
-      runProviderFlow({
+      runTestProviderFlow({
         appRoot: APP_ROOT,
         prompter: fake.prompter,
         picker: async () => undefined,

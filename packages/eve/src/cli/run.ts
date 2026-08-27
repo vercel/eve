@@ -1,19 +1,50 @@
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
+import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import { findCliApplicationRoot, resolveCliApplicationProject } from "#cli/application-root.js";
 import { eveCliBanner } from "#cli/banner.js";
+import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
+import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
-  parseDevelopmentHeaderOption,
-  resolveDevelopmentUrlTarget,
-  type DevelopmentRequestHeaders,
-} from "#cli/dev/url-target.js";
+  registerAcpCommand,
+  type ResolveVerifiedRemoteDevelopmentClient,
+  type RunAcpServer,
+} from "#cli/acp/command.js";
+import {
+  FORCED_EXIT_BACKSTOP_MS,
+  installShutdownSignal,
+  type CommandLifecycle,
+  waitForShutdownSignal,
+} from "#cli/shutdown.js";
+import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
+import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
+import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
 import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
-import { LOG_DISPLAY_MODES, parseLogDisplayMode } from "#cli/dev/tui/log-display-mode.js";
+import type { EvalCliOptions } from "#evals/cli/eval.js";
+import {
+  registerRuntimeInvokeCommand,
+  type InvokeCliRuntimeDependencies,
+} from "#cli/invoke/command.js";
+import {
+  parseContextSizeOption,
+  parseDisplayMode,
+  parseLogsMode,
+  parsePortOption,
+  parseReasoningOption,
+  parseStatsMode,
+} from "#cli/option-parsers.js";
+import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
+import {
+  resumeDevelopmentRuntimeArtifacts,
+  suspendDevelopmentRuntimeArtifacts,
+} from "#services/dev-client/runtime-artifacts.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -23,11 +54,6 @@ import type {
   DevelopmentServerOptions,
   ProductionServerHandle,
 } from "#internal/nitro/host/types.js";
-import type {
-  AssistantResponseStatsMode,
-  LogDisplayMode,
-  TerminalPartDisplayMode,
-} from "#cli/dev/tui/types.js";
 
 export { resolveDevUiMode, resolveTuiDisplayOptions };
 
@@ -36,47 +62,31 @@ interface CliLogger {
   log(message: string): void;
 }
 
-interface DevelopmentCliOptions {
-  assistantResponseStats?: AssistantResponseStatsMode;
-  connectionAuth?: TerminalPartDisplayMode;
-  contextSize?: number;
-  header?: DevelopmentRequestHeaders;
-  host?: string;
-  input?: string;
-  logs?: LogDisplayMode;
-  name?: string;
-  port?: number;
-  reasoning?: TerminalPartDisplayMode;
-  subagents?: TerminalPartDisplayMode;
-  tools?: TerminalPartDisplayMode;
-  ui?: boolean;
-  url?: string;
-}
-
-interface ProductionCliOptions {
-  host?: string;
-  port?: number;
-}
-
 interface CliRuntimeDependencies {
   isCodingAgentLaunch(): Promise<boolean>;
+  findApplicationRoot(cwd: string): Promise<string | undefined>;
   isActiveDevelopmentServerForApp(input: {
     readonly appRoot: string;
     readonly serverUrl: string;
   }): Promise<boolean>;
-  buildHost(appRoot: string): Promise<string>;
+  buildHost: BuildHost;
+  resolveVerifiedRemoteDevelopmentClient: ResolveVerifiedRemoteDevelopmentClient;
+  runAcpServer: RunAcpServer;
   printApplicationInfo(
     logger: CliLogger,
     appRoot: string,
     options?: { json?: boolean },
   ): Promise<void>;
   runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<void>;
+  runInvoke: InvokeCliRuntimeDependencies["runInvoke"];
   runEvalCommand(
     evalIds: readonly string[],
     options: EvalCliOptions,
     logger: CliLogger,
+    appRoot: string,
   ): Promise<void>;
   startHost(appRoot: string, options?: DevelopmentServerOptions): DevelopmentServer;
+  resolveApplicationProject: typeof resolveCliApplicationProject;
   startProductionHost(
     appRoot: string,
     options?: {
@@ -113,23 +123,6 @@ function createDevBootProgressReporter(
   };
 }
 
-interface EvalCliOptions {
-  json?: boolean;
-  junit?: string;
-  list?: boolean;
-  maxConcurrency?: string;
-  skipReport?: boolean;
-  strict?: boolean;
-  tag?: string[];
-  timeout?: string;
-  url?: string;
-  verbose?: boolean;
-}
-
-async function loadBuildHost(): Promise<CliRuntimeDependencies["buildHost"]> {
-  return (await import("#internal/nitro/host.js")).buildApplication;
-}
-
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
   return (await import("#cli/commands/info.js")).printApplicationInfo;
 }
@@ -143,7 +136,7 @@ async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalComm
 }
 
 async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
-  return (await import("#internal/nitro/host.js")).createDevelopmentServer;
+  return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 }
 
 const loadIsActiveDevelopmentServerForApp = async () =>
@@ -153,111 +146,15 @@ async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startP
   return (await import("#internal/nitro/host.js")).startProductionServer;
 }
 
-function shouldPrintCliBootBanner(actionCommand: Command): boolean {
-  return (
-    actionCommand.name() === "info" ||
-    actionCommand.name() === "dev" ||
-    actionCommand.name() === "init"
-  );
-}
-
-async function waitForShutdownSignal(input: { close(): Promise<void> }): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-
-    const cleanup = () => {
-      process.off("SIGINT", handleSignal);
-      process.off("SIGTERM", handleSignal);
-    };
-
-    const handleSignal = () => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      cleanup();
-      void input.close().then(resolve, reject);
-    };
-
-    process.once("SIGINT", handleSignal);
-    process.once("SIGTERM", handleSignal);
-  });
-}
-
-async function waitForProductionServer(input: ProductionServerHandle): Promise<void> {
-  await Promise.race([
-    input.wait(),
-    waitForShutdownSignal({
-      close: () => input.close(),
-    }),
-  ]);
-}
-
-function parsePortOption(value: string): number {
-  if (!/^-?\d+$/.test(value)) {
-    throw new InvalidArgumentError(`Expected a numeric port, received "${value}".`);
-  }
-
-  const port = Number(value);
-
-  if (port < 0 || port > 65_535) {
-    throw new InvalidArgumentError(`Expected a port between 0 and 65535, received "${value}".`);
-  }
-
-  return port;
-}
-
-const DISPLAY_MODES = new Set(["full", "collapsed", "auto-collapsed", "hidden"]);
-const STATS_MODES = new Set(["tokens", "tokensPerSecond"]);
-
-function parseDisplayMode(value: string): TerminalPartDisplayMode {
-  if (!DISPLAY_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...DISPLAY_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as TerminalPartDisplayMode;
-}
-
-function parseStatsMode(value: string): AssistantResponseStatsMode {
-  if (!STATS_MODES.has(value)) {
-    throw new InvalidArgumentError(
-      `Expected one of ${[...STATS_MODES].join(", ")}, received "${value}".`,
-    );
-  }
-
-  return value as AssistantResponseStatsMode;
-}
-
-function parseLogsMode(value: string): LogDisplayMode {
-  const mode = parseLogDisplayMode(value);
-  if (mode === undefined) {
-    throw new InvalidArgumentError(
-      `Expected one of ${LOG_DISPLAY_MODES.join(", ")}, received "${value}".`,
-    );
-  }
-
-  return mode;
-}
-
-function parseContextSizeOption(value: string): number {
-  const size = Number(value);
-
-  if (!Number.isFinite(size) || size <= 0) {
-    throw new InvalidArgumentError(`Expected a positive number, received "${value}".`);
-  }
-
-  return size;
-}
-
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Command {
-  const appRoot = resolveApplicationRoot();
+function createCliProgram(
+  logger: CliLogger,
+  runtime: CliRuntimeOverrides,
+  applicationContext: CliApplicationContext,
+): Command {
   const packageVersion = resolveInstalledPackageInfo().version;
   const program = new Command();
   const theme = createCliTheme();
@@ -269,9 +166,8 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .showHelpAfterError()
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
-      if (shouldPrintCliBootBanner(actionCommand)) {
-        logger.log(eveCliBanner());
-      }
+      const { json } = actionCommand.opts<{ json?: boolean }>();
+      if (["info", "init"].includes(actionCommand.name()) && !json) logger.log(eveCliBanner());
     })
     .configureOutput({
       writeErr: (message) => {
@@ -282,28 +178,53 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       },
     });
 
-  const channels = program
-    .command("channels")
-    .description("Manage user-authored channels in the current project.");
-
-  channels
-    .command("add [kind]")
-    .description("Add channels interactively, or scaffold a channel kind (slack | web).")
-    .option("-f, --force", "Overwrite existing channel files")
-    .option("-y, --yes", "Assume yes for confirmations; requires an explicit channel kind")
-    .action(async (kind: string | undefined, options: { force?: boolean; yes?: boolean }) => {
-      const { runChannelsAddCommand } = await import("#cli/commands/channels.js");
-      await runChannelsAddCommand(logger, appRoot, { kind, options });
-    });
-
-  channels
-    .command("list")
+  applicationCommand(
+    program
+      .command("channels")
+      .description("Manage user-authored channels in the current project.")
+      .command("list"),
+    applicationContext,
+  )
     .description("List user-authored channels in the current project.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
       const { runChannelsListCommand } = await import("#cli/commands/channels.js");
-      await runChannelsListCommand(logger, appRoot, options);
+      await runChannelsListCommand(logger, applicationContext.project!, options);
     });
+
+  registerIntegrationCommands({ program, logger, applicationContext });
+
+  const extension = program
+    .command("extension")
+    .description("Create and build reusable eve extension packages.");
+
+  extension
+    // Optional: a missing target scaffolds the current directory, matching
+    // `eve extension init .`.
+    .command("init [target]")
+    .description("Create a new eve extension package.")
+    .option("-y, --yes", "Accepted for compatibility; has no effect")
+    .action(async (target: string | undefined, options: { yes?: boolean }) => {
+      if (options.yes) {
+        logger.error("warning: --yes has no effect for eve extension init.");
+      }
+
+      const { runExtensionInitCommand } = await import("#cli/commands/extension-init.js");
+      await runExtensionInitCommand(logger, applicationContext.root, target);
+    });
+
+  extension
+    .command("build")
+    .description("Build the current package as an eve extension.")
+    .action(async () => {
+      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
+      loadDevelopmentEnvironmentFiles(applicationContext.root);
+
+      const { runExtensionBuildCommand } = await import("#cli/commands/extension-build.js");
+      await runExtensionBuildCommand(logger, applicationContext.root);
+    });
+
+  registerRegistryCommands({ program, logger, applicationContext });
 
   program
     // Optional: a missing target scaffolds or updates the current directory,
@@ -311,56 +232,69 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    .option("--model <model>", "Set the agent model (provider/model-id)")
+    .option(
+      "--reasoning <effort>",
+      "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
+      parseReasoningOption,
+    )
     .option("-y, --yes", "Accepted for compatibility; has no effect")
     .action(
       async (
         target: string | undefined,
-        options: { channelWebNextjs?: boolean; yes?: boolean },
+        options: {
+          channelWebNextjs?: boolean;
+          model?: string;
+          reasoning?: AgentReasoningDefinition;
+          yes?: boolean;
+        },
       ) => {
         if (options.yes) {
           logger.error("warning: --yes has no effect for eve init.");
         }
 
         const { runInitCommand } = await import("#cli/commands/init.js");
-        await runInitCommand(logger, appRoot, target, {
+        await runInitCommand(logger, applicationContext.root, target, {
           channelWebNextjs: options.channelWebNextjs,
+          model: options.model,
+          reasoning: options.reasoning,
         });
       },
     );
 
-  registerProjectCommands({ program, logger, appRoot });
-
-  program
-    .command("build")
-    .description("Build the current eve application.")
-    .action(async () => {
-      const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-
-      loadDevelopmentEnvironmentFiles(appRoot);
-
-      const buildHost = runtime.buildHost ?? (await loadBuildHost());
-      const outputDir = await buildHost(appRoot);
-      logger.log(
-        renderCliTaggedLine(theme, {
-          message: `built output at ${outputDir}`,
-          tag: "build",
-          tone: "success",
-        }),
-      );
+  applicationCommand(program.command("set"), applicationContext)
+    .description("Change root agent model settings.")
+    .option("--model <model>", "Set the agent model (provider/model-id)")
+    .option(
+      "--reasoning <effort>",
+      "Set reasoning (provider-default|none|minimal|low|medium|high|xhigh)",
+      parseReasoningOption,
+    )
+    .action(async (options: { model?: string; reasoning?: AgentReasoningDefinition }) => {
+      const { runSetCommand } = await import("#cli/commands/set.js");
+      await runSetCommand(logger, applicationContext.root, options);
     });
 
-  program
-    .command("start")
+  registerProjectCommands({ program, logger, applicationContext });
+
+  registerBuildCommand({
+    applicationContext,
+    buildHost: runtime.buildHost,
+    logger,
+    program,
+  });
+
+  applicationCommand(program.command("start"), applicationContext)
     .description("Start a built eve application.")
     .option("--host <host>", "Host interface to bind")
     .option("--port <port>", "Port to listen on (defaults to $PORT, then 3000)", parsePortOption)
     .action(async (options: ProductionCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
-      loadDevelopmentEnvironmentFiles(appRoot);
+      loadDevelopmentEnvironmentFiles(applicationContext.root);
 
       const startProductionHost = runtime.startProductionHost ?? (await loadStartProductionHost());
-      const server = await startProductionHost(appRoot, {
+      const server = await startProductionHost(applicationContext.root, {
         host: options.host,
         port: options.port,
       });
@@ -373,11 +307,27 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         }),
       );
 
-      await waitForProductionServer(server);
+      await waitForShutdownSignal({ close: () => server.close(), wait: () => server.wait() });
     });
 
-  program
-    .command("dev")
+  registerRuntimeInvokeCommand({ applicationContext, logger, program, runtime });
+
+  registerAcpCommand({
+    applicationContext,
+    eveVersion: packageVersion,
+    program,
+    resolveVerifiedRemoteDevelopmentClient: runtime.resolveVerifiedRemoteDevelopmentClient,
+    runAcpServer: runtime.runAcpServer,
+    startHost: runtime.startHost,
+  });
+
+  applicationCommand(program.command("dev"), applicationContext, (command) => {
+    const options = command.opts<DevelopmentCliOptions>();
+    return (
+      resolveDevelopmentUrlTarget(options, command.processedArgs[0] as string | undefined) ===
+      undefined
+    );
+  })
     .description("Start the eve development server or connect to an existing URL.")
     .argument("[url]", "Connect to an existing server URL", parseDevelopmentServerUrl)
     .option("--host <host>", "Host interface to bind")
@@ -435,6 +385,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
+      if (mode === "headless") logger.log(eveCliBanner());
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
@@ -442,7 +393,10 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
       if (remoteServerUrl !== undefined) {
         const isActive =
           runtime.isActiveDevelopmentServerForApp ?? (await loadIsActiveDevelopmentServerForApp());
-        existingLocalDevelopmentServer = await isActive({ appRoot, serverUrl: remoteServerUrl });
+        existingLocalDevelopmentServer = await isActive({
+          appRoot: applicationContext.root,
+          serverUrl: remoteServerUrl,
+        });
       }
       const runInteractiveUi = async (
         input: {
@@ -450,6 +404,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
           readonly serverUrl: string;
         },
         report?: DevBootProgressReporter,
+        lifecycle?: CommandLifecycle,
       ): Promise<void> => {
         const runDevelopmentTui = await devBootPhase(
           "loading interactive UI",
@@ -462,17 +417,40 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             ? {
                 kind: "local",
                 serverUrl: input.serverUrl,
-                workspaceRoot: input.appRoot ?? appRoot,
+                workspaceRoot: input.appRoot ?? applicationContext.root,
               }
-            : { kind: "remote", serverUrl: input.serverUrl, workspaceRoot: appRoot };
+            : {
+                kind: "remote",
+                serverUrl: input.serverUrl,
+                workspaceRoot: applicationContext.root,
+              };
         const title = resolveTuiTitle({ name: options.name, target });
         if (title !== undefined) display.name = title;
-        const tuiInput = {
+        const tuiInput: RunDevelopmentTuiInput = {
           target,
           initialInput: options.input,
           onBootProgress: report,
+          lifecycle,
           ...display,
-        } satisfies RunDevelopmentTuiInput;
+        };
+        if (target.kind === "local") {
+          tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+            const run = async (): Promise<T> => {
+              if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: input.serverUrl }))) {
+                throw new Error("Could not pause the development server for integration setup.");
+              }
+              try {
+                return await task();
+              } finally {
+                await resumeDevelopmentRuntimeArtifacts({
+                  serverUrl: input.serverUrl,
+                  silent: true,
+                });
+              }
+            };
+            return await run();
+          };
+        }
         if (remoteTarget?.headers !== undefined) {
           await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
         } else {
@@ -482,11 +460,10 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
 
       if (remoteServerUrl) {
         const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
-        loadDevelopmentEnvironmentFiles(appRoot);
+        loadDevelopmentEnvironmentFiles(applicationContext.root);
         logger.log(
           `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
         );
-
         if (mode === "headless") {
           logger.log(
             renderCliTaggedLine(theme, {
@@ -499,41 +476,49 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         }
 
         logger.log("");
-        await runInteractiveUi({ serverUrl: remoteServerUrl });
+        const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
+        try {
+          await runInteractiveUi({ serverUrl: remoteServerUrl }, undefined, lifecycle);
+        } finally {
+          lifecycle.dispose();
+        }
         return;
       }
 
-      // Print spacing before the live row; a later write would strand the row.
-      if (mode === "tui") logger.log("");
       const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
       const onBootProgress = createDevBootProgressReporter(buildProgress);
       buildProgress?.update("Building your agent");
 
-      let closed = false;
       let server: DevelopmentServer | undefined;
-      const closeServer = async () => {
-        if (closed || server === undefined) {
-          return;
-        }
-
-        closed = true;
-        // No-op when this instance attached to a server another process owns.
-        await server.close();
+      let closePromise: Promise<void> | undefined;
+      const closeServer = () => {
+        if (server === undefined) return Promise.resolve();
+        closePromise ??= server.close();
+        void closePromise.catch(() => undefined);
+        return closePromise;
       };
+      const lifecycle = installShutdownSignal({
+        exitAfterMs: FORCED_EXIT_BACKSTOP_MS,
+        onStop: () => {
+          void closeServer();
+        },
+      });
 
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
-        server = startHost(appRoot, {
+        server = startHost(applicationContext.root, {
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
           onBootProgress,
           port: options.port,
         });
-        const handle = await server.start();
+        const outcome = await Promise.race([
+          server.start().then((handle) => ({ handle })),
+          lifecycle.stopped.then(() => ({ handle: undefined })),
+        ]);
+        const handle = outcome.handle;
+        if (handle === undefined) return;
 
-        // The terminal UI's header already shows the server URL, and startup
-        // no longer clears the screen, so the line would linger as noise.
-        // Headless consumers (scripts, scenario tests) still parse it.
         if (mode !== "tui") {
           logger.log(
             renderCliTaggedLine(theme, {
@@ -545,9 +530,6 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
         }
 
         if (mode === "headless") {
-          // An explicit `--no-ui` is intentional and silent; a non-TTY
-          // terminal that did not ask for headless gets a hint so the
-          // missing UI is not mistaken for a hang.
           if (options.ui !== false && !interactive) {
             logger.log(
               renderCliTaggedLine(theme, {
@@ -558,30 +540,80 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
             );
           }
 
-          return await waitForShutdownSignal({
-            close: closeServer,
-          });
+          await waitForServerOrStop(server, lifecycle);
+          return;
         }
 
-        await runInteractiveUi({ appRoot: handle.appRoot, serverUrl: handle.url }, onBootProgress);
+        await waitForUiOrServer({
+          handle,
+          lifecycle,
+          server,
+          runUi: async () =>
+            await runInteractiveUi(
+              { appRoot: handle.appRoot, serverUrl: handle.url },
+              onBootProgress,
+              lifecycle,
+            ),
+        });
       } finally {
         buildProgress?.stop();
         await closeServer();
+        lifecycle.dispose();
       }
     });
 
-  program
-    .command("info")
+  const logs = program
+    .command("logs")
+    .description("Inspect local `eve dev` diagnostic logs (.eve/logs).");
+
+  applicationCommand(logs.command("show [logid]", { isDefault: true }), applicationContext)
+    .description("Print a diagnostic log (the most recent when logid is omitted).")
+    .option("--dump", "Prepend the log's environment dump (.dump sibling)")
+    .option("--events", "Interleave session events from the local workflow store")
+    .action(async (logId: string | undefined, options: { dump?: boolean; events?: boolean }) => {
+      const { runLogsShowCommand } = await import("#cli/commands/logs.js");
+      await runLogsShowCommand(logger, applicationContext.root, logId, options);
+    });
+
+  applicationCommand(logs.command("ls"), applicationContext)
+    .description("List diagnostic logs, most recent first.")
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean }) => {
+      const { runLogsListCommand } = await import("#cli/commands/logs.js");
+      await runLogsListCommand(logger, applicationContext.root, options);
+    });
+
+  const traces = applicationCommand(program.command("traces [trace]"), applicationContext)
+    .usage("[options] [trace]\n       eve traces ls [options]")
+    .description("Show a local `eve dev` trace (the most recent when trace is omitted).")
+    .option("--verbose", "Expand every span with all attributes and events")
+    .option("--json", "Output as JSON")
+    .action(
+      async (reference: string | undefined, options: { json?: boolean; verbose?: boolean }) => {
+        const { runTraceShowCommand } = await import("#cli/commands/trace.js");
+        await runTraceShowCommand(logger, applicationContext.root, reference, options);
+      },
+    );
+
+  traces
+    .command("ls")
+    .description("List local traces, most recent first.")
+    .option("--json", "Output as JSON")
+    .action(async (options: { json?: boolean }) => {
+      const { runTraceListCommand } = await import("#cli/commands/trace.js");
+      await runTraceListCommand(logger, applicationContext.root, options);
+    });
+
+  applicationCommand(program.command("info"), applicationContext)
     .description("Print resolved application information.")
     .option("--json", "Output as JSON")
     .action(async (options: { json?: boolean }) => {
       const printApplicationInfo =
         runtime.printApplicationInfo ?? (await loadPrintApplicationInfo());
-      await printApplicationInfo(logger, appRoot, options);
+      await printApplicationInfo(logger, applicationContext.root, options);
     });
 
-  program
-    .command("eval")
+  applicationCommand(program.command("eval"), applicationContext)
     .description("Run evals against an eve agent.")
     .argument(
       "[evalIds...]",
@@ -589,6 +621,7 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     )
     .option("--url <url>", "Remote agent URL (skip local host startup)", parseDevelopmentServerUrl)
     .option("--tag <tag...>", "Run only evals carrying a tag")
+    .option("--exclude-tag <tag...>", "Skip evals carrying a tag")
     .option("--strict", "Fail the exit code when any score falls below its threshold")
     .option("--list", "Print discovered evals without running them")
     .option("--timeout <ms>", "Per-eval timeout in milliseconds")
@@ -599,22 +632,40 @@ function createCliProgram(logger: CliLogger, runtime: CliRuntimeOverrides): Comm
     .option("--verbose", "Stream per-eval t.log lines to stdout")
     .action(async (evalIds: string[], options: EvalCliOptions) => {
       const runEvalCommand = runtime.runEvalCommand ?? (await loadRunEvalCommand());
-      await runEvalCommand(evalIds, options, logger);
+      await runEvalCommand(evalIds, options, logger, applicationContext.root);
     });
 
   return program;
 }
 
-/**
- * Runs the eve CLI entrypoint.
- */
+/** Runs the eve CLI entrypoint. */
 export async function runCli(
   argv: string[] = process.argv.slice(2),
   logger: CliLogger = console,
   runtime: CliRuntimeOverrides = {},
 ): Promise<void> {
-  const program = createCliProgram(logger, runtime);
-  const input = argv.length === 0 ? ["dev"] : argv;
+  const applicationContext: CliApplicationContext = {
+    root: resolveApplicationRoot(),
+    async resolve() {
+      const project = await (runtime.resolveApplicationProject ?? resolveCliApplicationProject)(
+        applicationContext.root,
+      );
+      applicationContext.project = project;
+      applicationContext.root = project.appRoot;
+    },
+  };
+  const program = createCliProgram(logger, runtime, applicationContext);
+  let input = argv;
+  if (input.length === 0) {
+    const findApplicationRoot = runtime.findApplicationRoot ?? findCliApplicationRoot;
+    const appRoot = await findApplicationRoot(applicationContext.root);
+    if (appRoot === undefined) {
+      input = ["init"];
+    } else {
+      applicationContext.root = appRoot;
+      input = ["dev"];
+    }
+  }
 
   try {
     await program.parseAsync(input, {

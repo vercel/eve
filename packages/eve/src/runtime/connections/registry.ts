@@ -1,8 +1,9 @@
-import type { Approval } from "#public/definitions/approval.js";
+import type { Approval } from "#approval/definition.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
-import type { ConnectionClient, ConnectionRegistry } from "#runtime/connections/types.js";
+import type { ConnectionClient } from "#shared/connection-types.js";
+import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 
 /**
  * Per-session container mapping connection names to lazily-initialized

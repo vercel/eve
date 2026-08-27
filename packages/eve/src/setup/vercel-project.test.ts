@@ -9,6 +9,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { readProjectLink } from "./project-resolution.js";
 import {
   assertNewProjectNameAvailable,
+  ensureLinkedVercelProject,
   getVercelAuthStatus,
   linkProject,
   pickNewProjectName,
@@ -91,8 +92,24 @@ describe("vercelAuthBlockerReason", () => {
 
 describe("getVercelAuthStatus", () => {
   it("reports authenticated when whoami succeeds", async () => {
+    mockedReadProjectLink.mockResolvedValueOnce(undefined);
     mockedCaptureVercel.mockResolvedValueOnce(captured("acme\n"));
     await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("authenticated");
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["whoami"],
+      expect.objectContaining({ cwd: "/tmp/eve-agent" }),
+    );
+  });
+
+  it("scopes whoami to an existing linked team project", async () => {
+    mockedReadProjectLink.mockResolvedValueOnce({ orgId: "team_demo", projectId: "prj_demo" });
+    mockedCaptureVercel.mockResolvedValueOnce(captured("demo\n"));
+
+    await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("authenticated");
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["whoami", "--scope", "team_demo"],
+      expect.objectContaining({ cwd: "/tmp/eve-agent" }),
+    );
   });
 
   it("reports logged-out when whoami ran but exited non-zero", async () => {
@@ -193,6 +210,88 @@ describe("pickProject", () => {
     // Randomized copy: the team name must still anchor the step.
     expect(spinner.mock.calls[0]?.[0]).toContain("team-a");
     expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("suggests a recent project matching the suggested name without a lookup", async () => {
+    mockedCaptureVercel.mockResolvedValueOnce(
+      captured({
+        projects: [
+          { id: "prj_other", name: "other" },
+          { id: "prj_mine", name: "my-agent" },
+        ],
+      }),
+    );
+    const single = vi.fn().mockImplementationOnce((options) => {
+      // The match floats to the top, carries the marker, and holds the cursor.
+      expect(options.options[0]).toEqual({
+        value: "prj_mine",
+        label: "my-agent",
+        hint: "suggested",
+      });
+      expect(options.initialValue).toBe("prj_mine");
+      return "prj_mine";
+    });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      pickProject(prompter, "/repo", "team-a", { suggestedName: "my-agent" }),
+    ).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_mine", projectName: "my-agent" },
+      team: "team-a",
+    });
+    // The recents already held the match: no extra lookup round trip.
+    expect(mockedCaptureVercel).toHaveBeenCalledTimes(1);
+  });
+
+  it("searches the team for the suggested name when the recents miss it", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_other", name: "other" }] }))
+      .mockResolvedValueOnce(captured(JSON.stringify({ id: "prj_mine", name: "my-agent" })));
+    const single = vi.fn().mockImplementationOnce((options) => {
+      expect(options.options.map((option: { label: string }) => option.label)).toEqual([
+        "my-agent",
+        "other",
+      ]);
+      expect(options.initialValue).toBe("prj_mine");
+      return "prj_mine";
+    });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      pickProject(prompter, "/repo", "team-a", { suggestedName: "my-agent" }),
+    ).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_mine", projectName: "my-agent" },
+      team: "team-a",
+    });
+    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
+      2,
+      ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
+      { cwd: "/repo", signal: undefined, timeoutMs: 15_000 },
+    );
+  });
+
+  it("degrades to the plain recents list when the suggestion lookup fails", async () => {
+    mockedCaptureVercel
+      .mockResolvedValueOnce(captured({ projects: [{ id: "prj_other", name: "other" }] }))
+      .mockResolvedValueOnce(
+        failedCapture(JSON.stringify({ error: { code: "internal", message: "boom" } })),
+      );
+    const single = vi.fn().mockImplementationOnce((options) => {
+      expect(options.options).toEqual([{ value: "prj_other", label: "other" }]);
+      expect(options.initialValue).toBe("prj_other");
+      return "prj_other";
+    });
+    const { prompter } = createFakePrompter({ single });
+
+    await expect(
+      pickProject(prompter, "/repo", "team-a", { suggestedName: "my-agent" }),
+    ).resolves.toEqual({
+      kind: "existing",
+      project: { projectId: "prj_other", projectName: "other" },
+      team: "team-a",
+    });
   });
 
   it("falls back to one ranked project-search page when no exact project exists", async () => {
@@ -485,6 +584,47 @@ describe("resolveProjectByNameOrId", () => {
       ["api", "/v9/projects/my-agent", "--scope", "team-a", "--raw"],
       { cwd: "/tmp/eve-agent", signal: undefined, timeoutMs: 15_000 },
     );
+  });
+});
+
+describe("ensureLinkedVercelProject", () => {
+  it("returns the existing project link without invoking the CLI", async () => {
+    mockedReadProjectLink.mockResolvedValue({ orgId: "team_a", projectId: "prj_a" });
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
+    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
+
+    expect(mockedRunVercel).not.toHaveBeenCalled();
+  });
+
+  it("links interactively and reads the resulting project link", async () => {
+    mockedReadProjectLink
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ orgId: "team_a", projectId: "prj_a" });
+    const { prompter } = createFakePrompter();
+    prompter.withInheritedStdio = vi.fn((task) => task());
+
+    await expect(
+      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
+    ).resolves.toEqual({ orgId: "team_a", projectId: "prj_a" });
+
+    expect(prompter.withInheritedStdio).toHaveBeenCalledOnce();
+    expect(mockedRunVercel).toHaveBeenCalledWith(["link"], {
+      cwd: "/tmp/eve-agent",
+      signal: undefined,
+    });
+  });
+
+  it("fails when the interactive link does not complete", async () => {
+    mockedReadProjectLink.mockResolvedValue(undefined);
+    mockedRunVercel.mockResolvedValue(false);
+    const { prompter } = createFakePrompter();
+
+    await expect(
+      ensureLinkedVercelProject({ projectRoot: "/tmp/eve-agent", prompter }),
+    ).rejects.toThrow("Vercel project linking failed.");
   });
 });
 

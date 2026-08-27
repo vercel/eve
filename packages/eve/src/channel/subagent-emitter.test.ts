@@ -4,7 +4,7 @@ import {
   deserializeRuntimeAdapter,
 } from "#runtime/channels/registry.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 
 describe("subagent adapter", () => {
   it("round-trips durable delegation metadata through the ChannelKey codec", async () => {
@@ -34,6 +34,7 @@ describe("subagent adapter", () => {
         parentSessionId: "parent-session",
         subagentName: "summarizer",
       },
+      audience: "unknown",
     });
 
     const rehydrated = deserializeRuntimeAdapter(

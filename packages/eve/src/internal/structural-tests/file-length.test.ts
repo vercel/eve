@@ -19,10 +19,8 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "harness/tool-loop.ts",
   "internal/nitro/host/create-application-nitro.ts",
   "protocol/message.ts",
-  "public/channels/eve.ts",
   "public/channels/auth.ts",
   "public/channels/slack/slackChannel.ts",
-  "public/channels/discord/discordChannel.ts",
   "public/channels/teams/teamsChannel.ts",
 ]);
 

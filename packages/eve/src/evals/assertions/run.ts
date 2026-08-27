@@ -1,11 +1,12 @@
 import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import {
   deepEquals,
   eventMatches,
   subagentCallMatches,
   testRegExp,
   toolCallMatches,
+  type EveEvalCountMatcher,
   type EveEvalSkillLoadMatchOptions,
   type EveEvalSubagentCallMatchOptions,
   type EveEvalToolCallMatchOptions,
@@ -17,7 +18,7 @@ import type { AssertionOutcome, RunAssertion } from "#evals/assertions/collector
 /** Minimal captured scope consumed by deterministic eval assertions. */
 export interface EveEvalAssertionSubject {
   readonly derived: import("#evals/types.js").EveEvalDerivedFacts;
-  readonly events: readonly HandleMessageStreamEvent[];
+  readonly events: readonly MessageStreamEvent[];
   readonly output: unknown;
   readonly status: "completed" | "failed" | "waiting";
 }
@@ -85,7 +86,8 @@ export function messageIncludes(token: string | RegExp): RunAssertion {
 /**
  * Asserts a completed tool call with `name` happened. Options constrain the
  * call further: `input` partial-deep-matches, `output` matches the result,
- * `status` overrides the lifecycle state, and `count` requires an exact count.
+ * `status` overrides the lifecycle state, and `count` constrains the number of
+ * matches with either an exact number or a predicate.
  */
 export function calledTool(name: string, options: EveEvalToolCallMatchOptions = {}): RunAssertion {
   validateCount(options.count);
@@ -94,18 +96,21 @@ export function calledTool(name: string, options: EveEvalToolCallMatchOptions = 
     evaluate(result) {
       const named = result.derived.toolCalls.filter((call) => call.name === name);
       const matching = named.filter((call) => toolCallMatches(call, options));
-      const passed =
-        options.count !== undefined ? matching.length === options.count : matching.length > 0;
+      const passed = matchesCount(options.count, matching.length);
       if (passed) return { score: 1, metadata: { matchingCalls: matching.length } };
 
       const observed =
         named.length > 0
           ? `observed ${name} calls: ${named.map((call) => truncate(JSON.stringify(call.input))).join(", ")}`
           : `observed tools: [${result.derived.toolCalls.map((call) => call.name).join(", ")}]`;
-      const expectation =
-        options.count !== undefined
-          ? `expected exactly ${options.count} matching call(s), found ${matching.length}`
-          : `expected a matching call to "${name}"`;
+      let expectation: string;
+      if (options.count === undefined) {
+        expectation = `expected a matching call to "${name}"`;
+      } else if (typeof options.count === "number") {
+        expectation = `expected exactly ${options.count} matching call(s), found ${matching.length}`;
+      } else {
+        expectation = `expected matching call count to satisfy the count predicate, found ${matching.length}`;
+      }
       return fail(`${expectation}; ${observed}`);
     },
   };
@@ -199,7 +204,7 @@ export function noFailedActions(): RunAssertion {
     name: "noFailedActions",
     evaluate(result) {
       const failed = result.events.filter(
-        (evt): evt is Extract<HandleMessageStreamEvent, { type: "action.result" }> =>
+        (evt): evt is Extract<MessageStreamEvent, { type: "action.result" }> =>
           evt.type === "action.result" &&
           (evt.data.status === "failed" || evt.data.result.isError === true),
       );
@@ -219,9 +224,9 @@ export function noFailedActions(): RunAssertion {
 }
 
 /**
- * Asserts a subagent delegation to `name` occurred. `remoteUrl` matches the
- * `subagent.called` remote metadata, `output` matches the `subagent.completed`
- * output.
+ * Asserts a subagent delegation to `name` occurred. Identity and remote
+ * metadata come from `subagent.called`; `output` comes from
+ * `subagent.completed`.
  */
 export function calledSubagent(
   name: string,
@@ -233,8 +238,7 @@ export function calledSubagent(
     evaluate(result) {
       const named = result.derived.subagentCalls.filter((call) => call.name === name);
       const matching = named.filter((call) => subagentCallMatches(call, options));
-      const passed =
-        options.count === undefined ? matching.length > 0 : matching.length === options.count;
+      const passed = matchesCount(options.count, matching.length);
       if (passed) return { score: 1, metadata: { matchingCalls: matching.length } };
 
       if (named.length === 0) {
@@ -259,7 +263,7 @@ export function calledSubagent(
  */
 export function eventsSatisfy(
   label: string,
-  predicate: (events: readonly HandleMessageStreamEvent[]) => boolean,
+  predicate: (events: readonly MessageStreamEvent[]) => boolean,
 ): RunAssertion {
   return {
     name: `eventsSatisfy(${label})`,
@@ -270,17 +274,16 @@ export function eventsSatisfy(
   };
 }
 
-/** Asserts a typed stream event exists, optionally with an exact count. */
+/** Asserts a typed stream event exists, optionally constraining its count. */
 export function typedEvent(matcher: EveEvalEventMatch): RunAssertion {
   validateCount(matcher.count);
   return {
     name: `event(${matcher.type})`,
     evaluate(result) {
       const matching = result.events.filter((entry) => eventMatches(entry, matcher));
-      const passed =
-        matcher.count === undefined ? matching.length > 0 : matching.length === matcher.count;
+      const passed = matchesCount(matcher.count, matching.length);
       if (passed) return { score: 1, metadata: { matchingEvents: matching.length } };
-      const expected = matcher.count === undefined ? "at least one" : `exactly ${matcher.count}`;
+      const expected = describeCount(matcher.count);
       return fail(
         `expected ${expected} matching ${matcher.type} event(s), found ${matching.length}; observed: [${result.events.map((entry) => entry.type).join(", ")}]`,
       );
@@ -312,11 +315,9 @@ export function eventOrder(matchers: readonly EveEvalEventMatch[]): RunAssertion
         const indexes = result.events.flatMap((entry, index) =>
           eventMatches(entry, matcher) ? [index] : [],
         );
-        const countPassed =
-          matcher.count === undefined ? indexes.length > 0 : indexes.length === matcher.count;
+        const countPassed = matchesCount(matcher.count, indexes.length);
         if (!countPassed) {
-          const expected =
-            matcher.count === undefined ? "at least one" : `exactly ${matcher.count}`;
+          const expected = describeCount(matcher.count);
           return fail(
             `expected ${expected} matching ${matcher.type} event(s), found ${indexes.length}`,
           );
@@ -363,7 +364,7 @@ export function outputMatches(schema: StandardSchemaV1): RunAssertion {
   };
 }
 
-function joinCompletedMessages(events: readonly HandleMessageStreamEvent[]): string {
+function joinCompletedMessages(events: readonly MessageStreamEvent[]): string {
   const parts: string[] = [];
   for (const evt of events) {
     if (evt.type === "message.completed" && evt.data.message !== null) {
@@ -378,7 +379,7 @@ function failureDetail(prefix: string, code: string | undefined): string {
 }
 
 function formatFailedActionResult(
-  event: Extract<HandleMessageStreamEvent, { type: "action.result" }>,
+  event: Extract<MessageStreamEvent, { type: "action.result" }>,
 ): string {
   const { result, status } = event.data;
   const parts = [
@@ -393,7 +394,7 @@ function formatFailedActionResult(
 }
 
 function actionResultLabel(
-  result: Extract<HandleMessageStreamEvent, { type: "action.result" }>["data"]["result"],
+  result: Extract<MessageStreamEvent, { type: "action.result" }>["data"]["result"],
 ): string {
   switch (result.kind) {
     case "tool-result":
@@ -410,7 +411,7 @@ function runFailure(result: EveEvalAssertionSubject): AssertionOutcome | undefin
     return fail(failureDetail("run failed", result.derived.failureCode));
   }
   const failedEvent = result.events.find(
-    (event): event is Extract<HandleMessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
+    (event): event is Extract<MessageStreamEvent, { type: "step.failed" | "turn.failed" }> =>
       event.type === "turn.failed" || event.type === "step.failed",
   );
   return failedEvent === undefined
@@ -433,9 +434,22 @@ function formatUnknown(value: unknown): string | undefined {
   }
 }
 
-function validateCount(count: number | undefined): void {
-  if (count !== undefined && (!Number.isInteger(count) || count < 0)) {
-    throw new TypeError(`Assertion count must be a non-negative integer; received ${count}.`);
+function matchesCount(matcher: EveEvalCountMatcher | undefined, count: number): boolean {
+  if (matcher === undefined) return count > 0;
+  return typeof matcher === "function" ? matcher(count) : count === matcher;
+}
+
+function describeCount(matcher: EveEvalCountMatcher | undefined): string {
+  if (matcher === undefined) return "at least one";
+  return typeof matcher === "function" ? "a count satisfying the predicate" : `exactly ${matcher}`;
+}
+
+function validateCount(count: unknown): void {
+  if (count === undefined || typeof count === "function") return;
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+    throw new TypeError(
+      `Assertion count must be a non-negative integer or predicate; received ${String(count)}.`,
+    );
   }
 }
 
@@ -457,7 +471,7 @@ interface ToolRequestEntry {
   readonly name: string;
 }
 
-function requestedTools(events: readonly HandleMessageStreamEvent[]): readonly ToolRequestEntry[] {
+function requestedTools(events: readonly MessageStreamEvent[]): readonly ToolRequestEntry[] {
   const entries: ToolRequestEntry[] = [];
   const seenCallIds = new Set<string>();
   const append = (callId: string, name: string): void => {

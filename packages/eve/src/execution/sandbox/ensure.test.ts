@@ -21,12 +21,8 @@ import {
   countActiveSandboxHandles,
   shutdownActiveSandboxHandles,
 } from "#execution/sandbox/active-handles.js";
-import {
-  clearInitializedDevelopmentSandboxBackendNames,
-  EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV,
-  getInitializedDevelopmentSandboxBackendNames,
-} from "#execution/sandbox/development-run.js";
 import { ensureSandboxAccess } from "#execution/sandbox/ensure.js";
+import type { SandboxState } from "#sandbox/state.js";
 
 const mocks = vi.hoisted(() => ({
   prewarmAppSandboxes: vi.fn(async () => {}),
@@ -74,6 +70,7 @@ function createBackend(): SandboxBackend {
         metadata: {},
         sessionKey: input.sessionKey,
       }),
+      stop: vi.fn(async () => {}),
       useSessionFn: async () => sandbox.session,
       shutdown: async () => {},
       session: sandbox.session,
@@ -87,6 +84,7 @@ async function ensure(input: {
   readonly compiledArtifactsSource?: RuntimeCompiledArtifactsSource;
   readonly runOnSession?: (callback: () => Promise<void>) => Promise<void>;
   readonly registry: RuntimeSandboxRegistry;
+  readonly state?: SandboxState;
   readonly tags?: Record<string, string>;
 }) {
   return await ensureSandboxAccess({
@@ -96,7 +94,7 @@ async function ensure(input: {
     registry: input.registry,
     runOnSession: input.runOnSession,
     sessionId: "session_1",
-    state: null,
+    state: input.state ?? null,
     tags: input.tags,
   });
 }
@@ -271,6 +269,52 @@ describe("ensureSandboxAccess", () => {
     });
   });
 
+  it("reattaches with persisted metadata and skips onSession when the session key matches", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, createSession());
+    const runOnSession = async (callback: () => Promise<void>) =>
+      await contextStorage.run(ctx, callback);
+    const onSession = vi.fn();
+    const backend = createBackend();
+    const registry = createTestRegistry({ onSession }, backend);
+
+    const first = await ensure({ registry, runOnSession });
+    await first.get();
+    const state = await first.captureState();
+    expect(onSession).toHaveBeenCalledTimes(1);
+
+    const second = await ensure({ registry, runOnSession, state });
+    await second.get();
+
+    expect(onSession).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(backend.create).mock.calls[1]?.[0].existingMetadata).toEqual({});
+  });
+
+  it("re-runs onSession and drops stale metadata when the session key rotates", async () => {
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, createSession());
+    const onSession = vi.fn();
+    const backend = createBackend();
+    const registry = createTestRegistry({ onSession }, backend);
+
+    const access = await ensure({
+      registry,
+      runOnSession: async (callback) => await contextStorage.run(ctx, callback),
+      state: {
+        initialized: true,
+        session: {
+          backendName: "test",
+          metadata: { sandboxName: "stale" },
+          sessionKey: "eve-sbx-ses-test-stale-key",
+        },
+      },
+    });
+    await access.get();
+
+    expect(onSession).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(backend.create).mock.calls[0]?.[0].existingMetadata).toBeUndefined();
+  });
+
   it("does not pass bootstrap or seed files to runtime create", async () => {
     const bootstrap = vi.fn();
     const backend = createBackend();
@@ -298,6 +342,39 @@ describe("ensureSandboxAccess", () => {
     expect(backend.create).toHaveBeenCalledWith(
       expect.objectContaining({
         templateKey: null,
+      }),
+    );
+  });
+
+  it("derives an inherited sandbox from the parent owner identity", async () => {
+    const parentBackend = createBackend();
+    const childBackend = createBackend();
+    const registry = createTestRegistry({ inheritsParent: true }, childBackend);
+    const parentDefinition: ResolvedSandboxDefinition = {
+      backend: parentBackend,
+      logicalPath: "agent/sandbox.ts",
+      sourceHash: "parent-source-hash",
+      sourceId: "agent/sandbox",
+      sourceKind: "module",
+    };
+    const inheritedRegistry: RuntimeSandboxRegistry = {
+      sandbox: {
+        ...registry.sandbox,
+        inheritance: {
+          definition: parentDefinition,
+          nodeId: "__root__",
+          workspaceResourceRoot: { logicalPath: "", rootEntries: [] },
+        },
+      },
+    };
+
+    const access = await ensure({ registry: inheritedRegistry });
+    await access.get();
+
+    expect(childBackend.create).not.toHaveBeenCalled();
+    expect(parentBackend.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: expect.stringContaining("session_1-__root__"),
       }),
     );
   });
@@ -340,20 +417,15 @@ describe("ensureSandboxAccess", () => {
     expect(countActiveSandboxHandles()).toBe(0);
   });
 
-  it("records the backend after a development sandbox is initialized", async () => {
-    process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = "dev-run-test";
+  it("delegates authored stops to the backend handle", async () => {
     const backend = createBackend();
     const registry = createTestRegistry({}, backend);
 
-    try {
-      const access = await ensure({ registry });
-      await access.get();
+    const access = await ensure({ registry });
+    await access.stop();
 
-      expect(getInitializedDevelopmentSandboxBackendNames("dev-run-test")).toEqual(["test"]);
-    } finally {
-      clearInitializedDevelopmentSandboxBackendNames("dev-run-test");
-      delete process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV];
-    }
+    const handle = await vi.mocked(backend.create).mock.results[0]?.value;
+    expect(handle?.stop).toHaveBeenCalledTimes(1);
   });
 });
 

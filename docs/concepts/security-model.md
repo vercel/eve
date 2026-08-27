@@ -16,9 +16,11 @@ Your eve agent runs across two contexts, with a trust boundary between them and 
 
 The app runtime is the trusted side. Your tool implementations, model calls, connections, state, and durable execution all run here, with `process.env` and full Node.js available. (On Vercel, this is a Vercel Function.)
 
-The sandbox is the isolated side. The model runs shell commands there through the built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools. It gets its own `/workspace` filesystem, but no `process.env`, no secrets, and no path back into the app runtime. (On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.) Only shell commands execute in the sandbox. Even the built-in `bash`/`read_file`/`write_file` tools live in the app runtime and _proxy_ into the sandbox. The model sees tool definitions and results, never your secrets.
+The sandbox is the isolated side. The model runs shell commands and accesses files there through the default `bash`, `read_file`, and `write_file` tools and any opt-in sandbox tools such as `glob` and `grep`. It gets its own `/workspace` filesystem, but no `process.env`, no secrets, and no path back into the app runtime. (On Vercel, each sandbox is a [Vercel Sandbox](https://vercel.com/docs/sandbox) microVM with hardware-level isolation.) Only shell commands execute in the sandbox. Even the built-in `bash`/`read_file`/`write_file` tools live in the app runtime and _proxy_ into the sandbox. The model sees tool definitions and results, never your secrets.
 
 A concrete trace makes the boundary clear. When the model calls a custom `charge_card` tool, its `execute` runs in the app runtime, reads `process.env.STRIPE_KEY`, calls Stripe, and returns `{ ok: true }`. The model sees only `{ ok: true }`: the key never leaves the app runtime, and nothing about the call touches the sandbox. The built-in `write_file` is the mirror image, running in the app runtime and proxying the write into the sandbox `/workspace`. Either way the model drives the work through tool calls and their results, never by holding a credential or reaching the runtime directly.
+
+See [Agent loop and sandbox](./execution-model-and-durability#agent-loop-and-sandbox) for how eve connects these contexts while keeping their state and lifetimes separate.
 
 ## Data flow at a glance
 
@@ -101,3 +103,4 @@ Before exposing an agent to real traffic:
 - [Sandbox](../sandbox): backends, network policy, and brokering config
 - [Execution model and durability](./execution-model-and-durability): how durable sessions run
 - [Connections](../connections): static-token and OAuth connections
+- [Responsible use](../responsible-use): deployer responsibilities and safeguards to review before production

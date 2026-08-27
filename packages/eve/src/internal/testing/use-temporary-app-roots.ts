@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach } from "vitest";
+import { resolvePackageRoot } from "#internal/application/package.js";
 
 /**
  * Options accepted by the factory returned from
@@ -77,7 +78,6 @@ export function useTemporaryAppRoots(): (
       `${JSON.stringify(packageJson, null, 2)}\n`,
       "utf8",
     );
-
     for (const [relativePath, contents] of Object.entries(options.files ?? {})) {
       const destinationPath = join(appRoot, relativePath);
 
@@ -86,6 +86,9 @@ export function useTemporaryAppRoots(): (
       });
       await writeFile(destinationPath, contents, "utf8");
     }
+
+    await mkdir(join(appRoot, "node_modules"), { recursive: true });
+    await symlink(resolvePackageRoot(), join(appRoot, "node_modules", "eve"), "junction");
 
     return {
       agentRoot,

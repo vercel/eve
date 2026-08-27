@@ -52,6 +52,17 @@ describe("buildNodeEsmCompatBanner", () => {
     expect(banner).not.toContain('from "node:path"');
   });
 
+  it("does not read a chunk-provided __filename before it initializes", () => {
+    const chunk = ["const __filename = '/x/file.js';", 'export const value = "noop";'].join("\n");
+
+    const banner = buildNodeEsmCompatBanner(chunk);
+
+    expect(banner).not.toContain("const __filename");
+    expect(banner).toContain(
+      "const __dirname = __eveDirname(__eveFileURLToPath(import.meta.url));",
+    );
+  });
+
   it("omits the require shim when the chunk binds require", () => {
     const chunk = [
       'import { createRequire } from "node:module";',
@@ -63,6 +74,21 @@ describe("buildNodeEsmCompatBanner", () => {
 
     expect(banner).not.toContain("__eveCreateRequire");
     expect(banner).not.toContain("const require");
+  });
+
+  it("does not treat bundler-suffixed bindings as compatibility globals", () => {
+    const chunk = [
+      "const __filename$1 = '/x/file.js';",
+      "const __dirname$1 = '/x';",
+      "const require$1 = () => {};",
+      'export const value = "noop";',
+    ].join("\n");
+
+    const banner = buildNodeEsmCompatBanner(chunk, { includeRequire: true });
+
+    expect(banner).toContain("const __filename = __eveFileURLToPath(import.meta.url);");
+    expect(banner).toContain("const __dirname = __eveDirname(__filename);");
+    expect(banner).toContain("const require = __eveCreateRequire(import.meta.url);");
   });
 
   it("ignores nested declarations inside functions", () => {

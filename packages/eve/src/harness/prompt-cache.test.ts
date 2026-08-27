@@ -9,10 +9,10 @@ import {
   mergeGatewayAutoCaching,
 } from "#harness/prompt-cache.js";
 
-function makeObjectModel(provider: string): LanguageModel {
+function makeObjectModel(provider: string, modelId = "test-model"): LanguageModel {
   return {
     provider,
-    modelId: "test-model",
+    modelId,
     specificationVersion: "v3",
   } as unknown as LanguageModel;
 }
@@ -68,20 +68,45 @@ describe("detectPromptCachePath", () => {
   it("returns none for generic Bedrock Converse (no anthropic subpath)", () => {
     expect(detectPromptCachePath(makeObjectModel("bedrock"))).toEqual({ kind: "none" });
   });
+
+  it("returns anthropic-direct for a Bedrock Converse model whose id is Anthropic", () => {
+    // `@ai-sdk/amazon-bedrock` reports provider `amazon-bedrock` and carries
+    // the Anthropic identity in the model id.
+    expect(
+      detectPromptCachePath(
+        makeObjectModel("amazon-bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
+      ),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("matches the Bedrock Anthropic model id regardless of case", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "ANTHROPIC.CLAUDE-3-5-SONNET")),
+    ).toEqual({ kind: "anthropic-direct" });
+  });
+
+  it("returns none for a non-Anthropic Bedrock Converse model id", () => {
+    expect(
+      detectPromptCachePath(makeObjectModel("amazon-bedrock", "amazon.nova-pro-v1:0")),
+    ).toEqual({ kind: "none" });
+  });
 });
 
 describe("getAnthropicCacheMarker", () => {
   it("returns the Anthropic cache marker shape", () => {
     expect(getAnthropicCacheMarker()).toEqual({
       anthropic: { cacheControl: { type: "ephemeral" } },
+      bedrock: { cachePoint: { type: "default" } },
     });
   });
 
-  it("returns a frozen object", () => {
+  it("returns a deeply frozen object", () => {
     const marker = getAnthropicCacheMarker();
     expect(Object.isFrozen(marker)).toBe(true);
     expect(Object.isFrozen(marker.anthropic)).toBe(true);
     expect(Object.isFrozen(marker.anthropic.cacheControl)).toBe(true);
+    expect(Object.isFrozen(marker.bedrock)).toBe(true);
+    expect(Object.isFrozen(marker.bedrock.cachePoint)).toBe(true);
   });
 });
 
@@ -146,7 +171,7 @@ describe("applyLastToolCacheBreakpoint", () => {
     expect(result.beta).toEqual({ description: "second" });
     expect(result.gamma).toEqual({
       description: "third",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      providerOptions: { ...marker },
     });
   });
 
@@ -163,9 +188,10 @@ describe("applyLastToolCacheBreakpoint", () => {
       { providerOptions: Record<string, unknown> } | undefined
     >;
 
-    // The marker's anthropic namespace overrides the existing one.
+    // The marker's namespaces override any existing ones; foreign namespaces
+    // are preserved.
     expect(result.only?.providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      ...marker,
       openai: { something: 2 },
     });
   });
@@ -197,11 +223,11 @@ describe("applyConversationCacheControl", () => {
     expect(out[0]).toEqual({
       role: "user",
       content: "hi",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      providerOptions: { ...marker },
     });
   });
 
-  it("marks both the last user and last assistant in a multi-turn history", () => {
+  it("marks the last message and the most recent assistant before it", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "hi" },
       { role: "assistant", content: "yo" },
@@ -211,20 +237,20 @@ describe("applyConversationCacheControl", () => {
     const out = applyConversationCacheControl(messages, marker);
 
     expect(out[0]).toEqual({ role: "user", content: "hi" });
-    expect(out[1]).toEqual({ role: "assistant", content: "yo" });
-    expect(out[2]).toEqual({
-      role: "user",
-      content: "hi2",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+    expect(out[1]).toEqual({
+      role: "assistant",
+      content: "yo",
+      providerOptions: { ...marker },
     });
+    expect(out[2]).toEqual({ role: "user", content: "hi2" });
     expect(out[3]).toEqual({
       role: "assistant",
       content: "yo2",
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+      providerOptions: { ...marker },
     });
   });
 
-  it("skips tool-result messages and still marks the last user and assistant", () => {
+  it("marks a trailing tool-result message so fresh tool results enter the cache", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "do the thing" },
       {
@@ -245,18 +271,14 @@ describe("applyConversationCacheControl", () => {
     ];
     const out = applyConversationCacheControl(messages, marker);
 
-    // Tool-result is not marked.
-    expect(out[2]).toEqual(messages[2]);
+    // The trailing tool-result message carries the final breakpoint.
+    expect((out[2] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
 
-    // The last assistant (index 1) is marked.
-    expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    });
+    // The most recent assistant (index 1) is the advancement anchor.
+    expect((out[1] as { providerOptions?: unknown }).providerOptions).toEqual({ ...marker });
 
-    // The last user (index 0) is marked.
-    expect((out[0] as { providerOptions?: unknown }).providerOptions).toEqual({
-      anthropic: { cacheControl: { type: "ephemeral" } },
-    });
+    // The user message is untouched.
+    expect(out[0]).toEqual(messages[0]);
   });
 
   it("preserves existing providerOptions on marked messages", () => {
@@ -270,7 +292,7 @@ describe("applyConversationCacheControl", () => {
     const out = applyConversationCacheControl(messages, marker);
     expect((out[0] as { providerOptions: Record<string, unknown> }).providerOptions).toEqual({
       openai: { someKey: "someValue" },
-      anthropic: { cacheControl: { type: "ephemeral" } },
+      ...marker,
     });
   });
 
@@ -289,7 +311,8 @@ describe("applyConversationCacheControl", () => {
     expect(messages[0]).toBe(originalRef0);
     expect(messages[1]).toBe(originalRef1);
     expect(out).not.toBe(messages);
-    expect(out[0]).not.toBe(originalRef0);
+    // Unmarked messages keep their identity; marked messages are copies.
+    expect(out[0]).toBe(originalRef0);
     expect(out[1]).not.toBe(originalRef1);
   });
 });

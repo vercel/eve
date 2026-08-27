@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/index.js";
-import { createDevelopmentRuntimeArtifactSessionRefresher } from "#services/dev-client.js";
+import { createDevelopmentRuntimeArtifactRefresher } from "#services/dev-client.js";
 
 const encoder = new TextEncoder();
 
@@ -9,8 +9,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("runtime-artifact refresher session rotation", () => {
-  it("starts a fresh local session for normal prompts after the dev artifact revision changes", async () => {
+describe("runtime-artifact refresher session continuity", () => {
+  it("keeps the active local session for normal prompts after the dev artifact revision changes", async () => {
     const requests: Array<{ method: string; url: string }> = [];
     const fetchMock = createDevFetchMock({
       requests,
@@ -18,35 +18,60 @@ describe("runtime-artifact refresher session rotation", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const client = new Client({ host: "http://127.0.0.1:3000" });
-    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+    const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://127.0.0.1:3000",
     });
-    let session = client.session();
+    const session = client.sessions.attach("session_test");
 
-    session = await refresher.refresh({
-      createSession: () => client.session(),
+    await refresher.refresh({
       message: "first",
-      session,
     });
-    await (await session.send({ message: "first" })).result();
-    const before = session;
-    session = await refresher.refresh({
-      createSession: () => client.session(),
+    await (await session.send("first")).result();
+    const sessionId = session.state.sessionId;
+    await refresher.refresh({
       message: "second",
-      session,
     });
-    await (await session.send({ message: "second" })).result();
+    await (await session.send("second")).result();
 
-    // The revision changed between turns, so the second prompt rotates onto a
-    // fresh session and POSTs /session instead of continuing the first.
-    expect(session).not.toBe(before);
+    expect(session.state.sessionId).toBe(sessionId);
     const postUrls = requests
       .filter((request) => {
         const pathname = new URL(request.url).pathname;
         return request.method === "POST" && !pathname.startsWith("/eve/v1/dev/runtime-artifacts");
       })
       .map((request) => new URL(request.url).pathname);
-    expect(postUrls).toEqual(["/eve/v1/session", "/eve/v1/session"]);
+    expect(postUrls).toEqual(["/eve/v1/session/session_test", "/eve/v1/session/session_test"]);
+  });
+
+  it("keeps the active session eligible when a candidate rebuild fails", async () => {
+    const requests: Array<{ method: string; url: string }> = [];
+    const fetchMock = createDevFetchMock({
+      failedRebuilds: [false, true],
+      requests,
+      revisions: ["snapshot-a", "snapshot-a"],
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const refresher = createDevelopmentRuntimeArtifactRefresher({
+      serverUrl: "http://127.0.0.1:3000",
+    });
+    const session = client.sessions.attach("session_test");
+
+    await refresher.refresh({ message: "first" });
+    await (await session.send("first")).result();
+    const sessionId = session.state.sessionId;
+
+    await refresher.refresh({ message: "second" });
+    await (await session.send("second")).result();
+
+    expect(session.state.sessionId).toBe(sessionId);
+    const postUrls = requests
+      .filter((request) => {
+        const pathname = new URL(request.url).pathname;
+        return request.method === "POST" && !pathname.startsWith("/eve/v1/dev/runtime-artifacts");
+      })
+      .map((request) => new URL(request.url).pathname);
+    expect(postUrls).toEqual(["/eve/v1/session/session_test", "/eve/v1/session/session_test"]);
   });
 
   it("keeps the active local session for input-response resumes after the dev artifact revision changes", async () => {
@@ -57,26 +82,23 @@ describe("runtime-artifact refresher session rotation", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const client = new Client({ host: "http://localhost:3000" });
-    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+    const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
     const inputResponses = [{ optionId: "approve", requestId: "request-1" }];
-    let session = client.session();
+    const session = client.sessions.attach("session_test");
 
-    session = await refresher.refresh({
-      createSession: () => client.session(),
+    await refresher.refresh({
       message: "approve a tool",
-      session,
     });
-    await (await session.send({ message: "approve a tool" })).result();
-    const before = session;
-    session = await refresher.refresh({
-      createSession: () => client.session(),
+    await (await session.send("approve a tool")).result();
+    const sessionId = session.state.sessionId;
+    await refresher.refresh({
       inputResponses,
-      session,
     });
-    expect(session).toBe(before);
-    await (await session.send({ inputResponses })).result();
+    await (await session.respond(inputResponses)).result();
+
+    expect(session.state.sessionId).toBe(sessionId);
 
     const rebuilds = requests.filter(
       (request) => new URL(request.url).pathname === "/eve/v1/dev/runtime-artifacts/rebuild",
@@ -88,12 +110,12 @@ describe("runtime-artifact refresher session rotation", () => {
       })
       .map((request) => new URL(request.url).pathname);
     expect(rebuilds).toHaveLength(1);
-    expect(postUrls).toEqual(["/eve/v1/session", "/eve/v1/session/session-1"]);
+    expect(postUrls).toEqual(["/eve/v1/session/session_test", "/eve/v1/session/session_test"]);
   });
 });
 
-describe("createDevelopmentRuntimeArtifactSessionRefresher", () => {
-  it("forces a rebuild and rotates an active session after a known source change", async () => {
+describe("createDevelopmentRuntimeArtifactRefresher", () => {
+  it("forces a rebuild without replacing an active session after a known source change", async () => {
     const requests: Array<{ method: string; url: string }> = [];
     const fetchMock = createDevFetchMock({
       requests,
@@ -101,24 +123,18 @@ describe("createDevelopmentRuntimeArtifactSessionRefresher", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const client = new Client({ host: "http://localhost:3000" });
-    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+    const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
-    let session = client.session();
+    const session = client.sessions.attach("session_test");
 
-    session = await refresher.refreshIdle({
-      createSession: () => client.session(),
-      session,
-    });
-    await (await session.send({ message: "first" })).result();
-    const before = session;
+    await refresher.refreshIdle({});
+    await (await session.send("first")).result();
+    const sessionId = session.state.sessionId;
 
-    session = await refresher.refreshAfterSourceChange({
-      createSession: () => client.session(),
-      session,
-    });
+    await refresher.refreshAfterSourceChange({});
 
-    expect(session).not.toBe(before);
+    expect(session.state.sessionId).toBe(sessionId);
     expect(
       requests.some((request) => {
         const url = new URL(request.url);
@@ -131,27 +147,24 @@ describe("createDevelopmentRuntimeArtifactSessionRefresher", () => {
     ).toBe(true);
   });
 
-  it("rotates an active session after a known source change without a baseline revision", async () => {
+  it("keeps an active session after a known source change without a baseline revision", async () => {
     const fetchMock = createDevFetchMock({
       requests: [],
       revisions: ["snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
     const client = new Client({ host: "http://localhost:3000" });
-    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+    const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
-    let session = client.session();
+    const session = client.sessions.attach("session_test");
 
-    await (await session.send({ message: "first" })).result();
-    const before = session;
+    await (await session.send("first")).result();
+    const sessionId = session.state.sessionId;
 
-    session = await refresher.refreshAfterSourceChange({
-      createSession: () => client.session(),
-      session,
-    });
+    await refresher.refreshAfterSourceChange({});
 
-    expect(session).not.toBe(before);
+    expect(session.state.sessionId).toBe(sessionId);
   });
 
   it("reports local dev artifact revision changes for normal prompts", async () => {
@@ -161,27 +174,21 @@ describe("createDevelopmentRuntimeArtifactSessionRefresher", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+    const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
     const changes: Array<{ previousRevision: string; revision: string }> = [];
-    const session = new Client({ host: "http://localhost:3000" }).session();
-
     await refresher.refresh({
-      createSession: () => session,
       message: "first",
       onRuntimeArtifactsChanged: (change) => {
         changes.push(change);
       },
-      session,
     });
     await refresher.refresh({
-      createSession: () => session,
       message: "second",
       onRuntimeArtifactsChanged: (change) => {
         changes.push(change);
       },
-      session,
     });
 
     expect(changes).toEqual([
@@ -209,25 +216,19 @@ describe("createDevelopmentRuntimeArtifactSessionRefresher", () => {
       revisions: ["snapshot-a", "snapshot-b"],
     });
     vi.stubGlobal("fetch", fetchMock);
-    const refresher = createDevelopmentRuntimeArtifactSessionRefresher({
+    const refresher = createDevelopmentRuntimeArtifactRefresher({
       serverUrl: "http://localhost:3000",
     });
     const changes: Array<{ previousRevision: string; revision: string }> = [];
-    const session = new Client({ host: "http://localhost:3000" }).session();
-
     await refresher.refreshIdle({
-      createSession: () => session,
       onRuntimeArtifactsChanged: (change) => {
         changes.push(change);
       },
-      session,
     });
     await refresher.refreshIdle({
-      createSession: () => session,
       onRuntimeArtifactsChanged: (change) => {
         changes.push(change);
       },
-      session,
     });
 
     expect(changes).toEqual([
@@ -250,9 +251,11 @@ describe("createDevelopmentRuntimeArtifactSessionRefresher", () => {
 });
 
 function createDevFetchMock(input: {
+  readonly failedRebuilds?: readonly boolean[];
   readonly requests: Array<{ method: string; url: string }>;
   readonly revisions: readonly string[];
 }) {
+  let nextRebuildIndex = 0;
   let nextRevisionIndex = 0;
   let nextSessionIndex = 0;
 
@@ -262,6 +265,14 @@ function createDevFetchMock(input: {
     input.requests.push({ method, url });
 
     const pathname = new URL(url).pathname;
+    if (pathname === "/eve/v1/dev/runtime-artifacts/rebuild") {
+      const rebuildFailed = input.failedRebuilds?.[nextRebuildIndex] === true;
+      nextRebuildIndex += 1;
+      if (rebuildFailed) {
+        return new Response(null, { status: 500 });
+      }
+    }
+
     if (
       pathname === "/eve/v1/dev/runtime-artifacts" ||
       pathname === "/eve/v1/dev/runtime-artifacts/rebuild"
@@ -273,17 +284,24 @@ function createDevFetchMock(input: {
     }
 
     if (method === "POST") {
-      nextSessionIndex += 1;
-      return Response.json({
-        continuationToken: `token-${nextSessionIndex}`,
-        sessionId: `session-${nextSessionIndex}`,
-      });
+      const sessionId =
+        pathname === "/eve/v1/session"
+          ? `session-${String(++nextSessionIndex)}`
+          : (pathname.split("/")[4] ?? `session-${String(++nextSessionIndex)}`);
+      return Response.json({ sessionId });
     }
 
     return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(encoder.encode('{"type":"session.waiting"}\n'));
+          controller.enqueue(
+            encoder.encode(
+              `${JSON.stringify({
+                data: { continuationToken: "session-id", wait: "next-user-message" },
+                type: "session.waiting",
+              })}\n`,
+            ),
+          );
           controller.close();
         },
       }),

@@ -2,24 +2,49 @@ import { describe, expect, it } from "vitest";
 
 import {
   deriveTeamsInputResponses,
-  isTeamsInputResponseActivity,
+  isTeamsToolApprovalResponseActivity,
+  readTeamsInputReplyToActivityId,
   renderInputRequestMessage,
-  teamsInvokeResponse,
   TEAMS_HITL_CHOICE_INPUT_ID,
   TEAMS_HITL_DATA_KEY,
   TEAMS_HITL_FREEFORM_INPUT_ID,
+  TEAMS_HITL_PROMPT_KEY,
+  TEAMS_HITL_REQUEST_KIND_KEY,
 } from "#public/channels/teams/hitl.js";
 import { parseTeamsActivity } from "#public/channels/teams/inbound.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 describe("Teams HITL helpers", () => {
-  it("renders option buttons as Adaptive Card submit actions", () => {
-    const body = renderInputRequestMessage(request());
-    const card = body.attachments?.[0]?.content as { actions?: unknown[] };
-    expect(card.actions).toHaveLength(2);
-    expect(card.actions?.[0]).toMatchObject({
-      data: { [TEAMS_HITL_DATA_KEY]: { optionId: "approve", requestId: "REQ" } },
-      type: "Action.Submit",
+  it("renders approval tool input in the card and fallback text", () => {
+    const body = renderInputRequestMessage({
+      ...request(),
+      action: {
+        callId: "TC",
+        input: { campaign: "summer", dailyBudget: 500 },
+        kind: "tool-call",
+        toolName: "set_campaign_budget",
+      },
+    });
+    const card = body.attachments?.[0]?.content as {
+      body?: Array<{ text?: string }>;
+    };
+
+    expect(card.body?.[1]?.text).toContain('"campaign": "summer"');
+    expect(body.text).toContain('"dailyBudget": 500');
+  });
+
+  it("carries the continuation token in submit actions", () => {
+    const body = renderInputRequestMessage(request(), { replyToActivityId: "ROOT" });
+    const card = body.attachments?.[0]?.content as {
+      actions?: Array<{ data?: Record<string, unknown> }>;
+    };
+
+    expect(card.actions?.[0]?.data).toMatchObject({
+      [TEAMS_HITL_DATA_KEY]: {
+        [TEAMS_HITL_PROMPT_KEY]: "Approve deploy?",
+        [TEAMS_HITL_REQUEST_KIND_KEY]: "tool-approval",
+        replyToActivityId: "ROOT",
+      },
     });
   });
 
@@ -29,20 +54,22 @@ describe("Teams HITL helpers", () => {
     expect(card.body?.some((entry) => entry.id === TEAMS_HITL_CHOICE_INPUT_ID)).toBe(true);
   });
 
-  it("decodes message activity submit values", () => {
-    const activity = parseTeamsActivity(
+  it("decodes message and invoke submission values", () => {
+    const message = parseTeamsActivity(
       activityWithValue({
-        [TEAMS_HITL_DATA_KEY]: { requestId: "REQ", optionId: "deny" },
+        [TEAMS_HITL_DATA_KEY]: {
+          replyToActivityId: "ROOT",
+          optionId: "cancel",
+          requestId: "REQ",
+        },
       }),
     );
-    expect(activity && isTeamsInputResponseActivity(activity)).toBe(true);
-    expect(activity ? deriveTeamsInputResponses(activity) : []).toEqual([
-      { optionId: "deny", requestId: "REQ" },
+    expect(message ? deriveTeamsInputResponses(message) : []).toEqual([
+      { optionId: "cancel", requestId: "REQ" },
     ]);
-  });
+    expect(message ? readTeamsInputReplyToActivityId(message) : null).toBe("ROOT");
 
-  it("decodes adaptiveCard/action invoke values with freeform text", () => {
-    const activity = parseTeamsActivity({
+    const invoke = parseTeamsActivity({
       ...activityWithValue(undefined),
       name: "adaptiveCard/action",
       type: "invoke",
@@ -55,17 +82,24 @@ describe("Teams HITL helpers", () => {
         },
       },
     });
-    expect(activity ? deriveTeamsInputResponses(activity) : []).toEqual([
+    expect(invoke ? deriveTeamsInputResponses(invoke) : []).toEqual([
       { requestId: "REQ", text: "freeform" },
     ]);
+    expect(invoke ? isTeamsToolApprovalResponseActivity(invoke) : false).toBe(false);
   });
 
-  it("builds Teams invoke responses", () => {
-    expect(teamsInvokeResponse({ message: "ok" })).toEqual({
-      statusCode: 200,
-      type: "application/vnd.microsoft.activity.message",
-      value: "ok",
-    });
+  it("identifies tool approval submissions", () => {
+    const activity = parseTeamsActivity(
+      activityWithValue({
+        [TEAMS_HITL_DATA_KEY]: {
+          [TEAMS_HITL_REQUEST_KIND_KEY]: "tool-approval",
+          optionId: "approve",
+          requestId: "REQ",
+        },
+      }),
+    );
+
+    expect(activity ? isTeamsToolApprovalResponseActivity(activity) : false).toBe(true);
   });
 });
 
@@ -73,9 +107,10 @@ function request(): InputRequest {
   return {
     action: { callId: "TC", input: {}, kind: "tool-call", toolName: "deploy" },
     display: "confirmation",
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
-      { id: "deny", label: "Deny", style: "danger" },
+      { id: "cancel", label: "Cancel", style: "danger" },
     ],
     prompt: "Approve deploy?",
     requestId: "REQ",

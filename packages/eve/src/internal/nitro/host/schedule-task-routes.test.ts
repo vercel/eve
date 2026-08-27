@@ -15,8 +15,7 @@ import {
 const DISPATCH_MODULE_PATH = "/framework/schedule-task.ts";
 
 const ARTIFACTS_CONFIG = {
-  appRoot: "/tmp/test-agent",
-  dev: false,
+  kind: "production",
 } as const;
 
 describe("schedule task routes", () => {

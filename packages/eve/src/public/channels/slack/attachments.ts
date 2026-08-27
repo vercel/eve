@@ -1,6 +1,6 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
-import type { FetchFileResult } from "#channel/adapter.js";
+import type { FetchFileContext, FetchFileResult } from "#channel/adapter.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveSlackBotToken,
@@ -72,11 +72,12 @@ function toSlackFilePart(attachment: SlackAttachment, index: number): FilePart |
  * Prefers attachments on the triggering mention (the common case: user
  * uploads a file and mentions the bot in the same message). When the
  * mention has none, refreshes the thread via {@link SlackThread.refresh}
- * and picks the latest non-bot message's attachments — covering the
- * case where a user dropped a file in the thread first, then mentioned
- * the bot in a follow-up. Any error during refresh is logged and treated
- * as "no attachments" so the text portion of the mention still gets
- * delivered.
+ * and picks the attachments of the latest message this app did not
+ * author (the thread message `isMe` classification) — covering the case
+ * where a user or another bot dropped a file in the thread first, then a
+ * user mentioned the bot in a follow-up. Any error during refresh is logged
+ * and treated as "no attachments" so the text portion of the mention
+ * still gets delivered.
  *
  * Skips the thread-history lookback when the policy disables uploads,
  * since the refresh can't surface anything we'd deliver.
@@ -166,21 +167,32 @@ export function buildSlackTurnMessage(
  */
 export function createSlackFetchFile(input: {
   readonly botToken?: SlackBotToken;
-}): (url: string) => Promise<FetchFileResult | null> {
-  return async (url) => {
+}): (url: string, context?: FetchFileContext) => Promise<FetchFileResult | null> {
+  return async (url, context) => {
     if (!isSlackFileUrl(url)) {
       return null;
     }
-    const token = await resolveSlackBotToken(input.botToken);
+    const installationTeamId = context?.state.installationTeamId;
+    const token = await resolveSlackBotToken(input.botToken, {
+      teamId: typeof installationTeamId === "string" ? installationTeamId : undefined,
+    });
     const response = await fetch(url, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
       throw new Error(`Slack file fetch returned HTTP ${response.status} for ${url}.`);
     }
+    const mediaType = response.headers.get("content-type") ?? undefined;
+    const normalizedMediaType = mediaType?.split(";", 1)[0]?.trim().toLowerCase();
+    if (normalizedMediaType === "text/html") {
+      throw new Error(
+        `Slack file fetch returned an HTML sign-in page instead of file bytes for ${url}. ` +
+          "The bot token may be missing the files:read scope. Add the scope, reinstall the Slack app, and retry.",
+      );
+    }
     return {
       bytes: Buffer.from(await response.arrayBuffer()),
-      mediaType: response.headers.get("content-type") ?? undefined,
+      mediaType,
     };
   };
 }

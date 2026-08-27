@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  buildAgentInfoResponseFromManifest: vi.fn(() => ({ kind: "eve-agent-info", version: 1 })),
+  buildAgentInfoResponse: vi.fn(() => ({ kind: "eve-agent-info", version: 4 })),
   getVercelOidcToken: vi.fn(),
-  loadAgentInfoManifestData: vi.fn(async () => ({
+  refreshChatGptState: vi.fn(async () => ({ kind: "ready" as const })),
+  loadAgentInfoManifestData: vi.fn(async (): Promise<unknown> => ({
     manifest: {
       config: {
         model: {
@@ -23,8 +24,12 @@ vi.mock("#compiled/@vercel/oidc/index.js", () => ({
   getVercelOidcToken: mocks.getVercelOidcToken,
 }));
 
-vi.mock("#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js", () => ({
-  buildAgentInfoResponseFromManifest: mocks.buildAgentInfoResponseFromManifest,
+vi.mock("#public/models/openai/chatgpt/token-broker.js", () => ({
+  getDefaultCodexTokenBroker: () => ({ refreshState: mocks.refreshChatGptState }),
+}));
+
+vi.mock("#internal/nitro/routes/agent-info/build-agent-info-response.js", () => ({
+  buildAgentInfoResponse: mocks.buildAgentInfoResponse,
 }));
 
 vi.mock("#internal/nitro/routes/agent-info/load-agent-info-data.js", () => ({
@@ -34,9 +39,8 @@ vi.mock("#internal/nitro/routes/agent-info/load-agent-info-data.js", () => ({
 
 const ROUTE_INPUT = {
   appRoot: "/tmp/app",
-  dev: true,
   devRuntimeArtifactsPointerPath: "/tmp/app/.eve/dev-runtime/current.json",
-  mode: "development",
+  kind: "development",
   moduleMapLoaderPath: "/tmp/eve/src/internal/authored-module-map-loader.ts",
 } as const;
 
@@ -45,6 +49,17 @@ const GATEWAY_MANIFEST_DATA = {
     config: {
       model: {
         routing: { kind: "gateway" as const, target: "openai" },
+      },
+    },
+  },
+  schedules: [],
+};
+
+const CHATGPT_MANIFEST_DATA = {
+  manifest: {
+    config: {
+      model: {
+        routing: { kind: "external" as const, provider: "codex" },
       },
     },
   },
@@ -61,9 +76,10 @@ describe("handleAgentInfoRequest", () => {
   beforeEach(() => {
     vi.stubEnv("AI_GATEWAY_API_KEY", "");
     vi.stubEnv("VERCEL_OIDC_TOKEN", "");
-    mocks.buildAgentInfoResponseFromManifest.mockClear();
+    mocks.buildAgentInfoResponse.mockClear();
     mocks.getVercelOidcToken.mockReset();
     mocks.getVercelOidcToken.mockRejectedValue(new Error("not linked"));
+    mocks.refreshChatGptState.mockClear();
     mocks.loadAgentInfoManifestData.mockReset();
     mocks.loadAgentInfoManifestData.mockResolvedValue(GATEWAY_MANIFEST_DATA);
     mocks.resolveAgentInfoCompiledArtifactsSource.mockClear();
@@ -84,7 +100,7 @@ describe("handleAgentInfoRequest", () => {
         kind: "disk",
       },
     });
-    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
+    expect(mocks.buildAgentInfoResponse).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
       mode: "development",
       gatewayCredentials: { apiKey: false, oidc: false },
     });
@@ -97,7 +113,7 @@ describe("handleAgentInfoRequest", () => {
     const response = await requestAgentInfo();
 
     expect(response.status).toBe(200);
-    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
+    expect(mocks.buildAgentInfoResponse).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
       mode: "development",
       gatewayCredentials: { apiKey: false, oidc: true },
     });
@@ -110,9 +126,24 @@ describe("handleAgentInfoRequest", () => {
     const response = await requestAgentInfo();
 
     expect(response.status).toBe(200);
-    expect(mocks.buildAgentInfoResponseFromManifest).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
+    expect(mocks.buildAgentInfoResponse).toHaveBeenCalledWith(GATEWAY_MANIFEST_DATA, {
       mode: "development",
       gatewayCredentials: { apiKey: true, oidc: false },
+    });
+    expect(mocks.getVercelOidcToken).not.toHaveBeenCalled();
+  });
+
+  it("preflights ChatGPT auth for Codex-backed models", async () => {
+    mocks.loadAgentInfoManifestData.mockResolvedValue(CHATGPT_MANIFEST_DATA);
+
+    const response = await requestAgentInfo();
+
+    expect(response.status).toBe(200);
+    expect(mocks.refreshChatGptState).toHaveBeenCalledOnce();
+    expect(mocks.buildAgentInfoResponse).toHaveBeenCalledWith(CHATGPT_MANIFEST_DATA, {
+      mode: "development",
+      gatewayCredentials: { apiKey: false, oidc: false },
+      chatgptAuth: { kind: "ready" },
     });
     expect(mocks.getVercelOidcToken).not.toHaveBeenCalled();
   });

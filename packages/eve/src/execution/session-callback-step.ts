@@ -1,12 +1,75 @@
-import type { SessionCallback } from "#channel/types.js";
+import type { SessionCallback, SubagentAuthorizationEvent } from "#channel/types.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import { SessionCallbackKey } from "#context/keys.js";
+import { postSessionCallbackRequest } from "#execution/session-callback-request.js";
+import { SESSION_FAILED } from "#harness/agent-handle-errors.js";
 import { createLogger } from "#internal/logging.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type { TokenUsage } from "#shared/token-usage.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
-const SESSION_CALLBACK_TIMEOUT_MS = 30_000;
 const log = createLogger("execution.session-callback");
+
+/** Sends task-owned remote HITL and authorization events to the parent callback capability. */
+export async function fireTaskEventCallbackStep(input: {
+  readonly callback: unknown;
+  readonly childContinuationToken: string;
+  readonly childSessionId: string;
+  readonly event:
+    | SubagentAuthorizationEvent
+    | Extract<UnstampedMessageStreamEvent, { type: "input.requested" }>;
+}): Promise<void> {
+  "use step";
+
+  const callback = parseSerializedSessionCallback(input.callback);
+  if (callback.taskId === undefined) return;
+  const inputRequested = input.event.type === "input.requested";
+  const kind = inputRequested ? "task.input-requested" : "task.authorization";
+  const response = await postSessionCallbackRequest({
+    body: {
+      callId: callback.callId,
+      childContinuationToken: input.childContinuationToken,
+      childSessionId: input.childSessionId,
+      event: inputRequested ? input.event.data : input.event,
+      kind,
+      subagentName: callback.subagentName,
+      taskId: callback.taskId,
+    },
+    url: callback.url,
+  });
+  if (!response.ok) {
+    throw new Error(`Task event callback failed with HTTP ${response.status}.`);
+  }
+}
+
+/** Sends one remote task progress update over its existing parent callback. */
+export async function fireTaskUpdateCallbackStep(input: {
+  readonly callback: unknown;
+  readonly callId: string;
+  readonly updateIndex: number;
+  readonly updateEpoch: string;
+  readonly message: string;
+}): Promise<string | undefined> {
+  "use step";
+
+  const callback = parseSerializedSessionCallback(input.callback);
+  if (callback.taskId === undefined) return undefined;
+  const response = await postSessionCallbackRequest({
+    body: {
+      callId: input.callId,
+      updateIndex: input.updateIndex,
+      updateEpoch: input.updateEpoch,
+      kind: "task.update",
+      message: input.message,
+      taskId: callback.taskId,
+    },
+    url: callback.url,
+  });
+  if (!response.ok) {
+    throw new Error(`Task update callback failed with HTTP ${response.status}.`);
+  }
+  return callback.taskId;
+}
 
 /**
  * Sends the configured session terminal callback.
@@ -50,26 +113,16 @@ export async function fireSessionCallbackStep(input: {
         : {
             callId: callback.callId,
             error: {
-              code: "SESSION_FAILED",
+              code: SESSION_FAILED,
               message: toErrorMessage(input.error),
             },
             kind: "session.failed" as const,
             sessionId,
             subagentName: callback.subagentName,
+            usage: input.usage,
           };
 
-    const response = await fetch(callback.url, {
-      body: JSON.stringify(body),
-      headers: {
-        "content-type": "application/json",
-      },
-      method: "POST",
-      // Do not follow redirects: a validated callback host could otherwise
-      // 3xx-bounce the framework to an internal/metadata address after the
-      // path/token check has already passed.
-      redirect: "error",
-      signal: AbortSignal.timeout(SESSION_CALLBACK_TIMEOUT_MS),
-    });
+    const response = await postSessionCallbackRequest({ body, url: callback.url });
 
     if (!response.ok) {
       throw new Error(`Session callback failed with HTTP ${response.status}.`);

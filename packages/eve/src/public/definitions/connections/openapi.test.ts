@@ -50,4 +50,19 @@ describe("defineOpenAPIConnection", () => {
 
     expect(definition.spec).toBe(spec);
   });
+
+  it("accepts application-provided operation arguments", () => {
+    const definition = defineOpenAPIConnection({
+      baseUrl: "https://api.example.com",
+      description: "test connection",
+      spec: "https://api.example.com/openapi.json",
+      toolCall: {
+        providedArguments: {
+          tenantId: ({ toolName }) => `${toolName}-tenant`,
+        },
+      },
+    });
+
+    expect(typeof definition.toolCall?.providedArguments?.tenantId).toBe("function");
+  });
 });

@@ -86,7 +86,7 @@ export interface DurableSession {
   readonly state?: SessionStateMap;
   readonly sandboxState?: SandboxState;
   readonly subagentDepth?: number;
-  readonly subagentMaxDepth?: number;
+  readonly workflowMaxSubagents?: number;
   readonly agent: {
     readonly system: string;
   };
@@ -198,5 +198,25 @@ export function createDurableSessionState(input: {
   return {
     ...projectSessionState({ session: input.session }),
     snapshot,
+  };
+}
+
+/** Replaces the embedded session while preserving additive snapshot fields. */
+export function replaceDurableSessionSnapshot(input: {
+  readonly session: DurableSession;
+  readonly state: DurableSessionState;
+}): DurableSessionState {
+  return {
+    ...input.state,
+    continuationToken: input.session.continuationToken,
+    emissionState: getHarnessEmissionState(input.session.state),
+    hasProxyInputRequests: hasProxyInputRequests(input.session.state),
+    sessionId: input.session.sessionId,
+    version: DURABLE_SESSION_VERSION,
+    snapshot: {
+      ...input.state.snapshot,
+      session: input.session,
+      version: DURABLE_SESSION_VERSION,
+    },
   };
 }

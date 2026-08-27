@@ -9,7 +9,6 @@ import type { ApplyAiGatewayCredentialDeps } from "#setup/boxes/apply-ai-gateway
 import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
 import type { LinkFlowDeps } from "#setup/flows/link.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 
 import { runLinkCommand, type LinkCliLogger } from "./link.js";
 
@@ -108,27 +107,11 @@ afterEach(() => {
 });
 
 describe("runLinkCommand", () => {
-  test("refuses a directory without an eve agent", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-empty-"));
-    const logger = new TestLogger();
-
-    await runLinkCommand(logger, projectRoot, {
-      isEveProject,
-      hasInteractiveTerminal: () => true,
-    });
-
-    expect(logger.errors).toEqual([
-      "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
-    ]);
-    expect(process.exitCode).toBe(1);
-  });
-
   test("refuses without an interactive terminal", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
 
     await runLinkCommand(logger, projectRoot, {
-      isEveProject,
       hasInteractiveTerminal: () => false,
     });
 
@@ -136,12 +119,12 @@ describe("runLinkCommand", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  test("links through the shared flow and reports success", async () => {
+  test("creates a project through the shared flow and reports success", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
     const fake = createFakePrompter({
       single: (opts) => {
-        if (opts.message === "Vercel project") return "link";
+        if (opts.message === "Vercel project") return "new";
         throw new Error(`Unexpected select: ${opts.message}`);
       },
     });
@@ -149,7 +132,6 @@ describe("runLinkCommand", () => {
 
     await runLinkCommand(logger, projectRoot, {
       createPrompter: () => fake.prompter,
-      isEveProject,
       hasInteractiveTerminal: () => true,
       flowDeps,
     });
@@ -158,6 +140,8 @@ describe("runLinkCommand", () => {
     expect(process.exitCode).toBeUndefined();
     expect(fake.prompter.intro).toHaveBeenCalledWith("Link your eve agent to Vercel");
     expect(fake.prompter.outro).toHaveBeenCalledWith("Project linked.");
+    expect(flowDeps.resolveProvisioning?.pickNewProjectName).toHaveBeenCalled();
+    expect(flowDeps.resolveProvisioning?.pickProject).not.toHaveBeenCalled();
     expect(flowDeps.linkProject?.linkProject).toHaveBeenCalled();
   });
 });

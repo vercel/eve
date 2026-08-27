@@ -2,7 +2,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
-import type { GitHubChannelCredentials } from "#public/channels/github/auth.js";
+import type {
+  GitHubBotNameResolver,
+  GitHubChannelCredentials,
+} from "#public/channels/github/auth.js";
 import { checkoutGitHubRepository } from "#public/channels/github/checkout.js";
 import {
   shouldDispatchGitHubComment,
@@ -16,6 +19,7 @@ import type {
 } from "#public/channels/github/githubChannel.js";
 import { splitGitHubCommentBody } from "#public/channels/github/limits.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import type { InputRequest } from "#shared/input.js";
 
 const log = createLogger("github.defaults");
 
@@ -49,20 +53,20 @@ export function defaultGitHubAuth(ctx: GitHubInboundContext): SessionAuthContext
 
 /** Options used by the built-in GitHub comment dispatch hook. */
 export interface GitHubDefaultDispatchOptions {
-  readonly botName?: string;
+  readonly botName?: GitHubBotNameResolver;
 }
 
 /** Default comment hook: dispatch only when the comment `@mention`s the bot. */
-export function defaultOnComment(
+export async function defaultOnComment(
   ctx: GitHubInboundContext,
   comment: GitHubComment,
   options: GitHubDefaultDispatchOptions,
-): GitHubInboundResult {
+): Promise<GitHubInboundResult> {
   if (
     !shouldDispatchGitHubComment({
       author: comment.author,
       body: comment.body,
-      botName: options.botName,
+      botName: await options.botName?.(),
     })
   ) {
     return null;
@@ -73,6 +77,7 @@ export function defaultOnComment(
 /** Options used by built-in GitHub event handlers. */
 export interface GitHubDefaultEventOptions {
   readonly api?: GitHubApiOptions;
+  readonly botName?: GitHubBotNameResolver;
   readonly credentials?: GitHubChannelCredentials;
   readonly progress?: GitHubProgressConfig;
 }
@@ -95,6 +100,14 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     async "message.completed"(event, channel, _ctx) {
       if (event.finishReason === "tool-calls" || !event.message) return;
       await postCommentChunks(channel, event.message);
+    },
+
+    async "input.requested"(event, channel, _ctx) {
+      if (event.requests.length === 0) return;
+      const sections = event.requests.map(renderInputRequest);
+      const replyInstruction = renderReplyInstruction(event.requests, await options.botName?.());
+      if (replyInstruction !== undefined) sections.push(replyInstruction);
+      await postCommentChunks(channel, sections.join("\n\n"));
     },
 
     async "session.failed"(event, channel) {
@@ -121,6 +134,36 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
       await postFailure(channel, message);
     },
   };
+}
+
+function renderInputRequest(request: InputRequest): string {
+  const lines = [request.prompt];
+  if (request.options !== undefined && request.options.length > 0) {
+    lines.push(
+      "",
+      ...request.options.map((option, index) => {
+        const description = option.description ? ` - ${option.description}` : "";
+        return `${index + 1}. ${option.label}${description}`;
+      }),
+    );
+  }
+  if (request.allowFreeform === true) {
+    lines.push("", "You can also reply with a custom answer.");
+  }
+  return lines.join("\n");
+}
+
+// The default onComment hook only dispatches comments that @mention the bot,
+// so a prompt without this instruction invites replies that are silently ignored.
+function renderReplyInstruction(
+  requests: readonly InputRequest[],
+  botName: string | undefined,
+): string | undefined {
+  const name = botName?.trim();
+  if (!name) return undefined;
+  const firstOption = requests.find((request) => (request.options?.length ?? 0) > 0)?.options?.[0];
+  const example = firstOption?.label ?? "<your answer>";
+  return `Answer by mentioning me in a reply, e.g. \`@${name} ${example}\`.`;
 }
 
 async function checkoutRepositoryForTurn(

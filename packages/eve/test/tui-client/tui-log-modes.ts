@@ -37,7 +37,7 @@ async function snapshotForMode(mode: "all" | "stderr" | "sandbox" | "none"): Pro
     captureForeignOutput: true,
     logs: mode,
   });
-  const options: EveTUIRunnerOptions = { session: client.session(), client, renderer };
+  const options: EveTUIRunnerOptions = { client, renderer };
   const runner = new EveTUIRunner(options);
 
   const runPromise = runner.run().catch((error: unknown) => {
@@ -47,7 +47,7 @@ async function snapshotForMode(mode: "all" | "stderr" | "sandbox" | "none"): Pro
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   // Foreign writes are captured synchronously, so the snapshot reflects
   // them immediately.

@@ -11,8 +11,34 @@ describe("channel instrumentation", () => {
     };
 
     expect(buildChannelInstrumentationProjection({ adapter, channelName: "support" })).toEqual({
+      channelType: "slack",
       kind: "channel:support",
-      metadata: {},
+      metadata: { audience: "unknown" },
+    });
+  });
+
+  it.each(["public", "private", "unknown"] as const)("preserves the %s audience", (audience) => {
+    const adapter: ChannelAdapter = {
+      instrumentation: { metadata: () => ({ audience }) },
+      kind: "slack",
+      state: {},
+    };
+
+    expect(buildChannelInstrumentationProjection({ adapter }).metadata).toEqual({ audience });
+  });
+
+  it("normalizes an invalid audience to unknown without dropping other metadata", () => {
+    const adapter: ChannelAdapter = {
+      instrumentation: {
+        metadata: () => ({ audience: "everyone", threadId: "thread-1" }) as never,
+      },
+      kind: "slack",
+      state: {},
+    };
+
+    expect(buildChannelInstrumentationProjection({ adapter }).metadata).toEqual({
+      audience: "unknown",
+      threadId: "thread-1",
     });
   });
 
@@ -35,8 +61,9 @@ describe("channel instrumentation", () => {
     };
 
     expect(buildChannelInstrumentationProjection({ adapter, channelName: "support" })).toEqual({
+      channelType: "slack",
       kind: "channel:support",
-      metadata: {},
+      metadata: { audience: "unknown" },
     });
     await Promise.resolve();
 

@@ -135,9 +135,32 @@ export function teamsContinuationToken(input: {
   readonly replyToActivityId?: string | null;
   readonly tenantId?: string | null;
 }): string {
-  return [input.tenantId ?? "_", input.conversationId, input.replyToActivityId ?? ""]
+  const address = normalizeTeamsContinuationAddress(input);
+  return [input.tenantId ?? "_", address.conversationId, address.replyToActivityId ?? ""]
     .map((component) => encodeURIComponent(component))
     .join(":");
+}
+
+/** Normalizes the thread suffix that Teams inconsistently includes in channel conversation ids. */
+export function normalizeTeamsContinuationAddress(input: {
+  readonly conversationId: string;
+  readonly replyToActivityId?: string | null;
+}): { readonly conversationId: string; readonly replyToActivityId: string | null } {
+  const marker = ";messageid=";
+  const markerIndex = input.conversationId.lastIndexOf(marker);
+  if (markerIndex < 0) {
+    return {
+      conversationId: input.conversationId,
+      replyToActivityId: input.replyToActivityId ?? null,
+    };
+  }
+
+  const conversationId = input.conversationId.slice(0, markerIndex);
+  const threadRoot = input.conversationId.slice(markerIndex + marker.length);
+  return {
+    conversationId,
+    replyToActivityId: threadRoot || input.replyToActivityId || null,
+  };
 }
 
 /** Resolves a Teams app id, falling back to `MICROSOFT_APP_ID` then `TEAMS_APP_ID`. */
@@ -301,7 +324,9 @@ export async function updateTeamsActivity(
     )}`,
   });
   if (!response.ok) {
-    throw new Error(`Teams update activity failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Teams update activity failed with HTTP ${response.status} for conversation "${input.conversationId}" activity "${input.activityId}": ${formatConnectorErrorBody(response.body)}`,
+    );
   }
   return toPostedActivity(response.body);
 }
@@ -372,6 +397,12 @@ function toPostedActivity(body: unknown): TeamsPostedActivity {
     id: typeof raw.id === "string" ? raw.id : "",
     raw: body,
   };
+}
+
+function formatConnectorErrorBody(body: unknown): string {
+  const value = typeof body === "string" ? body : JSON.stringify(body);
+  if (value === undefined || value.length === 0) return "empty response body";
+  return value.length <= 1_000 ? value : `${value.slice(0, 997)}...`;
 }
 
 function trimTrailingSlash(value: string): string {

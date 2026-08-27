@@ -1,5 +1,6 @@
 import { oriented_normal, env_reflect_dir, env_reflection_from_dir, encode_normal } from "../shared/material-core.wgsl";
-import { Params, VertexInput, VertexOutput, WIRE_PASS_THRESHOLD, glass_vs_main, is_back_facing_to_camera } from "../shared/glass-common.wgsl";
+import { Params, WIRE_PASS_THRESHOLD } from "../shared/scene-params.wgsl";
+import { VertexInput, VertexOutput, glass_vs_main, is_back_facing_to_camera } from "../shared/glass-vertex.wgsl";
 import { shade_glass } from "../shared/glass-material.wgsl";
 
 @group(0) @binding(0) var<uniform> params: Params;

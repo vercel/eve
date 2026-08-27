@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { equals, includes, satisfies, similarity } from "#evals/expect/index.js";
+import type { StandardSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
+import { equals, includes, matches, satisfies, similarity } from "#evals/expect/index.js";
 
 describe("expect builders", () => {
   it("includes scores 1 on substring, 0 otherwise, gate by default", () => {
@@ -29,6 +30,54 @@ describe("expect builders", () => {
     expect(assertion.score({ a: 1, b: [2, 3] })).toBe(1);
     expect(assertion.score({ a: 1, b: [2, 4] })).toBe(0);
     expect(assertion.score({ a: 1 })).toBe(0);
+  });
+
+  it("retains actual and expected values for failed checks", async () => {
+    const evaluation = await equals({ city: "Brooklyn" }).evaluate?.({ city: "Queens" });
+
+    expect(evaluation).toEqual({
+      score: 0,
+      message: 'expected {"city":"Brooklyn"}; received {"city":"Queens"}',
+      metadata: {
+        actual: { city: "Queens" },
+        expected: { city: "Brooklyn" },
+      },
+    });
+  });
+
+  it("makes arbitrary diagnostic values safe for JSON artifacts", async () => {
+    const actual: { amount: bigint; self?: unknown } = { amount: 3n };
+    actual.self = actual;
+
+    const evaluation = await equals({ amount: 4n }).evaluate?.(actual);
+
+    expect(evaluation?.metadata).toEqual({
+      actual: { amount: "3n", self: "[Circular]" },
+      expected: { amount: "4n" },
+    });
+  });
+
+  it("retains schema issue paths for failed checks", async () => {
+    const schema = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: () => ({
+          issues: [{ message: "Required", path: ["city"] }],
+        }),
+      },
+    } satisfies StandardSchemaV1;
+
+    const evaluation = await matches(schema).evaluate?.({});
+
+    expect(evaluation).toMatchObject({
+      score: 0,
+      message: "schema validation failed: city: Required",
+      metadata: {
+        actual: {},
+        issues: [{ message: "Required", path: ["city"] }],
+      },
+    });
   });
 
   it("similarity is soft by default and scores 1 on an exact match", async () => {

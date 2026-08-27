@@ -88,6 +88,7 @@ describe("startProductionServer", () => {
   it("starts the built server with Nitro host and port environment", async () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
+    (child.stdout as PassThrough).write("Listening on http://127.0.0.1:4321/\n");
     mocks.spawn.mockReturnValueOnce(child);
 
     const server = await startProductionServer("/tmp/app", {
@@ -115,11 +116,6 @@ describe("startProductionServer", () => {
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:4321/eve/v1/health",
-      expect.any(Object),
-    );
-
     await server.close();
 
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
@@ -129,6 +125,7 @@ describe("startProductionServer", () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
     process.env.PORT = "4567";
+    (child.stdout as PassThrough).write("Listening on http://0.0.0.0:4567/\n");
     mocks.spawn.mockReturnValueOnce(child);
 
     const server = await startProductionServer("/tmp/app");
@@ -151,7 +148,11 @@ describe("startProductionServer", () => {
   it("resolves port 0 before spawning the built server", async () => {
     const { startProductionServer } = await import("./start-production-server.js");
     const child = createChildProcess();
-    mocks.spawn.mockReturnValueOnce(child);
+    mocks.spawn.mockImplementationOnce((_command, _args, options) => {
+      const port = (options as { env?: NodeJS.ProcessEnv }).env?.PORT;
+      (child.stdout as PassThrough).write(`Listening on http://127.0.0.1:${port}/\n`);
+      return child;
+    });
 
     const server = await startProductionServer("/tmp/app", {
       host: "127.0.0.1",

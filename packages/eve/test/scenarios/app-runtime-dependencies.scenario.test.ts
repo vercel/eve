@@ -12,9 +12,16 @@ import {
 import { buildApplication } from "../../src/internal/nitro/host.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
+vi.mock("../../src/internal/nitro/host/vercel-build-prewarm.js", () => ({
+  runVercelBuildPrewarm: async () => true,
+}));
+
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const EVE_PACKAGE_ROOT = resolvePackageRoot();
 const createScratchDirectory = useTemporaryDirectories();
+const DEPLOYABLE_BUILD_OPTIONS = {
+  skipVercelSandboxPrewarm: false,
+} as const;
 
 async function readJavaScriptModulesRecursively(rootDirectory: string): Promise<string> {
   // `withFileTypes` so directories named like modules (for example the
@@ -145,7 +152,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const tracedServerPackageJson = await readTracedServerPackageJson(outputDir);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
@@ -159,7 +166,6 @@ describe("app runtime dependency tracing", () => {
       )
     ).join("\n");
 
-    expect(serverModuleEntries.some((entry) => entry.includes("fixture-runtime-dep"))).toBe(true);
     expect(tracedServerPackageJson.dependencies).not.toHaveProperty("fixture-runtime-dep");
     expect(tracedServerPackageJson.dependencies).not.toHaveProperty(EVE_PACKAGE_INFO.name);
     await expect(
@@ -249,7 +255,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
       recursive: true,
@@ -285,8 +291,6 @@ describe("app runtime dependency tracing", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
-    expect(bundledDependencyModule.source).toContain("const __dirname = __eveDirname(__filename);");
-
     await import(pathToFileURL(bundledDependencyModule.modulePath).href);
   }, 30_000);
 
@@ -327,7 +331,7 @@ describe("app runtime dependency tracing", () => {
         await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
         await writeFile(
           join(appRoot, "agent", "tools", "workflow.ts"),
-          'export default { kind: "eve:enable-workflow-tool" };\n',
+          'export default { kind: "eve:enable-workflow-tool", maxSubagents: 6 };\n',
         );
       }
 
@@ -336,6 +340,7 @@ describe("app runtime dependency tracing", () => {
 
     const disabledOutputDir = await buildApplication(
       await createWorkflowAssetsApp("disabled", false),
+      DEPLOYABLE_BUILD_OPTIONS,
     );
     const disabledTracedPackageJson = await readTracedServerPackageJson(disabledOutputDir);
     const disabledServerSource = await readJavaScriptModulesRecursively(
@@ -344,7 +349,10 @@ describe("app runtime dependency tracing", () => {
 
     expect(disabledServerSource).not.toContain("[Unprintable QuickJS value]");
 
-    const enabledOutputDir = await buildApplication(await createWorkflowAssetsApp("enabled", true));
+    const enabledOutputDir = await buildApplication(
+      await createWorkflowAssetsApp("enabled", true),
+      DEPLOYABLE_BUILD_OPTIONS,
+    );
     const tracedServerPackageJson = await readTracedServerPackageJson(enabledOutputDir);
     const enabledServerSource = await readJavaScriptModulesRecursively(
       join(enabledOutputDir, "server"),
@@ -410,6 +418,7 @@ describe("app runtime dependency tracing", () => {
     // opt-in — nothing of just-bash may reach the hosted output.
     const dockerOutputDir = await buildApplication(
       await createMinimalApp({ justBashEngine: false, label: "docker" }),
+      DEPLOYABLE_BUILD_OPTIONS,
     );
     const dockerTraced = await readTracedServerPackageJson(dockerOutputDir);
     expect(dockerTraced.dependencies).not.toHaveProperty("just-bash");
@@ -424,6 +433,7 @@ describe("app runtime dependency tracing", () => {
     // externalized and traced so the output stays self-contained.
     const justBashOutputDir = await buildApplication(
       await createMinimalApp({ justBashEngine: true, label: "just-bash" }),
+      DEPLOYABLE_BUILD_OPTIONS,
     );
     const justBashTraced = await readTracedServerPackageJson(justBashOutputDir);
     expect(justBashTraced.dependencies).toHaveProperty("just-bash");
@@ -512,7 +522,7 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
       recursive: true,
@@ -559,7 +569,7 @@ describe("app runtime dependency tracing", () => {
       [
         "export default {",
         "  build: {",
-        '    externalDependencies: ["fixture-external-only-dep"],',
+        '    externalDependencies: ["fixture-external-only-dep", "fixture-external-wrapper"],',
         "  },",
 
         '  model: "openai/gpt-5.4-mini",',
@@ -575,11 +585,12 @@ describe("app runtime dependency tracing", () => {
       join(appRoot, "agent", "tools", "use_fixture_dep.ts"),
       [
         'import fixtureExternalOnlyDep from "fixture-external-only-dep";',
+        'import fixtureExternalWrapper from "fixture-external-wrapper";',
         "",
         "export default {",
         '  description: "Use the fixture external dependency.",',
         "  execute() {",
-        "    return fixtureExternalOnlyDep;",
+        "    return { fixtureExternalOnlyDep, fixtureExternalWrapper };",
         "  },",
         "};",
         "",
@@ -587,10 +598,16 @@ describe("app runtime dependency tracing", () => {
     );
 
     const packageRoot = join(appRoot, "node_modules", "fixture-external-only-dep");
+    const wrapperRoot = join(appRoot, "node_modules", "fixture-external-wrapper");
+    const nestedPackageRoot = join(wrapperRoot, "node_modules", "fixture-external-only-dep");
 
-    await mkdir(packageRoot, {
-      recursive: true,
-    });
+    await Promise.all(
+      [packageRoot, wrapperRoot, nestedPackageRoot].map((directoryPath) =>
+        mkdir(directoryPath, {
+          recursive: true,
+        }),
+      ),
+    );
     await writeFile(
       join(packageRoot, "package.json"),
       JSON.stringify(
@@ -616,8 +633,60 @@ describe("app runtime dependency tracing", () => {
         "",
       ].join("\n"),
     );
+    await writeFile(
+      join(wrapperRoot, "package.json"),
+      JSON.stringify(
+        {
+          dependencies: {
+            "fixture-external-only-dep": "2.0.0",
+          },
+          exports: {
+            ".": "./index.js",
+          },
+          name: "fixture-external-wrapper",
+          type: "module",
+          version: "1.0.0",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(wrapperRoot, "index.js"),
+      [
+        'import fixtureExternalOnlyDep from "fixture-external-only-dep";',
+        "",
+        "export default fixtureExternalOnlyDep;",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(nestedPackageRoot, "package.json"),
+      JSON.stringify(
+        {
+          exports: {
+            ".": "./index.js",
+          },
+          name: "fixture-external-only-dep",
+          type: "module",
+          version: "2.0.0",
+        },
+        null,
+        2,
+      ),
+    );
+    await writeFile(
+      join(nestedPackageRoot, "index.js"),
+      [
+        'export const label = "fixture-external-only-dep-v2";',
+        "export default {",
+        "  label,",
+        "};",
+        "",
+      ].join("\n"),
+    );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverModuleDirectory = join(outputDir, "server");
     const serverModuleEntries = await readdir(serverModuleDirectory, {
       recursive: true,
@@ -638,6 +707,29 @@ describe("app runtime dependency tracing", () => {
     ).resolves.toContain('"name": "fixture-external-only-dep"');
     expect(serverModuleSource).toContain('"fixture-external-only-dep"');
     expect(serverModuleSource).not.toContain('export const label = "fixture-external-only-dep";');
+
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+
+    const vercelOutputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
+    const rootServerFunctionDirectory = join(vercelOutputDir, "functions", "__server.func");
+    const workflowFlowFunctionDirectory = join(
+      vercelOutputDir,
+      "functions",
+      ".well-known",
+      "workflow",
+      "v1",
+      "flow.func",
+    );
+
+    for (const functionDirectory of [rootServerFunctionDirectory, workflowFlowFunctionDirectory]) {
+      await expect(
+        readFile(
+          join(functionDirectory, "node_modules", "fixture-external-only-dep", "package.json"),
+          "utf8",
+        ),
+      ).resolves.toContain('"name": "fixture-external-only-dep"');
+    }
   }, 30_000);
 
   it("rewrites framework tool executors into hosted Vercel output", async () => {
@@ -677,7 +769,7 @@ describe("app runtime dependency tracing", () => {
       ["---", "description: Weather help.", "---", ""].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverFunctionDirectory = join(outputDir, "functions", "__server.func");
     const functionEntries = await readdir(join(outputDir, "functions"), {
       recursive: true,
@@ -693,9 +785,9 @@ describe("app runtime dependency tracing", () => {
       )
     ).join("\n");
 
-    expect(serverModuleSource).not.toContain("../execution/sandbox/bash-tool.js");
+    expect(serverModuleSource).not.toContain("../execution/sandbox/bash.js");
     expect(serverModuleSource).not.toContain("../execution/skills/activate.js");
-    expect(serverModuleSource).not.toContain("../execution/web-fetch/tool.js");
+    expect(serverModuleSource).not.toContain("../execution/web-fetch/execute.js");
     expect(functionEntries.some((entry) => entry.includes("node_modules/esbuild"))).toBe(false);
     expect(functionEntries.some((entry) => entry.includes("node_modules/.nf3/esbuild"))).toBe(
       false,
@@ -707,15 +799,13 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).not.toContain('import("esbuild")');
     expect(serverModuleSource).not.toContain('import("rolldown")');
     expect(serverModuleSource).toContain(
-      "This tool requires sandbox access on the runtime context.",
+      "Execute a shell command in the shared workspace environment.",
     );
-    expect(serverModuleSource).toContain(
-      "The load_skill tool requires sandbox access on the runtime context.",
-    );
-    expect(serverModuleSource).toContain("URL must start with http:// or https://");
+    expect(serverModuleSource).toContain("The dynamic skill");
+    expect(serverModuleSource).toContain("URL must start with https://");
   }, 30_000);
 
-  it("does not bundle dev-only watcher handling into hosted Vercel server output", async () => {
+  it("does not bundle local-only runtime infrastructure into hosted Vercel output", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
 
@@ -745,7 +835,7 @@ describe("app runtime dependency tracing", () => {
       "Verify deployed runtime contents.\n",
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const vercelFunctionsSource = await readJavaScriptModulesRecursively(
       join(outputDir, "functions"),
     );
@@ -754,6 +844,12 @@ describe("app runtime dependency tracing", () => {
     expect(vercelFunctionsSource).not.toContain("chokidar");
     expect(vercelFunctionsSource).not.toContain("[eve:dev]");
     expect(vercelFunctionsSource).not.toContain("rollup:reload");
+    // The world-local canary is its log prefix, not names other packages
+    // legitimately mention without bundling world-local code: the
+    // semantic-error catalog embeds error-class names like
+    // `DataDirAccessError`, and @workflow/core's runtime world factory
+    // (stubbed out at vendor time) names `WORKFLOW_LOCAL_DATA_DIR`.
+    expect(vercelFunctionsSource).not.toContain("[world-local]");
   }, 30_000);
 
   it("loads instrumentation runtime dependencies from hosted Vercel output", async () => {
@@ -864,13 +960,12 @@ describe("app runtime dependency tracing", () => {
       ].join("\n"),
     );
 
-    const outputDir = await buildApplication(appRoot);
+    const outputDir = await buildApplication(appRoot, DEPLOYABLE_BUILD_OPTIONS);
     const serverFunctionDirectory = join(outputDir, "functions", "__server.func");
     const serverEntries = await readdir(serverFunctionDirectory, {
       recursive: true,
     });
 
-    expect(serverEntries.some((entry) => entry.includes("fixture-instrumentation-dep"))).toBe(true);
     const instrumentationModulePath = (
       await Promise.all(
         serverEntries

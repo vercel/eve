@@ -1,7 +1,7 @@
 import type {
   UpdateProjectCustomAllow,
   UpdateProjectTrustedSources,
-} from "@vercel/sdk/models/updateprojectprojectsaction.js";
+} from "@vercel/sdk/models/updateprojectblock.js";
 
 export type TrustedSourceEnvironmentRule = UpdateProjectCustomAllow;
 

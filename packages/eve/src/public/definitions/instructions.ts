@@ -1,32 +1,23 @@
-import { INSTRUCTIONS_BRAND } from "#shared/dynamic-tool-definition.js";
+import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
+import {
+  DYNAMIC_SENTINEL_KIND,
+  type DynamicResolveContext,
+  type DynamicSentinel,
+} from "#dynamic/definition.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
+import {
+  INSTRUCTIONS_BRAND,
+  type PublicInstructionsDefinition,
+} from "#shared/instructions-definition.js";
+
+export type InstructionsDefinition = Readonly<PublicInstructionsDefinition>;
 
 /**
- * Public definition for an instructions prompt authored in markdown or
- * TypeScript.
- *
- * Authored at the agent root as either `instructions.md` or
- * `instructions.{ts,cts,mts,js,cjs,mjs}`, or inside the
- * `agent/instructions/` directory for multi-file setups. Module-backed
- * static instructions execute once at build time. The compiler captures
- * the resulting markdown into the compiled manifest.
- *
- * When used inside a `defineDynamic` handler, the runtime lowers the
- * returned markdown to `{ role: "system", content: markdown }`.
- * Instructions produce system messages only. Use channel `context` for
- * user-role messages.
- */
-export interface InstructionsDefinition {
-  readonly markdown: string;
-}
-
-/**
- * Defines an instructions prompt in TypeScript from a `{ markdown }`
- * definition.
+ * Defines instructions in TypeScript from a `{ content, role? }`
+ * definition. Omitted `role` defaults to `"system"`.
  *
  * Use it to return instructions from a `defineDynamic` resolver in
- * `agent/instructions/`; the returned markdown lowers to a single
- * `{ role: "system" }` message. For a fixed prompt with no resolver,
+ * `agent/instructions/`. For a fixed prompt with no resolver,
  * author `instructions.md` instead. The result is branded so the dynamic
  * instruction lifecycle can validate that a resolver return came through
  * this helper.
@@ -36,4 +27,27 @@ export function defineInstructions<TInstructions extends InstructionsDefinition>
 ): TInstructions {
   Object.assign(definition, { [INSTRUCTIONS_BRAND]: true });
   return definition;
+}
+
+export type DynamicInstructionsResult = InstructionsDefinition | null;
+
+export type DynamicInstructionsEvents = {
+  readonly [K in "session.started" | "turn.started"]?: (
+    event: unknown,
+    ctx: DynamicResolveContext,
+  ) => DynamicInstructionsResult | Promise<DynamicInstructionsResult>;
+};
+
+/**
+ * Defines a runtime instructions resolver for session and turn boundaries.
+ */
+export function defineDynamic<const TEvents extends DynamicInstructionsEvents>(definition: {
+  readonly events: ExactDefinition<TEvents, DynamicInstructionsEvents>;
+}): DynamicSentinel<DynamicInstructionsResult> {
+  const sentinel = {
+    kind: DYNAMIC_SENTINEL_KIND,
+    events: definition.events,
+  } as DynamicSentinel<DynamicInstructionsResult>;
+  stampDefinitionKey(sentinel, `dynamic-instructions:${Object.keys(definition.events).join(",")}`);
+  return sentinel;
 }

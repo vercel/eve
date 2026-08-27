@@ -1,12 +1,9 @@
-import { LogoAiElements } from "@vercel/geistdocs/assets/logos/logo-ai-elements";
-import { LogoAiSdk } from "@vercel/geistdocs/assets/logos/logo-ai-sdk";
-import { LogoChatSdk } from "@vercel/geistdocs/assets/logos/logo-chat-sdk";
-import { LogoFlagsSdk } from "@vercel/geistdocs/assets/logos/logo-flags-sdk";
-import { LogoWorkflowSdk } from "@vercel/geistdocs/assets/logos/logo-workflow-sdk";
-import { defineConfig, type GeistdocsNavbarOssProduct } from "@vercel/geistdocs/config";
+import { defineConfig } from "@vercel/geistdocs/config";
+import { LogoEve } from "@vercel/geistdocs/assets/logos/logo-eve";
 import {
   agent,
   basePath,
+  eveAgent,
   github,
   Logo,
   nav,
@@ -16,32 +13,43 @@ import {
   title,
   translations,
 } from "@/geistdocs";
-
-const navbarOssProducts: GeistdocsNavbarOssProduct[] = [
-  { href: "https://ai-sdk.dev/", logo: <LogoAiSdk height={12} /> },
-  { href: "https://flags-sdk.dev/", logo: <LogoFlagsSdk height={20} /> },
-  { href: "https://chat-sdk.dev/", logo: <LogoChatSdk height={20} /> },
-  { href: "https://workflow-sdk.dev/", logo: <LogoWorkflowSdk height={12} /> },
-  { href: "https://elements.ai-sdk.dev/", logo: <LogoAiElements height={12} /> },
-];
+import { defaultLanguage } from "./languages";
+import { getSiteOrigin } from "./url";
 
 export const config = defineConfig({
   title,
   agent,
-  defaultLanguage: "en",
+  defaultLanguage,
   logo: <Logo />,
   github,
   nav,
-  navbarOssProducts,
+  // Drops eve (this site) from geistdocs' default OSS products menu.
+  navbarActiveProduct: "eve",
   basePath,
   siteId,
+  siteUrl: getSiteOrigin(),
   translations,
   // Built-in edit link hardcodes `/edit/` and a `content/docs/` prefix; we
   // render our own `/blob/` link instead (see EditOnGithubAction).
   pageActions: { editSource: false },
   content: [{ id: "docs", label: "Docs", dir: "docs", route: "/docs" }],
   ai: {
+    eveAgent,
+    // Used only if eveAgent is removed and chat falls back to gateway mode.
     prompt,
     suggestions,
+    // Ask AI is answered by an agent built on eve (help-eve).
+    footer: (
+      <div className="flex justify-center">
+        <a
+          aria-label="Powered by eve"
+          className="inline-flex items-center gap-1.5 text-gray-700 text-label-12 transition-colors hover:text-gray-900"
+          href="https://eve.dev"
+        >
+          <span>Powered by</span>
+          <LogoEve height={10} />
+        </a>
+      </div>
+    ),
   },
 });

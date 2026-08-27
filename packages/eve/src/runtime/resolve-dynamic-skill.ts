@@ -43,6 +43,7 @@ export async function resolveDynamicSkillDefinition(
       eventNames: [...definition.eventNames],
       events: handlers as ResolvedDynamicSkillResolver["events"],
       exportName: definition.exportName,
+      extensionNamespace: definition.extensionNamespace,
       logicalPath: definition.logicalPath,
       slug: definition.slug,
       sourceId: definition.sourceId,

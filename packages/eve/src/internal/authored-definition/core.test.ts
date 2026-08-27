@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   normalizeAgentDefinition,
+  normalizeInstructionsDefinition,
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
+import { defineDynamic } from "#dynamic/definition.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
@@ -18,6 +20,74 @@ describe("normalizeAgentDefinition", () => {
     );
 
     expect(definition.reasoning).toBe("high");
+  });
+
+  it("accepts dynamic model definitions", () => {
+    const model = defineDynamic({
+      events: {
+        "session.started": () => "openai/gpt-5.5-mini",
+      },
+    });
+    const definition = normalizeAgentDefinition(
+      {
+        model,
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.model).toMatchObject({
+      kind: "eve:dynamic",
+    });
+    expect(typeof (definition.model as typeof model).events["session.started"]).toBe("function");
+  });
+
+  it("rejects fallback-shaped dynamic models", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: {
+            events: { "session.started": () => "openai/gpt-5.5-mini" },
+            fallback: "openai/gpt-5.5",
+            kind: "eve:dynamic",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "fallback"');
+  });
+
+  it("rejects definition-level model metadata for dynamic models", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: defineDynamic({
+            events: {
+              "session.started": () => "openai/gpt-5.5-mini",
+            },
+          }),
+          modelContextWindowTokens: 128_000,
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(/Dynamic model.*modelContextWindowTokens/);
+  });
+
+  it("rejects a dynamic compaction model", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          compaction: {
+            model: defineDynamic({
+              events: {
+                "session.started": () => "openai/gpt-5.5-mini",
+              },
+            }),
+          },
+          model: "openai/gpt-5.5",
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"compaction.model" does not support defineDynamic');
   });
 
   it("rejects unsupported reasoning effort", () => {
@@ -39,8 +109,7 @@ describe("normalizeAgentDefinition", () => {
         limits: {
           maxInputTokensPerSession: 200_000,
           maxOutputTokensPerSession: 20_000,
-          maxSubagentDepth: 4,
-          maxSubagents: 6,
+          sessionTimeoutMs: 86_400_000,
         },
       },
       FAILURE_MESSAGE,
@@ -49,29 +118,48 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.limits).toEqual({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
-      maxSubagentDepth: 4,
-      maxSubagents: 6,
+      sessionTimeoutMs: 86_400_000,
     });
   });
 
-  it.each([0, 1.5, -1, "4"])("rejects invalid subagent max depth %j", (maxSubagentDepth) => {
+  it("accepts false to uncap session token limits", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        limits: {
+          maxInputTokensPerSession: false,
+          maxOutputTokensPerSession: false,
+          sessionTimeoutMs: false,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.limits).toEqual({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+      sessionTimeoutMs: false,
+    });
+  });
+
+  it("rejects the removed subagent max depth limit", () => {
     expect(() =>
       normalizeAgentDefinition(
         {
           model: "openai/gpt-5.5",
-          limits: { maxSubagentDepth },
+          limits: { maxSubagentDepth: 4 },
         },
         FAILURE_MESSAGE,
       ),
     ).toThrow(FAILURE_MESSAGE);
   });
 
-  it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {
+  it("rejects the removed agent-level workflow max subagents limit", () => {
     expect(() =>
       normalizeAgentDefinition(
         {
           model: "openai/gpt-5.5",
-          limits: { maxSubagents },
+          limits: { maxSubagents: 6 },
         },
         FAILURE_MESSAGE,
       ),
@@ -87,7 +175,11 @@ describe("normalizeAgentDefinition", () => {
     ["maxOutputTokensPerSession", 1.5],
     ["maxOutputTokensPerSession", -1],
     ["maxOutputTokensPerSession", "20000"],
-  ])("rejects invalid session token limit %s=%j", (key, value) => {
+    ["sessionTimeoutMs", 0],
+    ["sessionTimeoutMs", 1.5],
+    ["sessionTimeoutMs", -1],
+    ["sessionTimeoutMs", "30d"],
+  ])("rejects invalid session runtime limit %s=%j", (key, value) => {
     expect(() =>
       normalizeAgentDefinition(
         {
@@ -160,6 +252,48 @@ describe("normalizeAgentDefinition", () => {
       ),
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
   });
+
+  it.each([true, false])("rejects the removed subagentPersistentSessions flag", (value) => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            subagentPersistentSessions: value,
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('Unknown key "subagentPersistentSessions"');
+  });
+
+  it("accepts a boolean tasks flag", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          tasks: true,
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.tasks).toBe(true);
+  });
+
+  it("rejects non-boolean tasks values", () => {
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: {
+            tasks: "yes",
+          },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.tasks" must be a boolean.');
+  });
 });
 
 describe("normalizeScheduleDefinition", () => {
@@ -174,5 +308,39 @@ describe("normalizeScheduleDefinition", () => {
         "Expected the schedule config to match the public eve shape.",
       ),
     ).toThrow(`Unknown key "${field}"`);
+  });
+});
+
+describe("normalizeInstructionsDefinition", () => {
+  const message = "Expected instructions to match the public eve shape.";
+
+  it("normalizes content with a default system role", () => {
+    expect(normalizeInstructionsDefinition({ content: "Be concise." }, message)).toEqual({
+      content: "Be concise.",
+      role: "system",
+    });
+  });
+
+  it("accepts user-role content", () => {
+    expect(
+      normalizeInstructionsDefinition({ content: "Tenant context.", role: "user" }, message),
+    ).toEqual({ content: "Tenant context.", role: "user" });
+  });
+
+  it("normalizes the deprecated markdown shape as system content", () => {
+    expect(normalizeInstructionsDefinition({ markdown: "Legacy." }, message)).toEqual({
+      content: "Legacy.",
+      role: "system",
+    });
+  });
+
+  it.each([
+    { content: "mixed", markdown: "mixed" },
+    { content: "invalid", role: "assistant" },
+    { markdown: "legacy", role: "system" },
+    { content: "unknown", extra: true },
+    {},
+  ])("rejects invalid instructions definitions %#", (definition) => {
+    expect(() => normalizeInstructionsDefinition(definition, message)).toThrow(message);
   });
 });

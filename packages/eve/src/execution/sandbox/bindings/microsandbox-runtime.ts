@@ -24,6 +24,7 @@ import {
 } from "#execution/sandbox/bindings/microsandbox-platform.js";
 import { adaptMicrosandboxExecToSandboxProcess } from "#execution/sandbox/bindings/microsandbox-process.js";
 import {
+  importInstalledEnginePackage,
   isEveDevEnvironment,
   loadOptionalEnginePackage,
 } from "#internal/application/optional-package-install.js";
@@ -148,6 +149,11 @@ export class MicrosandboxVm {
    */
   async shutdown(): Promise<void> {
     await this.#sandbox.stop().catch(() => {});
+    await this.detach();
+  }
+
+  async stop(): Promise<void> {
+    await this.#sandbox.stop();
     await this.detach();
   }
 
@@ -526,9 +532,14 @@ async function withProgressHeartbeat<T>(
  * Loads microsandbox only when its package and runtime are already
  * present — used by cleanup paths that must never trigger installs.
  */
-export async function loadMicrosandboxWithoutInstall(): Promise<MicrosandboxModule | null> {
+export async function loadMicrosandboxWithoutInstall(
+  appRoot: string,
+): Promise<MicrosandboxModule | null> {
   try {
-    const module: MicrosandboxModule = await import("microsandbox");
+    const module = await importInstalledEnginePackage<MicrosandboxModule>({
+      appRoot,
+      packageName: MICROSANDBOX_PACKAGE_NAME,
+    });
     return module.isInstalled() ? module : null;
   } catch {
     return null;

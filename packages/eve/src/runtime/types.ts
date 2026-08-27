@@ -1,23 +1,23 @@
-import type { FlexibleSchema } from "ai";
-
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { CompiledChannel } from "#channel/compiled-channel.js";
 import type { NormalizedChannelCorsOptions } from "#channel/cors.js";
 import type { HeadersValue } from "#client/types.js";
 import type { DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
+import type { MessageStreamEvent } from "#protocol/message.js";
 import type { ChannelRouteMethod, RouteContext } from "#public/definitions/channel.js";
 import type { RouteHandler, WebSocketRouteHandler } from "#channel/routes.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { StreamEventHook } from "#public/definitions/hook.js";
-import type { Approval } from "#public/definitions/approval.js";
-import type { ToolModelOutput } from "#public/definitions/tool.js";
+import type { Approval } from "#approval/definition.js";
+import type { ToolModelOutput } from "#tools/definition.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import type {
   AuthorizationDefinition,
   ConnectionAuthResolver,
   ConnectionProtocol,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
@@ -32,9 +32,14 @@ import type {
 } from "#shared/source-ref.js";
 import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
-import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
+import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
+import type { ToolSchema } from "#tools/schema.js";
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
+import type { MemoryDefinition } from "#public/memory/index.js";
 
 /**
  * Runtime-owned source ref describing one additive config module import.
@@ -46,13 +51,15 @@ export type ResolvedModuleSourceRef = Readonly<ModuleSourceRef>;
  * `instructions.{ts,...}`.
  *
  * Module-backed instructions sources are executed once at build time —
- * the resulting markdown is captured here. Runtime never re-evaluates
+ * the resulting content is captured here. Runtime never re-evaluates
  * the module.
  */
-export type ResolvedInstructions = Readonly<
+export type ResolvedInstructionsDefinition = Readonly<
   SourceRef & {
+    content: string;
     name: string;
-    markdown: string;
+    owner: AgentSourceOwner;
+    role: "system" | "user";
   } & (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef)
 >;
 
@@ -76,7 +83,7 @@ export type ResolvedSkillDefinition = Readonly<
  * a {@link ScheduleHandlerArgs}-shaped argument; for the markdown form
  * the dispatcher synthesizes a channel-less SCHEDULE_ADAPTER run.
  */
-export type ResolvedSchedule = Readonly<
+export type ResolvedScheduleDefinition = Readonly<
   SourceRef & {
     readonly cron: string;
     readonly name: string;
@@ -99,6 +106,7 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly connectionName: string;
   readonly description: string;
   readonly headers?: Readonly<HeadersDefinition>;
+  readonly toolCall?: Readonly<ConnectionToolCallDefinition>;
   /**
    * Wire protocol. Selects the runtime client implementation. `tools`
    * carries the connection's operation/tool filter regardless of
@@ -122,7 +130,7 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
  *
  * The resolved `backend` is non-optional: every sandbox in the runtime
  * graph carries a concrete SandboxBackend value, even when the
- * authored definition omits `backend`. The unauthored case is filled
+ * authored definition omits `backend`. The omitted field is filled
  * in by `defaultSandbox()` (which itself selects between
  * `vercel()`, `docker()`, `microsandbox()`, and `justbash()` based on the current
  * environment).
@@ -140,28 +148,31 @@ export type ResolvedSandboxDefinition = ResolvedModuleSourceRef & {
    */
   readonly backend: SandboxBackend;
   readonly description?: string;
+  readonly inheritsParent?: boolean;
   readonly onSession?: (input: SandboxSessionContext) => Promise<void> | void;
 };
 
 /**
- * Runtime-owned authored tool definition resolved from a compiled module map.
+ * Runtime-owned tool definition resolved from the selected compiled source graph.
  * A tool without `execute` is surfaced to the client and never executed by eve.
  */
 export type ResolvedToolDefinition = Readonly<
-  Optional<InternalToolDefinitionWithExecuteFn<unknown, unknown>, "execute">
+  Omit<
+    Optional<InternalToolDefinitionWithExecuteFn<unknown, unknown>, "execute">,
+    "inputSchema" | "outputSchema"
+  >
 > &
   ResolvedModuleSourceRef & {
+    readonly owner: AgentSourceOwner;
     /**
-     * Optional live Standard Schema reattached from the authored module at
-     * resolve time. When present, the AI SDK uses it for both JSON schema
-     * extraction and runtime validation with transforms/defaults.
+     * Validated runtime input schema. Compiled and durable JSON Schemas are
+     * rehydrated before entering this runtime-owned definition.
      */
-    readonly inputStandardSchema?: FlexibleSchema;
+    readonly inputSchema: ToolSchema | null;
     /**
-     * Optional live Standard Schema reattached from the authored module at
-     * resolve time for tool output typing/validation.
+     * Optional validated runtime output schema.
      */
-    readonly outputStandardSchema?: FlexibleSchema;
+    readonly outputSchema?: ToolSchema;
     /**
      * Optional per-tool approval gate. When set, determines whether user
      * approval is required before executing this tool. See
@@ -207,7 +218,7 @@ export interface ResolvedHookDefinition extends ResolvedModuleSourceRef {
    * wildcard if declared. Unknown keys are accepted at resolve time
    * and ignored at dispatch time.
    */
-  readonly events: Readonly<Record<string, StreamEventHook<unknown>>>;
+  readonly events: Readonly<Record<string, StreamEventHook<MessageStreamEvent>>>;
 }
 
 /**
@@ -222,13 +233,14 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly name: string;
   readonly method: ChannelRouteMethod;
   readonly adapter?: ChannelAdapter;
+  readonly turnPolicy?: CompiledChannel["turnPolicy"];
   readonly cors?: NormalizedChannelCorsOptions;
   readonly urlPath: string;
   readonly fetch: (req: Request, ctx: RouteContext) => Promise<Response>;
   /**
    * Universal entry point for new sessions, called by cross-channel
    * initiators (the schedule dispatcher today). Typed precisely as
-   * {@link CompiledChannel.receive} — `(input, { send }) => Session` —
+   * {@link CompiledChannel.receive} — `(input, ctx) => Session` —
    * so any caller passing the wrong context shape is a typecheck error,
    * not a runtime crash.
    *
@@ -240,7 +252,7 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
   readonly receive?: CompiledChannel["receive"];
   /**
    * Reference to the authored {@link CompiledChannel} value the channel
-   * module exported. Preserved so callers of `args.receive(channel, …)`
+   * module exported. Preserved so callers of `ctx.to(channel, target)`
    * can identify a target by the same imported reference. `undefined`
    * for framework-internal channels constructed without going through
    * `defineChannel`.
@@ -265,10 +277,18 @@ export interface ResolvedChannelDefinition extends ResolvedModuleSourceRef {
 export type ResolvedRuntimeSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
-      description: string;
       kind: "subagent";
       name: string;
-    }
+    } & (
+      | {
+          description: string;
+          dynamic?: never;
+        }
+      | {
+          description?: never;
+          dynamic: ResolvedDynamicSubagentDefinition;
+        }
+    )
 >;
 
 /**
@@ -280,6 +300,7 @@ export type ResolvedRuntimeRemoteAgentNode = Readonly<
     Node & {
       auth?: OutboundAuthFn;
       description: string;
+      forwardPrincipal?: boolean;
       headers?: HeadersValue;
       kind: "remote";
       name: string;
@@ -296,13 +317,32 @@ export type ResolvedRuntimeDelegationNode =
   | ResolvedRuntimeRemoteAgentNode
   | ResolvedRuntimeSubagentNode;
 
+export interface ResolvedDynamicSubagentDefinition extends Readonly<ModuleSourceRef> {
+  readonly eventNames: readonly string[];
+  readonly events: Readonly<
+    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
+  >;
+}
+
 /**
  * Runtime-owned additive agent configuration resolved from `agent.ts`.
  */
+type ResolvedAgentDefinitionBase = Omit<InternalAgentDefinition, "build" | "model" | "source"> & {
+  source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
+};
+
 export type ResolvedAgentDefinition = Readonly<
-  Omit<InternalAgentDefinition, "build" | "source"> & {
-    source?: Readonly<NonNullable<InternalAgentDefinition["source"]>>;
-  }
+  ResolvedAgentDefinitionBase &
+    (
+      | {
+          dynamicModel?: never;
+          model: InternalAgentDefinition["model"];
+        }
+      | {
+          dynamicModel: RuntimeDynamicModelReference;
+          model?: never;
+        }
+    )
 >;
 
 /**
@@ -324,7 +364,21 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
+  readonly rebindMissingCallbacks?: boolean;
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of tools
+   * the resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
+
+export type ResolvedMemoryDefinition = Readonly<
+  MemoryDefinition &
+    ModuleSourceRef & {
+      readonly slot: string;
+      readonly visibility: "scope" | "session";
+    }
+>;
 
 /**
  * Runtime resolver for dynamic skills declared via `defineDynamic({ events })`
@@ -337,6 +391,11 @@ export interface ResolvedDynamicSkillResolver extends Readonly<ModuleSourceRef> 
   readonly events: Readonly<
     Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
   >;
+  /**
+   * Mount namespace when this resolver comes from an extension. Names of skills
+   * a map resolver produces are prefixed with `${extensionNamespace}__`.
+   */
+  readonly extensionNamespace?: string;
 }
 
 /**
@@ -357,30 +416,18 @@ export interface ResolvedDynamicInstructionsResolver extends Readonly<ModuleSour
  */
 export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
-  readonly config: ResolvedAgentDefinition;
+  readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
   /**
-   * Logical names of framework-provided channels the author opted out of by
-   * exporting `disableRoute()` from a file in `agent/channels/`. Each
-   * entry is the slash-joined slug path of one such file. The graph
-   * resolver uses this list to filter the framework default channel set.
+   * Configuration for the experimental framework `Workflow` orchestration
+   * tool. Present when an authored tool module exports
+   * `experimental_workflow(...)`.
    */
-  readonly disabledFrameworkChannels: readonly string[];
-  /**
-   * Names of framework-provided tools the author opted out of by exporting
-   * `disableTool()` from a file in `agent/tools/`. Each entry is the
-   * filename slug of one such file. The graph resolver uses this list to
-   * filter the framework default tool set.
-   */
-  readonly disabledFrameworkTools: readonly string[];
-  /**
-   * Whether the author opted into the framework `Workflow` orchestration tool
-   * by re-exporting the `Workflow` marker as the default export of a file in
-   * `agent/tools/`. When true, the harness exposes an isolated JavaScript sandbox
-   * whose only callable operations are this agent's subagents and remote
-   * agents.
-   */
-  readonly workflowEnabled: boolean;
+  readonly workflowTool?: {
+    readonly maxSubagents?: number;
+  };
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];
@@ -390,12 +437,8 @@ export interface ResolvedAgent {
    * `instructions.{ts,...}`, or `undefined` when the agent does not
    * declare one.
    */
-  readonly instructions?: ResolvedInstructions;
-  /**
-   * Authored sandbox override for this agent, when one exists. `null`
-   * means the agent uses the framework default sandbox unchanged.
-   */
-  readonly sandbox: ResolvedSandboxDefinition | null;
+  readonly instructions: readonly ResolvedInstructionsDefinition[];
+  readonly sandbox: ResolvedSandboxDefinition;
   /**
    * Byte-free descriptor for the compiled workspace resource tree owned
    * by this agent's graph node. The prewarm orchestrator resolves the
@@ -404,6 +447,7 @@ export interface ResolvedAgent {
    */
   readonly workspaceResourceRoot: CompiledWorkspaceResourceRoot;
   readonly hooks: readonly ResolvedHookDefinition[];
+  readonly memories: readonly ResolvedMemoryDefinition[];
   readonly skills: readonly ResolvedSkillDefinition[];
   readonly tools: readonly ResolvedToolDefinition[];
   readonly workspaceSpec: WorkspaceRuntimeSpec;

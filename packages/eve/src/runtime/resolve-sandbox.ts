@@ -23,21 +23,24 @@ export async function resolveSandboxDefinition(
   nodeId: string | undefined,
 ): Promise<ResolvedSandboxDefinition> {
   try {
-    const resolvedExportValue = await loadResolvedModuleExport({
-      definition,
-      kindLabel: "sandbox",
-      moduleMap,
-      nodeId,
-    });
-    const resolvedRecord = expectObjectRecord(
-      resolvedExportValue,
-      `Expected the sandbox export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to return an object.`,
-    );
+    const resolvedExportValue = definition.inheritsParent
+      ? undefined
+      : await loadResolvedModuleExport({
+          definition,
+          kindLabel: "sandbox",
+          moduleMap,
+          nodeId,
+        });
     const sandboxDefinition: {
       readonly backend?: unknown;
       readonly bootstrap?: (input: unknown) => Promise<void> | void;
       readonly onSession?: (input: unknown) => Promise<void> | void;
-    } = resolvedRecord;
+    } = definition.inheritsParent
+      ? {}
+      : expectObjectRecord(
+          resolvedExportValue,
+          `Expected the sandbox export "${definition.exportName ?? "default"}" from "${definition.logicalPath}" to return an object.`,
+        );
 
     const backend = resolveBackend(sandboxDefinition.backend, definition.logicalPath);
 
@@ -45,6 +48,7 @@ export async function resolveSandboxDefinition(
       backend,
       bootstrap: sandboxDefinition.bootstrap as ResolvedSandboxDefinition["bootstrap"],
       description: definition.description,
+      inheritsParent: definition.inheritsParent,
       exportName: definition.exportName,
       logicalPath: definition.logicalPath,
       onSession: sandboxDefinition.onSession as ResolvedSandboxDefinition["onSession"],

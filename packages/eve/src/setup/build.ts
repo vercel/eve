@@ -1,5 +1,5 @@
 // Build-time generator for the setup island's Web Chat template. Reads the
-// `apps/templates/web-chat-next` source app, applies the declared scaffold transforms,
+// `apps/docs/registry/channel/web` source item, applies the declared scaffold transforms,
 // and writes `scaffold/create/web-template.ts`. Not part of the shipped package: it is
 // excluded from tsconfig.build.json and run on demand via the package scripts
 // `generate:web-template` (--write) and `check:web-template` (--check, drift).
@@ -12,7 +12,12 @@ import { fileURLToPath } from "node:url";
 
 const SETUP_ROOT = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SETUP_ROOT, "../../../..");
-const SOURCE_ROOT = join(REPO_ROOT, "apps/templates/web-chat-next");
+const SOURCE_ROOT = join(REPO_ROOT, "apps/docs/registry/channel/web");
+const SIGN_IN_WITH_VERCEL_SOURCE_ROOT = join(
+  REPO_ROOT,
+  "apps/docs/registry/channel/web-sign-in-with-vercel",
+);
+const REGISTRY_PATH = join(REPO_ROOT, "apps/docs/registry.json");
 const OUTPUT_PATH = join(SETUP_ROOT, "scaffold/create/web-template.ts");
 
 const SOURCE_ONLY_ROOT_ENTRIES = new Set([
@@ -72,8 +77,8 @@ function shouldCopySourcePath(relativePath: string): boolean {
   );
 }
 
-async function discoverSourceFiles(relativeDirectory = ""): Promise<string[]> {
-  const entries = await readdir(join(SOURCE_ROOT, relativeDirectory), { withFileTypes: true });
+async function discoverSourceFiles(sourceRoot: string, relativeDirectory = ""): Promise<string[]> {
+  const entries = await readdir(join(sourceRoot, relativeDirectory), { withFileTypes: true });
   const discoveredFiles: string[] = [];
 
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
@@ -81,7 +86,7 @@ async function discoverSourceFiles(relativeDirectory = ""): Promise<string[]> {
     if (!shouldCopySourcePath(relativePath)) continue;
 
     if (entry.isDirectory()) {
-      discoveredFiles.push(...(await discoverSourceFiles(relativePath)));
+      discoveredFiles.push(...(await discoverSourceFiles(sourceRoot, relativePath)));
     } else if (entry.isFile()) {
       discoveredFiles.push(relativePath);
     }
@@ -123,43 +128,65 @@ interface PackageTemplate {
   devDependencies: Record<string, string>;
 }
 
+function dependencyRecord(specifiers: unknown, field: string): Record<string, string> {
+  if (!Array.isArray(specifiers) || !specifiers.every((value) => typeof value === "string")) {
+    throw new Error(`channel/web must define string-array ${field}.`);
+  }
+  return Object.fromEntries(
+    specifiers.map((specifier) => {
+      const separator = specifier.lastIndexOf("@");
+      if (separator <= 0) throw new Error(`channel/web has invalid dependency ${specifier}.`);
+      return [specifier.slice(0, separator), specifier.slice(separator + 1)];
+    }),
+  );
+}
+
 function parsePackageTemplate(source: string): PackageTemplate {
-  const parsed: unknown = JSON.parse(source);
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new Error("apps/templates/web-chat-next/package.json must be an object.");
-  }
-  const record = parsed as Record<string, unknown>;
-  const fields = ["scripts", "dependencies", "devDependencies"] as const;
-  for (const field of fields) {
-    if (typeof record[field] !== "object" || record[field] === null) {
-      throw new Error(`apps/templates/web-chat-next/package.json must define ${field}.`);
-    }
-  }
+  const parsed = JSON.parse(source) as { items?: Array<Record<string, unknown>> };
+  const item = parsed.items?.find((candidate) => candidate.name === "channel/web");
+  if (item === undefined) throw new Error("apps/docs/registry.json must define channel/web.");
   return {
-    scripts: record.scripts as Record<string, string>,
-    dependencies: record.dependencies as Record<string, string>,
-    devDependencies: record.devDependencies as Record<string, string>,
+    scripts: {
+      build: "next build",
+      "build:eve": "eve build",
+      dev: "next dev",
+      "dev:eve": "eve dev",
+      start: "next start",
+      "start:eve": "eve start",
+      typecheck: "tsc --noEmit -p tsconfig.json",
+    },
+    dependencies: dependencyRecord(item.dependencies, "dependencies"),
+    devDependencies: dependencyRecord(item.devDependencies, "devDependencies"),
   };
 }
 
 async function renderGeneratedModule(): Promise<string> {
-  const sourceFiles = await discoverSourceFiles();
+  const sourceFiles = await discoverSourceFiles(SOURCE_ROOT);
   const entries = await Promise.all(
     sourceFiles.map(async (relativePath) => {
       const source = await readFile(join(SOURCE_ROOT, relativePath), "utf8");
       return renderFileEntry(relativePath, applyDeclaredTransforms(relativePath, source));
     }),
   );
-  const packageTemplate = parsePackageTemplate(
-    await readFile(join(SOURCE_ROOT, "package.json"), "utf8"),
+  const signInWithVercelSourceFiles = await discoverSourceFiles(SIGN_IN_WITH_VERCEL_SOURCE_ROOT);
+  const signInWithVercelEntries = await Promise.all(
+    signInWithVercelSourceFiles.map(async (relativePath) => {
+      const source = await readFile(join(SIGN_IN_WITH_VERCEL_SOURCE_ROOT, relativePath), "utf8");
+      return renderFileEntry(relativePath, source);
+    }),
   );
+  const packageTemplate = parsePackageTemplate(await readFile(REGISTRY_PATH, "utf8"));
 
   return [
-    "// Generated from apps/templates/web-chat-next by eve's setup build (src/setup/build.ts).",
+    "// Generated from apps/docs/registry/channel/web by eve's setup build (src/setup/build.ts).",
     "// Do not edit directly. Edit the app or the declared generator transforms.",
     "",
     "export const WEB_APP_TEMPLATE_FILES = {",
     ...entries,
+    "} as const;",
+    "",
+    "export const WEB_APP_SIGN_IN_WITH_VERCEL_TEMPLATE_FILES = {",
+    ...signInWithVercelEntries,
     "} as const;",
     "",
     "export const WEB_APP_TEMPLATE_PACKAGE_JSON = {",

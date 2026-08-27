@@ -4,7 +4,7 @@ description: "Define typed actions the agent can call, and gate sensitive ones o
 url: /tools
 ---
 
-A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
+A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. Define a tool when you implement the action in code you control. To give the model tools published by an external MCP or OpenAPI service, use a [connection](/docs/connections) instead. Authored tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
 
 ## Define a tool
 
@@ -28,9 +28,53 @@ A tool definition needs:
 - a filename slug under `agent/tools/`, the model-facing name.
 - a `description`: what the tool does, written for the model.
 - an `inputSchema`: a Zod schema (or any Standard Schema, or a plain JSON Schema object). Required. For no input, pass `z.object({})`. Zod and Standard Schema infer the `input` type in `execute`. Plain JSON Schema types it as `Record<string, unknown>`.
-- an `execute(input, ctx)`: the implementation. May be sync or async.
+- an `execute(input, ctx)`: the implementation. May be sync, async, or an async generator.
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
+
+### Stream preliminary tool results
+
+An async generator lets a long-running tool stream complete output snapshots
+before it finishes. Each `yield` replaces the previous snapshot; the final
+yield is the normal tool result the model receives:
+
+```ts title="agent/tools/build_report.ts"
+export default defineTool({
+  description: "Build a project report.",
+  inputSchema: z.object({ project: z.string() }),
+  async *execute({ project }) {
+    yield { phase: "collecting", report: null };
+    const report = await buildReport(project);
+    yield { phase: "complete", report };
+  },
+});
+```
+
+eve publishes every earlier yield as an `action.partial` stream event. The
+snapshot is visible to channels, hooks, and clients but never enters model
+history or `toModelOutput`; only the final yield does. Treat snapshots as
+last-write-wins by tool call id, not append-only progress. The durable runtime
+can retry a step and replay overlapping snapshots.
+
+### Experimental background execution
+
+`defineTool({ execution: "background" })` receives a third `task` argument. Returning a normal
+value completes the durable task with that value. Returning `task.delegated({ executor, receipt })`
+returns a `working` receipt immediately while an external executor continues the task.
+The root agent must enable `experimental.tasks`; eve rejects background tools at build time otherwise.
+
+This contract currently supports framework-owned task executors, including local and remote
+subagents when `experimental.tasks` is enabled. After delegating, an in-process executor reports
+progress with `task.send({ kind: "update", message })` and the terminal result with
+`task.send({ kind: "complete", data })` (or `fail` / `cancel`). `send` is not restart-safe — an
+in-memory callback dies with the process — so the cross-process executor wire remains
+framework-owned and is not yet a stable authored-tool API.
+
+After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
+cohort and instructs the model to acknowledge that the work started without waiting for results.
+Later task-triggered parent turns receive fresh state for the same cohort. The model is instructed
+to keep related intermediate results silent while any task remains pending. Once every related
+task is terminal, the state includes their outputs so the model can combine the useful results.
 
 ### The `ctx` parameter
 
@@ -38,6 +82,7 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 
 - `ctx.session`: session metadata, turn, auth, parent lineage.
 - `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
+- `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
 - `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 - `ctx.getSkill(id)`: read a packaged [skill](/docs/skills)'s metadata and files.
@@ -45,6 +90,20 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
 
 eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
+
+## When a tool throws
+
+If an authored tool's `execute` function throws, eve records a failed `action.result` and gives the error to the model as a tool error. The model can respond, choose another action, or call the tool again. eve does not automatically call the tool again based on the exception type, an upstream HTTP status, or a `retryable` property.
+
+Authored tools have no public terminal-error class or retry policy for thrown exceptions. Handle retry policy inside the tool when the operation is safe to retry, and return or throw an actionable error when it is not. Do not rely on that distinction to protect a write: an interruption before the durable step completes can re-run the step and execute the tool again even if the first request reached the upstream service.
+
+Protect non-idempotent operations with the strongest mechanism the service supports:
+
+1. Pass a stable idempotency key to the upstream API.
+2. Otherwise, record a unique application operation before writing and check it on every attempt.
+3. Use human approval when a person must authorize each execution, not as a substitute for deduplication after an ambiguous network result.
+
+See [Execution model and durability](/docs/concepts/execution-model-and-durability#resuming-after-a-crash) for step replay semantics. For one-way provider notifications, see [Durable cross-channel notifications](/docs/patterns/durable-cross-channel-notifications).
 
 ## Gate a tool on human approval
 
@@ -77,9 +136,38 @@ toModelOutput(output) {
 },
 ```
 
-`toModelOutput` receives the full, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
+`toModelOutput` receives the final, typed `execute` return and only affects the model. Channel event handlers and hooks still get the full output on `action.result`, so a channel can render rich platform output (Slack Block Kit, say) the model never sees. Return `{ type: "text", value }` for a summary, or `{ type: "json", value }` for a smaller object.
 
 Tool outputs must be JSON-serializable. Return plain objects, arrays, strings, numbers, booleans, or `null`; convert values like `Date`, `Map`, `Set`, `NaN`, and cyclic objects before returning them from `execute` or from a `{ type: "json" }` `toModelOutput`.
+
+### Send images to the model with content parts
+
+A tool that produces an image — a screenshot, a rendered chart — can hand the pixels to a vision-capable model by returning a `content` output from `toModelOutput`. Build outputs with the `toolOutput` helpers and parts with the `toolOutputPart` helpers, both from `eve/tools`:
+
+```ts
+import { defineTool, toolOutput, toolOutputPart } from "eve/tools";
+
+export default defineTool({
+  description: "Capture a screenshot of the current page",
+  inputSchema: z.object({ url: z.string() }),
+  async execute(input) {
+    const png = await captureScreenshot(input.url);
+    return { path: png.path, screenshotBase64: png.base64 };
+  },
+  toModelOutput(output) {
+    return toolOutput.content([
+      toolOutputPart.text(`Screenshot of ${output.path}:`),
+      toolOutputPart.file(output.screenshotBase64, { mediaType: "image/png" }),
+    ]);
+  },
+});
+```
+
+The `toolOutput.text` and `toolOutput.json` builders construct the other two output shapes; hand-written literals remain valid everywhere.
+
+File payloads must be base64 strings — raw bytes (`Uint8Array`, `Buffer`) are rejected because they do not survive eve's durable JSON boundary. Keep payloads small: a content-part image is persisted in session history and re-sent on every subsequent model call, and eve warns above 3 MiB. Sending image parts to a model without vision support fails with that provider's error, the same as image parts in user messages.
+
+When older turns are compacted, file payloads are dropped from the summary and replaced with a text stub naming the file and media type — the model cannot re-see a compacted image. Content parts are for "look at this now"; if the agent may need an artifact again later, write it to the [sandbox](/docs/sandbox) and return its path.
 
 Do not return secrets, credentials, unnecessary personal data, or unbounded sensitive content from tools. Filter, minimize, and redact tool outputs before returning them.
 
@@ -87,6 +175,6 @@ Do not return secrets, credentials, unnecessary personal data, or unbounded sens
 
 - [Human-in-the-loop](./human-in-the-loop): gate a tool on approval, or have the agent ask a question
 - [Skills](/docs/skills): on-demand procedures the model loads when relevant
-- [Default harness](/docs/concepts/default-harness): the built-in tools and how to override or disable them
+- [Built-in tools](/docs/concepts/built-in-tools): the default and opt-in framework tools and how to override or disable them
 - [Dynamic capabilities](/docs/guides/dynamic-capabilities): tools whose set is resolved per session with `defineDynamic`
-- [Auth & route protection](/docs/guides/auth-and-route-protection): authenticate a tool to an external service
+- [Authentication](/docs/guides/auth-and-route-protection): authenticate a tool to an external service

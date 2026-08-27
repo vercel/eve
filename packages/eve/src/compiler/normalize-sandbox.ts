@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import type { SandboxSourceRef } from "#discover/manifest.js";
 import { normalizeSandboxDefinition } from "#internal/authored-definition/sandbox.js";
@@ -16,20 +15,19 @@ import { toErrorMessage } from "#shared/errors.js";
  * definition stored on the compiled agent manifest.
  */
 export async function compileSandboxDefinition(
-  agentRoot: string,
+  _agentRoot: string,
   source: SandboxSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledSandboxDefinition> {
   const message = `Expected the sandbox export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
-  const normalized = normalizeSandboxDefinition(
-    await loadModuleBackedDefinition({
-      agentRoot,
-      externalDependencies: options.externalDependencies,
-      kind: "sandbox",
-      source,
-    }),
-    message,
-  );
+  const loaded = await loadModuleBackedDefinition({
+    binding: options.binding,
+    kind: "sandbox",
+    loadNamespace: options.loadNamespace,
+    source,
+  });
+  const inheritsParent = await resolveParentSandboxSelector(loaded, message);
+  const normalized = normalizeSandboxDefinition(inheritsParent ? {} : loaded, message);
   const revalidationKey =
     normalized.revalidationKey === undefined
       ? undefined
@@ -42,10 +40,11 @@ export async function compileSandboxDefinition(
   return {
     backendName: resolveCompiledBackendName(normalized.backend),
     description: normalized.description,
+    inheritsParent: inheritsParent || undefined,
     exportName: source.exportName,
     logicalPath: source.logicalPath,
     revalidationKey,
-    sourceHash: await resolveSandboxSourceHash(agentRoot, source),
+    sourceHash: await resolveSandboxSourceHash(options.binding),
     sourceId: source.sourceId,
     sourceKind: "module",
   };
@@ -59,6 +58,33 @@ export async function compileSandboxDefinition(
  * fails at runtime, where the error surfaces with full context) and
  * simply leaves the name unrecorded.
  */
+const PARENT_SANDBOX_VALUE = Object.freeze({ __eveSandboxParentValue: Symbol("parent") });
+
+export async function resolveParentSandboxSelector(
+  value: unknown,
+  message: string,
+): Promise<boolean> {
+  if (typeof value !== "function") {
+    return false;
+  }
+
+  let selected: unknown;
+  try {
+    selected = await value({ parent: { sandbox: PARENT_SANDBOX_VALUE } });
+  } catch (error) {
+    throw new Error(
+      `${message} The callback passed to defineSandbox(...) threw while selecting parent.sandbox: ${toErrorMessage(error)}`,
+    );
+  }
+
+  if (selected !== PARENT_SANDBOX_VALUE) {
+    throw new Error(
+      `${message} The callback passed to defineSandbox(...) must return parent.sandbox. Export a sandbox definition object for an independent sandbox.`,
+    );
+  }
+  return true;
+}
+
 function resolveCompiledBackendName(
   backend: { readonly name: string } | undefined,
 ): string | undefined {
@@ -100,9 +126,13 @@ async function resolveSandboxRevalidationKey(input: {
 }
 
 async function resolveSandboxSourceHash(
-  agentRoot: string,
-  source: SandboxSourceRef,
+  binding: ModuleBackedDefinitionLoadOptions["binding"],
 ): Promise<string> {
-  const content = await readFile(join(agentRoot, source.logicalPath));
+  if (binding.backing.kind === "programmatic") {
+    return createHash("sha256")
+      .update(binding.backing.semanticRevision ?? binding.backing.revision)
+      .digest("hex");
+  }
+  const content = await readFile(binding.backing.sourcePath);
   return createHash("sha256").update(content).digest("hex");
 }

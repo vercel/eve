@@ -12,7 +12,7 @@ import type {
   DiscordComponentInteraction,
   DiscordModalSubmitInteraction,
 } from "#public/channels/discord/inbound.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const BASE_COMPONENT: Omit<
   DiscordComponentInteraction,
@@ -32,6 +32,7 @@ function request(overrides?: Partial<InputRequest>): InputRequest {
     prompt: "Choose one",
     requestId: "call_1",
     ...overrides,
+    kind: overrides?.kind ?? "question",
   };
 }
 
@@ -42,7 +43,7 @@ describe("renderInputRequestComponents", () => {
         display: "confirmation",
         options: [
           { id: "approve", label: "Approve", style: "primary" },
-          { id: "deny", label: "Deny", style: "danger" },
+          { id: "cancel", label: "Cancel", style: "danger" },
         ],
       }),
     );

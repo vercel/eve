@@ -1,6 +1,8 @@
+import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
+import { respond } from "./lib/mock-responder.js";
 
 export default defineAgent({
-  model: "anthropic/claude-sonnet-5",
+  ...e2eAgentConfig({ mock: respond }),
   reasoning: "high",
 });

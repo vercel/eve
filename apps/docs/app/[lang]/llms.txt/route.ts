@@ -1,10 +1,17 @@
-import { createLlmsRoute } from "@vercel/geistdocs/routes/llms";
-import { geistdocsSource } from "@/lib/geistdocs/source";
+import { cacheLife } from "next/cache";
+import { createLlmsIndex } from "@/lib/geistdocs/llms-index";
+import { supportedLanguages } from "@/lib/geistdocs/languages";
 
-export const revalidate = false;
+const getLlmsIndex = async () => {
+  "use cache";
+  cacheLife("max");
 
-const llmsRoute = createLlmsRoute({
-  sources: [geistdocsSource],
-});
+  return createLlmsIndex();
+};
 
-export const GET = llmsRoute.GET;
+export const GET = async () =>
+  new Response(await getLlmsIndex(), {
+    headers: { "Content-Type": "text/markdown; charset=utf-8" },
+  });
+
+export const generateStaticParams = () => supportedLanguages.map((lang) => ({ lang }));

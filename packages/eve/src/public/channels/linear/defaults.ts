@@ -3,8 +3,12 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
-import { renderLinearInputRequests } from "#public/channels/linear/hitl.js";
+import {
+  linearInputRequestSignal,
+  renderLinearInputRequests,
+} from "#public/channels/linear/hitl.js";
 import type { LinearAgentSessionEvent, LinearUser } from "#public/channels/linear/inbound.js";
+import type { SessionContext } from "#public/definitions/callback-context.js";
 import type {
   LinearChannelEvents,
   LinearInboundResult,
@@ -128,9 +132,62 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
     },
 
     async "input.requested"(event, channel, _ctx) {
+      const signal = linearInputRequestSignal(event.requests);
+      await postActivity(
+        channel,
+        options,
+        {
+          body: renderLinearInputRequests(event.requests),
+          type: "elicitation",
+        },
+        signal,
+      );
+    },
+
+    async "authorization.required"(event, channel, ctx) {
+      const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
+      const url = event.authorization?.url;
+      const userId = linearUserId(ctx);
+      let authSignal: Parameters<typeof postActivity>[3];
+      if (url !== undefined) {
+        const signalMetadata: Record<string, string> = { providerName: displayName, url };
+        if (userId !== undefined) signalMetadata.userId = userId;
+        authSignal = { signal: "auth", signalMetadata };
+      }
+      await postActivity(
+        channel,
+        options,
+        {
+          body: authorizationRequiredBody({
+            displayName,
+            instructions: event.authorization?.instructions,
+            userCode: event.authorization?.userCode,
+          }),
+          type: "elicitation",
+        },
+        authSignal,
+      );
+    },
+
+    async "authorization.completed"(event, channel, _ctx) {
+      const displayName = authorizationDisplayName(event.name, event.authorization?.displayName);
+      if (event.outcome === "authorized") {
+        await postActivity(
+          channel,
+          options,
+          {
+            body: `Connected to ${displayName}. Resuming.`,
+            type: "thought",
+          },
+          { ephemeral: true },
+        );
+        return;
+      }
+
+      const reason = event.reason === undefined ? "" : ` (${event.reason})`;
       await postActivity(channel, options, {
-        body: renderLinearInputRequests(event.requests),
-        type: "elicitation",
+        body: `${displayName} authorization ${formatAuthorizationOutcome(event.outcome)}${reason}.`,
+        type: "thought",
       });
     },
 
@@ -185,6 +242,10 @@ function postActivity(
   content: Parameters<typeof createLinearAgentActivity>[0]["activity"]["content"],
   activityOptions: {
     readonly ephemeral?: boolean;
+    readonly signal?: Parameters<typeof createLinearAgentActivity>[0]["activity"]["signal"];
+    readonly signalMetadata?: Parameters<
+      typeof createLinearAgentActivity
+    >[0]["activity"]["signalMetadata"];
   } = {},
 ): Promise<{ readonly id: string; readonly success: boolean }> {
   return createLinearAgentActivity({
@@ -194,6 +255,8 @@ function postActivity(
       agentSessionId: requireAgentSessionId(channel.state.agentSessionId),
       content,
       ephemeral: activityOptions.ephemeral,
+      signal: activityOptions.signal,
+      signalMetadata: activityOptions.signalMetadata,
     },
   });
 }
@@ -207,6 +270,35 @@ function requireAgentSessionId(agentSessionId: string | null): string {
 
 function linearUserLabel(user: LinearUser): string | undefined {
   return user.displayName ?? user.name ?? user.email;
+}
+
+function authorizationDisplayName(name: string, displayName: string | undefined): string {
+  if (displayName !== undefined) return displayName;
+  if (name.length === 0) return name;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function authorizationRequiredBody(input: {
+  readonly displayName: string;
+  readonly instructions?: string;
+  readonly userCode?: string;
+}): string {
+  return [
+    `Authorization required for ${input.displayName}.`,
+    input.instructions,
+    input.userCode === undefined ? undefined : `Code: ${input.userCode}`,
+  ]
+    .filter((part): part is string => part !== undefined && part.length > 0)
+    .join("\n\n");
+}
+
+function linearUserId(ctx: SessionContext): string | undefined {
+  const auth = ctx.session.auth.current;
+  return auth?.authenticator === "linear-agent-webhook" ? auth.subject : undefined;
+}
+
+function formatAuthorizationOutcome(outcome: "declined" | "failed" | "timed-out"): string {
+  return outcome === "timed-out" ? "timed out" : outcome;
 }
 
 function firstNonEmptyLine(text: string): string | undefined {

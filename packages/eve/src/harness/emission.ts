@@ -9,11 +9,15 @@ import type {
 
 type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 type InlineToolResultPart = Extract<ToolResponsePart, { type: "tool-result" }>;
-type InlineToolResultJsonValue = Extract<InlineToolResultPart["output"], { type: "json" }>["value"];
 
-import type { AssistantStepFinishReason, RuntimeIdentity } from "#protocol/message.js";
+import type {
+  AssistantStepFinishReason,
+  RuntimeIdentity,
+  RuntimeTraceContext,
+} from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
+  createActionPartialEvent,
   createActionResultEvent,
   createMessageAppendedEvent,
   createMessageCompletedEvent,
@@ -32,99 +36,33 @@ import {
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import { toError } from "#shared/errors.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
+import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import {
-  createRuntimeActionRequestFromToolCall,
-  resolveToolCallInputObject,
-} from "#harness/runtime-actions.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
-import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
-import { contextStorage } from "#context/container.js";
-import { readToolInterrupt } from "#harness/tool-interrupts.js";
+  createInvalidToolCallInputError,
+  isInvalidToolCall,
+  resolveProviderToolCallRequest,
+} from "#harness/tool-call-input-errors.js";
+import type { RuntimeActionRequest, RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
-import type {
-  HarnessEmitFn,
-  HarnessSession,
-  HarnessToolMap,
-  SessionStateMap,
-  StepInput,
-} from "#harness/types.js";
+import { normalizeModelStreamError } from "#harness/model-call-error.js";
+import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
+import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
+import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
+import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
 
-// ---------------------------------------------------------------------------
-// Emission state
-// ---------------------------------------------------------------------------
-
-/**
- * Tracks emission lifecycle state across harness step invocations.
- *
- * Persisted on `session.state` so the state survives when the durable
- * workflow runtime recreates the harness at each `"use step"` boundary.
- */
-export interface HarnessEmissionState {
-  readonly sessionStarted: boolean;
-  readonly sequence: number;
-  readonly stepIndex: number;
-  readonly turnId: string;
-}
-
-const HARNESS_EMISSION_STATE_KEY = "eve.harness.emission";
-
-const DEFAULT_EMISSION_STATE: HarnessEmissionState = {
-  sessionStarted: false,
-  sequence: 0,
-  stepIndex: 0,
-  turnId: "",
-};
-
-/** Reads the emission state, returning defaults when absent. */
-export function getHarnessEmissionState(state: SessionStateMap | undefined): HarnessEmissionState {
-  const emissionState = state?.[HARNESS_EMISSION_STATE_KEY] as HarnessEmissionState | undefined;
-  return emissionState ?? DEFAULT_EMISSION_STATE;
-}
-
-/**
- * Returns `true` when the harness is **between turns** — either no turn
- * has started yet (initial state) or the previous turn has emitted its
- * epilogue (or recoverable failure cascade) and reset.
- *
- * Returns `false` while a turn is in progress, including during
- * tool-loop continuations and runtime-action resumes within the same
- * turn. Callers that gate per-turn work (eg. lifecycle hook dispatch)
- * use this predicate to distinguish a fresh delivery from a
- * continuation of an in-flight turn.
- *
- * Implemented over the empty-`turnId` sentinel that `emitTurnEpilogue`
- * and `emitRecoverableFailedTurn` write — clients should never read
- * `state.turnId` directly to make this distinction.
- */
-export function isHarnessBetweenTurns(session: HarnessSession): boolean {
-  return getHarnessEmissionState(session.state).turnId === "";
-}
-
-/**
- * Writes the emission state onto a new copy of the session.
- */
-export function setHarnessEmissionState(
-  session: HarnessSession,
-  state: HarnessEmissionState,
-): HarnessSession {
-  return {
-    ...session,
-    state: {
-      ...session.state,
-      [HARNESS_EMISSION_STATE_KEY]: state,
-    },
-  };
-}
+export {
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission-state.js";
+export type { HarnessEmissionState } from "#harness/emission-state.js";
 
 // ---------------------------------------------------------------------------
 // Turn lifecycle helpers
@@ -139,14 +77,15 @@ export async function emitTurnPreamble(
   input: StepInput,
   state: HarnessEmissionState,
   runtimeIdentity?: RuntimeIdentity,
+  traceContext?: RuntimeTraceContext,
 ): Promise<HarnessEmissionState> {
   const turnId = `turn_${state.sequence}`;
 
   if (!state.sessionStarted) {
-    await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity }));
+    await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
 
-  await emitFn(createTurnStartedEvent({ sequence: state.sequence, turnId }));
+  await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
 
   if (input.message !== undefined) {
     await emitFn(
@@ -172,10 +111,12 @@ export async function emitTurnPreamble(
 export async function emitStepStarted(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
+  modelId: string,
   messages?: readonly import("ai").ModelMessage[],
 ): Promise<void> {
   await emitFn(
     createStepStartedEvent({
+      modelId,
       sequence: state.sequence,
       stepIndex: state.stepIndex,
       turnId: state.turnId,
@@ -242,7 +183,7 @@ export async function emitFailedStep(
 export async function emitRecoverableFailedTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
-  input: FailedStepPayload,
+  input: FailedStepPayload & { readonly continuationToken: string },
 ): Promise<HarnessEmissionState> {
   await emitStepAndTurnFailed(emitFn, state, input);
   await emitFn(createSessionWaitingEvent());
@@ -273,12 +214,14 @@ export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
+  messages?: readonly import("ai").ModelMessage[],
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
       sequence: state.sequence,
       turnId: state.turnId,
     }),
+    messages,
   );
 
   if (mode === "conversation") {
@@ -325,15 +268,14 @@ export function normalizeAssistantStepFinishReason(
 /**
  * Result of consuming one step's `fullStream`.
  *
- * Inline results avoid duplicate post-step events. Approval-resume results
- * also repair persisted history or route authorization back to the park
- * detector.
+ * Inline results avoid duplicate post-step events. Approval-resume
+ * authorization results also route back to the park detector.
  */
 interface EmittedStreamContent {
   readonly emittedActionCallIds: ReadonlySet<string>;
   readonly handledInlineToolResultCallIds: ReadonlySet<string>;
+  readonly invalidInputToolCallIds: ReadonlySet<string>;
   readonly inlineAuthorizationResults: readonly TypedToolResult<ToolSet>[];
-  readonly inlineToolResultParts: readonly InlineToolResultPart[];
   readonly trailingInlineToolResultParts: readonly InlineToolResultPart[];
 }
 
@@ -356,6 +298,35 @@ export async function emitStreamContent(
   fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
   options?: StreamActionEmissionOptions,
 ): Promise<EmittedStreamContent> {
+  const orderedEmitter = createOrderedStreamEmitter(emitFn);
+  const providerActionBatch = createProviderStreamActionBatch({
+    emitFn: orderedEmitter.emit,
+    state,
+  });
+  try {
+    return await consumeStreamContent(
+      orderedEmitter.emit,
+      state,
+      interruptStreamOnFailure(fullStream, orderedEmitter.failureSignal),
+      providerActionBatch,
+      options,
+    );
+  } finally {
+    try {
+      await providerActionBatch.cancel();
+    } finally {
+      await orderedEmitter.closeAndDrain();
+    }
+  }
+}
+
+async function consumeStreamContent(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+  fullStream: AsyncIterable<TextStreamPart<ToolSet>>,
+  providerActionBatch: ReturnType<typeof createProviderStreamActionBatch>,
+  options?: StreamActionEmissionOptions,
+): Promise<EmittedStreamContent> {
   let currentReasoning = "";
   let currentMessage = "";
   let finishReason: AssistantStepFinishReason = "stop";
@@ -364,10 +335,9 @@ export async function emitStreamContent(
   const emittedActionCallIds = new Set<string>();
   const emittedActionResultCallIds = new Set<string>();
   const providerToolCallIdsSeen = new Set<string>();
-  const providerActionBatch = createProviderStreamActionBatch({ emitFn, state });
   const handledInlineToolResultCallIds = new Set<string>();
+  const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
-  const inlineToolResultParts: InlineToolResultPart[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
 
   const flushCurrentMessage = async (): Promise<void> => {
@@ -424,15 +394,18 @@ export async function emitStreamContent(
       await flushCurrentMessage();
     }
 
-    providerActionBatch.observe({
-      callId: toolCall.toolCallId,
-      input: resolveToolCallInputObject(toolCall.input, {
-        callId: toolCall.toolCallId,
-        toolName: toolCall.toolName,
-      }),
-      kind: "tool-call",
-      toolName: toolCall.toolName,
-    });
+    const resolved = resolveProviderToolCallRequest(toolCall);
+    if (resolved.toolError !== undefined) {
+      invalidInputToolCallIds.add(toolCall.toolCallId);
+      await emitActionResult(createRuntimeToolResultFromToolError(resolved.toolError));
+      handledInlineToolResultCallIds.add(toolCall.toolCallId);
+      trailingInlineToolResultParts.push(
+        createToolResultMessagePartFromToolError(resolved.toolError),
+      );
+      return;
+    }
+
+    providerActionBatch.observe(resolved.request);
   };
 
   const emitActionResult = async (result: RuntimeToolResultActionResult): Promise<void> => {
@@ -450,12 +423,23 @@ export async function emitStreamContent(
     );
   };
 
+  const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
+    await emitFn(
+      createActionPartialEvent({
+        result,
+        sequence: state.sequence,
+        stepIndex: state.stepIndex,
+        turnId: state.turnId,
+      }),
+    );
+  };
+
   const emitToolCall = async (toolCall: TypedToolCall<ToolSet>): Promise<void> => {
-    if (
-      options === undefined ||
-      toolCall.invalid === true ||
-      options.excludedActionToolNames.has(toolCall.toolName)
-    ) {
+    if (isInvalidToolCall(toolCall)) {
+      invalidInputToolCallIds.add(toolCall.toolCallId);
+      return;
+    }
+    if (options === undefined || options.excludedActionToolNames.has(toolCall.toolName)) {
       return;
     }
 
@@ -467,10 +451,15 @@ export async function emitStreamContent(
         }),
       );
     } catch (error) {
-      // A malformed tool call can arrive before the SDK marks its final call
-      // invalid. Let the SDK's recovery path handle it instead of failing the
-      // whole step while projecting UI events.
       if (error instanceof TypeError) {
+        const toolError = createInvalidToolCallInputError({ error, toolCall });
+        invalidInputToolCallIds.add(toolCall.toolCallId);
+        if (currentMessage.trim().length > 0) {
+          await flushCurrentMessage();
+        }
+        await emitActionResult(createRuntimeToolResultFromToolError(toolError));
+        handledInlineToolResultCallIds.add(toolCall.toolCallId);
+        trailingInlineToolResultParts.push(createToolResultMessagePartFromToolError(toolError));
         return;
       }
       throw error;
@@ -534,8 +523,10 @@ export async function emitStreamContent(
       }
       case "tool-result": {
         const inlineToolResult = part as TypedToolResult<ToolSet>;
-        // Preliminary chunks can be superseded by the terminal result.
         if (inlineToolResult.preliminary === true) {
+          if (inlineToolResult.providerExecuted !== true) {
+            await emitActionPartial(createRuntimeToolResultFromStepResult(inlineToolResult));
+          }
           break;
         }
         if (inlineToolResult.providerExecuted === true) {
@@ -575,17 +566,6 @@ export async function emitStreamContent(
         }
         await emitActionResult(createRuntimeToolResultFromStepResult(inlineToolResult));
         handledInlineToolResultCallIds.add(part.toolCallId);
-        // Preserve the SDK's text/json output shape in persisted history.
-        const rawOutput: unknown = inlineToolResult.output;
-        inlineToolResultParts.push({
-          type: "tool-result",
-          toolCallId: inlineToolResult.toolCallId,
-          toolName: inlineToolResult.toolName,
-          output:
-            typeof rawOutput === "string"
-              ? { type: "text", value: rawOutput }
-              : { type: "json", value: (rawOutput ?? null) as InlineToolResultJsonValue },
-        });
         break;
       }
       case "tool-error": {
@@ -611,7 +591,7 @@ export async function emitStreamContent(
         // so plain-object shapes (structured-clone survivors, typed
         // gateway payloads) keep their `message`, `name`, `stack`, and
         // `cause` instead of degrading to `new Error("[object Object]")`.
-        streamError = toError(part.error);
+        streamError = normalizeModelStreamError(part.error);
         break;
       case "abort":
         // The SDK does not resolve step results for aborted in-flight steps.
@@ -666,20 +646,8 @@ export async function emitStreamContent(
   return {
     emittedActionCallIds,
     handledInlineToolResultCallIds,
+    invalidInputToolCallIds,
     inlineAuthorizationResults,
-    inlineToolResultParts,
     trailingInlineToolResultParts,
   };
-}
-
-function isInlineAuthorizationToolResult(toolResult: TypedToolResult<ToolSet>): boolean {
-  if (isPendingAuthorizationToolOutput(toolResult.output)) {
-    return true;
-  }
-  const ctx = contextStorage.getStore();
-  if (ctx === undefined) {
-    return false;
-  }
-  const stashed = readToolInterrupt(ctx, toolResult.toolCallId);
-  return stashed !== undefined && isAuthorizationSignal(stashed);
 }

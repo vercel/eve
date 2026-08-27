@@ -4,10 +4,14 @@
  */
 export {
   defineSandbox,
+  type SandboxAncestorReference,
   type SandboxBootstrapContext,
   type SandboxBootstrapUseFn,
   type SandboxCommandResult,
   type SandboxDefinition,
+  type SandboxParentDefinition,
+  type SandboxParentDefinitionContext,
+  type SandboxParentValue,
   type SandboxProcess,
   type SandboxReadBinaryFileOptions,
   type SandboxReadFileOptions,
@@ -15,6 +19,7 @@ export {
   type SandboxRevalidationKeyFn,
   type SandboxRunOptions,
   type SandboxSession,
+  type RuntimeSandboxSession,
   type SandboxSpawnOptions,
   type SandboxSessionContext,
   type SandboxSessionUseFn,

@@ -10,12 +10,19 @@ export {
   type AgentModelDefinition,
   type AgentModelOptionsDefinition,
   type AgentReasoningDefinition,
+  type AgentStaticModelDefinition,
   type AgentWorkflowDefinition,
   type AgentWorkflowWorldDefinition,
+  type DefinedAgent,
+  type DynamicSubagentDefinition,
+  type DynamicLocalSubagentDefinition,
   defineAgent,
+  defineDynamic,
 } from "#public/definitions/agent.js";
+export type { DynamicResolveContext, DynamicSentinel } from "#dynamic/definition.js";
 export {
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
+  type RemoteAgentUrl,
   defineRemoteAgent,
 } from "#public/definitions/remote-agent.js";

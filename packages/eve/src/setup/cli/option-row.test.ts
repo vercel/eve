@@ -81,14 +81,15 @@ describe("renderOptionRow", () => {
     );
   });
 
-  test("hovering a row takes over the icon column, even when checked", () => {
+  test("hovering a checked row keeps its check inside the highlight", () => {
+    // The highlight says "active", not "press to activate": the check stays.
     expect(
       row({
         label: "Web Chat",
         isCursor: true,
         state: { kind: "available", checked: true },
       }),
-    ).toBe("<inverse><blue> ▶ Web Chat </blue></inverse>");
+    ).toBe("<inverse><blue> ✓ Web Chat </blue></inverse>");
   });
 
   test("a completed row under the cursor reads as inert: a dim pointer and dim label", () => {

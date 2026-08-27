@@ -37,6 +37,42 @@ describe("createMockAuthoredRuntimeModel", () => {
     expect(shouldMockAuthoredRuntimeModels()).toBe(true);
   });
 
+  it("emits a message-only input for delegated agent calls", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Delegate to a subagent: use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: {
+              message: { type: "string" },
+            },
+            required: ["message"],
+            type: "object",
+          },
+          name: "agent",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({
+          message: "use the wait_for_cancel tool.",
+        }),
+        toolCallId: "call_agent",
+        toolName: "agent",
+        type: "tool-call",
+      },
+    ]);
+  });
+
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {
@@ -414,6 +450,37 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("builds empty input for an explicitly empty object schema", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: {},
+            type: "object",
+          },
+          name: "wait_for_cancel",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({}),
+        toolCallId: "call_wait_for_cancel",
+        toolName: "wait_for_cancel",
+        type: "tool-call",
+      },
+    ]);
+  });
+
   it("replies with exact fixture text from system context", async () => {
     const result = await generateWithPrompt([
       {
@@ -632,6 +699,68 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  // Regression: the [Agents] announcement is user-role scaffolding injected
+  // after a subagent settles. Treating it as a turn boundary masked the tool
+  // result, and the adapter re-issued the same deterministic tool call — a
+  // duplicate start operation that fatally failed the parent session in the
+  // mock world suites.
+  it("replies to a tool result behind a framework [Agents] announcement instead of re-calling", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Call conditional-marker exactly once.",
+          role: "user",
+        },
+        {
+          content: [
+            {
+              input: JSON.stringify({ message: "run" }),
+              toolCallId: "call_conditional_marker",
+              toolName: "conditional-marker",
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+        {
+          content: [
+            {
+              output: { type: "json", value: "DYNAMIC_SUBAGENT_ENABLED" },
+              toolCallId: "call_conditional_marker",
+              toolName: "conditional-marker",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        {
+          content:
+            '[Agents]\n<agents>\n<agent id="ag_conditional-marker:5ae9bfd35776" name="conditional-marker">DYNAMIC_SUBAGENT_ENABLED</agent>\n</agents>',
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            properties: { message: { type: "string" } },
+            required: ["message"],
+            type: "object",
+          },
+          name: "conditional-marker",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.finishReason).toEqual({ raw: undefined, unified: "stop" });
+    expect(result.content).toEqual([
+      {
+        text: 'Used conditional-marker for "Call conditional-marker exactly once.": DYNAMIC_SUBAGENT_ENABLED',
+        type: "text",
+      },
+    ]);
+  });
+
   it("does not reuse a prior turn's tool result after a later user message", async () => {
     const result = await generateWithPrompt([
       {
@@ -658,6 +787,39 @@ describe("createMockAuthoredRuntimeModel", () => {
         type: "text",
       },
     ]);
+  });
+
+  it("calls an explicit list of authored tools in parallel", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: [
+            "Call tools in parallel: local-sleeper, remote-sleeper",
+            'message: "Use wait-for-cancel."',
+          ].join("\n"),
+          role: "user",
+        },
+      ],
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        inputSchema: {
+          properties: { message: { type: "string" } },
+          required: ["message"],
+          type: "object",
+        },
+        name,
+        type: "function",
+      })),
+    );
+
+    expect(result.finishReason).toEqual({ raw: undefined, unified: "tool-calls" });
+    expect(result.content).toEqual(
+      ["local-sleeper", "remote-sleeper"].map((name) => ({
+        input: JSON.stringify({ message: "Use wait-for-cancel." }),
+        toolCallId: `call_${name.replaceAll("-", "_")}`,
+        toolName: name,
+        type: "tool-call",
+      })),
+    );
   });
 
   it("calls final_output with a schema-shaped sample when the tool is offered", async () => {

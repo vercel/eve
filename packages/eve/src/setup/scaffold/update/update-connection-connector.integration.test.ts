@@ -34,6 +34,21 @@ describe("updateConnectionConnectorUid", () => {
     expect(updated).toContain('import { connect } from "@vercel/connect/eve";');
   });
 
+  test("rewrites the connector UID in the connect object form", async () => {
+    const path = await writeTemp(
+      [
+        'import { connect } from "@vercel/connect/eve";',
+        "export default defineMcpClientConnection({",
+        '  auth: connect({ connector: "honeycomb", principalType: "app" }),',
+        "});",
+        "",
+      ].join("\n"),
+    );
+
+    expect((await updateConnectionConnectorUid(path, "oauth/honeycomb-123")).patched).toBe(true);
+    expect(await readFile(path, "utf8")).toContain('connector: "oauth/honeycomb-123"');
+  });
+
   test("returns patched: false when there is no connect() call", async () => {
     const path = await writeTemp("export default defineMcpClientConnection({});\n");
     expect((await updateConnectionConnectorUid(path, "oauth/x")).patched).toBe(false);

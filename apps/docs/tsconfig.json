@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "target": "ESNext",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
@@ -17,7 +16,7 @@
     "incremental": true,
     "paths": {
       "@/*": ["./*"],
-      "@/.source": [".source"]
+      "@/.source": ["./.source"]
     },
     "plugins": [
       {
@@ -33,5 +32,6 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  // Registry mount templates are typechecked independently by registry/tsconfig.json.
+  "exclude": ["node_modules", "registry"]
 }

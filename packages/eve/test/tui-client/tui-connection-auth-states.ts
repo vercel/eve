@@ -1,6 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { ClientSession, MessageResponse, type HandleMessageStreamEvent } from "eve/client";
+import { ClientSession, MessageResponse, type MessageStreamEvent } from "eve/client";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { EveTUIRunner, MockScreen, MockUserInput } from "./lib/tui.ts";
 
 import { theme } from "./lib/theme.ts";
@@ -30,23 +31,21 @@ import { theme } from "./lib/theme.ts";
  */
 
 class FakeSession extends ClientSession {
-  readonly #turns: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
-  readonly #continuations: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
+  readonly #turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
+  readonly #continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
   #turnIndex = 0;
   #continuationIndex = 0;
 
   constructor(input: {
-    turns: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
-    continuations: ReadonlyArray<readonly HandleMessageStreamEvent[]>;
+    turns: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
+    continuations: ReadonlyArray<readonly UnstampedMessageStreamEvent[]>;
   }) {
     super(
       {
         host: "http://fake.invalid",
-        maxReconnectAttempts: 0,
-        preserveCompletedSessions: false,
         resolveHeaders: async () => new Headers(),
       },
-      { streamIndex: 0 },
+      { sessionId: "fake-session", streamIndex: 0 },
     );
     this.#turns = input.turns;
     this.#continuations = input.continuations;
@@ -56,24 +55,38 @@ class FakeSession extends ClientSession {
     const events = this.#turns[this.#turnIndex] ?? [];
     this.#turnIndex += 1;
     return new MessageResponse<TOutput>({
+      cancelTurn: async () => ({ status: "no_active_turn" }),
       sessionId: "fake-session",
-      continuationToken: `fake-token-${this.#turnIndex}`,
       createStream: () => pacedEvents(events),
     });
   }
 
-  override stream(): AsyncIterable<HandleMessageStreamEvent> {
+  override stream(): AsyncIterable<MessageStreamEvent> {
+    // A durable session tail cannot expose a callback continuation before
+    // the turn that parked for that callback has been accepted.
+    if (this.#continuationIndex >= this.#turnIndex) return pacedEvents([]);
     const events = this.#continuations[this.#continuationIndex] ?? [];
     this.#continuationIndex += 1;
     return pacedEvents(events);
   }
 }
 
+let nextEventIndex = 0;
+
+/** Stamps a fixture event the way an emit seam does before it hits the wire. */
+function stamp(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+  nextEventIndex += 1;
+  return {
+    ...event,
+    meta: { at: new Date().toISOString(), id: `evt_smoke_${nextEventIndex}` },
+  } as MessageStreamEvent;
+}
+
 async function* pacedEvents(
-  events: readonly HandleMessageStreamEvent[],
-): AsyncGenerator<HandleMessageStreamEvent> {
+  events: readonly UnstampedMessageStreamEvent[],
+): AsyncGenerator<MessageStreamEvent> {
   for (const event of events) {
-    yield event;
+    yield stamp(event);
     // Pacing gives the renderer and smoke assertions a chance to observe
     // each lifecycle state between events, as the HTTP transport does live.
     await sleep(200);
@@ -86,10 +99,10 @@ const stepIndex = 0;
 let sequence = 0;
 const next = () => ++sequence;
 
-const firstTurn: HandleMessageStreamEvent[] = [
+const firstTurn: UnstampedMessageStreamEvent[] = [
   { type: "session.started", data: {} },
   { type: "turn.started", data: { sequence: next(), turnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId } },
+  { type: "step.started", data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId } },
   {
     type: "authorization.required",
     data: {
@@ -110,10 +123,14 @@ const firstTurn: HandleMessageStreamEvent[] = [
     type: "step.completed",
     data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
 ];
 
-const firstCallbackTurn: HandleMessageStreamEvent[] = [
+const firstCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-1" } },
   {
     type: "authorization.completed",
     data: {
@@ -121,20 +138,27 @@ const firstCallbackTurn: HandleMessageStreamEvent[] = [
       outcome: "authorized",
       sequence: next(),
       stepIndex,
-      turnId,
+      turnId: "turn-1",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-1" },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-1" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
 ];
 
-const secondTurnId = "turn-1";
-const secondTurn: HandleMessageStreamEvent[] = [
+const secondTurnId = "turn-2";
+const secondTurn: UnstampedMessageStreamEvent[] = [
   { type: "turn.started", data: { sequence: next(), turnId: secondTurnId } },
-  { type: "step.started", data: { sequence: next(), stepIndex, turnId: secondTurnId } },
+  {
+    type: "step.started",
+    data: { modelId: "eve-mock/test", sequence: next(), stepIndex, turnId: secondTurnId },
+  },
   {
     type: "authorization.required",
     data: {
@@ -153,10 +177,14 @@ const secondTurn: HandleMessageStreamEvent[] = [
     type: "step.completed",
     data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
 ];
 
-const secondCallbackTurn: HandleMessageStreamEvent[] = [
+const secondCallbackTurn: UnstampedMessageStreamEvent[] = [
+  { type: "turn.started", data: { sequence: next(), turnId: "turn-3" } },
   {
     type: "authorization.completed",
     data: {
@@ -165,14 +193,18 @@ const secondCallbackTurn: HandleMessageStreamEvent[] = [
       reason: "access_denied",
       sequence: next(),
       stepIndex,
-      turnId: secondTurnId,
+      turnId: "turn-3",
     },
   },
   {
     type: "step.completed",
-    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: secondTurnId },
+    data: { finishReason: "stop", sequence: next(), stepIndex, turnId: "turn-3" },
   },
-  { type: "session.waiting", data: { wait: "next-user-message" } },
+  { type: "turn.completed", data: { sequence: next(), turnId: "turn-3" } },
+  {
+    type: "session.waiting",
+    data: { continuationToken: "session-id", wait: "next-user-message" },
+  },
 ];
 
 process.env.EVE_TUI_UNICODE = "1";
@@ -199,7 +231,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     // ---- Turn 1: stub-mcp, ends in `authorized` ----
 
@@ -302,12 +334,13 @@ void (async () => {
     console.log(theme.muted("[states] failure reason surfaced"));
 
     // The turn is complete; wait until the runner is back at the prompt so
-    // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
-    // turn and returns to the prompt (Claude Code's two-step exit).
-    await screen.waitForText("❯", 10_000);
+    // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
+    await screen.waitForIdlePrompt(10_000);
+    input.ctrlC();
     input.ctrlC();
     await runPromise;
   } catch (error) {
+    input.ctrlC();
     input.ctrlC();
     await runPromise.catch(() => undefined);
     throw error;

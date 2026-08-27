@@ -1,12 +1,19 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { lstat, readlink, realpath } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import {
-  parseTsConfigObject,
   readTextFileIfExists,
   resolveTsConfigDependencyPaths,
 } from "#internal/application/tsconfig-dependencies.js";
+import {
+  isAuthoredSourcePath,
+  isPathInsideOrEqual,
+  resolveLocalTsConfigPathTargetRoots,
+  resolveNearestPackageRoot,
+} from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
+
+export { isAuthoredSourcePath } from "#internal/nitro/dev-runtime-source-snapshot-local-roots.js";
 
 export const DEV_RUNTIME_SOURCE_DIRECTORY = "source";
 
@@ -38,37 +45,41 @@ export class DevelopmentRuntimeSourceSnapshotError extends Error {
 export interface DevelopmentSourceSnapshotPlan {
   readonly appRoot: string;
   readonly copyFiles: readonly string[];
-  readonly copyRoots: readonly string[];
+  readonly dependencyMounts: readonly DevelopmentSourceSnapshotDependencyMount[];
   readonly runtimeAppRoot: string;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
   readonly sourceRoot: string;
-  readonly symlinks: readonly DevelopmentSourceSnapshotSymlink[];
   readonly tsconfigPaths: readonly string[];
   readonly watchPaths: readonly string[];
 }
 
-export interface DevelopmentSourceSnapshotSymlink {
-  readonly linkPath: string;
-  readonly targetKind: "external" | "local";
-  readonly targetPath: string;
+export interface DevelopmentSourceSnapshotDependencyMount {
+  readonly mountPath: string;
+  readonly sourceKind: "installed" | "workspace";
+  readonly sourcePath: string;
 }
 
 interface SnapshotPlanState {
   readonly appRoot: string;
   readonly copyFiles: Set<string>;
-  readonly copyRoots: Set<string>;
+  readonly dependencyMountsByPath: Map<string, DevelopmentSourceSnapshotDependencyMount>;
   readonly localRootsToProcess: string[];
   readonly processedLocalRoots: Set<string>;
   readonly snapshotRoot: string;
   readonly snapshotSourceRoot: string;
   readonly sourceRoot: string;
-  readonly symlinksByLinkPath: Map<string, DevelopmentSourceSnapshotSymlink>;
   readonly tsconfigPaths: Set<string>;
 }
 
 export async function createDevelopmentSourceSnapshotPlan(input: {
   readonly appRoot: string;
+  /**
+   * Workspace roots that host extension-authored source. Their dependency and
+   * tsconfig topology participates in watch and mount discovery before the
+   * authored module graph is materialized.
+   */
+  readonly authoredSourceRoots?: readonly string[];
   readonly snapshotRoot: string;
 }): Promise<DevelopmentSourceSnapshotPlan> {
   const appRoot = resolve(input.appRoot);
@@ -78,17 +89,20 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
   const state: SnapshotPlanState = {
     appRoot,
     copyFiles: new Set(),
-    copyRoots: new Set(),
+    dependencyMountsByPath: new Map(),
     localRootsToProcess: [appRoot],
     processedLocalRoots: new Set(),
     snapshotRoot,
     snapshotSourceRoot,
     sourceRoot,
-    symlinksByLinkPath: new Map(),
     tsconfigPaths: new Set(),
   };
 
-  addWorkspaceMetadataFiles(state);
+  const appPackageJsonPath = join(appRoot, "package.json");
+  if (existsSync(appPackageJsonPath)) {
+    state.copyFiles.add(appPackageJsonPath);
+  }
+  await addAuthoredSourceRoots(state, input.authoredSourceRoots ?? []);
 
   while (state.localRootsToProcess.length > 0) {
     const localRoot = state.localRootsToProcess.shift();
@@ -107,40 +121,37 @@ export async function createDevelopmentSourceSnapshotPlan(input: {
     }
 
     state.processedLocalRoots.add(resolvedLocalRoot);
-    state.copyRoots.add(resolvedLocalRoot);
 
     await addTsConfigDependenciesForRoot(state, resolvedLocalRoot);
-    await addDependencySymlinksForRoot(state, resolvedLocalRoot);
+    await addDependencyMountsForRoot(state, resolvedLocalRoot);
   }
 
-  const copyRoots = normalizeCopyRoots([...state.copyRoots]);
   const copyFiles = [...state.copyFiles]
     .filter((path) => isPathInsideOrEqual(path, sourceRoot))
     .sort((left, right) => left.localeCompare(right));
   const tsconfigPaths = [...state.tsconfigPaths]
     .filter((path) => isPathInsideOrEqual(path, sourceRoot))
     .sort((left, right) => left.localeCompare(right));
-  const symlinks = [...state.symlinksByLinkPath.values()].sort((left, right) =>
-    left.linkPath.localeCompare(right.linkPath),
+  const dependencyMounts = [...state.dependencyMountsByPath.values()].sort((left, right) =>
+    left.mountPath.localeCompare(right.mountPath),
   );
   const watchPaths = createWatchPaths({
     appRoot,
     copyFiles,
-    copyRoots,
+    dependencyMounts,
+    localRoots: [...state.processedLocalRoots],
     sourceRoot,
-    symlinks,
     tsconfigPaths,
   });
 
   return {
     appRoot,
     copyFiles,
-    copyRoots,
+    dependencyMounts,
     runtimeAppRoot: toSnapshotPath({ sourcePath: appRoot, sourceRoot, snapshotSourceRoot }),
     snapshotRoot,
     snapshotSourceRoot,
     sourceRoot,
-    symlinks,
     tsconfigPaths,
     watchPaths,
   };
@@ -166,12 +177,16 @@ export function toDevelopmentSourceSnapshotPath(input: {
   return toSnapshotPath(input);
 }
 
-function resolveDevelopmentSourceRoot(appRoot: string): string {
+/** Resolves the repository/workspace boundary used for authored development sources. */
+export function resolveDevelopmentSourceRoot(appRoot: string): string {
   let currentDirectory = resolve(appRoot);
 
   while (true) {
     if (
-      SOURCE_ROOT_MARKER_NAMES.some((markerName) => existsSync(join(currentDirectory, markerName)))
+      SOURCE_ROOT_MARKER_NAMES.some((markerName) =>
+        existsSync(join(currentDirectory, markerName)),
+      ) ||
+      isWorkspaceManifestRoot(currentDirectory)
     ) {
       return currentDirectory;
     }
@@ -186,13 +201,21 @@ function resolveDevelopmentSourceRoot(appRoot: string): string {
   }
 }
 
-function addWorkspaceMetadataFiles(state: SnapshotPlanState): void {
-  for (const fileName of WORKSPACE_METADATA_FILE_NAMES) {
-    const path = join(state.sourceRoot, fileName);
+async function addAuthoredSourceRoots(
+  state: SnapshotPlanState,
+  authoredSourceRoots: readonly string[],
+): Promise<void> {
+  for (const authoredSourceRoot of authoredSourceRoots) {
+    const resolvedRoot = resolve(authoredSourceRoot);
 
-    if (existsSync(path)) {
-      state.copyFiles.add(path);
+    if (!isAuthoredSourcePath(resolvedRoot, state.sourceRoot)) {
+      continue;
     }
+
+    const localRoot =
+      (await resolveNearestPackageRoot(resolvedRoot, state.sourceRoot)) ?? resolvedRoot;
+
+    enqueueLocalRoot(state, localRoot);
   }
 }
 
@@ -208,7 +231,6 @@ async function addTsConfigDependenciesForRoot(
     }
 
     state.tsconfigPaths.add(tsconfigPath);
-    state.copyFiles.add(tsconfigPath);
 
     for (const localRoot of await resolveLocalTsConfigPathTargetRoots({
       configPath: tsconfigPath,
@@ -219,66 +241,155 @@ async function addTsConfigDependenciesForRoot(
   }
 }
 
-async function addDependencySymlinksForRoot(
+async function addDependencyMountsForRoot(
   state: SnapshotPlanState,
   packageRoot: string,
 ): Promise<void> {
-  const dependencyNames = await readPackageDependencyNames(packageRoot);
+  const declarationRoot = resolveDependencyDeclarationRoot(packageRoot, state.sourceRoot);
+  const dependencyNames = await readPackageDependencyNames(declarationRoot);
 
   for (const dependencyName of dependencyNames) {
-    for (const nodeModulesRoot of [packageRoot, state.sourceRoot]) {
-      const linkPath = joinNodeModulesPackagePath(nodeModulesRoot, dependencyName);
-      await addDependencySymlink(state, linkPath);
+    for (const nodeModulesRoot of listAncestorNodeModulesRoots(packageRoot, state.sourceRoot)) {
+      const mountPath = joinNodeModulesPackagePath(nodeModulesRoot, dependencyName);
+      await addDependencyMount(state, mountPath);
     }
   }
 }
 
-async function addDependencySymlink(state: SnapshotPlanState, linkPath: string): Promise<void> {
-  let linkStats: Awaited<ReturnType<typeof lstat>>;
+/**
+ * An app root without its own `package.json` (a bare `withEve` agent
+ * directory) resolves imports through the nearest owning package. Its
+ * dependency declarations live there, not at the app root (vercel/eve#1151).
+ */
+function resolveDependencyDeclarationRoot(packageRoot: string, sourceRoot: string): string {
+  let currentDirectory = resolve(packageRoot);
+  const boundary = resolve(sourceRoot);
+
+  while (isPathInsideOrEqual(currentDirectory, boundary)) {
+    if (existsSync(join(currentDirectory, "package.json"))) {
+      return currentDirectory;
+    }
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      break;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+
+  return packageRoot;
+}
+
+/**
+ * Node resolution walks every ancestor `node_modules`. Mirror that walk up to
+ * the source boundary so hoisted installs — npm/yarn workspaces and
+ * intermediate monorepo levels — are materialized in the snapshot instead of
+ * only the package's own and the source root's `node_modules`
+ * (vercel/eve#1151).
+ */
+function listAncestorNodeModulesRoots(packageRoot: string, sourceRoot: string): string[] {
+  const boundary = resolve(sourceRoot);
+  const roots = new Set<string>();
+  let currentDirectory = resolve(packageRoot);
+
+  while (isPathInsideOrEqual(currentDirectory, boundary)) {
+    roots.add(currentDirectory);
+
+    const parentDirectory = dirname(currentDirectory);
+
+    if (parentDirectory === currentDirectory) {
+      break;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+
+  // A package root outside the boundary keeps the pre-existing two-point
+  // behavior: its own node_modules plus the source root's.
+  roots.add(resolve(packageRoot));
+  roots.add(boundary);
+
+  return [...roots];
+}
+
+/**
+ * npm and Yarn mark the workspace root only in `package.json` (`workspaces`),
+ * unlike pnpm's `pnpm-workspace.yaml`. Without recognizing it, a gitless npm
+ * workspace collapses the source root to the app root and hides the hoisted
+ * `node_modules` level from the snapshot (vercel/eve#1151).
+ */
+function isWorkspaceManifestRoot(directory: string): boolean {
+  const packageJsonPath = join(directory, "package.json");
+
+  if (!existsSync(packageJsonPath)) {
+    return false;
+  }
 
   try {
-    linkStats = await lstat(linkPath);
+    const packageJson: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+    return isObjectRecord(packageJson) && packageJson["workspaces"] !== undefined;
+  } catch {
+    return false;
+  }
+}
+
+async function addDependencyMount(state: SnapshotPlanState, mountPath: string): Promise<void> {
+  let mountStats: Awaited<ReturnType<typeof lstat>>;
+
+  try {
+    mountStats = await lstat(mountPath);
   } catch {
     return;
   }
 
-  if (!linkStats.isSymbolicLink()) {
+  if (!mountStats.isDirectory() && !mountStats.isSymbolicLink()) {
     return;
   }
 
-  const targetPathCandidates = await resolveSymlinkTargetPathCandidates(linkPath);
-  const localTargetPath = targetPathCandidates.find((candidate) =>
+  // Installation topology does not express ownership: npm and hoisted Yarn
+  // use directories where pnpm uses links for the same installed package.
+  const sourcePathCandidates = await resolveDependencySourcePathCandidates(mountPath);
+  const workspaceSourcePath = sourcePathCandidates.find((candidate) =>
     isAuthoredSourcePath(candidate, state.sourceRoot),
   );
 
-  if (localTargetPath !== undefined) {
-    await addLocalDependencySymlink({
-      linkPath,
+  if (workspaceSourcePath !== undefined) {
+    await addWorkspaceDependencyMount({
+      mountPath,
       state,
-      targetPath: localTargetPath,
+      sourcePath: workspaceSourcePath,
     });
     return;
   }
 
-  const externalTargetPath = targetPathCandidates.find((candidate) => existsSync(candidate));
+  const installedSourcePath = sourcePathCandidates.find((candidate) => existsSync(candidate));
 
-  if (externalTargetPath === undefined) {
+  if (installedSourcePath === undefined) {
     return;
   }
 
-  state.symlinksByLinkPath.set(resolve(linkPath), {
-    linkPath: resolve(linkPath),
-    targetKind: "external",
-    targetPath: externalTargetPath,
+  state.dependencyMountsByPath.set(resolve(mountPath), {
+    mountPath: resolve(mountPath),
+    sourceKind: "installed",
+    sourcePath: installedSourcePath,
   });
 }
 
-async function addLocalDependencySymlink(input: {
-  readonly linkPath: string;
+/**
+ * Workspace dependency packages are mounted in place rather than copied: the
+ * dev runtime resolves their contents through the real tree, the same way
+ * installed dependencies already resolve (vercel/eve#652). Their dependency
+ * closure is still discovered so externalized dependencies resolve from the
+ * same installation topology as the authored source bundle.
+ */
+async function addWorkspaceDependencyMount(input: {
+  readonly mountPath: string;
   readonly state: SnapshotPlanState;
-  readonly targetPath: string;
+  readonly sourcePath: string;
 }): Promise<void> {
-  const packageRoot = await resolveNearestPackageRoot(input.targetPath, input.state.sourceRoot);
+  const packageRoot = await resolveNearestPackageRoot(input.sourcePath, input.state.sourceRoot);
 
   if (packageRoot === undefined || !isAuthoredSourcePath(packageRoot, input.state.sourceRoot)) {
     return;
@@ -287,27 +398,27 @@ async function addLocalDependencySymlink(input: {
   const { state } = input;
 
   enqueueLocalRoot(state, packageRoot);
-  state.symlinksByLinkPath.set(resolve(input.linkPath), {
-    linkPath: resolve(input.linkPath),
-    targetKind: "local",
-    targetPath: packageRoot,
+  state.dependencyMountsByPath.set(resolve(input.mountPath), {
+    mountPath: resolve(input.mountPath),
+    sourceKind: "workspace",
+    sourcePath: packageRoot,
   });
 }
 
-async function resolveSymlinkTargetPathCandidates(linkPath: string): Promise<string[]> {
+async function resolveDependencySourcePathCandidates(mountPath: string): Promise<string[]> {
   const candidates = new Set<string>();
 
   try {
-    const declaredTarget = await readlink(linkPath);
-    candidates.add(resolve(dirname(linkPath), declaredTarget));
+    const declaredTarget = await readlink(mountPath);
+    candidates.add(resolve(dirname(mountPath), declaredTarget));
   } catch {
     // Continue to canonical target fallback below.
   }
 
   try {
-    candidates.add(await realpath(linkPath));
+    candidates.add(await realpath(mountPath));
   } catch {
-    // Broken symlinks are ignored by the caller.
+    // Broken dependency entries are ignored by the caller.
   }
 
   return [...candidates];
@@ -364,179 +475,12 @@ async function readPackageDependencyNames(packageRoot: string): Promise<string[]
   return [...dependencyNames].sort((left, right) => left.localeCompare(right));
 }
 
-async function resolveLocalTsConfigPathTargetRoots(input: {
-  readonly configPath: string;
-  readonly sourceRoot: string;
-}): Promise<string[]> {
-  const source = await readTextFileIfExists(input.configPath);
-
-  if (source === undefined) {
-    return [];
-  }
-
-  const parsedConfig = parseTsConfigObject(source);
-  const compilerOptions = isObjectRecord(parsedConfig?.compilerOptions)
-    ? parsedConfig.compilerOptions
-    : undefined;
-  const paths = isObjectRecord(compilerOptions?.paths) ? compilerOptions.paths : undefined;
-
-  if (compilerOptions === undefined || paths === undefined) {
-    return [];
-  }
-
-  const baseDirectory =
-    typeof compilerOptions.baseUrl === "string"
-      ? resolve(dirname(input.configPath), compilerOptions.baseUrl)
-      : dirname(input.configPath);
-  const localRoots = new Set<string>();
-
-  for (const targets of Object.values(paths)) {
-    if (!Array.isArray(targets)) {
-      continue;
-    }
-
-    for (const target of targets) {
-      if (typeof target !== "string" || target.length === 0) {
-        continue;
-      }
-
-      const localRoot = await resolveLocalTsConfigPathTargetRoot({
-        baseDirectory,
-        sourceRoot: input.sourceRoot,
-        target,
-      });
-
-      if (localRoot !== undefined) {
-        localRoots.add(localRoot);
-      }
-    }
-  }
-
-  return [...localRoots].sort((left, right) => left.localeCompare(right));
-}
-
-async function resolveLocalTsConfigPathTargetRoot(input: {
-  readonly baseDirectory: string;
-  readonly sourceRoot: string;
-  readonly target: string;
-}): Promise<string | undefined> {
-  const hasWildcard = input.target.includes("*");
-  const targetPrefix = hasWildcard
-    ? input.target.slice(0, input.target.indexOf("*"))
-    : input.target;
-
-  if (targetPrefix.length === 0 || targetPrefix === "." || targetPrefix === "./") {
-    return undefined;
-  }
-
-  const resolvedTarget = resolve(input.baseDirectory, targetPrefix);
-
-  if (!isAuthoredSourcePath(resolvedTarget, input.sourceRoot)) {
-    return undefined;
-  }
-
-  const existingTarget = await resolveExistingPathOrAncestor({
-    path: resolvedTarget,
-    stopDirectory: input.sourceRoot,
-  });
-
-  if (existingTarget === undefined) {
-    return undefined;
-  }
-
-  const packageRoot = await resolveNearestPackageRoot(existingTarget, input.sourceRoot);
-
-  if (packageRoot !== undefined && packageRoot !== input.sourceRoot) {
-    return packageRoot;
-  }
-
-  if (hasWildcard) {
-    return undefined;
-  }
-
-  return existingTarget === input.sourceRoot ? undefined : existingTarget;
-}
-
-async function resolveExistingPathOrAncestor(input: {
-  readonly path: string;
-  readonly stopDirectory: string;
-}): Promise<string | undefined> {
-  let currentPath = resolve(input.path);
-
-  while (isAuthoredSourcePath(currentPath, input.stopDirectory)) {
-    if (existsSync(currentPath)) {
-      return currentPath;
-    }
-
-    const parentPath = dirname(currentPath);
-
-    if (parentPath === currentPath) {
-      return undefined;
-    }
-
-    currentPath = parentPath;
-  }
-
-  return undefined;
-}
-
-async function resolveNearestPackageRoot(
-  path: string,
-  sourceRoot: string,
-): Promise<string | undefined> {
-  let currentDirectory = resolve(path);
-
-  try {
-    const stats = await lstat(currentDirectory);
-
-    if (!stats.isDirectory()) {
-      currentDirectory = dirname(currentDirectory);
-    }
-  } catch {
-    currentDirectory = dirname(currentDirectory);
-  }
-
-  while (isAuthoredSourcePath(currentDirectory, sourceRoot)) {
-    if (existsSync(join(currentDirectory, "package.json"))) {
-      return currentDirectory;
-    }
-
-    const parentDirectory = dirname(currentDirectory);
-
-    if (parentDirectory === currentDirectory) {
-      return undefined;
-    }
-
-    currentDirectory = parentDirectory;
-  }
-
-  return undefined;
-}
-
-function normalizeCopyRoots(copyRoots: readonly string[]): string[] {
-  const sortedRoots = [...new Set(copyRoots.map((path) => resolve(path)))].sort((left, right) => {
-    const lengthDifference = left.length - right.length;
-    return lengthDifference === 0 ? left.localeCompare(right) : lengthDifference;
-  });
-  const normalizedRoots: string[] = [];
-
-  for (const root of sortedRoots) {
-    if (normalizedRoots.some((existingRoot) => isPathInsideOrEqual(root, existingRoot))) {
-      continue;
-    }
-
-    normalizedRoots.push(root);
-  }
-
-  return normalizedRoots.sort((left, right) => left.localeCompare(right));
-}
-
 function createWatchPaths(input: {
   readonly appRoot: string;
   readonly copyFiles: readonly string[];
-  readonly copyRoots: readonly string[];
+  readonly dependencyMounts: readonly DevelopmentSourceSnapshotDependencyMount[];
+  readonly localRoots: readonly string[];
   readonly sourceRoot: string;
-  readonly symlinks: readonly DevelopmentSourceSnapshotSymlink[];
   readonly tsconfigPaths: readonly string[];
 }): string[] {
   const watchPaths = new Set<string>([
@@ -545,15 +489,15 @@ function createWatchPaths(input: {
     ...input.tsconfigPaths,
   ]);
 
-  for (const copyRoot of input.copyRoots) {
-    if (copyRoot !== input.appRoot) {
-      watchPaths.add(copyRoot);
+  for (const localRoot of input.localRoots) {
+    if (localRoot !== input.appRoot) {
+      watchPaths.add(localRoot);
     }
   }
 
-  for (const symlink of input.symlinks) {
-    if (symlink.targetKind === "local" && symlink.targetPath !== input.appRoot) {
-      watchPaths.add(symlink.targetPath);
+  for (const mount of input.dependencyMounts) {
+    if (mount.sourceKind === "workspace" && mount.sourcePath !== input.appRoot) {
+      watchPaths.add(mount.sourcePath);
     }
   }
 
@@ -586,25 +530,6 @@ function toSnapshotPath(input: {
   }
 
   return join(input.snapshotSourceRoot, relative(input.sourceRoot, input.sourcePath));
-}
-
-function isPathInsideOrEqual(path: string, directory: string): boolean {
-  const resolvedPath = resolve(path);
-  const resolvedDirectory = resolve(directory);
-
-  return (
-    resolvedPath === resolvedDirectory || resolvedPath.startsWith(`${resolvedDirectory}${sep}`)
-  );
-}
-
-function isAuthoredSourcePath(path: string, sourceRoot: string): boolean {
-  if (!isPathInsideOrEqual(path, sourceRoot)) {
-    return false;
-  }
-
-  const relativePath = relative(sourceRoot, path);
-
-  return !relativePath.split(/[\\/]/).includes("node_modules");
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

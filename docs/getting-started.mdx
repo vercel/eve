@@ -1,206 +1,186 @@
 ---
 title: "Getting Started"
-description: "Install eve, scaffold your first agent, give it a tool, and run it locally."
+description: "Create an eve project, configure a model, understand its filesystem layout, and run your first agent."
+contentType: "How-to"
 ---
-
-eve is a filesystem-first framework for durable agents. You write capabilities under `agent/`, and eve runs the model loop, persists every session, and serves the agent over HTTP and platform channels. You'll scaffold an app, add a tool, run it locally, then create, stream, and continue a session over HTTP.
 
 ## Prerequisites
 
-- Node 24 or newer
-- npm (bundled with Node)
-- A model credential (see below)
+You need:
 
-The scaffold's default model is `anthropic/claude-sonnet-5`, which routes through the Vercel AI Gateway. Set one of these before you run the agent:
+- Node.js 24 or newer
+- npm, which Node.js includes
+- A credential for the model your agent uses
 
-- A gateway model id needs `AI_GATEWAY_API_KEY`, or a `VERCEL_OIDC_TOKEN` pulled with `vercel link`.
-- A direct provider model uses that provider's AI SDK package and API key. For example, `anthropic("claude-...")` from `@ai-sdk/anthropic` needs `ANTHROPIC_API_KEY`.
+The default scaffolded model routes through the Vercel AI Gateway. Set `AI_GATEWAY_API_KEY`, or link a Vercel project to use `VERCEL_OIDC_TOKEN`. To use a model provider directly, install its AI SDK provider package and set the provider's API key.
 
-You are responsible for selecting a model, provider, and channel appropriate for your data and use case, and for complying with each provider's terms (as listed per model) and data-processing requirements.
+Choose a model, provider, and channel that meet your data-processing and compliance requirements.
 
-If you skip this, the dev TUI flags the missing credential and its `/model` command walks you through pasting a key or linking a project.
+## Create a project
 
-## Quick start
-
-`npx` runs `eve init` without installing eve first:
+Run `eve init` with a project name:
 
 ```bash
 npx eve@latest init my-agent
 ```
 
-The command:
+The command creates the project, installs dependencies, and initializes Git. After scaffolding, eve offers to start the development server or, if a supported coding agent is installed, to open the project in the coding agent.
 
-- Creates a child directory using the current workspace or launcher package manager, and uses eve's default model
-- Installs dependencies and initializes Git
-- When a supported coding-agent REPL (Claude Code, Codex, Cursor, Droid, Gemini CLI, opencode, or Pi) is on `PATH`, asks whether to open an available REPL or start the development server; otherwise starts the server and opens the interactive [terminal UI](./guides/dev-tui)
-
-Type a message and watch the model loop run. Pass `--channel-web-nextjs` to add the Web Chat application. Every app ships the built-in HTTP channel (`agent/channels/eve.ts`) regardless.
-
-When you choose one of those REPLs, eve starts it with a project-specific
-prompt that guides the setup. The prompt distinguishes `eve dev`, which starts
-eve's HMR server and the agent's terminal REPL, from `eve dev --no-ui`, which is
-the controllable background mode for verification.
-
-`eve init` holds the terminal, so stop it with Ctrl+C to get your shell back before editing the generated agent. The command does not create a Vercel project or deploy.
-
-To add eve to an existing project, run `eve init .` from a directory that already has a `package.json` and no `agent/` files yet. eve adds the missing `eve`, `ai`, and `zod` dependencies without touching anything else the project owns. The eve dependency and the Node engine come from the same release. eve pins `engines.node` to the lowest major that release supports (for example `24.x`). It keeps an existing range only when every version that range allows stays within that major; otherwise it replaces the range and prints a warning.
-
-## Manual installation
-
-To wire eve into an existing app by hand instead of using `eve init`, first declare a compatible Node runtime in `package.json`:
-
-```json
-{
-  "engines": {
-    "node": "24.x"
-  }
-}
-```
-
-Then install the dependencies and author the two files the runtime needs. The `eve init` scaffold adds `ai` and `zod` for you; by hand you install all three:
+To add eve to a project that already has a `package.json`, run this command from its root before you create any `agent/` files:
 
 ```bash
-npm install eve@latest ai zod
+npx eve@latest init .
 ```
 
-### Project files
+eve adds the missing `eve`, `ai`, and `zod` dependencies without changing files the project already owns.
 
-A minimal agent is two files; you add tools as you need them.
+### Customize initialization
 
-`agent/instructions.md` is the always-on system prompt:
+To initialize the agent with a different AI Gateway model or reasoning effort, pass `--model` or `--reasoning`:
 
-```md
-You are a concise assistant. Use tools when they are available.
+```bash
+npx eve@latest init my-agent --model openai/gpt-5.6-terra --reasoning high
 ```
 
-`agent/agent.ts` holds runtime config:
+## Run the agent
 
-```ts
-import { defineAgent } from "eve";
-
-export default defineAgent({
-  model: "anthropic/claude-sonnet-5",
-});
-```
-
-Before using real customer data, confirm the selected model provider's terms, routing path, and retention settings are appropriate for that data.
-
-Even at this size the agent can already do real work. The default harness gives it file, shell, web, and delegation tools out of the box. See [Default harness](./concepts/default-harness) for the full set and how to override or disable any of them.
-
-### Add your first tool
-
-The filename becomes the tool name the model sees, and it must be snake_case ASCII. Create `agent/tools/get_weather.ts`:
-
-```ts
-import { defineTool } from "eve/tools";
-import { z } from "zod";
-
-// The model sees this tool as `get_weather`, from the filename.
-export default defineTool({
-  description: "Get the current weather for a city.",
-  inputSchema: z.object({ city: z.string().min(1) }),
-  async execute({ city }) {
-    return { city, condition: "Sunny", temperatureF: 72 };
-  },
-});
-```
-
-Tools run in your app runtime with full `process.env`, not inside the [sandbox](./sandbox). More in [Tools](./tools).
-
-## Run the app
-
-A scaffolded app has a `dev` script, so from the app root run:
+Choose **Start eve dev** after scaffolding, or run this from the project root:
 
 ```bash
 npm run dev
 ```
 
-The manual path authors no `dev` script. Run the binary through `npx` instead:
+This starts an interactive session where you can send messages to your agent.
 
-```bash
-npx eve dev
+## Project layout
+
+eve builds an agent by walking the filesystem under `agent/`. Each directory is an authored slot, and the slot a file lands in determines how eve loads it.
+
+### Naming from paths
+
+eve derives names from file paths, so you do not configure them separately.
+
+| Path                                  | Resolves to           |
+| ------------------------------------- | --------------------- |
+| `agent/tools/get_weather.ts`          | tool `get_weather`    |
+| `agent/connections/linear.ts`         | connection `linear`   |
+| `agent/skills/summarize.md`           | skill `summarize`     |
+| `agent/subagents/researcher/agent.ts` | subagent `researcher` |
+
+The root agent uses its `package.json` `name`, or its app directory name if none is set. A subagent uses its directory name.
+
+### Recommended layout
+
+A minimal agent needs `instructions.md`; `agent.ts` is optional when the default config is sufficient. Framework defaults occupy ordinary agent slots, so authoring the same path replaces the default before eve compiles the agent. Add other slots as the agent needs them:
+
+```text
+my-agent/
+├── README.md
+├── package.json
+├── tsconfig.json
+├── agent/
+│   ├── agent.ts
+│   ├── instructions.md
+│   ├── instrumentation.ts
+│   ├── channels/
+│   ├── connections/
+│   ├── hooks/
+│   ├── skills/
+│   ├── lib/
+│   ├── sandbox/
+│   ├── tools/
+│   ├── schedules/
+│   └── subagents/
+└── evals/
 ```
 
-Other commands the eve binary provides (prefix each with `npx`, or add a matching package.json script):
+Evals live beside `agent/`, not inside it.
 
-- `eve info`: show the active routes and compiled artifacts
-- `eve build`: compile the agent into `.eve/` and build the host output
-- `eve start`: serve the built output
-- `eve dev`: start the local runtime and open the interactive [terminal UI](./guides/dev-tui)
+### Agent files and directories
 
-In the dev TUI, type a message and watch it happen in order. First the `get_weather` call, then its result, then the reply.
+Each path under `agent/` has a specific purpose. Root agents can use every path below. A subagent has its own files and can use only the paths marked **Yes**.
 
-The same CLI can point at a deployment. `npx eve dev https://your-app.vercel.app` drives a deployed app, which is handy for preview and production smoke tests. See [Deployment](./guides/deployment).
+| Path                                                    | Use                                       | Available to subagents | Notes                                                                                                                                                                             |
+| ------------------------------------------------------- | ----------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.ts`                                              | Runtime config                            | Yes                    | Model, model options, compaction, build, and experimental settings. See [Agents](./agent-config).                                                                                 |
+| `instructions.md` / `instructions.ts` / `instructions/` | Base system prompt                        | Optional               | A flat file or directory of `.md` and `.ts` files. Static sources compose at build time. Dynamic sources resolve at runtime. Required on the root, optional on subagents.         |
+| `instrumentation.ts`                                    | Telemetry config                          | No                     | OTel exporter and AI SDK span settings, auto-discovered and run before agent code. Root-only.                                                                                     |
+| `channels/`                                             | HTTP and messaging entry points           | No                     | Root-only.                                                                                                                                                                        |
+| `connections/`                                          | External MCP and OpenAPI services         | Yes                    | One connection per file; its name comes from the filename.                                                                                                                        |
+| `hooks/`                                                | Lifecycle and stream-event subscribers    | Yes                    | Module-backed only. Recursive directories are supported.                                                                                                                          |
+| `skills/`                                               | On-demand procedures and capability packs | Yes                    | Flat markdown, module-backed skills, or packaged skills. Runtime files are seeded under `$HOME/.agents/skills/`, with `/workspace/skills/` as a fallback.                         |
+| `lib/`                                                  | Shared authored helper code               | Yes                    | Import-only; not mounted into the workspace.                                                                                                                                      |
+| `sandbox.ts` or `sandbox/sandbox.ts`                    | The agent's single sandbox                | Yes                    | Use `sandbox.ts` for a definition-only override; use `sandbox/sandbox.ts` with `sandbox/workspace/**` to also seed files. The framework default applies when neither is authored. |
+| `sandbox/workspace/**`                                  | Files seeded into the sandbox             | Yes                    | Mirrored into `/workspace/` when a session starts.                                                                                                                                |
+| `tools/`                                                | Typed executable integrations             | Yes                    | Module-backed only.                                                                                                                                                               |
+| `schedules/`                                            | Recurring jobs                            | No                     | Each schedule is a default-exported `defineSchedule` module or a markdown prompt with `cron` frontmatter. Recursive nesting is supported. Root-only.                              |
+| `subagents/`                                            | Specialist child agents                   | Yes                    | Each child is a local package under `subagents/<id>/`. Nested subagents are supported.                                                                                            |
 
-## Send a message
+### Files available in the sandbox
 
-Every eve app exposes the same stable HTTP API. Start a durable session:
+Files under `agent/` define your agent; only files in `agent/sandbox/workspace/` are copied to `/workspace/` when a session starts.
 
-```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session \
-  -H 'content-type: application/json' \
-  -d '{"message":"What is the weather in Brooklyn?"}'
+### Local subagents
+
+A local subagent uses the same `agent.ts` shape as the root:
+
+```text
+agent/subagents/researcher/
+├── agent.ts
+├── instructions.md
+├── connections/
+├── hooks/
+├── skills/
+├── lib/
+├── sandbox/
+├── tools/
+└── subagents/
 ```
 
-The response comes back with two things you'll reuse:
+A subagent's `agent.ts` is required and must provide a description, while its instructions are optional. Connections, hooks, skills, shared code, sandboxes, tools, and nested subagents are supported. Channels and schedules remain root-only. See [Subagents](./subagents) for inheritance and isolation behavior.
 
-- a `continuationToken` in the JSON body, to resume this conversation
-- an `x-eve-session-id` header that identifies the run to stream
+### Flat layout
 
-## Stream the session
+When the app root is also the agent root, eve supports this layout:
 
-Attach to the session stream:
-
-```bash
-curl http://127.0.0.1:2000/eve/v1/session/<sessionId>/stream
+```text
+my-agent/
+├── package.json
+├── agent.ts
+├── instructions.md
+├── tools/
+└── skills/
 ```
 
-The stream is NDJSON, served as `application/x-ndjson; charset=utf-8`. For this run you'll see a handful of lifecycle events:
+Prefer the nested layout because it keeps application files separate from the authored agent surface.
 
-- `session.started`
-- `actions.requested` (the `get_weather` call)
-- `action.result`
-- `message.completed` (the reply)
-- `session.completed`
+### Debug file discovery
 
-`reasoning.appended` and `message.appended` are optional live-streaming events. Clients that can't surface incremental output can ignore them and rely on `reasoning.completed` and `message.completed`.
+Run `eve info` when eve does not discover a file. It lists the discovered surface and diagnostics so you can check the authored slot and root-versus-subagent boundary. eve also writes inspectable artifacts under `.eve/`; see [Observability](./guides/instrumentation) and the [CLI](./reference/cli) reference.
 
-Note: consider the privacy, confidentiality, and user-experience implications for displaying, storing, or transmitting reasoning events in your application.
+## Install manually
 
-The full set covers more lifecycle, human-in-the-loop, and authorization events, including `input.requested`, `turn.failed`, `authorization.required`, and `authorization.completed`. See [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming) for every event and its data shape.
-
-## Send a follow-up message
-
-When the session is waiting for the next user message, post a follow-up with the token:
+If you do not want to use the scaffold, install the runtime dependencies:
 
 ```bash
-curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId> \
-  -H 'content-type: application/json' \
-  -d '{"continuationToken":"<token>","message":"Now do Queens."}'
+npm install eve@latest ai zod
 ```
 
-See [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming) for the full contract.
+Declare Node.js 24 in `package.json`, then create `agent/instructions.md` and, when you need runtime configuration, `agent/agent.ts`.
 
-## Setting up with a coding agent
+## Continue with the tutorial
 
-If a coding agent (Claude Code, Cursor, and the like) is doing the setup, hand it this prompt:
+The [Tutorial](/docs/tutorial/first-agent) builds a data analytics agent step by step. It adds tools, state, sandboxed analysis, reusable skills, and human approval before deploying the result.
 
-<CopyPrompt text="Set up an eve agent for the user. eve is a filesystem-first TypeScript framework for durable agents, published as the npm package eve. Read its docs: once eve is installed they are bundled in the package at node_modules/eve/docs; before eve is installed, read the published Introduction and Getting Started pages. If the project has no eve app, scaffold one with `npx eve@latest init <name>`; add `--channel-web-nextjs` only when the user wants Web Chat. In a coding-agent launch, init installs dependencies and prints the project-specific dev command instead of starting the interactive terminal UI. A fresh project also initializes Git; an existing app keeps its repository and scripts. To add eve to an existing app, run `eve init .`, or install the dependencies by hand with `npm install eve@latest ai zod` (init adds ai and zod; the by-hand path needs all three). Make sure agent/agent.ts and agent/instructions.md exist, then add a first typed tool at agent/tools/get_weather.ts using defineTool from eve/tools with a Zod inputSchema and an inline execute. Start eve in a controllable background process with `npx eve dev --no-ui`, wait for the server URL, then exercise the HTTP API: create a session with POST /eve/v1/session, attach to GET /eve/v1/session/:id/stream, and send a follow-up with the returned continuationToken. Stop the dev process after verification. Verify with the project's typecheck, adapt model and provider choices to the project, and do not commit unless the user asks.">
-  Set up an eve agent: read the eve docs (bundled at node_modules/eve/docs once eve is
-  installed), scaffold with `npx eve@latest init <name>` (or `npm install eve@latest ai zod` in an existing app), add
-  a typed tool at agent/tools/get_weather.ts, run it with `npx eve dev --no-ui`, then create a session, stream
-  it, and send a follow-up.
-</CopyPrompt>
+After the tutorial, continue with the task you need:
 
-Once `eve` is a dependency, the package bundles the full docs, so the agent can read them locally at `node_modules/eve/docs/` without fetching anything.
+| Goal                                                               | Read                                                                                                          |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Give the model some code it can run                                | [Tools](/docs/tools)                                                                                          |
+| Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                              |
+| Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                           |
+| Build a browser interface                                          | [Frontend Frameworks](/docs/guides/frontend/overview)                                                         |
+| Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                 |
+| Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
 
-To add a platform channel after setup, run `eve channels add slack` from an interactive terminal. The init flags are covered in [Quick start](#quick-start).
-
-## What to read next
-
-- [Instructions](./instructions) and [Tools](./tools): the core building blocks
-- [Channels](./channels/overview): reach the agent from Slack, Discord, or a web UI
-- [Frontend](./guides/frontend/overview): browser chat with `useEveAgent`
-- [TypeScript SDK](./guides/client/overview): call the agent from scripts or server-side code
-- [Sessions, runs and streaming](./concepts/sessions-runs-and-streaming): the durable session model
-- [Build an agent](./tutorial/first-agent): the full end-to-end walkthrough
+Read [Execution Model and Durability](/docs/concepts/execution-model-and-durability) for the mental model behind sessions, turns, durable steps, and parked work.

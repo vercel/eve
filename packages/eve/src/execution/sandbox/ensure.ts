@@ -13,7 +13,6 @@ import {
 } from "#runtime/compiled-artifacts-source.js";
 import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
 import { waitForDevelopmentSandboxPrewarm } from "#execution/sandbox/development-prewarm.js";
-import { markDevelopmentSandboxBackendInitialized } from "#execution/sandbox/development-run.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { waitForSandboxTemplatePrewarmLock } from "#execution/sandbox/template-prewarm-lock.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -69,17 +68,18 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     if (registered === null) {
       return null;
     }
-    const definition = registered.definition;
+    const inheritance = registered.inheritance;
+    const definition = inheritance?.definition ?? registered.definition;
     const backend = definition.backend;
     const templatePlan = createRuntimeSandboxTemplatePlan({
       definition,
-      workspaceResourceRoot: registered.workspaceResourceRoot,
+      workspaceResourceRoot: inheritance?.workspaceResourceRoot ?? registered.workspaceResourceRoot,
     });
 
     const keys = await createRuntimeSandboxKeys({
       backendName: backend.name,
       compiledArtifactsSource: input.compiledArtifactsSource,
-      nodeId: input.nodeId,
+      nodeId: inheritance?.nodeId ?? input.nodeId,
       sessionId: input.sessionId,
       sourceId: definition.sourceId,
       templatePlan,
@@ -105,12 +105,23 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
       });
     }
 
+    // The session eve may reattach to: the persisted record is only
+    // meaningful when it names the sandbox this step derived. A rotated
+    // session key (the sandbox definition changed) means the backend
+    // provisions a fresh sandbox, so per-session initialization must run
+    // again even though the durable state says it already did.
+    const reattachSession =
+      persistedSession !== null &&
+      persistedSession.backendName === backend.name &&
+      persistedSession.sessionKey === keys.sessionKey
+        ? persistedSession
+        : null;
+    if (reattachSession === null) {
+      initialized = false;
+    }
+
     const createInput: SandboxBackendCreateInput = {
-      existingMetadata:
-        persistedSession?.backendName === backend.name &&
-        persistedSession.sessionKey === keys.sessionKey
-          ? persistedSession.metadata
-          : undefined,
+      existingMetadata: reattachSession?.metadata,
       runtimeContext: { appRoot },
       sessionKey: keys.sessionKey,
       tags: input.tags,
@@ -128,7 +139,6 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
           createInput,
         }),
     );
-    markDevelopmentSandboxBackendInitialized(backend.name);
     trackActiveSandboxHandle({
       backendName: backend.name,
       handle,
@@ -169,7 +179,15 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     },
     async get(): Promise<SandboxSession | null> {
       const handle = await getHandle();
-      return handle?.session ?? null;
+      if (handle === null) return null;
+      return handle.session;
+    },
+    async stop(): Promise<void> {
+      const handle = await getHandle();
+      if (handle === null) {
+        throw new Error("The sandbox is not available in the current authored runtime context.");
+      }
+      await handle.stop();
     },
   };
 }

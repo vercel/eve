@@ -1,12 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 
 import type {
   CompiledAgentManifest,
   CompiledChannelDefinition,
-  CompiledChannelEntry,
   CompiledConnectionDefinition,
-  CompiledInstructions,
+  CompiledInstructionsDefinition,
   CompiledScheduleDefinition,
   CompiledSkillDefinition,
   CompiledSubagentNode,
@@ -23,7 +22,6 @@ import {
   type VercelEveSubagentEntry,
   type VercelEveToolEntry,
   VERCEL_EVE_AGENT_SUMMARY_KIND,
-  VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH,
   VERCEL_EVE_AGENT_SUMMARY_VERSION,
   normalizeChannelKindForDisplay,
 } from "#internal/vercel-agent-summary.js";
@@ -44,17 +42,24 @@ export function buildVercelAgentSummary(input: {
     kind: VERCEL_EVE_AGENT_SUMMARY_KIND,
     schemaVersion: VERCEL_EVE_AGENT_SUMMARY_VERSION,
     generatorVersion: input.generatorVersion ?? resolveInstalledPackageInfo().version,
-    agent: {
-      name: manifest.config.name,
-      description: manifest.config.description,
-      modelId: manifest.config.model.id,
-    },
-    instructions: manifest.instructions ? toInstructionsEntry(manifest.instructions) : null,
+    agent:
+      manifest.config.dynamicModel === undefined
+        ? {
+            name: manifest.config.name,
+            description: manifest.config.description,
+            modelId: manifest.config.model.id,
+          }
+        : {
+            name: manifest.config.name,
+            description: manifest.config.description,
+            modelRouting: { kind: "dynamic" },
+          },
+    instructions: manifest.instructions.map(toInstructionsEntry),
     schedules: manifest.schedules.map(toScheduleEntry),
     tools: manifest.tools.map(toToolEntry),
     skills: manifest.skills.map(toSkillEntry),
     connections: manifest.connections.map(toConnectionEntry),
-    channels: manifest.channels.filter(isActiveChannel).map(toChannelEntry),
+    channels: manifest.channelRoutes.effective.map(toChannelEntry),
     sandbox:
       manifest.sandbox === null
         ? null
@@ -73,12 +78,6 @@ export function buildVercelAgentSummary(input: {
  * Writes the agent summary file. Returns the absolute path of the
  * written file.
  *
- * The file is written to {@link VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH}
- * relative to {@link input.appRoot} — i.e.
- * `<appRoot>/.eve/agent-summary.json`. Lives outside `.vercel/output/`
- * by design, so it is not part of the Build Output API surface and is
- * never served on the deployment URL.
- *
  * On Vercel deployments, the build container's
  * `upload-eve-agent-summary.ts` helper picks up this file from
  * `rootPath` (which equals `appRoot` for the project being built) and
@@ -94,30 +93,27 @@ export function buildVercelAgentSummary(input: {
  */
 export async function emitVercelAgentSummary(input: {
   manifest: CompiledAgentManifest;
-  appRoot: string;
   generatorVersion?: string;
+  outputPath: string;
 }): Promise<string> {
   const summary = buildVercelAgentSummary({
     generatorVersion: input.generatorVersion,
     manifest: input.manifest,
   });
-  const filePath = join(input.appRoot, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH);
+  await mkdir(dirname(input.outputPath), { recursive: true });
+  await writeFile(input.outputPath, `${JSON.stringify(summary, null, 2)}\n`);
 
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(summary, null, 2)}\n`);
-
-  return filePath;
+  return input.outputPath;
 }
 
-function isActiveChannel(entry: CompiledChannelEntry): entry is CompiledChannelDefinition {
-  return entry.kind === "channel";
-}
-
-function toInstructionsEntry(instructions: CompiledInstructions): VercelEveInstructionsEntry {
+function toInstructionsEntry(
+  instructions: CompiledInstructionsDefinition,
+): VercelEveInstructionsEntry {
   return {
+    content: instructions.content,
     logicalPath: instructions.logicalPath,
+    role: instructions.role,
     sourceKind: instructions.sourceKind,
-    markdown: instructions.markdown,
   };
 }
 

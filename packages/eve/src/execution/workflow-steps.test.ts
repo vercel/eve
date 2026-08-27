@@ -1,17 +1,41 @@
+import type { ModelMessage } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter, ChannelAdapterContext } from "#channel/adapter.js";
-import type { DeliverPayload, SubagentInputRequestHookPayload } from "#channel/types.js";
-import { ContextContainer } from "#context/container.js";
+import type {
+  DeliverPayload,
+  SessionAuthContext,
+  SubagentInputRequestHookPayload,
+} from "#channel/types.js";
+import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import { AuthKey, ContinuationTokenKey, ModeKey, SessionIdKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ContinuationTokenKey,
+  DynamicSubagentAgentConfigKey,
+  ModeKey,
+  SessionCallbackKey,
+  SessionDynamicSubagentRuntimeRevisionKey,
+  SessionDynamicSubagentSelectionsKey,
+  SessionDynamicModelReferenceKey,
+  SessionDynamicToolMetadataKey,
+  SessionDynamicToolRuntimeRevisionKey,
+  SessionIdKey,
+  TurnTaskDeliveryKey,
+  TurnTaskStateKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { DEFAULT_SUBAGENT_MAX_DEPTH } from "#harness/subagent-depth.js";
+import { AGENT_HANDLES_STATE_KEY, getAgentHandleStore } from "#harness/handles/store.js";
+import { requestTurnSleep } from "#harness/turn-sleep.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
+import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
+import { createInputRequestedEvent } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
@@ -21,16 +45,20 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { createTurnWorkflowInput } from "#execution/durable-session-migrations/turn-workflow.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { projectToDurableSession } from "#execution/session.js";
-import { createExecutionNodeStep } from "#execution/node-step.js";
+import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
+import { defineTool } from "#tools/definition.js";
+import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
-import {
-  dispatchTurnStep,
-  emitTerminalSessionFailureStep,
-  resolveEffectiveOutputSchema,
-  runProxyInputRequestStep,
-  turnStep,
-} from "#execution/workflow-steps.js";
+import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
+import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
+import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
+import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
+import { turnStep } from "#execution/workflow-steps.js";
+import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   turnWorkflowReference,
@@ -45,8 +73,29 @@ vi.mock("./durable-session-store.js", async (importOriginal) => {
     readDurableSession: vi.fn(),
   };
 });
+vi.mock("./tasks/parent/run-parent.js", () => ({
+  readLatestTaskView: vi.fn(),
+  sendTaskInboundPayload: vi.fn(),
+}));
+vi.mock("./tasks/parent/agent-views.js", () => ({
+  appendTaskAgentAnnouncement: vi.fn(async (session) => session),
+}));
 
-function installSessionStoreMocks(sessions: HarnessSession[]): void {
+const mockIdentityHistoryViewProjector = vi.hoisted(() =>
+  vi.fn(({ messages }: { readonly messages: readonly ModelMessage[] }) => messages),
+);
+vi.mock("#shared/history-view.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#shared/history-view.js")>();
+  return {
+    ...actual,
+    identityHistoryViewProjector: (input: { readonly messages: readonly ModelMessage[] }) =>
+      mockIdentityHistoryViewProjector(input),
+  };
+});
+
+function installSessionStoreMocks(
+  sessions: Awaited<ReturnType<typeof readDurableSession>>[],
+): void {
   // Each `readDurableSession` invocation pops the next prepared session
   // off the queue. Tests that exercise multiple harness steps stack
   // sessions in the order the step boundaries hit them.
@@ -83,6 +132,7 @@ function createStubSessionState(overrides: Partial<DurableSessionState> = {}): D
 
 const DEFAULT_WORKFLOW_STREAM_NAMESPACE = "__default__";
 const getRunMock = vi.fn();
+const resumeHookMock = vi.fn();
 const startMock = vi.fn();
 const workflowWritesByNamespace = new Map<string, unknown[]>();
 
@@ -99,6 +149,11 @@ function createTestWritable(
 }
 
 vi.mock("./node-step.js", () => ({
+  buildRuntimeIdentity: vi.fn(() => ({
+    agentId: "test-agent",
+    eveVersion: "0.0.0-test",
+    modelId: "test-model",
+  })),
   createExecutionNodeStep: vi.fn(),
 }));
 
@@ -107,8 +162,9 @@ vi.mock("../runtime/sessions/compiled-agent-cache.js", () => ({
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
+  getHookByToken: vi.fn(async (token: string) => currentSessionHook(token)),
   getRun: (...args: unknown[]) => getRunMock(...args),
-  resumeHook: vi.fn(),
+  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
   start: (...args: unknown[]) => startMock(...args),
 }));
 
@@ -147,7 +203,9 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(
+  mode: "conversation" | "task" = "conversation",
+): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
@@ -170,18 +228,422 @@ function createSerializedContext(): Record<string, unknown> {
   } as never);
   ctx.set(ChannelKey, threadContextAdapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
-  ctx.set(ModeKey, "conversation");
+  ctx.set(ModeKey, mode);
   ctx.set(SessionIdKey, "session-1");
   return serializeContext(ctx);
 }
 
 afterEach(() => {
   getRunMock.mockReset();
+  resumeHookMock.mockReset();
   startMock.mockReset();
   workflowWritesByNamespace.clear();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+  vi.mocked(readLatestTaskView).mockReset();
+  vi.mocked(sendTaskInboundPayload).mockReset();
+  vi.mocked(sendTaskInboundPayload).mockResolvedValue("delivered");
+  vi.mocked(appendTaskAgentAnnouncement).mockReset();
+  vi.mocked(appendTaskAgentAnnouncement).mockImplementation(async (session) => session);
+  mockIdentityHistoryViewProjector.mockReset();
+  mockIdentityHistoryViewProjector.mockImplementation(({ messages }) => messages);
+});
+
+describe("routeProxiedDeliverStep", () => {
+  it("forwards descendant input responses as session send commands", async () => {
+    const auth = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "user-1",
+      principalType: "user",
+    };
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["request-1", { childContinuationToken: "child-token", kind: "tool-approval" }],
+        ["request-2", { childContinuationToken: "child-token", kind: "tool-approval" }],
+      ],
+      forChildContinuationToken: "child-token",
+      session: createStubSession({
+        continuationToken: "parent-token",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await routeProxiedDeliverStep({
+      auth,
+      parentWritable: createTestWritable(),
+      payload: {
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      },
+      sessionState: createStubSessionState({
+        continuationToken: "parent-token",
+        hasProxyInputRequests: true,
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(resumeHookMock).toHaveBeenCalledWith(currentSessionHook("child-token"), {
+      auth,
+      caller: undefined,
+      kind: "deliver",
+      payload: {
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+      },
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "request-1" }] }],
+      requestId: undefined,
+      version: 1,
+    });
+  });
+
+  it("preserves envelope fields and reindexes metadata across routed payloads", async () => {
+    const auth = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "user-1",
+      principalType: "user",
+    };
+    const caller = {
+      callId: "call-parent",
+      replyTo: { kind: "hook" as const, token: "parent-turn" },
+      subagentName: "research",
+    };
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["child-a", { childContinuationToken: "child-token-a", kind: "question" }],
+        ["child-b", { childContinuationToken: "child-token-b", kind: "question" }],
+      ],
+      forChildContinuationToken: "child-token-a",
+      session: upsertProxyInputRequests({
+        entries: [["child-b", { childContinuationToken: "child-token-b", kind: "question" }]],
+        forChildContinuationToken: "child-token-b",
+        session: createStubSession(),
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const delivery = {
+      auth,
+      caller,
+      deliveryMetadata: [
+        { channelKind: "test", channelName: "main", deliveryId: "delivery-0", payloadIndex: 0 },
+        { channelKind: "test", channelName: "main", deliveryId: "delivery-1", payloadIndex: 1 },
+        { channelKind: "test", channelName: "main", deliveryId: "delivery-2", payloadIndex: 2 },
+      ],
+      kind: "deliver" as const,
+      payloads: [
+        { inputResponses: [{ text: "a", requestId: "child-a" }] },
+        {
+          inputResponses: [
+            { text: "b", requestId: "child-b" },
+            { text: "parent", requestId: "parent-response" },
+          ],
+        },
+        { message: "parent message" },
+      ],
+      requestId: "request-1",
+      taskDeliveryId: "task-delivery-1",
+      turnPolicy: "queue" as const,
+    };
+
+    const result = await routeProxiedDeliverStep({
+      delivery,
+      parentWritable: createTestWritable(),
+      sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+    });
+
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook("child-token-a"),
+      expect.objectContaining({
+        ...delivery,
+        deliveryMetadata: [expect.objectContaining({ deliveryId: "delivery-0", payloadIndex: 0 })],
+        payloads: [{ inputResponses: [{ requestId: "child-a", text: "a" }] }],
+      }),
+    );
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      currentSessionHook("child-token-b"),
+      expect.objectContaining({
+        auth,
+        caller,
+        deliveryMetadata: undefined,
+        requestId: "request-1",
+        taskDeliveryId: "task-delivery-1",
+        turnPolicy: "queue",
+      }),
+    );
+    expect(result).toMatchObject({
+      kind: "continue",
+      remainder: {
+        auth,
+        caller,
+        deliveryMetadata: [
+          { deliveryId: "delivery-1", payloadIndex: 0 },
+          { deliveryId: "delivery-2", payloadIndex: 1 },
+        ],
+        payloads: [
+          { inputResponses: [{ requestId: "parent-response", text: "parent" }] },
+          { message: "parent message" },
+        ],
+        requestId: "request-1",
+        taskDeliveryId: "task-delivery-1",
+        turnPolicy: "queue",
+      },
+    });
+  });
+
+  function createTaskRouteSession(options?: { readonly owned?: boolean }): HarnessSession {
+    return upsertProxyInputRequests({
+      entries: [
+        [
+          "task-1:request-1",
+          {
+            childContinuationToken: "child-token",
+            childRequestId: "request-1",
+            kind: "tool-approval",
+            taskId: "task-1",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-token",
+      session: createStubSession({
+        continuationToken: "parent-token",
+        sessionId: "parent-session",
+        state:
+          options?.owned === false
+            ? undefined
+            : {
+                "eve.tasks": {
+                  tasks: [
+                    {
+                      taskInboxToken: "task-token",
+                      createdByTurnId: "turn-parent",
+                      metadata: {
+                        agentId: "agent-1",
+                        kind: "subagent",
+                        mode: "local",
+                        name: "research",
+                      },
+                      operationId: "operation-1",
+                      taskId: "task-1",
+                      taskRunId: "run-1",
+                    },
+                  ],
+                },
+              },
+      }),
+    });
+  }
+
+  const taskRouteInput = {
+    payload: { inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }] },
+    sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+  };
+
+  it("hands a task-owned answer to the task run instead of the child", async () => {
+    installSessionStoreMocks([createTaskRouteSession()]);
+
+    const result = await routeProxiedDeliverStep({
+      ...taskRouteInput,
+      parentWritable: createTestWritable(),
+    });
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
+    expect(sendTaskInboundPayload).toHaveBeenCalledWith({
+      taskInboxToken: "task-token",
+      payload: {
+        auth: undefined,
+        childContinuationToken: "child-token",
+        inputResponses: [{ optionId: "approve", requestId: "request-1" }],
+        kind: "input-response",
+        taskId: "task-1",
+      },
+    });
+    expect(resumeHookMock).not.toHaveBeenCalled();
+    expect(getProxyInputRequests(result.sessionState.snapshot?.session.state).size).toBe(0);
+  });
+
+  it("keeps a response for a task this session does not own on the parent", async () => {
+    installSessionStoreMocks([createTaskRouteSession({ owned: false })]);
+
+    await expect(
+      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+    ).resolves.toMatchObject({
+      kind: "continue",
+      remainder: {
+        inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }],
+      },
+    });
+    expect(sendTaskInboundPayload).not.toHaveBeenCalled();
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("returns answers to the parent when the task run already finished", async () => {
+    installSessionStoreMocks([createTaskRouteSession()]);
+    vi.mocked(sendTaskInboundPayload).mockResolvedValue("unreachable");
+
+    await expect(
+      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+    ).resolves.toMatchObject({
+      kind: "continue",
+      remainder: {
+        inputResponses: [{ optionId: "approve", requestId: "task-1:request-1" }],
+      },
+    });
+  });
+
+  it("keeps a task answer retryable after delivery fails", async () => {
+    const session = createTaskRouteSession();
+    installSessionStoreMocks([session, session]);
+    vi.mocked(sendTaskInboundPayload)
+      .mockRejectedValueOnce(new Error("transient"))
+      .mockResolvedValueOnce("delivered");
+
+    await expect(
+      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+    ).rejects.toThrow("transient");
+    await expect(
+      routeProxiedDeliverStep({ ...taskRouteInput, parentWritable: createTestWritable() }),
+    ).resolves.toMatchObject({ kind: "continue", remainder: undefined });
+    expect(sendTaskInboundPayload).toHaveBeenCalledTimes(2);
+  });
+});
+
+function currentSessionHook(token: string) {
+  return {
+    metadata: { sessionInboxWireVersion: 1 },
+    runId: "child-run",
+    token,
+  };
+}
+
+describe("recordTaskInputRequestStep", () => {
+  const hookPayload: SubagentInputRequestHookPayload = {
+    callId: "call-task",
+    childContinuationToken: "child-token",
+    childSessionId: "child-session",
+    event: {
+      requests: [
+        {
+          action: { callId: "call-q", input: {}, kind: "tool-call", toolName: "ask" },
+          kind: "question",
+          prompt: "Which?",
+          requestId: "request-1",
+        },
+      ],
+      sequence: 1,
+      stepIndex: 2,
+      turnId: "turn_child",
+    },
+    kind: "subagent-input-request",
+    subagentName: "research",
+  };
+
+  it("records an exact route only for a current task owned by this parent", async () => {
+    const session = createStubSession({
+      state: {
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "child-token",
+                kind: "agent/local",
+                sessionId: "child-session",
+              },
+              identity: { id: "agent-1", name: "research", nodeId: "node-1" },
+              phase: "addressed",
+            },
+          ],
+        },
+        "eve.tasks": {
+          tasks: [
+            {
+              taskInboxToken: "task-token",
+              createdByTurnId: "turn-parent",
+              executor: {
+                data: {
+                  address: {
+                    continuationToken: "child-token",
+                    kind: "agent/local",
+                    sessionId: "child-session",
+                  },
+                  identity: { id: "agent-1", name: "research", nodeId: "node-1" },
+                },
+                kind: "subagent",
+              },
+              metadata: { kind: "tool", name: "research" },
+              operationId: "operation-1",
+              taskId: "task-1",
+              taskRunId: "run-1",
+            },
+          ],
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: { kind: "tool", name: "research" },
+      executor: {
+        binding: {
+          data: {
+            address: {
+              continuationToken: "child-token",
+              kind: "agent/local",
+              sessionId: "child-session",
+            },
+            identity: { id: "agent-1", name: "research", nodeId: "node-1" },
+          },
+          kind: "subagent",
+        },
+        childSessionId: "child-session",
+      },
+      inputRequests: hookPayload.event.requests,
+      status: "input_required",
+      taskId: "task-1",
+    });
+
+    const result = await recordTaskInputRequestStep({
+      hookPayload,
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+      taskId: "task-1",
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(
+      getProxyInputRequests(result.sessionState.snapshot?.session.state).get("task-1:request-1"),
+    ).toEqual({
+      batch: {
+        approvalRequestIds: [],
+        requestIds: ["task-1:request-1"],
+      },
+      childContinuationToken: "child-token",
+      childRequestId: "request-1",
+      kind: "question",
+      taskId: "task-1",
+    });
+    expect(result).toMatchObject({
+      accepted: true,
+      hookPayload: {
+        event: { requests: [{ requestId: "task-1:request-1" }] },
+      },
+    });
+  });
+
+  it("rejects cross-session and stale batches without recording a route", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session, session]);
+    vi.mocked(readLatestTaskView).mockResolvedValue(undefined);
+
+    const result = await recordTaskInputRequestStep({
+      hookPayload,
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+      taskId: "foreign-task",
+    });
+
+    expect(result).toEqual({ accepted: false, sessionState: createStubSessionState() });
+  });
 });
 
 describe("dispatchTurnStep", () => {
@@ -218,12 +680,28 @@ describe("dispatchTurnStep", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
+          "$eve.is_trace_content_visible": "false",
           "$eve.type": "turn",
         },
         deploymentId: "latest",
       },
+    );
+  });
+
+  it("starts turn workflows on the latest promoted generation in local development", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    const input = createTurnInput();
+    startMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
+
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      expect.objectContaining({ deploymentId: "latest" }),
     );
   });
 
@@ -242,8 +720,10 @@ describe("dispatchTurnStep", () => {
         allowReservedAttributes: true,
         attributes: {
           "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
           "$eve.parent": "sess-test",
           "$eve.root": "sess-test",
+          "$eve.is_trace_content_visible": "false",
           "$eve.type": "turn",
         },
       },
@@ -264,8 +744,10 @@ describe("dispatchTurnStep", () => {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
+        "$eve.is_otel_trace_enabled": "false",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
+        "$eve.is_trace_content_visible": "false",
         "$eve.type": "turn",
       },
       deploymentId: "latest",
@@ -274,8 +756,10 @@ describe("dispatchTurnStep", () => {
       allowReservedAttributes: true,
       attributes: {
         "$eve.channel_request_id": "req_turn",
+        "$eve.is_otel_trace_enabled": "false",
         "$eve.parent": "sess-test",
         "$eve.root": "sess-test",
+        "$eve.is_trace_content_visible": "false",
         "$eve.type": "turn",
       },
     });
@@ -283,7 +767,7 @@ describe("dispatchTurnStep", () => {
 });
 
 describe("dispatchRuntimeActionsStep", () => {
-  it("starts subagent child drivers on the latest deployment", async () => {
+  it("preserves a started local child when a later start fails", async () => {
     vi.stubEnv("VERCEL_ENV", "production");
     const compiledArtifactsSource = {} as never;
     const compiledBundle = {
@@ -303,10 +787,10 @@ describe("dispatchRuntimeActionsStep", () => {
       subagentRegistry: {
         subagentsByNodeId: new Map([
           [
-            "subagents/delegate",
+            "subagents/agent",
             {
               definition: {
-                description: "Local delegate child description.",
+                description: "Explicitly declared agent child description.",
                 kind: "subagent",
               },
             },
@@ -317,7 +801,9 @@ describe("dispatchRuntimeActionsStep", () => {
       turnAgent: TestTurnAgent,
     } as never;
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    startMock.mockResolvedValue({ runId: "child-run" });
+    startMock
+      .mockResolvedValueOnce({ runId: "child-run" })
+      .mockRejectedValueOnce(new Error("child start failed"));
     getRunMock.mockReturnValue({
       getReadable: () =>
         new ReadableStream<Uint8Array>({
@@ -334,16 +820,27 @@ describe("dispatchRuntimeActionsStep", () => {
           description: "Runtime action event description.",
           input: { message: "investigate latest routing" },
           kind: "subagent-call",
-          name: "delegate",
-          nodeId: "subagents/delegate",
-          subagentName: "delegate",
+          name: "agent",
+          nodeId: "subagents/agent",
+          subagentName: "agent",
+        },
+        {
+          callId: "call-2",
+          description: "Second runtime action event description.",
+          input: { message: "investigate fallback routing" },
+          kind: "subagent-call",
+          name: "agent",
+          nodeId: "subagents/agent",
+          subagentName: "agent",
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
+        rootSessionId: "root-session",
         sessionId: "parent-session",
+        subagentDepth: 99,
       }),
     });
     installSessionStoreMocks([session]);
@@ -360,13 +857,50 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionState,
     });
 
-    expect(result).toEqual({ results: [], sessionState: expect.any(Object) });
+    expect(result).toEqual({
+      results: [
+        {
+          callId: "call-2",
+          isError: true,
+          kind: "subagent-result",
+          origin: "dispatch",
+          output: {
+            code: "SUBAGENT_START_FAILED",
+            message: "child start failed",
+          },
+          subagentName: "agent",
+        },
+      ],
+      sessionState: expect.any(Object),
+      pendingTasks: [],
+    });
+    // The started child stays owned as a running handle; the dead start's
+    // prepared handle was rejected.
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [
+        expect.objectContaining({
+          address: {
+            continuationToken: "subagent:parent-session:call-1",
+            kind: "agent/local",
+            sessionId: "child-run",
+          },
+          operation: expect.objectContaining({ callId: "call-1", kind: "start" }),
+          phase: "running",
+        }),
+      ],
+    });
     expect(startMock).toHaveBeenCalledWith(
       workflowEntryReference,
       [
         expect.objectContaining({
           input: {
-            message: expect.stringContaining("Description: Local delegate child description."),
+            message: expect.stringContaining(
+              "Description: Explicitly declared agent child description.",
+            ),
+          },
+          limits: {
+            maxInputTokensPerSession: false,
+            maxOutputTokensPerSession: false,
           },
           serializedContext: expect.objectContaining({
             "eve.channel": expect.objectContaining({
@@ -380,7 +914,7 @@ describe("dispatchRuntimeActionsStep", () => {
         allowReservedAttributes: true,
         attributes: expect.objectContaining({
           "$eve.parent": "parent-session",
-          "$eve.root": "parent-session",
+          "$eve.root": "root-session",
           "$eve.type": "subagent",
         }),
         deploymentId: "latest",
@@ -470,30 +1004,31 @@ describe("dispatchRuntimeActionsStep", () => {
       sessionId: "parent-session",
     });
 
-    await expect(
-      dispatchRuntimeActionsStep({
-        callbackBaseUrl: "https://caller.example.com",
-        parentContinuationToken: "turn-inbox",
-        parentWritable: createTestWritable(),
-        serializedContext: createSerializedContext(),
-        sessionState,
-      }),
-    ).resolves.toEqual({
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          output: {
-            code: "REMOTE_AGENT_START_FAILED",
-            message: 'Remote agent "research" create-session request failed with HTTP 503.',
-          },
-          subagentName: "research",
-        },
-      ],
-      // A remote-agent dispatch failure does not mutate the session,
-      // so the step returns the input sessionState unchanged.
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
       sessionState,
+    });
+
+    expect(result.results).toEqual([
+      {
+        callId: "call-1",
+        isError: true,
+        kind: "subagent-result",
+        origin: "dispatch",
+        output: {
+          code: "REMOTE_AGENT_START_FAILED",
+          message: 'Remote agent "research" create-session request failed with HTTP 503.',
+        },
+        subagentName: "research",
+      },
+    ]);
+    // The prepared handle was committed before the effect and rejected as
+    // dead when the start failed, so no handle survives.
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [],
     });
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).callback.token).toBe(
       "turn-inbox",
@@ -501,7 +1036,213 @@ describe("dispatchRuntimeActionsStep", () => {
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
 
-  it("blocks pending subagent calls at the subagent depth limit", async () => {
+  it("records a successfully started remote child session for cancellation", async () => {
+    const remote = {
+      definition: {
+        description: "Research remote",
+        kind: "remote",
+        name: "research",
+        nodeId: "remote/research",
+        path: "/eve/v1/session",
+        url: "https://remote.example.com",
+      },
+    };
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        subagentsByNodeId: new Map([["remote/research", remote]]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "remote-child",
+            status: "accepted",
+          },
+          { headers: { "x-eve-session-id": "remote-child" }, status: 202 },
+        ),
+      ),
+    );
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-remote",
+          description: "Delegate the work.",
+          input: { message: "investigate latest routing" },
+          kind: "remote-agent-call",
+          name: "research",
+          nodeId: "remote/research",
+          remoteAgentName: "research",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result.results).toEqual([]);
+    expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+      handles: [
+        expect.objectContaining({
+          address: expect.objectContaining({
+            kind: "agent/remote",
+            sessionId: "remote-child",
+            url: "https://remote.example.com",
+          }),
+          phase: "running",
+        }),
+      ],
+    });
+  });
+
+  it("starts a remote agent from the current dynamic selection", async () => {
+    const nodeId = "subagents/research";
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        dynamicNodeIds: new Set([nodeId]),
+        subagentsByNodeId: new Map([
+          [
+            nodeId,
+            {
+              definition: {
+                kind: "subagent",
+                logicalPath: "subagents/research.ts",
+                name: "research",
+                nodeId,
+                sourceId: "subagents/research.ts",
+                sourceKind: "module",
+              },
+            },
+          ],
+        ]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const credentialsStepId = "eve:dynamic-remote-agent//workflow-research";
+    const registryKey = Symbol.for("@workflow/core//registeredSteps");
+    const globalRecord = globalThis as Record<symbol, Map<string, Function> | undefined>;
+    const stepRegistry = globalRecord[registryKey] ?? new Map<string, Function>();
+    globalRecord[registryKey] = stepRegistry;
+    stepRegistry.set(credentialsStepId, () => ({
+      headers: { authorization: "Bearer selected" },
+    }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "dynamic-remote-child", status: "accepted" },
+          { headers: { "x-eve-session-id": "dynamic-remote-child" }, status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-dynamic-remote",
+          description: "Delegate the work.",
+          input: { message: "investigate latest routing" },
+          kind: "remote-agent-call",
+          name: "research",
+          nodeId,
+          remoteAgentName: "research",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+    const serializedContext = createSerializedContext();
+    serializedContext[SessionDynamicSubagentSelectionsKey.name] = {
+      [nodeId]: {
+        kind: "remote",
+        prepared: {},
+        remoteAgent: {
+          credentialsStepId,
+          description: "Selected remote research.",
+          path: "/custom/session",
+          url: "https://selected.example.com",
+        },
+      },
+    };
+
+    const result = await dispatchRuntimeActionsStep({
+      callbackBaseUrl: "https://caller.example.com",
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createTestWritable(),
+      serializedContext,
+      sessionState: createStubSessionState({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+
+    expect(result.results).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://selected.example.com/custom/session",
+      expect.objectContaining({
+        headers: {
+          authorization: "Bearer selected",
+          "content-type": "application/json",
+        },
+      }),
+    );
+  });
+
+  it("blocks a stale recursive agent call from a delegated session", async () => {
     const compiledBundle = {
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -532,18 +1273,18 @@ describe("dispatchRuntimeActionsStep", () => {
           description: "Delegate the work.",
           input: { message: "try to recurse" },
           kind: "subagent-call",
-          name: "delegate",
-          nodeId: "subagents/delegate",
-          subagentName: "delegate",
+          name: "agent",
+          nodeId: "__root__",
+          subagentName: "agent",
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
       responseMessages: [],
       session: createStubSession({
         continuationToken: "http:parent",
+        rootSessionId: "root-session",
         sessionId: "parent-session",
-        subagentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-        subagentMaxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
+        subagentDepth: 1,
       }),
     });
     installSessionStoreMocks([session]);
@@ -566,32 +1307,982 @@ describe("dispatchRuntimeActionsStep", () => {
           callId: "call-1",
           isError: true,
           kind: "subagent-result",
+          origin: "dispatch",
           output: {
-            code: "SUBAGENT_DEPTH_LIMIT_REACHED",
-            currentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-            maxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-            message: `Subagent depth limit reached (${DEFAULT_SUBAGENT_MAX_DEPTH + 1}); "delegate" was not called.`,
+            code: "RECURSIVE_AGENT_ROOT_ONLY",
+            message: 'The built-in "agent" tool is only available to the root session.',
           },
-          subagentName: "delegate",
+          subagentName: "agent",
         },
       ],
       sessionState,
+      pendingTasks: [],
     });
     expect(startMock).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
-      "[eve:execution.dispatch-runtime-actions] subagent depth limit reached; blocking delegated call",
+      "[eve:execution.dispatch-runtime-actions] recursive agent call blocked outside the root session",
       expect.objectContaining({
         callId: "call-1",
-        currentDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-        maxDepth: DEFAULT_SUBAGENT_MAX_DEPTH + 1,
-        subagentName: "delegate",
+        currentDepth: 1,
+        subagentName: "agent",
       }),
     );
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
+
+  it("blocks a dynamic subagent call when the current selection omits it", async () => {
+    const nodeId = "subagents/researcher";
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {
+        dynamicNodeIds: new Set([nodeId]),
+        dynamicResolvers: [],
+        subagentsByNodeId: new Map([
+          [
+            nodeId,
+            {
+              definition: {
+                description: "Research the request.",
+                kind: "subagent",
+              },
+            },
+          ],
+        ]),
+      },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const session = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-dynamic",
+          description: "Research the request.",
+          input: { message: "investigate" },
+          kind: "subagent-call",
+          name: "researcher",
+          nodeId,
+          subagentName: "researcher",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createStubSession({
+        continuationToken: "http:parent",
+        sessionId: "parent-session",
+      }),
+    });
+    installSessionStoreMocks([session]);
+    const sessionState = createStubSessionState({
+      continuationToken: "http:parent",
+      sessionId: "parent-session",
+    });
+
+    await expect(
+      dispatchRuntimeActionsStep({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createTestWritable(),
+        serializedContext: createSerializedContext(),
+        sessionState,
+      }),
+    ).resolves.toEqual({
+      results: [
+        {
+          callId: "call-dynamic",
+          isError: true,
+          kind: "subagent-result",
+          origin: "dispatch",
+          output: {
+            code: "SUBAGENT_UNAVAILABLE",
+            message: 'Subagent "researcher" is not available in the current session context.',
+          },
+          subagentName: "researcher",
+        },
+      ],
+      sessionState,
+      pendingTasks: [],
+    });
+    expect(startMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("turnStep", () => {
+  it("prepares resumed-session history before dynamic runtime refresh", async () => {
+    const hidden = { content: "HIDE_FROM_RUNTIME_REFRESH", role: "user" as const };
+    mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>
+      messages.filter((message) => message !== hidden),
+    );
+    const toolHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
+    const subagentHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
+    const dynamicToolResolver = {
+      eventNames: ["session.started"],
+      events: { "session.started": toolHandler },
+      logicalPath: "agent/tools/runtime.ts",
+      slug: "runtime",
+      sourceId: "test:runtime",
+      sourceKind: "module",
+    } as never;
+    const dynamicSubagentResolver = {
+      eventNames: ["session.started"],
+      events: { "session.started": subagentHandler },
+      logicalPath: "agent/subagents/runtime/agent.ts",
+      name: "runtime-agent",
+      nodeId: "subagents/runtime-agent",
+      sourceId: "test:runtime-agent",
+      sourceKind: "module",
+    } as never;
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {}, dynamicToolResolvers: [dynamicToolResolver] },
+      subagentRegistry: { dynamicResolvers: [dynamicSubagentResolver] },
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const session = createStubSession({
+      history: [
+        { content: "first", role: "user" },
+        hidden,
+        { content: "second", role: "assistant" },
+      ],
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:thread-context");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    ctx.set(SessionDynamicSubagentRuntimeRevisionKey, "deployment:dpl_old");
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+
+    let harnessHistory: readonly ModelMessage[] = [];
+    let rawHistory: readonly ModelMessage[] = [];
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+      harnessHistory = input.historyView?.messages ?? [];
+      return async (stepSession): Promise<StepResult> => {
+        rawHistory = stepSession.history;
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
+
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "follow up" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      }),
+    });
+
+    const expectedView = [
+      { content: "first", role: "user" },
+      { content: "second", role: "assistant" },
+    ];
+    expect(toolHandler.mock.calls[0]?.[1]).toMatchObject({ messages: expectedView });
+    expect(subagentHandler.mock.calls[0]?.[1]).toMatchObject({ messages: expectedView });
+    expect(harnessHistory).toEqual(expectedView);
+    expect(rawHistory).toEqual(session.history);
+    expect(rawHistory).toContain(hidden);
+  });
+
+  it("fails history projection before authored delivery or runtime callbacks run", async () => {
+    const deliver = vi.fn(() => ({ message: "delivered" }));
+    const adapter: ChannelAdapter = { kind: "projection-failure", deliver };
+    const dynamicToolHandler = vi.fn(() => null);
+    const compiledBundle = {
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: { sandboxRegistry: { sandbox: null }, turnAgent: TestTurnAgent },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: {},
+        dynamicToolResolvers: [
+          {
+            eventNames: ["session.started"],
+            events: { "session.started": dynamicToolHandler },
+            logicalPath: "agent/tools/failure.ts",
+            slug: "failure",
+            sourceId: "test:failure",
+            sourceKind: "module",
+          },
+        ],
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    installSessionStoreMocks([createStubSession({ history: [{ content: "raw", role: "user" }] })]);
+    mockIdentityHistoryViewProjector.mockImplementation(() => {
+      throw new Error("projection failed");
+    });
+    vi.mocked(createExecutionNodeStep).mockClear();
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "projection-failure");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+
+    await expect(
+      turnStep({
+        input: { kind: "deliver", payloads: [{ message: "hello" }] },
+        parentWritable: createTestWritable(),
+        serializedContext: serializeContext(ctx),
+        sessionState: createStubSessionState(),
+      }),
+    ).rejects.toThrow("projection failed");
+    expect(deliver).not.toHaveBeenCalled();
+    expect(dynamicToolHandler).not.toHaveBeenCalled();
+    expect(createExecutionNodeStep).not.toHaveBeenCalled();
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+  });
+
+  it.each([
+    {
+      expected: {
+        attributes: { user_id: "U456" },
+        authenticator: "slack-webhook",
+        issuer: "slack",
+        principalId: "slack:U456",
+        principalType: "user",
+        subject: "U456",
+      } satisfies SessionAuthContext,
+      title: "replaces the previous caller",
+    },
+    { expected: null, title: "clears the previous caller" },
+  ])("$title from deliver-time auth", async ({ expected }) => {
+    const bundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    installSessionStoreMocks([createStubSession()]);
+
+    const previous: SessionAuthContext = {
+      attributes: { user_id: "U123" },
+      authenticator: "slack-webhook",
+      issuer: "slack",
+      principalId: "slack:U123",
+      principalType: "user",
+      subject: "U123",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, previous);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:auth-replacement");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+
+    let observed: SessionAuthContext | null | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        observed = loadContext().get(AuthKey);
+        return { next: null, session };
+      };
+    });
+
+    await turnStep({
+      input: { auth: expected, kind: "deliver", payloads: [{ message: "follow up" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(observed).toEqual(expected);
+  });
+
+  it("routes remote task HITL only to the parent callback", async () => {
+    const inputRequested = vi.fn();
+    const remoteTaskAdapter: ChannelAdapter = {
+      kind: "remote-task-test",
+      "input.requested": inputRequested,
+    };
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[remoteTaskAdapter.kind, remoteTaskAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation((input) => {
+      return async (stepSession): Promise<StepResult> => {
+        await input.handleEvent?.(
+          createInputRequestedEvent({
+            requests: [
+              {
+                action: {
+                  callId: "tool-call-1",
+                  input: {},
+                  kind: "tool-call",
+                  toolName: "dangerous_tool",
+                },
+                kind: "tool-approval",
+                options: [
+                  { id: "approve", label: "Approve" },
+                  { id: "cancel", label: "Cancel" },
+                ],
+                prompt: "Approve?",
+                requestId: "request-1",
+              },
+            ],
+            sequence: 1,
+            stepIndex: 2,
+            turnId: "turn-child",
+          }),
+        );
+        return { next: null, session: stepSession };
+      };
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, remoteTaskAdapter);
+    ctx.set(ContinuationTokenKey, "child-token");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionCallbackKey, {
+      callId: "parent-call",
+      subagentName: "remote-worker",
+      taskId: "task_abc",
+      token: "task-token",
+      url: "https://parent.example/eve/v1/callback/task-token",
+    });
+    ctx.set(SessionIdKey, "child-session");
+
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "run the task" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://parent.example/eve/v1/callback/task-token",
+      expect.objectContaining({
+        body: expect.stringContaining('"kind":"task.input-requested"'),
+      }),
+    );
+    expect(inputRequested).not.toHaveBeenCalled();
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? []).toEqual([]);
+  });
+
+  it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {},
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (): Promise<StepResult> => {
+        const ctx = loadContext();
+        ctx.set(SessionDynamicModelReferenceKey, {
+          id: "anthropic/claude-opus-4.6",
+          contextWindowTokens: 1_000_000,
+        });
+        ctx.set(ThreadKey, "discard this turn-scoped mutation");
+        throw new TurnCancelledError();
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "cancel this turn" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "cancelled",
+      serializedContext: {
+        [SessionDynamicModelReferenceKey.name]: {
+          id: "anthropic/claude-opus-4.6",
+          contextWindowTokens: 1_000_000,
+        },
+      },
+    });
+    expect(result.serializedContext).not.toHaveProperty(ThreadKey.name);
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      { content: "thread=unset; user=cancel this turn", role: "user" },
+    ]);
+  });
+
+  it("rejects task completion while input requests remain pending", async () => {
+    const session = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "call-pending-approval",
+            input: {},
+            kind: "tool-call",
+            toolName: "confirm",
+          },
+          kind: "tool-approval",
+          prompt: "Approve?",
+          requestId: "request-pending-approval",
+        },
+      ],
+      responseMessages: [],
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "must not complete" },
+        session: stepSession,
+      });
+    });
+
+    await expect(
+      turnStep({
+        input: {
+          kind: "deliver",
+          payloads: [{ message: "unrelated message" }],
+        },
+        parentWritable: createTestWritable(),
+        serializedContext: createSerializedContext("task"),
+        sessionState: createStubSessionState(),
+      }),
+    ).rejects.toThrow("Task mode cannot complete while input requests remain pending.");
+  });
+
+  it("uses the selected dynamic subagent model for execution identity", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: { done: true, output: "ok" },
+        session: stepSession,
+      });
+    });
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: { config: {} },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "dynamic-subagent");
+    ctx.set(DynamicSubagentAgentConfigKey, {
+      description: "Perform deep research.",
+      model: { id: "anthropic/claude-opus-4.6" },
+    });
+    ctx.set(ModeKey, "task");
+    ctx.set(SessionIdKey, "session-1");
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "research this" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    const effectiveNode = expect.objectContaining({
+      turnAgent: expect.objectContaining({
+        model: { id: "anthropic/claude-opus-4.6" },
+      }),
+    });
+    expect(buildRuntimeIdentity).toHaveBeenCalledWith(effectiveNode);
+    expect(createExecutionNodeStep).toHaveBeenCalledWith(
+      expect.objectContaining({ node: effectiveNode }),
+    );
+  });
+
+  it("returns tasksEnabled on park results so the turn workflow selects dispatchTaskStep", async () => {
+    // Regression: a stack rebase once dropped `tasksEnabled` from the park
+    // arms while keeping the computation, so every tasks-mode agent silently
+    // fell back to dispatchRuntimeActionsStep and no background task receipt
+    // was ever minted. The park result is the only wire that carries this
+    // flag to the dispatch selection in turn-workflow.ts.
+    const tasksBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(tasksBundle);
+
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: stepSession,
+      });
+    });
+
+    const parked = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "start a background task" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    expect(parked).toMatchObject({ action: "park", tasksEnabled: true });
+
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: stepSession,
+        settledTurn: { output: "settled" },
+      });
+    });
+    const settled = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "settle" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+    expect(settled).toMatchObject({ action: "park", tasksEnabled: true });
+  });
+
+  it("passes task-agent availability projection into execution", async () => {
+    const tasksBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(tasksBundle);
+
+    const session = createStubSession();
+    const projectedSession = {
+      ...session,
+      history: [{ content: "[Agents]\n<agents>\n</agents>", role: "user" as const }],
+    };
+    installSessionStoreMocks([session]);
+    vi.mocked(appendTaskAgentAnnouncement).mockResolvedValue(projectedSession);
+
+    let executedSession: HarnessSession | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        executedSession = stepSession;
+        return { next: null, session: stepSession };
+      };
+    });
+
+    await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "check background work" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(appendTaskAgentAnnouncement).toHaveBeenCalledOnce();
+    expect(executedSession).toBe(projectedSession);
+  });
+
+  it("carries a settled turn through the typed park action when no work remains pending", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: stepSession,
+        settledTurn: { output: "settled answer" },
+      });
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "park",
+      settled: { output: "settled answer" },
+    });
+  });
+
+  it("reports each settled turn's usage as a delta, not the cumulative session totals", async () => {
+    const usageStateAfterTurn = (
+      totals: Readonly<Record<string, number>>,
+    ): Record<string, unknown> => ({
+      "eve.harness.turnUsage": {
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        costUsd: 0,
+        sawCost: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        session: {
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          costUsd: 0,
+          sawCost: false,
+          ...totals,
+        },
+        turnId: "turn_usage",
+      },
+    });
+
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: {
+          ...stepSession,
+          state: {
+            ...stepSession.state,
+            ...usageStateAfterTurn({ inputTokens: 100, outputTokens: 40 }),
+          },
+        },
+        settledTurn: { output: "first answer" },
+      });
+    });
+
+    const first = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "hello" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(first).toMatchObject({
+      action: "park",
+      settled: {
+        output: "first answer",
+        usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 100, outputTokens: 40 },
+      },
+    });
+    if (first.action !== "park") throw new Error("expected park");
+
+    // Second turn: session totals are cumulative (150/60), but the settled
+    // answer must only report what this turn added (50/20).
+    const firstSession = first.sessionState.snapshot?.session as HarnessSession;
+    installSessionStoreMocks([firstSession]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: {
+          ...stepSession,
+          state: {
+            ...stepSession.state,
+            ...usageStateAfterTurn({ inputTokens: 150, outputTokens: 60 }),
+          },
+        },
+        settledTurn: { output: "second answer" },
+      });
+    });
+
+    const second = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "again" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: first.sessionState,
+    });
+
+    expect(second).toMatchObject({
+      action: "park",
+      settled: {
+        output: "second answer",
+        usage: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 50, outputTokens: 20 },
+      },
+    });
+  });
+
+  it("carries a settled turn while an older input batch remains pending", async () => {
+    const session = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "call-existing-input",
+            input: {},
+            kind: "tool-call",
+            toolName: "confirm",
+          },
+          kind: "question",
+          prompt: "Continue?",
+          requestId: "request-existing-input",
+        },
+      ],
+      responseMessages: [],
+      session: createStubSession(),
+    });
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: stepSession,
+        settledTurn: { output: "settled while approval remains open" },
+      });
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "unrelated message" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "park",
+      hasPendingInputBatch: true,
+      settled: { output: "settled while approval remains open" },
+    });
+  });
+
+  it.each([
+    {
+      name: "authorization",
+      withPending: (session: HarnessSession): HarnessSession => ({
+        ...session,
+        state: setPendingAuthorization(session.state, {
+          challenges: [
+            {
+              attemptId: "attempt-statuspage",
+              challenge: {
+                instructions: "Sign in to continue",
+                url: "https://idp.example/authorize",
+              },
+              hookUrl: "https://app.example/callback",
+              name: "statuspage",
+              principal: { type: "app" },
+            },
+          ],
+        }),
+      }),
+    },
+    {
+      name: "input batch",
+      withPending: (session: HarnessSession): HarnessSession =>
+        appendPendingInputBatch({
+          requests: [
+            {
+              action: {
+                callId: "call-input",
+                input: {},
+                kind: "tool-call",
+                toolName: "confirm",
+              },
+              kind: "question",
+              prompt: "Continue?",
+              requestId: "request-input",
+            },
+          ],
+          responseMessages: [],
+          session,
+        }),
+    },
+    {
+      name: "runtime action",
+      withPending: (session: HarnessSession): HarnessSession =>
+        setPendingRuntimeActionBatch({
+          actions: [
+            {
+              callId: "call-runtime",
+              input: {},
+              kind: "tool-call",
+              toolName: "runtime-tool",
+            },
+          ],
+          event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+          responseMessages: [],
+          session,
+        }),
+    },
+  ])("does not infer settled output from a pending $name", async ({ withPending }) => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: null,
+        session: withPending(stepSession),
+      });
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "hello" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("park");
+    if (result.action === "park") {
+      expect(result.settled).toBeUndefined();
+    }
+  });
+
   it("reads the durable session from normalized turn-step input", async () => {
     const session = createStubSession({
       continuationToken: "http:turn-step",
@@ -623,6 +2314,188 @@ describe("turnStep", () => {
     expect(createDurableSessionState).toHaveBeenLastCalledWith({
       session: expect.objectContaining({ sessionId: "turn-step-session" }),
     });
+  });
+
+  it("sets task-delivery provenance only when the runtime supplies owned task state", async () => {
+    const observedTaskDeliveries: unknown[] = [];
+    const observedTaskStates: unknown[] = [];
+    const metadata = { kind: "report-probe", name: "report_probe" } as const;
+    const session = createStubSession({
+      state: {
+        "eve.tasks": {
+          tasks: [
+            {
+              taskInboxToken: "task-token",
+              createdByTurnId: "turn-parent",
+              metadata,
+              taskId: "task_1",
+              taskRunId: "run_1",
+              terminalView: {
+                lastOutput: { data: { result: "done" }, type: "result" },
+                metadata,
+                status: "completed",
+                taskId: "task_1",
+              },
+            },
+          ],
+        },
+      },
+    });
+    installSessionStoreMocks([session, session, session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        observedTaskDeliveries.push(contextStorage.getStore()?.get(TurnTaskDeliveryKey));
+        observedTaskStates.push(contextStorage.getStore()?.get(TurnTaskStateKey));
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+
+    const initialSerializedContext = createSerializedContext();
+    initialSerializedContext[TurnTaskStateKey.name] = "stale task state";
+
+    const first = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "Background task task_1 is completed." }],
+        taskDeliveryId: "task_1:ready:completed",
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: initialSerializedContext,
+      sessionState: createStubSessionState(),
+    });
+    const second = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "Background task task_unknown is completed." }],
+        taskDeliveryId: "task_unknown:ready:completed",
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: first.serializedContext,
+      sessionState: first.sessionState,
+    });
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "What happened?" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: second.serializedContext,
+      sessionState: second.sessionState,
+    });
+
+    expect(observedTaskDeliveries).toEqual(["settled", "none", "none"]);
+    expect(observedTaskStates).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("supplies initiating task state after the active turn accepts delegated work", async () => {
+    const tasksBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource: {} as never,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(tasksBundle);
+
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 0,
+          sessionStarted: true,
+          stepIndex: 1,
+          turnId: "turn_0",
+        },
+        "eve.tasks": {
+          tasks: [
+            {
+              createdByStepIndex: 0,
+              createdByTurnId: "turn_0",
+              executor: { data: {}, kind: "subagent" },
+              metadata: { kind: "report-probe", name: "report_probe" },
+              taskId: "task_1",
+              taskInboxToken: "task-token",
+              taskRunId: "run_1",
+            },
+          ],
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+
+    let observedInput: unknown;
+    let observedPhase: unknown;
+    let observedTaskState: unknown;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession, stepInput): Promise<StepResult> => {
+        observedInput = stepInput;
+        observedPhase = contextStorage.getStore()?.get(TurnTaskDeliveryKey);
+        observedTaskState = contextStorage.getStore()?.get(TurnTaskStateKey);
+        return { next: { done: true, output: "ok" }, session: stepSession };
+      };
+    });
+    const serializedContext = createSerializedContext();
+    serializedContext[TurnTaskDeliveryKey.name] = "none";
+
+    await turnStep({
+      input: undefined,
+      parentWritable: createTestWritable(),
+      serializedContext,
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 0,
+          sessionStarted: true,
+          stepIndex: 1,
+          turnId: "turn_0",
+        },
+      }),
+    });
+
+    expect(observedPhase).toBe("initiating");
+    expect(observedTaskState).toBe(
+      '[Task state]\n{"tasks":[{"name":"report_probe","status":"pending","taskId":"task_1"}]}',
+    );
+    expect(observedInput).toBeUndefined();
+  });
+
+  it("projects a requested sleep onto the durable step result", async () => {
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        requestTurnSleep(2_500);
+        return {
+          next: async () => ({ next: null, session: stepSession }),
+          session: stepSession,
+        };
+      };
+    });
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "wait before checking" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result).toMatchObject({
+      action: "continue",
+      sleepDurationMs: 2_500,
+    });
+    expect(result.serializedContext).not.toHaveProperty("eve.pendingTurnSleepDuration");
   });
 
   it("persists onDeliver context into the next durable step", async () => {
@@ -842,7 +2715,141 @@ describe("turnStep", () => {
     });
   });
 
-  it("clears pending authorization after a matching callback resumes the turn", async () => {
+  it("refreshes session-scoped dynamic tools from the current deployment", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_new");
+    const lifecycleOrder: string[] = [];
+    const originalClearVirtualContext = ContextContainer.prototype.clearVirtualContext;
+    vi.spyOn(ContextContainer.prototype, "clearVirtualContext").mockImplementation(
+      function (this: ContextContainer) {
+        lifecycleOrder.push("clear");
+        originalClearVirtualContext.call(this);
+      },
+    );
+    const approval = stampDurableDynamicCallback(() => "not-applicable" as const, {
+      callback: () => "not-applicable",
+      closure: {},
+    });
+    const execute = stampDurableDynamicCallback(async () => ({ ok: true }), {
+      callback: async () => ({ ok: true }),
+      closure: {},
+    });
+    const handler = vi.fn(() => {
+      lifecycleOrder.push("refresh");
+      return {
+        current_tool: defineTool({
+          description: "Current deployment tool",
+          inputSchema: { type: "object" },
+          approval,
+          execute,
+        }),
+      };
+    });
+    const dynamicToolResolver = {
+      eventNames: ["session.started"],
+      events: { "session.started": handler },
+      logicalPath: "agent/tools/current.ts",
+      slug: "current",
+      sourceId: "test:current",
+      sourceKind: "module",
+    } as never;
+    const compiledArtifactsSource = { kind: "bundled" } as const;
+    const compiledBundle = {
+      adapterRegistry: {
+        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      },
+      compiledArtifactsSource,
+      graph: {
+        nodesByNodeId: new Map(),
+        root: {
+          sandboxRegistry: { sandbox: null },
+          turnAgent: TestTurnAgent,
+        },
+      },
+      moduleMap: { nodes: {} },
+      hookRegistry: createEmptyHookRegistry(),
+      resolvedAgent: {
+        config: {},
+        dynamicToolResolvers: [dynamicToolResolver],
+      },
+      subagentRegistry: {},
+      toolRegistry: {},
+      turnAgent: TestTurnAgent,
+    } as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session): Promise<StepResult> => {
+        lifecycleOrder.push("execute");
+        return {
+          next: { done: true, output: "ok" },
+          session,
+        };
+      };
+    });
+
+    const session = createStubSession({
+      state: {
+        "eve.harness.emission": {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      },
+    });
+    installSessionStoreMocks([session]);
+
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, compiledBundle);
+    ctx.set(ChannelKey, threadContextAdapter);
+    ctx.set(ContinuationTokenKey, "http:thread-context");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_old");
+    ctx.set(SessionDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: { closure: {} },
+        },
+        description: "Stale deployment tool",
+        entryKey: "old_tool",
+        inputSchema: { type: "object" },
+        name: "old_tool",
+        resolverSlug: "old",
+      },
+    ]);
+
+    const result = await turnStep({
+      input: {
+        kind: "deliver",
+        payloads: [{ message: "follow up" }],
+      },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState({
+        emissionState: {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        },
+      }),
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(lifecycleOrder).toEqual(["refresh", "clear", "execute"]);
+    expect(result.serializedContext[SessionDynamicToolRuntimeRevisionKey.name]).toBe(
+      "deployment:dpl_new",
+    );
+    expect(result.serializedContext[SessionDynamicToolMetadataKey.name]).toEqual([
+      expect.objectContaining({
+        name: "current_tool",
+        resolverSlug: "current",
+      }),
+    ]);
+  });
+
+  it("resumes a legacy pending authorization without attempt metadata", async () => {
     const challenge = {
       challenge: {
         instructions: "Sign in to continue",
@@ -894,6 +2901,7 @@ describe("turnStep", () => {
             authorizationCallback: {
               callback: { code: "oauth-code" },
               connectionName: "statuspage",
+              legacy: true,
             },
           },
         ],
@@ -919,15 +2927,25 @@ describe("turnStep", () => {
 
   it("clears pending authorization after a matching callback resumes the turn", async () => {
     const challenge = {
+      attemptId: "attempt-statuspage",
       challenge: {
         instructions: "Sign in to continue",
         url: "https://idp.example/authorize",
       },
       hookUrl: "https://app.example/eve/v1/connections/statuspage/callback/sess-test:auth",
       name: "statuspage",
+      principal: { type: "app" } as const,
       resume: { nonce: "n1" },
     };
+    const hidden = { content: "HIDE_FROM_AUTH_CONTINUATION", role: "user" as const };
+    mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>
+      messages.filter((message) => message !== hidden),
+    );
+    const instructionHandler = vi.fn(
+      (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
+    );
     const session = createStubSession({
+      history: [{ content: "visible", role: "user" }, hidden],
       state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
     });
     installSessionStoreMocks([session]);
@@ -945,7 +2963,22 @@ describe("turnStep", () => {
       },
       moduleMap: { nodes: {} },
       hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {} },
+      resolvedAgent: {
+        config: {},
+        dynamicInstructionsResolvers: [
+          {
+            eventNames: ["session.started", "turn.started"],
+            events: {
+              "session.started": instructionHandler,
+              "turn.started": instructionHandler,
+            },
+            logicalPath: "agent/instructions/auth.ts",
+            slug: "auth",
+            sourceId: "test:auth",
+            sourceKind: "module",
+          },
+        ],
+      },
       subagentRegistry: {},
       toolRegistry: {},
       turnAgent: TestTurnAgent,
@@ -967,6 +3000,7 @@ describe("turnStep", () => {
         payloads: [
           {
             authorizationCallback: {
+              attemptId: "attempt-statuspage",
               callback: { code: "oauth-code" },
               connectionName: "statuspage",
             },
@@ -990,6 +3024,13 @@ describe("turnStep", () => {
     const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(persistedSession?.state?.retained).toBe("yes");
     expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
+    expect(instructionHandler).toHaveBeenCalledTimes(2);
+    for (const call of instructionHandler.mock.calls) {
+      expect(call[1]).toMatchObject({
+        messages: [{ content: "visible", role: "user" }],
+      });
+    }
+    expect(persistedSession?.history).toContain(hidden);
   });
 });
 
@@ -1053,10 +3094,12 @@ describe("emitTerminalSessionFailureStep", () => {
     // raw Errors to this shape (`normalizeSerializableError`) before
     // handing them into the step so they survive JSON serialization.
     const error = {
-      message: "attachment staging failed",
+      detail: "private attachment name: confidential.png",
+      message: "attachment staging failed for confidential.png",
       name: "EveAttachmentError",
       kind: "resolver-threw",
     };
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await emitTerminalSessionFailureStep({
       error,
@@ -1069,14 +3112,64 @@ describe("emitTerminalSessionFailureStep", () => {
       data: { code: string; message: string; details?: { errorId?: string } };
     };
     expect(data.code).toBe("EveAttachmentError");
-    expect(data.message).toContain("attachment staging failed");
+    expect(data.message).toContain("attachment staging failed for confidential.png");
     expect(typeof data.details?.errorId).toBe("string");
+
+    const providerLog = errorLog.mock.calls.find(([line]) =>
+      String(line).includes("workflow loop threw"),
+    );
+    expect(providerLog?.[1]).toEqual({
+      code: "EveAttachmentError",
+      errorId: data.details?.errorId,
+      sessionId: "session-terminal",
+    });
+    expect(JSON.stringify(providerLog)).not.toContain("confidential.png");
 
     // The terminal step must also write the event to the durable
     // stream so event-stream consumers see a canonical tail instead
     // of an abrupt close.
     const writes = workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE) ?? [];
     expect(writes.length).toBe(1);
+  });
+
+  it("replaces cataloged failures with their semantic summary while keeping the raw dump", async () => {
+    const sessionFailedCalls: Array<{ data: unknown }> = [];
+    const capturingAdapter: ChannelAdapter = {
+      kind: "thread-context",
+      async "session.failed"(data) {
+        sessionFailedCalls.push({ data });
+      },
+    };
+
+    const serialized = buildSerializedContextWithAdapter(capturingAdapter, "session-semantic");
+
+    const error = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), {
+        code: "ECONNREFUSED",
+      }),
+    });
+
+    await emitTerminalSessionFailureStep({
+      error,
+      parentWritable: createTestWritable(),
+      serializedContext: serialized,
+    });
+
+    expect(sessionFailedCalls).toHaveLength(1);
+    const { data } = sessionFailedCalls[0] as {
+      data: {
+        code: string;
+        message: string;
+        details?: { detail?: string; hint?: string; semanticErrorId?: string };
+      };
+    };
+    expect(data.code).toBe("Network request failed");
+    expect(data.message).toContain("ECONNREFUSED");
+    expect(data.details?.semanticErrorId).toBe("network-request-failed");
+    expect(data.details?.hint).toContain("Check your internet connection");
+    // The raw inspection stays attached so the private session trace keeps
+    // the evidence the curated message summarizes away.
+    expect(data.details?.detail).toContain("fetch failed");
   });
 
   it("does not throw when the adapter handler itself throws", async () => {
@@ -1109,7 +3202,7 @@ describe("emitTerminalSessionFailureStep", () => {
   });
 });
 
-describe("runProxyInputRequestStep", () => {
+describe("runProxySubagentEventStep", () => {
   // Ensures adapter state mutations made while proxying input requests
   // are serialized for the next durable workflow step.
 
@@ -1168,9 +3261,10 @@ describe("runProxyInputRequestStep", () => {
               kind: "tool-call",
               toolName: "dangerous_tool",
             },
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Approve" },
-              { id: "deny", label: "Deny" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve?",
             requestId: "req-1",
@@ -1216,7 +3310,7 @@ describe("runProxyInputRequestStep", () => {
       continuationToken: "http:proxy-test",
     });
 
-    const result = await runProxyInputRequestStep({
+    const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
       serializedContext: buildSerializedContextForAdapter(cachingAdapter),
@@ -1258,7 +3352,7 @@ describe("runProxyInputRequestStep", () => {
     const rekeyingAdapter: ChannelAdapter = {
       kind: "thread-context",
       async "input.requested"(_data, adapterCtx) {
-        adapterCtx.session.setContinuationToken("proxy-rekeyed");
+        adapterCtx.session.continuation?.rekey("proxy-rekeyed");
       },
     };
 
@@ -1273,7 +3367,7 @@ describe("runProxyInputRequestStep", () => {
       continuationToken: "http:proxy-test",
     });
 
-    const result = await runProxyInputRequestStep({
+    const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
       serializedContext: buildSerializedContextForAdapter(rekeyingAdapter),

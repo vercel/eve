@@ -13,16 +13,24 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
     const controller = new AbortController();
 
     await runtime.runAsSession({ sandbox }, async () => {
-      const ctx = buildBaseToolContext({ abortSignal: controller.signal, toolCallId: "call_1" });
+      const ctx = buildBaseToolContext({
+        options: { abortSignal: controller.signal, toolCallId: "call_1" },
+        toolName: "shell",
+      });
+      expect(ctx.toolName).toBe("shell");
       const live = await ctx.getSandbox();
       await live.run({ command: "echo ready" });
     });
 
-    expect(observed).toBe(controller.signal);
+    expect(observed).toBeDefined();
+    expect(observed).not.toBe(controller.signal);
+    expect(observed?.aborted).toBe(false);
+    controller.abort(new Error("turn cancelled"));
+    expect(observed?.aborted).toBe(true);
   });
 
   it("binds the inert fallback signal when no turn signal exists", async () => {
@@ -33,10 +41,13 @@ describe("buildBaseToolContext – getSandbox abort binding", () => {
         return { exitCode: 0, stderr: "", stdout: "" };
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     await runtime.runAsSession({ sandbox }, async () => {
-      const ctx = buildBaseToolContext({ toolCallId: "call_1" });
+      const ctx = buildBaseToolContext({
+        options: { toolCallId: "call_1" },
+        toolName: "shell",
+      });
       const live = await ctx.getSandbox();
       await live.run({ command: "echo ready" });
     });

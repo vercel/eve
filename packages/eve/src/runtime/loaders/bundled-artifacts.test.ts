@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
   readBundledCompiledArtifacts,
   withBundledCompiledArtifacts,
@@ -13,16 +13,11 @@ import {
 
 describe("withBundledCompiledArtifacts", () => {
   it("installs artifacts only for the scoped runtime session", async () => {
-    const manifest = createCompiledAgentManifest({
+    const { manifest, moduleMap } = await compileFromMemory({
       agentRoot: "/tmp/app/agent",
       appRoot: "/tmp/app",
-      config: {
-        model: {
-          id: "openai/gpt-5-mini",
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "test-agent",
-      },
+      model: "openai/gpt-5.4",
+      name: "test-agent",
     });
 
     await withRuntimeSession(createRuntimeSession("outer"), async () => {
@@ -31,9 +26,7 @@ describe("withBundledCompiledArtifacts", () => {
       const inner = await withBundledCompiledArtifacts(
         {
           manifest,
-          moduleMap: {
-            nodes: {},
-          },
+          moduleMap,
           sessionId: "inner",
         },
         () => ({

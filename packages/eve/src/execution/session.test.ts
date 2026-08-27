@@ -5,14 +5,15 @@ import {
   createCompactionConfig,
   createSession,
   DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
-  DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
   hydrateDurableSession,
   mintSubagentContinuationToken,
   projectToDurableSession,
   refreshSessionFromTurnAgent,
 } from "#execution/session.js";
 
-function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurnAgent {
+type StaticRuntimeTurnAgent = Extract<RuntimeTurnAgent, { readonly model: unknown }>;
+
+function createTestTurnAgent(overrides?: Partial<StaticRuntimeTurnAgent>): RuntimeTurnAgent {
   return {
     id: "test-agent",
     instructions: ["You are a helpful assistant.", "Be concise."],
@@ -30,6 +31,7 @@ function createTestTurnAgent(overrides?: Partial<RuntimeTurnAgent>): RuntimeTurn
         kind: "authored-tool",
         logicalPath: "tools/add",
         name: "add",
+        owner: { kind: "application" },
         sourceId: "src-add",
       },
     ],
@@ -47,6 +49,7 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 180_000,
+      thresholdPercent: 0.9,
     });
   });
 
@@ -59,6 +62,7 @@ describe("createCompactionConfig", () => {
     ).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 
@@ -66,6 +70,7 @@ describe("createCompactionConfig", () => {
     expect(createCompactionConfig()).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.9,
     });
   });
 });
@@ -97,24 +102,20 @@ describe("createSession", () => {
     ]);
   });
 
-  it("renders available skill paths with the chosen skill root", () => {
+  it("renders canonical symbolic paths for static skills", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
-      skillRoot: "/home/agent/.agents/skills",
       turnAgent: createTestTurnAgent({
         availableSkills: [{ description: "Research topics.", name: "research" }],
       }),
     });
 
+    expect(session.agent.system).toContain("`$HOME/.agents/skills/<skill>/`");
+    expect(session.agent.system).toContain("`/workspace/skills/<skill>/` as the fallback");
     expect(session.agent.system).toContain(
-      "Skill files live under `/home/agent/.agents/skills/<skill>/`.",
+      "- research: Research topics. (path: $HOME/.agents/skills/research/SKILL.md)",
     );
-    expect(session.agent.system).toContain(
-      "- research: Research topics. (path: /home/agent/.agents/skills/research/SKILL.md)",
-    );
-    expect(session.agent.system).not.toContain("/workspace/skills");
-    expect(session.agent.system).not.toContain("fallback");
   });
 
   it("starts with empty history and stores the continuation token verbatim", () => {
@@ -126,6 +127,34 @@ describe("createSession", () => {
 
     expect(session.history).toEqual([]);
     expect(session.continuationToken).toBe("root-token");
+  });
+
+  it("copies static user instructions only when creating a fresh session", () => {
+    const initialMessages = [{ content: "Pinned tenant policy.", role: "user" as const }];
+    const session = createSession({
+      continuationToken: "root-token",
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent({ initialMessages }),
+    });
+    initialMessages[0] = { content: "mutated", role: "user" };
+
+    expect(session.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+
+    const refreshed = refreshSessionFromTurnAgent({
+      session,
+      turnAgent: createTestTurnAgent({
+        initialMessages: [{ content: "New deployment policy.", role: "user" }],
+      }),
+    });
+    expect(refreshed.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
+
+    const hydrated = hydrateDurableSession({
+      durable: projectToDurableSession(refreshed),
+      turnAgent: createTestTurnAgent({
+        initialMessages: [{ content: "Another deployment policy.", role: "user" }],
+      }),
+    });
+    expect(hydrated.history).toEqual([{ content: "Pinned tenant policy.", role: "user" }]);
   });
 
   it("defaults description and inputSchema when null", () => {
@@ -140,6 +169,7 @@ describe("createSession", () => {
             kind: "authored-tool",
             logicalPath: "tools/noop",
             name: "noop",
+            owner: { kind: "application" },
             sourceId: "src-noop",
           },
         ],
@@ -163,6 +193,7 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.9,
     });
   });
 
@@ -179,6 +210,7 @@ describe("createSession", () => {
     expect(session.compaction).toEqual({
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 
@@ -215,7 +247,7 @@ describe("createSession", () => {
     );
   });
 
-  it("defaults delegated subagent sessions to the subagent input token budget", () => {
+  it("leaves delegated subagent sessions uncapped by default", () => {
     const session = createSession({
       continuationToken: "subagent-token",
       sessionId: "sess-child",
@@ -223,12 +255,33 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(session.limits?.maxInputTokensPerSession).toBe(
-      DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
-    );
+    expect(session.limits).toEqual({});
   });
 
-  it("applies the root input token budget when hydrating a durable session without a stored limit", () => {
+  it("uncaps a root session when the authored limit is false", () => {
+    const session = createSession({
+      continuationToken: "root-token",
+      limits: { maxInputTokensPerSession: false },
+      sessionId: "sess-root",
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(session.limits).toEqual({});
+  });
+
+  it("uncaps a delegated subagent session when the authored limit is false", () => {
+    const session = createSession({
+      continuationToken: "subagent-token",
+      limits: { maxInputTokensPerSession: false },
+      sessionId: "sess-child",
+      subagentDepth: 1,
+      turnAgent: createTestTurnAgent(),
+    });
+
+    expect(session.limits).toEqual({});
+  });
+
+  it("treats a durable session without stored limits as uncapped on hydration", () => {
     const hydrated = hydrateDurableSession({
       durable: {
         agent: { system: "You are a helpful assistant." },
@@ -239,26 +292,25 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(hydrated.limits?.maxInputTokensPerSession).toBe(
-      DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION,
-    );
+    expect(hydrated.limits).toBeUndefined();
   });
 
-  it("applies the subagent input token budget when hydrating a durable child without a stored limit", () => {
+  it("rehydrates persisted limits verbatim without re-applying defaults", () => {
     const hydrated = hydrateDurableSession({
       durable: {
         agent: { system: "You are a helpful assistant." },
         continuationToken: "subagent-token",
         history: [],
+        limits: {},
         sessionId: "sess-child",
         subagentDepth: 1,
       },
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(hydrated.limits?.maxInputTokensPerSession).toBe(
-      DEFAULT_SUBAGENT_MAX_INPUT_TOKENS_PER_SESSION,
-    );
+    // An uncapped session (resolved limits `{}`) must stay uncapped across
+    // rehydration instead of picking up the root default again.
+    expect(hydrated.limits).toEqual({});
   });
 
   it("persists run outputSchema through durable session projection and hydration", () => {
@@ -289,12 +341,11 @@ describe("createSession", () => {
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
   });
 
-  it("persists subagent depth limits through durable session projection and hydration", () => {
+  it("persists subagent depth through durable session projection and hydration", () => {
     const session = createSession({
       continuationToken: "root-token",
       sessionId: "sess-root",
       subagentDepth: 2,
-      subagentMaxDepth: 4,
       turnAgent: createTestTurnAgent(),
     });
 
@@ -305,9 +356,7 @@ describe("createSession", () => {
     });
 
     expect(durable.subagentDepth).toBe(2);
-    expect(durable.subagentMaxDepth).toBe(4);
     expect(hydrated.subagentDepth).toBe(2);
-    expect(hydrated.subagentMaxDepth).toBe(4);
   });
 
   it("persists session token limits through durable session projection and hydration", () => {
@@ -368,6 +417,25 @@ describe("mintSubagentContinuationToken", () => {
 });
 
 describe("refreshSessionFromTurnAgent", () => {
+  it("keeps session-specific system additions alongside refreshed authored instructions", () => {
+    const session = createSession({
+      continuationToken: "child-token",
+      sessionId: "child-session",
+      systemPromptAdditions: ["Background task updates"],
+      turnAgent: createTestTurnAgent({ instructions: ["Original instructions."] }),
+    });
+    expect(session.agent.system).toBe("Original instructions.\n\nBackground task updates");
+
+    const refreshed = refreshSessionFromTurnAgent({
+      session,
+      systemPromptAdditions: ["Background task updates"],
+      turnAgent: createTestTurnAgent({ instructions: ["Updated instructions."] }),
+    });
+
+    expect(refreshed.agent.system).toBe("Updated instructions.\n\nBackground task updates");
+    expect(refreshed.state).toBeUndefined();
+  });
+
   it("refreshes the current agent configuration while preserving history", () => {
     const session = createSession({
       continuationToken: "root-token",
@@ -392,6 +460,7 @@ describe("refreshSessionFromTurnAgent", () => {
             kind: "authored-tool",
             logicalPath: "tools/echo",
             name: "echo",
+            owner: { kind: "application" },
             sourceId: "src-echo",
           },
         ],
@@ -454,6 +523,7 @@ describe("refreshSessionFromTurnAgent", () => {
       lastKnownPromptMessageCount: 7,
       recentWindowSize: 10,
       threshold: 100_000,
+      thresholdPercent: 0.5,
     });
   });
 
@@ -478,31 +548,5 @@ describe("refreshSessionFromTurnAgent", () => {
       id: "updated-model",
     });
     expect(refreshed.agent.system).toBe("Updated prompt from the current deployment.");
-  });
-
-  it("refreshes available skill paths with the chosen skill root", () => {
-    const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      turnAgent: createTestTurnAgent({
-        availableSkills: [{ description: "Research topics.", name: "research" }],
-      }),
-    });
-    const refreshed = refreshSessionFromTurnAgent({
-      session,
-      skillRoot: "/workspace/skills",
-      turnAgent: createTestTurnAgent({
-        availableSkills: [{ description: "Research topics.", name: "research" }],
-      }),
-    });
-
-    expect(refreshed.agent.system).toContain(
-      "Skill files live under `/workspace/skills/<skill>/`.",
-    );
-    expect(refreshed.agent.system).toContain(
-      "- research: Research topics. (path: /workspace/skills/research/SKILL.md)",
-    );
-    expect(refreshed.agent.system).not.toContain("$HOME");
-    expect(refreshed.agent.system).not.toContain("fallback");
   });
 });

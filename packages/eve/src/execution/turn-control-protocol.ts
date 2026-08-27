@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
@@ -36,5 +37,12 @@ export async function sendTurnControlStep(input: {
 }): Promise<void> {
   "use step";
 
-  await resumeHook(input.controlToken, input.payload);
+  try {
+    await resumeHook(input.controlToken, input.payload);
+  } catch (error) {
+    // Reset and timeout terminally stop the session driver while its child
+    // turn may still be unwinding. A final at-least-once control send then
+    // has no receiver and is already obsolete.
+    if (!HookNotFoundError.is(error)) throw error;
+  }
 }

@@ -14,13 +14,19 @@ export type {
   NonInteractiveAuthorizationDefinition,
   TokenResult,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-export { defineInteractiveAuthorization } from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
+export { defineInteractiveAuthorization } from "#shared/connection-types.js";
 export type { JsonValue } from "#public/types/json.js";
 export {
   defineMcpClientConnection,
   type McpClientConnectionDefinition,
 } from "#public/definitions/connections/mcp.js";
+export type {
+  ConnectionToolCallDefinition,
+  ProvidedArgumentContext,
+  ProvidedArgumentsDefinition,
+  ProvidedArgumentValue,
+} from "#public/definitions/connections/tool-call.js";
 export {
   defineOpenAPIConnection,
   type OpenAPIConnectionDefinition,

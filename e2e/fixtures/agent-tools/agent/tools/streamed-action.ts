@@ -11,10 +11,17 @@ export default defineTool({
   inputSchema: z.object({
     label: z.string(),
   }),
-  async execute(input) {
+  async *execute(input) {
     const executionStartedAt = Date.now();
+    yield { executionStartedAt, label: input.label, phase: "waiting" as const };
+
     await delay(500);
 
-    return { executionCompletedAt: Date.now(), executionStartedAt, label: input.label };
+    yield {
+      executionCompletedAt: Date.now(),
+      executionStartedAt,
+      label: input.label,
+      phase: "complete" as const,
+    };
   },
 });

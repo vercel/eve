@@ -24,39 +24,39 @@ beforeEach(() => {
 });
 
 describe("listTeams", () => {
-  it("drains every page and deduplicates by slug", async () => {
-    mockedCaptureVercel
-      .mockResolvedValueOnce(
-        captured({
-          teams: [{ name: "Current", slug: "current", current: true }],
-          pagination: { next: 20 },
-        }),
-      )
-      .mockResolvedValueOnce(
-        captured({
-          teams: [
-            { name: "Current", slug: "current", current: true },
-            { name: "Other", slug: "other", current: false },
-          ],
-          pagination: { next: null },
-        }),
-      );
+  it("requests the maximum team page", async () => {
+    mockedCaptureVercel.mockResolvedValue(
+      captured({
+        teams: [
+          { name: "Current", slug: "current", current: true },
+          { name: "Other", slug: "other", current: false },
+        ],
+        pagination: { next: null },
+      }),
+    );
 
     await expect(listTeams("/repo")).resolves.toEqual([
       { name: "Current", slug: "current", current: true },
       { name: "Other", slug: "other", current: false },
     ]);
-    expect(mockedCaptureVercel).toHaveBeenNthCalledWith(
-      2,
-      ["teams", "ls", "--format", "json", "--next", "20"],
+    expect(mockedCaptureVercel).toHaveBeenCalledOnce();
+    expect(mockedCaptureVercel).toHaveBeenCalledWith(
+      ["teams", "ls", "--format", "json", "--limit", "100"],
       { cwd: "/repo", signal: undefined },
     );
   });
 
-  it("rejects a repeated pagination cursor", async () => {
-    mockedCaptureVercel.mockResolvedValue(captured({ teams: [], pagination: { next: 20 } }));
+  it("requests a CLI upgrade when the team-list flags are unsupported", async () => {
+    mockedCaptureVercel.mockResolvedValue(failed("Error: unknown or unexpected option: --limit"));
 
-    await expect(listTeams("/repo")).rejects.toThrow("repeated pagination cursor");
+    await expect(listTeams("/repo")).rejects.toMatchObject({
+      name: "HumanActionRequiredError",
+      action: {
+        kind: "vercel-cli-upgrade",
+        command: "vercel upgrade",
+        reason: expect.stringContaining("does not support"),
+      },
+    });
   });
 
   it("rejects an invalid entry instead of returning a partial page", async () => {

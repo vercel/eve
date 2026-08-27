@@ -10,6 +10,7 @@ import type {
   TypedToolCall,
   TypedToolResult,
 } from "ai";
+import type { SessionAuthContext } from "#channel/types.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
@@ -30,9 +31,16 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
+import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
-import type { RuntimeToolResultActionResult } from "#runtime/actions/types.js";
-import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import {
+  type HarnessEmitFn,
+  type HarnessSession,
+  requireSessionModelReference,
+  type ToolLoopHarnessConfig,
+} from "#harness/types.js";
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
@@ -57,7 +65,9 @@ export type HarnessStepResult = Pick<
   | "toolCalls"
   | "toolResults"
   | "usage"
->;
+> & {
+  readonly invalidInputToolCallIds?: ReadonlySet<string>;
+};
 
 // ---------------------------------------------------------------------------
 // Hook builder input / output
@@ -67,6 +77,7 @@ export type HarnessStepResult = Pick<
  * Input for {@link buildStepHooks}.
  */
 interface StepHooksInput {
+  readonly auth: SessionAuthContext | null;
   readonly cachePath: PromptCachePath;
   readonly emit?: HarnessEmitFn;
   readonly emissionState: HarnessEmissionState;
@@ -155,7 +166,12 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     let processed = messages;
 
     if (emit && input.emitStepStarted !== false) {
-      await emitStepStarted(emit, input.emissionState, messages);
+      await emitStepStarted(
+        emit,
+        input.emissionState,
+        requireSessionModelReference(session).id,
+        messages,
+      );
     }
 
     if (input.cachePath.kind === "anthropic-direct" && input.marker) {
@@ -166,10 +182,20 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       messages: processed,
     };
 
+    const modelReference = requireSessionModelReference(session);
+    const providerOptions = mergeProviderSafetyIdentifier(
+      modelReference,
+      modelReference.providerOptions,
+      input.auth,
+    );
     if (input.cachePath.kind === "gateway-auto") {
-      stepResult.providerOptions = mergeGatewayAutoCaching(
-        session.agent.modelReference.providerOptions,
-      ) as NonNullable<typeof stepResult.providerOptions>;
+      stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
+        typeof stepResult.providerOptions
+      >;
+    } else if (providerOptions !== undefined) {
+      stepResult.providerOptions = providerOptions as NonNullable<
+        typeof stepResult.providerOptions
+      >;
     }
 
     return stepResult;
@@ -209,6 +235,7 @@ export async function emitStepActions(
   step: HarnessStepResult,
   options: {
     readonly emittedActionCallIds?: ReadonlySet<string>;
+    readonly excludedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
     readonly handledInlineToolResultCallIds?: ReadonlySet<string>;
     readonly tools: ToolLoopHarnessConfig["tools"];
@@ -220,9 +247,11 @@ export async function emitStepActions(
       .map((toolCall) => toolCall.toolCallId),
   );
   const excludedCallIds = new Set<string>([
+    ...(options.excludedActionCallIds ?? []),
     ...providerExecutedCallIds,
     ...extractToolApprovalInputRequests({
       content: (step.content ?? []) as ContentPart<ToolSet>[],
+      excludedCallIds: options.excludedActionCallIds,
     }).map((request) => request.action.callId),
     ...(step.toolCalls as TypedToolCall<ToolSet>[])
       .filter(isInvalidToolCall)
@@ -309,20 +338,6 @@ export async function emitStepActions(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Returns true when the AI SDK marked the tool call `invalid` (typically
- * because the model emitted unparsable JSON or targeted an unknown tool).
- *
- * Invalid calls have a raw-string or partial `input` payload that cannot
- * satisfy the runtime-action contract. The AI SDK synthesizes a tool-error
- * result for the next model step automatically; callers must skip invalid
- * calls when projecting to `RuntimeActionRequest` values or the harness
- * will throw on the JSON-object invariant.
- */
-export function isInvalidToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
-  return toolCall.invalid === true;
-}
 
 function isProviderExecutedToolCall(toolCall: TypedToolCall<ToolSet>): boolean {
   return toolCall.providerExecuted === true;

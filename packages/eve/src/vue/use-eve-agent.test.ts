@@ -10,10 +10,11 @@ import {
   createMessageReceivedEvent,
   createSessionFailedEvent,
   createSessionWaitingEvent,
-  type HandleMessageStreamEvent,
+  type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
+import { stampTestEvents } from "#internal/testing/events.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
-import type { SessionState } from "#client/types.js";
+import type { ClientSessionState } from "#client/types.js";
 
 function createStartedMessageResponse(sessionId: string, continuationToken: string): Response {
   return new Response(JSON.stringify({ continuationToken, ok: true, sessionId }), {
@@ -25,18 +26,24 @@ function createStartedMessageResponse(sessionId: string, continuationToken: stri
   });
 }
 
-function createEagerStreamResponse(events: readonly HandleMessageStreamEvent[]): Response {
+function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
-        for (const event of events) {
+        for (const event of stampTestEvents(events)) {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();
       },
     }),
   );
+}
+
+function createBoundedStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  return response;
 }
 
 function createDeferred<T>() {
@@ -150,8 +157,8 @@ describe("EveAgentStore (Vue composable backing store)", () => {
       reducer: defaultMessageReducer(),
     });
 
-    const seenEvents: HandleMessageStreamEvent[] = [];
-    const seenSessions: SessionState[] = [];
+    const seenEvents: UnstampedMessageStreamEvent[] = [];
+    const seenSessions: Array<ClientSessionState | undefined> = [];
     store.setCallbacks({
       onEvent(event) {
         seenEvents.push(event);
@@ -179,7 +186,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));
     await sendPromise;
 
-    expect(seenEvents).toEqual(events);
+    expect(seenEvents).toEqual(stampTestEvents(events));
     expect(store.snapshot.status).toBe("ready");
     expect(store.snapshot.data).toEqual(
       completedTurnData({
@@ -190,7 +197,10 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     );
     expect(seenSessions).toEqual([
       {
-        continuationToken: "http:session_1",
+        sessionId: "session_1",
+        streamIndex: 0,
+      },
+      {
         sessionId: "session_1",
         streamIndex: 3,
       },
@@ -300,7 +310,6 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 
     const store = new EveAgentStore<readonly string[]>({
       initialSession: {
-        continuationToken: "http:session_1",
         sessionId: "session_1",
         streamIndex: 0,
       },
@@ -315,7 +324,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
     });
 
     const sendPromise = store.send({
-      inputResponses: [{ optionId: "deny", requestId: "approval_1" }],
+      inputResponses: [{ optionId: "cancel", requestId: "approval_1" }],
     });
     await Promise.resolve();
 
@@ -331,6 +340,44 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 });
 
 describe("useEveAgent (Vue composable wiring)", () => {
+  it("automatically replays an initial session when resume is enabled", async () => {
+    vi.stubGlobal("window", {});
+    const events = [
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ];
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
+    const scope = effectScope();
+    const agent = scope.run(() =>
+      useEveAgent({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        resume: true,
+      }),
+    );
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    expect(agent.status.value).toBe("resuming");
+    await vi.waitFor(() => expect(agent.events.value).toHaveLength(events.length));
+    expect(agent.status.value).toBe("ready");
+    expect(agent.data.value).toEqual(
+      completedTurnData({
+        assistantMessage: "Hi there.",
+        turnId: "turn_1",
+        userMessage: "Hello",
+      }),
+    );
+
+    scope.stop();
+  });
+
   it("projects streamed events into reactive refs in the browser", async () => {
     vi.stubGlobal("window", {});
     const events = [
@@ -356,7 +403,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     expect(agent.status.value).toBe("ready");
     expect(agent.data.value.messages).toEqual([]);
 
-    const sendPromise = agent.send({ message: "Hello" });
+    const sendPromise = agent.send("Hello");
     await Promise.resolve();
     expect(agent.status.value).toBe("submitted");
 
@@ -375,7 +422,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     scope.stop();
   });
 
-  it("unsubscribes and stops the session when the scope is disposed", async () => {
+  it("unsubscribes and detaches the local stream when the scope is disposed", async () => {
     vi.stubGlobal("window", {});
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))
@@ -393,7 +440,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     const dataBeforeDispose = agent.data.value;
     scope.stop();
 
-    await agent.send({ message: "After" });
+    await agent.send("After");
 
     expect(agent.data.value).toBe(dataBeforeDispose);
     expect(agent.data.value.messages).toEqual([]);
@@ -401,7 +448,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
 
   it("renders initial projection without subscribing during SSR", async () => {
     const agent = useEveAgent({
-      initialEvents: [
+      initialEvents: stampTestEvents([
         createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
         createMessageCompletedEvent({
           message: "Hi there.",
@@ -409,9 +456,8 @@ describe("useEveAgent (Vue composable wiring)", () => {
           stepIndex: 0,
           turnId: "turn_1",
         }),
-      ],
+      ]),
       initialSession: {
-        continuationToken: "http:session_1",
         sessionId: "session_1",
         streamIndex: 2,
       },
@@ -422,7 +468,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
 
     vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network failed"));
     const dataBeforeSend = agent.data.value;
-    await agent.send({ message: "ignored" });
+    await agent.send("ignored");
 
     expect(agent.data.value).toBe(dataBeforeSend);
     expect(agent.status.value).toBe("ready");

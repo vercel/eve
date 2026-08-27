@@ -1,32 +1,35 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
-import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
+import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
+import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
   loadAgentInfoManifestData,
   resolveAgentInfoCompiledArtifactsSource,
 } from "#internal/nitro/routes/agent-info/load-agent-info-data.js";
 import type { GatewayCredentialPresence } from "#internal/resolve-model-endpoint-status.js";
 import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifacts.js";
+import { getDefaultCodexTokenBroker } from "#public/models/openai/chatgpt/token-broker.js";
 import type { ModelRouting } from "#shared/agent-definition.js";
+import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
 
-type AgentInfoRouteMode = "development" | "production";
-
-export interface AgentInfoRouteInput extends NitroArtifactsConfig {
-  readonly mode?: AgentInfoRouteMode;
-}
-
-async function createAgentInfoPayload(input: AgentInfoRouteInput) {
+async function createAgentInfoPayload(input: NitroArtifactsConfig) {
   const data = await loadAgentInfoManifestData({
     compiledArtifactsSource: resolveAgentInfoCompiledArtifactsSource(input),
   });
 
-  return buildAgentInfoResponseFromManifest(data, {
-    mode: input.mode ?? (input.dev === false ? "production" : "development"),
-    gatewayCredentials: await resolveGatewayCredentialPresence(data.manifest.config.model.routing),
+  const routing =
+    data.manifest.config.dynamicModel === undefined
+      ? data.manifest.config.model.routing
+      : undefined;
+  return buildAgentInfoResponse(data, {
+    mode: input.kind,
+    gatewayCredentials:
+      routing === undefined
+        ? { apiKey: false, oidc: false }
+        : await resolveGatewayCredentialPresence(routing),
+    ...(isChatGptModelRouting(routing)
+      ? { chatgptAuth: await getDefaultCodexTokenBroker().refreshState() }
+      : {}),
   });
-}
-
-function hasEnvValue(value: string | undefined): boolean {
-  return value !== undefined && value.trim() !== "";
 }
 
 /**
@@ -54,7 +57,7 @@ async function resolveGatewayCredentialPresence(
 /**
  * Builds the package-owned JSON inspection response for the current agent.
  */
-export async function handleAgentInfoRequest(input: AgentInfoRouteInput): Promise<Response> {
+export async function handleAgentInfoRequest(input: NitroArtifactsConfig): Promise<Response> {
   return new Response(JSON.stringify(await createAgentInfoPayload(input)), {
     headers: {
       "cache-control": "no-store",

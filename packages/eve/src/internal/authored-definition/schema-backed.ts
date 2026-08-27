@@ -1,13 +1,26 @@
-import { isDisabledToolSentinel, isEnableWorkflowToolSentinel } from "#public/definitions/tool.js";
+import { isDisabledToolSentinel } from "#tools/definition.js";
+import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
+import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
+  expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
-import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
-import { normalizeJsonSchemaDefinition } from "#internal/json-schema.js";
-import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
+import {
+  serializeInputSchema,
+  serializeOutputSchema,
+  type ToolSchemaSource,
+} from "#tools/schema.js";
+import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
+import {
+  assertResolverOnlyDynamicSentinel,
+  isDynamicSentinel,
+  type DynamicToolEventName,
+} from "#dynamic/definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -15,7 +28,12 @@ import { isDynamicSentinel, type DynamicToolEventName } from "#shared/dynamic-to
  * Identity is path-derived — the compiler stamps the filename slug onto
  * the compiled entry. This shape never carries an authored `name`.
  */
-type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn, "name">>;
+type NormalizedAuthoredTool = Readonly<
+  Omit<InternalToolDefinitionWithExecuteFn, "name"> & {
+    readonly hasApproval: boolean;
+    readonly hasModelOutputProjection: boolean;
+  }
+>;
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -30,50 +48,88 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "enable-workflow" }
+  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
+  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
+      readonly rebindMissingCallbacks: boolean;
     };
 
 /**
  * Normalizes one authored tool default export. Recognizes real tool
  * definitions (`defineTool(...)`), disable sentinels (`disableTool()`), and the
- * `Workflow` opt-in sentinel.
+ * experimental `Workflow` tool definition.
  *
  * Authored `name` fields are rejected — tool identity is path-derived.
  */
 export function normalizeToolDefinition(value: unknown, message: string): NormalizedToolEntry {
   if (isDynamicSentinel(value)) {
+    assertResolverOnlyDynamicSentinel(value, message);
     return {
       kind: "dynamic-tool",
       eventNames: Object.keys(value.events) as DynamicToolEventName[],
+      rebindMissingCallbacks: shouldRebindDynamicCallbacks(value),
     };
   }
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
   }
-  if (isEnableWorkflowToolSentinel(value)) {
-    return { kind: "enable-workflow" };
+  if (isExperimentalWorkflowToolDefinition(value)) {
+    const record = expectObjectRecord(value, message);
+    expectOnlyKnownKeys(record, ["kind", "maxSubagents"], message);
+    return {
+      kind: "workflow-tool",
+      maxSubagents:
+        record.maxSubagents === undefined
+          ? undefined
+          : expectPositiveInteger(record.maxSubagents, message),
+    };
+  }
+  if (isWebSearchToolDefinition(value)) {
+    const record = expectObjectRecord(value, message);
+    expectOnlyKnownKeys(record, ["kind", "provider"], message);
+    const provider = expectString(record.provider, message);
+    if (provider !== "exa" && provider !== "parallel") {
+      throw new Error(`${message} Expected "provider" to be one of: exa, parallel.`);
+    }
+    return { kind: "web-search-tool", provider };
   }
 
   const record = expectObjectRecord(value, message);
   expectOnlyKnownKeys(
     record,
-    ["auth", "description", "execute", "inputSchema", "approval", "outputSchema", "toModelOutput"],
+    [
+      "auth",
+      "description",
+      "execute",
+      "execution",
+      "inputSchema",
+      "approval",
+      "outputSchema",
+      "toModelOutput",
+    ],
     message,
   );
   const inputSchema =
-    record.inputSchema === undefined ? null : normalizeJsonSchemaDefinition(record.inputSchema);
-  const outputSchema =
-    record.outputSchema === undefined
-      ? undefined
-      : normalizeJsonSchemaDefinition(record.outputSchema, "output");
+    record.inputSchema === undefined
+      ? null
+      : serializeInputSchema(record.inputSchema as ToolSchemaSource);
+  const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
     execute: expectFunction(record.execute, message),
+    hasApproval: record.approval !== undefined,
+    hasModelOutputProjection: record.toModelOutput !== undefined,
     inputSchema,
   };
+  if (record.execution !== undefined) {
+    const execution = expectString(record.execution, message);
+    if (execution !== "background") {
+      throw new Error(`${message} Expected "execution" to be "background".`);
+    }
+    definition.execution = execution;
+  }
   if (outputSchema !== undefined) {
     definition.outputSchema = outputSchema;
   }
@@ -85,7 +141,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * the module export and attaches them to the ResolvedToolDefinition.
    */
   if (record.approval !== undefined) {
-    expectFunction(record.approval, message);
+    normalizeApproval(record.approval, message);
   }
 
   if (record.toModelOutput !== undefined) {

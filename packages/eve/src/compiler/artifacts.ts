@@ -2,16 +2,23 @@ import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
-import type { DiscoverDiagnostic, DiscoverDiagnosticsSummary } from "#discover/diagnostics.js";
-import { summarizeDiscoverDiagnostics } from "#discover/diagnostics.js";
+import { z } from "#compiled/zod/index.js";
+import {
+  discoverDiagnosticsSummarySchema,
+  type DiscoverDiagnostic,
+  type DiscoverDiagnosticsSummary,
+} from "#discover/diagnostics.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import {
-  CHANNEL_INSTRUMENTATION_TYPES_FILE_NAME,
-  createChannelInstrumentationTypesSource,
-} from "#compiler/channel-instrumentation-types.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
+import {
+  compilerDiagnosticSchema,
+  projectDiscoverDiagnostic,
+  summarizeCompilerDiagnostics,
+  type CompilerDiagnostic,
+} from "#compiler/diagnostics.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { materializeWorkspaceResources } from "#compiler/workspace-resources.js";
@@ -19,12 +26,12 @@ import { materializeWorkspaceResources } from "#compiler/workspace-resources.js"
 /**
  * Stable diagnostics artifact kind emitted by the compiler.
  */
-const DISCOVERY_DIAGNOSTICS_ARTIFACT_KIND = "eve-discovery-diagnostics";
+export const COMPILER_DIAGNOSTICS_ARTIFACT_KIND = "eve-compiler-diagnostics";
 
 /**
  * Current diagnostics artifact schema version.
  */
-const DISCOVERY_DIAGNOSTICS_ARTIFACT_VERSION = 1;
+export const COMPILER_DIAGNOSTICS_ARTIFACT_VERSION = 2;
 
 /**
  * Stable compile metadata artifact kind emitted by the compiler.
@@ -34,14 +41,13 @@ export const COMPILE_METADATA_KIND = "eve-compile-metadata";
 /**
  * Current compile metadata schema version.
  */
-export const COMPILE_METADATA_VERSION = 5;
+export const COMPILE_METADATA_VERSION = 6;
 
 /**
  * Structured paths for compiler-owned artifacts under `.eve/`.
  */
 export interface CompilerArtifactPaths {
   appRoot: string;
-  channelInstrumentationTypesPath: string;
   compiledManifestPath: string;
   compileDirectoryPath: string;
   compileMetadataPath: string;
@@ -52,14 +58,23 @@ export interface CompilerArtifactPaths {
 }
 
 /**
- * Machine-readable discovery diagnostics artifact written by the compiler.
+ * Machine-readable compiler diagnostics artifact written by the compiler.
  */
-interface DiscoveryDiagnosticsArtifact {
-  diagnostics: DiscoverDiagnostic[];
-  kind: typeof DISCOVERY_DIAGNOSTICS_ARTIFACT_KIND;
+export interface CompilerDiagnosticsArtifact {
+  diagnostics: CompilerDiagnostic[];
+  kind: typeof COMPILER_DIAGNOSTICS_ARTIFACT_KIND;
   summary: DiscoverDiagnosticsSummary;
-  version: typeof DISCOVERY_DIAGNOSTICS_ARTIFACT_VERSION;
+  version: typeof COMPILER_DIAGNOSTICS_ARTIFACT_VERSION;
 }
+
+export const compilerDiagnosticsArtifactSchema = z
+  .object({
+    diagnostics: z.array(compilerDiagnosticSchema),
+    kind: z.literal(COMPILER_DIAGNOSTICS_ARTIFACT_KIND),
+    summary: discoverDiagnosticsSummarySchema,
+    version: z.literal(COMPILER_DIAGNOSTICS_ARTIFACT_VERSION),
+  })
+  .strict();
 
 /**
  * One artifact digest recorded in compile metadata.
@@ -74,6 +89,7 @@ interface CompileArtifactDigest {
  */
 export interface CompileMetadata {
   compile: {
+    manifest: CompileArtifactDigest;
     moduleMap: CompileArtifactDigest;
   };
   discovery: {
@@ -91,11 +107,17 @@ export interface CompileMetadata {
   version: typeof COMPILE_METADATA_VERSION;
 }
 
+export interface CompilerArtifactLocations {
+  readonly publishedRoot: string;
+  readonly writeRoot: string;
+}
+
 /**
- * Input for writing compiler-owned discovery artifacts.
+ * Input for writing compiler-owned source and diagnostic artifacts.
  */
 interface WriteCompilerArtifactsInput {
   appRoot: string;
+  artifactLocations: CompilerArtifactLocations;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
 }
@@ -105,26 +127,28 @@ interface WriteCompilerArtifactsInput {
  */
 interface WriteCompilerArtifactsResult {
   compiledManifest: CompiledAgentManifest;
-  diagnosticsArtifact: DiscoveryDiagnosticsArtifact;
+  diagnosticsArtifact: CompilerDiagnosticsArtifact;
   metadata: CompileMetadata;
   moduleMapSource: string;
   paths: CompilerArtifactPaths;
 }
 
-/**
- * Resolves the compiler-owned artifact paths for one application root.
- */
+/** Resolves stable compiler-owned artifact paths for one application root. */
 export function resolveCompilerArtifactPaths(appRoot: string): CompilerArtifactPaths {
+  return resolveCompilerArtifactPathsAt(appRoot, join(resolve(appRoot), ".eve"));
+}
+
+function resolveCompilerArtifactPathsAt(
+  appRoot: string,
+  artifactsRoot: string,
+): CompilerArtifactPaths {
   const resolvedAppRoot = resolve(appRoot);
-  const discoveryDirectoryPath = join(resolvedAppRoot, ".eve", "discovery");
-  const compileDirectoryPath = join(resolvedAppRoot, ".eve", "compile");
+  const resolvedArtifactsRoot = resolve(artifactsRoot);
+  const discoveryDirectoryPath = join(resolvedArtifactsRoot, "discovery");
+  const compileDirectoryPath = join(resolvedArtifactsRoot, "compile");
 
   return {
     appRoot: resolvedAppRoot,
-    channelInstrumentationTypesPath: join(
-      compileDirectoryPath,
-      CHANNEL_INSTRUMENTATION_TYPES_FILE_NAME,
-    ),
     compiledManifestPath: join(compileDirectoryPath, "compiled-agent-manifest.json"),
     compileDirectoryPath,
     compileMetadataPath: join(compileDirectoryPath, "compile-metadata.json"),
@@ -136,16 +160,16 @@ export function resolveCompilerArtifactPaths(appRoot: string): CompilerArtifactP
 }
 
 /**
- * Creates the diagnostics artifact written alongside the source manifest.
+ * Creates the compiler diagnostics artifact written alongside the source manifest.
  */
-function createDiscoveryDiagnosticsArtifact(
-  diagnostics: readonly DiscoverDiagnostic[],
-): DiscoveryDiagnosticsArtifact {
+function createCompilerDiagnosticsArtifact(
+  diagnostics: readonly CompilerDiagnostic[],
+): CompilerDiagnosticsArtifact {
   return {
     diagnostics: [...diagnostics],
-    kind: DISCOVERY_DIAGNOSTICS_ARTIFACT_KIND,
-    summary: summarizeDiscoverDiagnostics(diagnostics),
-    version: DISCOVERY_DIAGNOSTICS_ARTIFACT_VERSION,
+    kind: COMPILER_DIAGNOSTICS_ARTIFACT_KIND,
+    summary: summarizeCompilerDiagnostics(diagnostics),
+    version: COMPILER_DIAGNOSTICS_ARTIFACT_VERSION,
   };
 }
 
@@ -155,6 +179,7 @@ function createDiscoveryDiagnosticsArtifact(
  */
 export function createCompileMetadata(input: {
   appRoot: string;
+  compiledManifestJson: string;
   diagnosticsArtifactJson: string;
   diagnosticsSummary: DiscoverDiagnosticsSummary;
   discoveryManifestJson: string;
@@ -162,12 +187,17 @@ export function createCompileMetadata(input: {
   paths: CompilerArtifactPaths;
 }): CompileMetadata {
   const generator = resolveInstalledPackageInfo();
-  const manifestHash = createContentHash(input.discoveryManifestJson);
+  const compiledManifestHash = createContentHash(input.compiledManifestJson);
+  const discoveryManifestHash = createContentHash(input.discoveryManifestJson);
   const diagnosticsHash = createContentHash(input.diagnosticsArtifactJson);
   const moduleMapHash = createContentHash(input.moduleMapSource);
 
   return {
     compile: {
+      manifest: {
+        path: toArtifactRelativePath(input.appRoot, input.paths.compiledManifestPath),
+        sha256: compiledManifestHash,
+      },
       moduleMap: {
         path: toArtifactRelativePath(input.appRoot, input.paths.moduleMapPath),
         sha256: moduleMapHash,
@@ -180,9 +210,11 @@ export function createCompileMetadata(input: {
       },
       manifest: {
         path: toArtifactRelativePath(input.appRoot, input.paths.discoveryManifestPath),
-        sha256: manifestHash,
+        sha256: discoveryManifestHash,
       },
-      sourceGraphHash: createContentHash(`${manifestHash}:${diagnosticsHash}:${moduleMapHash}`),
+      sourceGraphHash: createContentHash(
+        `${compiledManifestHash}:${discoveryManifestHash}:${diagnosticsHash}:${moduleMapHash}`,
+      ),
       summary: input.diagnosticsSummary,
     },
     generator: {
@@ -195,36 +227,38 @@ export function createCompileMetadata(input: {
   };
 }
 
-/**
- * Writes the compiler-owned discovery artifacts under `.eve/`.
- */
+/** Writes compiler-owned artifacts and records their stable published locations. */
 export async function writeCompilerArtifacts(
   input: WriteCompilerArtifactsInput,
 ): Promise<WriteCompilerArtifactsResult> {
-  const paths = resolveCompilerArtifactPaths(input.appRoot);
-  const diagnosticsArtifact = createDiscoveryDiagnosticsArtifact(input.diagnostics);
+  const paths = resolveCompilerArtifactPathsAt(input.appRoot, input.artifactLocations.writeRoot);
+  const publishedPaths = resolveCompilerArtifactPathsAt(
+    input.appRoot,
+    input.artifactLocations.publishedRoot,
+  );
+  const diagnostics = input.diagnostics.map((diagnostic) =>
+    projectDiscoverDiagnostic(diagnostic, ROOT_COMPILED_AGENT_NODE_ID),
+  );
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest),
+    manifest: await compileAgentManifest(input.manifest, { diagnostics }),
   });
+  const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
   const discoveryManifestJson = serializeArtifactJson(input.manifest);
   const diagnosticsArtifactJson = serializeArtifactJson(diagnosticsArtifact);
   const moduleMapSource = createCompiledModuleMapSource({
     manifest: compiledManifest,
-    moduleMapPath: paths.moduleMapPath,
-  });
-  const channelInstrumentationTypesSource = createChannelInstrumentationTypesSource({
-    manifest: compiledManifest,
-    typesPath: paths.channelInstrumentationTypesPath,
+    moduleMapPath: publishedPaths.moduleMapPath,
   });
   const metadata = createCompileMetadata({
     appRoot: input.appRoot,
+    compiledManifestJson,
     diagnosticsArtifactJson,
     diagnosticsSummary: diagnosticsArtifact.summary,
     discoveryManifestJson,
     moduleMapSource,
-    paths,
+    paths: publishedPaths,
   });
   const metadataJson = serializeArtifactJson(metadata);
 
@@ -238,7 +272,6 @@ export async function writeCompilerArtifacts(
     writeFile(paths.compiledManifestPath, compiledManifestJson),
     writeFile(paths.diagnosticsPath, diagnosticsArtifactJson),
     writeFile(paths.discoveryManifestPath, discoveryManifestJson),
-    writeFile(paths.channelInstrumentationTypesPath, channelInstrumentationTypesSource),
     writeFile(paths.moduleMapPath, moduleMapSource),
     writeFile(paths.compileMetadataPath, metadataJson),
   ]);

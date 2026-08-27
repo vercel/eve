@@ -37,14 +37,16 @@ describe("formatAvailableSkillsSection", () => {
     expect(result).toContain(
       "If multiple skills match, activate the minimal set that covers the task.",
     );
+    expect(result).toContain("Skill files live under `$HOME/.agents/skills/<skill>/`");
     expect(result).toContain(
-      "Skill files are available after load_skill resolves the active sandbox skill location.",
+      "`/workspace/skills/<skill>/` as the fallback when `$HOME` is unavailable",
     );
     expect(result).toContain(
       "resolve them relative to the directory containing that specific SKILL.md",
     );
-    expect(result).toContain("- test-skill: A test skill");
-    expect(result).not.toContain("/workspace/skills");
+    expect(result).toContain(
+      "- test-skill: A test skill (path: $HOME/.agents/skills/test-skill/SKILL.md)",
+    );
   });
 
   it("formats skill line with the resolved skill root", () => {

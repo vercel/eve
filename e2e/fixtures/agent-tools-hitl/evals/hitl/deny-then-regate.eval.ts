@@ -6,12 +6,13 @@ import { defineEval } from "eve/evals";
  * park/resume here is deterministic.
  */
 export default defineEval({
+  tags: ["real-model"],
   description: "HITL smoke: a denied once() call does not execute and re-gates the next call.",
   async test(t) {
     await t.send('Call the guarded-echo tool with note "denied-call".');
     const request = t.requireInputRequest({ toolName: "guarded-echo" });
 
-    const denied = await t.respondAll("deny");
+    const denied = await t.respondAll("cancel");
     denied.expectOk();
     denied.event("action.result", {
       data: {

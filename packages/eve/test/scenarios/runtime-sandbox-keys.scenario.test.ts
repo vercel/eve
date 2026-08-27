@@ -50,34 +50,19 @@ async function createTemporaryAppRoot(options?: { sourceGraphHash?: string }): P
   return appRoot;
 }
 
+const WORKSPACE_PLAN = { contentHash: "workspace-hash", kind: "workspace-content" } as const;
+
+function stubEmptyVercelProjectSources(): void {
+  vi.stubEnv("VERCEL_PROJECT_ID", "");
+  vi.stubEnv("VERCEL_OIDC_TOKEN", "");
+  // A deployment id must never participate in template scopes; set one to
+  // prove the fallback ignores it.
+  vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_123");
+}
+
 describe("createRuntimeSandboxTemplateKey", () => {
-  it("derives Vercel template keys from VERCEL_DEPLOYMENT_ID when one is set", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_123");
-    vi.stubEnv("VERCEL_URL", "preview-456.vercel.app");
-
-    const keyWithBoth = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      nodeId: "__root__",
-      sourceId: "sandbox/sandbox.ts",
-      templatePlan: { kind: "source-graph" },
-    });
-
-    vi.stubEnv("VERCEL_URL", "");
-
-    const keyWithDeploymentIdOnly = await createRuntimeSandboxTemplateKey({
-      backendName: "vercel",
-      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
-      nodeId: "__root__",
-      sourceId: "sandbox/sandbox.ts",
-      templatePlan: { kind: "source-graph" },
-    });
-
-    expect(keyWithBoth).toBe(keyWithDeploymentIdOnly);
-  });
-
-  it("falls back to the realpath of the disk app root for the Vercel adapter when VERCEL_DEPLOYMENT_ID is missing", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+  it("falls back to the realpath of the disk app root for the Vercel adapter when no project id is resolvable", async () => {
+    stubEmptyVercelProjectSources();
 
     const appRoot = await createTemporaryAppRoot();
     const compiledArtifactsSource = createDiskRuntimeCompiledArtifactsSource(appRoot);
@@ -87,7 +72,7 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource,
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
-      templatePlan: { kind: "source-graph" },
+      templatePlan: WORKSPACE_PLAN,
     });
 
     const secondKey = await createRuntimeSandboxTemplateKey({
@@ -95,15 +80,15 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource,
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
-      templatePlan: { kind: "source-graph" },
+      templatePlan: WORKSPACE_PLAN,
     });
 
     expect(firstKey).toMatch(/^eve-sbx-tpl-vercel-/);
     expect(secondKey).toBe(firstKey);
   });
 
-  it("isolates Vercel template keys per app root when VERCEL_DEPLOYMENT_ID is missing", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+  it("isolates Vercel template keys per app root when no project id is resolvable", async () => {
+    stubEmptyVercelProjectSources();
 
     const firstAppRoot = await createTemporaryAppRoot();
     const secondAppRoot = await createTemporaryAppRoot();
@@ -113,28 +98,28 @@ describe("createRuntimeSandboxTemplateKey", () => {
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(firstAppRoot),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
-      templatePlan: { kind: "source-graph" },
+      templatePlan: WORKSPACE_PLAN,
     });
     const secondKey = await createRuntimeSandboxTemplateKey({
       backendName: "vercel",
       compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(secondAppRoot),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
-      templatePlan: { kind: "source-graph" },
+      templatePlan: WORKSPACE_PLAN,
     });
 
     expect(firstKey).not.toBe(secondKey);
   });
 
-  it("falls back to the bundled cache key for the Vercel adapter when no app root and no VERCEL_DEPLOYMENT_ID are available", async () => {
-    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "");
+  it("falls back to the bundled cache key for the Vercel adapter when no app root and no project id are available", async () => {
+    stubEmptyVercelProjectSources();
 
     const key = await createRuntimeSandboxTemplateKey({
       backendName: "vercel",
       compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       nodeId: "__root__",
       sourceId: "sandbox/sandbox.ts",
-      templatePlan: { kind: "source-graph" },
+      templatePlan: WORKSPACE_PLAN,
     });
 
     expect(key).toMatch(/^eve-sbx-tpl-vercel-/);

@@ -24,7 +24,6 @@ import {
   uploadSlackFiles,
   type SlackApiOptions,
   type SlackApiResponse as SlackPrimitiveApiResponse,
-  type SlackBotToken as SlackPrimitiveBotToken,
   type SlackFileUpload,
   type SlackMessageOptions,
 } from "#compiled/@chat-adapter/slack/api.js";
@@ -32,17 +31,22 @@ import { isCardElement, type CardElement, type FileUpload } from "#compiled/chat
 
 import { createLogger, logError } from "#internal/logging.js";
 import { cardToBlocks, cardToFallbackText } from "#public/channels/slack/blocks.js";
+import { resolveSlackInboundMrkdwn } from "#public/channels/slack/inbound-content.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
-import { rewriteBareMentions, slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
+import { slackMrkdwnToGfm } from "#public/channels/slack/mrkdwn.js";
 
 const log = createLogger("slack.api");
 
+/** Slack app installation workspace available when eve resolves a bot token. */
+export interface SlackBotTokenContext {
+  readonly teamId?: string;
+}
+
 /**
  * Slack bot token, materialized either as a literal `xoxb-...` string or
- * as a (possibly async) function that returns one. The function form
- * supports secret-manager lookups and credential rotation.
+ * as a (possibly async) function that receives the app installation workspace.
  */
-export type SlackBotToken = SlackPrimitiveBotToken;
+export type SlackBotToken = string | ((context: SlackBotTokenContext) => string | Promise<string>);
 
 /**
  * Builds the channel-local continuation token (`<channelId>:<threadTs>`).
@@ -59,9 +63,13 @@ export function slackContinuationToken(channelId: string, threadTs: string): str
  * Materializes a {@link SlackBotToken} to a string, falling back to
  * `process.env.SLACK_BOT_TOKEN`. Throws when neither is set.
  */
-export async function resolveSlackBotToken(token?: SlackBotToken): Promise<string> {
+export async function resolveSlackBotToken(
+  token?: SlackBotToken,
+  context: SlackBotTokenContext = {},
+): Promise<string> {
   const source = token ?? process.env.SLACK_BOT_TOKEN;
   if (!source) throw new Error("SLACK_BOT_TOKEN is required.");
+  if (typeof source === "function") return source(context);
   return resolveSlackBotTokenPrimitive(source);
 }
 
@@ -80,13 +88,14 @@ export type SlackApiResponse = SlackPrimitiveApiResponse;
  */
 export async function callSlackApi(input: {
   readonly botToken: SlackBotToken | undefined;
+  readonly context?: SlackBotTokenContext;
   readonly operation: string;
   readonly body: unknown;
 }): Promise<SlackApiResponse> {
   return callSlackApiPrimitive(
     input.operation,
     normalizeSlackApiBody(input.body),
-    createSlackApiOptions(input.botToken),
+    createSlackApiOptions(input.botToken, input.context),
   );
 }
 
@@ -97,8 +106,9 @@ export async function callSlackApi(input: {
  */
 function createSlackRequester(
   botToken: SlackBotToken | undefined,
+  context: SlackBotTokenContext,
 ): (operation: string, body: unknown) => Promise<SlackApiResponse> {
-  return (operation, body) => callSlackApi({ botToken, operation, body });
+  return (operation, body) => callSlackApi({ botToken, context, operation, body });
 }
 
 /**
@@ -195,6 +205,13 @@ export interface SlackThreadMessage {
   readonly botId: string | undefined;
   readonly ts: string;
   readonly threadTs: string;
+  /**
+   * Whether this message was authored by the Slack app bound to the thread.
+   * Classification requires the binding to carry the app identity (bot user
+   * id or app id). Inbound event bindings do; bindings rebuilt from session
+   * state or interaction payloads currently do not and mark every message
+   * `false`.
+   */
   readonly isMe: boolean;
   readonly raw: Record<string, unknown>;
 }
@@ -208,6 +225,19 @@ export interface SlackThreadMessage {
 export interface SlackThread {
   /** Recently fetched thread messages. Populated by {@link refresh}. */
   readonly recentMessages: readonly SlackThreadMessage[];
+
+  /**
+   * Fetch the latest replies via {@link refresh} and return the unique
+   * human Slack user ids participating in this thread, ordered by first
+   * appearance. For a human-started thread, the first entry is the
+   * starting author. Bot messages and user-less system messages are
+   * excluded.
+   *
+   * Shares {@link refresh} semantics: it observes at most the first 50
+   * messages of the thread, and refresh failures are logged and swallowed,
+   * so the returned list may be empty or stale.
+   */
+  listParticipants(): Promise<readonly string[]>;
 
   /**
    * Post a reply to this thread.
@@ -257,8 +287,9 @@ export interface SlackThread {
 
   /**
    * Fetch the latest replies in this thread into {@link recentMessages}
-   * via `conversations.replies` (50-message cap). Failures are logged and
-   * swallowed, leaving `recentMessages` empty.
+   * via `conversations.replies` (50-message cap). Overlapping calls share
+   * one request. Failures are logged and swallowed without discarding the
+   * most recently loaded messages.
    */
   refresh(): Promise<void>;
 
@@ -308,6 +339,37 @@ export interface SlackHandle {
 }
 
 /**
+ * Workspace-scoped Slack API handle exposed to generic inbound event
+ * handlers. Events such as `team_join` and `reaction_added` are not always
+ * bound to one message thread, so this surface deliberately exposes only
+ * workspace identity and the raw Web API escape hatch.
+ */
+export interface SlackWorkspaceHandle {
+  /** Slack team id carried by the Events API envelope, when present. */
+  readonly teamId: string | undefined;
+
+  /**
+   * POST to a Slack Web API method. Returns Slack's raw JSON response.
+   * Callers must check `response.ok` themselves.
+   */
+  request(operation: string, body: unknown): Promise<SlackApiResponse>;
+}
+
+/** Builds the workspace-scoped API handle used by generic event callbacks. */
+export function buildSlackWorkspaceHandle(input: {
+  readonly botToken: SlackBotToken | undefined;
+  /** Workspace whose app installation supplies the bot token. */
+  readonly installationTeamId?: string;
+  /** Actor/content workspace exposed on the public handle. */
+  readonly teamId: string | undefined;
+}): SlackWorkspaceHandle {
+  return {
+    teamId: input.teamId,
+    request: createSlackRequester(input.botToken, { teamId: input.installationTeamId }),
+  };
+}
+
+/**
  * The `{ thread, slack }` pair exposed through `ctx` to every mention
  * handler, interaction handler, and event handler. Returned by
  * {@link buildSlackBinding}.
@@ -327,15 +389,24 @@ interface SlackBinding {
  * anchor.
  */
 export function buildSlackBinding(input: {
+  /** Slack app id used to identify this app's fetched thread replies. */
+  readonly appId?: string;
   readonly botToken: SlackBotToken | undefined;
+  /** Slack bot user id used to identify this app's fetched thread replies. */
+  readonly botUserId?: string;
   readonly channelId: string;
   readonly threadTs: string;
+  /** Workspace whose app installation supplies the bot token. */
+  readonly installationTeamId?: string;
+  /** Actor/content workspace exposed on the public handle. */
   readonly teamId: string | undefined;
   readonly onThreadTsChanged?: (ts: string) => void;
 }): SlackBinding {
-  const request = createSlackRequester(input.botToken);
-  const messages: SlackThreadMessage[] = [];
+  const context = { teamId: input.installationTeamId };
+  const request = createSlackRequester(input.botToken, context);
+  let messages: readonly SlackThreadMessage[] = [];
   let currentThreadTs = input.threadTs;
+  let refreshInFlight: Promise<void> | undefined;
 
   function handleMessageTs(ts: string): void {
     if (currentThreadTs || ts === currentThreadTs) return;
@@ -350,15 +421,64 @@ export function buildSlackBinding(input: {
     const channelId = options?.channelId ?? input.channelId;
     const threadTs = options?.threadTs ?? currentThreadTs;
     return uploadSlackFiles(files.map(toSlackFileUpload), {
-      ...createSlackApiOptions(input.botToken),
+      ...createSlackApiOptions(input.botToken, context),
       channelId: channelId || undefined,
       initialComment: options?.initialComment,
       threadTs: threadTs || undefined,
     });
   }
 
+  function refreshMessages(): Promise<void> {
+    if (refreshInFlight !== undefined) return refreshInFlight;
+
+    // Scoped inside the coalescing check so no caller can start an
+    // uncoalesced fetch.
+    async function fetchAndReplace(): Promise<void> {
+      if (!input.channelId || !currentThreadTs) {
+        messages = [];
+        return;
+      }
+      try {
+        const response = await fetchSlackThreadReplies({
+          ...createSlackApiOptions(input.botToken, context),
+          channel: input.channelId,
+          limit: 50,
+          ts: currentThreadTs,
+        });
+        messages = (response.messages as Record<string, unknown>[]).map((raw) =>
+          parseThreadMessage(raw, currentThreadTs, {
+            appId: input.appId,
+            botUserId: input.botUserId,
+          }),
+        );
+      } catch (error) {
+        logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
+      }
+    }
+
+    const refresh = fetchAndReplace().finally(() => {
+      if (refreshInFlight === refresh) {
+        refreshInFlight = undefined;
+      }
+    });
+    refreshInFlight = refresh;
+    return refresh;
+  }
+
   const thread: SlackThread = {
-    recentMessages: messages,
+    get recentMessages() {
+      return messages;
+    },
+    async listParticipants() {
+      await thread.refresh();
+      const participants = new Set<string>();
+      for (const message of messages) {
+        if (message.user !== undefined && message.botId === undefined) {
+          participants.add(message.user);
+        }
+      }
+      return [...participants];
+    },
     async post(rawMessage) {
       const message = normalizePostInput(rawMessage);
       const files = message.files ?? [];
@@ -368,7 +488,7 @@ export function buildSlackBinding(input: {
       // text + files: single Slack message with files attached via
       // files.completeUploadExternal's mrkdwn-only initial_comment.
       if (files.length > 0 && !shouldPostBeforeFiles) {
-        const comment = "text" in message ? rewriteBareMentions(message.text) : undefined;
+        const comment = "text" in message ? message.text : undefined;
         const result = await uploadFiles(files, { initialComment: comment });
         const id =
           Array.isArray(result.raw.files) && result.raw.files.length > 0
@@ -378,7 +498,7 @@ export function buildSlackBinding(input: {
       }
 
       const response = await postSlackMessage(
-        buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken),
+        buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken, context),
       );
       const id = response.id;
       handleMessageTs(id);
@@ -397,7 +517,13 @@ export function buildSlackBinding(input: {
     async postEphemeral(userId, rawMessage) {
       const message = normalizePostInput(rawMessage);
       const response = await postSlackEphemeral({
-        ...buildPostMessageOptions(message, input.channelId, currentThreadTs, input.botToken),
+        ...buildPostMessageOptions(
+          message,
+          input.channelId,
+          currentThreadTs,
+          input.botToken,
+          context,
+        ),
         user: userId,
       });
       return { id: response.id, raw: response.raw };
@@ -411,7 +537,7 @@ export function buildSlackBinding(input: {
       }
       const message = normalizePostInput(rawMessage);
       const response = await postSlackMessage(
-        buildPostMessageOptions(message, imChannelId, "", input.botToken),
+        buildPostMessageOptions(message, imChannelId, "", input.botToken, context),
       );
       return { id: response.id, raw: response.raw };
     },
@@ -437,22 +563,8 @@ export function buildSlackBinding(input: {
         logError(log, "startTyping threw — swallowed", error, { channelId: input.channelId });
       }
     },
-    async refresh() {
-      messages.length = 0;
-      if (!input.channelId || !currentThreadTs) return;
-      try {
-        const response = await fetchSlackThreadReplies({
-          ...createSlackApiOptions(input.botToken),
-          channel: input.channelId,
-          limit: 50,
-          ts: currentThreadTs,
-        });
-        for (const raw of response.messages as Record<string, unknown>[]) {
-          messages.push(parseThreadMessage(raw, currentThreadTs));
-        }
-      } catch (error) {
-        logError(log, "refresh threw — swallowed", error, { channelId: input.channelId });
-      }
+    refresh() {
+      return refreshMessages();
     },
     mentionUser(userId) {
       return `<@${userId}>`;
@@ -494,9 +606,10 @@ function buildPostMessageOptions(
   channelId: string,
   threadTs: string,
   botToken: SlackBotToken | undefined,
+  context: SlackBotTokenContext,
 ): SlackMessageOptions {
   const base: SlackMessageOptions = {
-    ...createSlackApiOptions(botToken),
+    ...createSlackApiOptions(botToken, context),
     channel: channelId,
     threadTs: threadTs || undefined,
     unfurlLinks: false,
@@ -514,15 +627,18 @@ function buildPostMessageOptions(
     return base;
   }
   if ("markdown" in message) {
-    base.markdownText = rewriteBareMentions(message.markdown);
+    base.markdownText = message.markdown;
     return base;
   }
-  base.text = rewriteBareMentions(message.text);
+  base.text = message.text;
   return base;
 }
 
-function createSlackApiOptions(botToken: SlackBotToken | undefined): SlackApiOptions {
-  return { token: () => resolveSlackBotToken(botToken) };
+function createSlackApiOptions(
+  botToken: SlackBotToken | undefined,
+  context: SlackBotTokenContext = {},
+): SlackApiOptions {
+  return { token: () => resolveSlackBotToken(botToken, context) };
 }
 
 function normalizeSlackApiBody(body: unknown): Record<string, unknown> {
@@ -552,12 +668,21 @@ function normalizeFileData(data: FileUpload["data"]): SlackFileUpload["data"] {
 function parseThreadMessage(
   raw: Record<string, unknown>,
   threadRootTs: string,
+  identity: {
+    readonly appId: string | undefined;
+    readonly botUserId: string | undefined;
+  },
 ): SlackThreadMessage {
-  const text = typeof raw.text === "string" ? raw.text : "";
+  const topLevelText = typeof raw.text === "string" ? raw.text : "";
+  const text = resolveSlackInboundMrkdwn(topLevelText, raw);
   const ts = typeof raw.ts === "string" ? raw.ts : "";
   const threadTs = typeof raw.thread_ts === "string" ? raw.thread_ts : threadRootTs;
   const user = typeof raw.user === "string" ? raw.user : undefined;
   const botId = typeof raw.bot_id === "string" ? raw.bot_id : undefined;
+  const appId = typeof raw.app_id === "string" ? raw.app_id : undefined;
+  const isMe =
+    (identity.botUserId !== undefined && user === identity.botUserId) ||
+    (identity.appId !== undefined && appId === identity.appId);
   return {
     text,
     markdown: slackMrkdwnToGfm(text),
@@ -565,7 +690,7 @@ function parseThreadMessage(
     botId,
     ts,
     threadTs,
-    isMe: botId !== undefined,
+    isMe,
     raw,
   };
 }

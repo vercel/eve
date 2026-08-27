@@ -18,10 +18,10 @@ import { theme } from "./lib/theme.ts";
  *   2. Boot an `EveTUIRunner` with a mock terminal.
  *   3. Type a prompt that asks the model to call `ask_question` with
  *      two options (red/blue).
- *   4. Wait for the question section to display the select indicator
- *      (`▶ <label>`), which proves the dedicated question UI is up.
+ *   4. Wait for the question overlay to display the numbered select
+ *      indicator (`▶ 1. <label>`), which proves the question UI is up.
  *   5. Send Down arrow + Enter to pick the second option (blue).
- *   6. Wait for the answered marker in the body section.
+ *   6. Wait for the answered marker (`⎿  <label>`) in the transcript.
  *   7. Wait for the post-answer assistant turn to render. The runner
  *      only returns to its prompt-reading state if the chosen option
  *      flowed through to the agent and resolved the pending input.
@@ -33,11 +33,10 @@ process.env.EVE_TUI_UNICODE = "1";
 
 run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   const client = new Client({ host: target.baseUrl });
-  const session = client.session();
   const screen = new MockScreen({ columns: 100, rows: 40 });
   const input = new MockUserInput();
   const runner = new EveTUIRunner({
-    session,
+    client,
     screen,
     userInput: input,
     name: "TUI smoke",
@@ -50,7 +49,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
     throw error;
   });
 
-  await screen.waitForText("❯", 5_000);
+  await screen.waitForIdlePrompt(5_000);
 
   const promptLines = [
     "Use the ask_question tool exactly once to ask me which color I prefer.",
@@ -63,7 +62,7 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   input.type(promptLines.join(" · "));
   input.enter();
 
-  await screen.waitForText("▶ Red", 60_000);
+  await screen.waitForText("▶ 1. Red", 60_000);
   console.log(theme.muted("[tui-questions] select UI is live, highlight on Red"));
 
   // Bridges a server-side race where the park hook isn't yet
@@ -73,22 +72,22 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   await sleep(500);
 
   input.emit("data", Buffer.from("\x1B[B"));
-  await screen.waitForText("▶ Blue", 2_000);
+  await screen.waitForText("▶ 2. Blue", 2_000);
   console.log(theme.muted("[tui-questions] highlight moved to Blue"));
 
   input.enter();
 
-  await screen.waitForText("✓ Blue", 5_000);
+  await screen.waitForText("⎿  Blue", 5_000);
   console.log(theme.muted("[tui-questions] answer recorded in body"));
 
   // The post-answer turn must produce a `▲`-prefixed assistant
   // section whose body contains "blue", proof that the chosen
   // optionId flowed through to the agent and the model produced a
   // reply reflecting the choice. We only search the region after the
-  // "✓ Blue" answer marker to avoid a false positive from the marker
+  // "⎿  Blue" answer marker to avoid a false positive from the marker
   // itself (transcript blocks commit in order, so the follow-up reply
   // always renders below the answered question).
-  await waitForCondition(() => assistantReplyAfter(screen.snapshot(), "✓ Blue", "blue"), {
+  await waitForCondition(() => assistantReplyAfter(screen.snapshot(), "⎿  Blue", "blue"), {
     timeoutMs: 60_000,
     label: "follow-up assistant section mentioning blue",
   });
@@ -100,9 +99,9 @@ run({ app: "agent-tui-client", kind: "local-build" }, async (target) => {
   }
 
   // The turn is complete; wait until the runner is back at the prompt so
-  // Ctrl+C exits the session. A Ctrl+C mid-stream now only interrupts the
-  // turn and returns to the prompt (Claude Code's two-step exit).
-  await screen.waitForText("❯", 30_000);
+  // Two idle Ctrl+C presses exit; mid-stream Ctrl+C cancels cooperatively.
+  await screen.waitForIdlePrompt(30_000);
+  input.ctrlC();
   input.ctrlC();
   await runPromise;
 });

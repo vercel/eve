@@ -84,6 +84,7 @@ export async function resolveChannelDefinition(
       receive: channelDefinition.receive,
       definition: channelDefinition,
       adapter,
+      turnPolicy: channelDefinition.turnPolicy,
       ...sourceRef,
     };
   } catch (error) {

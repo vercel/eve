@@ -145,8 +145,10 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
   switch (state.kind) {
     case "available":
       if (input.isCursor) {
+        // A checked row keeps its check under the cursor — the highlight says
+        // "active", not "press to activate".
         return {
-          glyph: glyphs.selectedPointer,
+          glyph: state.checked ? glyphs.success : glyphs.selectedPointer,
           label: input.label,
         };
       }

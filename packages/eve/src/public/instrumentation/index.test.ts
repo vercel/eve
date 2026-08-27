@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  CHANNEL_SENTINEL,
-  setChannelInstrumentationKind,
-  type CompiledChannel,
-} from "#channel/compiled-channel.js";
+import { setChannelInstrumentationKind, type CompiledChannel } from "#channel/compiled-channel.js";
+import { defineChannel, POST } from "#public/definitions/channel.js";
 import { isChannel, type InstrumentationChannel } from "#public/instrumentation/index.js";
 
 type SupportMetadata = {
@@ -12,31 +9,22 @@ type SupportMetadata = {
   readonly queueId: string | null;
 };
 
-const supportChannel: CompiledChannel<undefined, Record<string, unknown>, SupportMetadata> = {
-  __kind: CHANNEL_SENTINEL,
-  adapter: { kind: "defineChannel" },
-  routes: [
-    {
-      method: "POST",
-      path: "/support",
-      handler: async () => new Response("ok"),
-    },
-  ],
-};
+function createSupportChannel() {
+  return defineChannel({
+    metadata: (): SupportMetadata => ({ priority: "high", queueId: null }),
+    routes: [POST("/support", async () => new Response("ok"))],
+  });
+}
 
-declare module "#public/channels/index.js" {
-  interface ChannelMetadataMap {
-    readonly "channel:is-channel-test": SupportMetadata;
-  }
+const supportChannel = createSupportChannel();
 
-  interface ChannelReferenceMap {
-    readonly "channel:is-channel-test": typeof supportChannel;
-  }
+function stampSupportChannel(): void {
+  setChannelInstrumentationKind(supportChannel as CompiledChannel, "channel:is-channel-test");
 }
 
 describe("isChannel", () => {
   it("compares instrumentation input to the compiler-stamped channel identity", () => {
-    setChannelInstrumentationKind(supportChannel, "channel:is-channel-test");
+    stampSupportChannel();
 
     const input: InstrumentationChannel = {
       kind: "channel:is-channel-test",
@@ -60,7 +48,7 @@ describe("isChannel", () => {
   });
 
   it("returns false when the instrumentation channel kind does not match", () => {
-    setChannelInstrumentationKind(supportChannel, "channel:is-channel-test");
+    stampSupportChannel();
 
     expect(
       isChannel(
@@ -74,7 +62,7 @@ describe("isChannel", () => {
   });
 
   it("accepts the DynamicResolveContext.channel shape (optional kind)", () => {
-    setChannelInstrumentationKind(supportChannel, "channel:is-channel-test");
+    stampSupportChannel();
 
     const resolveCtxChannel: {
       readonly kind?: string;
@@ -85,11 +73,8 @@ describe("isChannel", () => {
   });
 
   it("recognizes a separately evaluated copy of the authored channel", () => {
-    setChannelInstrumentationKind(supportChannel, "channel:is-channel-test");
-    const importedCopy: typeof supportChannel = {
-      ...supportChannel,
-      adapter: { kind: "defineChannel" },
-    };
+    stampSupportChannel();
+    const importedCopy = createSupportChannel();
 
     expect(
       isChannel(
@@ -103,7 +88,7 @@ describe("isChannel", () => {
   });
 
   it("returns false for DynamicResolveContext.channel with undefined kind", () => {
-    setChannelInstrumentationKind(supportChannel, "channel:is-channel-test");
+    stampSupportChannel();
 
     const noKind: { readonly kind?: string } = {};
     expect(isChannel(noKind, supportChannel)).toBe(false);

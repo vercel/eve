@@ -2,29 +2,27 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { H3Event } from "nitro";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileAgent } from "../../src/compiler/compile-agent.js";
-import { createNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
+import { createDevelopmentNitroArtifactsConfig } from "../../src/internal/nitro/host/artifacts-config.js";
 import type { AgentInfoResponse } from "../../src/internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { dispatchChannelRequest } from "../../src/internal/nitro/routes/channel-dispatch.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "../../src/protocol/routes.js";
+import { EVE_INFO_ROUTE_PATH, EVE_SESSION_ROUTE_PATH } from "../../src/protocol/routes.js";
 import { useTemporaryAppRoots } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const createAppRoot = useTemporaryAppRoots();
 
 const APP_ROOT_OPTIONS = { packageName: "agent-info-route-test-agent" } as const;
-const EVE_CHANNEL_IMPORT_URL = new URL("../../dist/src/public/channels/eve.js", import.meta.url);
 const INFO_ROUTE_KEY = `GET ${EVE_INFO_ROUTE_PATH}`;
 
-// Loopback request — `localDev()` authenticates this one. Models a
-// developer hitting `eve start` or `vercel dev` on their machine.
+// A request to the local server. The deployment environment, not this
+// URL, decides auth: `localDev()` authenticates only when the process
+// is an `eve dev` or `vercel dev` server (stubbed via EVE_DEV below).
 const LOOPBACK_REQUEST = new Request("http://localhost/eve/v1/info");
 
-// Public-hostname request — what a real Vercel (or self-hosted)
-// deployment sees on the wire. `localDev()` skips this because the
-// request was not addressed to a loopback hostname, so the walk falls
-// through to `vercelOidc()`.
+// A request a real deployment sees on the wire. With no dev flag set,
+// `localDev()` skips it and the walk falls through to `vercelOidc()`.
 const DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info");
 const AUTHORIZED_DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.app/eve/v1/info", {
   headers: {
@@ -35,29 +33,6 @@ const AUTHORIZED_DEPLOYED_REQUEST = new Request("https://weather-agent.vercel.ap
 type MinimalAgentInfoH3Event = Pick<H3Event, "context" | "waitUntil"> & {
   readonly req: Request;
 };
-
-async function installEveChannelShim(appRoot: string): Promise<void> {
-  const packageRoot = join(appRoot, "node_modules", "eve");
-  await mkdir(join(packageRoot, "channels"), { recursive: true });
-  await writeFile(
-    join(packageRoot, "package.json"),
-    `${JSON.stringify(
-      {
-        name: "eve",
-        type: "module",
-        exports: {
-          "./channels/eve": "./channels/eve.js",
-        },
-      },
-      null,
-      2,
-    )}\n`,
-  );
-  await writeFile(
-    join(packageRoot, "channels", "eve.js"),
-    `export { eveChannel } from ${JSON.stringify(EVE_CHANNEL_IMPORT_URL.href)};\n`,
-  );
-}
 
 function createInfoEvent(request: Request): H3Event {
   Object.assign(request, { ip: "127.0.0.1" });
@@ -73,12 +48,18 @@ async function requestAgentInfo(appRoot: string, request: Request): Promise<Resp
   return await dispatchChannelRequest(
     createInfoEvent(request),
     INFO_ROUTE_KEY,
-    createNitroArtifactsConfig({ appRoot, dev: true }),
+    createDevelopmentNitroArtifactsConfig({ configuredWorld: undefined, appRoot }),
   );
 }
 
 describe("eve agent info route", () => {
-  it("returns inspection JSON when the request is addressed to a loopback hostname", async () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns inspection JSON in a local dev environment", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+
     const { agentRoot, appRoot } = await createAppRoot("eve-agent-info-route-", APP_ROOT_OPTIONS);
 
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
@@ -102,33 +83,57 @@ describe("eve agent info route", () => {
     const payload = (await response.json()) as AgentInfoResponse;
 
     expect(payload.kind).toBe("eve-agent-info");
-    expect(payload.version).toBe(1);
+    expect(payload.version).toBe(4);
     expect(payload.mode).toBe("development");
     expect(payload.agent.model.id).toBe("openai/gpt-5.4");
-    expect(payload.instructions.static?.markdown).toContain("precise assistant");
+    expect(payload.instructions.static[0]?.content).toContain("precise assistant");
+    expect(payload.instructions.static[0]?.role).toBe("system");
     expect(payload.instructions.dynamic).toEqual([]);
-    expect(payload.tools.authored.map((tool) => tool.name)).toEqual(["get_weather"]);
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("bash");
-    expect(payload.tools.available.map((tool) => tool.name)).toContain("get_weather");
-    expect(payload.tools.framework.find((tool) => tool.name === "bash")).toMatchObject({
-      origin: "framework",
-      status: "active",
+    expect(
+      payload.tools.static
+        .filter((tool) => tool.owner.kind === "application")
+        .map((tool) => tool.name),
+    ).toEqual(["get_weather"]);
+    expect(payload.tools.static.map((tool) => tool.name)).toContain("bash");
+    expect(payload.tools.static.map((tool) => tool.name)).toContain("agent");
+    expect(payload.tools.static.map((tool) => tool.name)).toContain("get_weather");
+    expect(payload.tools.static.find((tool) => tool.name === "bash")).toMatchObject({
+      owner: { kind: "framework" },
     });
-    expect(payload.channels.available.map((channel) => channel.urlPath)).toContain(
-      EVE_CREATE_SESSION_ROUTE_PATH,
+    expect(payload.tools.static.find((tool) => tool.name === "agent")).toMatchObject({
+      owner: { kind: "framework" },
+    });
+    expect(payload.channels.routes.map((channel) => channel.urlPath)).toContain(
+      EVE_SESSION_ROUTE_PATH,
     );
-    expect(payload.channels.framework.length).toBeGreaterThan(0);
+    expect(payload.channels.routes.some((channel) => channel.owner.kind === "framework")).toBe(
+      true,
+    );
     expect(payload.diagnostics).toEqual({
       discoveryErrors: 0,
       discoveryWarnings: 0,
     });
+
+    await writeFile(
+      join(agentRoot, "tools", "agent.mjs"),
+      'import { disableTool } from "eve/tools";\nexport default disableTool();\n',
+    );
+    await compileAgent({ startPath: appRoot });
+
+    const disabledPayload = (await (
+      await requestAgentInfo(appRoot, LOOPBACK_REQUEST)
+    ).json()) as AgentInfoResponse;
+
+    expect(disabledPayload.tools.static.map((tool) => tool.name)).not.toContain("agent");
+    expect(
+      disabledPayload.composition.disabled.some((entry) => entry.logicalPath === "tools/agent.mjs"),
+    ).toBe(true);
   });
 
-  it("returns 401 without a Vercel OIDC bearer token when the request is addressed to a public hostname", async () => {
-    // The default chain `[vercelOidc(), localDev()]` must reject public
-    // traffic that arrives without a token, regardless of `process.env`.
-    // `vercelOidc()` skips because there is no bearer token; `localDev()`
-    // skips because the request URL is not loopback.
+  it("returns 401 for a deployment request without a Vercel OIDC bearer token", async () => {
+    // With no dev flag set, the default chain must reject a request that
+    // carries no token: `vercelOidc()` skips without a bearer token and
+    // `localDev()` skips outside an `eve dev` or `vercel dev` server.
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-agent-info-route-deployed-",
       APP_ROOT_OPTIONS,
@@ -158,7 +163,6 @@ describe("eve agent info route", () => {
     );
 
     await mkdir(join(agentRoot, "channels"), { recursive: true });
-    await installEveChannelShim(appRoot);
     await writeFile(join(agentRoot, "agent.mjs"), 'export default { model: "openai/gpt-5.4" };\n');
     await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
     await writeFile(

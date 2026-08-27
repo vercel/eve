@@ -4,16 +4,19 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 
 const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 const DEFAULT_SERVER_READY_TIMEOUT_MS = 180_000;
 const DEV_SERVER_REGISTRY_TIMEOUT_MS = 180_000;
 const DEV_SERVER_REGISTRY_POLL_MS = 100;
+const DEV_SERVER_READINESS_TIMEOUT_MS = 1_000;
 const DEV_SERVER_STALE_LOCK_MS = 30_000;
 const EVE_CACHE_DIRECTORY_NAME = ".eve";
 const EVE_NEXT_DEV_SERVER_FILE_NAME = "next-dev-server.json";
 const EVE_NEXT_DEV_SERVER_LOCK_FILE_NAME = "next-dev-server.lock";
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
 const SERVER_URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'<>]+/g;
 const NEXT_PHASE_PRODUCTION_BUILD = "phase-production-build";
 
@@ -45,10 +48,6 @@ function getGlobalState(): EveNextGlobalState {
   };
 
   return globalWithState[globalStateSymbol];
-}
-
-function joinRoutePrefix(prefix: string, path: string): string {
-  return `${prefix.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
 function normalizeOrigin(origin: string): string {
@@ -118,25 +117,6 @@ function normalizeDevServerRegistry(value: unknown): EveDevServerRegistry | unde
   }
 }
 
-async function isEveServerHealthy(origin: string): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 1_000);
-
-  try {
-    const response = await fetch(joinRoutePrefix(origin, `${EVE_ROUTE_PREFIX}/health`), {
-      signal: controller.signal,
-    });
-
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function readUsableEveDevServerRegistry(appRoot: string): Promise<string | undefined> {
   try {
     const registry = normalizeDevServerRegistry(
@@ -147,11 +127,15 @@ async function readUsableEveDevServerRegistry(appRoot: string): Promise<string |
       return undefined;
     }
 
-    if (!(await isEveServerHealthy(registry.origin))) {
+    if (
+      (await readDevelopmentRuntimeArtifactsRevision({
+        serverUrl: registry.origin,
+        timeoutMs: DEV_SERVER_READINESS_TIMEOUT_MS,
+      })) === undefined
+    ) {
       return undefined;
     }
 
-    process.env[EVE_BASE_URL_ENV] = registry.origin;
     return registry.origin;
   } catch (error) {
     if (isNodeErrorWithCode(error, "ENOENT")) {
@@ -284,11 +268,71 @@ function findLocalServerOrigin(output: string): string | undefined {
   return undefined;
 }
 
+function formatEveDevOutputLine(line: string, logLabel: string | undefined): string | undefined {
+  const normalizedLine = line.replace(/\r$/, "");
+  const trimmedLine = normalizedLine.replace(ANSI_ESCAPE_PATTERN, "").trim();
+
+  if (
+    trimmedLine.length === 0 ||
+    /^☰eve\b/.test(trimmedLine) ||
+    trimmedLine === "CONFIGURATION_FIELD_CONFLICT" ||
+    trimmedLine.startsWith("[CONFIGURATION_FIELD_CONFLICT]")
+  ) {
+    return undefined;
+  }
+
+  const tag = logLabel === undefined ? "[eve:dev]" : `[eve:dev:${logLabel}]`;
+  const serverMatch = /server listening at\s+(https?:\/\/[^\s]+)/i.exec(normalizedLine);
+  if (serverMatch !== null) {
+    return `${tag} server listening at ${serverMatch[1]}`;
+  }
+
+  return `${tag} ${normalizedLine}`;
+}
+
+function createEveDevOutputWriter(input: {
+  readonly logLabel?: string;
+  readonly stream: NodeJS.WriteStream;
+}): {
+  readonly flush: () => void;
+  readonly write: (chunk: Buffer) => void;
+} {
+  let pendingLine = "";
+
+  const writeLine = (line: string) => {
+    const formattedLine = formatEveDevOutputLine(line, input.logLabel);
+    if (formattedLine !== undefined) {
+      input.stream.write(`${formattedLine}\n`);
+    }
+  };
+
+  return {
+    flush() {
+      if (pendingLine.length === 0) {
+        return;
+      }
+
+      writeLine(pendingLine);
+      pendingLine = "";
+    },
+    write(chunk) {
+      pendingLine += chunk.toString("utf8");
+      const lines = pendingLine.split("\n");
+      pendingLine = lines.pop() ?? "";
+
+      for (const line of lines) {
+        writeLine(line);
+      }
+    },
+  };
+}
+
 function startServerProcess(input: {
   readonly args: readonly string[];
   readonly command: string;
   readonly cwd: string;
   readonly env?: Record<string, string>;
+  readonly logLabel?: string;
   readonly timeoutMs?: number;
 }): Promise<EveProcessHandle> {
   return new Promise((resolvePromise, reject) => {
@@ -299,6 +343,14 @@ function startServerProcess(input: {
         ...input.env,
       },
       stdio: ["ignore", "pipe", "pipe"],
+    });
+    const stderrWriter = createEveDevOutputWriter({
+      logLabel: input.logLabel,
+      stream: process.stderr,
+    });
+    const stdoutWriter = createEveDevOutputWriter({
+      logLabel: input.logLabel,
+      stream: process.stdout,
     });
     const timeout = setTimeout(() => {
       child.kill();
@@ -314,11 +366,17 @@ function startServerProcess(input: {
       child.off("error", handleError);
       child.off("exit", handleEarlyExit);
     };
+    const flushOutput = () => {
+      stdoutWriter.flush();
+      stderrWriter.flush();
+    };
     const handleError = (error: Error) => {
+      flushOutput();
       cleanup();
       reject(error);
     };
     const handleEarlyExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      flushOutput();
       cleanup();
       reject(
         new Error(
@@ -340,11 +398,11 @@ function startServerProcess(input: {
       });
     };
     const handleStdout = (chunk: Buffer) => {
-      process.stdout.write(chunk);
+      stdoutWriter.write(chunk);
       handleOutput(chunk);
     };
     const handleStderr = (chunk: Buffer) => {
-      process.stderr.write(chunk);
+      stderrWriter.write(chunk);
       handleOutput(chunk);
     };
 
@@ -374,14 +432,18 @@ function installProcessShutdown(handle: EveProcessHandle): EveProcessHandle {
   return handle;
 }
 
-function startEveDevServer(appRoot: string, timeoutMs: number): Promise<EveProcessHandle> {
+function startEveDevServer(
+  appRoot: string,
+  timeoutMs: number,
+  logLabel: string | undefined,
+): Promise<EveProcessHandle> {
   return startServerProcess({
     args: [createEveBinaryPath(), "dev", "--no-ui", "--port", "0"],
     command: process.execPath,
     cwd: appRoot,
+    logLabel,
     timeoutMs,
   }).then((handle) => {
-    process.env[EVE_BASE_URL_ENV] = handle.origin;
     return installProcessShutdown(handle);
   });
 }
@@ -414,6 +476,7 @@ function startEveProductionServer(input: {
 async function resolveSharedEveDevServer(
   appRoot: string,
   timeoutMs: number,
+  logLabel: string | undefined,
 ): Promise<EveProcessHandle> {
   const registeredOrigin = await readUsableEveDevServerRegistry(appRoot);
   if (registeredOrigin !== undefined) {
@@ -432,7 +495,7 @@ async function resolveSharedEveDevServer(
       };
     }
 
-    const handle = await startEveDevServer(appRoot, timeoutMs);
+    const handle = await startEveDevServer(appRoot, timeoutMs, logLabel);
     await writeEveDevServerRegistry(appRoot, handle);
     return handle;
   } finally {
@@ -443,6 +506,7 @@ async function resolveSharedEveDevServer(
 export async function resolveEveDestinationPrefix(input: {
   readonly appRoot: string;
   readonly devServerTimeoutMs?: number;
+  readonly logLabel?: string;
   readonly phase: string;
   readonly productionDestinationPrefix: string;
   readonly productionServerOrigin?: string;
@@ -496,6 +560,7 @@ export async function resolveEveDestinationPrefix(input: {
     server = resolveSharedEveDevServer(
       input.appRoot,
       input.devServerTimeoutMs ?? DEV_SERVER_REGISTRY_TIMEOUT_MS,
+      input.logLabel,
     ).catch((error) => {
       state.servers.delete(key);
       throw error;

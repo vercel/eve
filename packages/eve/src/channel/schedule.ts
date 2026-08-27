@@ -1,11 +1,6 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { ScheduleIdKey } from "#context/keys.js";
-import {
-  createCrossChannelReceiveFn,
-  toCrossChannelTargets,
-} from "#channel/cross-channel-receive.js";
+import { createCrossChannelToFn, toCrossChannelTargets } from "#channel/cross-channel-receive.js";
 import { createSession, type Session } from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { expectFunction } from "#internal/authored-module.js";
@@ -47,7 +42,7 @@ export interface ScheduleDispatchInput {
  *
  * For handler schedules: builds {@link ScheduleHandlerArgs} against the
  * request-scoped channel bundle and invokes the author's `run`. The
- * author owns control flow — `args.receive(channel, …)` hands work off
+ * author owns control flow — `args.to(channel, target).send(…)` hands work off
  * to a channel; `args.waitUntil(promise)` extends the task lifetime
  * so the dispatcher awaits in-flight work before settling.
  *
@@ -77,56 +72,49 @@ export class ScheduleDispatcher {
   }
 
   async trigger(input: ScheduleDispatchInput): Promise<ScheduleDispatchResult> {
-    // The dispatch runs inside an eve context scope carrying the schedule
-    // name, so every run started within it — the synthesized markdown run
-    // and sessions the handler starts through `args.receive(...)` (whose
-    // `RunInput` is built by the target channel's authored `receive` hook,
-    // out of the dispatcher's hands) — is attributable to this schedule.
-    const scope = new ContextContainer();
-    scope.set(ScheduleIdKey, input.scheduleId);
-    return await contextStorage.run(scope, async () => {
-      const sessions: Session[] = [];
-      const waitUntilTasks: Promise<unknown>[] = [];
-      const receive = createCrossChannelReceiveFn(
-        this.runtime,
-        toCrossChannelTargets(this.channels),
+    const sessions: Session[] = [];
+    const waitUntilTasks: Promise<unknown>[] = [];
+    const toChannel = createCrossChannelToFn(this.runtime, toCrossChannelTargets(this.channels));
+
+    const args: ScheduleHandlerArgs = {
+      appAuth: SCHEDULE_APP_AUTH,
+      to(channel, target) {
+        const destination = toChannel(channel, target);
+        return {
+          async send(message, options) {
+            const session = await destination.send(message, options);
+            sessions.push(session);
+            return session;
+          },
+        };
+      },
+      waitUntil(task) {
+        waitUntilTasks.push(task);
+      },
+    };
+
+    if (input.run) {
+      await input.run(args);
+    } else if (input.markdown !== undefined) {
+      const session = await this.runMarkdown(input.markdown);
+      sessions.push(session);
+    } else {
+      throw new Error(
+        `Schedule "${input.scheduleId}" has neither "run" nor "markdown" — at least one must be set.`,
       );
+    }
 
-      const args: ScheduleHandlerArgs = {
-        appAuth: SCHEDULE_APP_AUTH,
-        receive: async (channel, options) => {
-          const session = await receive(channel, options);
-          sessions.push(session);
-          return session;
-        },
-        waitUntil(task) {
-          waitUntilTasks.push(task);
-        },
-      };
-
-      if (input.run) {
-        await input.run(args);
-      } else if (input.markdown !== undefined) {
-        const session = await this.runMarkdown(input.markdown);
-        sessions.push(session);
-      } else {
-        throw new Error(
-          `Schedule "${input.scheduleId}" has neither "run" nor "markdown" — at least one must be set.`,
-        );
-      }
-
-      return { sessions, waitUntilTasks };
-    });
+    return { sessions, waitUntilTasks };
   }
 
   private async runMarkdown(markdown: string): Promise<Session> {
-    const handle = await this.runtime.run({
+    const handle = await this.runtime.createSession({
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
       mode: "task",
     });
-    return createSession(handle.sessionId, handle.continuationToken, this.runtime);
+    return createSession(handle.sessionId, this.runtime);
   }
 }
 

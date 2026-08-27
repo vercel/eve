@@ -1,4 +1,5 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
+import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -18,9 +19,7 @@ vi.mock("#internal/vercel/project-link.js", () => ({
 
 const target = { ownerId: "team_expected", projectId: "prj_expected" } as const;
 
-function token(claims: Record<string, string>): string {
-  return `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.signature`;
-}
+const token = createFakeVercelOidcToken;
 
 afterEach(() => {
   vi.mocked(getVercelOidcToken).mockReset();

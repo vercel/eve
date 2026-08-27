@@ -2,42 +2,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
 import { Client } from "#client/client.js";
-import type { AgentInfoResult } from "#client/types.js";
+import { ClientError } from "#client/client-error.js";
+import { HealthResponseError } from "#client/health-response-error.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 
-const AGENT_INFO: AgentInfoResult = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: { id: "openai/gpt-5.5" },
-    name: "Weather Agent",
-  },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: null },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 1,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
-};
+const AGENT_INFO = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  name: "Weather Agent",
+});
+
+function testBinding(
+  logicalPath: string,
+  owner:
+    | { readonly kind: "application" }
+    | { readonly feature: string; readonly kind: "framework" },
+) {
+  return {
+    backing: {
+      externalDependencies: [],
+      kind: "filesystem" as const,
+      sourcePath: `/tmp/weather-agent/agent/${logicalPath}`,
+    },
+    logicalPath,
+    owner,
+  };
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -45,6 +38,45 @@ afterEach(() => {
 });
 
 describe("Client request policy", () => {
+  it("rejects malformed health payloads", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      Response.json({ ok: true, status: "ready", workflowId: "wf", extra: true }),
+    );
+
+    const client = new Client({ host: "https://eve.test" });
+
+    await expect(client.health()).rejects.toThrow(HealthResponseError);
+  });
+
+  it("includes host query parameters on every agent request", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(AGENT_INFO))
+      .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+      );
+    const client = new Client({
+      host: "https://eve.test?x-vercel-protection-bypass=secret",
+    });
+
+    await client.info();
+    await client.health();
+    await client.fetch("/custom");
+    await (await client.sessions.create({ message: "hello" })).response.result();
+
+    expect(fetchMock.mock.calls).toHaveLength(5);
+    for (const [request] of fetchMock.mock.calls) {
+      expect(new URL(String(request)).searchParams.get("x-vercel-protection-bypass")).toBe(
+        "secret",
+      );
+    }
+  });
+
   it("enforces its redirect policy for info, health, raw fetch, and sessions", async () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
@@ -52,7 +84,7 @@ describe("Client request policy", () => {
       .mockResolvedValueOnce(Response.json({ ok: true, status: "ready", workflowId: "wf" }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(
-        Response.json({ continuationToken: "eve:test", sessionId: "session_1" }, { status: 202 }),
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
       .mockResolvedValueOnce(
         new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
@@ -62,7 +94,7 @@ describe("Client request policy", () => {
     await client.info();
     await client.health();
     await client.fetch("/custom", { redirect: "follow" });
-    await (await client.session().send("hello")).result();
+    await (await client.sessions.create({ message: "hello" })).response.result();
 
     expect(fetchMock.mock.calls).toHaveLength(5);
     for (const [, init] of fetchMock.mock.calls) {
@@ -84,6 +116,52 @@ describe("Client request policy", () => {
     const sent = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(sent.get("authorization")).toBe("Bearer oidc-tok");
     expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
+  });
+
+  it("lets turn authorization override the client bearer while retaining trusted OIDC", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+      );
+    const client = new Client({
+      host: "https://eve.test",
+      auth: { vercelOidc: { token: "oidc-tok" } },
+    });
+
+    await (
+      await client.sessions.create({
+        headers: { authorization: "Bearer application-user" },
+        message: "hello",
+      })
+    ).response.result();
+
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      const sent = new Headers(init?.headers);
+      expect(sent.get("authorization")).toBe("Bearer application-user");
+      expect(sent.get("x-vercel-trusted-oidc-idp-token")).toBe("oidc-tok");
+    }
+  });
+
+  it("includes response headers in info request errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Redirecting...", {
+        status: 302,
+        headers: { location: "https://vercel.com/sso-api?url=https://eve.test" },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test", redirect: "manual" });
+
+    const error = await client.info().catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ClientError);
+    expect((error as ClientError).headers.location).toBe(
+      "https://vercel.com/sso-api?url=https://eve.test",
+    );
   });
 
   it("keeps an in-flight remote request on one credential snapshot after rollback", async () => {
@@ -111,18 +189,20 @@ describe("Client request policy", () => {
   });
 
   it("accepts a tool whose undefined output schema was omitted during JSON serialization", async () => {
+    const owner = { feature: "eve:defaults", kind: "framework" as const };
     const toolWithoutOutputSchema = {
+      binding: testBinding("tools/web_search.ts", owner),
       description: "Search the web",
       hasAuth: false,
       hasExecute: false,
       hasModelOutputProjection: false,
       hasOutputSchema: false,
       inputSchema: null,
-      logicalPath: "eve:framework/web-search",
+      logicalPath: "tools/web_search.ts",
       name: "web_search",
-      origin: "framework",
-      replacesFrameworkTool: false,
+      owner,
       requiresApproval: false,
+      sourceId: "eve:defaults:tools/web_search.ts",
       sourceKind: "module",
     };
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -130,7 +210,7 @@ describe("Client request policy", () => {
         ...AGENT_INFO,
         tools: {
           ...AGENT_INFO.tools,
-          available: [toolWithoutOutputSchema],
+          static: [toolWithoutOutputSchema],
         },
       }),
     );
@@ -138,22 +218,119 @@ describe("Client request policy", () => {
 
     const info = await client.info();
 
-    expect(info.tools.available[0]).toMatchObject({
+    expect(info.tools.static[0]).toMatchObject({
       hasOutputSchema: false,
       name: "web_search",
     });
-    expect(info.tools.available[0]).not.toHaveProperty("outputSchema");
+    expect(info.tools.static[0]).not.toHaveProperty("outputSchema");
   });
 
-  it("returns the parsed agent info payload", async () => {
+  it("rejects unknown fields in the agent info payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ ...AGENT_INFO, ignoredByClient: true }),
     );
     const client = new Client({ host: "https://eve.test" });
 
-    const info = await client.info();
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
 
-    expect(info).not.toHaveProperty("ignoredByClient");
+  it("rejects duplicate public identities in the agent info payload", async () => {
+    const owner = { kind: "application" as const };
+    const tool = {
+      binding: testBinding("tools/weather.ts", owner),
+      description: "Gets weather.",
+      hasAuth: false,
+      hasExecute: true,
+      hasModelOutputProjection: false,
+      hasOutputSchema: false,
+      inputSchema: { type: "object" },
+      logicalPath: "tools/weather.ts",
+      name: "weather",
+      owner,
+      requiresApproval: false,
+      sourceId: "tools/weather.ts",
+      sourceKind: "module",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        tools: {
+          ...AGENT_INFO.tools,
+          static: [
+            tool,
+            {
+              ...tool,
+              binding: testBinding("tools/forecast.ts", owner),
+              logicalPath: "tools/forecast.ts",
+              sourceId: "tools/forecast.ts",
+            },
+          ],
+        },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
+
+  it("rejects normalized channel-route collisions in the agent info payload", async () => {
+    const owner = { kind: "application" as const };
+    const route = {
+      binding: testBinding("channels/users.ts", owner),
+      logicalPath: "channels/users.ts",
+      method: "GET" as const,
+      name: "users",
+      owner,
+      sourceId: "channels/users.ts",
+      sourceKind: "module",
+      urlPath: "/users/:id",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        channels: {
+          ...AGENT_INFO.channels,
+          routes: [
+            route,
+            {
+              ...route,
+              binding: testBinding("channels/profiles.ts", owner),
+              logicalPath: "channels/profiles.ts",
+              name: "profiles",
+              sourceId: "channels/profiles.ts",
+              urlPath: "/users/[profile]",
+            },
+          ],
+        },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
+
+  it("rejects source provenance that disagrees with its compiled binding", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        ...AGENT_INFO,
+        sandbox: {
+          ...AGENT_INFO.sandbox,
+          binding: { ...AGENT_INFO.sandbox.binding, logicalPath: "sandbox/other.ts" },
+        },
+      }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
+  });
+
+  it("rejects collection totals that disagree with their entries", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ ...AGENT_INFO, subagents: { local: [], total: 1 } }),
+    );
+    const client = new Client({ host: "https://eve.test" });
+
+    await expect(client.info()).rejects.toThrow(AgentInfoResponseError);
   });
 
   it("rejects a non-Eve response from the agent info route", async () => {
@@ -168,7 +345,12 @@ describe("Client request policy", () => {
   it("rejects an incomplete agent info payload", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
-        agent: { model: { id: "openai/gpt-5.5" } },
+        agent: {
+          model: {
+            id: "openai/gpt-5.5",
+            routing: { kind: "gateway", target: "openai" },
+          },
+        },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
         version: 1,
@@ -182,7 +364,12 @@ describe("Client request policy", () => {
   it("names the offending fields when the agent info payload is incomplete", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
-        agent: { model: { id: "openai/gpt-5.5" } },
+        agent: {
+          model: {
+            id: "openai/gpt-5.5",
+            routing: { kind: "gateway", target: "openai" },
+          },
+        },
         diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
         kind: "eve-agent-info",
         version: 1,

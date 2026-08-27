@@ -3,17 +3,24 @@ import { File, Files, Folder } from "fumadocs-ui/components/files";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import type { MDXComponents } from "mdx/types";
 import Link from "next/link";
+import { AgentRuntimeDiagram } from "./agent-runtime-diagram";
 
 const localComponents: MDXComponents = {
   a: ({ href, ...props }) =>
     typeof href === "string" && href.startsWith("/") ? (
-      <Link className="font-normal text-primary no-underline" href={href} {...props} />
+      <Link
+        className="font-normal text-primary no-underline"
+        href={href}
+        {...props}
+        prefetch={true}
+      />
     ) : (
       <a href={href} {...props} className="font-normal text-primary no-underline" />
     ),
   File,
   Files,
   Folder,
+  AgentRuntimeDiagram,
   Step,
   Steps,
 };

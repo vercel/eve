@@ -8,7 +8,6 @@ dist
 
 # eve runtime data
 .eve
-.workflow-data
 
 # Node dependencies
 node_modules

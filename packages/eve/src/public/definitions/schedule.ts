@@ -1,21 +1,28 @@
-import type { CrossChannelReceiveFn } from "#channel/cross-channel-receive.js";
+import type { CrossChannelToFn } from "#channel/cross-channel-receive.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
+import type {
+  GenericScheduleDefinition,
+  GenericScheduleRunHandler,
+  GenericScheduleDefinitionFields,
+} from "#shared/schedule-definition.js";
 
 export type { InferReceiveTarget, TypedReceiveTarget } from "#channel/receive-target.js";
 
+/** Selects a proactive target channel from a schedule handler. */
+export type ScheduleToFn = CrossChannelToFn;
+
 /**
  * Arguments passed to a schedule's `run` handler. A tight subset of a route
- * handler's args: `receive` starts a session on another channel and `waitUntil`
- * extends the task lifetime. There is no `send` because a schedule has no
- * current channel.
+ * handler's args: `to` selects another channel and `waitUntil`
+ * extends the task lifetime.
  */
 export interface ScheduleHandlerArgs {
   /**
-   * Starts a session on another channel, using the same contract as a route
-   * handler's `args.receive(channel, ...)`.
+   * Selects a proactive target on another channel. Call `.send(message, options)`
+   * on the returned handle.
    */
-  readonly receive: CrossChannelReceiveFn;
+  readonly to: ScheduleToFn;
   /**
    * Extends the cron task's lifetime past handler return so the runtime awaits
    * background work (the parked workflow session, in-flight fetches, etc.)
@@ -23,7 +30,7 @@ export interface ScheduleHandlerArgs {
    */
   readonly waitUntil: (task: Promise<unknown>) => void;
   /**
-   * Pre-built APP auth context. Pass this to `receive(channel, { auth })`
+   * Pre-built APP auth context. Pass this to `to(channel, target).send(message, { auth })`
    * for schedules that run on behalf of the agent itself.
    */
   readonly appAuth: SessionAuthContext;
@@ -31,17 +38,10 @@ export interface ScheduleHandlerArgs {
 
 /**
  * The `run` form of {@link ScheduleDefinition} invokes this handler when a
- * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`receive`,
+ * schedule's cron fires. It receives {@link ScheduleHandlerArgs} (`to`,
  * `waitUntil`, `appAuth`) and may return synchronously or as a promise.
  */
-export type ScheduleRunHandler = (args: ScheduleHandlerArgs) => Promise<void> | void;
-
-/** Constraint shape that bounds the authored keys accepted by {@link defineSchedule}. */
-interface ScheduleDefinitionFields {
-  readonly cron: string;
-  readonly markdown?: string;
-  readonly run?: ScheduleRunHandler;
-}
+export type ScheduleRunHandler = GenericScheduleRunHandler<ScheduleHandlerArgs>;
 
 /**
  * Public definition for a schedule authored in TypeScript. Provide a required
@@ -51,22 +51,12 @@ interface ScheduleDefinitionFields {
  *   on the prompt and discards the output (equivalent to the `<name>.md`
  *   markdown form).
  * - `run`: full handler ({@link ScheduleRunHandler}). Receives
- *   `{ receive, waitUntil, appAuth }` and decides what to do.
+ *   `{ to, waitUntil, appAuth }` and decides what to do.
  *
  * Identity is derived from the file path under `agent/schedules/`; authored
  * definitions do not carry a `name` field.
  */
-export type ScheduleDefinition =
-  | {
-      readonly cron: string;
-      readonly markdown: string;
-      readonly run?: never;
-    }
-  | {
-      readonly cron: string;
-      readonly markdown?: never;
-      readonly run: ScheduleRunHandler;
-    };
+export type ScheduleDefinition = GenericScheduleDefinition<ScheduleHandlerArgs>;
 
 /**
  * Defines a schedule in TypeScript. Export as the default from
@@ -81,12 +71,11 @@ export type ScheduleDefinition =
  *
  * export default defineSchedule({
  *   cron: "0 9 * * 1-5",
- *   async run({ receive, waitUntil, appAuth }) {
- *     waitUntil(receive(slack, {
- *       message: "Post the daily standup summary.",
- *       target: { channelId: "C0123ABC" },
- *       auth: appAuth,
- *     }));
+ *   async run({ to, waitUntil, appAuth }) {
+ *     waitUntil(to(slack, { channelId: "C0123ABC" }).send(
+ *       "Post the daily standup summary.",
+ *       { auth: appAuth },
+ *     ));
  *   },
  * });
  * ```
@@ -102,7 +91,7 @@ export type ScheduleDefinition =
  * ```
  */
 export function defineSchedule<TSchedule extends ScheduleDefinition>(
-  definition: ExactDefinition<TSchedule, ScheduleDefinitionFields>,
+  definition: ExactDefinition<TSchedule, GenericScheduleDefinitionFields<ScheduleHandlerArgs>>,
 ): TSchedule {
   return definition;
 }

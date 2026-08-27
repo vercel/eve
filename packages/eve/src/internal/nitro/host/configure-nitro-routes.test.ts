@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PreparedApplicationHost } from "./types.js";
 
 interface NitroStub {
+  hookHandlers: Map<string, Array<() => unknown>>;
   hooks: {
-    hook(): void;
+    hook(name: string, handler: () => unknown): void;
   };
   options: {
     buildDir: string;
@@ -23,7 +24,18 @@ interface PreparedApplicationHostStub {
   appRoot: string;
   compileResult: {
     manifest: {
-      channels: [];
+      channelRoutes: {
+        effective: Array<{
+          logicalPath: string;
+          method: "GET" | "HEAD";
+          name: string;
+          sourceId: string;
+          sourceKind: "module";
+          urlPath: string;
+        }>;
+        preflight: [];
+        shadowed: [];
+      };
       config: {
         name: string;
         experimental?: { workflow?: { world?: string } };
@@ -37,6 +49,7 @@ interface PreparedApplicationHostStub {
   };
   compiledArtifacts: {
     bootstrapPath: string;
+    workflowWorldPluginPath: string;
   };
   scheduleRegistrations: [];
   schedules: [];
@@ -83,15 +96,21 @@ vi.mock("../../application/paths.js", () => ({
   isVercelBuildEnvironment: () => Boolean(process.env.VERCEL),
 }));
 
-const { configureNitroRoutes } = await import("./configure-nitro-routes.js");
-const { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } = await import("#protocol/routes.js");
+const { configureDevelopmentNitroRoutes, configureProductionNitroRoutes } =
+  await import("./configure-nitro-routes.js");
+const { EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN, EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } =
+  await import("#protocol/routes.js");
 
 function createNitroStub(
   input: { buildDir?: string; dev?: boolean; rootDir?: string } = {},
-): Nitro {
+): Nitro & Pick<NitroStub, "hookHandlers"> {
+  const hookHandlers = new Map<string, Array<() => unknown>>();
   const nitro: NitroStub = {
+    hookHandlers,
     hooks: {
-      hook() {},
+      hook(name, handler) {
+        hookHandlers.set(name, [...(hookHandlers.get(name) ?? []), handler]);
+      },
     },
     options: {
       buildDir: input.buildDir ?? "G:\\projects\\test-eve\\.eve\\nitro",
@@ -105,7 +124,7 @@ function createNitroStub(
     },
   };
 
-  return nitro as never as Nitro;
+  return nitro as never as Nitro & Pick<NitroStub, "hookHandlers">;
 }
 
 function createPreparedHost(
@@ -117,12 +136,42 @@ function createPreparedHost(
   } = {},
 ): PreparedApplicationHost {
   const appRoot = input.appRoot ?? "G:\\projects\\test-eve";
+  const pathSeparator = appRoot.includes("\\") ? "\\" : "/";
 
   const preparedHost: PreparedApplicationHostStub = {
     appRoot,
     compileResult: {
       manifest: {
-        channels: [],
+        channelRoutes: {
+          effective: [
+            ...["GET", "HEAD"].map((method) => ({
+              logicalPath: "channels/home.ts",
+              method: method as "GET" | "HEAD",
+              name: "home",
+              sourceId: "framework:home",
+              sourceKind: "module" as const,
+              urlPath: "/",
+            })),
+            ...["GET", "HEAD"].map((method) => ({
+              logicalPath: "channels/eve.ts",
+              method: method as "GET" | "HEAD",
+              name: "eve",
+              sourceId: "framework:eve",
+              sourceKind: "module" as const,
+              urlPath: EVE_HEALTH_ROUTE_PATH,
+            })),
+            {
+              logicalPath: "channels/eve.ts",
+              method: "GET",
+              name: "eve",
+              sourceId: "framework:eve",
+              sourceKind: "module",
+              urlPath: EVE_INFO_ROUTE_PATH,
+            },
+          ],
+          preflight: [],
+          shadowed: [],
+        },
         config:
           input.workflowWorld === undefined
             ? { name: input.agentName ?? "test-agent" }
@@ -139,6 +188,7 @@ function createPreparedHost(
     },
     compiledArtifacts: {
       bootstrapPath: `${appRoot}\\.eve\\compiled-artifacts-bootstrap.mjs`,
+      workflowWorldPluginPath: `${appRoot}${pathSeparator}.eve${pathSeparator}compiled-artifacts-workflow-world.mjs`,
     },
     scheduleRegistrations: [],
     schedules: [],
@@ -148,7 +198,7 @@ function createPreparedHost(
   return preparedHost as never as PreparedApplicationHost;
 }
 
-describe("configureNitroRoutes", () => {
+describe("Nitro route configuration", () => {
   beforeEach(() => {
     fsMocks.mkdir.mockClear();
     fsMocks.writeFile.mockClear();
@@ -158,48 +208,40 @@ describe("configureNitroRoutes", () => {
     vi.unstubAllEnvs();
   });
 
-  it("registers package-owned route files through file-url virtual handlers", async () => {
+  it("registers compiler-owned routes through channel virtual handlers", async () => {
     const nitro = createNitroStub();
 
-    await configureNitroRoutes(nitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureProductionNitroRoutes(nitro, createPreparedHost());
 
     const healthHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "GET",
     );
-    expect(healthHandler?.handler).toBe(`#eve-route-handler/GET ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(healthHandler?.handler).toBe(`#nitro/virtual/eve-channel/GET ${EVE_HEALTH_ROUTE_PATH}`);
 
     const virtualSource = nitro.options.virtual[healthHandler?.handler ?? ""];
-    expect(virtualSource).toContain(
-      'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
-    );
+    expect(virtualSource).toContain("dispatchChannelRequest");
     expect(virtualSource).not.toContain('"G:\\');
   });
 
-  it("bakes the agent name into the home page route", async () => {
+  it("routes the compiled home channel through the same dispatcher", async () => {
     const nitro = createNitroStub();
 
-    await configureNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }), {
-      surface: "app",
-    });
+    await configureProductionNitroRoutes(nitro, createPreparedHost({ agentName: "support-agent" }));
 
     const homeHandler = nitro.options.handlers.find(
       (handler) => handler.route === "/" && handler.method === "GET",
     );
-    expect(homeHandler?.handler).toBe("#eve-route/");
+    expect(homeHandler?.handler).toBe("#nitro/virtual/eve-channel/GET /");
 
     const virtualSource = nitro.options.virtual[homeHandler?.handler ?? ""];
-    expect(virtualSource).toContain("handleHomePageRequest");
-    expect(virtualSource).toContain('{"agentName":"support-agent"}');
+    expect(virtualSource).toContain("dispatchChannelRequest");
+    expect(virtualSource).not.toContain("support-agent");
   });
 
   it("registers the health route for HEAD so load balancers probing with HEAD see 200", async () => {
     const nitro = createNitroStub();
 
-    await configureNitroRoutes(nitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureProductionNitroRoutes(nitro, createPreparedHost());
 
     const healthMethods = nitro.options.handlers
       .filter((handler) => handler.route === EVE_HEALTH_ROUTE_PATH)
@@ -210,12 +252,10 @@ describe("configureNitroRoutes", () => {
     const headHandler = nitro.options.handlers.find(
       (handler) => handler.route === EVE_HEALTH_ROUTE_PATH && handler.method === "HEAD",
     );
-    expect(headHandler?.handler).toBe(`#eve-route-handler/HEAD ${EVE_HEALTH_ROUTE_PATH}`);
+    expect(headHandler?.handler).toBe(`#nitro/virtual/eve-channel/HEAD ${EVE_HEALTH_ROUTE_PATH}`);
 
     const virtualSource = nitro.options.virtual[headHandler?.handler ?? ""];
-    expect(virtualSource).toContain(
-      'import handler from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/internal/nitro/routes/health.js";',
-    );
+    expect(virtualSource).toContain("dispatchChannelRequest");
   });
 
   it("registers workflow routes through physical handlers with relative bundle imports", async () => {
@@ -224,15 +264,12 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: true, rootDir: root });
 
-    await configureNitroRoutes(
+    await configureDevelopmentNitroRoutes(
       nitro,
       createPreparedHost({
         appRoot: root,
         workflowBuildDir,
       }),
-      {
-        surface: "flow",
-      },
     );
 
     const workflowHandler = nitro.options.handlers.find(
@@ -252,40 +289,67 @@ describe("configureNitroRoutes", () => {
     expect(nitro.options.virtual["#eve-workflow/workflows"]).toBeUndefined();
   });
 
-  it("registers direct workflow queue handlers in dev mode so the worker bypasses HTTP dispatch", async () => {
+  it("does not retain a workflow reload hook after configuring a candidate", async () => {
+    const nitro = createNitroStub({ dev: true });
+
+    await configureDevelopmentNitroRoutes(nitro, createPreparedHost());
+    const build = nitro.hookHandlers.get("build:before")?.[0];
+    if (build === undefined) {
+      throw new Error("Expected the workflow build hook to be registered.");
+    }
+
+    expect(nitro.hookHandlers.has("dev:reload")).toBe(false);
+    await expect(build()).resolves.toBeUndefined();
+    expect(workflowBuilderMocks.build).toHaveBeenCalledOnce();
+  });
+
+  it("leaves development queue dispatch to the stable parent", async () => {
     const root = "/tmp/eve-nitro-direct-handlers";
     const buildDir = `${root}/nitro`;
     const nitro = createNitroStub({ buildDir, dev: true, rootDir: root });
 
-    await configureNitroRoutes(nitro, createPreparedHost({ appRoot: root }), {
-      surface: "all",
-    });
+    await configureDevelopmentNitroRoutes(nitro, createPreparedHost({ appRoot: root }));
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
 
     expect(workflowHandlerSource).toContain('import { POST } from "./workflows.mjs";');
-    expect(workflowHandlerSource).toContain(
-      'import { getWorld as __eveGetWorkflowWorld } from "file:///G:/projects/test-eve/node_modules/.pnpm/eve@0.3.0/node_modules/eve/dist/src/compiled/@workflow/core/runtime.js";',
+    expect(workflowHandlerSource).not.toContain("registerHandler");
+    expect(workflowHandlerSource).not.toContain("__eveGetWorkflowWorld");
+    expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
+  });
+
+  it("keeps configured development World queue dispatch inside the worker", async () => {
+    const root = "/tmp/eve-nitro-configured-world-handlers";
+    const nitro = createNitroStub({ buildDir: `${root}/nitro`, dev: true, rootDir: root });
+
+    await configureDevelopmentNitroRoutes(
+      nitro,
+      createPreparedHost({ appRoot: root, workflowWorld: "@workflow/world-postgres" }),
     );
+
+    const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
     expect(workflowHandlerSource).toContain(
       "const __eveWorkflowWorld = await __eveGetWorkflowWorld();",
     );
-    expect(workflowHandlerSource).toContain(
-      '__eveWorkflowWorld.registerHandler("__eve746573742d6167656e74_wkf_workflow_", POST);',
-    );
-    expect(readWriteFileSourceMatching("/workflow/steps-handler.mjs")).toBeUndefined();
+    expect(workflowHandlerSource).toContain("__eveWorkflowWorld.registerHandler");
+  });
+
+  it("bakes the module map loader into the dev schedule handler", async () => {
+    const nitro = createNitroStub({ dev: true });
+
+    await configureDevelopmentNitroRoutes(nitro, createPreparedHost());
+
+    const source = nitro.options.virtual[`#eve-route${EVE_DEV_DISPATCH_SCHEDULE_ROUTE_PATTERN}`];
+    expect(source).toContain('"moduleMapLoaderPath"');
+    expect(source).toContain("authored-module-map-loader.js");
   });
 
   it("registers the dev runtime artifact revision route only in dev mode", async () => {
     const devNitro = createNitroStub({ dev: true });
     const prodNitro = createNitroStub({ dev: false });
 
-    await configureNitroRoutes(devNitro, createPreparedHost(), {
-      surface: "app",
-    });
-    await configureNitroRoutes(prodNitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureDevelopmentNitroRoutes(devNitro, createPreparedHost());
+    await configureProductionNitroRoutes(prodNitro, createPreparedHost());
 
     expect(devNitro.options.handlers).toContainEqual({
       handler: "#eve-route/eve/v1/dev/runtime-artifacts",
@@ -308,12 +372,8 @@ describe("configureNitroRoutes", () => {
     const devNitro = createNitroStub({ dev: true });
     const prodNitro = createNitroStub({ dev: false });
 
-    await configureNitroRoutes(devNitro, createPreparedHost(), {
-      surface: "app",
-    });
-    await configureNitroRoutes(prodNitro, createPreparedHost(), {
-      surface: "app",
-    });
+    await configureDevelopmentNitroRoutes(devNitro, createPreparedHost());
+    await configureProductionNitroRoutes(prodNitro, createPreparedHost());
 
     expect(devNitro.options.handlers).toContainEqual({
       handler: `#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`,
@@ -327,10 +387,10 @@ describe("configureNitroRoutes", () => {
     });
     expect(
       devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
-    ).toContain('"dev":true');
+    ).toContain('"kind":"development"');
     expect(
       prodNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
-    ).toContain('"dev":false');
+    ).toContain('"kind":"production"');
     expect(
       devNitro.options.virtual[`#nitro/virtual/eve-channel/GET ${EVE_INFO_ROUTE_PATH}`],
     ).toContain("dispatchChannelRequest");
@@ -349,16 +409,13 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: false, rootDir: root });
 
-    await configureNitroRoutes(
+    await configureProductionNitroRoutes(
       nitro,
       createPreparedHost({
         appRoot: root,
         workflowBuildDir,
         workflowWorld: "@workflow/world-postgres",
       }),
-      {
-        surface: "all",
-      },
     );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
@@ -377,16 +434,13 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: false, rootDir: root });
 
-    await configureNitroRoutes(
+    await configureProductionNitroRoutes(
       nitro,
       createPreparedHost({
         appRoot: root,
         workflowBuildDir,
         workflowWorld: "@workflow/world-postgres",
       }),
-      {
-        surface: "all",
-      },
     );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
@@ -409,9 +463,10 @@ describe("configureNitroRoutes", () => {
     const workflowBuildDir = `${root}/workflow-cache`;
     const nitro = createNitroStub({ buildDir, dev: false, rootDir: root });
 
-    await configureNitroRoutes(nitro, createPreparedHost({ appRoot: root, workflowBuildDir }), {
-      surface: "all",
-    });
+    await configureProductionNitroRoutes(
+      nitro,
+      createPreparedHost({ appRoot: root, workflowBuildDir }),
+    );
 
     const workflowHandlerSource = readWriteFileSourceMatching("/workflow/workflows-handler.mjs");
 

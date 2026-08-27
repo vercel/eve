@@ -3,7 +3,7 @@
  * `eve connections add` picker and the per-entry scaffold template.
  *
  * Connection *identity* (slug, label, transport, description) is owned by
- * `@vercel/eve-catalog`, the cross-surface source of truth shared with the
+ * `@eve/catalog`, the cross-surface source of truth shared with the
  * docs gallery. This module overlays the scaffolder-only concern — the Connect
  * auth spec to emit — and shapes the result into {@link ConnectionCatalogEntry}.
  *
@@ -17,7 +17,7 @@ import {
   type ConnectionProtocol,
   connectionEntries,
   connectionProtocols,
-} from "@vercel/eve-catalog";
+} from "@eve/catalog";
 
 /** Wire protocol a connection speaks at runtime. */
 export type { ConnectionProtocol };
@@ -99,7 +99,7 @@ export const CUSTOM_CONNECTION_SLUG = "custom";
 
 /**
  * Scaffolder-only auth overlay, keyed by catalog slug. Identity comes from
- * `@vercel/eve-catalog`; this map says how each curated connection authenticates
+ * `@eve/catalog`; this map says how each curated connection authenticates
  * when the scaffolder emits its template. Every connection in the catalog must
  * have an entry here — {@link buildCatalogEntry} throws otherwise.
  */
@@ -135,14 +135,17 @@ function buildCatalogEntry(
   return entry;
 }
 
-export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionEntries().map(
-  (entry) => {
+// Gallery-only connections (`surfaces.scaffoldable: false`) live in the shared
+// catalog for the docs directory but have no scaffolder auth overlay, so they
+// must not reach `buildCatalogEntry`.
+export const CONNECTION_CATALOG: readonly ConnectionCatalogEntry[] = connectionEntries()
+  .filter((entry) => entry.surfaces.scaffoldable)
+  .map((entry) => {
     if (entry.connection === undefined) {
       throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
     }
     return buildCatalogEntry(entry.slug, entry.name, entry.connection);
-  },
-);
+  });
 
 const CATALOG_BY_SLUG = new Map(CONNECTION_CATALOG.map((entry) => [entry.slug, entry]));
 

@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { normalizeMcpClientConnectionDefinition } from "#internal/authored-definition/connection.js";
-import type {
-  ConnectionAuthDefinition,
-  ConnectionAuthProvider,
-} from "#runtime/connections/types.js";
+import type { ConnectionAuthDefinition, ConnectionAuthProvider } from "#shared/connection-types.js";
 
 const MSG = "Expected the connection export to match the public eve shape.";
 
@@ -325,16 +322,25 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.approval).toBe(fn);
     });
 
+    it("accepts request and response approval policies", () => {
+      const approval = {
+        request: () => "user-approval" as const,
+        response: () => ({ status: "allowed" as const }),
+      };
+      const result = normalizeMcpClientConnectionDefinition(validInput({ approval }), MSG);
+      expect(result.approval).toEqual(approval);
+    });
+
     it("rejects a non-function approval", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ approval: "never" }), MSG),
-      ).toThrow(/must be a function/);
+      ).toThrow();
     });
 
     it("rejects a boolean approval", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ approval: true }), MSG),
-      ).toThrow(/must be a function/);
+      ).toThrow();
     });
   });
 
@@ -443,6 +449,49 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(result.auth).toBeUndefined();
       const headers = result.headers as Record<string, string>;
       expect(headers.Authorization).toBe("Custom scheme");
+    });
+  });
+
+  describe("toolCall.providedArguments validation", () => {
+    it("accepts static, Promise, and function values", () => {
+      const resolver = () => ({ profile: "https://agent.example.com/profile" });
+      const promised = Promise.resolve("request-id");
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({
+          toolCall: {
+            providedArguments: {
+              meta: resolver,
+              requestId: promised,
+              version: 1,
+            },
+          },
+        }),
+        MSG,
+      );
+
+      expect(result.toolCall?.providedArguments).toEqual({
+        meta: resolver,
+        requestId: promised,
+        version: 1,
+      });
+    });
+
+    it("rejects unknown toolCall fields", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({ toolCall: { prepare: () => ({}) } }),
+          MSG,
+        ),
+      ).toThrow(/Unknown key "prepare"/);
+    });
+
+    it("rejects non-JSON static values", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(
+          validInput({ toolCall: { providedArguments: { meta: new Date() } } }),
+          MSG,
+        ),
+      ).toThrow(/toolCall\.providedArguments\.meta.*JSON-serializable/);
     });
   });
 

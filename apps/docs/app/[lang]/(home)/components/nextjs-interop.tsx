@@ -1,6 +1,7 @@
 import { CodeBlock } from "@vercel/geistdocs/components/code-block";
 import { geistShikiTheme } from "@vercel/geistdocs/shiki-theme";
 import { highlight } from "fumadocs-core/highlight";
+import { cacheLife } from "next/cache";
 import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import { GradientBorder } from "./gradient-border";
@@ -54,13 +55,16 @@ async function renderCode(file: InteropFile) {
 }
 
 export async function NextjsInterop() {
+  "use cache";
+  cacheLife("max");
+
   const rendered = await Promise.all(FILES.map(renderCode));
 
   return (
     <section className="px-4 py-24">
       <div className="mx-auto max-w-5xl">
-        <h2 className="text-center font-medium! text-heading-32 tracking-tighter text-gray-1000 sm:text-heading-40">
-          Works natively with Next.js
+        <h2 className="text-center text-heading-32 text-gray-1000 sm:text-heading-40">
+          Works natively with React and Next.js
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-gray-900">
           Wrap your config with <span className="text-gray-1000">withEve()</span> and the agent

@@ -1,11 +1,12 @@
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ChannelFrom } from "#channel/channel-operations.js";
 
 import { createLogger, logError } from "#internal/logging.js";
+import type { GitHubBotNameResolver } from "#public/channels/github/auth.js";
 import { buildGitHubBinding } from "#public/channels/github/binding.js";
 import {
   extractGitHubCommentTrigger,
   formatGitHubContextBlock,
-  prependGitHubContext,
   type GitHubCheckRunWebhookEvent,
   type GitHubCheckSuiteWebhookEvent,
   type GitHubCiPayload,
@@ -39,7 +40,6 @@ import type {
   GitHubInboundResult,
   GitHubInboundResultOrPromise,
 } from "#public/channels/github/githubChannel.js";
-import type { SendFn } from "#public/definitions/defineChannel.js";
 
 const log = createLogger("github.dispatch");
 
@@ -52,98 +52,101 @@ type GitHubTurnEvent =
 
 /** Dispatches a bot-directed issue or PR timeline comment into the runtime. */
 export async function dispatchIssueComment(input: {
-  readonly botName: string | undefined;
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueCommentEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onComment"]>;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
-  if (
-    isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, input.botName)
-  ) {
+  const botName = await input.botName();
+  if (isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, botName)) {
     return;
   }
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchCommentTurn({
     body: input.event.comment.body,
-    botName: input.botName,
+    botName,
     commentUrl: input.event.comment.htmlUrl,
     event: input.event,
     handlerResult: () => input.handler(ctx, toGitHubComment(input.event.comment)),
     config: input.config,
-    send: input.send,
+    from: input.from,
     state: stateFromIssueCommentEvent(input.event),
   });
 }
 
 /** Dispatches a bot-directed inline pull-request review comment. */
 export async function dispatchPullRequestReviewComment(input: {
-  readonly botName: string | undefined;
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubPullRequestReviewCommentEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onComment"]>;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
-  if (
-    isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, input.botName)
-  ) {
+  const botName = await input.botName();
+  if (isIgnoredInboundComment(input.event.comment.body, input.event.comment.author, botName)) {
     return;
   }
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchCommentTurn({
     body: input.event.comment.body,
-    botName: input.botName,
+    botName,
     commentUrl: input.event.comment.htmlUrl,
     event: input.event,
     handlerResult: () => input.handler(ctx, toGitHubComment(input.event.comment)),
     config: input.config,
-    send: input.send,
+    from: input.from,
     state: stateFromPullRequestReviewCommentEvent(input.event),
   });
 }
 
 /** Dispatches an opt-in issue webhook event into the runtime. */
 export async function dispatchIssue(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onIssue"]>;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchWebhookEventTurn({
+    botName: input.botName,
     config: input.config,
     event: input.event,
     handlerResult: () => input.handler(ctx, input.event.issue),
     message: formatIssueEventMessage(input.event),
-    send: input.send,
+    from: input.from,
     state: stateFromIssueEvent(input.event),
   });
 }
 
 /** Dispatches an opt-in pull-request webhook event into the runtime. */
 export async function dispatchPullRequest(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubPullRequestWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onPullRequest"]>;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
   const ctx = buildInboundContext(input.config, input.event);
   await dispatchWebhookEventTurn({
+    botName: input.botName,
     config: input.config,
     event: input.event,
     handlerResult: () => input.handler(ctx, input.event.pullRequest),
     message: formatPullRequestEventMessage(input.event),
-    send: input.send,
+    from: input.from,
     state: stateFromPullRequestEvent(input.event),
   });
 }
 
 /** Dispatches an opt-in check-suite webhook event into the runtime. */
 export async function dispatchCheckSuite(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCheckSuiteWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onCheckSuite"]>;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
   await dispatchCiEvent({
     ...input,
@@ -155,10 +158,11 @@ export async function dispatchCheckSuite(input: {
 
 /** Dispatches an opt-in check-run webhook event into the runtime. */
 export async function dispatchCheckRun(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCheckRunWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onCheckRun"]>;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
   await dispatchCiEvent({
     ...input,
@@ -170,10 +174,11 @@ export async function dispatchCheckRun(input: {
 
 /** Dispatches an opt-in workflow-run webhook event into the runtime. */
 export async function dispatchWorkflowRun(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubWorkflowRunWebhookEvent;
   readonly handler: NonNullable<GitHubChannelConfig["onWorkflowRun"]>;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
   await dispatchCiEvent({
     ...input,
@@ -184,12 +189,13 @@ export async function dispatchWorkflowRun(input: {
 }
 
 async function dispatchCiEvent(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly ci: GitHubCiPayload;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCiWebhookEvent;
   readonly handlerResult: (ctx: GitHubInboundContext) => GitHubInboundResultOrPromise;
   readonly label: string;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
 }): Promise<void> {
   const state = stateFromCiEvent(input.event);
   const ctx = buildInboundContext(input.config, input.event);
@@ -208,21 +214,23 @@ async function dispatchCiEvent(input: {
   }
 
   await dispatchWebhookEventTurn({
+    botName: input.botName,
     config: input.config,
     event: input.event,
     handlerResult: () => input.handlerResult(ctx),
     message: formatCiEventMessage(input.label, input.ci),
-    send: input.send,
+    from: input.from,
     state,
   });
 }
 
 async function dispatchWebhookEventTurn(input: {
+  readonly botName: GitHubBotNameResolver;
   readonly config: GitHubChannelConfig;
   readonly event: GitHubCiWebhookEvent | GitHubIssueWebhookEvent | GitHubPullRequestWebhookEvent;
   readonly handlerResult: () => GitHubInboundResultOrPromise;
   readonly message: string;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
 }): Promise<void> {
   const result = await runInboundHandler({
@@ -230,17 +238,20 @@ async function dispatchWebhookEventTurn(input: {
     handlerResult: input.handlerResult,
   });
   if (result === null || result === undefined) return;
+  const botName = await input.botName();
 
   await sendGitHubTurn({
     auth: result.auth,
+    botName,
     event: input.event,
     message: input.message,
     context: mergeGitHubContext({
       github: await buildPullRequestContext(input.config, input.state, input.event.delivery.id),
       hook: result.context,
     }),
-    send: input.send,
+    from: input.from,
     state: input.state,
+    title: result.title,
   });
 }
 
@@ -251,7 +262,7 @@ async function dispatchCommentTurn(input: {
   readonly config: GitHubChannelConfig;
   readonly event: GitHubIssueCommentEvent | GitHubPullRequestReviewCommentEvent;
   readonly handlerResult: () => GitHubInboundResultOrPromise;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
 }): Promise<void> {
   const result = await runInboundHandler({
@@ -268,15 +279,18 @@ async function dispatchCommentTurn(input: {
 
   await sendGitHubTurn({
     auth: result.auth,
+    botName: input.botName,
     commentUrl: input.commentUrl,
     event: input.event,
+    isMentioned: trigger !== null,
     message,
     context: mergeGitHubContext({
       github: await buildPullRequestContext(input.config, input.state, input.event.delivery.id),
       hook: result.context,
     }),
-    send: input.send,
+    from: input.from,
     state: input.state,
+    title: result.title,
   });
 }
 
@@ -296,37 +310,36 @@ async function runInboundHandler(input: {
 
 async function sendGitHubTurn(input: {
   readonly auth: SessionAuthContext | null;
+  readonly botName: string | undefined;
   readonly commentUrl?: string;
   readonly event: GitHubTurnEvent;
+  readonly isMentioned?: boolean;
   readonly logMessage?: string;
   readonly message: string;
   readonly context: readonly string[] | undefined;
-  readonly send: SendFn<GitHubChannelState>;
+  readonly from: ChannelFrom<GitHubChannelState>;
   readonly state: GitHubChannelState;
+  readonly title: string | undefined;
 }): Promise<void> {
   const contextBlock = formatGitHubContextBlock({
+    botName: input.botName,
     deliveryId: input.event.delivery.id,
     commentUrl: input.commentUrl,
     headSha: input.state.headSha,
     issueNumber: input.state.issueNumber,
+    isMentioned: input.isMentioned,
     pullRequestNumber: input.state.pullRequestNumber,
     repository: input.event.repository,
     sender: input.event.sender,
   });
-  const turnMessage = prependGitHubContext(input.message, contextBlock);
 
   try {
-    await input.send(
-      {
-        message: turnMessage,
-        context: input.context,
-      },
-      {
-        auth: input.auth,
-        continuationToken: continuationTokenFromState(input.state),
-        state: input.state,
-      },
-    );
+    await input.from(continuationTokenFromState(input.state)).send(input.message, {
+      auth: input.auth,
+      context: [contextBlock, ...(input.context ?? [])],
+      state: input.state,
+      title: input.title,
+    });
   } catch (error) {
     logError(log, input.logMessage ?? "GitHub delivery failed", error, {
       deliveryId: input.event.delivery.id,

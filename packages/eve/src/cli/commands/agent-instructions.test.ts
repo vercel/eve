@@ -2,11 +2,16 @@ import { readdirSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { stripAnsi } from "#cli/ui/terminal-text.js";
+
 import {
   HANDOFF_SECTIONS,
   initAgentDevHandoff,
   initAgentInstructions,
+  initAgentReadySummary,
   initAgentReplPrompt,
+  initExtensionHandoff,
+  initExtensionInstructions,
   SETUP_SECTIONS,
 } from "./agent-instructions.js";
 
@@ -21,10 +26,13 @@ describe("initAgentInstructions", () => {
     expect(instructions).toContain("ask the user to confirm it");
     expect(instructions).toContain("Web Chat");
     expect(instructions).toContain("--channel-web-nextjs");
+    expect(instructions).toContain("--model provider/model-id");
+    expect(instructions).toContain("--reasoning effort");
     // `npx` runs without a prior install and is package-manager agnostic, so the
     // pre-scaffold guide renders the universal `npx eve dev` through the shared
     // prompt renderer rather than a launcher-specific command.
     expect(instructions).toContain("npx eve@latest init <name>");
+    expect(instructions).toContain("npx eve@latest extension init <name>");
     expect(instructions).toContain("full docs are bundled");
     expect(instructions).toContain("node_modules/eve/docs/");
     expect(instructions).toContain("resolve\nthe installed `eve` package location");
@@ -39,12 +47,23 @@ describe("initAgentInstructions", () => {
     const instructions = initAgentInstructions();
 
     // Channels: Slack credentials are provisioned by Connect, not hand-managed.
-    expect(instructions).toContain("eve channels add slack");
+    expect(instructions).toContain("eve add channel/slack");
     // Connections: per-user auth wires through Connect's eve helper.
     expect(instructions).toContain("agent/connections/");
     expect(instructions).toContain("@vercel/connect/eve");
     // Both surfaces name the product, so neither path is left to hand-rolled tokens.
     expect(instructions.match(/Vercel Connect/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("initAgentReadySummary", () => {
+  it("reports the model and generated instructions path", () => {
+    expect(stripAnsi(initAgentReadySummary(undefined, "/app"))).toBe(
+      "✓ Model zai/glm-5.2 (eve default)\n✓ Instructions /app/agent/instructions.md",
+    );
+    expect(stripAnsi(initAgentReadySummary("openai/gpt-5.5", "/app"))).toContain(
+      "✓ Model openai/gpt-5.5\n",
+    );
   });
 });
 
@@ -62,6 +81,10 @@ describe("initAgentDevHandoff", () => {
     expect(handoff).toContain("node_modules/eve/docs/");
     expect(handoff).toContain("resolve\nthe installed `eve` package location");
     expect(handoff).toContain("agent/instructions.md");
+    expect(handoff).toContain("`eve registry search <query>`");
+    expect(handoff).toContain("`eve registry list`");
+    expect(handoff).toContain("`eve registry view <item>`");
+    expect(handoff).toContain("`eve add <item>`");
     expect(handoff).not.toContain("/tmp/triage-bot/");
 
     // Shared guidance the leaner handoff used to omit now reaches it.
@@ -86,8 +109,38 @@ describe("initAgentReplPrompt", () => {
 
     expect(prompt).toContain("The project at `.` is already scaffolded.");
     expect(prompt).toContain("What should the agent do?");
+    expect(prompt).toContain("`eve registry search <query>`");
     expect(prompt).toContain("pnpm exec eve dev --no-ui");
     expect(prompt).not.toContain("{{");
+  });
+});
+
+describe("initExtensionInstructions", () => {
+  it("points coding agents at extension init with a package name", () => {
+    const instructions = initExtensionInstructions();
+
+    expect(instructions).toContain("npx eve@latest extension init <name>");
+    expect(instructions).toContain("eve extension build");
+    expect(instructions).toContain("does not start eve dev");
+    expect(instructions).not.toContain("{{");
+  });
+});
+
+describe("initExtensionHandoff", () => {
+  it("describes the scaffold and mount next steps without eve dev", () => {
+    const handoff = initExtensionHandoff({
+      packageManager: "pnpm",
+      packageName: "my-crm",
+      projectPath: "/tmp/my-crm",
+    });
+
+    expect(handoff).toContain("extension/extension.ts");
+    expect(handoff).toContain("pnpm run build");
+    expect(handoff).toContain("eve extension build");
+    expect(handoff).toContain('import ext from "my-crm"');
+    expect(handoff).toContain("agent/extensions/my-crm.ts");
+    expect(handoff).toContain("/tmp/my-crm");
+    expect(handoff).not.toContain("eve dev");
   });
 });
 

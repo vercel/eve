@@ -1,5 +1,6 @@
 import type { ModelRouting } from "#shared/agent-definition.js";
-import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
+import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
+import type { ChatGptEndpointState, ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 
 /**
  * Presence of the two gateway credentials, read from wherever the caller can
@@ -13,27 +14,88 @@ export interface GatewayCredentialPresence {
   readonly oidc: boolean;
 }
 
+/** True when an environment value is present and non-blank. */
+export function hasEnvValue(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
+}
+
+/** Where a winning gateway API key was observed. */
+export type GatewayCredentialSource = { kind: "env-file"; path: string } | { kind: "shell" };
+
+/**
+ * Everywhere the two gateway credentials can be observed. Callers fill in
+ * whatever their vantage point can see — env files on disk, the process
+ * environment, an SDK token lookup — and the resolver ranks it.
+ */
+export interface GatewayCredentialEvidence {
+  /** `AI_GATEWAY_API_KEY` found in an app env file (the file's name). */
+  readonly apiKeyFile?: string;
+  /** `AI_GATEWAY_API_KEY` present in the process environment. */
+  readonly apiKeyInEnv?: boolean;
+  /** `VERCEL_OIDC_TOKEN` found in an app env file (the file's name). */
+  readonly oidcFile?: string;
+  /** An OIDC token is otherwise available (env or linked-project lookup). */
+  readonly oidcAvailable?: boolean;
+}
+
+export type GatewayCredentialResolution =
+  | {
+      credential: "api-key";
+      /** Where the winning key lives; a shell export is not eve's to remove. */
+      source: GatewayCredentialSource;
+    }
+  | { credential: "oidc"; file?: string };
+
+/** Ranks Gateway credentials using runtime precedence. */
+export function resolveGatewayCredential(
+  evidence: GatewayCredentialEvidence,
+): GatewayCredentialResolution | undefined {
+  const source: GatewayCredentialSource | undefined =
+    evidence.apiKeyFile !== undefined
+      ? { kind: "env-file", path: evidence.apiKeyFile }
+      : evidence.apiKeyInEnv === true
+        ? { kind: "shell" }
+        : undefined;
+  const hasOidc = evidence.oidcFile !== undefined || evidence.oidcAvailable === true;
+
+  if (source !== undefined) {
+    return { credential: "api-key", source };
+  }
+  if (hasOidc) {
+    return evidence.oidcFile === undefined
+      ? { credential: "oidc" }
+      : { credential: "oidc", file: evidence.oidcFile };
+  }
+  return undefined;
+}
+
 /**
  * Composes the build-time {@link ModelRouting} with runtime credential presence
  * into the consumer-facing {@link ModelEndpointStatus}.
  *
  * Credentials matter only for gateway routing; an external endpoint makes no
- * connectedness claim. `api-key` outranks `oidc` to match the AI SDK gateway
- * provider, which uses `AI_GATEWAY_API_KEY` when present and otherwise the OIDC
- * token.
+ * connectedness claim. Ranking delegates to {@link resolveGatewayCredential}.
  */
 export function resolveModelEndpointStatus(
   routing: ModelRouting,
   credentials: GatewayCredentialPresence,
+  chatgpt?: {
+    readonly state: ChatGptEndpointState;
+    readonly accountLabel?: string;
+  },
 ): ModelEndpointStatus {
   if (routing.kind === "external") {
+    if (isChatGptModelRouting(routing) && chatgpt !== undefined) {
+      return { kind: "chatgpt", ...chatgpt };
+    }
     return { kind: "external", provider: routing.provider };
   }
-  if (credentials.apiKey) {
-    return { kind: "gateway", connected: true, credential: "api-key" };
+  const resolution = resolveGatewayCredential({
+    apiKeyInEnv: credentials.apiKey,
+    oidcAvailable: credentials.oidc,
+  });
+  if (resolution === undefined) {
+    return { kind: "gateway", connected: false };
   }
-  if (credentials.oidc) {
-    return { kind: "gateway", connected: true, credential: "oidc" };
-  }
-  return { kind: "gateway", connected: false };
+  return { kind: "gateway", connected: true, credential: resolution.credential };
 }

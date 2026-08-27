@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { ChannelAdapter, FetchFileResult } from "#channel/adapter.js";
-import { defaultDeliverResult, getAdapterKind } from "#channel/adapter.js";
+import type { ChannelAdapter, ChannelAdapterContext, FetchFileResult } from "#channel/adapter.js";
+import { callAdapterEventHandler, defaultDeliverResult, getAdapterKind } from "#channel/adapter.js";
+import { createSessionWaitingEvent } from "#protocol/message.js";
 
 describe("ChannelAdapter (fetchFile field)", () => {
   it("treats the fetchFile field as optional", () => {
@@ -98,5 +99,64 @@ describe("ChannelAdapter helpers", () => {
 
   it("defaultDeliverResult returns undefined when the payload is empty", () => {
     expect(defaultDeliverResult({})).toBeUndefined();
+  });
+
+  it("publishes a waiting handler's re-keyed channel address", async () => {
+    let continuationToken = "slack:temporary";
+    let observedToken: string | undefined;
+    const context: ChannelAdapterContext = {
+      ctx: {} as ChannelAdapterContext["ctx"],
+      session: {
+        auth: { current: null, initiator: null },
+        id: "session-1",
+        continuation: {
+          get token() {
+            return continuationToken.slice("slack:".length);
+          },
+          rekey(token: string) {
+            continuationToken = `slack:${token}`;
+          },
+        },
+      },
+      state: {},
+    };
+    const adapter: ChannelAdapter = {
+      kind: "slack",
+      "session.waiting"(data, ctx) {
+        observedToken = data.continuationToken;
+        ctx.session.continuation?.rekey("C1:T1");
+      },
+    };
+
+    const event = await callAdapterEventHandler(adapter, createSessionWaitingEvent(), context);
+
+    expect(event).toEqual({
+      data: { continuationToken: "C1:T1", wait: "next-user-message" },
+      type: "session.waiting",
+    });
+    expect(observedToken).toBe("temporary");
+    expect(continuationToken).toBe("slack:C1:T1");
+  });
+
+  it("publishes the session ID for an ID-only waiting session", async () => {
+    const context: ChannelAdapterContext = {
+      ctx: {} as ChannelAdapterContext["ctx"],
+      session: {
+        auth: { current: null, initiator: null },
+        id: "session-1",
+      },
+      state: {},
+    };
+
+    const event = await callAdapterEventHandler(
+      { kind: "http" },
+      createSessionWaitingEvent(),
+      context,
+    );
+
+    expect(event).toEqual({
+      data: { continuationToken: "session-1", wait: "next-user-message" },
+      type: "session.waiting",
+    });
   });
 });

@@ -21,7 +21,7 @@ const INSPECT_DEPTH = 10;
  * Exposed so the logger API is composable with future sinks that want
  * to filter or route by severity.
  */
-type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
 /** Numeric severity per level, gated against {@link resolveThreshold}. */
 const LEVEL_SEVERITY: Record<LogLevel, number> = {
@@ -263,9 +263,55 @@ export function isLogLevelEnabled(level: LogLevel): boolean {
   return LEVEL_SEVERITY[level] >= resolveThreshold();
 }
 
+/**
+ * One structured log record, as delivered to the process-wide subscriber
+ * registered via {@link setLogRecordSubscriber}. `fields` carries the
+ * {@link renderFields} projection — Errors already replaced by their
+ * `formatError` shape — so subscribers receive JSON, never live objects.
+ */
+export interface LogRecord {
+  readonly level: LogLevel;
+  readonly namespace: string;
+  readonly message: string;
+  readonly fields?: JsonObject;
+}
+
+let logRecordSubscriber: ((record: LogRecord) => void) | undefined;
+
+/**
+ * Registers the process-wide structured log subscriber, replacing any
+ * previous one; pass `undefined` to restore plain console output.
+ *
+ * A registered subscriber takes ownership of rendering: records it
+ * handles skip the console entirely, so a host that both displays and
+ * persists logs (the dev TUI, which would otherwise scrape its own
+ * console output back off stderr) sees each record exactly once, still
+ * structured. If the subscriber throws, the record falls through to the
+ * console so a broken subscriber can never swallow logs. Single slot by
+ * design — one interactive host per process.
+ */
+export function setLogRecordSubscriber(
+  subscriber: ((record: LogRecord) => void) | undefined,
+): void {
+  logRecordSubscriber = subscriber;
+}
+
 function write(level: LogLevel, namespace: string, message: string, fields?: LogFields): void {
   if (LEVEL_SEVERITY[level] < resolveThreshold()) {
     return;
+  }
+  const subscriber = logRecordSubscriber;
+  if (subscriber !== undefined) {
+    try {
+      subscriber(
+        fields === undefined
+          ? { level, namespace, message }
+          : { level, namespace, message, fields: renderFields(fields) },
+      );
+      return;
+    } catch {
+      // Fall through to the console path below.
+    }
   }
   // `debug` routes through `console.log` because most runtimes
   // default-silence `console.debug` and the aggregators we target
@@ -337,7 +383,13 @@ function isFormattedError(
   return isObject(value) && typeof value.errorId === "string" && typeof value.message === "string";
 }
 
-function inspectError(error: unknown): string {
+/**
+ * Renders a throwable's full cause chain via `util.inspect`, bounded to
+ * the logger's inline-detail budget. Exported for callers that route a
+ * raw error into a diagnostic sink outside a log record (the dev TUI's
+ * client-side stream-error capture).
+ */
+export function inspectError(error: unknown): string {
   return truncate(
     inspect(error, {
       breakLength: Number.POSITIVE_INFINITY,

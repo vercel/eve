@@ -1,8 +1,16 @@
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { HeadersValue } from "#client/types.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
-import { EVE_CREATE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
+import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { JsonObject } from "#shared/json.js";
+
+/**
+ * Base URL of a remote eve deployment, either a static string or a function
+ * resolved at runtime. Use the function form to read `process.env` for a URL
+ * known only once the deployment runs. A string is baked into the compiled
+ * manifest; a function is invoked when the runtime resolves the agent graph.
+ */
+export type RemoteAgentUrl = string | (() => string | Promise<string>);
 
 /**
  * Public definition for a remote eve agent. The compiler lowers it to a
@@ -14,6 +22,23 @@ export interface RemoteAgentDefinition {
    * The parent agent reads this as the lowered subagent tool's description.
    */
   readonly description: string;
+  /**
+   * Forwards the dispatching turn's session principal to the remote
+   * deployment as the `forwardedPrincipal` session-request body field, so
+   * each remote turn runs as the same end user as the parent (per-user
+   * Connect, local subagents, and further remote hops all see that active
+   * principal). Session creation forwards current and initiator identity;
+   * continuation forwards only the active caller and leaves the remote
+   * session's initiator pinned. Defaults to `false` — forwarding identity to
+   * another deployment is an explicit decision, never ambient.
+   *
+   * Only principal metadata crosses the wire, never tokens or credentials —
+   * {@link auth} keeps authenticating *this* deployment to the remote. The
+   * receiver must opt in with `eveChannel({ trustedForwarders })`;
+   * a receiver that refuses the forwarder (or accepts no forwarded principal
+   * at all) rejects with 403 and the dispatch fails.
+   */
+  readonly forwardPrincipal?: boolean;
   readonly headers?: HeadersValue;
   readonly kind: "remote";
   /**
@@ -29,9 +54,11 @@ export interface RemoteAgentDefinition {
    */
   readonly path: string;
   /**
-   * Base URL of the remote eve deployment to call.
+   * Base URL of the remote eve deployment to call. Accepts a static string
+   * (baked at compile time) or a function resolved at runtime — use the
+   * function form to read a URL from `process.env`.
    */
-  readonly url: string;
+  readonly url: RemoteAgentUrl;
 }
 
 /**
@@ -54,6 +81,6 @@ export function defineRemoteAgent(input: RemoteAgentDefinitionInput): RemoteAgen
   return {
     ...input,
     kind: "remote",
-    path: input.path ?? EVE_CREATE_SESSION_ROUTE_PATH,
+    path: input.path ?? EVE_SESSION_ROUTE_PATH,
   };
 }

@@ -28,6 +28,12 @@ describe("runtime action keys", () => {
       getRuntimeActionResultKey({
         callId: "call_2",
         kind: "subagent-result",
+        origin: "child",
+        outcome: {
+          kind: "terminal",
+          result: { kind: "succeeded", output: "done" },
+          usageDelta: { cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 },
+        },
         output: "done",
         subagentName: "reviewer",
       }),

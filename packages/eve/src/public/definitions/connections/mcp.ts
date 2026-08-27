@@ -2,11 +2,12 @@ import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 
 /**
  * Public definition for an MCP client connection authored in
@@ -72,6 +73,14 @@ export interface McpClientConnectionDefinition {
    * session context.
    */
   headers?: HeadersDefinition;
+  /**
+   * Per-call behavior for tools exposed by this MCP connection.
+   *
+   * Use `providedArguments` for application-owned values that should not be
+   * controlled by the model. eve removes configured keys from the model-facing
+   * input schema and adds their resolved values immediately before execution.
+   */
+  toolCall?: ConnectionToolCallDefinition;
   /**
    * Client-side tool filter. When set, the model sees only tools
    * whose names pass the filter; `connection_search` drops all

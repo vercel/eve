@@ -26,7 +26,6 @@ import {
 } from "#execution/sandbox/bindings/docker-templates.js";
 import { expectDockerSuccess } from "#execution/sandbox/bindings/docker-utils.js";
 import { writeSandboxSeedFiles } from "#execution/sandbox/bindings/local-backend-utils.js";
-import { markDevelopmentSandboxBackendInitialized } from "#execution/sandbox/development-run.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
 import type {
@@ -143,6 +142,11 @@ export function createDockerSandboxBackend(
           (policy) => setDockerNetworkPolicy(cli, buildContainerName, policy),
         );
 
+        if (prewarmInput.seedFiles.length > 0) {
+          prewarmInput.log?.(`writing ${prewarmInput.seedFiles.length} seed file(s)`);
+        }
+        await writeSandboxSeedFiles(templateSession, prewarmInput.seedFiles);
+
         if (prewarmInput.bootstrap !== undefined) {
           prewarmInput.log?.("running sandbox bootstrap");
           await prewarmInput.bootstrap({
@@ -153,11 +157,6 @@ export function createDockerSandboxBackend(
               }),
           });
         }
-
-        if (prewarmInput.seedFiles.length > 0) {
-          prewarmInput.log?.(`writing ${prewarmInput.seedFiles.length} seed file(s)`);
-        }
-        await writeSandboxSeedFiles(templateSession, prewarmInput.seedFiles);
 
         // Quiesce before commit so the captured filesystem is stable.
         prewarmInput.log?.("stopping template build container");
@@ -189,7 +188,6 @@ export function createDockerSandboxBackend(
     },
     async create(createInput: SandboxBackendCreateInput): Promise<SandboxBackendHandle> {
       await ensureDaemon();
-      markDevelopmentSandboxBackendInitialized(DOCKER_BACKEND_NAME);
       const containerName =
         getDockerContainerName(createInput.existingMetadata) ?? createInput.sessionKey;
 
@@ -277,6 +275,9 @@ export function createDockerSandboxBackend(
             metadata: { containerName },
             sessionKey: createInput.sessionKey,
           };
+        },
+        async stop() {
+          await stopDockerContainerIfRunning(cli, containerName);
         },
         // Session state lives in the container filesystem, so a stopped
         // container restarts with state intact on the next `create`.

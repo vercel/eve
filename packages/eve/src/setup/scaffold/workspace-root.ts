@@ -15,7 +15,7 @@ import {
   workspacePatternsClaimProject,
 } from "./workspace-glob.js";
 import { patchPackageJson } from "./update/package-json.js";
-import type { PackageJsonPatch, PackageJsonPatchResult } from "./update/package-json.js";
+import type { PackageJsonPatchResult } from "./update/package-json.js";
 
 interface PackageJsonWorkspaceShape {
   workspaces?: unknown;
@@ -162,39 +162,11 @@ async function ensurePackageManagerWorkspaceIncludesProject(
   }
 }
 
-function packageManagerRootOnlyPackageJsonPatch(
-  packageManager: PackageManagerKind,
-  input: {
-    readonly aiPackageVersion?: string;
-    readonly nodeEngineRequirement?: string;
-  },
-): PackageJsonPatch {
-  const patch: PackageJsonPatch = {};
-  if (input.nodeEngineRequirement !== undefined) {
-    patch.nodeEngineRequirement = input.nodeEngineRequirement;
-  }
-  if (input.aiPackageVersion !== undefined) {
-    switch (packageManager) {
-      case "bun":
-      case "npm":
-        patch.overrides = { ai: input.aiPackageVersion };
-        break;
-      case "yarn":
-        patch.resolutions = { ai: input.aiPackageVersion };
-        break;
-      case "pnpm":
-        break;
-    }
-  }
-  return patch;
-}
-
 /** Applies root-only package.json fields to an ancestor workspace package.json. */
 export async function patchWorkspaceRootPackageJson(
   packageManager: PackageManagerKind,
   projectRoot: string,
   input: {
-    readonly aiPackageVersion?: string;
     readonly nodeEngineRequirement?: string;
     readonly onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
   },
@@ -208,10 +180,9 @@ export async function patchWorkspaceRootPackageJson(
     return { changed: false };
   }
 
-  const result = await patchPackageJson(
-    path,
-    packageManagerRootOnlyPackageJsonPatch(packageManager, input),
-  );
+  const result = await patchPackageJson(path, {
+    nodeEngineRequirement: input.nodeEngineRequirement,
+  });
   if (result.changed) {
     await input.onWorkspaceRootMutation?.({
       kind: "package-json",

@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,42 +8,61 @@ import { runPnpmCommand } from "../../src/internal/testing/run-pnpm-command.js";
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const EVE_PACKAGE_NAME_TARBALL_PREFIX = "eve";
 const SCENARIO_CACHE_ROOT = join(tmpdir(), "eve-scenario-cache");
-const SHARED_TARBALLS_ROOT = join(SCENARIO_CACHE_ROOT, "shared-tarballs");
+const PREBUILT_EVE_ENTRY = join(EVE_PACKAGE_ROOT, "dist", "src", "index.js");
 
 /**
  * Vitest `globalSetup` that packs the eve package exactly once before any
  * scenario worker boots. The resulting tarball path is exposed to workers
  * through `process.env.EVE_SCENARIO_EVE_TARBALL_PATH` so
- * `materializeScenarioApp()` can reuse it instead of racing to run
- * `pnpm pack` concurrently (which triggers `prepack` → `pnpm run clean &&
- * build`, a shared-state operation that corrupts `dist/` when run in
- * parallel).
+ * `materializeScenarioApp()` can reuse it without rebuilding or packing the
+ * shared workspace package in parallel.
  *
- * Running once upfront avoids that race and also saves N × ~4s of cold-pack
- * time when file parallelism is enabled.
+ * Scenario CI builds the workspace before Vitest starts. Packing with
+ * lifecycle scripts disabled reuses that exact output instead of paying for
+ * `prepack` to clean and rebuild it a second time. The tarball directory is
+ * run-scoped (`mkdtemp`) so concurrent scenario invocations on one machine
+ * cannot clobber each other's shared tarball, and it is removed on teardown.
  */
-export default async function packScenarioTarball(): Promise<void> {
-  await rm(SHARED_TARBALLS_ROOT, {
-    force: true,
+export default async function packScenarioTarball(): Promise<() => Promise<void>> {
+  try {
+    await access(PREBUILT_EVE_ENTRY);
+  } catch {
+    throw new Error(
+      `Scenario tests require a prebuilt eve package. Run "pnpm build" before "pnpm test:scenario". Missing: ${PREBUILT_EVE_ENTRY}`,
+    );
+  }
+
+  await mkdir(SCENARIO_CACHE_ROOT, {
     recursive: true,
   });
-  await mkdir(SHARED_TARBALLS_ROOT, {
-    recursive: true,
-  });
+  const tarballsRoot = await mkdtemp(join(SCENARIO_CACHE_ROOT, "shared-tarballs-"));
 
   await runPnpmCommand({
-    args: ["pack", "--pack-destination", SHARED_TARBALLS_ROOT, "--config.minimum-release-age=0"],
+    args: [
+      "pack",
+      "--config.ignore-scripts=true",
+      "--pack-destination",
+      tarballsRoot,
+      "--config.minimum-release-age=0",
+    ],
     cwd: EVE_PACKAGE_ROOT,
   });
 
-  const tarballName = await resolveTarballName();
-  const tarballPath = join(SHARED_TARBALLS_ROOT, tarballName);
+  const tarballName = await resolveTarballName(tarballsRoot);
+  const tarballPath = join(tarballsRoot, tarballName);
 
   process.env.EVE_SCENARIO_EVE_TARBALL_PATH = tarballPath;
+
+  return async () => {
+    await rm(tarballsRoot, {
+      force: true,
+      recursive: true,
+    });
+  };
 }
 
-async function resolveTarballName(): Promise<string> {
-  const entries = await readdir(SHARED_TARBALLS_ROOT);
+async function resolveTarballName(tarballsRoot: string): Promise<string> {
+  const entries = await readdir(tarballsRoot);
   const tarballName = entries
     .filter(
       (entry) => entry.startsWith(`${EVE_PACKAGE_NAME_TARBALL_PREFIX}-`) && entry.endsWith(".tgz"),
@@ -53,7 +72,7 @@ async function resolveTarballName(): Promise<string> {
 
   if (tarballName === undefined) {
     throw new Error(
-      `Expected pnpm pack to emit a ${EVE_PACKAGE_NAME_TARBALL_PREFIX}-*.tgz tarball in "${SHARED_TARBALLS_ROOT}".`,
+      `Expected pnpm pack to emit a ${EVE_PACKAGE_NAME_TARBALL_PREFIX}-*.tgz tarball in "${tarballsRoot}".`,
     );
   }
 

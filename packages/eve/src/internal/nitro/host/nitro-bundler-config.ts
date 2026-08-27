@@ -6,7 +6,6 @@ interface BundlerLog {
   readonly loc?: {
     readonly file?: string;
   };
-  readonly pluginCode?: unknown;
 }
 
 type BundlerDefaultLogHandler = (level: string, log: unknown) => void;
@@ -41,17 +40,16 @@ function getLogFilePaths(log: unknown): string[] {
   const candidate = log as BundlerLog;
   const ids = Array.isArray(candidate.ids) ? candidate.ids : [];
 
-  return [
-    candidate.id,
-    ...ids,
-    candidate.loc?.file,
-    typeof candidate.pluginCode === "string" ? candidate.pluginCode : undefined,
-  ].filter((value): value is string => typeof value === "string");
+  return [candidate.id, ...ids, candidate.loc?.file].filter(
+    (value): value is string => typeof value === "string",
+  );
 }
 
 function isVendoredDependencyWarning(log: unknown): boolean {
-  return getLogFilePaths(log).some(
-    (filePath) => isNodeModulesPath(filePath) || isCompiledVendorPath(filePath),
+  const filePaths = getLogFilePaths(log);
+  return (
+    filePaths.length > 0 &&
+    filePaths.every((filePath) => isNodeModulesPath(filePath) || isCompiledVendorPath(filePath))
   );
 }
 

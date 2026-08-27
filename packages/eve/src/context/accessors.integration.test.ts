@@ -4,7 +4,7 @@ import { buildCallbackContext } from "#context/build-callback-context.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { mockSkill } from "#internal/testing/mocks/mock-skill.js";
-import type { SandboxSession } from "#public/definitions/sandbox.js";
+import type { RuntimeSandboxSession, SandboxSession } from "#public/definitions/sandbox.js";
 
 /**
  * Integration coverage for {@link buildCallbackContext} — the single
@@ -22,7 +22,7 @@ describe("buildCallbackContext – session", () => {
   });
 
   it("returns the active session identity across async boundaries", async () => {
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const session = await runtime.runAsSession(
       {
@@ -50,7 +50,7 @@ describe("buildCallbackContext – session", () => {
   });
 
   it("preserves parent lineage on the public session", async () => {
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const session = await runtime.runAsSession(
       {
@@ -88,7 +88,7 @@ describe("buildCallbackContext – getSandbox", () => {
         "echo ready": { exitCode: 0, stderr: "", stdout: "ready" },
       },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const live = (await runtime.runAsSession({ sandbox }, async () => {
       await Promise.resolve();
@@ -106,7 +106,7 @@ describe("buildCallbackContext – getSandbox", () => {
       id: "sbx_public_sandbox_file",
       initialFiles: { "note.txt": "file content" },
     });
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     const live = (await runtime.runAsSession(
       { sandbox },
@@ -122,6 +122,23 @@ describe("buildCallbackContext – getSandbox", () => {
     expect(sandbox.removedPaths).toEqual(["/workspace/note.txt"]);
     expect(sandbox.files.has("/workspace/note.txt")).toBe(false);
   });
+
+  it("stops the active sandbox through the runtime session", async () => {
+    let stops = 0;
+    const sandbox = mockSandbox({
+      stop: () => {
+        stops += 1;
+      },
+    });
+    const runtime = await createTestRuntime();
+
+    await runtime.runAsSession({ sandbox }, async () => {
+      const live: RuntimeSandboxSession = await buildCallbackContext().getSandbox();
+      await live.stop();
+    });
+
+    expect(stops).toBe(1);
+  });
 });
 
 describe("buildCallbackContext – getSkill", () => {
@@ -130,7 +147,7 @@ describe("buildCallbackContext – getSkill", () => {
   });
 
   it("throws when authored runtime execution does not include skill access", async () => {
-    const runtime = createTestRuntime();
+    const runtime = await createTestRuntime();
 
     await expect(
       runtime.runAsSession({}, () => buildCallbackContext().getSkill("semantic-model")),
@@ -151,7 +168,7 @@ describe("buildCallbackContext – getSkill", () => {
         "/workspace/skills/semantic-model/references/catalog.yml": "entities: []\n",
       },
     });
-    const runtime = createTestRuntime({ skills: [skill.source] });
+    const runtime = await createTestRuntime({ skills: [skill.source] });
 
     const result = await runtime.runAsSession({ sandbox }, async () => {
       await Promise.resolve();

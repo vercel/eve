@@ -2,7 +2,7 @@ import { isChannel } from "eve/channels";
 import { defineDynamic, defineTool } from "eve/tools";
 import { z } from "zod";
 
-import actionNarration from "../channels/action-narration.js";
+import actionNarration from "../channels/action-narration";
 
 /**
  * Exposes the channel-side observation on the next model step after a streamed

@@ -1,16 +1,22 @@
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter.js";
-import { formatSubagentInput } from "#execution/subagent-invocation.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
+import {
+  formatSubagentInput,
+  normalizeRequestedOutputSchema,
+} from "#execution/subagent-invocation.js";
 import type {
   ChannelInstrumentationProjection,
   RunInput,
+  RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
+  SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { JsonObject } from "#shared/json.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
-import { resolveSubagentDelegationLimit } from "#harness/subagent-depth.js";
+import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
+import type { JsonObject } from "#shared/json.js";
 
 /**
  * Pending runtime-action batch event metadata needed for child run lineage.
@@ -23,9 +29,11 @@ interface BatchEventMetadata {
 export type SubagentInputSource =
   | {
       readonly description: string;
+      readonly outputSchema?: JsonObject;
       readonly type: "local";
     }
   | {
+      readonly outputSchema?: JsonObject;
       readonly type: "runtime";
     };
 
@@ -42,6 +50,23 @@ export interface SubagentRunInputBuild {
 }
 
 /**
+ * Runtime graph shape needed to answer sandbox-inheritance questions for
+ * one declared child node. Partial test bundles may omit the graph.
+ */
+export interface SubagentSandboxGraph {
+  readonly nodesByNodeId: ReadonlyMap<
+    string,
+    {
+      readonly sandboxRegistry: {
+        readonly sandbox: {
+          readonly definition: { readonly inheritsParent?: boolean };
+        } | null;
+      };
+    }
+  >;
+}
+
+/**
  * Builds the {@link RunInput} for one delegated subagent child run.
  */
 export function buildSubagentRunInput(input: {
@@ -55,9 +80,24 @@ export function buildSubagentRunInput(input: {
    */
   readonly capabilities?: SessionCapabilities;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  /**
+   * Number of local subagent calls dispatched in this batch. The parent's
+   * remaining token quota is split evenly across them so parallel children
+   * are collectively, not individually, bounded by it. Remote agents run
+   * under their own deployment's limits and are not counted.
+   */
+  readonly fanoutSize?: number;
   readonly initiatorAuth: SessionAuthContext | null;
+  /**
+   * Runtime graph used to detect whether this declared child selected the
+   * dispatching parent's sandbox. Absence means no inheritance.
+   */
+  readonly graph?: SubagentSandboxGraph;
+  /** Durable session identity of the sandbox currently used by the parent. */
+  readonly sandboxSessionId?: string;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
+  readonly parentTraceContext?: SessionTraceContext;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -84,20 +124,33 @@ export function buildSubagentRunInput(input: {
   // explicit root, so its own `sessionId` becomes the root for its
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
-  const delegationLimit = resolveSubagentDelegationLimit(session);
+  const subagentDepth = resolveSubagentDepth(session);
+  const inheritedLimits: {
+    -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
+  } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
+  const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
+  const adapterState: Record<string, unknown> = {
+    callId: action.callId,
+    parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+    parentSessionId: session.sessionId,
+    subagentName: action.subagentName,
+  };
+  const sharesSandbox =
+    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
+      .inheritsParent === true || action.subagentName === "agent";
+  if (sharesSandbox) {
+    if (session.sandboxState !== undefined) {
+      adapterState.parentSandboxState = session.sandboxState;
+    }
+    adapterState.sandboxSessionId = input.sandboxSessionId ?? session.sessionId;
+  }
 
-  const runInput: RunInput = {
+  const runInput: {
+    -readonly [K in keyof RunInput]: RunInput[K];
+  } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,
-      state: {
-        callId: action.callId,
-        parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
-        parentSessionId: session.sessionId,
-        subagentName: action.subagentName,
-        ...(action.subagentName === "agent" && session.sandboxState
-          ? { parentSandboxState: session.sandboxState, sandboxSessionId: session.sessionId }
-          : {}),
-      },
+      state: adapterState,
     },
     auth,
     capabilities,
@@ -105,10 +158,14 @@ export function buildSubagentRunInput(input: {
     continuationToken: childContinuationToken,
     initiatorAuth,
     input: {
-      message: formatSubagentCallInputMessage({ action, source }),
-      outputSchema: action.input.outputSchema as JsonObject | undefined,
+      message: formatSubagentCallInputMessage({
+        action,
+        source,
+      }),
+      outputSchema: requestedOutputSchema ?? source.outputSchema,
     },
-    mode: "task",
+    limits: inheritedLimits,
+    mode: "conversation",
     parent: {
       callId: action.callId,
       rootSessionId,
@@ -118,8 +175,8 @@ export function buildSubagentRunInput(input: {
         sequence: batchEvent.sequence,
       },
     },
-    subagentDepth: delegationLimit.nextChildDepth,
-    subagentMaxDepth: session.subagentMaxDepth,
+    parentTraceContext: input.parentTraceContext,
+    subagentDepth: subagentDepth.nextChildDepth,
   };
 
   return { childContinuationToken, runInput };

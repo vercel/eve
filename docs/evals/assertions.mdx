@@ -22,7 +22,7 @@ Scoped assertions take no explicit value and gate by default. Assertions on `t` 
 | `t.usedNoTools()`                                     | No tool calls at all                                                          |
 | `t.maxToolCalls(n)`                                   | At most `n` tool calls                                                        |
 | `t.noFailedActions()`                                 | No tool, subagent, or skill action reported a failure                         |
-| `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (`remoteUrl`, `output` constraints)            |
+| `t.calledSubagent(name, opts?)`                       | A subagent delegation happened (identity, remote, output, status, count)      |
 | `t.event(type, opts?)` / `t.notEvent(type, opts?)`    | Typed event presence, data, and count matching                                |
 | `t.eventOrder([...matchers])`                         | Matching event groups occur in order                                          |
 | `t.eventsSatisfy(label, predicate)`                   | Escape hatch: any predicate over the typed event stream                       |
@@ -73,16 +73,24 @@ t.check(
 | `similarity(expected)` | normalized Levenshtein similarity, 1 = identical        | soft    |
 | `satisfies(fn, label)` | custom boolean predicate                                | gate    |
 
+For example, a failed labeled equality check prints:
+
+```text
+✗ equals [status] (0% < 100%): expected {"status":"active"}; received {"status":"disabled"}
+```
+
 Pick the cheapest builder that captures what "correct" means. When exact match is too strict but a judge model is overkill, `similarity` is the middle ground. For nuanced grading, reach for the [judge](./judge).
 
 ## The matcher mini-language
 
-`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. `count` is the exact number of calls matching every supplied constraint.
+`t.calledTool` and `t.calledSubagent` take matcher objects. Tools accept `{ input, output, status, count }`; subagents accept `{ callId, childSessionId, remoteUrl, output, status, count }`. Calls match `status: "completed"` by default; use `"pending"`, `"failed"`, or `"rejected"` explicitly for lifecycle checks. A numeric `count` requires an exact number of calls matching every supplied constraint. Use a predicate for ranges or other custom count requirements; it receives the observed number of matching calls.
 
 Matcher values accept a literal (objects partial-deep-match), a RegExp, or a predicate function that returns a boolean:
 
 ```ts
 t.calledTool("bash", { input: { command: /^pwd/ }, count: 1 });
+
+t.calledTool("echo", { count: (count) => count >= 2 });
 
 t.calledTool("echo", { output: (value) => String(value).includes(marker) });
 
@@ -108,7 +116,7 @@ const request = session.requireInputRequest({
 
 Beyond the raw `t.events` stream, the runner derives typed facts the assertions read: tool calls (name, input, output, lifecycle status), subagent calls, and HITL input requests. A turn that leaves the session open for a next message is the normal end state of a successful turn; parking on unanswered HITL input is tracked separately.
 
-Typed event matching covers presence, absence, exact counts, partial event data, and ordering:
+Typed event matching covers presence, absence, numeric or predicate counts, partial event data, and ordering:
 
 ```ts
 turn.notEvent("result.completed");
@@ -152,12 +160,13 @@ Every assertion returns a chainable handle. Severity rides on the assertion, so 
 - `.gate(threshold?)` is hard. A miss marks the eval `failed` and `eve eval` exits non-zero.
 - `.soft(threshold?)` is tracked data. A below-threshold miss marks the eval `scored`, fatal only under `--strict`. With no threshold, it is tracked-only and never fails.
 - `.atLeast(threshold)` is soft with a bar (equivalent to `.soft(threshold)`).
+- `.label(name)` adds a stable name when an eval records several assertions from the same family.
 
 The defaults are chosen so you rarely set severity. Run-level methods and `includes`/`equals`/`matches` are gates; `similarity` and every `t.judge.*` assertion are soft. Annotate only when you deviate:
 
 ```ts
 t.calledTool("get_weather").soft(); // record the tool call as a metric, don't gate
-t.check(t.reply, similarity("Sunny")).atLeast(0.8); // gate the fuzzy match under --strict
+t.check(t.reply, similarity("Sunny")).label("forecast wording").atLeast(0.8);
 t.check(t.reply, includes("error")).soft(); // track without failing the build
 ```
 

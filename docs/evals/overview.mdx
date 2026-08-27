@@ -100,7 +100,7 @@ model: mockModel({
 
 `t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
 
-- **Drive** the agent: `t.send(...)`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.requireInputRequest(...)`, `t.newSession()`. Read what came back with `t.reply` (the last assistant message), `t.sessionId`, and `t.events`. See [Cases](./cases).
+- **Drive** the agent: `t.send(...)`, `t.start(...)`, `t.cancel()`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.requireInputRequest(...)`, `t.newSession()`. Live turns returned by `start()` can wait for typed mid-turn events before cancellation or settlement. Read what came back with `t.reply` (the last assistant message), `t.sessionId`, and `t.events`. See [Cases](./cases).
 - **Assert** with three surfaces, covered next.
 
 ## Three assertion surfaces

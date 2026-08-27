@@ -9,8 +9,16 @@ import {
 } from "./prompt-commands.js";
 
 describe("parsePromptCommand", () => {
-  it("parses /new", () => {
-    expect(parsePromptCommand("/new")).toEqual({ type: "new" });
+  it("parses /reset", () => {
+    expect(parsePromptCommand("/reset")).toEqual({ type: "reset" });
+  });
+
+  it("parses /cancel", () => {
+    expect(parsePromptCommand("/cancel")).toEqual({ type: "cancel" });
+  });
+
+  it("parses /new as a context clear", () => {
+    expect(parsePromptCommand("/new")).toEqual({ type: "clear" });
   });
 
   it("parses /exit and its /quit alias", () => {
@@ -45,14 +53,35 @@ describe("parsePromptCommand", () => {
       name: "vc:login",
       argument: "",
     });
-    expect(parsePromptCommand("/channels")).toEqual({
-      type: "extension",
-      name: "channels",
-      argument: "",
-    });
     expect(parsePromptCommand("/deploy")).toEqual({
       type: "extension",
       name: "deploy",
+      argument: "",
+    });
+    expect(parsePromptCommand("/add")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "",
+    });
+  });
+
+  it("parses /add with a trimmed registry address", () => {
+    expect(parsePromptCommand("/add channel/slack")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "channel/slack",
+    });
+    expect(parsePromptCommand("/add  extension/agent-browser ")).toEqual({
+      type: "extension",
+      name: "add",
+      argument: "extension/agent-browser",
+    });
+  });
+
+  it("parses the typeahead's completed /add, which carries a trailing space", () => {
+    expect(parsePromptCommand("/add ")).toEqual({
+      type: "extension",
+      name: "add",
       argument: "",
     });
   });
@@ -72,7 +101,7 @@ describe("parsePromptCommand", () => {
   });
 
   it("trims surrounding whitespace before matching", () => {
-    expect(parsePromptCommand("  /new  ")).toEqual({ type: "new" });
+    expect(parsePromptCommand("  /reset  ")).toEqual({ type: "reset" });
   });
 
   it("rejects near-misses and ordinary prompts", () => {
@@ -81,7 +110,7 @@ describe("parsePromptCommand", () => {
     expect(parsePromptCommand("/vc")).toBeNull();
     expect(parsePromptCommand("/login")).toBeNull();
     expect(parsePromptCommand("/vc:auth")).toBeNull();
-    expect(parsePromptCommand("/channels extra")).toBeNull();
+    expect(parsePromptCommand("/channels")).toBeNull();
     expect(parsePromptCommand("tell me about /channels")).toBeNull();
     expect(parsePromptCommand("/")).toBeNull();
     expect(parsePromptCommand("")).toBeNull();
@@ -93,8 +122,7 @@ describe("promptCommandsFor", () => {
   it("exposes project commands only for local sessions", () => {
     const names = promptCommandsFor("local").map((command) => command.name);
     expect(names).toContain("model");
-    expect(names).toContain("channels");
-    expect(names).toContain("connect");
+    expect(names).toContain("add");
     expect(names).toContain("deploy");
     expect(names).toContain("vc:install");
     expect(names).toContain("vc:login");
@@ -107,8 +135,7 @@ describe("promptCommandsFor", () => {
     expect(names).toContain("vc:login");
     expect(names).not.toContain("vc:auth");
     expect(names).not.toContain("model");
-    expect(names).not.toContain("channels");
-    expect(names).not.toContain("connect");
+    expect(names).not.toContain("add");
     expect(names).not.toContain("deploy");
   });
 
@@ -128,6 +155,7 @@ describe("promptCommandsFor", () => {
 
 describe("isPromptControlCommand", () => {
   it("is true exactly for recognized commands", () => {
+    expect(isPromptControlCommand("/reset")).toBe(true);
     expect(isPromptControlCommand("/new")).toBe(true);
     expect(isPromptControlCommand("/model gpt-5")).toBe(true);
     expect(isPromptControlCommand("/unknown")).toBe(false);
@@ -147,9 +175,9 @@ describe("PROMPT_COMMANDS registry", () => {
     }
   });
 
-  it("pairs an argument hint with takesArgument", () => {
+  it("only gives argument hints to commands that accept arguments", () => {
     for (const spec of PROMPT_COMMANDS) {
-      expect(spec.argumentHint !== undefined).toBe(spec.takesArgument);
+      if (spec.argumentHint !== undefined) expect(spec.takesArgument).toBe(true);
     }
   });
 

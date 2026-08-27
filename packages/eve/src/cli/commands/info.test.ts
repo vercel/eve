@@ -1,76 +1,57 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { COMPILE_METADATA_KIND, COMPILE_METADATA_VERSION } from "#compiler/artifacts.js";
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import { createCompiledAgentManifest, type CompiledChannelEntry } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
+import { defineInstructions } from "#public/definitions/instructions.js";
+import { defineSchedule } from "#public/definitions/schedule.js";
 import { getApplicationInfo } from "#internal/application/paths.js";
+import { inspectApplication } from "#services/inspect-application.js";
 
-import { buildApplicationInfoJson } from "./info.js";
+import { buildApplicationInfoJson, printApplicationInfo } from "./info.js";
+
+vi.mock("#services/inspect-application.js", () => ({ inspectApplication: vi.fn() }));
 
 const MESSAGING = {
   createSessionRoutePath: "/eve/v1/session",
-  continueSessionRoutePattern: "/eve/v1/session/:id",
-  streamRoutePattern: "/eve/v1/session/:id/stream",
+  sessionMessagesRoutePattern: "/eve/v1/session/:sessionId",
+  streamRoutePattern: "/eve/v1/session/:sessionId/stream",
 };
-
 const APP_ROOT = "/virtual/app";
-const AGENT_ROOT = "/virtual/app/agent";
+const AGENT_ROOT = `${APP_ROOT}/agent`;
 
-function makeCompiledState(): CompileAgentResult {
-  const channels: CompiledChannelEntry[] = [
-    {
-      kind: "channel",
-      name: "slack",
-      logicalPath: "agent/channels/slack.ts",
-      method: "POST",
-      urlPath: "/eve/v1/slack",
-      sourceId: "memory::slack",
-      sourceKind: "module",
-      adapterKind: "slack",
-    },
-    {
-      kind: "channel",
-      name: "eve",
-      logicalPath: "agent/channels/eve.ts",
-      method: "POST",
-      urlPath: "/eve/v1/session",
-      sourceId: "memory::eve",
-      sourceKind: "module",
-      adapterKind: "http",
-    },
-  ];
-  const manifest = createCompiledAgentManifest({
+async function makeCompiledState(): Promise<CompileAgentResult> {
+  const { manifest } = await compileFromMemory({
     agentRoot: AGENT_ROOT,
     appRoot: APP_ROOT,
-    config: {
-      model: {
-        id: "anthropic/claude-sonnet-5",
-        routing: { kind: "gateway", target: "anthropic" },
-      },
-      name: "triage-bot",
-    },
-    channels,
-    tools: [
+    model: "openai/gpt-5.4",
+    modules: [
       {
-        description: "Create a triage ticket.",
-        inputSchema: null,
-        logicalPath: "tools/create_ticket.ts",
-        name: "create_ticket",
-        sourceId: "memory::create_ticket",
-        sourceKind: "module",
+        loadNamespace: async () => ({
+          default: defineInstructions({ content: "Standing rules.", role: "system" }),
+        }),
+        logicalPath: "instructions/rules.ts",
+      },
+      {
+        loadNamespace: async () => ({
+          default: defineSchedule({ cron: "0 9 * * *", markdown: "Run the digest." }),
+        }),
+        logicalPath: "schedules/morning-digest.ts",
       },
     ],
+    name: "triage-bot",
+    tools: [{ description: "Create a triage ticket.", name: "create_ticket" }],
   });
-  const digest = { path: "x", sha256: "y" };
+  const digest = { path: "x", sha256: "a".repeat(64) };
   return {
     diagnostics: [],
     manifest,
     metadata: {
-      compile: { moduleMap: digest },
+      compile: { manifest: digest, moduleMap: digest },
       discovery: {
         diagnostics: digest,
         manifest: digest,
-        sourceGraphHash: "hash",
+        sourceGraphHash: "a".repeat(64),
         summary: { errors: 0, warnings: 0 },
       },
       generator: { name: "eve", version: "0.0.0-test" },
@@ -80,7 +61,6 @@ function makeCompiledState(): CompileAgentResult {
     },
     paths: {
       appRoot: APP_ROOT,
-      channelInstrumentationTypesPath: `${APP_ROOT}/.eve/compile/channel-instrumentation.d.ts`,
       compiledManifestPath: `${APP_ROOT}/.eve/compile/compiled-agent-manifest.json`,
       compileDirectoryPath: `${APP_ROOT}/.eve/compile`,
       compileMetadataPath: `${APP_ROOT}/.eve/compile/compile-metadata.json`,
@@ -94,22 +74,24 @@ function makeCompiledState(): CompileAgentResult {
 }
 
 describe("buildApplicationInfoJson", () => {
-  test("projects a compiled agent into the JSON contract", () => {
+  test("projects the effective compiled graph into the JSON contract", async () => {
     const json = buildApplicationInfoJson({
       application: getApplicationInfo(APP_ROOT),
-      compiledState: makeCompiledState(),
+      compiledState: await makeCompiledState(),
       messaging: MESSAGING,
     });
 
-    expect(json.status).toBe("ready");
-    expect(json.model).toBe("anthropic/claude-sonnet-5");
-    expect(json.tools).toEqual(["create_ticket"]);
-    expect(json.skills).toEqual([]);
-    expect(json.diagnostics).toEqual({ errors: 0, warnings: 0 });
-    expect(json.channels).toEqual([
-      { name: "slack", kind: "slack", method: "POST", urlPath: "/eve/v1/slack" },
-      { name: "eve", kind: "http", method: "POST", urlPath: "/eve/v1/session" },
-    ]);
+    expect(json).toMatchObject({
+      diagnostics: { errors: 0, warnings: 0 },
+      instructions: "instructions/rules.ts (system)",
+      model: "openai/gpt-5.4",
+      schedules: ["morning-digest"],
+      status: "ready",
+    });
+    expect(json.tools).toContain("create_ticket");
+    expect(json.channels).toContainEqual(
+      expect.objectContaining({ method: "GET", urlPath: "/eve/v1/health" }),
+    );
     expect(json.messaging.create).toBe("/eve/v1/session");
     expect(json.artifacts?.compiledManifest).toContain("compiled-agent-manifest.json");
   });
@@ -121,15 +103,31 @@ describe("buildApplicationInfoJson", () => {
       messaging: MESSAGING,
     });
 
-    expect(json.status).toBe("unavailable");
-    expect(json.model).toBeNull();
-    expect(json.instructions).toBeNull();
-    expect(json.diagnostics).toBeNull();
-    expect(json.artifacts).toBeNull();
-    expect(json.channels).toEqual([]);
-    expect(json.tools).toEqual([]);
-    expect(json.skills).toEqual([]);
-    expect(json.appRoot).toBe(APP_ROOT);
-    expect(json.messaging.stream).toBe("/eve/v1/session/:id/stream");
+    expect(json).toMatchObject({
+      appRoot: APP_ROOT,
+      artifacts: null,
+      channels: [],
+      diagnostics: null,
+      model: null,
+      status: "unavailable",
+      tools: [],
+    });
+  });
+});
+
+describe("printApplicationInfo", () => {
+  test("reports the effective compiled tool count", async () => {
+    const compiledState = await makeCompiledState();
+    vi.mocked(inspectApplication).mockResolvedValue({
+      application: getApplicationInfo(APP_ROOT),
+      compiledState,
+      messaging: MESSAGING,
+    });
+    const output: string[] = [];
+
+    await printApplicationInfo({ log: (message) => output.push(message) }, APP_ROOT);
+
+    expect(output).toHaveLength(1);
+    expect(output[0]).toMatch(new RegExp(`Tools\\s+${compiledState.manifest.tools.length} tools?`));
   });
 });

@@ -20,7 +20,7 @@ export const AGENT_SOURCE_MANIFEST_KIND = "eve-agent-discovery-manifest";
 /**
  * Current manifest schema version.
  */
-export const AGENT_SOURCE_MANIFEST_VERSION = 12;
+export const AGENT_SOURCE_MANIFEST_VERSION = 15;
 
 /**
  * Channel source reference preserved by the discovery manifest.
@@ -43,6 +43,11 @@ export interface ConnectionSourceRef extends ModuleSourceRef {
 }
 
 /**
+ * Hook source reference preserved by the discovery manifest.
+ */
+export type HookSourceRef = ModuleSourceRef;
+
+/**
  * Instructions source reference preserved by discovery for compiler
  * normalization.
  */
@@ -55,6 +60,15 @@ export type SkillSourceRef =
   | MarkdownSourceRef<SkillDefinition>
   | ModuleSourceRef
   | (NamedSkillDefinition & SkillPackageSourceRef);
+
+/**
+ * Tool source reference preserved by the discovery manifest.
+ */
+export type ToolSourceRef = ModuleSourceRef;
+
+export interface MemorySourceRef extends ModuleSourceRef {
+  readonly slot: string;
+}
 
 /**
  * Recursive manifest entry for a local subagent package.
@@ -121,6 +135,42 @@ export interface SandboxWorkspaceFolderSourceRef {
 export type LibSourceRef = ModuleSourceRef;
 
 /**
+ * Extension mount source reference preserved by the discovery manifest. Each
+ * `agent/extensions/*.ts` file re-exports (and configures) an extension
+ * package; the file basename is the mount namespace.
+ */
+export type ExtensionSourceRef = ModuleSourceRef;
+
+/**
+ * A mounted extension resolved to its package and discovered agent-shaped
+ * source tree. The compiler composes each mount's {@link manifest} into the
+ * consuming agent, prefixing contributions with {@link namespace}.
+ */
+export interface ResolvedExtensionMount {
+  /** Mount namespace derived from the mount filename (e.g. `crm`). */
+  readonly namespace: string;
+  /** Package specifier the mount imports (e.g. `@acme/crm`). */
+  readonly specifier: string;
+  /** Package name from the resolved package.json, used to scope state. */
+  readonly packageName: string;
+  /** Absolute path to the resolved package root. */
+  readonly packageRoot: string;
+  /** Absolute path to the extension's agent-shaped source root. */
+  readonly sourceRoot: string;
+  /** Discovered agent-shaped source manifest for the extension. */
+  readonly manifest: AgentSourceManifest;
+  /** Runtime packages this extension requires the consuming application to externalize. */
+  readonly externalDependencies: readonly string[];
+  /**
+   * Consumer-authored overrides discovered in the mount directory form
+   * (`extensions/<ns>/{tools,connections,…}/`). Composed under the same
+   * `<ns>__` namespace as the extension's own contributions but winning on
+   * name collision. Absent for the flat file mount form.
+   */
+  readonly overrides?: AgentSourceManifest;
+}
+
+/**
  * Subagent source reference preserved by the discovery manifest.
  */
 export type SubagentSourceRef = LocalSubagentSourceRef;
@@ -143,7 +193,20 @@ export interface AgentSourceManifest {
   connections: ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
   diagnosticsSummary: DiscoverDiagnosticsSummary;
+  /**
+   * Mounted extension source references discovered under `agent/extensions/`.
+   * Each entry's logical-path basename is the mount namespace the compiler
+   * prefixes onto the extension's composed contributions.
+   */
+  extensions: ExtensionSourceRef[];
+  /**
+   * Mounted extensions resolved to their packages and discovered source trees.
+   * Populated only for the agent root; extension trees do not mount further
+   * extensions (transitive mounting is a non-goal).
+   */
+  resolvedExtensions: ResolvedExtensionMount[];
   hooks: ModuleSourceRef[];
+  memories: MemorySourceRef[];
   lib: LibSourceRef[];
   kind: typeof AGENT_SOURCE_MANIFEST_KIND;
   /**
@@ -157,6 +220,8 @@ export interface AgentSourceManifest {
    * Empty when no instructions are authored.
    */
   instructions: InstructionsSourceRef[];
+  /** Authored single-file instrumentation module, when present. */
+  instrumentation?: ModuleSourceRef;
   /**
    * Authored sandbox module discovered for this agent, or `null` when
    * the agent does not declare one. Every agent owns at most one
@@ -187,7 +252,10 @@ export interface CreateAgentSourceManifestInput {
   connections?: readonly ConnectionSourceRef[];
   configModule?: ModuleSourceRef;
   diagnostics?: readonly DiscoverDiagnostic[];
+  extensions?: readonly ExtensionSourceRef[];
+  resolvedExtensions?: readonly ResolvedExtensionMount[];
   hooks?: readonly ModuleSourceRef[];
+  memories?: readonly MemorySourceRef[];
   lib?: readonly LibSourceRef[];
   /**
    * Optional package name read from the app root's package.json.
@@ -197,6 +265,7 @@ export interface CreateAgentSourceManifestInput {
    */
   packageName?: string;
   instructions?: readonly InstructionsSourceRef[];
+  instrumentation?: ModuleSourceRef;
   sandbox?: SandboxSourceRef | null;
   sandboxWorkspaces?: readonly SandboxWorkspaceFolderSourceRef[];
   schedules?: readonly ScheduleSourceRef[];
@@ -260,7 +329,10 @@ export function createAgentSourceManifest(
     channels: [...(input.channels ?? [])],
     connections: [...(input.connections ?? [])],
     diagnosticsSummary: summarizeDiscoverDiagnostics(input.diagnostics ?? []),
+    extensions: [...(input.extensions ?? [])],
+    resolvedExtensions: [...(input.resolvedExtensions ?? [])],
     hooks: [...(input.hooks ?? [])],
+    memories: [...(input.memories ?? [])],
     instructions: [...(input.instructions ?? [])],
     lib: [...(input.lib ?? [])],
     kind: AGENT_SOURCE_MANIFEST_KIND,
@@ -275,6 +347,9 @@ export function createAgentSourceManifest(
 
   if (input.configModule !== undefined) {
     manifest.configModule = input.configModule;
+  }
+  if (input.instrumentation !== undefined) {
+    manifest.instrumentation = input.instrumentation;
   }
 
   return manifest;

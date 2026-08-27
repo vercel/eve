@@ -6,6 +6,7 @@ import {
   resolveTeamsAccessToken,
   sendTeamsActivity,
   splitTeamsMessageText,
+  normalizeTeamsContinuationAddress,
   teamsContinuationToken,
   triggerTeamsTypingIndicator,
   updateTeamsActivity,
@@ -20,6 +21,24 @@ describe("Teams Connector API wrapper", () => {
         tenantId: "T 1",
       }),
     ).toBe("T%201:19%3Aabc%40thread.skype:A%3A1");
+  });
+
+  it("normalizes channel thread suffixes before building continuation tokens", () => {
+    expect(
+      normalizeTeamsContinuationAddress({
+        conversationId: "19:abc@thread.tacv2;messageid=THREAD_ROOT",
+        replyToActivityId: "VOLATILE_ACTIVITY",
+      }),
+    ).toEqual({
+      conversationId: "19:abc@thread.tacv2",
+      replyToActivityId: "THREAD_ROOT",
+    });
+    expect(
+      teamsContinuationToken({
+        conversationId: "19:abc@thread.tacv2;messageid=THREAD_ROOT",
+        tenantId: "TENANT",
+      }),
+    ).toBe("TENANT:19%3Aabc%40thread.tacv2:THREAD_ROOT");
   });
 
   it("requests and caches Bot Connector access tokens", async () => {
@@ -82,6 +101,28 @@ describe("Teams Connector API wrapper", () => {
       "POST https://smba.example.test/teams/v3/conversations/CONV/activities",
     ]);
     expect(requests[3]!.body).toEqual({ type: "typing" });
+  });
+
+  it("reports Connector update failures with the response body and target", async () => {
+    const apiFetch = vi.fn(async () =>
+      Response.json(
+        { error: { code: "BadArgument", message: "Activity cannot be updated." } },
+        { status: 400 },
+      ),
+    );
+
+    await expect(
+      updateTeamsActivity({
+        activityId: "ACTIVITY_1",
+        body: { text: "updated", type: "message" },
+        conversationId: "CONV",
+        credentials: { tokenProvider: () => "connector-token" },
+        fetch: apiFetch,
+        serviceUrl: "https://smba.example.test/teams",
+      }),
+    ).rejects.toThrow(
+      'Teams update activity failed with HTTP 400 for conversation "CONV" activity "ACTIVITY_1": {"error":{"code":"BadArgument","message":"Activity cannot be updated."}}',
+    );
   });
 
   it("exposes a raw Connector request helper", async () => {

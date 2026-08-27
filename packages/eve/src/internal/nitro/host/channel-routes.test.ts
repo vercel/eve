@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createDevelopmentNitroArtifactsConfig } from "#internal/nitro/host/artifacts-config.js";
 import { registerChannelVirtualHandlers } from "#internal/nitro/host/channel-routes.js";
 
 describe("registerChannelVirtualHandlers", () => {
@@ -12,8 +13,18 @@ describe("registerChannelVirtualHandlers", () => {
     };
 
     registerChannelVirtualHandlers(nitro, {
-      artifactsConfig: { appRoot: "/app", dev: true },
-      registrations: [{ cors: {}, method: "POST", route: "/eve/v1/session" }],
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({
+        appRoot: "/app",
+      }),
+      routes: [
+        { cors: {}, kind: "channel", method: "POST", path: "/eve/v1/session" },
+        {
+          cors: {},
+          kind: "channel-preflight",
+          method: "OPTIONS",
+          path: "/eve/v1/session",
+        },
+      ],
     });
 
     expect(nitro.options.handlers).toEqual([
@@ -48,10 +59,28 @@ describe("registerChannelVirtualHandlers", () => {
     };
 
     registerChannelVirtualHandlers(nitro, {
-      artifactsConfig: { appRoot: "/app", dev: true },
-      registrations: [
-        { cors: {}, method: "GET", route: "/eve/v1/session/:sessionId/events" },
-        { cors: {}, method: "POST", route: "/eve/v1/session/:sessionId/events" },
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({
+        appRoot: "/app",
+      }),
+      routes: [
+        {
+          cors: {},
+          kind: "channel",
+          method: "GET",
+          path: "/eve/v1/session/:sessionId/events",
+        },
+        {
+          cors: {},
+          kind: "channel-preflight",
+          method: "OPTIONS",
+          path: "/eve/v1/session/:sessionId/events",
+        },
+        {
+          cors: {},
+          kind: "channel",
+          method: "POST",
+          path: "/eve/v1/session/:sessionId/events",
+        },
       ],
     });
 
@@ -72,8 +101,10 @@ describe("registerChannelVirtualHandlers", () => {
     };
 
     registerChannelVirtualHandlers(nitro, {
-      artifactsConfig: { appRoot: "/app", dev: true },
-      registrations: [{ method: "WEBSOCKET", route: "/voice" }],
+      artifactsConfig: createDevelopmentNitroArtifactsConfig({
+        appRoot: "/app",
+      }),
+      routes: [{ kind: "channel", method: "WEBSOCKET", path: "/voice" }],
     });
 
     expect(nitro.options.handlers).toEqual([

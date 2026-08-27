@@ -1,16 +1,17 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
+import type { ChannelFrom } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
-
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   callDiscordApi,
   createDiscordFollowupMessage,
   discordContinuationToken,
   editDiscordOriginalResponse,
+  resolveDiscordBotToken,
   sendDiscordChannelMessage,
   splitDiscordMessageContent,
   triggerDiscordTypingIndicator,
@@ -46,18 +47,17 @@ import {
 } from "#public/channels/discord/responses.js";
 import { type DiscordWebhookVerifier } from "#public/channels/discord/verify.js";
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
+import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import {
-  defineChannel,
-  POST,
-  type Channel,
-  type SendFn,
-} from "#public/definitions/defineChannel.js";
+import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import type { ValidatedInputResponse } from "#shared/input.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
 
 const log = createLogger("discord.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Pre-dispatch Discord context passed to inbound command hooks. */
 export interface DiscordContext {
@@ -67,11 +67,12 @@ export interface DiscordContext {
 /** Channel-owned Discord context returned by `context()`. */
 export type DiscordChannelContext = DiscordContext & { state: DiscordChannelState };
 
-/** Event-handler Discord context, including session operations. */
-export interface DiscordEventContext extends DiscordChannelContext, ChannelSessionOps {}
+/** Event-handler Discord context, including continuation routing. */
+export interface DiscordEventContext extends DiscordChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Discord channel state. */
 export interface DiscordChannelState {
+  audience?: ChannelAudience;
   /** Discord channel id. */
   channelId: string | null;
   /** Discord message id once anchored, or an interaction placeholder before the first reply. */
@@ -107,17 +108,19 @@ export interface DiscordReceiveTarget {
  * - `auth`: session auth context for the dispatched turn, or `null` for anonymous.
  * - `ephemeral`: when `true`, the deferred reply is visible only to the invoking user.
  * - `context`: model-visible context lines appended after the Discord context block.
+ * - `title`: workflow run title override that does not change model input.
  */
 export type DiscordCommandResult = {
   readonly auth: SessionAuthContext | null;
   readonly ephemeral?: boolean;
   readonly context?: readonly string[];
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link DiscordCommandResult}. */
 export type DiscordCommandResultOrPromise = DiscordCommandResult | Promise<DiscordCommandResult>;
 
-type DiscordEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type DiscordEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: DiscordEventContext,
   ctx: SessionContext,
@@ -128,16 +131,18 @@ type DiscordSessionFailedHandler = (
   channel: DiscordEventContext,
 ) => void | Promise<void>;
 
-/** Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in defaults per key; unspecified events keep their defaults. `session.failed` receives only `(data, channel)`; every other handler also gets the session `ctx`. */
+/** Per-event handlers for `discordChannel({ events })`. Supplied handlers override built-in defaults per key; unspecified events keep their defaults. `session.failed` receives only `(data, channel)` and exposes the ID as `data.sessionId`; every other handler also gets the session `ctx`. */
 export interface DiscordChannelEvents {
   readonly "turn.started"?: DiscordEventHandler<"turn.started">;
   readonly "actions.requested"?: DiscordEventHandler<"actions.requested">;
+  readonly "action.partial"?: DiscordEventHandler<"action.partial">;
   readonly "action.result"?: DiscordEventHandler<"action.result">;
   readonly "message.completed"?: DiscordEventHandler<"message.completed">;
   readonly "message.appended"?: DiscordEventHandler<"message.appended">;
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;
   readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
   readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: DiscordEventHandler<"turn.cancelled">;
   readonly "session.failed"?: DiscordSessionFailedHandler;
   readonly "session.completed"?: DiscordEventHandler<"session.completed">;
   readonly "session.waiting"?: DiscordEventHandler<"session.waiting">;
@@ -151,6 +156,8 @@ export interface DiscordChannelConfig {
   readonly credentials?: DiscordChannelCredentials;
   /** Override the default interaction route path (`/eve/v1/discord`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */
   onCommand?(
@@ -206,7 +213,6 @@ export interface DiscordChannel extends Channel<
   DiscordReceiveTarget,
   DiscordInstrumentationMetadata
 > {}
-
 /** Discord channel factory for HTTP Interactions and proactive channel messages. */
 export function discordChannel(config: DiscordChannelConfig = {}): DiscordChannel {
   const onCommand = config.onCommand ?? defaultOnCommand;
@@ -219,8 +225,9 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     DiscordInstrumentationMetadata
   >({
     kindHint: "discord",
+    turnPolicy: config.turnPolicy,
     state: initialDiscordState(),
-    metadata: (state) => ({ channelId: state.channelId, guildId: state.guildId }),
+    metadata: discordInstrumentationMetadata,
 
     context(state, session) {
       return rebuildDiscordContext(state, session, config);
@@ -229,7 +236,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
     routes: [
       POST<DiscordChannelState>(
         config.route ?? "/eve/v1/discord",
-        async (req, { send, waitUntil }) => {
+        async (req, { from, waitUntil }) => {
           const body = await verifyDiscordInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -254,20 +261,20 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
             config,
             interaction,
             onCommand,
-            send,
+            from,
             waitUntil,
           });
         },
       ),
     ],
 
-    async receive(input, { send }) {
+    async receive(input, { from }) {
       const receiveTarget = input.target as Partial<DiscordReceiveTarget>;
-      const channelId = readString(receiveTarget.channelId);
+      const channelId = readNonEmptyString(receiveTarget.channelId);
       if (!channelId) {
         throw new Error("discordChannel().receive requires target.channelId.");
       }
-      const requestedConversationId = readString(receiveTarget.conversationId);
+      const requestedConversationId = readNonEmptyString(receiveTarget.conversationId);
       const initialMessage = receiveTarget.initialMessage;
       if (initialMessage !== undefined && requestedConversationId !== undefined) {
         throw new Error(
@@ -290,10 +297,10 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
         hasMessageAnchor = posted.id.length > 0;
       }
 
-      return send(input.message, {
+      return from(discordContinuationToken(channelId, conversationId)).send(input.message, {
         auth: input.auth,
-        continuationToken: discordContinuationToken(channelId, conversationId),
         state: {
+          audience: "unknown",
           applicationId: null,
           channelId,
           conversationId: conversationId || null,
@@ -334,7 +341,7 @@ function buildDiscordHandle(input: {
     state.conversationId = posted.id;
     state.hasMessageAnchor = true;
     if (state.channelId) {
-      input.session?.setContinuationToken(discordContinuationToken(state.channelId, posted.id));
+      input.session?.continuation?.rekey(discordContinuationToken(state.channelId, posted.id));
     }
   }
 
@@ -466,7 +473,7 @@ async function handleInteraction(input: {
   readonly config: DiscordChannelConfig;
   readonly interaction: DiscordInteraction;
   readonly onCommand: NonNullable<DiscordChannelConfig["onCommand"]>;
-  readonly send: SendFn<DiscordChannelState>;
+  readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
   if (input.interaction.type === DISCORD_INTERACTION_TYPE.APPLICATION_COMMAND) {
@@ -474,20 +481,20 @@ async function handleInteraction(input: {
       config: input.config,
       interaction: input.interaction,
       onCommand: input.onCommand,
-      send: input.send,
+      from: input.from,
       waitUntil: input.waitUntil,
     });
   }
   if (input.interaction.type === DISCORD_INTERACTION_TYPE.MESSAGE_COMPONENT) {
     return handleComponentInteraction({
       interaction: input.interaction,
-      send: input.send,
+      from: input.from,
       waitUntil: input.waitUntil,
     });
   }
   return handleModalSubmitInteraction({
     interaction: input.interaction,
-    send: input.send,
+    from: input.from,
     waitUntil: input.waitUntil,
   });
 }
@@ -496,7 +503,7 @@ async function handleCommandInteraction(input: {
   readonly config: DiscordChannelConfig;
   readonly interaction: DiscordCommandInteraction;
   readonly onCommand: NonNullable<DiscordChannelConfig["onCommand"]>;
-  readonly send: SendFn<DiscordChannelState>;
+  readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
   const state = stateFromInteraction(input.interaction, {
@@ -523,7 +530,7 @@ async function handleCommandInteraction(input: {
     dispatchCommand({
       interaction: input.interaction,
       result,
-      send: input.send,
+      from: input.from,
       state,
     }),
   );
@@ -532,7 +539,7 @@ async function handleCommandInteraction(input: {
 
 function handleComponentInteraction(input: {
   readonly interaction: DiscordComponentInteraction;
-  readonly send: SendFn<DiscordChannelState>;
+  readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Response {
   if (isDiscordFreeformComponent(input.interaction.customId)) {
@@ -552,7 +559,7 @@ function handleComponentInteraction(input: {
         conversationId: input.interaction.messageId,
         inputResponses,
         interaction: input.interaction,
-        send: input.send,
+        from: input.from,
       }),
     );
   }
@@ -561,7 +568,7 @@ function handleComponentInteraction(input: {
 
 function handleModalSubmitInteraction(input: {
   readonly interaction: DiscordModalSubmitInteraction;
-  readonly send: SendFn<DiscordChannelState>;
+  readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Response {
   const inputResponses = deriveModalInputResponses(input.interaction);
@@ -571,7 +578,7 @@ function handleModalSubmitInteraction(input: {
         conversationId: input.interaction.messageId ?? input.interaction.id,
         inputResponses,
         interaction: input.interaction,
-        send: input.send,
+        from: input.from,
       }),
     );
   }
@@ -581,11 +588,12 @@ function handleModalSubmitInteraction(input: {
 async function dispatchCommand(input: {
   readonly interaction: DiscordCommandInteraction;
   readonly result: Exclude<DiscordCommandResult, null>;
-  readonly send: SendFn<DiscordChannelState>;
+  readonly from: ChannelFrom<DiscordChannelState>;
   readonly state: DiscordChannelState;
 }): Promise<void> {
   const turnMessage = commandInteractionMessage(input.interaction);
   const contextBlock = formatDiscordContextBlock({
+    applicationId: input.interaction.applicationId,
     channelId: input.interaction.channelId,
     commandName: input.interaction.commandName,
     guildId: input.interaction.guildId,
@@ -596,20 +604,14 @@ async function dispatchCommand(input: {
   const channelContext = input.result.context ?? [];
 
   try {
-    await input.send(
-      {
-        message: turnMessage,
-        context: [contextBlock, ...channelContext],
-      },
-      {
+    await input
+      .from(discordContinuationToken(input.interaction.channelId, input.interaction.id))
+      .send(turnMessage, {
         auth: input.result.auth,
-        continuationToken: discordContinuationToken(
-          input.interaction.channelId,
-          input.interaction.id,
-        ),
+        context: [contextBlock, ...channelContext],
         state: input.state,
-      },
-    );
+        title: input.result.title,
+      });
   } catch (error) {
     log.error("command delivery failed", { error });
   }
@@ -617,26 +619,16 @@ async function dispatchCommand(input: {
 
 async function dispatchInputResponses(input: {
   readonly conversationId: string;
-  readonly inputResponses: readonly { requestId: string; optionId?: string; text?: string }[];
+  readonly inputResponses: readonly ValidatedInputResponse[];
   readonly interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction;
-  readonly send: SendFn<DiscordChannelState>;
+  readonly from: ChannelFrom<DiscordChannelState>;
 }): Promise<void> {
   try {
-    await input.send(
-      { inputResponses: input.inputResponses },
-      {
+    await input
+      .from(discordContinuationToken(input.interaction.channelId, input.conversationId))
+      .respond(input.inputResponses, {
         auth: null,
-        continuationToken: discordContinuationToken(
-          input.interaction.channelId,
-          input.conversationId,
-        ),
-        state: stateFromInteraction(input.interaction, {
-          conversationId: input.conversationId,
-          hasMessageAnchor: true,
-          initialResponseSent: true,
-        }),
-      },
-    );
+      });
   } catch (error) {
     log.error("interaction response delivery failed", { error });
   }
@@ -651,6 +643,7 @@ function stateFromInteraction(
   },
 ): DiscordChannelState {
   return {
+    audience: discordAudience(interaction.channelType),
     applicationId: interaction.applicationId,
     channelId: interaction.channelId,
     conversationId: options.conversationId,
@@ -663,6 +656,7 @@ function stateFromInteraction(
 
 function initialDiscordState(): DiscordChannelState {
   return {
+    audience: "unknown",
     applicationId: null,
     channelId: null,
     conversationId: null,
@@ -679,7 +673,7 @@ function mergeCredentials(
 ): DiscordChannelCredentials {
   const merged: DiscordChannelCredentials = {
     applicationId: state.applicationId ?? credentials?.applicationId,
-    botToken: credentials?.botToken,
+    botToken: credentials?.botToken ?? (() => resolveDiscordBotToken()),
     publicKey: credentials?.publicKey,
     webhookVerifier: credentials?.webhookVerifier,
   };
@@ -703,8 +697,4 @@ function expandPostBodies(body: DiscordMessageBody): readonly DiscordMessageBody
       content,
     };
   });
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

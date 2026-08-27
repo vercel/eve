@@ -62,8 +62,8 @@ interface RuntimeRegistryRegisterOptions {
  * collision.
  *
  * The optional `reserved` set lets a registry detect collisions across
- * multiple registration passes — for example the tool registry seeds
- * reserved framework tool names so authored tools cannot shadow them.
+ * multiple registration passes — for example when runtime-derived tools and
+ * selected compiled tools share one model-visible namespace.
  * Once an entry is registered its name is automatically added to the
  * reserved set.
  */
@@ -126,8 +126,7 @@ export class RuntimeRegistry<TEntry> {
 
   /**
    * Adds or replaces an entry without uniqueness or reservation checks.
-   * Use for framework-owned defaults that the caller has already
-   * validated.
+   * Use for entries the caller has already validated.
    */
   set(name: string, entry: TEntry): void {
     this._entries.set(name, entry);

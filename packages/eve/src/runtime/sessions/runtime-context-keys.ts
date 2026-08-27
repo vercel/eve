@@ -4,10 +4,17 @@
  */
 
 import type { ChannelAdapter } from "#channel/adapter.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { getAdapterKind } from "#channel/adapter.js";
 import { ContextKey } from "#context/key.js";
+import { buildChannelInstrumentationProjection } from "#channel/instrumentation.js";
+import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { deserializeRuntimeAdapter } from "#runtime/channels/registry.js";
-import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import {
+  type DurableCompiledArtifactsSource,
+  resolveDurableCompiledArtifactsSource,
+  serializeDurableCompiledArtifactsSource,
+} from "#runtime/durable-compiled-artifacts-source.js";
 import {
   type CompiledRuntimeAgentBundle,
   getCompiledRuntimeAgentBundle,
@@ -17,6 +24,7 @@ import {
 interface SerializedAdapter {
   readonly kind: string;
   readonly state: Record<string, unknown>;
+  readonly audience?: ChannelAudience;
 }
 
 /** Compiled bundle on the durable context — re-exported under a stable name. */
@@ -24,15 +32,17 @@ export type CompiledBundle = CompiledRuntimeAgentBundle;
 
 interface SerializedBundle {
   readonly nodeId?: string;
-  readonly source: RuntimeCompiledArtifactsSource;
+  readonly source: DurableCompiledArtifactsSource;
 }
 
-export const ChannelKey = new ContextKey<ChannelAdapter>("eve.channel", {
+export const ChannelKey = new ContextKey<ChannelAdapter>(CHANNEL_CONTEXT_KEY_NAME, {
   codec: {
     serialize(adapter): SerializedAdapter {
+      const projection = buildChannelInstrumentationProjection({ adapter });
       return {
         kind: getAdapterKind(adapter),
         state: adapter.state ? { ...adapter.state } : {},
+        audience: projection.metadata.audience,
       };
     },
     deserialize(data, ctx): ChannelAdapter {
@@ -53,12 +63,12 @@ export const BundleKey = new ContextKey<CompiledBundle>("eve.bundle", {
   codec: {
     serialize: (bundle): SerializedBundle => ({
       nodeId: bundle.nodeId,
-      source: bundle.compiledArtifactsSource,
+      source: serializeDurableCompiledArtifactsSource(bundle.compiledArtifactsSource),
     }),
     deserialize: (data) => {
       const { source, nodeId } = data as SerializedBundle;
       return getCompiledRuntimeAgentBundle({
-        compiledArtifactsSource: source,
+        compiledArtifactsSource: resolveDurableCompiledArtifactsSource(source),
         nodeId,
       });
     },

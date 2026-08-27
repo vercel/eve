@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import {
   buildAnsweredBlocks,
   buildFreeformModalView,
@@ -16,7 +16,10 @@ import {
   isHitlAction,
   renderInputRequestBlocks,
 } from "#public/channels/slack/hitl.js";
-import { SLACK_SECTION_TEXT_MAX_LENGTH } from "#public/channels/slack/limits.js";
+import {
+  SLACK_CARD_BODY_TEXT_MAX_LENGTH,
+  SLACK_SECTION_TEXT_MAX_LENGTH,
+} from "#public/channels/slack/limits.js";
 
 function makeRequest(overrides: Partial<InputRequest>): InputRequest {
   return {
@@ -24,10 +27,25 @@ function makeRequest(overrides: Partial<InputRequest>): InputRequest {
     prompt: "Pick one",
     requestId: "call_abc123",
     ...overrides,
+    kind: overrides.kind ?? "question",
   };
 }
 
 describe("deriveHitlResponse", () => {
+  it("keeps Slack classification outside the durable input response type", () => {
+    const derived: NonNullable<ReturnType<typeof deriveHitlResponse>> = {
+      kind: "tool-approval",
+      response: {
+        // @ts-expect-error Slack classification is not part of InputResponse.
+        kind: "tool-approval",
+        optionId: "approve",
+        requestId: "approval_abc123",
+      },
+    };
+
+    expect(derived.kind).toBe("tool-approval");
+  });
+
   it("decodes a button click with a requestId that contains underscores", () => {
     // `requestId` is the AI SDK `action.callId`, which always starts
     // with `call_…` and contains underscores. The old encoding
@@ -38,7 +56,9 @@ describe("deriveHitlResponse", () => {
       value: "approve",
     });
 
-    expect(response).toEqual({ requestId: "call_abc123", optionId: "approve" });
+    expect(response).toEqual({
+      response: { requestId: "call_abc123", optionId: "approve" },
+    });
   });
 
   it("decodes a radio / select click from selectedOptionValue", () => {
@@ -47,7 +67,22 @@ describe("deriveHitlResponse", () => {
       selectedOptionValue: "weekly",
     });
 
-    expect(response).toEqual({ requestId: "call_xyz", optionId: "weekly" });
+    expect(response).toEqual({ response: { requestId: "call_xyz", optionId: "weekly" } });
+  });
+
+  it("preserves tool-approval metadata from a button action id", () => {
+    const response = deriveHitlResponse({
+      actionId: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+      value: "approve",
+    });
+
+    expect(response).toEqual({
+      kind: "tool-approval",
+      response: {
+        optionId: "approve",
+        requestId: "approval_abc123",
+      },
+    });
   });
 
   it("returns null when neither value nor selectedOptionValue is set", () => {
@@ -81,42 +116,46 @@ describe("isHitlAction", () => {
 });
 
 describe("renderInputRequestBlocks", () => {
-  it("emits a section + buttons block for an option list with no display hint", () => {
+  it("emits a card block for an option list with no display hint", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
         options: [
           { id: "approve", label: "Approve", style: "primary" },
-          { id: "deny", label: "Deny", style: "danger" },
+          { id: "cancel", label: "Cancel", style: "danger" },
         ],
       }),
     );
 
-    expect(blocks).toHaveLength(2);
-    expect((blocks[0] as { type: string }).type).toBe("section");
-
-    const actions = blocks[1] as {
+    expect(blocks).toHaveLength(1);
+    const card = blocks[0] as {
+      body: { text: string; type: string; verbatim: boolean };
+      actions: Array<Record<string, unknown>>;
       type: string;
-      elements: Array<Record<string, unknown>>;
     };
-    expect(actions.type).toBe("actions");
-    expect(actions.elements).toHaveLength(2);
-    const actionIds = actions.elements.map((element) => element.action_id);
+    expect(card).toMatchObject({
+      type: "card",
+      body: { type: "mrkdwn", text: "*Pick one*", verbatim: false },
+    });
+    expect(card.actions).toHaveLength(2);
+    const actionIds = card.actions.map((element) => element.action_id);
     expect(new Set(actionIds).size).toBe(actionIds.length);
-    expect(actions.elements[0]).toMatchObject({
+    expect(card.actions[0]).toMatchObject({
       type: "button",
       action_id: `${HITL_ACTION_PREFIX}call_abc123:button:0`,
       value: "approve",
       style: "primary",
+      text: { type: "plain_text", text: "Approve", emoji: false },
     });
-    expect(actions.elements[1]).toMatchObject({
+    expect(card.actions[1]).toMatchObject({
       type: "button",
       action_id: `${HITL_ACTION_PREFIX}call_abc123:button:1`,
-      value: "deny",
+      value: "cancel",
       style: "danger",
+      text: { type: "plain_text", text: "Cancel", emoji: false },
     });
   });
 
-  it("shows tool input for confirmation approval requests", () => {
+  it("shows tool input for confirmation approval requests in a collapsible container", () => {
     const request = makeRequest({
       action: {
         kind: "tool-call",
@@ -129,26 +168,61 @@ describe("renderInputRequestBlocks", () => {
         },
       },
       display: "confirmation",
+      kind: "tool-approval",
       prompt: "Approve tool call: mongodb-mutate",
       requestId: "approval_1",
       options: [
-        { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "approve", label: "Approve" },
+        { id: "cancel", label: "Cancel" },
       ],
     });
 
     const blocks = renderInputRequestBlocks(request);
 
-    expect(blocks).toHaveLength(3);
-    const details = blocks[1] as { type: string; text: { type: string; text: string } };
-    expect(details).toMatchObject({ type: "section", text: { type: "mrkdwn" } });
-    expect(details.text.text).toContain("*Tool input*");
-    expect(details.text.text).toContain('"collection": "org_members"');
-    expect(details.text.text).toContain('"_id": "qudw7ekkzulpgw3j"');
-    expect(blocks[2]).toMatchObject({ type: "actions" });
+    expect(blocks).toHaveLength(2);
+    const card = blocks[0] as {
+      actions: Array<Record<string, unknown>>;
+      body: { text: string; type: string };
+      type: string;
+    };
+    expect(card).toMatchObject({
+      type: "card",
+      body: { type: "mrkdwn", text: "*Approve tool call: mongodb-mutate*" },
+    });
+    expect(card.actions).toMatchObject([
+      {
+        action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_1:button:0`,
+        text: { text: "Cancel" },
+        value: "cancel",
+      },
+      {
+        action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_1:button:1`,
+        style: "primary",
+        text: { text: "Approve" },
+        value: "approve",
+      },
+    ]);
+
+    const details = blocks[1] as {
+      child_blocks: Array<{ text?: { text?: string }; type: string }>;
+      default_collapsed: boolean;
+      is_collapsible: boolean;
+      title: { text: string; type: string };
+      type: string;
+    };
+    expect(details).toMatchObject({
+      type: "container",
+      title: { type: "plain_text", text: "Tool input" },
+      is_collapsible: true,
+      default_collapsed: false,
+    });
+    expect(details.child_blocks).toHaveLength(1);
+    expect(details.child_blocks[0]).toMatchObject({ type: "section", text: { type: "mrkdwn" } });
+    expect(details.child_blocks[0]?.text?.text).toContain('"collection": "org_members"');
+    expect(details.child_blocks[0]?.text?.text).toContain('"_id": "qudw7ekkzulpgw3j"');
   });
 
-  it("keeps long approval input details within the section limit", () => {
+  it("keeps long approval input details within the collapsible container section limit", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
         action: {
@@ -158,16 +232,22 @@ describe("renderInputRequestBlocks", () => {
           input: { value: "x".repeat(SLACK_SECTION_TEXT_MAX_LENGTH + 500) },
         },
         display: "confirmation",
+        kind: "tool-approval",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
       }),
     );
 
-    const details = blocks[1] as { text: { text: string } };
-    expect(details.text.text.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
-    expect(details.text.text).toMatch(/\.\.\.\n```$/u);
+    const card = blocks[0] as { body: { text: string } };
+    expect(card.body.text.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
+    expect(card.body.text).toBe("*Pick one*");
+
+    const details = blocks[1] as { child_blocks: Array<{ text?: { text?: string } }> };
+    const text = details.child_blocks[0]?.text?.text;
+    expect(text?.length).toBeLessThanOrEqual(SLACK_SECTION_TEXT_MAX_LENGTH);
+    expect(text?.endsWith("...\n```")).toBe(true);
   });
 
   it("renders a radio_buttons widget for select-display requests with ≤6 options", () => {
@@ -243,19 +323,19 @@ describe("renderInputRequestBlocks", () => {
     expect(button.style).toBe("primary");
   });
 
-  it("emits the freeform button alongside options when allowFreeform is set", () => {
+  it("uses option buttons when allowFreeform is set alongside options", () => {
     const blocks = renderInputRequestBlocks(
       makeRequest({
         allowFreeform: true,
-        options: [{ id: "yes", label: "Yes" }],
+        options: [{ id: "yes", label: "Approve" }],
       }),
     );
     // current behavior: options take precedence; freeform button is the
     // fallback when no options are supplied. This documents the
     // option-only path; freeform-with-options is left as future work.
-    expect(blocks).toHaveLength(2);
-    const actions = blocks[1] as { elements: Array<{ action_id: string }> };
-    const ids = actions.elements.map((e) => e.action_id);
+    expect(blocks).toHaveLength(1);
+    const card = blocks[0] as { actions: Array<{ action_id: string }> };
+    const ids = card.actions.map((e) => e.action_id);
     for (const id of ids) {
       expect(id.startsWith(HITL_ACTION_PREFIX)).toBe(true);
     }
@@ -268,13 +348,15 @@ describe("renderInputRequestBlocks", () => {
     });
 
     const blocks = renderInputRequestBlocks(request);
-    const button = (blocks[1] as { elements: Array<{ action_id: string; value: string }> })
-      .elements[0]!;
+    const button = (blocks[0] as { actions: Array<{ action_id: string; value: string }> })
+      .actions[0]!;
 
     const response = deriveHitlResponse({ actionId: button.action_id, value: button.value });
     expect(response).toEqual({
-      requestId: "call_with_many_underscores_99",
-      optionId: "yes_please",
+      response: {
+        requestId: "call_with_many_underscores_99",
+        optionId: "yes_please",
+      },
     });
   });
 
@@ -316,8 +398,10 @@ describe("renderInputRequestBlocks", () => {
       selectedOptionValue: widget.options[0]!.value,
     });
     expect(response).toEqual({
-      requestId: "call_with_many_underscores_99",
-      optionId: "weekly_report",
+      response: {
+        requestId: "call_with_many_underscores_99",
+        optionId: "weekly_report",
+      },
     });
   });
 });
@@ -337,10 +421,11 @@ describe("formatInputRequestFallbackText", () => {
           },
         },
         display: "confirmation",
+        kind: "tool-approval",
         prompt: "Approve tool call: mongodb-mutate",
         options: [
-          { id: "approve", label: "Yes" },
-          { id: "deny", label: "No" },
+          { id: "approve", label: "Approve" },
+          { id: "cancel", label: "Cancel" },
         ],
       }),
     );
@@ -463,10 +548,10 @@ describe("buildAnsweredBlocks", () => {
   });
 
   it("omits the attribution block when no userId is supplied", () => {
-    const blocks = buildAnsweredBlocks({ promptBlocks: [], answerLabel: "Deny" });
+    const blocks = buildAnsweredBlocks({ promptBlocks: [], answerLabel: "Cancel" });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({
-      text: { text: ":white_check_mark: *Deny*" },
+      text: { text: ":white_check_mark: *Cancel*" },
     });
   });
 

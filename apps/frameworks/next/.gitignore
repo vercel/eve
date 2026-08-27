@@ -37,7 +37,6 @@ yarn-error.log*
 .eve
 .swc
 .output
-.workflow-data
 
 # vercel
 .vercel

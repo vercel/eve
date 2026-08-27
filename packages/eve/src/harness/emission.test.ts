@@ -2,6 +2,7 @@ import { jsonSchema, type TextStreamPart, type ToolSet } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  emitTurnPreamble,
   emitStreamContent,
   getHarnessEmissionState,
   type HarnessEmissionState,
@@ -126,33 +127,72 @@ describe("setHarnessEmissionState", () => {
   });
 });
 
+describe("emitTurnPreamble", () => {
+  it("attaches one trace context to the session and turn start events", async () => {
+    const events: Array<Parameters<HarnessEmitFn>[0]> = [];
+    const trace = {
+      spanId: "0123456789abcdef",
+      traceFlags: 1,
+      traceId: "0123456789abcdef0123456789abcdef",
+    };
+
+    await emitTurnPreamble(
+      async (event) => {
+        events.push(event);
+      },
+      { message: "hello" },
+      { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "" },
+      undefined,
+      trace,
+    );
+
+    expect(events.slice(0, 2)).toEqual([
+      { data: { trace }, type: "session.started" },
+      { data: { sequence: 0, trace, turnId: "turn_0" }, type: "turn.started" },
+    ]);
+  });
+});
+
 describe("emitStreamContent empty delivery", () => {
-  it("emits each normal text delta before reading the next stream part", async () => {
-    const emit = createEmitStub();
-    let releaseSecondPart!: () => void;
-    const secondPartReady = new Promise<void>((resolve) => {
-      releaseSecondPart = resolve;
+  it("reduces 368 saturated deltas to eight bounded dispatches", async () => {
+    const deltaCount = 368;
+    const writeReleases: Array<() => void> = [];
+    let providerDeltas = 0;
+    let providerFinished = false;
+    const emit = vi.fn(async (_event: Parameters<HarnessEmitFn>[0]) => {
+      await new Promise<void>((resolve) => {
+        writeReleases.push(resolve);
+      });
     });
     async function* controlledStream(): AsyncIterable<TextStreamPart<ToolSet>> {
-      yield { id: "text-1", text: "first", type: "text-delta" } as TextStreamPart<ToolSet>;
-      await secondPartReady;
-      yield { id: "text-1", text: " second", type: "text-delta" } as TextStreamPart<ToolSet>;
+      for (let index = 0; index < deltaCount; index += 1) {
+        providerDeltas += 1;
+        yield { id: "text-1", text: "x", type: "text-delta" } as TextStreamPart<ToolSet>;
+      }
       yield { finishReason: "stop", type: "finish-step" } as TextStreamPart<ToolSet>;
+      providerFinished = true;
     }
 
     const run = emitStreamContent(emit, EMISSION_STATE, controlledStream());
-    try {
-      await vi.waitFor(() => expect(emit).toHaveBeenCalledTimes(1));
-      expect(vi.mocked(emit).mock.calls[0]?.[0]).toEqual(
-        expect.objectContaining({
-          data: expect.objectContaining({ messageDelta: "first", messageSoFar: "first" }),
-          type: "message.appended",
-        }),
-      );
-    } finally {
-      releaseSecondPart();
-      await run;
+    await vi.waitFor(() => expect(providerDeltas).toBe(65));
+    expect(providerFinished).toBe(false);
+    expect(emit).toHaveBeenCalledTimes(1);
+
+    for (let writeIndex = 0; writeIndex < 8; writeIndex += 1) {
+      await vi.waitFor(() => expect(writeReleases.length).toBe(writeIndex + 1));
+      writeReleases[writeIndex]?.();
     }
+    await run;
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const appended = events.filter((event) => event.type === "message.appended");
+    expect(providerFinished).toBe(true);
+    expect(events).toHaveLength(8);
+    expect(appended.map((event) => event.data.messageDelta.length)).toEqual([
+      1, 64, 64, 64, 64, 64, 47,
+    ]);
+    expect(appended.at(-1)?.data.messageSoFar).toBe("x".repeat(deltaCount));
+    expect(events.at(-1)?.type).toBe("message.completed");
   });
 
   it("streams a split sentinel immediately and completes with a null message", async () => {
@@ -237,6 +277,35 @@ describe("emitStreamContent empty delivery", () => {
 });
 
 describe("emitStreamContent action requests", () => {
+  it("cancels a pending provider action batch when the stream aborts", async () => {
+    vi.useFakeTimers();
+    const emit = createEmitStub();
+
+    try {
+      await expect(
+        emitStreamContent(
+          emit,
+          EMISSION_STATE,
+          streamOf([
+            {
+              input: { query: "eve" },
+              providerExecuted: true,
+              toolCallId: "search-1",
+              toolName: "web_search",
+              type: "tool-call",
+            },
+            { reason: "cancelled", type: "abort" },
+          ] as TextStreamPart<ToolSet>[]),
+        ),
+      ).rejects.toMatchObject({ name: "AbortError" });
+
+      await vi.runAllTimersAsync();
+      expect(emit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("emits a provider action batch before any provider result arrives", async () => {
     const events: Parameters<HarnessEmitFn>[0][] = [];
     const emit: HarnessEmitFn = async (event) => {
@@ -339,7 +408,7 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
-  it("projects local and provider tool results at the same stream position", async () => {
+  it("emits local preliminary results and drops provider preliminary results", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [
         "web_search",
@@ -398,8 +467,24 @@ describe("emitStreamContent action requests", () => {
     const localEvents = vi.mocked(localEmit).mock.calls.map(([event]) => event);
     const providerEvents = vi.mocked(providerEmit).mock.calls.map(([event]) => event);
 
-    expect(localEvents).toEqual(providerEvents);
     expect(localEvents.map((event) => event.type)).toEqual([
+      "message.appended",
+      "message.completed",
+      "actions.requested",
+      "action.partial",
+      "action.result",
+      "message.appended",
+      "message.completed",
+    ]);
+    expect(localEvents[3]).toMatchObject({
+      data: { result: { output: { results: ["partial"] } } },
+      type: "action.partial",
+    });
+    expect(localEvents[4]).toMatchObject({
+      data: { result: { output: { results: ["eve"] } } },
+      type: "action.result",
+    });
+    expect(providerEvents.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
       "actions.requested",
@@ -407,10 +492,6 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
-    expect(localEvents[3]).toMatchObject({
-      data: { result: { output: { results: ["eve"] } } },
-      type: "action.result",
-    });
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {
@@ -493,9 +574,172 @@ describe("emitStreamContent action requests", () => {
     ]);
     expect(providerResult.trailingInlineToolResultParts).toEqual([]);
   });
+
+  it("turns non-object tool call input into a failed tool result for the model", async () => {
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "web_search",
+        {
+          description: "Search the web.",
+          execute: async () => ({ results: [] }),
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "web_search",
+        },
+      ],
+    ]);
+    const emit = createEmitStub();
+    const message =
+      'Failed to parse tool-call arguments for "web_search" (call-bad): Expected a JSON-serializable object.';
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: '"not an object"',
+          toolCallId: "call-bad",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools,
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: { code: "ACTION_RESULT_FAILED", message },
+          result: {
+            callId: "call-bad",
+            isError: true,
+            kind: "tool-result",
+            output: message,
+            toolName: "web_search",
+          },
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    expect([...result.invalidInputToolCallIds]).toEqual(["call-bad"]);
+    expect(result.trailingInlineToolResultParts).toEqual([
+      {
+        output: { type: "error-text", value: message },
+        toolCallId: "call-bad",
+        toolName: "web_search",
+        type: "tool-result",
+      },
+    ]);
+  });
+
+  it("turns malformed provider-executed tool call input into a failed tool result", async () => {
+    const emit = createEmitStub();
+
+    const result = await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          // Opus 5 has emitted syntactically invalid JSON for provider
+          // web_search arguments: an unquoted bare value.
+          input: '{"objective": "Find the champion.", "search_queries": 2025 NBA Finals}',
+          providerExecuted: true,
+          toolCallId: "call-bad",
+          toolName: "web_search",
+          type: "tool-call",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      {
+        excludedActionToolNames: new Set(),
+        tools: new Map<string, HarnessToolDefinition>(),
+      },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    const actionResult = events.find((event) => event.type === "action.result");
+    if (actionResult?.data.error === undefined) {
+      throw new Error("Expected a failed action.result event.");
+    }
+    const { message } = actionResult.data.error;
+    expect(message).toMatch(/Failed to parse tool-call arguments for "web_search" \(call-bad\):/u);
+    expect(message).not.toContain("Expected a JSON-serializable object.");
+    expect(events).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          error: { code: "ACTION_RESULT_FAILED", message },
+          result: {
+            callId: "call-bad",
+            isError: true,
+            kind: "tool-result",
+            output: message,
+            toolName: "web_search",
+          },
+          status: "failed",
+        }),
+        type: "action.result",
+      }),
+    ]);
+    expect([...result.invalidInputToolCallIds]).toEqual(["call-bad"]);
+    expect(result.trailingInlineToolResultParts).toEqual([
+      {
+        output: { type: "error-text", value: message },
+        toolCallId: "call-bad",
+        toolName: "web_search",
+        type: "tool-result",
+      },
+    ]);
+  });
 });
 
 describe("emitStreamContent error-part handling", () => {
+  it("interrupts a stalled provider pull when the durable emitter fails", async () => {
+    const writeError = new Error("durable write failed");
+    let rejectWrite!: (error: unknown) => void;
+    const firstWrite = new Promise<void>((_resolve, reject) => {
+      rejectWrite = reject;
+    });
+    let providerCancelled = false;
+    let stalledReadStarted = false;
+    const firstPart = {
+      id: "text-1",
+      text: "A",
+      type: "text-delta",
+    } as TextStreamPart<ToolSet>;
+    const stalledStream: AsyncIterable<TextStreamPart<ToolSet>> = {
+      [Symbol.asyncIterator]() {
+        let reads = 0;
+        return {
+          next(): Promise<IteratorResult<TextStreamPart<ToolSet>>> {
+            reads += 1;
+            if (reads === 1) {
+              return Promise.resolve({ done: false, value: firstPart });
+            }
+            stalledReadStarted = true;
+            return new Promise(() => {});
+          },
+          return(): Promise<IteratorResult<TextStreamPart<ToolSet>>> {
+            providerCancelled = true;
+            return Promise.resolve({ done: true, value: undefined });
+          },
+        };
+      },
+    };
+    const run = emitStreamContent(async () => firstWrite, EMISSION_STATE, stalledStream);
+    const rejected = expect(run).rejects.toBe(writeError);
+    await vi.waitFor(() => expect(stalledReadStarted).toBe(true));
+
+    rejectWrite(writeError);
+
+    await rejected;
+    expect(providerCancelled).toBe(true);
+  });
+
   it("preserves the original Error instance when the stream emits one", async () => {
     const original = new TypeError("upstream rejected");
 

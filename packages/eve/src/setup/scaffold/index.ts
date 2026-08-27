@@ -8,6 +8,11 @@ export {
 } from "./create/project.js";
 
 export {
+  scaffoldExtensionProject,
+  type ScaffoldExtensionProjectOptions,
+} from "./create/extension.js";
+
+export {
   DEFAULT_SLACK_CONNECTOR_SLUG,
   SLACK_CHANNEL_DEFAULT_ROUTE,
   deriveSlackConnectorSlug,
@@ -16,10 +21,12 @@ export {
   isNextJsProject,
   listAuthoredChannels,
   normalizeSlackConnectorSlug,
+  resolveVercelHostFrameworkPreset,
   type ChannelKind,
   type ChannelMutationResult,
   type EnsureChannelOptions,
   type SlackConnectorSlug,
+  type WebAuthentication,
   type WebPackageVersions,
 } from "./update/channels.js";
 

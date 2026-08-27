@@ -1,6 +1,6 @@
 import { stripVTControlCharacters } from "node:util";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import type { ApplyAiGatewayCredentialDeps } from "#setup/boxes/apply-ai-gateway-credential.js";
@@ -84,7 +84,70 @@ function flowDeps(args: {
   };
 }
 
+beforeEach(() => {
+  // The flow reads the shell for a gateway key that would shadow the pulled
+  // OIDC token; a developer shell exporting one must not leak in.
+  vi.stubEnv("AI_GATEWAY_API_KEY", "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("runLinkFlow", () => {
+  it("reports the env-file key as active when both credentials exist", async () => {
+    const { prompter } = createFakePrompter({
+      single: (opts) => {
+        if (stripVTControlCharacters(opts.message) === "Vercel project") return "new";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+    });
+    const deps = flowDeps({
+      envFilesByKey: { VERCEL_OIDC_TOKEN: ".env.local", AI_GATEWAY_API_KEY: ".env.local" },
+    });
+
+    const result = await runLinkFlow({
+      appRoot: APP_ROOT,
+      prompter,
+      deps,
+      projectSelection: "create-or-link",
+    });
+
+    expect(result).toEqual({
+      kind: "done",
+      resolution: {
+        credential: "api-key",
+        source: { kind: "env-file", path: ".env.local" },
+      },
+    });
+  });
+
+  it("reports the shell key as active when both credentials exist", async () => {
+    vi.stubEnv("AI_GATEWAY_API_KEY", "vck_shell");
+    const { prompter } = createFakePrompter({
+      single: (opts) => {
+        if (stripVTControlCharacters(opts.message) === "Vercel project") return "new";
+        throw new Error(`Unexpected select: ${opts.message}`);
+      },
+    });
+    const deps = flowDeps({ envFilesByKey: { VERCEL_OIDC_TOKEN: ".env.local" } });
+
+    const result = await runLinkFlow({
+      appRoot: APP_ROOT,
+      prompter,
+      deps,
+      projectSelection: "create-or-link",
+    });
+
+    expect(result).toEqual({
+      kind: "done",
+      resolution: {
+        credential: "api-key",
+        source: { kind: "shell" },
+      },
+    });
+  });
+
   it("shows the current link, then goes directly from team to the existing-project picker", async () => {
     const { prompter, selectMessages } = createFakePrompter({
       single: (opts) => {
@@ -104,17 +167,21 @@ describe("runLinkFlow", () => {
 
     const result = await runLinkFlow({ appRoot: APP_ROOT, prompter, deps });
 
-    expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
+    expect(result).toEqual({
+      kind: "done",
+      resolution: { credential: "oidc", file: ".env.local" },
+    });
     expect(selectMessages).toHaveLength(1);
     expect(stripVTControlCharacters(selectMessages[0] ?? "")).toBe(
       "This directory is already linked to\nweather-app in Acme",
     );
     expect(deps.resolveProvisioning?.pickTeam).toHaveBeenCalled();
+    // Linking suggests the project a create would have named after the agent.
     expect(deps.resolveProvisioning?.pickProject).toHaveBeenCalledWith(
       expect.anything(),
       APP_ROOT,
       "acme",
-      { allowCreateWhenEmpty: false },
+      { allowCreateWhenEmpty: false, suggestedName: "my-agent" },
     );
     expect(deps.resolveProvisioning?.pickNewProjectName).not.toHaveBeenCalled();
     expect(deps.linkProject?.linkProject).toHaveBeenCalled();
@@ -147,7 +214,10 @@ describe("runLinkFlow", () => {
       teamSelectMessage,
     });
 
-    expect(result).toEqual({ kind: "done", credential: "VERCEL_OIDC_TOKEN" });
+    expect(result).toEqual({
+      kind: "done",
+      resolution: { credential: "oidc", file: ".env.local" },
+    });
     // The create path runs the new-project namer and never reaches the
     // existing-project picker — the opposite of the existing-only default.
     expect(deps.resolveProvisioning?.pickNewProjectName).toHaveBeenCalled();

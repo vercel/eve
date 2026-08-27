@@ -1,5 +1,7 @@
 import { toErrorMessage } from "#shared/errors.js";
+import { formatAssertionName } from "#evals/diagnostics.js";
 import type {
+  AssertionEvaluation,
   AssertionHandle,
   AssertionResult,
   AssertionSeverity,
@@ -7,15 +9,7 @@ import type {
 } from "#evals/types.js";
 import type { EveEvalAssertionSubject } from "#evals/assertions/run.js";
 
-/**
- * Outcome of evaluating one assertion: a 0–1 score (boolean assertions use
- * exactly 0 or 1) with optional human-readable detail and metadata.
- */
-export interface AssertionOutcome {
-  readonly score: number;
-  readonly message?: string;
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
+export type AssertionOutcome = AssertionEvaluation;
 
 /**
  * A scoped assertion evaluated lazily after `test(t)` returns. The selected
@@ -27,6 +21,7 @@ export interface RunAssertion {
 }
 
 interface MutableEntry {
+  readonly baseName: string;
   name: string;
   severity: AssertionSeverity;
   threshold: number | undefined;
@@ -63,6 +58,7 @@ export class AssertionCollector {
     severity: AssertionSeverity = "gate",
   ): AssertionHandle {
     const entry: MutableEntry = {
+      baseName: spec.name,
       name: spec.name,
       severity,
       threshold: undefined,
@@ -84,6 +80,7 @@ export class AssertionCollector {
     readonly score: () => Promise<AssertionOutcome>;
   }): AssertionHandle {
     const entry: MutableEntry = {
+      baseName: input.name,
       name: input.name,
       severity: input.severity,
       threshold: input.threshold,
@@ -102,6 +99,7 @@ export class AssertionCollector {
   /** Record an already-computed assertion outcome and return whether it passed. */
   recordOutcome(input: { readonly name: string; readonly outcome: AssertionOutcome }): boolean {
     const entry: MutableEntry = {
+      baseName: input.name,
       name: input.name,
       severity: "gate",
       threshold: undefined,
@@ -122,6 +120,7 @@ export class AssertionCollector {
     readonly score: () => Promise<AssertionOutcome>;
   }): Promise<boolean> {
     const entry: MutableEntry = {
+      baseName: input.name,
       name: input.name,
       severity: "gate",
       threshold: input.threshold,
@@ -214,6 +213,10 @@ function makeHandle(entry: MutableEntry): AssertionHandle {
     atLeast(threshold) {
       entry.severity = "soft";
       entry.threshold = threshold;
+      return handle;
+    },
+    label(label) {
+      entry.name = formatAssertionName(entry.baseName, label);
       return handle;
     },
   };

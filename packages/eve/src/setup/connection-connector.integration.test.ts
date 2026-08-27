@@ -217,6 +217,63 @@ describe("setupConnectionConnector", () => {
     );
   });
 
+  it("surfaces the Vercel error when connector creation fails", async () => {
+    run.mockResolvedValueOnce(false);
+    capture.mockResolvedValue(jsonResult({ connectors: [] }));
+    create.mockResolvedValue({
+      ok: false,
+      stdout: "",
+      stderr: "Vercel CLI 58.5.1\nError: Connect is not enabled for this team.\n",
+    });
+    const fake = createFakePrompter({ single: () => "create", text: () => "acme" });
+
+    await expect(setupConnectionConnector(options(fake.prompter))).rejects.toThrow(
+      `Could not create the ${SERVICE} connector. Vercel returned: Error: Connect is not enabled for this team.`,
+    );
+  });
+
+  it("uses separate discovery and creation services when requested", async () => {
+    run.mockResolvedValue(true);
+    capture.mockResolvedValue(jsonResult({ connectors: [] }));
+    create.mockResolvedValue(connectorResult("mcp.agentcard.sh/agentcard", "scl_created", "user"));
+    const fake = createFakePrompter({ single: () => "create", text: () => "agentcard" });
+
+    await expect(
+      setupConnectionConnector({
+        ...options(fake.prompter),
+        slug: "agentcard",
+        service: "mcp.agentcard.sh/mcp",
+        creationType: "agentcard",
+        canonicalConnectorName: "agentcard",
+        connectionMethod: "mcp",
+      }),
+    ).resolves.toEqual({
+      kind: "created",
+      connectorId: "scl_created",
+      connectorUid: "mcp.agentcard.sh/agentcard",
+    });
+    expect(capture).toHaveBeenCalledWith(
+      expect.arrayContaining(["--service", "mcp.agentcard.sh/mcp"]),
+      expect.any(Object),
+    );
+    expect(create).toHaveBeenCalledWith(
+      [
+        "connect",
+        "create",
+        "agentcard",
+        "--name",
+        "agentcard",
+        "--connection-method",
+        "mcp",
+        "-F",
+        "json",
+        "--scope",
+        "org_1",
+      ],
+      expect.any(Object),
+    );
+  });
+
   it("recovers a partially created connector id from CLI progress and removes it", async () => {
     run.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     capture.mockResolvedValue(jsonResult({ connectors: [] }));

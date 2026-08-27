@@ -36,7 +36,7 @@ void (async () => {
     captureForeignOutput: true,
     logs: "all",
   });
-  const options: EveTUIRunnerOptions = { session: client.session(), client, renderer };
+  const options: EveTUIRunnerOptions = { client, renderer };
   const runner = new EveTUIRunner(options);
 
   const runPromise = runner.run().catch((error: unknown) => {
@@ -47,7 +47,7 @@ void (async () => {
   });
 
   try {
-    await screen.waitForText("❯", 5_000);
+    await screen.waitForIdlePrompt(5_000);
 
     // Two full rebuild cycles, producer-authentic lines. Foreign writes are
     // captured synchronously, so snapshots reflect them immediately.

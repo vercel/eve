@@ -23,9 +23,21 @@
  * session total crosses into it.
  */
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import {
+  findRuntimeTokenLimitViolation,
+  grantRuntimeTokenLimits,
+  remainingRuntimeTokenQuota,
+  resolveRuntimeTokenLimits,
+  type SessionRuntimeTokenLimits,
+  type SessionTokenLimitViolation,
+} from "#harness/session-token-limits.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 
+export type { SessionRuntimeTokenLimits, SessionTokenLimitViolation };
+
 const HARNESS_TURN_USAGE_STATE_KEY = "eve.harness.turnUsage";
+const REPORTED_SESSION_USAGE_STATE_KEY = "eve.harness.reportedSessionUsage";
+const SESSION_RUNTIME_TOKEN_LIMIT_KEY = "eve.harness.sessionRuntimeTokenLimit";
 
 export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
@@ -64,18 +76,6 @@ export function getTurnUsageState(state: SessionStateMap | undefined): TurnUsage
   return state?.[HARNESS_TURN_USAGE_STATE_KEY] as TurnUsageState | undefined;
 }
 
-export type SessionTokenLimitViolation =
-  | {
-      readonly kind: "input";
-      readonly limit: number;
-      readonly usedTokens: number;
-    }
-  | {
-      readonly kind: "output";
-      readonly limit: number;
-      readonly usedTokens: number;
-    };
-
 export function getSessionTokenUsage(session: Pick<HarnessSession, "state">): TokenUsageTotals {
   return getTurnUsageState(session.state)?.session ?? ZERO_TOKEN_USAGE;
 }
@@ -90,27 +90,118 @@ export function toUsage(totals: TokenUsageTotals): TokenUsage {
   };
 }
 
+/**
+ * The lifetime-usage ceilings currently in force, per axis. An axis is
+ * absent when the configured limit leaves it uncapped. Before any granted
+ * continuation the runtime limit equals the configured limit; each grant
+ * re-anchors it to `usage + configured limit` via
+ * {@link bumpSessionRuntimeTokenLimits}.
+ */
+export function getSessionRuntimeTokenLimits(
+  session: Pick<HarnessSession, "limits" | "state">,
+): SessionRuntimeTokenLimits {
+  const stored = session.state?.[SESSION_RUNTIME_TOKEN_LIMIT_KEY] as
+    | SessionRuntimeTokenLimits
+    | undefined;
+  return resolveRuntimeTokenLimits({
+    configured: configuredSessionTokenLimits(session),
+    stored,
+  });
+}
+
+/**
+ * Bumps the runtime token limits after the user grants a continuation:
+ * each capped axis is re-anchored to `current usage + configured limit`, so
+ * one approval always buys one full configured window from the moment of
+ * the grant (even when the last model call overshot by more than a window).
+ * Both axes bump together so a session near two limits gets one prompt, not
+ * two back-to-back. The configured limits never change.
+ */
+export function bumpSessionRuntimeTokenLimits(session: HarnessSession): HarnessSession {
+  const usage = getSessionTokenUsage(session);
+  const bumped = grantRuntimeTokenLimits({
+    configured: configuredSessionTokenLimits(session),
+    usage,
+  });
+  return {
+    ...session,
+    state: {
+      ...session.state,
+      [SESSION_RUNTIME_TOKEN_LIMIT_KEY]: bumped satisfies SessionRuntimeTokenLimits,
+    },
+  };
+}
+
+/**
+ * Remaining lifetime-token quota under the runtime limits, per axis.
+ * `false` marks an uncapped axis. This is the pool a delegated child's
+ * budget is granted from.
+ */
+export function getSessionRemainingTokenQuota(session: Pick<HarnessSession, "limits" | "state">): {
+  inputTokens: number | false;
+  outputTokens: number | false;
+} {
+  const usage = getSessionTokenUsage(session);
+  const runtime = getSessionRuntimeTokenLimits(session);
+  return remainingRuntimeTokenQuota({ runtime, usage });
+}
+
 export function getSessionTokenLimitViolation(
   session: Pick<HarnessSession, "limits" | "state">,
 ): SessionTokenLimitViolation | null {
   const usage = getSessionTokenUsage(session);
-  const maxInputTokensPerSession = session.limits?.maxInputTokensPerSession;
-  const maxOutputTokensPerSession = session.limits?.maxOutputTokensPerSession;
-  if (maxInputTokensPerSession !== undefined && usage.inputTokens >= maxInputTokensPerSession) {
-    return {
-      kind: "input",
-      limit: maxInputTokensPerSession,
-      usedTokens: usage.inputTokens,
-    };
-  }
-  if (maxOutputTokensPerSession !== undefined && usage.outputTokens >= maxOutputTokensPerSession) {
-    return {
-      kind: "output",
-      limit: maxOutputTokensPerSession,
-      usedTokens: usage.outputTokens,
-    };
-  }
-  return null;
+  const runtime = getSessionRuntimeTokenLimits(session);
+  return findRuntimeTokenLimitViolation({
+    configured: configuredSessionTokenLimits(session),
+    runtime,
+    usage,
+  });
+}
+
+function configuredSessionTokenLimits(
+  session: Pick<HarnessSession, "limits">,
+): SessionRuntimeTokenLimits {
+  return {
+    inputTokens: session.limits?.maxInputTokensPerSession,
+    outputTokens: session.limits?.maxOutputTokensPerSession,
+  };
+}
+
+/**
+ * Takes the session-usage delta accumulated since the previous take and
+ * marks it reported.
+ *
+ * Persisted on `session.state` (not in step-local memory) so the entry
+ * snapshot survives `"use step"` boundaries: the totals at the previous
+ * settled turn are the totals at this turn's entry, because a parked child
+ * runs no model calls in between. Blocked parks (authorization, queued
+ * input) between two settlements never lose usage — the delta always
+ * measures everything since the last report, so the deltas of a
+ * multi-turn persistent child sum exactly to its session totals.
+ */
+export function takeSessionUsageDelta(session: HarnessSession): {
+  readonly delta: TokenUsage;
+  readonly session: HarnessSession;
+} {
+  const totals = getSessionTokenUsage(session);
+  const reported =
+    (session.state?.[REPORTED_SESSION_USAGE_STATE_KEY] as TokenUsageTotals | undefined) ??
+    ZERO_TOKEN_USAGE;
+  return {
+    delta: {
+      cacheReadTokens: totals.cacheReadTokens - reported.cacheReadTokens,
+      cacheWriteTokens: totals.cacheWriteTokens - reported.cacheWriteTokens,
+      inputTokens: totals.inputTokens - reported.inputTokens,
+      outputTokens: totals.outputTokens - reported.outputTokens,
+    },
+    session: {
+      ...session,
+      state: {
+        ...session.state,
+        [REPORTED_SESSION_USAGE_STATE_KEY]: totals,
+      },
+    },
+  };
 }
 
 /** Writes per-turn token state onto a new copy of the session. */
@@ -146,6 +237,30 @@ export function accumulateTurnUsage(input: {
     ...addTokenUsage(turnBase, delta),
     turnId: input.turnId,
     session: addTokenUsage(previousSession, delta),
+  };
+}
+
+/**
+ * Folds a delegated child session's reported totals into the parent's
+ * session totals without touching the in-flight turn totals. Turn tags
+ * attribute only the parent's own model calls (child spend is attributed by
+ * the caller-side `invoke_agent` span); session totals feed the session
+ * token limits and the remaining-quota budget granted to later delegations.
+ */
+export function accumulateSessionUsage(input: {
+  readonly previous: TurnUsageState | undefined;
+  readonly usage: TokenUsageDelta;
+}): TurnUsageState {
+  const delta = toTokenUsageDelta(input.usage);
+  const base = input.previous ?? {
+    ...ZERO_TOKEN_USAGE,
+    session: ZERO_TOKEN_USAGE,
+    turnId: "",
+  };
+
+  return {
+    ...base,
+    session: addTokenUsage(base.session, delta),
   };
 }
 

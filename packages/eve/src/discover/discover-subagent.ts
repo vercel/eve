@@ -2,6 +2,10 @@ import { join, relative, resolve } from "node:path";
 import { discoverConnectionSources } from "#discover/connections.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import {
+  discoverExtensionMountDeclarations,
+  resolveExtensionMounts,
+} from "#discover/discover-agent.js";
+import {
   classifyLocalSubagentEntry,
   getDirectoryEntryType,
   getSupportedModuleBaseName,
@@ -19,6 +23,7 @@ import {
 } from "#discover/grammar.js";
 import { DISCOVER_HOOKS_DIRECTORY_INVALID } from "#discover/grammar.js";
 import { discoverLibSources } from "#discover/lib.js";
+import { discoverMemorySources } from "#discover/memory.js";
 import {
   type CreateAgentSourceManifestInput,
   createAgentSourceManifest,
@@ -227,6 +232,13 @@ async function discoverLocalSubagentPackage(input: {
   });
   diagnostics.push(...connectionsResult.diagnostics);
 
+  const memoryResult = await discoverMemorySources({
+    rootEntries,
+    rootPath: input.subagentRoot,
+    source: input.source,
+  });
+  diagnostics.push(...memoryResult.diagnostics);
+
   const sandboxResult = await discoverSandboxSource({
     rootEntries,
     rootPath: input.subagentRoot,
@@ -280,12 +292,28 @@ async function discoverLocalSubagentPackage(input: {
   });
   diagnostics.push(...subagentsResult.diagnostics);
 
+  const extensionsResult = await discoverExtensionMountDeclarations({
+    agentRoot: input.subagentRoot,
+    source: input.source,
+  });
+  diagnostics.push(...extensionsResult.diagnostics);
+  const resolvedExtensions = await resolveExtensionMounts({
+    agentRoot: input.subagentRoot,
+    appRoot: input.appRoot,
+    mounts: extensionsResult.mounts,
+    source: input.source,
+  });
+  diagnostics.push(...resolvedExtensions.diagnostics);
+
   const manifestInput: CreateAgentSourceManifestInput = {
     agentRoot: input.subagentRoot,
     appRoot: input.appRoot,
     connections: connectionsResult.connections,
     diagnostics,
+    extensions: extensionsResult.mounts.map((mount) => mount.mountRef),
+    resolvedExtensions: resolvedExtensions.mounts,
     hooks: hooksResult.sources,
+    memories: memoryResult.memories,
     lib: libResult.lib,
     instructions: instructionsResult.instructions,
     sandbox: sandboxResult.sandbox,

@@ -12,8 +12,9 @@
 
 import { type AlsContext, contextStorage } from "#context/container.js";
 import { AuthKey, type SessionAuthContext } from "#context/keys.js";
-import { ConnectionAuthorizationFailedError } from "#public/connections/errors.js";
-import type { AuthorizationDefinition, ConnectionPrincipal } from "#runtime/connections/types.js";
+import { ConnectionAuthorizationFailedError } from "#connections/errors.js";
+import type { AuthorizationDefinition, ConnectionPrincipal } from "#shared/connection-types.js";
+import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
 /**
  * Stable string key identifying one principal within a connection's
@@ -83,11 +84,20 @@ export function resolveConnectionPrincipal(
   authorization: AuthorizationDefinition,
   ctx: AlsContext | undefined = contextStorage.getStore(),
 ): ConnectionPrincipal {
+  return resolveConnectionPrincipalFromAuth(connectionName, authorization, ctx?.get(AuthKey), ctx);
+}
+
+/** Resolves a connection principal from an explicitly bound session identity. */
+export function resolveConnectionPrincipalFromAuth(
+  connectionName: string,
+  authorization: AuthorizationDefinition,
+  current: SessionAuthContext | null | undefined,
+  ctx?: AlsContext,
+): ConnectionPrincipal {
   if (authorization.principalType === "app") {
     return { type: "app" };
   }
 
-  const current = ctx?.get(AuthKey);
   if (current === null || current === undefined || current.principalType !== "user") {
     throw new ConnectionAuthorizationFailedError(connectionName, {
       message: buildUserPrincipalRequiredMessage(connectionName, authorization, ctx, current),
@@ -115,7 +125,7 @@ export function resolveConnectionPrincipal(
 function isVercelDevelopmentUser(current: SessionAuthContext): boolean {
   return (
     current.authenticator === "oidc" &&
-    current.issuer?.startsWith("https://oidc.vercel.com/") === true &&
+    isVercelOidcIssuer(current.issuer) &&
     current.attributes.environment === "development" &&
     current.subject === current.attributes.user_id
   );

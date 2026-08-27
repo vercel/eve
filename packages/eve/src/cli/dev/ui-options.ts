@@ -32,7 +32,9 @@ export function resolveDevUiMode(input: {
 export function resolveTuiDisplayOptions(options: DevelopmentTuiOptions): TuiDisplayOptions {
   const display: TuiDisplayOptions = {
     logs: options.logs ?? "stderr",
-    reasoning: options.reasoning ?? "full",
+    // Collapsed reasoning renders as the fixed thinking line; `--reasoning
+    // full` restores the streaming transcript trace.
+    reasoning: options.reasoning ?? "auto-collapsed",
     tools: options.tools ?? "auto-collapsed",
   };
 

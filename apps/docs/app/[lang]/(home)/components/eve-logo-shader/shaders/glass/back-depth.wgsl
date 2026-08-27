@@ -1,4 +1,5 @@
-import { Params, VertexInput, VertexOutput, glass_vs_main, is_back_facing_to_camera } from "../shared/glass-common.wgsl";
+import { Params } from "../shared/scene-params.wgsl";
+import { VertexInput, VertexOutput, glass_vs_main, is_back_facing_to_camera } from "../shared/glass-vertex.wgsl";
 
 @group(0) @binding(0) var<uniform> params: Params;
 

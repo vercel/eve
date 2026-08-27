@@ -1,9 +1,9 @@
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
 /**
- * Default for `limits.maxSubagents`: the maximum number of subagent (and
- * remote-agent) calls one `Workflow` tool invocation may dispatch.
+ * Default maximum number of subagent (and remote-agent) calls one `Workflow`
+ * tool invocation may dispatch.
  */
 export const DEFAULT_WORKFLOW_MAX_SUBAGENTS = 100;
 

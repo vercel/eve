@@ -1,14 +1,18 @@
 import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
-import { registerDefinitionSource, stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
+import {
+  registerDefinitionSource,
+  stampDefinitionKey,
+} from "#internal/authored-definition/source-identity.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
   ConnectionAuthResolver,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 
@@ -74,6 +78,7 @@ export async function resolveConnectionDefinition(
       sourceId: string;
       sourceKind: "module";
       spec?: ResolvedConnectionDefinition["spec"];
+      toolCall?: Readonly<ConnectionToolCallDefinition>;
       tools?: Readonly<ToolFilterDefinition>;
       url: string;
     } = {
@@ -107,6 +112,10 @@ export async function resolveConnectionDefinition(
 
     if (hasHeaders) {
       result.headers = resolvedRecord.headers as Readonly<HeadersDefinition>;
+    }
+
+    if (resolvedRecord.toolCall !== undefined) {
+      result.toolCall = resolvedRecord.toolCall as Readonly<ConnectionToolCallDefinition>;
     }
 
     if (filter !== undefined) {

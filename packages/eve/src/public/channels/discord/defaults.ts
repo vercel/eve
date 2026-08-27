@@ -55,6 +55,12 @@ export const defaultEvents: DiscordChannelEvents = {
     await channel.discord.startTyping();
   },
 
+  async "authorization.completed"(event, channel, _ctx) {
+    if (event.outcome === "authorized") {
+      await channel.discord.startTyping();
+    }
+  },
+
   async "actions.requested"(_event, channel, _ctx) {
     await channel.discord.startTyping();
   },

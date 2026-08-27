@@ -10,6 +10,7 @@ export {
 export { type GitHubHandle, type GitHubThread } from "#public/channels/github/binding.js";
 export {
   type GitHubAppId,
+  type GitHubBotName,
   type GitHubChannelCredentials,
   type GitHubInstallationToken,
   type GitHubPrivateKey,

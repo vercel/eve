@@ -1,16 +1,18 @@
 import type { TelegramInstrumentationMetadata } from "#public/channels/telegram/index.js";
 import { defaultDeliverResult, type ChannelAdapterContext } from "#channel/adapter.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { ChannelSessionOps } from "#public/definitions/defineChannel.js";
+import type { ChannelContinuationOps } from "#public/definitions/channel.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import {
   answerTelegramCallbackQuery,
   callTelegramApi,
   editTelegramMessageReplyMarkup,
+  editTelegramMessageText,
   sendTelegramChatAction,
   sendTelegramMessage,
   splitTelegramMessageText,
@@ -21,12 +23,18 @@ import {
   type TelegramMessageBody,
   type TelegramMessageResult,
 } from "#public/channels/telegram/api.js";
+import { TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX } from "#public/channels/telegram/authorization.js";
+import { dispatchTelegramAuthorizationCallback } from "#public/channels/telegram/authorization-callback.js";
 import {
   buildTelegramTurnMessage,
   collectTelegramFileParts,
   createTelegramFetchFile,
 } from "#public/channels/telegram/attachments.js";
-import { defaultEvents, defaultOnMessage } from "#public/channels/telegram/defaults.js";
+import {
+  defaultEvents,
+  defaultOnMessage,
+  isTelegramBotMentioned,
+} from "#public/channels/telegram/defaults.js";
 import {
   TELEGRAM_HITL_CALLBACK_PREFIX,
   isTelegramSyntheticResponse,
@@ -48,22 +56,24 @@ import {
   type UploadPolicyInput,
 } from "#public/channels/upload-policy.js";
 import {
+  initialTelegramState,
+  stateFromTelegramCallbackQuery,
+  stateFromTelegramMessage,
+  telegramContinuationTokenFromState,
+} from "#public/channels/telegram/state.js";
+import {
   verifyTelegramRequest,
   type TelegramWebhookSecretToken,
   type TelegramWebhookVerifier,
 } from "#public/channels/telegram/verify.js";
-import {
-  defineChannel,
-  POST,
-  type Channel,
-  type SendFn,
-} from "#public/definitions/defineChannel.js";
+import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import { telegramInstrumentationMetadata } from "#public/channels/telegram/audience.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 
 const log = createLogger("telegram.channel");
 
-type EventData<T extends HandleMessageStreamEvent["type"]> =
-  Extract<HandleMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
+type EventData<T extends UnstampedMessageStreamEvent["type"]> =
+  Extract<UnstampedMessageStreamEvent, { type: T }> extends { data: infer D } ? D : undefined;
 
 /** Minimal Telegram context (only `telegram`, no `state` or session ops), passed to `onMessage` and `onCallbackQuery` hooks before a session exists. Event handlers receive the richer {@link TelegramEventContext}. */
 export interface TelegramContext {
@@ -75,8 +85,8 @@ export interface TelegramChannelContext extends TelegramContext {
   state: TelegramChannelState;
 }
 
-/** Event-handler Telegram context, including session operations. */
-export interface TelegramEventContext extends TelegramChannelContext, ChannelSessionOps {}
+/** Event-handler Telegram context, including continuation routing. */
+export interface TelegramEventContext extends TelegramChannelContext, ChannelContinuationOps {}
 
 /** JSON-serializable Telegram channel state. */
 export interface TelegramChannelState extends TelegramHitlState {
@@ -92,6 +102,8 @@ export interface TelegramChannelState extends TelegramHitlState {
   messageThreadId: number | null;
   /** Telegram user id that triggered the current session/turn. */
   triggeringUserId?: string | null;
+  /** Public authorization status messages, keyed by connection name. */
+  pendingAuthMessageIds?: Record<string, string>;
 }
 
 /** Telegram channel credentials. `webhookVerifier` is a custom inbound webhook verifier for forwarded webhooks. */
@@ -113,12 +125,14 @@ export interface TelegramReceiveTarget {
 export type TelegramInboundResult = {
   readonly auth: SessionAuthContext | null;
   readonly context?: readonly string[];
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  readonly title?: string;
 } | null;
 
 /** Sync or async {@link TelegramInboundResult}. */
 export type TelegramInboundResultOrPromise = TelegramInboundResult | Promise<TelegramInboundResult>;
 
-type TelegramEventHandler<T extends HandleMessageStreamEvent["type"]> = (
+type TelegramEventHandler<T extends UnstampedMessageStreamEvent["type"]> = (
   data: EventData<T>,
   channel: TelegramEventContext,
   ctx: SessionContext,
@@ -129,16 +143,18 @@ type TelegramSessionFailedHandler = (
   channel: TelegramEventContext,
 ) => void | Promise<void>;
 
-/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)`; all others also receive the {@link SessionContext}. */
+/** Per-event handlers for `telegramChannel({ events })`. Each entry overrides the built-in default (handlers merge over {@link defaultEvents}). `session.failed` receives `(data, channel)` and exposes the ID as `data.sessionId`; all others also receive the {@link SessionContext}. */
 export interface TelegramChannelEvents {
   readonly "turn.started"?: TelegramEventHandler<"turn.started">;
   readonly "actions.requested"?: TelegramEventHandler<"actions.requested">;
+  readonly "action.partial"?: TelegramEventHandler<"action.partial">;
   readonly "action.result"?: TelegramEventHandler<"action.result">;
   readonly "message.completed"?: TelegramEventHandler<"message.completed">;
   readonly "message.appended"?: TelegramEventHandler<"message.appended">;
   readonly "input.requested"?: TelegramEventHandler<"input.requested">;
   readonly "turn.failed"?: TelegramEventHandler<"turn.failed">;
   readonly "turn.completed"?: TelegramEventHandler<"turn.completed">;
+  readonly "turn.cancelled"?: TelegramEventHandler<"turn.cancelled">;
   readonly "session.failed"?: TelegramSessionFailedHandler;
   readonly "session.completed"?: TelegramEventHandler<"session.completed">;
   readonly "session.waiting"?: TelegramEventHandler<"session.waiting">;
@@ -168,6 +184,8 @@ export interface TelegramChannelConfig {
   ) => TelegramInboundResultOrPromise;
   /** Override the default webhook route path (`/eve/v1/telegram`). */
   readonly route?: string;
+  /** Policy for accepted messages that arrive while a turn is active. */
+  readonly turnPolicy?: TurnPolicy;
   /** Inbound upload policy for Telegram photos and documents. */
   readonly uploadPolicy?: UploadPolicyInput;
 }
@@ -182,6 +200,12 @@ export interface TelegramHandle {
 
   request(method: string, body?: JsonObject): Promise<TelegramApiResponse>;
   post(message: string | TelegramMessageBody): Promise<TelegramMessageResult>;
+  /** Posts a group or supergroup message visible only to `userId`. */
+  postEphemeral(
+    userId: number | string,
+    message: string | TelegramMessageBody,
+    options?: { readonly callbackQueryId?: string },
+  ): Promise<TelegramMessageResult>;
   sendMessage(message: string | TelegramMessageBody): Promise<TelegramMessageResult>;
   startTyping(action?: string): Promise<void>;
   answerCallbackQuery(input: {
@@ -192,6 +216,11 @@ export interface TelegramHandle {
   editMessageReplyMarkup(input: {
     readonly messageId: number | string;
     readonly replyMarkup?: Readonly<Record<string, unknown>>;
+  }): Promise<TelegramApiResponse>;
+  editMessageText(input: {
+    readonly messageId: number | string;
+    readonly replyMarkup?: Readonly<Record<string, unknown>>;
+    readonly text: string;
   }): Promise<TelegramApiResponse>;
 }
 
@@ -215,12 +244,9 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     TelegramInstrumentationMetadata
   >({
     kindHint: "telegram",
+    turnPolicy: config.turnPolicy,
     state: initialTelegramState(config.botUsername),
-    metadata: (state) => ({
-      chatId: state.chatId,
-      chatType: state.chatType,
-      triggeringUserId: state.triggeringUserId ?? null,
-    }),
+    metadata: telegramInstrumentationMetadata,
     fetchFile: createTelegramFetchFile({
       api: config.api,
       credentials: config.credentials,
@@ -234,7 +260,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
     routes: [
       POST<TelegramChannelState>(
         config.route ?? "/eve/v1/telegram",
-        async (req, { send, waitUntil }) => {
+        async (req, { from, resolveSession, waitUntil }) => {
           const body = await verifyInbound(req, config.credentials);
           if (body === null) return new Response("unauthorized", { status: 401 });
 
@@ -255,8 +281,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
                 config,
                 message: update.message,
                 onMessage,
-                send,
                 uploadPolicy,
+                from,
               }),
             );
             return new Response("ok");
@@ -266,7 +292,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
             dispatchCallbackQuery({
               config,
               query: update.callbackQuery,
-              send,
+              from,
+              resolveSession,
             }),
           );
           return new Response("ok");
@@ -274,7 +301,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
       ),
     ],
 
-    async receive(input, { send }) {
+    async receive(input, { from }) {
       const receiveTarget = input.target as Partial<TelegramReceiveTarget>;
       const chatId = readChatId(receiveTarget.chatId);
       if (chatId === undefined) {
@@ -284,7 +311,7 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
         typeof receiveTarget.messageThreadId === "number"
           ? receiveTarget.messageThreadId
           : undefined;
-      const requestedConversationId = readOptionalString(receiveTarget.conversationId);
+      const requestedConversationId = readChatId(receiveTarget.conversationId);
       const initialMessage = receiveTarget.initialMessage;
       if (initialMessage !== undefined && requestedConversationId !== undefined) {
         throw new Error(
@@ -307,9 +334,8 @@ export function telegramChannel(config: TelegramChannelConfig = {}): TelegramCha
         await handle.sendMessage(initialMessage);
       }
 
-      return send(input.message, {
+      return from(telegramContinuationTokenFromState(receiveState)).send(input.message, {
         auth: input.auth,
-        continuationToken: continuationTokenFromState(receiveState),
         state: receiveState,
       });
     },
@@ -349,7 +375,7 @@ function buildTelegramHandle(input: {
     if (!posted.id || !shouldAnchorTelegramConversation(chatType)) return;
     state.conversationId = posted.id;
     if (state.chatId) {
-      input.session?.setContinuationToken(
+      input.session?.continuation?.rekey(
         telegramContinuationToken({
           chatId: state.chatId,
           conversationId: posted.id,
@@ -360,9 +386,15 @@ function buildTelegramHandle(input: {
   }
 
   async function sendOne(body: TelegramMessageBody): Promise<TelegramMessageResult> {
+    const posted = await sendMessage(body);
+    anchor(posted);
+    return posted;
+  }
+
+  async function sendMessage(body: TelegramMessageBody): Promise<TelegramMessageResult> {
     const chatId = state.chatId ?? "";
     if (!chatId) throw new Error("telegramChannel: missing chat id for outbound message.");
-    const posted = await sendTelegramMessage({
+    return sendTelegramMessage({
       apiBaseUrl: api?.apiBaseUrl,
       body: {
         ...body,
@@ -373,8 +405,6 @@ function buildTelegramHandle(input: {
       fileBaseUrl: api?.fileBaseUrl,
       chatId,
     });
-    anchor(posted);
-    return posted;
   }
 
   return {
@@ -405,8 +435,36 @@ function buildTelegramHandle(input: {
         replyMarkup: args.replyMarkup,
       });
     },
+    editMessageText(args) {
+      const chatId = state.chatId ?? "";
+      if (!chatId) throw new Error("telegramChannel: missing chat id for text edit.");
+      return editTelegramMessageText({
+        apiBaseUrl: api?.apiBaseUrl,
+        chatId,
+        credentials,
+        fetch: api?.fetch,
+        messageId: args.messageId,
+        replyMarkup: args.replyMarkup,
+        text: args.text,
+      });
+    },
     post(message) {
       return postTelegramMessage(message, sendOne);
+    },
+    postEphemeral(userId, message, options) {
+      const body = typeof message === "string" ? { text: message } : message;
+      return postTelegramMessage(
+        {
+          ...body,
+          ephemeral_message_parameters: {
+            ...(options?.callbackQueryId === undefined
+              ? {}
+              : { callback_query_id: options.callbackQueryId }),
+            receiver_user_id: userId,
+          },
+        },
+        sendMessage,
+      );
     },
     request(method, body) {
       return callTelegramApi({
@@ -452,7 +510,16 @@ async function postTelegramMessage(
   let first: TelegramMessageResult | undefined;
 
   for (const [index, text] of chunks.entries()) {
-    const posted = await sendOne(index === 0 ? { ...body, text } : { text });
+    const posted = await sendOne(
+      index === 0
+        ? { ...body, text }
+        : {
+            ...(body.ephemeral_message_parameters === undefined
+              ? {}
+              : { ephemeral_message_parameters: body.ephemeral_message_parameters }),
+            text,
+          },
+    );
     if (first === undefined) first = posted;
   }
 
@@ -478,12 +545,12 @@ async function dispatchMessage(input: {
   readonly config: TelegramChannelConfig;
   readonly message: TelegramMessage;
   readonly onMessage: NonNullable<TelegramChannelConfig["onMessage"]>;
-  readonly send: SendFn<TelegramChannelState>;
+  readonly from: ChannelFrom<TelegramChannelState>;
   readonly uploadPolicy: UploadPolicy;
 }): Promise<void> {
   if (input.message.from?.isBot === true) return;
 
-  const state = stateFromMessage(input.message, input.config);
+  const state = stateFromTelegramMessage(input.message, input.config.botUsername);
   const telegram: TelegramContext = {
     telegram: buildTelegramHandle({ config: input.config, state }),
   };
@@ -504,6 +571,7 @@ async function dispatchMessage(input: {
     chatId: input.message.chat.id,
     chatTitle: input.message.chat.title,
     chatType: input.message.chat.type,
+    isMentioned: isTelegramBotMentioned(input.message, input.config.botUsername),
     messageId: input.message.messageId,
     messageThreadId: input.message.messageThreadId,
     userId: input.message.from?.id,
@@ -523,18 +591,20 @@ async function dispatchMessage(input: {
       : undefined;
 
   try {
-    await input.send(
-      {
-        inputResponses: replyInputResponses,
-        message: turnMessage,
-        context: [contextBlock, ...channelContext],
-      },
-      {
+    const source = input.from(telegramContinuationTokenFromState(state));
+    if (replyInputResponses === undefined) {
+      await source.send(turnMessage, {
         auth: result.auth,
-        continuationToken: continuationTokenFromState(state),
+        context: [contextBlock, ...channelContext],
         state,
-      },
-    );
+        title: result.title,
+      });
+    } else {
+      await source.respond(replyInputResponses, {
+        auth: result.auth,
+        context: [contextBlock, ...channelContext],
+      });
+    }
   } catch (error) {
     log.error("message delivery failed", { error });
   }
@@ -543,12 +613,24 @@ async function dispatchMessage(input: {
 async function dispatchCallbackQuery(input: {
   readonly config: TelegramChannelConfig;
   readonly query: TelegramCallbackQuery;
-  readonly send: SendFn<TelegramChannelState>;
+  readonly from: ChannelFrom<TelegramChannelState>;
+  readonly resolveSession: ChannelResolveSession;
 }): Promise<void> {
-  const state = stateFromCallbackQuery(input.query, input.config);
+  const state = stateFromTelegramCallbackQuery(input.query, input.config.botUsername);
   const telegram: TelegramContext = {
     telegram: buildTelegramHandle({ config: input.config, state }),
   };
+
+  if (input.query.data?.startsWith(TELEGRAM_AUTHORIZATION_CALLBACK_PREFIX) === true) {
+    await dispatchTelegramAuthorizationCallback({
+      continuationToken: telegramContinuationTokenFromState(state),
+      query: input.query,
+      resolveSession: input.resolveSession,
+      state,
+      telegram,
+    });
+    return;
+  }
 
   if (input.query.data?.startsWith(TELEGRAM_HITL_CALLBACK_PREFIX) === true) {
     try {
@@ -562,16 +644,10 @@ async function dispatchCallbackQuery(input: {
 
     if (!input.query.message || !state.chatId) return;
     try {
-      await input.send(
-        {
-          inputResponses: [telegramCallbackInputResponse(input.query.data)],
-        },
-        {
-          auth: null,
-          continuationToken: continuationTokenFromState(state),
-          state,
-        },
-      );
+      const source = input.from(telegramContinuationTokenFromState(state));
+      await source.respond([telegramCallbackInputResponse(input.query.data)], {
+        auth: null,
+      });
     } catch (error) {
       log.error("callback query delivery failed", { error });
     }
@@ -616,80 +692,7 @@ function attachTelegramDeliver(channel: TelegramChannel): void {
   };
 }
 
-function stateFromMessage(
-  message: TelegramMessage,
-  config: TelegramChannelConfig,
-): TelegramChannelState {
-  const privateChat = message.chat.type === "private";
-  return {
-    ...initialTelegramState(config.botUsername),
-    chatId: message.chat.id,
-    chatType: message.chat.type,
-    conversationId: privateChat ? null : conversationIdForMessage(message),
-    messageThreadId: message.messageThreadId ?? null,
-    triggeringUserId: message.from?.id ?? null,
-  };
-}
-
-function stateFromCallbackQuery(
-  query: TelegramCallbackQuery,
-  config: TelegramChannelConfig,
-): TelegramChannelState {
-  const message = query.message;
-  if (!message) {
-    return {
-      ...initialTelegramState(config.botUsername),
-      triggeringUserId: query.from.id,
-    };
-  }
-  const privateChat = message.chat.type === "private";
-  return {
-    ...initialTelegramState(config.botUsername),
-    chatId: message.chat.id,
-    chatType: message.chat.type,
-    conversationId: privateChat ? null : message.messageId,
-    messageThreadId: message.messageThreadId ?? null,
-    triggeringUserId: query.from.id,
-  };
-}
-
-function conversationIdForMessage(message: TelegramMessage): string {
-  if (message.replyToMessage?.from?.isBot === true) {
-    return message.replyToMessage.messageId;
-  }
-  return message.messageId;
-}
-
-function continuationTokenFromState(state: TelegramChannelState): string {
-  const chatId = state.chatId ?? "";
-  return telegramContinuationToken({
-    chatId,
-    conversationId: state.chatType === "private" ? undefined : (state.conversationId ?? undefined),
-    messageThreadId: state.messageThreadId ?? undefined,
-  });
-}
-
-function initialTelegramState(botUsername: string | undefined): TelegramChannelState {
-  return {
-    botUsername: botUsername ?? null,
-    chatId: null,
-    chatType: null,
-    conversationId: null,
-    hitlCallbacks: {},
-    messageThreadId: null,
-    nextHitlCallbackId: 0,
-    pendingFreeformReplies: {},
-    triggeringUserId: null,
-  };
-}
-
 function readChatId(value: unknown): string | undefined {
-  if (typeof value === "string" && value.length > 0) return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return undefined;
-}
-
-function readOptionalString(value: unknown): string | undefined {
   if (typeof value === "string" && value.length > 0) return value;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return undefined;

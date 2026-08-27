@@ -1,3 +1,17 @@
+import type { CustomCommand, IFileSystem } from "just-bash";
+
+/**
+ * Context passed to a custom just-bash filesystem factory for each live handle.
+ */
+export interface JustBashFilesystemContext {
+  /** Stable application root for this backend create call. */
+  readonly appRoot: string;
+  /** eve's durable, session-owned filesystem, including `/workspace`. */
+  readonly defaultFilesystem: IFileSystem;
+  /** The just-bash engine resolved by eve after its optional installation check. */
+  readonly justBash: typeof import("just-bash");
+}
+
 /**
  * Options accepted by `justbash(opts)`.
  *
@@ -14,4 +28,26 @@ export interface JustBashSandboxCreateOptions {
    * actionable install error instead. Defaults to `true`.
    */
   readonly autoInstall?: boolean;
+  /**
+   * Registers trusted host application code as commands in each live
+   * just-bash interpreter. Custom commands can participate in normal shell
+   * composition, including pipelines and redirections.
+   *
+   * Custom commands are not available during template prewarming. They run in
+   * eve's host process, outside the virtual filesystem security boundary, and
+   * are responsible for validating their own inputs and cleaning up host
+   * resources.
+   */
+  readonly customCommands?: ReadonlyArray<CustomCommand>;
+  /**
+   * Composes the filesystem used by each live sandbox handle. The factory is
+   * called when a handle opens with eve's durable default filesystem; return a
+   * fresh filesystem that preserves eve-owned paths such as `/workspace`,
+   * `/tmp`, and the home directory.
+   *
+   * This just-bash-specific escape hatch requires the application to install
+   * a compatible `just-bash` version. It is not invoked during template
+   * prewarming.
+   */
+  readonly filesystem?: (context: JustBashFilesystemContext) => IFileSystem | Promise<IFileSystem>;
 }

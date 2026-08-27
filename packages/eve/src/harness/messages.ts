@@ -1,7 +1,12 @@
 import type { ModelMessage, TextPart, UserContent } from "ai";
 
-import type { DeliverPayload, SessionAuthContext } from "#channel/types.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type {
+  ChannelDeliveryMetadataEntry,
+  DeliverPayload,
+  SessionAuthContext,
+  TurnCaller,
+} from "#channel/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
 
 /**
@@ -50,6 +55,47 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   }
 
   return result;
+}
+
+/**
+ * Removes text parts with no model-visible content from a user message.
+ *
+ * Returns `undefined` when no parts remain, allowing callers to omit the user
+ * turn entirely rather than create an empty model prompt block.
+ */
+export function normalizeUserContent(
+  content: string | UserContent | undefined,
+): string | UserContent | undefined {
+  if (content === undefined) {
+    return undefined;
+  }
+
+  if (typeof content === "string") {
+    return content.trim().length > 0 ? content : undefined;
+  }
+
+  const parts = content.filter((part) => part.type !== "text" || part.text.trim().length > 0);
+  if (parts.length === 0) {
+    return undefined;
+  }
+  return parts.length === content.length ? content : parts;
+}
+
+/** Removes blank text blocks that some providers reject from model-bound history. */
+export function normalizeModelMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+  return messages.flatMap((message) => {
+    if (typeof message.content === "string") {
+      return message.content.trim().length > 0 ? [message] : [];
+    }
+
+    const content = message.content.filter(
+      (part) => part.type !== "text" || part.text.trim().length > 0,
+    );
+    if (content.length === 0) return [];
+    return content.length === message.content.length
+      ? [message]
+      : [{ ...message, content } as ModelMessage];
+  });
 }
 
 /**
@@ -134,30 +180,41 @@ function coalesceContext(input: {
 }
 
 /**
- * Merges two optional turn messages into one.
- *
- * When both sides are strings, concatenates with a blank line. When
- * either side is a structured {@link UserContent} array, promotes both
- * to arrays and concatenates their parts so attachments carried on the
- * deferred or newer input are preserved end-to-end.
+ * Merges two optional turn messages into one after removing blank content.
  */
 function coalesceMessage(input: {
   readonly a?: string | UserContent;
   readonly b?: string | UserContent;
 }): string | UserContent | undefined {
-  if (input.a === undefined) {
-    return input.b;
+  const a = normalizeUserContent(input.a);
+  const b = normalizeUserContent(input.b);
+
+  if (a === undefined) {
+    return b;
   }
 
-  if (input.b === undefined) {
-    return input.a;
+  if (b === undefined) {
+    return a;
   }
 
-  if (typeof input.a === "string" && typeof input.b === "string") {
-    return `${input.a}\n\n${input.b}`;
+  return appendUserContent({ appended: b, existing: a });
+}
+
+/**
+ * Appends user content while preserving structured attachment parts.
+ */
+export function appendUserContent(input: {
+  readonly appended: string | UserContent;
+  readonly existing: string | UserContent;
+}): string | UserContent {
+  if (typeof input.existing === "string" && typeof input.appended === "string") {
+    return `${input.existing}\n\n${input.appended}`;
   }
 
-  const merged: UserContentArray = [...toUserContentArray(input.a), ...toUserContentArray(input.b)];
+  const merged: UserContentArray = [
+    ...toUserContentArray(input.existing),
+    ...toUserContentArray(input.appended),
+  ];
   return merged;
 }
 
@@ -180,6 +237,8 @@ function toUserContentArray(value: string | UserContent): UserContentArray {
  */
 interface DeliverLike {
   readonly auth?: SessionAuthContext | null;
+  readonly caller?: TurnCaller;
+  readonly deliveryMetadata?: readonly ChannelDeliveryMetadataEntry[];
   readonly kind: "deliver";
   readonly payloads: readonly DeliverPayload[];
 }
@@ -191,7 +250,8 @@ interface DeliverLike {
  * Used by the workflow runtime to batch follow-up deliveries that
  * arrived while a turn or subagent delegation was in progress. Each
  * payload is later passed to `onDeliver` individually so channel-
- * specific fields are never lost.
+ * specific fields are never lost. A caller defines a turn boundary, so
+ * callers must be partitioned before coalescing.
  */
 export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): T {
   const [first, ...rest] = items;
@@ -201,14 +261,35 @@ export function coalesceDeliveries<T extends DeliverLike>(items: readonly T[]): 
   }
 
   let auth = first.auth;
+  let caller = first.caller;
   const payloads = [...first.payloads];
+  const deliveryMetadata = [...(first.deliveryMetadata ?? [])];
 
   for (const item of rest) {
+    const payloadOffset = payloads.length;
     if (item.auth !== undefined) {
       auth = item.auth;
     }
+    if (item.caller !== undefined) {
+      if (caller !== undefined) {
+        throw new Error("Cannot coalesce deliveries from different turns.");
+      }
+      caller = item.caller;
+    }
     payloads.push(...item.payloads);
+    deliveryMetadata.push(
+      ...(item.deliveryMetadata ?? []).map((entry) => ({
+        ...entry,
+        payloadIndex: entry.payloadIndex + payloadOffset,
+      })),
+    );
   }
 
-  return { ...first, auth, payloads };
+  return {
+    ...first,
+    auth,
+    caller,
+    deliveryMetadata: deliveryMetadata.length === 0 ? undefined : deliveryMetadata,
+    payloads,
+  };
 }

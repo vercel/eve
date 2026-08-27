@@ -1,23 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { HookPayload } from "#channel/types.js";
+import { SessionDynamicModelReferenceKey } from "#context/keys.js";
+import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
+import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
   TURN_WORKFLOW_INPUT_VERSION,
   type TurnWorkflowInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { runProxyInputRequestStep, turnStep } from "#execution/workflow-steps.js";
+import { turnStep } from "#execution/workflow-steps.js";
+import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
+const sleepMock = vi.fn(async (_duration: unknown) => {});
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
   getWorkflowMetadata: vi.fn(() => ({ url: "https://eve.example.com" })),
+  sleep: (duration: unknown) => sleepMock(duration),
 }));
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
@@ -28,8 +35,11 @@ vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
 
+vi.mock("./subagent-event-proxy-step.js", () => ({
+  runProxySubagentEventStep: vi.fn(),
+}));
+
 vi.mock("./workflow-steps.js", () => ({
-  runProxyInputRequestStep: vi.fn(),
   turnStep: vi.fn(),
 }));
 
@@ -41,6 +51,14 @@ vi.mock("./dispatch-workflow-runtime-actions-step.js", () => ({
   dispatchWorkflowRuntimeActionsStep: vi.fn(),
 }));
 
+vi.mock("./cancel-descendant-turns-step.js", () => ({
+  cancelDescendantTurnsStep: vi.fn(),
+}));
+
+vi.mock("./tasks/parent/delegate.js", () => ({
+  acknowledgeDelegatedTasksStep: vi.fn(),
+}));
+
 vi.mock("./workflow-callback-url.js", () => ({
   resolveWorkflowCallbackBaseUrl: vi.fn((metadataUrl: string) => metadataUrl),
 }));
@@ -50,6 +68,7 @@ describe("turnWorkflow", () => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
     createHookMock.mockReset();
+    sleepMock.mockClear();
   });
 
   it("notifies the driver when a turn completes", async () => {
@@ -143,6 +162,60 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({ kind: "done", output: "after continue" }),
         kind: "turn-result",
       }),
+    );
+  });
+
+  it("durably sleeps the turn before continuing the tool loop", async () => {
+    const sessionState = createSessionState();
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "continue",
+        sleepDurationMs: 2_500,
+        serializedContext: { state: "sleeping" },
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "checked again",
+        serializedContext: { state: "done" },
+        sessionState,
+      });
+
+    const { input } = createInput({ sessionState });
+    await turnWorkflow(input);
+
+    expect(sleepMock).toHaveBeenCalledExactlyOnceWith(2_500);
+    expect(sleepMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(turnStep).mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it("durably sleeps a turn-owned workflow before continuing the tool loop", async () => {
+    const sessionState = createSessionState();
+    installInbox([]);
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "continue",
+        sleepDurationMs: 1_250,
+        serializedContext: { state: "sleeping" },
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "checked again",
+        serializedContext: { state: "done" },
+        sessionState,
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(sleepMock).toHaveBeenCalledExactlyOnceWith(1_250);
+    expect(sleepMock.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(turnStep).mock.invocationCallOrder[1]!,
     );
   });
 
@@ -248,13 +321,229 @@ describe("turnWorkflow", () => {
     });
   });
 
+  it("reports a cancelled turn as a park with the cancelled marker", async () => {
+    const sessionState = createSessionState();
+    const cancelledState = createSessionState({ continuationToken: "cancelled-state" });
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "cancelled",
+      serializedContext: { state: "cancelled" },
+      sessionState: cancelledState,
+    });
+
+    // Task mode on purpose: cancellation bypasses the `canPark` gate.
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      mode: "task",
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "cancelled" },
+      sessionState: cancelledState,
+    });
+    // The command inbox forwards cancellation to this turn-private hook.
+    expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
+    // The cancelled step has already rolled its context back to the allowed
+    // carve-outs, which must reach the driver cancellation epilogue.
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      action: {
+        cancelled: true,
+        kind: "park",
+        serializedContext: { state: "cancelled" },
+        sessionState: cancelledState,
+      },
+      kind: "turn-result",
+    });
+    expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
+  });
+
+  it("commits and releases background tasks before settling a cancelled turn", async () => {
+    const initialState = createSessionState({ continuationToken: "http:parent" });
+    const backgroundState = createSessionState({ continuationToken: "http:parent:background" });
+    const backgroundTasks = [
+      {
+        taskId: "task-1",
+        taskInboxToken: "task-inbox-1",
+        taskRunId: "task-run-1",
+      },
+    ];
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "cancelled",
+      backgroundTaskState: backgroundState,
+      backgroundTasks,
+      serializedContext: { state: "cancelled" },
+      sessionState: initialState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      mode: "task",
+      sessionState: initialState,
+    });
+    await turnWorkflow(input);
+
+    expect(acknowledgeDelegatedTasksStep).toHaveBeenCalledWith({ tasks: backgroundTasks });
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "cancelled" },
+      sessionState: backgroundState,
+    });
+  });
+
+  it("honors cancellation observed while a durable turn step returns", async () => {
+    const sessionState = createSessionState();
+    const sessionModel = {
+      id: "openai/gpt-5.6-sol",
+      contextWindowTokens: 1_000_000,
+    };
+    installInbox([], { cancelPayloads: [{}] });
+    vi.mocked(turnStep).mockImplementationOnce(async (stepInput) => {
+      await vi.waitFor(() => expect(stepInput.abortSignal?.aborted).toBe(true));
+      return {
+        action: "done",
+        output: "must not complete",
+        serializedContext: {
+          state: "done",
+          [SessionDynamicModelReferenceKey.name]: sessionModel,
+        },
+        sessionState,
+      };
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    const cancelledContext = {
+      state: "start",
+      [SessionDynamicModelReferenceKey.name]: sessionModel,
+    };
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: cancelledContext,
+      sessionState,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      action: {
+        cancelled: true,
+        kind: "park",
+        serializedContext: cancelledContext,
+        sessionState,
+      },
+      kind: "turn-result",
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "done" }),
+      }),
+    );
+  });
+
+  it("runs uncancellable when the session cancel token is claimed by another run", async () => {
+    const sessionState = createSessionState();
+    installInbox([], { cancelConflict: { runId: "wrun_stale_prior_turn" } });
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    // The stale claim degrades cancellation instead of failing the turn.
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeUndefined();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-result" }),
+    );
+    expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
+  });
+
+  it("disposes the session cancel hook before publishing the turn result", async () => {
+    const sessionState = createSessionState();
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    // The next turn must never race this run's teardown, so disposal
+    // precedes the terminal send.
+    const cancelHook = createHookMock.mock.results.find(
+      (result) => (result.value as { token?: string }).token === "turn-token:cancel",
+    )?.value as { dispose: ReturnType<typeof vi.fn> };
+    const resultCall = resumeHookMock.mock.calls.findIndex(
+      (call) => call[1]?.kind === "turn-result",
+    );
+    expect(cancelHook.dispose).toHaveBeenCalled();
+    expect(cancelHook.dispose.mock.invocationCallOrder[0]).toBeLessThan(
+      resumeHookMock.mock.invocationCallOrder[resultCall]!,
+    );
+  });
+
+  it("registers no cancel hook when the driver cannot settle cancelled parks", async () => {
+    const sessionState = createSessionState();
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({ driverCapabilities: { turnInbox: true }, sessionState });
+    await turnWorkflow(input);
+
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeUndefined();
+    expect(cancelHookTokens()).toEqual([]);
+  });
+
+  it("registers a cancel hook for a task session without a continuation alias", async () => {
+    const sessionState = createSessionState({ continuationToken: "" });
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      mode: "task",
+      sessionState,
+    });
+    await turnWorkflow(input);
+
+    expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
+    expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
+  });
+
   it("deduplicates concurrent turn workflows through inbox ownership", async () => {
     const sessionState = createSessionState();
     const ownerInbox = createInboxMock([]);
     const duplicateInbox = createInboxMock([], {
       conflict: { runId: "wrun_owner" },
     });
-    createHookMock.mockReturnValueOnce(ownerInbox.hook).mockReturnValueOnce(duplicateInbox.hook);
+    installHookDispatch([ownerInbox, duplicateInbox]);
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "done",
       output: "ok",
@@ -313,6 +602,7 @@ describe("turnWorkflow", () => {
   });
 
   it("keeps a local subagent result inside one turn workflow", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_234);
     const initialState = createSessionState({ continuationToken: "slack:C1:" });
     const pendingState = createSessionState({ continuationToken: "slack:C1:T1" });
     const completedState = createSessionState({ continuationToken: "slack:C1:T1" });
@@ -323,6 +613,7 @@ describe("turnWorkflow", () => {
           {
             callId: "call-1",
             kind: "subagent-result",
+            origin: "child",
             output: "child output",
             subagentName: "delegate",
           },
@@ -331,7 +622,10 @@ describe("turnWorkflow", () => {
     ]);
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
-      sessionState: pendingState,
+      sessionState: withRunningChildren(pendingState, [
+        { callId: "call-1", sessionId: "child-session" },
+      ]),
+      pendingTasks: [],
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -372,8 +666,14 @@ describe("turnWorkflow", () => {
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
       input: {
+        acceptedAtMsByCallId: { "call-1": 1_234 },
         kind: "runtime-action-result",
-        results: [expect.objectContaining({ callId: "call-1", output: "child output" })],
+        results: [
+          expect.objectContaining({
+            callId: "call-1",
+            output: "child output",
+          }),
+        ],
       },
     });
     expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result")).toEqual([
@@ -390,9 +690,68 @@ describe("turnWorkflow", () => {
         action: expect.objectContaining({ kind: "dispatch-runtime-actions" }),
       }),
     );
+    now.mockRestore();
+  });
+
+  it("waits for dispatch adoption before cascading a cancellation", async () => {
+    const initialState = createSessionState({ continuationToken: "http:parent" });
+    const pendingState = createSessionState({ continuationToken: "http:parent:turn" });
+    const adoptedState = createSessionState({ continuationToken: "http:parent:turn:adopted" });
+    let finishDispatch:
+      | ((value: {
+          results: readonly [];
+          sessionState: DurableSessionState;
+          pendingTasks: readonly [];
+        }) => void)
+      | undefined;
+    const dispatchResult = new Promise<{
+      results: readonly [];
+      sessionState: DurableSessionState;
+      pendingTasks: readonly [];
+    }>((resolve) => {
+      finishDispatch = resolve;
+    });
+    installInbox([], { cancelPayloads: [{}], stayOpen: true });
+    vi.mocked(dispatchRuntimeActionsStep).mockReturnValue(dispatchResult);
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "cancelled",
+        serializedContext: { state: "cancelled" },
+        sessionState: adoptedState,
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      mode: "task",
+      sessionState: initialState,
+    });
+    const workflow = turnWorkflow(input);
+    await vi.waitFor(() => expect(dispatchRuntimeActionsStep).toHaveBeenCalledOnce());
+    expect(cancelDescendantTurnsStep).not.toHaveBeenCalled();
+
+    finishDispatch?.({ results: [], sessionState: adoptedState, pendingTasks: [] });
+    await workflow;
+
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].abortSignal?.aborted).toBe(true);
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "cancelled" },
+      sessionState: adoptedState,
+    });
+    expect(vi.mocked(dispatchRuntimeActionsStep).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(cancelDescendantTurnsStep).mock.invocationCallOrder[0]!,
+    );
   });
 
   it("keeps dynamic-workflow child dispatch and immediate remote failures in the same turn", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_345);
     const pendingState = createSessionState();
     const completedState = createSessionState();
     installInbox([]);
@@ -402,11 +761,13 @@ describe("turnWorkflow", () => {
           callId: "call-1",
           isError: true,
           kind: "subagent-result",
+          origin: "dispatch",
           output: { code: "REMOTE_AGENT_START_FAILED", message: "remote unavailable" },
           subagentName: "research",
         },
       ],
       sessionState: pendingState,
+      pendingTasks: [],
     });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
@@ -437,17 +798,24 @@ describe("turnWorkflow", () => {
       sessionState: pendingState,
     });
     expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
+      acceptedAtMsByCallId: { "call-1": 2_345 },
       kind: "runtime-action-result",
       results: [expect.objectContaining({ callId: "call-1", isError: true })],
     });
     expect(
       resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
     ).toHaveLength(1);
+    now.mockRestore();
   });
 
   it("proxies child HITL and pulls the response through the active turn", async () => {
+    const runningChildren = [{ callId: "call-1", sessionId: "child-session" }];
     const pendingState = createSessionState();
-    const proxyState = createSessionState({ hasProxyInputRequests: true });
+    const proxyState = withRunningChildren(
+      createSessionState({ hasProxyInputRequests: true }),
+      runningChildren,
+    );
+    const retiredProxyState = withRunningChildren(createSessionState(), runningChildren);
     const completedState = createSessionState();
     const requestId = "turn-token:inbox:delivery:0";
     installInbox([
@@ -473,6 +841,7 @@ describe("turnWorkflow", () => {
           {
             callId: "call-1",
             kind: "subagent-result",
+            origin: "child",
             output: "approved child output",
             subagentName: "delegate",
           },
@@ -481,13 +850,19 @@ describe("turnWorkflow", () => {
     ]);
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
-      sessionState: pendingState,
+      sessionState: withRunningChildren(pendingState, runningChildren),
+      pendingTasks: [],
     });
-    vi.mocked(runProxyInputRequestStep).mockResolvedValue({
+    vi.mocked(runProxySubagentEventStep).mockResolvedValue({
       serializedContext: { state: "proxied" },
       sessionState: proxyState,
     });
-    vi.mocked(routeDeliverToChildren).mockResolvedValue(undefined);
+    vi.mocked(routeDeliverToChildren).mockResolvedValue({
+      kind: "continue",
+      remainder: undefined,
+      serializedContext: { state: "proxied" },
+      sessionState: retiredProxyState,
+    });
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
         action: "park",
@@ -511,7 +886,7 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    expect(runProxyInputRequestStep).toHaveBeenCalledOnce();
+    expect(runProxySubagentEventStep).toHaveBeenCalledOnce();
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       continuationToken: "http:test",
       inboxToken: "turn-token:inbox",
@@ -524,10 +899,214 @@ describe("turnWorkflow", () => {
     });
     expect(routeDeliverToChildren).toHaveBeenCalledWith(
       expect.objectContaining({
-        payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        delivery: {
+          kind: "deliver",
+          payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval-1" }] }],
+        },
         sessionState: proxyState,
       }),
     );
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].sessionState).toBe(retiredProxyState);
+  });
+
+  it("lets the parent cancel after a descendant consumes a session-limit Stop response", async () => {
+    const pendingState = createSessionState();
+    const proxyState = createSessionState({ hasProxyInputRequests: true });
+    const retiredProxyState = createSessionState();
+    const requestId = "child-limit-request";
+    installInbox([
+      {
+        callId: "call-1",
+        childContinuationToken: "subagent:parent:call-1",
+        childSessionId: "child-session",
+        event: { requests: [], sequence: 0, stepIndex: 1, turnId: "turn_0" },
+        kind: "subagent-input-request",
+        subagentName: "delegate",
+      },
+      {
+        delivery: {
+          kind: "deliver",
+          payloads: [{ inputResponses: [{ optionId: "stop", requestId }] }],
+        },
+        kind: "driver-delivery",
+        requestId: "turn-token:inbox:delivery:0",
+      },
+    ]);
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: pendingState,
+      pendingTasks: [],
+    });
+    vi.mocked(runProxySubagentEventStep).mockResolvedValue({
+      serializedContext: { state: "proxied" },
+      sessionState: proxyState,
+    });
+    vi.mocked(routeDeliverToChildren).mockResolvedValue({
+      kind: "cancel-turn",
+      serializedContext: { state: "proxied" },
+      sessionState: retiredProxyState,
+    });
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+      serializedContext: { state: "pending" },
+      sessionState: pendingState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      mode: "conversation",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "proxied" },
+      sessionState: retiredProxyState,
+    });
+    expect(turnStep).toHaveBeenCalledOnce();
+    expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
+      action: {
+        cancelled: true,
+        kind: "park",
+        serializedContext: { state: "proxied" },
+        sessionState: retiredProxyState,
+      },
+      kind: "turn-result",
+    });
+  });
+
+  it("proxies child authorization lifecycle events while continuing to await its result", async () => {
+    const runningChildren = [{ callId: "call-1", sessionId: "child-session" }];
+    const pendingState = createSessionState();
+    const requiredState = withRunningChildren(createSessionState(), runningChildren);
+    const completedAuthState = withRunningChildren(createSessionState(), runningChildren);
+    const completedState = createSessionState();
+    const requiredEvent = {
+      data: {
+        authorization: { displayName: "Linear", url: "https://idp.example/authorize" },
+        description: "Authorization required for linear",
+        name: "linear",
+        sequence: 0,
+        stepIndex: 1,
+        turnId: "turn_0",
+        webhookUrl: "https://eve.example/connections/linear/callback/child%3Aauth",
+      },
+      type: "authorization.required" as const,
+    };
+    const completedEvent = {
+      data: {
+        authorization: { displayName: "Linear", url: "https://idp.example/authorize" },
+        name: "linear",
+        outcome: "authorized" as const,
+        sequence: 0,
+        stepIndex: 2,
+        turnId: "turn_0",
+      },
+      type: "authorization.completed" as const,
+    };
+    installInbox([
+      {
+        callId: "call-1",
+        childSessionId: "child-session",
+        event: requiredEvent,
+        kind: "subagent-authorization-event",
+        subagentName: "delegate",
+      },
+      {
+        callId: "call-1",
+        childSessionId: "child-session",
+        event: completedEvent,
+        kind: "subagent-authorization-event",
+        subagentName: "delegate",
+      },
+      {
+        kind: "runtime-action-result",
+        results: [
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            origin: "child",
+            output: "authorized child output",
+            subagentName: "delegate",
+          },
+        ],
+      },
+    ]);
+    const dispatchedState = withRunningChildren(pendingState, runningChildren);
+    vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
+      results: [],
+      sessionState: dispatchedState,
+      pendingTasks: [],
+    });
+    vi.mocked(runProxySubagentEventStep)
+      .mockResolvedValueOnce({
+        serializedContext: { state: "auth-required" },
+        sessionState: requiredState,
+      })
+      .mockResolvedValueOnce({
+        serializedContext: { state: "auth-completed" },
+        sessionState: completedAuthState,
+      });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+        serializedContext: { state: "pending" },
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: { state: "done" },
+        sessionState: completedState,
+      });
+
+    const { input, parentWritable } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(vi.mocked(runProxySubagentEventStep).mock.calls).toEqual([
+      [
+        {
+          hookPayload: expect.objectContaining({ event: requiredEvent }),
+          parentWritable,
+          serializedContext: { state: "pending" },
+          sessionState: dispatchedState,
+        },
+      ],
+      [
+        {
+          hookPayload: expect.objectContaining({ event: completedEvent }),
+          parentWritable,
+          serializedContext: { state: "auth-required" },
+          sessionState: requiredState,
+        },
+      ],
+    ]);
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0]).toMatchObject({
+      input: {
+        kind: "runtime-action-result",
+        results: [expect.objectContaining({ output: "authorized child output" })],
+      },
+      serializedContext: { state: "auth-completed" },
+      sessionState: completedAuthState,
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-delivery-request" }),
+    );
+    expect(routeDeliverToChildren).not.toHaveBeenCalled();
+    expect(
+      resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
+    ).toHaveLength(1);
   });
 
   it("mints a unique delivery request id per wait so a stale forward is not re-accepted", async () => {
@@ -540,7 +1119,13 @@ describe("turnWorkflow", () => {
       {
         kind: "runtime-action-result",
         results: [
-          { callId: "call-1", kind: "subagent-result", output: "first", subagentName: "delegate" },
+          {
+            callId: "call-1",
+            kind: "subagent-result",
+            origin: "child",
+            output: "first",
+            subagentName: "delegate",
+          },
         ],
       },
       {
@@ -557,6 +1142,7 @@ describe("turnWorkflow", () => {
           {
             callId: "call-2",
             kind: "subagent-result",
+            origin: "child",
             output: "second",
             subagentName: "delegate",
           },
@@ -565,9 +1151,18 @@ describe("turnWorkflow", () => {
     ]);
     vi.mocked(dispatchRuntimeActionsStep).mockResolvedValue({
       results: [],
+      sessionState: withRunningChildren(pendingState, [
+        { callId: "call-1", sessionId: "child-session-1" },
+        { callId: "call-2", sessionId: "child-session-2" },
+      ]),
+      pendingTasks: [],
+    });
+    vi.mocked(routeDeliverToChildren).mockResolvedValue({
+      kind: "continue",
+      remainder: undefined,
+      serializedContext: {},
       sessionState: pendingState,
     });
-    vi.mocked(routeDeliverToChildren).mockResolvedValue(undefined);
     vi.mocked(turnStep)
       .mockResolvedValueOnce({
         action: "park",
@@ -623,13 +1218,72 @@ interface InboxMock {
 function installInbox(
   values: readonly unknown[],
   options: {
+    readonly cancelConflict?: { readonly runId: string } | null;
+    readonly cancelPayloads?: readonly unknown[];
     readonly claimError?: unknown;
     readonly conflict?: { readonly runId: string } | null;
+    readonly stayOpen?: boolean;
   } = {},
 ): InboxMock {
   const inbox = createInboxMock(values, options);
-  createHookMock.mockReturnValue(inbox.hook);
+  installHookDispatch([inbox], {
+    conflict: options.cancelConflict ?? null,
+    payloads: options.cancelPayloads ?? [],
+  });
   return inbox;
+}
+
+/**
+ * Routes inbox tokens to the queued inbox mocks and `:cancel` tokens to
+ * cancel hooks (inert by default — their reads never resolve, so no
+ * cancellation is ever observed unless a test provides payloads or a
+ * claim conflict via `cancelOptions`).
+ */
+function installHookDispatch(
+  inboxes: readonly InboxMock[],
+  cancelOptions: {
+    readonly conflict?: { readonly runId: string } | null;
+    readonly payloads?: readonly unknown[];
+  } = {},
+): void {
+  const queue = [...inboxes];
+  createHookMock.mockImplementation((input: { token: string }) =>
+    input.token.endsWith(":cancel")
+      ? createCancelHookMock(input.token, cancelOptions)
+      : queue.shift()?.hook,
+  );
+}
+
+function cancelHookTokens(): string[] {
+  return createHookMock.mock.calls
+    .map((call) => (call[0] as { token: string }).token)
+    .filter((token) => token.endsWith(":cancel"));
+}
+
+function createCancelHookMock(
+  token: string,
+  options: {
+    readonly conflict?: { readonly runId: string } | null;
+    readonly payloads?: readonly unknown[];
+  } = {},
+): unknown {
+  const queue = [...(options.payloads ?? [])];
+  return {
+    token,
+    getConflict: vi.fn(async () => options.conflict ?? null),
+    dispose: vi.fn(),
+    [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      return {
+        next: () => {
+          const value = queue.shift();
+          return value === undefined
+            ? new Promise<IteratorResult<unknown>>(() => {})
+            : Promise.resolve({ done: false, value });
+        },
+        return: vi.fn(async () => ({ done: true, value: undefined })),
+      };
+    },
+  };
 }
 
 function createInboxMock(
@@ -637,6 +1291,7 @@ function createInboxMock(
   options: {
     readonly claimError?: unknown;
     readonly conflict?: { readonly runId: string } | null;
+    readonly stayOpen?: boolean;
   } = {},
 ): InboxMock {
   const queue = [...values];
@@ -644,7 +1299,9 @@ function createInboxMock(
   const createIterator = vi.fn(() => ({
     next: vi.fn(async () => {
       const value = queue.shift();
-      return value === undefined ? { done: true, value: undefined } : { done: false, value };
+      if (value !== undefined) return { done: false, value };
+      if (options.stayOpen === true) return await new Promise<never>(() => {});
+      return { done: true, value: undefined };
     }),
     return: vi.fn(async () => ({ done: true, value: undefined })),
   }));
@@ -698,5 +1355,51 @@ function createSessionState(overrides: Partial<DurableSessionState> = {}): Durab
     sessionId: "wrun_test_123",
     version: 1,
     ...overrides,
+  };
+}
+
+/**
+ * Embeds a snapshot whose handle store owns each child as `running`, the
+ * shape the dispatch step commits: inbox results only resolve the wait when
+ * a running handle binds their callId to their claimed sessionId.
+ */
+function withRunningChildren(
+  state: DurableSessionState,
+  children: readonly { readonly callId: string; readonly sessionId: string }[],
+): DurableSessionState {
+  return {
+    ...state,
+    snapshot: {
+      session: {
+        agent: { system: "" },
+        continuationToken: state.continuationToken,
+        history: [],
+        sessionId: state.sessionId,
+        state: {
+          [AGENT_HANDLES_STATE_KEY]: {
+            handles: children.map((child) => ({
+              address: {
+                continuationToken: `subagent:parent:${child.callId}`,
+                kind: "agent/local",
+                sessionId: child.sessionId,
+              },
+              identity: {
+                id: `ag_delegate:${child.callId}`,
+                name: "delegate",
+                nodeId: "subagents/delegate",
+              },
+              operation: {
+                callId: child.callId,
+                id: `op-${child.callId}`,
+                kind: "start",
+                parentTurnId: "turn_0",
+              },
+              phase: "running",
+            })),
+          },
+        },
+      },
+      version: 1,
+    },
   };
 }

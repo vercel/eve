@@ -1,42 +1,56 @@
+import { getPublicPath } from "@vercel/geistdocs/config";
 import type { MetadataRoute } from "next";
-
-import { source } from "@/lib/geistdocs/source";
+import { cacheLife } from "next/cache";
+import { canonicalRoutes, integrationPath, templatePath } from "@/lib/geistdocs/canonical";
+import { config } from "@/lib/geistdocs/config";
+import { defaultLanguage } from "@/lib/geistdocs/languages";
+import {
+  compatibilityRedirects,
+  defaultLanguageRedirects,
+  docsRedirects,
+  rootMarkdownRedirects,
+} from "@/lib/geistdocs/redirects";
+import { createCanonicalSitemap, type SitemapSourceEntry } from "@/lib/geistdocs/sitemap";
+import { geistdocsSource } from "@/lib/geistdocs/source";
 import { getSiteOrigin } from "@/lib/geistdocs/url";
+import { integrations } from "@/lib/integrations/data";
+import { templateManifest } from "@/lib/templates/manifest";
 
-const baseUrl = getSiteOrigin();
+const getLastModified = (data: unknown): Date | undefined => {
+  if (!data || typeof data !== "object" || !("lastModified" in data)) return;
+  return data.lastModified instanceof Date ? data.lastModified : undefined;
+};
 
-export const revalidate = false;
+const redirectPathnames = [
+  "/docs",
+  ...compatibilityRedirects.map(({ source }) => source),
+  ...docsRedirects.map(({ source }) => source),
+  ...rootMarkdownRedirects.map(({ source }) => source),
+  ...defaultLanguageRedirects.map(({ source }) => source),
+].filter((pathname) => !pathname.includes(":"));
 
-const getLastModified = (data: object) =>
-  "lastModified" in data && data.lastModified instanceof Date ? data.lastModified : undefined;
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  "use cache";
+  cacheLife("max");
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  const url = (path: string): string => new URL(path, baseUrl).toString();
+  const docs: SitemapSourceEntry[] = geistdocsSource.source
+    .getPages(defaultLanguage)
+    .map((page) => ({
+      pathname: getPublicPath(page.url, config.basePath),
+      lastModified: getLastModified(page.data),
+    }));
 
-  const pages: MetadataRoute.Sitemap = [];
-
-  for (const page of source.getPages()) {
-    const lastModified = getLastModified(page.data);
-
-    pages.push({
-      changeFrequency: "weekly" as const,
-      lastModified,
-      priority: 0.5,
-      url: url(page.url),
-    });
-  }
-
-  return [
-    {
-      changeFrequency: "monthly",
-      priority: 1,
-      url: url("/"),
-    },
-    {
-      changeFrequency: "weekly",
-      priority: 0.5,
-      url: url("/resources"),
-    },
-    ...pages,
-  ];
+  return createCanonicalSitemap({
+    excludedPathnames: redirectPathnames,
+    origin: getSiteOrigin(),
+    sources: [
+      { pathname: canonicalRoutes.home },
+      { pathname: canonicalRoutes.benchmarks },
+      ...docs,
+      { pathname: canonicalRoutes.integrations },
+      ...integrations.map(({ slug }) => ({ pathname: integrationPath(slug) })),
+      { pathname: canonicalRoutes.templates },
+      ...templateManifest.map(({ slug }) => ({ pathname: templatePath(slug) })),
+    ],
+  });
 }

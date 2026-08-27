@@ -14,6 +14,7 @@ import { createDeclarationCopier } from "../_shared.mjs";
  *   the `import * as _ai_sdk_provider` namespace import at the vendored
  *   copy.
  * - `@ai-sdk/provider-utils` → type-only vendored upstream declarations.
+ * - `zod/v4` → eve's vendored Zod v4 declarations.
  */
 export default {
   packageName: "@ai-sdk/openai",
@@ -26,6 +27,7 @@ export default {
         kind: "vendored",
         compiledPath: "@ai-sdk/provider-utils",
       },
+      "zod/v4": { kind: "vendored", compiledPath: "zod" },
     },
   }),
 };

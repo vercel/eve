@@ -126,6 +126,109 @@ async function walkRegularFiles(root) {
   return files;
 }
 
+function readManifestDependencyNames(manifest, field) {
+  const dependencies = manifest[field];
+
+  return dependencies && typeof dependencies === "object" && !Array.isArray(dependencies)
+    ? Object.keys(dependencies)
+    : [];
+}
+
+async function collectInstalledPackageGraph(nodeModulesRoot) {
+  // npm package roots are direct children of a node_modules directory (or one
+  // of its scope directories). Following only those roots keeps embedded
+  // package.json files from becoming false package instances or graph edges.
+  /** @type {{ manifest: Record<string, unknown>; root: string }[]} */
+  const packageInstances = [];
+
+  async function visitPackageRoot(packageRoot) {
+    const manifest = await readJson(join(packageRoot, "package.json"));
+
+    if (typeof manifest.name !== "string" || manifest.name.length === 0) {
+      throw new Error(`Installed package at "${packageRoot}" has no package name.`);
+    }
+
+    packageInstances.push({
+      manifest,
+      root: packageRoot,
+    });
+
+    const nestedNodeModulesRoot = join(packageRoot, "node_modules");
+
+    if (await pathExists(nestedNodeModulesRoot)) {
+      await visitNodeModulesRoot(nestedNodeModulesRoot);
+    }
+  }
+
+  async function visitNodeModulesRoot(currentNodeModulesRoot) {
+    const entries = await readdir(currentNodeModulesRoot, {
+      withFileTypes: true,
+    });
+    entries.sort((left, right) => comparePaths(left.name, right.name));
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) {
+        continue;
+      }
+
+      const entryPath = join(currentNodeModulesRoot, entry.name);
+
+      if (!entry.name.startsWith("@")) {
+        await visitPackageRoot(entryPath);
+        continue;
+      }
+
+      const scopedEntries = await readdir(entryPath, {
+        withFileTypes: true,
+      });
+      scopedEntries.sort((left, right) => comparePaths(left.name, right.name));
+
+      for (const scopedEntry of scopedEntries) {
+        if (!scopedEntry.isDirectory() || scopedEntry.name.startsWith(".")) {
+          continue;
+        }
+
+        await visitPackageRoot(join(entryPath, scopedEntry.name));
+      }
+    }
+  }
+
+  if (await pathExists(nodeModulesRoot)) {
+    await visitNodeModulesRoot(nodeModulesRoot);
+  }
+
+  const distinctPackageNames = new Set();
+  let dependencyEdgeCount = 0;
+  let optionalPeerEdgeCount = 0;
+
+  for (const { manifest } of packageInstances) {
+    distinctPackageNames.add(manifest.name);
+
+    dependencyEdgeCount += new Set([
+      ...readManifestDependencyNames(manifest, "dependencies"),
+      ...readManifestDependencyNames(manifest, "optionalDependencies"),
+    ]).size;
+
+    const peerDependencyNames = readManifestDependencyNames(manifest, "peerDependencies");
+    const peerDependenciesMeta = manifest.peerDependenciesMeta;
+
+    optionalPeerEdgeCount += peerDependencyNames.filter(
+      (name) =>
+        peerDependenciesMeta &&
+        typeof peerDependenciesMeta === "object" &&
+        !Array.isArray(peerDependenciesMeta) &&
+        peerDependenciesMeta[name]?.optional === true,
+    ).length;
+  }
+
+  return {
+    installedDependencyEdgeCount: dependencyEdgeCount,
+    installedDistinctPackageNameCount: distinctPackageNames.size,
+    installedOptionalPeerEdgeCount: optionalPeerEdgeCount,
+    installedPackageInstanceCount: packageInstances.length,
+  };
+}
+
 function summarizeInstalledPackages(files, options) {
   /** @type {Map<string, number>} */
   const packageSizes = new Map();
@@ -418,6 +521,7 @@ async function collectInstalledPackageSnapshot(input) {
   const installedFiles = (await pathExists(nodeModulesRoot))
     ? await walkRegularFiles(nodeModulesRoot)
     : [];
+  const installedPackageGraph = await collectInstalledPackageGraph(nodeModulesRoot);
   const installedSizeBytes = installedFiles.reduce((total, file) => total + file.size, 0);
   const installedPackageBytes = installedFiles.reduce((total, file) => {
     return readInstalledPackageName(file.relativePath) === input.packageName
@@ -427,8 +531,12 @@ async function collectInstalledPackageSnapshot(input) {
 
   return {
     installedDependencyBytes: installedSizeBytes - installedPackageBytes,
+    installedDependencyEdgeCount: installedPackageGraph.installedDependencyEdgeCount,
+    installedDistinctPackageNameCount: installedPackageGraph.installedDistinctPackageNameCount,
     installedFileCount: installedFiles.length,
+    installedOptionalPeerEdgeCount: installedPackageGraph.installedOptionalPeerEdgeCount,
     installedPackageBytes,
+    installedPackageInstanceCount: installedPackageGraph.installedPackageInstanceCount,
     installedSizeBytes,
     topInstalledPackages: summarizeInstalledPackages(installedFiles, {
       maxEntries: INSTALLED_PACKAGE_BREAKDOWN_MAX_ENTRIES,
@@ -473,8 +581,12 @@ export async function collectPublishedPackageReportFromPack(options) {
 
   return {
     installedDependencyBytes: installedSnapshot.installedDependencyBytes,
+    installedDependencyEdgeCount: installedSnapshot.installedDependencyEdgeCount,
+    installedDistinctPackageNameCount: installedSnapshot.installedDistinctPackageNameCount,
     installedFileCount: installedSnapshot.installedFileCount,
+    installedOptionalPeerEdgeCount: installedSnapshot.installedOptionalPeerEdgeCount,
     installedPackageBytes: installedSnapshot.installedPackageBytes,
+    installedPackageInstanceCount: installedSnapshot.installedPackageInstanceCount,
     installedSizeBytes: installedSnapshot.installedSizeBytes,
     packageLabel: options.packageLabel ?? basename(packageRoot),
     packageName,

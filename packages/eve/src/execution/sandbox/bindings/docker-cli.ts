@@ -52,15 +52,17 @@ export interface DockerCli {
  * installed or not on `PATH`).
  */
 export class DockerUnavailableError extends Error {
+  /** Structured remediation, surfaced by the semantic-error catalog. */
+  readonly hint =
+    "Install and start Docker Desktop, OrbStack, Colima, or another runtime exposing a " +
+    "Docker-compatible `docker` CLI (or point EVE_DOCKER_PATH at one, e.g. Podman). " +
+    "Alternatively use microsandbox(), the dependency-free justbash(), " +
+    "vercel(), or defaultSandbox() to pick by availability.";
+
   constructor(cause?: unknown) {
-    super(
-      "The Docker sandbox backend requires Docker, but the `docker` CLI was not found. " +
-        "Install and start Docker Desktop, OrbStack, Colima, or another runtime exposing a " +
-        "Docker-compatible `docker` CLI (or point EVE_DOCKER_PATH at one, e.g. Podman). " +
-        "Alternatively use microsandbox(), the dependency-free justbash(), " +
-        "vercel(), or defaultSandbox() to pick by availability.",
-      { cause },
-    );
+    super("The Docker sandbox backend requires Docker, but the `docker` CLI was not found.", {
+      cause,
+    });
     this.name = "DockerUnavailableError";
   }
 }
@@ -69,13 +71,17 @@ export class DockerUnavailableError extends Error {
  * Raised when the `docker` CLI exists but the daemon is not reachable.
  */
 export class DockerDaemonUnavailableError extends Error {
+  /** Structured remediation, surfaced by the semantic-error catalog. */
+  readonly hint =
+    "Start Docker Desktop (or your Docker-compatible runtime) and retry. Alternatively use " +
+    "microsandbox(), the dependency-free justbash() (installed automatically " +
+    "by `eve dev`, or `pnpm add -D just-bash`), vercel(), or defaultSandbox() " +
+    "to pick by availability.";
+
   constructor(detail: string) {
     super(
       "The Docker sandbox backend requires a running Docker daemon, but it is not reachable. " +
-        "Start Docker Desktop (or your Docker-compatible runtime) and retry. Alternatively use " +
-        "microsandbox(), the dependency-free justbash() (installed automatically " +
-        "by `eve dev`, or `pnpm add -D just-bash`), vercel(), or defaultSandbox() " +
-        `to pick by availability. Docker reported: ${detail}`,
+        `Docker reported: ${detail}`,
     );
     this.name = "DockerDaemonUnavailableError";
   }
@@ -98,27 +104,29 @@ function resolveDockerExecutable(): string {
   return fromEnv !== undefined && fromEnv.length > 0 ? fromEnv : "docker";
 }
 
-let cachedDockerAvailability: boolean | undefined;
+let cachedLinuxDockerAvailability: boolean | undefined;
 
 /**
- * Synchronously probes whether a Docker daemon is reachable, for
- * `defaultSandbox()`'s availability chain. The result is cached for the
- * process lifetime: backend selection must be stable, and the probe
- * costs a subprocess round-trip.
+ * Synchronously probes whether a reachable Docker daemon runs Linux
+ * containers, for `defaultSandbox()`'s availability chain. eve's Docker
+ * sandbox image is Linux-only, so a Windows-container daemon is not a
+ * compatible default even though it answers the Docker CLI. The result is
+ * cached for the process lifetime: backend selection must be stable, and
+ * the probe costs a subprocess round-trip.
  */
-export function isDockerDaemonAvailableSync(): boolean {
-  cachedDockerAvailability ??= probeDockerDaemonSync();
-  return cachedDockerAvailability;
+export function isLinuxDockerDaemonAvailableSync(): boolean {
+  cachedLinuxDockerAvailability ??= probeLinuxDockerDaemonSync();
+  return cachedLinuxDockerAvailability;
 }
 
-function probeDockerDaemonSync(): boolean {
+function probeLinuxDockerDaemonSync(): boolean {
   try {
-    const result = spawnSync(
-      resolveDockerExecutable(),
-      ["version", "--format", "{{.Server.Version}}"],
-      { stdio: "ignore", timeout: 5_000 },
-    );
-    return result.status === 0;
+    const result = spawnSync(resolveDockerExecutable(), ["version", "--format", "{{.Server.Os}}"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5_000,
+    });
+    return result.status === 0 && result.stdout.trim().toLowerCase() === "linux";
   } catch {
     return false;
   }

@@ -1,10 +1,11 @@
 import { EVE_HEALTH_ROUTE_PATH, EVE_INFO_ROUTE_PATH } from "#protocol/routes.js";
 import { AgentInfoResponseError } from "#client/agent-info-error.js";
+import { HealthResponseError } from "#client/health-response-error.js";
+import { HealthResultSchema } from "#client/health-schema.js";
 import { encodeBasicCredentials } from "#internal/http/basic-auth.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { ClientError } from "#client/client-error.js";
-import { ClientSession } from "#client/session.js";
-import { createInitialSessionState } from "#client/session-utils.js";
+import { ClientSessions } from "#client/sessions.js";
 import { createClientUrl } from "#client/url.js";
 import type {
   AgentInfoResult,
@@ -13,7 +14,6 @@ import type {
   ClientRedirectPolicy,
   HeadersValue,
   HealthResult,
-  SessionState,
   TokenValue,
 } from "#client/types.js";
 import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
@@ -21,25 +21,28 @@ import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER } from "#client/types.js";
 /**
  * HTTP client for talking to a deployed eve agent.
  *
- * A single client is bound to one host and auth configuration. It can create
- * many concurrent {@link ClientSession | sessions}, each tracking their own
- * conversation state independently.
+ * A single client is bound to one host and auth configuration. Its
+ * `sessions` collection can create or attach many independent fixed session
+ * handles.
  */
 export class Client {
   readonly #auth: ClientAuth | undefined;
   readonly #headers: HeadersValue | undefined;
   readonly #host: string;
-  readonly #maxReconnectAttempts: number;
-  readonly #preserveCompletedSessions: boolean;
   readonly #redirect: ClientRedirectPolicy | undefined;
+  /** Explicit create/attach surface for ID-addressed sessions. */
+  readonly sessions: ClientSessions;
 
   constructor(options: ClientOptions) {
     this.#host = options.host;
     this.#auth = options.auth;
     this.#headers = options.headers;
-    this.#maxReconnectAttempts = options.maxReconnectAttempts ?? 3;
-    this.#preserveCompletedSessions = options.preserveCompletedSessions ?? false;
     this.#redirect = options.redirect;
+    this.sessions = new ClientSessions({
+      host: this.#host,
+      redirect: this.#redirect,
+      resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),
+    });
   }
 
   /**
@@ -54,10 +57,26 @@ export class Client {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new ClientError(response.status, body);
+      throw new ClientError(response.status, body, response.headers);
     }
 
-    return (await response.json()) as HealthResult;
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new HealthResponseError();
+    }
+
+    const result = HealthResultSchema.safeParse(payload);
+    if (!result.success) {
+      throw new HealthResponseError(
+        result.error.issues.slice(0, 5).map((issue) => {
+          const path = issue.path.join(".");
+          return path.length === 0 ? issue.message : `${path}: ${issue.message}`;
+        }),
+      );
+    }
+    return result.data;
   }
 
   /**
@@ -78,7 +97,7 @@ export class Client {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new ClientError(response.status, body);
+      throw new ClientError(response.status, body, response.headers);
     }
 
     let payload: unknown;
@@ -114,37 +133,6 @@ export class Client {
     return await fetch(url, withRedirectPolicy({ ...init, headers }, this.#redirect));
   }
 
-  /**
-   * Creates a {@link ClientSession} handle for one conversation.
-   *
-   * - **No arguments**: starts a fresh conversation. The first
-   *   `session.send()` call creates the run on the server.
-   * - **{@link SessionState}**: resumes a previously serialized session.
-   * - **string**: shorthand for resuming with a continuation token alone.
-   */
-  session(state?: SessionState | string): ClientSession {
-    let resolved: SessionState;
-
-    if (typeof state === "string") {
-      resolved = { continuationToken: state, streamIndex: 0 };
-    } else if (state) {
-      resolved = state;
-    } else {
-      resolved = createInitialSessionState();
-    }
-
-    return new ClientSession(
-      {
-        host: this.#host,
-        maxReconnectAttempts: this.#maxReconnectAttempts,
-        preserveCompletedSessions: this.#preserveCompletedSessions,
-        redirect: this.#redirect,
-        resolveHeaders: (perRequest) => this.#resolveHeaders(perRequest),
-      },
-      resolved,
-    );
-  }
-
   // ---------------------------------------------------------------------------
   // Internal
   // ---------------------------------------------------------------------------
@@ -162,14 +150,14 @@ export class Client {
       headers.set(key, value);
     }
 
+    for (const [key, value] of Object.entries(authHeaders)) {
+      headers.set(key, value);
+    }
+
     if (perRequest) {
       for (const [key, value] of Object.entries(perRequest)) {
         headers.set(key, value);
       }
-    }
-
-    for (const [key, value] of Object.entries(authHeaders)) {
-      headers.set(key, value);
     }
 
     return headers;

@@ -51,7 +51,7 @@ describe("cardToBlocks", () => {
         children: [
           Actions([
             Button({ id: "approve", label: "Approve", style: "primary" }),
-            Button({ id: "deny", label: "Deny", style: "danger", value: "force" }),
+            Button({ id: "cancel", label: "Cancel", style: "danger", value: "force" }),
           ]),
         ],
       }),
@@ -68,8 +68,8 @@ describe("cardToBlocks", () => {
           },
           {
             type: "button",
-            action_id: "deny",
-            text: { type: "plain_text", text: "Deny", emoji: true },
+            action_id: "cancel",
+            text: { type: "plain_text", text: "Cancel", emoji: true },
             value: "force",
             style: "danger",
           },
@@ -189,7 +189,7 @@ describe("cardToBlocks", () => {
     ]);
   });
 
-  it("renders the first Table as a native Slack table block", () => {
+  it("renders the first Table as a native Slack data table block", () => {
     const blocks = cardToBlocks(
       Card({
         children: [
@@ -204,7 +204,8 @@ describe("cardToBlocks", () => {
       }),
     );
     expect(blocks[0]).toEqual({
-      type: "table",
+      type: "data_table",
+      caption: "Table",
       rows: [
         [
           { type: "raw_text", text: "Name" },
@@ -231,7 +232,7 @@ describe("cardToBlocks", () => {
         ],
       }),
     );
-    expect(blocks[0]?.type).toBe("table");
+    expect(blocks[0]?.type).toBe("data_table");
     const section = blocks[1] as { type: string; text: { text: string } };
     expect(section.type).toBe("section");
     expect(section.text.text).toContain("```");

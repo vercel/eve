@@ -20,6 +20,30 @@ export interface JsonObject {
  */
 export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
+/** Compares two already-validated JSON structures by value. */
+export function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => jsonValuesEqual(value, right[index]))
+    );
+  }
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
+    return false;
+  }
+  const leftEntries = Object.entries(left);
+  const rightRecord = right as Record<string, unknown>;
+  return (
+    leftEntries.length === Object.keys(rightRecord).length &&
+    leftEntries.every(
+      ([key, value]) => Object.hasOwn(rightRecord, key) && jsonValuesEqual(value, rightRecord[key]),
+    )
+  );
+}
+
 const INVALID_JSON_VALUE_CANDIDATE = Symbol("invalid-json-value-candidate");
 const JSON_VALUE_ERROR_MESSAGE = "Expected a JSON-serializable value.";
 const JSON_OBJECT_ERROR_MESSAGE = "Expected a JSON-serializable object.";
@@ -121,7 +145,10 @@ function normalizeJsonValueCandidate(
   return normalized;
 }
 
-function isJsonObjectValue(value: JsonValue): value is JsonObject {
+/**
+ * Narrows an already-normalized {@link JsonValue} to a {@link JsonObject}.
+ */
+export function isJsonObjectValue(value: JsonValue | undefined): value is JsonObject {
   return value !== null && !Array.isArray(value) && typeof value === "object";
 }
 

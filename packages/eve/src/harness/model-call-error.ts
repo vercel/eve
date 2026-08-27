@@ -1,24 +1,13 @@
 import { isObject } from "#shared/guards.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import { toError, walkCauseChain } from "#shared/errors.js";
+import { summarizeKnownError } from "#harness/semantic-errors/index.js";
 import { isTurnCancellation } from "#harness/turn-cancellation.js";
 
 const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
+const API_ERROR_SUMMARY_LIMIT = 800;
 const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
   "AI Gateway rejected the model request before the agent produced a response.";
-
-/**
- * The upstream error name the AI Gateway uses for authentication failures.
- * Exported so consumers of `step.failed` details (the dev TUI's `/model`
- * hint) match the same identifier this module classifies on.
- */
-export const GATEWAY_AUTHENTICATION_ERROR_NAME = "GatewayAuthenticationError";
-
-/**
- * The summary `name` this module assigns to recognized gateway-auth
- * failures, carried into failure-event details. Exported for the same
- * consumers as {@link GATEWAY_AUTHENTICATION_ERROR_NAME}.
- */
-export const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication failed";
 
 /**
  * Anchored regex for the upstream "unsupported tool" rejection message
@@ -33,20 +22,19 @@ export const GATEWAY_AUTH_FAILURE_SUMMARY_NAME = "AI Gateway authentication fail
 const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supported/i;
 
 /**
- * One human-readable summary of a known model-call configuration failure.
- *
- * Returned by {@link summarizeKnownModelCallConfigError} for terminal
- * failures that point at a fixable setup mistake (missing API key,
- * gateway auth failure). Surfaces actionable text in REPL output and in
- * structured `step.failed` events without dumping the full SDK error
- * inspection into user-facing logs.
+ * The most informative human-readable rejection a model-call error
+ * carries, extracted from the upstream response. Not a semantic-error
+ * classification: the message is arbitrary provider prose, so it carries
+ * no catalog id — `semanticErrorId` is reserved for registered rules.
  */
-export interface ModelCallConfigErrorSummary {
+export interface UpstreamRejectionSummary {
   readonly name: string;
   readonly message: string;
 }
 
 interface ModelCallErrorSignals {
+  readonly apiCallError: boolean;
+  readonly apiErrorMessage?: string;
   readonly gatewayName?: string;
   readonly gatewayType?: string;
   readonly generationId?: string;
@@ -58,76 +46,26 @@ interface ModelCallErrorSignals {
 }
 
 /**
- * Returns a concise actionable summary for known terminal configuration
- * errors raised during a model call. Returns `null` for everything else
- * so the caller falls back to the raw SDK message.
+ * Extracts the most informative upstream rejection message from a
+ * model-call error that the semantic-error catalog did not recognize.
+ * These failures happen before the agent can produce a response, so the
+ * user-facing message should avoid implying a bad tool call. Returns
+ * `null` when the error carries nothing better than its raw message.
  */
-export function summarizeKnownModelCallConfigError(
-  error: unknown,
-): ModelCallConfigErrorSummary | null {
-  const rawName = readErrorName(error);
-  const rawMessage = readErrorMessage(error);
-
-  if (
-    rawName === GATEWAY_AUTHENTICATION_ERROR_NAME ||
-    /AI Gateway authentication/i.test(rawMessage)
-  ) {
-    // The upstream `GatewayAuthenticationError` builds one of three
-    // contextual messages depending on which credential was offered
-    // (api-key, oidc, neither). Surface a remediation that matches the
-    // one that actually failed — collapsing all three into a single
-    // "set AI_GATEWAY_API_KEY" hint misleads users whose shell already
-    // exports a stale `AI_GATEWAY_API_KEY` that shadows the OIDC fallback.
-    if (/Invalid API key/i.test(rawMessage)) {
-      return {
-        name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-        message:
-          "AI Gateway rejected the provided API key. Update or unset `AI_GATEWAY_API_KEY` (check your shell profile if you did not set it for this project) — manage keys at https://vercel.com/dashboard/ai/api-keys. Unsetting it falls back to OIDC via `eve link`.",
-      };
-    }
-    if (/Invalid OIDC token/i.test(rawMessage)) {
-      return {
-        name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-        message:
-          "AI Gateway rejected the OIDC token. Run `eve link` to refresh `VERCEL_OIDC_TOKEN` in `.env.local`, or set `AI_GATEWAY_API_KEY` — create a key at https://vercel.com/dashboard/ai/api-keys.",
-      };
-    }
-    return {
-      name: GATEWAY_AUTH_FAILURE_SUMMARY_NAME,
-      message:
-        "AI Gateway received no credentials. Run `eve link` to populate `VERCEL_OIDC_TOKEN`, or set `AI_GATEWAY_API_KEY` — create a key at https://vercel.com/dashboard/ai/api-keys.",
-    };
-  }
-
-  if (rawName === "LoadAPIKeyError" || /API key is missing/i.test(rawMessage)) {
-    return {
-      name: "Model provider API key missing",
-      message:
-        "The model provider could not load an API key. Export the provider's API key environment variable (for example `AI_GATEWAY_API_KEY` or `OPENAI_API_KEY`) and try again.",
-    };
-  }
-
-  return null;
-}
-
-/**
- * Returns a concise summary for known model-call request failures that are not
- * configuration errors. These failures happen before the agent can produce a
- * response, so the user-facing message should avoid implying a bad tool call.
- */
-export function summarizeKnownModelCallRequestError(
-  error: unknown,
-): ModelCallConfigErrorSummary | null {
-  // Known benign shape: skip the inspector dump and the stack (which would
-  // point at the harness's own throw site, not upstream evidence).
-  if (error instanceof EmptyModelResponseError) {
-    return {
-      name: "Empty model response",
-      message: error.message,
-    };
-  }
-
+export function extractUpstreamRejectionMessage(error: unknown): UpstreamRejectionSummary | null {
   const signals = readModelCallErrorSignals(error);
+
+  // Transient upstream failures (throttles, overloads) keep the generic
+  // retry-exhausted framing; a summary here would read as a terminal
+  // rejection and send users to debug their configuration.
+  if (isTransientHttpStatus(signals.statusCode ?? signals.upstreamStatusCode)) {
+    return null;
+  }
+
+  const apiSummary = signals.apiErrorMessage;
+  if (apiSummary !== undefined) {
+    return { name: upstreamRejectionName(signals), message: apiSummary };
+  }
 
   if (signals.statusCode === 400 && isGatewayErrorSignal(signals)) {
     return {
@@ -136,7 +74,22 @@ export function summarizeKnownModelCallRequestError(
     };
   }
 
+  const apiCallSummary = formatApiCallErrorFallback(signals);
+  if (apiCallSummary !== undefined) {
+    return { name: upstreamRejectionName(signals), message: apiCallSummary };
+  }
+
   return null;
+}
+
+function upstreamRejectionName(signals: ModelCallErrorSignals): string {
+  return isGatewayErrorSignal(signals)
+    ? "AI Gateway model request rejected"
+    : "Model provider API error";
+}
+
+function isTransientHttpStatus(status: number | undefined): boolean {
+  return status === 408 || status === 429 || (status !== undefined && status >= 500);
 }
 
 /**
@@ -215,6 +168,7 @@ export function extractModelCallErrorDetails(error: unknown): JsonObject {
   const signals = readModelCallErrorSignals(error);
   const details: Record<string, JsonValue> = {};
 
+  appendJsonField(details, "apiErrorMessage", signals.apiErrorMessage);
   appendJsonField(details, "gatewayName", signals.gatewayName);
   appendJsonField(details, "gatewayType", signals.gatewayType);
   appendJsonField(details, "statusCode", signals.statusCode);
@@ -268,6 +222,21 @@ export class EmptyModelResponseError extends Error {
 }
 
 /**
+ * Coerces a streamed provider failure into an Error while retaining the raw
+ * payload so provider discriminators remain visible to error classification.
+ */
+export function normalizeModelStreamError(raw: unknown): Error {
+  const error = toError(raw);
+  if (error === raw) return error;
+
+  Object.defineProperty(error, "cause", {
+    configurable: true,
+    value: raw,
+  });
+  return error;
+}
+
+/**
  * True when the error (or any error in its cause chain) is the AI SDK's
  * `NoOutputGeneratedError`. Since `ai@7.0.0-canary.169` (vercel/ai#15938)
  * a model stream that ends after metadata without any output or finish
@@ -310,17 +279,29 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     return "retry";
   }
 
-  if (summarizeKnownModelCallConfigError(error) !== null) {
+  // The catalog's tags carry the recovery judgment for every failure
+  // shape it can see on the cause chain: a fixable configuration mistake
+  // is terminal (repeating the request cannot fix a credential), a
+  // transient provider condition retries.
+  const summary = summarizeKnownError(error);
+  if (summary?.tags.includes("config") === true) {
     return "terminal";
+  }
+  if (summary?.tags.includes("transient") === true) {
+    return "retry";
   }
 
   const signals = readModelCallErrorSignals(error);
-  if (isRetryableGatewayType(signals.gatewayType) || isRetryableGatewayType(signals.upstreamType)) {
+  // The catalog matches structural fields on the chain; these checks
+  // cover the one channel it deliberately does not model — discriminators
+  // that only exist inside the deep-parsed upstream response body — plus
+  // the invalid-request shape, whose message is too free-form to catalog.
+  if (isRetryableGatewayType(signals.upstreamType)) {
     return "retry";
   }
   if (
-    isTerminalGatewayType(signals.gatewayType) ||
     isTerminalGatewayType(signals.upstreamType) ||
+    signals.gatewayType === "invalid_request_error" ||
     signals.gatewayName === "GatewayInvalidRequestError"
   ) {
     return "terminal";
@@ -337,10 +318,6 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
     if (status >= 400 && status < 500) return "terminal";
   }
 
-  if (isLikelyNetworkError(error)) {
-    return "retry";
-  }
-
   return "recoverable";
 }
 
@@ -353,25 +330,6 @@ function hasRetryableFlag(error: unknown): boolean {
   return false;
 }
 
-function isLikelyNetworkError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  if (
-    message.includes("econnreset") ||
-    message.includes("etimedout") ||
-    message.includes("eai_again") ||
-    message.includes("socket hang up") ||
-    message.includes("network") ||
-    message.includes("fetch failed")
-  ) {
-    return true;
-  }
-  if (error.cause !== undefined && error.cause !== error) {
-    return isLikelyNetworkError(error.cause);
-  }
-  return false;
-}
-
 function readModelCallErrorSignals(error: unknown): ModelCallErrorSignals {
   const gatewayError = findGatewayError(error);
   const upstreamError = findUpstreamApiCallError(error);
@@ -379,6 +337,10 @@ function readModelCallErrorSignals(error: unknown): ModelCallErrorSignals {
   const upstreamBody = readGatewayErrorBody(upstreamError);
 
   return {
+    apiCallError: upstreamError !== undefined,
+    apiErrorMessage:
+      upstreamBody?.apiErrorMessage ??
+      firstInformativeApiMessage([readErrorMessage(upstreamError)]),
     gatewayName: readErrorName(gatewayError),
     gatewayType: readStringField(gatewayError, "type"),
     generationId: readStringField(gatewayError, "generationId") ?? upstreamBody?.generationId,
@@ -422,6 +384,7 @@ function findUpstreamApiCallError(error: unknown): unknown {
 
 function readGatewayErrorBody(error: unknown):
   | {
+      readonly apiErrorMessage?: string;
       readonly generationId?: string;
       readonly message?: string;
       readonly type?: string;
@@ -446,6 +409,7 @@ function readGatewayErrorBody(error: unknown):
 
 function readGatewayErrorBodyFromValue(value: unknown):
   | {
+      readonly apiErrorMessage?: string;
       readonly generationId?: string;
       readonly message?: string;
       readonly type?: string;
@@ -453,13 +417,20 @@ function readGatewayErrorBodyFromValue(value: unknown):
   | undefined {
   if (!isObject(value)) return undefined;
   const error = readObjectField(value, "error");
-  if (error === undefined) return undefined;
   const generationId = readStringField(value, "generationId");
-  const message = readStringField(error, "message");
-  const type = readStringField(error, "type");
-  return message === undefined && type === undefined && generationId === undefined
+  const message = readStringField(error, "message") ?? readStringField(value, "message");
+  const type = readStringField(error, "type") ?? readStringField(value, "type");
+  const apiErrorMessage = firstInformativeApiMessage([
+    message,
+    ...readNestedApiErrorMessages(error),
+    ...readNestedApiErrorMessages(value),
+  ]);
+  return message === undefined &&
+    type === undefined &&
+    generationId === undefined &&
+    apiErrorMessage === undefined
     ? undefined
-    : { generationId, message, type };
+    : { apiErrorMessage, generationId, message, type };
 }
 
 function readStatusCode(error: unknown): number | undefined {
@@ -489,8 +460,80 @@ function readObjectField(value: unknown, key: string): Record<string, unknown> |
   return isObject(field) ? field : undefined;
 }
 
+function readNestedApiErrorMessages(value: unknown): readonly string[] {
+  if (!isObject(value)) return [];
+  const messages: string[] = [];
+  appendString(messages, readStringField(value, "message"));
+  appendString(messages, readStringField(value, "error_description"));
+  appendNestedApiFieldMessages(messages, value.error);
+  // `code` can carry a structured rejection ({ message }) on OpenAI-shaped
+  // bodies. `param` and `status` never hold prose - promoting them surfaced
+  // bare field names ("input") as the user-facing error.
+  appendNestedApiFieldMessages(messages, value.code);
+
+  return messages;
+}
+
+function appendNestedApiFieldMessages(out: string[], value: unknown): void {
+  if (typeof value === "string") {
+    appendString(out, value);
+    return;
+  }
+  if (!isObject(value)) return;
+  appendString(out, readStringField(value, "message"));
+  appendString(out, readStringField(value, "error"));
+  appendString(out, readStringField(value, "description"));
+  appendString(out, readStringField(value, "error_description"));
+  appendNestedApiFieldMessages(out, value.error);
+}
+
+function appendString(out: string[], value: string | undefined): void {
+  if (value !== undefined) out.push(value);
+}
+
+function firstInformativeApiMessage(messages: readonly (string | undefined)[]): string | undefined {
+  for (const message of messages) {
+    if (message !== undefined && isInformativeApiMessage(message)) {
+      return truncateSnippet(message, API_ERROR_SUMMARY_LIMIT);
+    }
+  }
+  return undefined;
+}
+
+function isInformativeApiMessage(message: string): boolean {
+  const normalized = message.trim();
+  return (
+    normalized.length > 0 &&
+    normalized !== "[object Object]" &&
+    normalized !== "AI_APICallError" &&
+    normalized !== "Bad Request" &&
+    normalized !== "Internal Server Error"
+  );
+}
+
+function formatApiCallErrorFallback(signals: ModelCallErrorSignals): string | undefined {
+  if (!signals.apiCallError) return undefined;
+  const status = signals.statusCode ?? signals.upstreamStatusCode;
+  const body = signals.responseBodySnippet;
+  const type =
+    signals.upstreamType !== undefined && isInformativeApiMessage(signals.upstreamType)
+      ? signals.upstreamType
+      : undefined;
+  if (status === undefined && body === undefined && type === undefined) {
+    return undefined;
+  }
+  const qualifiers = [status === undefined ? undefined : `HTTP ${status}`, type]
+    .filter((part): part is string => part !== undefined)
+    .join(", ");
+  const prefix =
+    qualifiers.length === 0
+      ? "Model provider API request failed"
+      : `Model provider API request failed (${qualifiers})`;
+  return body === undefined ? `${prefix}.` : `${prefix}: ${body}`;
+}
+
 function isRetryableGatewayType(type: string | undefined): boolean {
-  return type === "rate_limit_exceeded" || type === "timeout_error";
+  return type === "overloaded_error" || type === "rate_limit_exceeded" || type === "timeout_error";
 }
 
 function isTerminalGatewayType(type: string | undefined): boolean {
@@ -512,16 +555,6 @@ function isAmbiguousGatewayInternalBadRequest(signals: ModelCallErrorSignals): b
       signals.gatewayType === "internal_server_error") &&
     (signals.upstreamType === undefined || signals.upstreamType === "internal_server_error")
   );
-}
-
-function* walkCauseChain(error: unknown): Generator<unknown> {
-  const seen = new Set<unknown>();
-  let current = error;
-  while (isObject(current) && !seen.has(current)) {
-    seen.add(current);
-    yield current;
-    current = current.cause;
-  }
 }
 
 function appendJsonField(target: Record<string, JsonValue>, key: string, value: unknown): void {

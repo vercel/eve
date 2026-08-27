@@ -36,6 +36,11 @@ export function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/** Returns a non-empty string or `undefined` for any other value. */
+export function readNonEmptyString(value: unknown): string | undefined {
+  return isNonEmptyString(value) ? value : undefined;
+}
+
 /**
  * Returns `true` when `value` is a thenable — an object with a `then`
  * function. Used to reject async instrumentation metadata projectors
@@ -43,6 +48,16 @@ export function isNonEmptyString(value: unknown): value is string {
  */
 export function isThenable(value: unknown): value is PromiseLike<unknown> {
   return isObject(value) && typeof value.then === "function";
+}
+
+/**
+ * Returns `true` when `error` is an `Error` carrying the given Node.js
+ * `errno` code (`"ENOENT"`, `"EEXIST"`, ...). Filesystem control flow
+ * routinely branches on these codes; this guard keeps the
+ * `"code" in error` duck-typing in one place.
+ */
+export function isErrnoCode(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && error.code === code;
 }
 
 /**

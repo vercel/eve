@@ -20,6 +20,10 @@ const createAppRoot = useTemporaryAppRoots();
 describe("writeCompiledArtifactsFiles", () => {
   afterEach(() => {
     delete (globalThis as Record<string, unknown>).__eveInstrumentationLoaded;
+    delete (globalThis as Record<string, unknown>).__eveProviderSetups;
+    delete (globalThis as Record<symbol, unknown>)[
+      Symbol.for("eve.harness-instrumentation-providers")
+    ];
   });
 
   it("installs compile metadata into bundled compiled artifacts", async () => {
@@ -36,6 +40,7 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -78,6 +83,7 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
@@ -93,10 +99,13 @@ describe("writeCompiledArtifactsFiles", () => {
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
 
     expect(instrumentationPluginSource).toContain(
-      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
+      join(outDir, "compiled-artifacts-module-map.mjs").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).toContain(
-      `import * as instrumentationModule from ${JSON.stringify(join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"))};`,
+      `moduleMap.nodes["__root__"].modules["instrumentation.ts"]`,
+    );
+    expect(instrumentationPluginSource).not.toContain(
+      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).toContain("registerInstrumentationConfig");
 
@@ -108,6 +117,136 @@ describe("writeCompiledArtifactsFiles", () => {
 
     expect((globalThis as Record<string, unknown>).__eveInstrumentationLoaded).toBe("yes");
     expect(instrumentationPluginModule.default()).toBeUndefined();
+  });
+
+  it("registers one provider per file when the instrumentationProviders flag is on", async () => {
+    const { agentRoot, appRoot } = await createAppRoot("eve-compiled-artifacts-providers-", {
+      packageName: "compiled-artifacts-providers-test-agent",
+    });
+    const outDir = join(appRoot, ".workflow-build");
+    const definePath = resolvePackageSourceFilePath(
+      "src/public/instrumentation/index.ts",
+    ).replaceAll("\\", "/");
+
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      [
+        "export default {",
+        '  model: "openai/gpt-5.4",',
+        "  experimental: { instrumentationProviders: true },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+    await mkdir(join(agentRoot, "instrumentation"), { recursive: true });
+    for (const slot of ["local", "otel"]) {
+      await writeFile(
+        join(agentRoot, "instrumentation", `${slot}.ts`),
+        [
+          `import { defineInstrumentation } from ${JSON.stringify(definePath)};`,
+          "",
+          "const container = globalThis as Record<string, unknown>;",
+          "",
+          "export default defineInstrumentation({",
+          "  setup(context) {",
+          "    container.__eveProviderSetups ??= [];",
+          `    (container.__eveProviderSetups as string[]).push(\`${slot}:\${context.agentName}\`);`,
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      );
+    }
+
+    const compileResult = await compileAgent({ startPath: appRoot });
+    const generatedArtifacts = await writeCompiledArtifactsFiles({
+      compileResult,
+      defaultWorkflowWorld: "local",
+      outDir,
+    });
+    const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
+
+    if (instrumentationPluginPath === undefined) {
+      throw new Error("Expected instrumentation plugin path to be generated.");
+    }
+
+    expect(generatedArtifacts.instrumentationSourcePaths).toEqual([
+      join(outDir, "compiled-artifacts-instrumentation-local.mjs"),
+      join(outDir, "compiled-artifacts-instrumentation-otel.mjs"),
+    ]);
+
+    const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
+
+    expect(instrumentationPluginSource).toContain('slot: "local"');
+    expect(instrumentationPluginSource).toContain('slot: "otel"');
+    expect(instrumentationPluginSource).toContain("seedInstrumentationProviders();");
+    expect(instrumentationPluginSource).toContain("shutdownInstrumentationProviders");
+    expect(instrumentationPluginSource).toContain("hooks?.hook('close'");
+    expect(instrumentationPluginSource).not.toContain("registerInstrumentationConfig");
+
+    const instrumentationPlugin = (await import(pathToFileURL(instrumentationPluginPath).href)) as {
+      default: (nitroApp: {
+        hooks: { hook(name: "close", handler: () => Promise<void>): void };
+      }) => void;
+    };
+    const closeHandlers: Array<() => Promise<void>> = [];
+    instrumentationPlugin.default({
+      hooks: {
+        hook: (_name, handler) => closeHandlers.push(handler),
+      },
+    });
+
+    // The plugin resolves the registry by absolute path while the assertion
+    // resolves it by package alias, so this also proves the globalThis rooting
+    // survives two module instances.
+    const { getInstrumentationProviders } =
+      await import("../../src/harness/instrumentation/providers.js");
+
+    expect((globalThis as Record<string, unknown>).__eveProviderSetups).toEqual([
+      "local:compiled-artifacts-providers-test-agent",
+      "otel:compiled-artifacts-providers-test-agent",
+    ]);
+    expect(getInstrumentationProviders().map((entry) => entry.slot)).toEqual(["local", "otel"]);
+    expect(closeHandlers).toHaveLength(1);
+    await closeHandlers[0]?.();
+  });
+
+  it("generates the provider plugin for built-in destinations without authored files", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compiled-artifacts-default-providers-",
+      {
+        packageName: "compiled-artifacts-default-providers-test-agent",
+      },
+    );
+    const outDir = join(appRoot, ".workflow-build");
+    await writeFile(
+      join(agentRoot, "agent.ts"),
+      [
+        "export default {",
+        '  model: "openai/gpt-5.4",',
+        "  experimental: { instrumentationProviders: true },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(join(agentRoot, "instructions.md"), "You are a precise assistant.\n");
+
+    const compileResult = await compileAgent({ startPath: appRoot });
+    const generatedArtifacts = await writeCompiledArtifactsFiles({
+      compileResult,
+      defaultWorkflowWorld: "local",
+      outDir,
+    });
+    const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
+    if (instrumentationPluginPath === undefined) {
+      throw new Error("Expected instrumentation plugin path to be generated.");
+    }
+
+    expect(generatedArtifacts.instrumentationSourcePaths).toEqual([]);
+    expect(await readFile(instrumentationPluginPath, "utf8")).toContain(
+      "seedInstrumentationProviders();",
+    );
   });
 
   it("surfaces instrumentation import failures when the Nitro plugin module loads", async () => {
@@ -129,6 +268,7 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
     const instrumentationPluginPath = generatedArtifacts.instrumentationPluginPath;
@@ -175,11 +315,15 @@ describe("writeCompiledArtifactsFiles", () => {
     });
     const generatedArtifacts = await writeCompiledArtifactsFiles({
       compileResult,
+      defaultWorkflowWorld: "local",
       outDir,
     });
 
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
 
+    expect(compileResult.manifest.skills).toContainEqual(
+      expect.objectContaining({ name: "research", sourceKind: "skill-package" }),
+    );
     expect(bootstrapSource).not.toContain("workspaceResources");
     expect(bootstrapSource).not.toContain("contentBase64");
     expect(bootstrapSource).not.toContain("Always confirm the source of truth.");

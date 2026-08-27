@@ -1,9 +1,15 @@
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setPendingInputBatch } from "#harness/input-requests.js";
+import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
+import {
+  applyMemoryRecallBatches,
+  createMemoryLock,
+  projectMemoryHistoryFromSessionState,
+  validateMemoryRecallResult,
+} from "#shared/memory-state.js";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
@@ -61,6 +67,19 @@ type MockAgentConstructor =
     ? (settings: S) => ToolLoopAgent
     : never;
 
+function getMockResponseMessages(result: Record<string, unknown>): unknown[] {
+  const response = result.response;
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("messages" in response) ||
+    !Array.isArray(response.messages)
+  ) {
+    throw new Error("Mock ToolLoopAgent result must include response messages.");
+  }
+  return response.messages;
+}
+
 function setupMockAgentSequence(results: readonly Record<string, unknown>[]): void {
   const queue = [...results];
 
@@ -91,7 +110,7 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
         await onStepFinish(result);
       }
 
-      return result;
+      return { ...result, responseMessages: getMockResponseMessages(result) };
     });
 
     this.stream = vi.fn();
@@ -109,6 +128,67 @@ function expectStepFn(value: StepNext): StepFn {
 }
 
 describe("tool-loop structured compaction accounting", () => {
+  it("keeps private memory out of the summary while retaining its attributed record", async () => {
+    vi.mocked(generateText).mockResolvedValue({
+      text: "ordinary summary",
+    } as Awaited<ReturnType<typeof generateText>>);
+    setupMockAgentSequence([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const memoryLock = createMemoryLock({
+      namespace: "app",
+      scope: "user_1",
+      slot: "profile",
+      turn: { id: "turn_0", input: [], sequence: 0 },
+      visibility: "scope",
+    });
+    const recalled = applyMemoryRecallBatches({
+      batches: [
+        {
+          lock: memoryLock,
+          messages: validateMemoryRecallResult(
+            { messages: [{ content: "PRIVATE_MEMORY_SENTINEL", id: "profile" }] },
+            "profile",
+          ),
+          operationId: "recall_1",
+        },
+      ],
+      history: [],
+      state: undefined,
+    });
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        historyProjector: projectMemoryHistoryFromSessionState,
+        resolveModel: vi.fn().mockResolvedValue({ modelId: "test-model" } as LanguageModel),
+      }),
+    );
+
+    const result = await runStep(
+      createTestSession({
+        compaction: { recentWindowSize: 0, threshold: 100 },
+        history: [
+          ...recalled.history,
+          { content: `ordinary ${"conversation ".repeat(100)}`, role: "user" },
+        ],
+        state: recalled.state,
+      }),
+      { message: "continue" },
+    );
+
+    expect(vi.mocked(generateText)).toHaveBeenCalledOnce();
+    expect(vi.mocked(generateText).mock.calls[0]?.[0].prompt).not.toContain(
+      "PRIVATE_MEMORY_SENTINEL",
+    );
+    expect(JSON.stringify(result.session.history)).toContain("PRIVATE_MEMORY_SENTINEL");
+    expect(JSON.stringify(result.session.history)).toContain("eve.memory");
+  });
+
   it("compacts before the continuation step when structured tool results were appended", async () => {
     vi.mocked(generateText).mockResolvedValue({
       text: "summary",
@@ -193,7 +273,7 @@ describe("tool-loop structured compaction accounting", () => {
       createTestSession({
         compaction: {
           recentWindowSize: 10,
-          threshold: 101,
+          threshold: 500,
         },
       }),
       { message: "Compute something" },
@@ -236,7 +316,7 @@ describe("tool-loop structured compaction accounting", () => {
     ]);
 
     const runStep = createToolLoopHarness(createTestConfig());
-    const session = setPendingInputBatch({
+    const session = appendPendingInputBatch({
       requests: [
         {
           action: {
@@ -246,6 +326,7 @@ describe("tool-loop structured compaction accounting", () => {
             toolName: "ask_question",
           },
           display: "select",
+          kind: "question",
           prompt: "Pick one.",
           requestId: "question-call",
         },

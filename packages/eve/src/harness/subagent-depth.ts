@@ -1,49 +1,35 @@
-import { SubagentDepthKey, SubagentMaxDepthKey } from "#context/keys.js";
+import { SubagentDepthKey } from "#context/keys.js";
 import type { HarnessSession } from "#harness/types.js";
 import type {
   RuntimeActionRequest,
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
-} from "#runtime/actions/types.js";
-
-export const DEFAULT_SUBAGENT_MAX_DEPTH = 3;
+} from "#shared/action-types.js";
 
 export type DelegatedRuntimeActionRequest =
   | RuntimeRemoteAgentCallActionRequest
   | RuntimeSubagentCallActionRequest;
 
-export type SubagentDelegationLimit = {
+export type ResolvedSubagentDepth = {
   readonly currentDepth: number;
-  readonly maxDepth: number;
   readonly nextChildDepth: number;
-  readonly reached: boolean;
 };
 
-export function resolveSubagentDelegationLimit(
-  session: Pick<HarnessSession, "subagentDepth" | "subagentMaxDepth">,
-): SubagentDelegationLimit {
+export function resolveSubagentDepth(
+  session: Pick<HarnessSession, "subagentDepth">,
+): ResolvedSubagentDepth {
   const currentDepth = parseSubagentDepth(session.subagentDepth);
-  const maxDepth = parseSubagentMaxDepth(session.subagentMaxDepth) ?? DEFAULT_SUBAGENT_MAX_DEPTH;
   return {
     currentDepth,
-    maxDepth,
     nextChildDepth: currentDepth + 1,
-    reached: currentDepth >= maxDepth,
   };
 }
 
-export function readSerializedSubagentSessionDepth(
+export function readSerializedSubagentDepth(
   serializedContext: Readonly<Record<string, unknown>>,
-): {
-  readonly subagentDepth?: number;
-  readonly subagentMaxDepth?: number;
-} {
+): number | undefined {
   const subagentDepth = parseSubagentDepth(serializedContext[SubagentDepthKey.name]);
-  const subagentMaxDepth = parseSubagentMaxDepth(serializedContext[SubagentMaxDepthKey.name]);
-  return {
-    subagentDepth: subagentDepth === 0 ? undefined : subagentDepth,
-    subagentMaxDepth,
-  };
+  return subagentDepth === 0 ? undefined : subagentDepth;
 }
 
 export function isSubagentDelegationAction(
@@ -67,8 +53,4 @@ export function getSubagentDelegationName(action: DelegatedRuntimeActionRequest)
 
 function parseSubagentDepth(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : 0;
-}
-
-function parseSubagentMaxDepth(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 }

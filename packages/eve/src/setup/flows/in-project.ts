@@ -12,7 +12,7 @@ import type { OutputSink } from "../step.js";
  * named X" row), and the resolved in-place project path. The channels flow
  * seeds its own state instead — it must keep the default empty agent name so
  * the Slack connector slug falls back to the package.json name, exactly like
- * `eve channels add`.
+ * `eve add channel/slack`.
  */
 export function inProjectSetupState(
   appRoot: string,

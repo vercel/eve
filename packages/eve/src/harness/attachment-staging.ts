@@ -345,7 +345,7 @@ async function tryFetchFile(
   const adapterKind = getAdapterKind(adapter);
 
   try {
-    const result = await adapter.fetchFile(url);
+    const result = await adapter.fetchFile(url, adapterCtx);
     if (result === null) {
       return null;
     }

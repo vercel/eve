@@ -1,26 +1,8 @@
-import { sample_env } from "../shared/cube-sample.wgsl";
+import { sample_env } from "../shared/env-sample.wgsl";
+import { Params } from "../shared/scene-params.wgsl";
 
 // Environment background pass for eve-5.
 // Draws the fixed-world studio HDR cubemap from the same true orbit camera as the logo.
-
-struct Params {
-  viewProj: mat4x4f,
-  cameraPos: vec3f,
-  passKind: f32,
-  cameraRight: vec3f,
-  fov: f32,
-  cameraUp: vec3f,
-  aspect: f32,
-  cameraForward: vec3f,
-  materialKind: f32,
-  thicknessScale: f32,
-  envYaw: f32,
-  envPitch: f32,
-  glassAbsorption: f32,
-  // Match the shared glass Params layout because this pass receives the same buffer.
-  ascii0: vec4f,
-  ascii1: vec4f,
-};
 
 struct VertexOutput {
   @builtin(position) clipPosition: vec4f,

@@ -11,8 +11,8 @@ import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js
 import { serializeContext } from "#context/serialize.js";
 import { hasProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { HarnessEmitFn, HarnessSession } from "#harness/types.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { InputRequest } from "#shared/input.js";
 import { createRuntimeAdapterRegistry } from "#runtime/channels/registry.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -140,9 +140,10 @@ function buildApprovalRequest(requestId: string): InputRequest {
       toolName: "create_issue",
     },
     display: "confirmation",
+    kind: "tool-approval",
     options: [
       { id: "approve", label: "Approve", style: "primary" },
-      { id: "deny", label: "Deny", style: "danger" },
+      { id: "cancel", label: "Cancel", style: "danger" },
     ],
     prompt: "Approve?",
     requestId,
@@ -175,10 +176,10 @@ function buildEmptySession(continuationToken: string, sessionId: string): Harnes
  */
 function buildCapturingEmit(ctx: ContextContainer): {
   readonly emit: HarnessEmitFn;
-  readonly events: HandleMessageStreamEvent[];
+  readonly events: UnstampedMessageStreamEvent[];
   readonly persistAdapterState: () => void;
 } {
-  const events: HandleMessageStreamEvent[] = [];
+  const events: UnstampedMessageStreamEvent[] = [];
   const adapter = ctx.require(ChannelKey);
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const emit: HarnessEmitFn = async (event) => {
@@ -207,7 +208,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     ctx.set(ChannelKey, slackishAdapter);
 
     // Drive a child HITL batch up through the parent's adapter. This
-    // is the exact call shape used by `runProxyInputRequestStep` on
+    // is the exact call shape used by `runProxySubagentEventStep` on
     // the workflow runtime.
     const approvalRequest = buildApprovalRequest("req-approve-1");
     const hookPayload = buildHitlPayload({
@@ -237,7 +238,19 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     expect((afterEmitAdapter.state as SlackishState | undefined)?.pendingRequests).toEqual([
       approvalRequest,
     ]);
-    expect(entries).toEqual([["req-approve-1", "subagent:parent:call-1"]]);
+    expect(entries).toEqual([
+      [
+        "req-approve-1",
+        {
+          batch: {
+            approvalRequestIds: ["req-approve-1"],
+            requestIds: ["req-approve-1"],
+          },
+          childContinuationToken: "subagent:parent:call-1",
+          kind: "tool-approval",
+        },
+      ],
+    ]);
 
     // The parent is in conversation mode, so the helper follows the
     // proxied `input.requested` with a `turn.completed` +
@@ -301,6 +314,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
         payload: {
           inputResponses: [{ optionId: "approve", requestId: "req-approve-1" }],
         },
+        retireRequestIds: ["req-approve-1"],
       },
     ]);
   });
@@ -421,7 +435,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       payload: {
         inputResponses: [
           { optionId: "approve", requestId: "req-a" },
-          { optionId: "deny", requestId: "req-b" },
+          { optionId: "cancel", requestId: "req-b" },
         ],
       },
       state: parkedSession.state,
@@ -440,7 +454,7 @@ describe("subagent HITL proxy → concurrent-descendant routing", () => {
       inputResponses: [{ optionId: "approve", requestId: "req-a" }],
     });
     expect(byChild.get("subagent:parent:call-b")).toEqual({
-      inputResponses: [{ optionId: "deny", requestId: "req-b" }],
+      inputResponses: [{ optionId: "cancel", requestId: "req-b" }],
     });
 
     // A response whose requestId does not match any proxy entry

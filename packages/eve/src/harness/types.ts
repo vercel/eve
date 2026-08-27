@@ -1,16 +1,21 @@
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
-import type { SessionCapabilities } from "#channel/types.js";
-import type { HandleMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
+import type { AlsContext } from "#context/container.js";
+import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { TokenUsage } from "#shared/token-usage.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
+import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
+import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 /**
  * Serializable tool definition stored on the session.
@@ -31,23 +36,35 @@ export interface CompactionConfig {
   readonly lastKnownPromptMessageCount?: number;
   readonly recentWindowSize: number;
   readonly threshold: number;
+  readonly thresholdPercent?: number;
 }
 
 /**
  * Serializable agent configuration stored on the session.
  */
-export interface SessionAgent {
+interface SessionAgentBase {
   /**
    * Optional model used only for compaction summaries.
    *
    * When omitted, the harness uses the active turn model for compaction.
    */
   readonly compactionModelReference?: RuntimeModelReference;
-  readonly modelReference: RuntimeModelReference;
   readonly reasoning?: AgentReasoningDefinition;
   readonly system: string;
   readonly tools: readonly SessionToolDefinition[];
 }
+
+export type SessionAgent = SessionAgentBase &
+  (
+    | {
+        readonly dynamicModel?: never;
+        readonly modelReference: RuntimeModelReference;
+      }
+    | {
+        readonly dynamicModel: true;
+        readonly modelReference?: RuntimeModelReference;
+      }
+  );
 
 /**
  * Serializable session state passed between harness and runtime.
@@ -76,15 +93,23 @@ export interface HarnessSession {
   readonly state?: SessionStateMap;
   /**
    * Number of local delegated subagent hops from the root session to this
-   * session. Root sessions are depth 0. Used by the harness to cap recursive
-   * subagent delegation.
+   * session. Root sessions are depth 0.
    */
   readonly subagentDepth?: number;
   /**
-   * Maximum delegated child-session depth for this session. When omitted, the
-   * harness uses the framework default.
+   * Effective maximum subagent calls one `Workflow` invocation may dispatch
+   * for this session, configured by `experimental_workflow({ maxSubagents })`.
+   * When omitted, the dispatch step applies the framework default.
    */
-  readonly subagentMaxDepth?: number;
+  readonly workflowMaxSubagents?: number;
+}
+
+export function requireSessionModelReference(session: HarnessSession): RuntimeModelReference {
+  const reference = session.agent.modelReference;
+  if (reference === undefined) {
+    throw new Error("Expected a concrete model selection for the active model call.");
+  }
+  return reference;
 }
 
 /**
@@ -92,9 +117,11 @@ export interface HarnessSession {
  */
 export interface SessionLimits {
   /**
-   * Maximum provider-reported input tokens this durable session may spend before
-   * eve refuses to start another model call. Defaults to 40M for root sessions
-   * and 5M for delegated subagent sessions.
+   * Maximum provider-reported input tokens this durable session may spend
+   * before eve refuses to start another model call. Absent when the session
+   * is uncapped. Root sessions default to 40M unless authored otherwise;
+   * delegated subagent sessions receive the parent's remaining quota at
+   * dispatch time.
    */
   readonly maxInputTokensPerSession?: number;
   /**
@@ -114,9 +141,18 @@ export interface SessionLimits {
  * channels. The harness resolves any pending input batch at the start of
  * `runStep` before the model call.
  */
+export interface AttributedInputResponse {
+  readonly auth: SessionAuthContext | null;
+  readonly response: InputResponse;
+}
+
 export interface StepInput {
+  /** Internal responder-bound input produced at the delivery boundary. */
+  readonly attributedInputResponses?: readonly AttributedInputResponse[];
   readonly inputResponses?: readonly InputResponse[];
   readonly message?: string | UserContent;
+  /** Internal actor attribution for `message`. */
+  readonly messageAuth?: SessionAuthContext | null;
   /**
    * Context strings from the channel delivery. Each entry is appended
    * as a `role: "user"` message to `session.history` before the
@@ -160,12 +196,37 @@ export interface StepDone {
  */
 export type StepNext = StepDone | StepFn | null;
 
+/** User-facing answer produced when a conversation turn settles. */
+export interface SettledTurn {
+  readonly output: unknown;
+  readonly isError?: boolean;
+  /**
+   * Usage this turn added to the child's session subtree. The harness never
+   * sets it; the durable turn step fills it with the per-turn delta before
+   * the answer crosses the park boundary to the delegated caller.
+   */
+  readonly usage?: TokenUsage;
+}
+
 /**
  * Result returned by one harness step invocation.
  */
 export interface StepResult {
+  /** Background-tool effects projected onto the session that entered this step. */
+  readonly backgroundTaskSession?: HarnessSession;
+  /** Durable tasks started by background tools and awaiting the parent commit barrier. */
+  readonly backgroundTasks?: readonly {
+    readonly taskInboxToken: string;
+    readonly taskId: string;
+    readonly taskRunId: string;
+  }[];
   readonly next: StepNext;
   readonly session: HarnessSession;
+  /**
+   * Present when a conversation turn settled with a user-facing answer; carried
+   * across the park boundary so a delegated parent can be notified.
+   */
+  readonly settledTurn?: SettledTurn;
 }
 
 /**
@@ -190,7 +251,7 @@ export type HarnessToolMap = ReadonlyMap<string, HarnessToolDefinition>;
  * events without knowing about writables or handlers.
  */
 export type HarnessEmitFn = (
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
@@ -203,7 +264,7 @@ export type HarnessEmitFn = (
  * and dynamic tool dispatch in one call.
  */
 export type HandleEventFn = (
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
 ) => Promise<void>;
 
@@ -219,23 +280,37 @@ export interface ToolLoopHarnessConfig {
    * per-step toolset to decide whether `ask_question` is available.
    */
   readonly capabilities?: SessionCapabilities;
+  /** Clears model-message history without running a model turn. */
+  readonly clearOnly?: boolean;
+  /** Forces one context-compaction pass without running a model turn. */
+  readonly compactOnly?: boolean;
   /**
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote
-   * agents. Resolved by the runtime from the agent's `workflowEnabled` flag
-   * (set when `agent/tools/workflow.ts` re-exports the `ExperimentalWorkflow`
-   * marker). Only root sessions ever see the tool.
+   * agents. Resolved from the `experimental_workflow(...)` definition exported
+   * by `agent/tools/workflow.ts`. Only root sessions ever see the tool.
    * Defaults to `false`.
    */
   readonly workflow?: boolean;
   /**
    * Maximum subagent calls one `Workflow` invocation may dispatch, from the
-   * agent's `limits.maxSubagents`. Advertised in the tool description; the
-   * dispatch step enforces it. Defaults to
+   * authored Workflow tool definition. Advertised in the tool description;
+   * the dispatch step enforces it. Defaults to
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;
+  /** AI Gateway provider selected for the framework `web_search` tool. */
+  readonly webSearchProvider?: WebSearchProvider;
   readonly handleEvent?: HandleEventFn;
+  /** Projects raw durable history before it crosses a message-bearing boundary. */
+  readonly historyProjector?: HistoryViewProjector;
+  /** Execution-prepared view of the history supplied to the first harness step. */
+  readonly historyView?: PreparedHistoryView;
+  /**
+   * Internal lifecycle hooks injected into each actual model attempt.
+   * Omitted in production until an instrumentation runtime opts in.
+   */
+  readonly instrumentation?: HarnessInstrumentation;
   /**
    * Execution mode for the current harness.
    *
@@ -251,6 +326,17 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
+  /** Resolves step-scoped dynamic tools once for approval policy and model work. */
+  readonly resolveStepDynamicTools?: (input: {
+    readonly ctx: AlsContext;
+    readonly event: UnstampedMessageStreamEvent;
+    readonly messages: readonly ModelMessage[];
+  }) => Promise<void>;
+  readonly dispatchDynamicModelEvent?: (input: {
+    readonly ctx: AlsContext;
+    readonly event: UnstampedMessageStreamEvent;
+    readonly messages: readonly ModelMessage[];
+  }) => Promise<void>;
   readonly resolveModel: (reference: RuntimeModelReference) => Promise<LanguageModel>;
   /**
    * Runtime identity metadata attached to the `session.started` event.

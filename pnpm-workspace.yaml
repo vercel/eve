@@ -5,59 +5,66 @@ packages:
   - packages/*
 
 allowBuilds:
-  "@mongodb-js/zstd": true
-  "@nestjs/core": true
-  "@parcel/watcher": false
-  cbor-extract: true
-  esbuild: true
-  node-liblzma: false
-  protobufjs: true
-  sharp: true
-  simple-git-hooks: true
-  unrs-resolver: true
-  vue-demi: false
-  webgpu: true
+  "@google/genai": false # No-op preinstall.
+  "@parcel/watcher": false # Builds from source only when explicitly requested.
+  braintrust: false # Installs an optional CLI binary; the SDK does not need it.
+  bufferutil: false # The package already includes the supported prebuilt bindings.
+  cpu-features: false # Optional ssh2 acceleration; JavaScript fallback is sufficient.
+  esbuild: true # Verifies the installed platform binary.
+  phase: false # Would install its own Git hooks.
+  protobufjs: false # Only checks the package version.
+  sharp: false # Prebuilt platform packages need no install script.
+  ssh2: false # Optional native acceleration; JavaScript fallback is sufficient.
+  unrs-resolver: false # Prebuilt platform packages need no repair script.
+  webgpu: true # Clears macOS quarantine from its packaged native binding.
+
+ignoredOptionalDependencies:
+  - "@braintrust/bt-*"
+  - "@mongodb-js/zstd"
+  - cbor-extract
+  - node-liblzma
 
 catalog:
-  "@ai-sdk/anthropic": "^4.0.0"
-  "@ai-sdk/google": "^4.0.0"
-  "@ai-sdk/mcp": "^2.0.1"
-  "@ai-sdk/openai": "^4.0.0"
-  "@ai-sdk/otel": "^1.0.0"
-  "@ai-sdk/provider": "^4.0.0"
-  "@ai-sdk/provider-utils": "^5.0.0"
+  "@ai-sdk/anthropic": "^4.0.36"
+  "@ai-sdk/google": "^4.0.39"
+  "@ai-sdk/mcp": "^2.0.29"
+  "@ai-sdk/openai": "^4.0.36"
+  "@ai-sdk/otel": "^1.0.58"
+  "@ai-sdk/provider": "^4.0.7"
+  "@ai-sdk/provider-utils": "^5.0.25"
+  "@opentelemetry/context-async-hooks": "2.6.1"
+  "@opentelemetry/core": "2.6.1"
+  "@opentelemetry/sdk-trace-base": "2.6.1"
   "@types/node": "25.9.1"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
-  "@vercel/connect": "0.2.2"
-  "@vercel/sandbox": "2.3.0"
-  ai: "^7.0.0"
-  next: "16.2.6"
+  "@vercel/connect": "1.0.0"
+  "@vercel/otel": "2.1.3"
+  "@vercel/sandbox": "2.8.0"
+  "@vercel/sandbox-drives": "npm:@vercel/sandbox@2.10.0-beta.0"
+  "@workflow/world-postgres": "5.0.0-beta.35"
+  ai: "^7.0.58"
+  better-auth: "1.6.26"
+  marked: "17.0.6"
+  next: "16.3.0-preview.6"
+  phase: "0.0.1"
   picocolors: "1.1.1"
   react: "19.2.6"
   react-dom: "19.2.6"
   streamdown: "2.5.0"
-  typescript: "7.0.1-rc"
-  vitest: "4.1.7"
+  typescript: "7.0.2"
+  vitest: "4.1.10"
   zod: "4.4.3"
+
+catalogs:
+  docs:
+    next: "16.3.1"
 
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
-  - "@ai-sdk/*"
-  - "@rolldown/*"
-  - "@typescript/typescript-*"
-  - "@turbo/*"
-  - "@workflow/*"
+  - "@linqapp/chat-sdk-adapter"
   - "@vercel/*"
-  - "@vgpu/*"
-  - ai
-  - crossws
-  - experimental-ai-sdk-code-mode
-  - eve
+  - "@workflow/*"
   - nitro
-  - rolldown
-  - turbo
-  - typescript
-  - vercel
   - workflow

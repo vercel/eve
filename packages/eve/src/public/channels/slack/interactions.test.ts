@@ -39,11 +39,18 @@ describe("parseBlockActionsPayload", () => {
     }
   });
 
-  it("accepts the shared Slack webhook block_actions payload", () => {
+  it("separates the installation and actor workspaces in block_actions", () => {
     const body = new URLSearchParams({
       payload: JSON.stringify(
         makePayload({
           type: "block_actions",
+          team: { id: "T_INSTALLATION" },
+          user: {
+            id: "U0123456789",
+            username: "jane.doe",
+            name: "jane.doe",
+            team_id: "T_ACTOR",
+          },
           actions: [
             {
               action_id: "priority",
@@ -72,8 +79,9 @@ describe("parseBlockActionsPayload", () => {
 
     expect(parsed).toMatchObject({
       channelId: "C0123456789",
+      installationTeamId: "T_INSTALLATION",
       threadTs: "1700000000.000100",
-      teamId: "T0123456789",
+      teamId: "T_ACTOR",
     });
     expect(parsed?.messageBlocks).toHaveLength(1);
     expect(parsed?.actions[0]).toMatchObject({

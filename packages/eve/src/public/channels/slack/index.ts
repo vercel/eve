@@ -19,36 +19,61 @@ export {
   type SlackChannelState,
   type SlackContext,
   type SlackEventContext,
+  type SlackEventRespondFn,
+  type SlackEventRespondOptions,
+  type SlackEventSendFn,
+  type SlackEventSendOptions,
   type SlackHandle,
+  type SlackInboundEventContext,
+  type SlackInboundMessageContext,
   type SlackInboundResult,
   type SlackInboundResultOrPromise,
-  type SlackInstrumentationMetadata,
   type SlackInitialMessage,
+  type SlackInputResponseContext,
+  type SlackInputResponseResult,
+  type SlackInputResponseSubmission,
+  type SlackInstrumentationMetadata,
   type SlackInteractionAction,
+  type SlackInteractionContext,
   type SlackMentionResult,
   type SlackMentionResultOrPromise,
   type SlackReceiveTarget,
+  type SlackSessionTarget,
+  type SlackRespondOptions,
+  type SlackSendOptions,
+  type SlackSessionOperations,
   type SlackThread,
   type SlackWebhookVerifier,
+  type SlackWorkspaceHandle,
 } from "#public/channels/slack/slackChannel.js";
 
 export type {
   SlackAttachment,
   SlackAuthor,
+  SlackEvent,
+  SlackEventEnvelope,
   SlackInboundContext,
   SlackMessage,
 } from "#public/channels/slack/inbound.js";
 
 export {
+  callSlackApi,
+  resolveSlackBotToken,
   slackContinuationToken,
   type SlackPostInput,
   type SlackPostedMessage,
+  type SlackBotTokenContext,
   type SlackThreadMessage,
   type SlackUploadFilesOptions,
   type SlackUploadFilesResult,
 } from "#public/channels/slack/api.js";
 
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
+
+export {
+  describeActionRequest,
+  describeActionRequests,
+} from "#public/channels/slack/action-status.js";
 
 export {
   loadThreadContextMessages,

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { VERBOSE_BUNDLING_DESCRIPTOR } from "../../src/internal/testing/scenario-apps/verbose-bundling.js";
-import type { HandleMessageStreamEvent } from "../../src/protocol/message.js";
-import type { RuntimeToolResultActionResult } from "../../src/runtime/actions/types.js";
+import type { MessageStreamEvent } from "../../src/protocol/message.js";
+import type { RuntimeToolResultActionResult } from "../../src/shared/action-types.js";
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
 import {
@@ -108,7 +108,7 @@ async function sendToolMessageAndCollectResult(input: {
 }
 
 function extractToolResult(
-  events: readonly HandleMessageStreamEvent[],
+  events: readonly MessageStreamEvent[],
   toolName: string,
 ): RuntimeToolResultActionResult | undefined {
   for (const event of events) {

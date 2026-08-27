@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey } from "#context/keys.js";
-import { reconcileSessionContinuationToken } from "#execution/workflow-steps.js";
+import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import type { HarnessSession } from "#harness/types.js";
 
 function makeSession(continuationToken: string): HarnessSession {
@@ -35,8 +35,8 @@ describe("reconcileSessionContinuationToken", () => {
     expect(next).toBe(session);
   });
 
-  it("re-stamps the session's continuation token when a handler called setContinuationToken", () => {
-    // The session handle's `setContinuationToken(...)` writes through
+  it("re-stamps the session's continuation token when a handler called continuation.rekey", () => {
+    // The session handle's `continuation.rekey(...)` writes through
     // to ContinuationTokenKey during the step. After the step,
     // reconcile picks the new token up and stamps it onto the
     // HarnessSession the workflow body reads back.

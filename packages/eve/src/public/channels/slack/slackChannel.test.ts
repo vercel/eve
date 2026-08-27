@@ -5,18 +5,26 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel, type CompiledChannel } from "#channel/compiled-channel.js";
+import type { ChannelFrom, ChannelSource } from "#channel/channel-operations.js";
 import { isHttpRouteDefinition } from "#channel/routes.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
+import {
+  mockChannelContext,
+  type ObservedChannelDelivery,
+} from "#internal/testing/mocks/mock-channel-operations.js";
+import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { decodeSlackApiBody } from "#public/channels/slack/api-encoding.js";
 import {
   HITL_ACTION_PREFIX,
+  HITL_FREEFORM_ACTION_PREFIX,
   HITL_FREEFORM_MODAL_ACTION_ID,
   HITL_FREEFORM_MODAL_BLOCK_ID,
   HITL_FREEFORM_MODAL_CALLBACK_ID,
 } from "#public/channels/slack/hitl.js";
 import {
+  SLACK_CARD_BODY_TEXT_MAX_LENGTH,
   SLACK_MAX_BLOCKS_PER_MESSAGE,
   SLACK_MESSAGE_TEXT_MAX_LENGTH,
   SLACK_SECTION_TEXT_MAX_LENGTH,
@@ -26,10 +34,34 @@ import {
   constrainAuthorizationRequired,
   slackChannel,
   type SlackAuthorizationEventContext,
+  type SlackInboundEventContext,
+  type SlackInputResponseContext,
+  type SlackInputResponseSubmission,
+  type SlackInteractionContext,
   type SlackChannelState,
   type SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
+import { type InputResponse, parseInputResponses } from "#shared/input.js";
+
+function slackRespondTypeChecks(
+  interaction: SlackInteractionContext,
+  event: SlackInboundEventContext,
+): void {
+  const widened: readonly InputResponse[] = [{ optionId: "approve", requestId: "approval-1" }];
+  const validated = parseInputResponses(widened);
+
+  // @ts-expect-error Slack thread wrappers reject input-response shapes that erased extra keys.
+  void interaction.respond(widened);
+  void interaction.respond(validated);
+
+  const options = { auth: null, target: { channelId: "C1", threadTs: "T1" } } as const;
+  // @ts-expect-error generic Slack event wrappers enforce the same schema proof.
+  void event.respond(widened, options);
+  void event.respond(validated, options);
+}
+
+void slackRespondTypeChecks;
 
 function getAdapter(channel: unknown): ChannelAdapter<any> {
   if (!isCompiledChannel(channel)) {
@@ -76,15 +108,15 @@ const stubAlsContext = (() => {
 
 function callEvent(
   adapter: ChannelAdapter,
-  event: HandleMessageStreamEvent,
+  event: UnstampedMessageStreamEvent,
   ctx: any,
-): Promise<HandleMessageStreamEvent> {
+): Promise<UnstampedMessageStreamEvent> {
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
 /**
  * Accessor whose `set` writes are captured so tests can assert on
- * `setContinuationToken` flowing through the SessionHandle. Returns
+ * `continuation.rekey` flowing through the SessionHandle. Returns
  * undefined for unset keys (matching the real `ContextContainer`
  * behavior), while seeding the current continuation token so
  * SessionHandle can preserve the runtime namespace.
@@ -113,11 +145,11 @@ function captureAccessor(initialContinuationToken: string): {
   };
 }
 
-function makeEvent<T extends HandleMessageStreamEvent["type"]>(
+function makeEvent<T extends UnstampedMessageStreamEvent["type"]>(
   type: T,
   data: unknown,
-): HandleMessageStreamEvent {
-  return { type, data } as HandleMessageStreamEvent;
+): UnstampedMessageStreamEvent {
+  return { type, data } as UnstampedMessageStreamEvent;
 }
 
 const THREAD_STATE = {
@@ -223,10 +255,41 @@ function buildDirectMessageBody(overrides?: {
   return { body, channel, ts };
 }
 
+function buildEventBody(
+  event: Record<string, unknown>,
+  overrides?: {
+    authorizations?: readonly Record<string, unknown>[];
+    eventId?: string;
+    eventTime?: number;
+    teamId?: string;
+  },
+): string {
+  mentionCounter += 1;
+  return JSON.stringify({
+    api_app_id: "A01",
+    authorizations: overrides?.authorizations,
+    event,
+    event_id: overrides?.eventId ?? `Ev${mentionCounter}`,
+    event_time: overrides?.eventTime ?? 1_700_000_000,
+    team_id: overrides?.teamId ?? "T01",
+    type: "event_callback",
+  });
+}
+
 async function firePost(
   channel: unknown,
   request: Request,
+  overrides: {
+    readonly cancel?: (address: string, options?: { readonly turnId?: string }) => Promise<unknown>;
+    readonly clear?: (address: string) => Promise<unknown>;
+    readonly compact?: (address: string) => Promise<unknown>;
+    readonly reset?: (address: string, options?: { readonly reason?: string }) => Promise<unknown>;
+    readonly resolveSession?: (address: string) => Promise<unknown>;
+    readonly send?: ReturnType<typeof vi.fn>;
+  } = {},
 ): Promise<{
+  cancel: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
+  reset: ReturnType<typeof vi.fn<(options?: Record<string, unknown>) => Promise<unknown>>>;
   response: Response;
   send: ReturnType<typeof vi.fn>;
   waitUntil: ReturnType<typeof vi.fn>;
@@ -236,16 +299,49 @@ async function firePost(
   if (!post || !isHttpRouteDefinition(post)) {
     throw new Error("Expected slack channel to define a POST route.");
   }
-  const send = vi.fn().mockResolvedValue({ id: "s1", continuationToken: "ct" });
+  const cancel = vi
+    .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
+    .mockResolvedValue({ sessionId: "session_current", status: "accepted" });
+  const reset = vi
+    .fn<(options?: Record<string, unknown>) => Promise<unknown>>()
+    .mockResolvedValue({ status: "reset", previousSessionId: "session_previous" });
+  const send = vi.fn().mockResolvedValue({ id: "s1" });
+  const observeSend = overrides.send ?? send;
+  const baseFrom = mockChannelContext<SlackChannelState>(
+    observeSend as (address: string, input: ObservedChannelDelivery<SlackChannelState>) => unknown,
+  ).from;
+  const from: ChannelFrom<SlackChannelState> = (address) => {
+    const source = baseFrom(address);
+    return {
+      ...source,
+      cancel: (options) =>
+        (overrides.cancel?.(address, options) ??
+          cancel({ ...options, continuationToken: address })) as ReturnType<
+          ChannelSource<SlackChannelState>["cancel"]
+        >,
+      clear: () =>
+        (overrides.clear?.(address) ??
+          Promise.resolve({ sessionId: "s1", status: "accepted" })) as never,
+      compact: () =>
+        (overrides.compact?.(address) ??
+          Promise.resolve({ sessionId: "s1", status: "accepted" })) as never,
+      reset: (options) =>
+        (overrides.reset?.(address, options) ??
+          reset({ ...options, continuationToken: address })) as never,
+    };
+  };
   const waitUntil = vi.fn();
 
   const response = await post.handler(request, {
-    send,
+    from,
+    resolveSession: (address) =>
+      (overrides.resolveSession?.(address) ?? Promise.resolve({ id: "s1" })) as never,
     waitUntil,
-    getSession: vi.fn() as any,
+    attachSession: vi.fn() as any,
+    to: vi.fn() as any,
     params: {},
     requestIp: null,
-  } as any);
+  });
 
   let drained = 0;
   while (drained < waitUntil.mock.calls.length) {
@@ -254,8 +350,24 @@ async function firePost(
     await Promise.allSettled(pending);
   }
 
-  return { response, send, waitUntil };
+  return { cancel, reset, response, send, waitUntil };
 }
+
+describe("slackChannel()", () => {
+  it("preserves the configured turn policy", () => {
+    const channel = slackChannel({ turnPolicy: "queue" });
+
+    expect(channel).toMatchObject({ turnPolicy: "queue" });
+  });
+
+  it("projects the durable audience into instrumentation metadata", () => {
+    const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({
+      audience: "private",
+    });
+  });
+});
 
 describe("slackChannel() default event handlers", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
@@ -388,7 +500,7 @@ describe("slackChannel() default event handlers", () => {
     expect(parseSlackRequestBody(init as RequestInit)).toMatchObject({ status: "" });
   });
 
-  it("input.requested posts an approval card with Slack-unique button action ids", async () => {
+  it("input.requested keeps tool input out of the interactive approval message", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -407,9 +519,10 @@ describe("slackChannel() default event handlers", () => {
               toolName: "mongodb-mutate",
             },
             display: "confirmation",
+            kind: "tool-approval",
             options: [
               { id: "approve", label: "Yes" },
-              { id: "deny", label: "No" },
+              { id: "cancel", label: "Cancel" },
             ],
             prompt: "Approve tool call: mongodb-mutate",
             requestId: "approval_abc123",
@@ -422,28 +535,183 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0]!;
-    expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
-    const body = parseSlackRequestBody(init as RequestInit) as {
-      blocks: Array<{ elements?: Array<{ action_id: string; value: string }> }>;
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [detailsCall, controlsCall] = fetchMock.mock.calls;
+    expect(String(detailsCall?.[0])).toBe("https://slack.com/api/chat.postMessage");
+    expect(String(controlsCall?.[0])).toBe("https://slack.com/api/chat.postMessage");
+    const detailsBody = parseSlackRequestBody(detailsCall?.[1] as RequestInit) as {
+      blocks: Array<{
+        child_blocks?: Array<{ text?: { text?: string; type?: string }; type: string }>;
+        title?: { text: string; type: string };
+        type: string;
+      }>;
       channel: string;
       text: string;
       thread_ts: string;
     };
-    expect(body).toMatchObject({
+    expect(detailsBody).toMatchObject({
       channel: "C01",
       text: 'Approve tool call: mongodb-mutate\n*Tool input*\n```\n{\n  "operation": "deleteMany"\n}\n```',
       thread_ts: "1700000000.000001",
     });
+    expect(detailsBody.blocks).toEqual([
+      expect.objectContaining({
+        type: "container",
+        title: { type: "plain_text", text: "Tool input" },
+        is_collapsible: true,
+        default_collapsed: false,
+        child_blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: '```\n{\n  "operation": "deleteMany"\n}\n```',
+            },
+          },
+        ],
+      }),
+    ]);
 
-    const actions = body.blocks.find((block) => Array.isArray(block.elements));
-    const actionIds = actions?.elements?.map((element) => element.action_id) ?? [];
+    const controlsBody = parseSlackRequestBody(controlsCall?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{
+          action_id: string;
+          style?: string;
+          text: { emoji?: boolean; text: string; type: string };
+          value: string;
+        }>;
+        body?: { text: string; type: string; verbatim?: boolean };
+        type: string;
+      }>;
+      channel: string;
+      text: string;
+      thread_ts: string;
+    };
+    expect(controlsBody).toMatchObject({
+      channel: "C01",
+      text: "Approve tool call: mongodb-mutate",
+      thread_ts: "1700000000.000001",
+    });
+
+    expect(controlsBody.blocks).toHaveLength(1);
+    const [card] = controlsBody.blocks;
+    expect(card).toMatchObject({
+      type: "card",
+      body: {
+        type: "mrkdwn",
+        text: "*Approve tool call: mongodb-mutate*",
+        verbatim: false,
+      },
+    });
+    expect(card?.body?.text.length).toBeLessThanOrEqual(SLACK_CARD_BODY_TEXT_MAX_LENGTH);
+    expect(JSON.stringify(controlsBody)).not.toContain("deleteMany");
+
+    const actions = card?.actions ?? [];
+    const actionIds = actions.map((element) => element.action_id);
     expect(actionIds).toEqual([
-      `${HITL_ACTION_PREFIX}approval_abc123:button:0`,
-      `${HITL_ACTION_PREFIX}approval_abc123:button:1`,
+      `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+      `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:1`,
     ]);
     expect(new Set(actionIds).size).toBe(actionIds.length);
+    expect(actions).toMatchObject([
+      {
+        text: { type: "plain_text", text: "Cancel", emoji: false },
+        value: "cancel",
+      },
+      {
+        style: "primary",
+        text: { type: "plain_text", text: "Approve", emoji: false },
+        value: "approve",
+      },
+    ]);
+    expect(ctx.state.pendingApprovalCards).toEqual({
+      approval_abc123: {
+        messageBlocks: controlsBody.blocks,
+        messageTs: "1700000001.000001",
+      },
+    });
+  });
+
+  it("keeps a large tool input out of the Slack button callback", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+    });
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const longPrompt = "cursor cloud task ".repeat(700);
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: {
+              callId: "call_cursor",
+              input: { prompt: longPrompt },
+              kind: "tool-call",
+              toolName: "spawn_cursor_agent",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve tool call: spawn_cursor_agent",
+            requestId: "approval_cursor",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
+    );
+    expect(postCalls).toHaveLength(2);
+    const details = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit);
+    expect(JSON.stringify(details)).toContain("cursor cloud task");
+
+    const controls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{
+          action_id: string;
+          text: { type: string; text: string };
+          value: string;
+        }>;
+      }>;
+      text: string;
+    };
+    expect(JSON.stringify(controls)).not.toContain("cursor cloud task");
+    const approve = controls.blocks[0]?.actions?.find((action) => action.value === "approve");
+    expect(approve).toBeDefined();
+
+    const interactionRequest = buildSignedInteractionRequest({
+      type: "block_actions",
+      team: { id: "T01" },
+      user: { id: "U_APPROVER", username: "ada", team_id: "T01" },
+      channel: { id: "C01" },
+      message: {
+        ts: "1700000000.000010",
+        thread_ts: "1700000000.000001",
+        text: controls.text,
+        blocks: controls.blocks,
+      },
+      actions: [approve],
+    });
+    const callbackBody = await interactionRequest.clone().text();
+    expect(callbackBody).not.toContain("cursor+cloud+task");
+    expect(callbackBody.length).toBeLessThan(3_000);
+
+    const { send } = await firePost(channel, interactionRequest);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      inputResponses: [{ optionId: "approve", requestId: "approval_cursor" }],
+    });
   });
 
   it("input.requested caps section and fallback text so Slack does not reject the post", async () => {
@@ -466,6 +734,7 @@ describe("slackChannel() default event handlers", () => {
               toolName: "ask_question",
             },
             display: "text",
+            kind: "question",
             prompt: longPrompt,
             requestId: "call_long",
           },
@@ -496,9 +765,9 @@ describe("slackChannel() default event handlers", () => {
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
 
-    // 20 approval requests render 3 blocks each (prompt, tool input,
-    // actions) = 60 blocks, which must split across two posts.
-    const requests = Array.from({ length: 20 }, (_, index) => ({
+    // Tool-input containers and approval cards are grouped into separate
+    // posts. 60 of each must split into two posts per kind.
+    const requests = Array.from({ length: 60 }, (_, index) => ({
       action: {
         callId: `call_${index}`,
         input: { operation: "deleteMany" },
@@ -506,9 +775,10 @@ describe("slackChannel() default event handlers", () => {
         toolName: "mongodb-mutate",
       },
       display: "confirmation" as const,
+      kind: "tool-approval" as const,
       options: [
         { id: "approve", label: "Yes" },
-        { id: "deny", label: "No" },
+        { id: "cancel", label: "Cancel" },
       ],
       prompt: `Approve tool call ${index}`,
       requestId: `approval_${index}`,
@@ -520,22 +790,29 @@ describe("slackChannel() default event handlers", () => {
       ctx,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     const allRequestIds: string[] = [];
-    for (const [url, init] of fetchMock.mock.calls) {
+    for (const [callIndex, [url, init]] of fetchMock.mock.calls.entries()) {
       expect(String(url)).toBe("https://slack.com/api/chat.postMessage");
       const body = parseSlackRequestBody(init as RequestInit) as {
-        blocks: Array<{ type: string; elements?: Array<{ action_id: string }> }>;
+        blocks: Array<{
+          type: string;
+          actions?: Array<{ action_id: string }>;
+          elements?: Array<{ action_id: string }>;
+        }>;
       };
       expect(body.blocks.length).toBeLessThanOrEqual(SLACK_MAX_BLOCKS_PER_MESSAGE);
+      expect(new Set(body.blocks.map((block) => block.type))).toEqual(
+        new Set([callIndex < 2 ? "container" : "card"]),
+      );
       for (const block of body.blocks) {
-        for (const element of block.elements ?? []) {
+        for (const element of block.actions ?? block.elements ?? []) {
           const requestId = element.action_id.replace(/^.*:(approval_\d+):button:\d+$/u, "$1");
           if (!allRequestIds.includes(requestId)) allRequestIds.push(requestId);
         }
       }
     }
-    expect(allRequestIds).toHaveLength(20);
+    expect(allRequestIds).toHaveLength(60);
   });
 
   it("turn.started calls assistant.threads.setStatus", async () => {
@@ -812,6 +1089,48 @@ describe("rebuildSlackContext", () => {
     expect("id" in ctx.thread).toBe(false);
   });
 
+  it("keeps actor identity public while reusing the installation workspace for credentials", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const adapter = withState(getAdapter(slackChannel({ credentials: { botToken } })), {
+      ...THREAD_STATE,
+      installationTeamId: "T_INSTALLATION",
+      teamId: "T_ACTOR",
+    });
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    expect(ctx.slack.teamId).toBe("T_ACTOR");
+    await ctx.slack.request("auth.test", {});
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+  });
+
+  it("does not fall back to the actor workspace for legacy session credentials", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const adapter = withState(getAdapter(slackChannel({ credentials: { botToken } })), {
+      ...THREAD_STATE,
+      teamId: "T_ACTOR",
+    });
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await ctx.slack.request("auth.test", {});
+    expect(botToken).toHaveBeenCalledWith({ teamId: undefined });
+  });
+
   it("falls back to empty strings when state has no thread", () => {
     const adapter = withState(getAdapter(slackChannel()), {
       channelId: null,
@@ -862,7 +1181,7 @@ describe("rebuildSlackContext", () => {
     expect((adapter.state as { threadTs: string | null }).threadTs).toBe("1800000000.123456");
 
     // The anchor moment wrote the new continuation token to context
-    // via `session.setContinuationToken(...)`. The workflow body picks
+    // via `session.continuation.rekey(...)`. The workflow body picks
     // this up via `reconcileSessionContinuationToken` after the step.
     const tokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(tokenWrites).toEqual([["eve.continuationToken", "slack:C01:1800000000.123456"]]);
@@ -889,7 +1208,7 @@ describe("rebuildSlackContext", () => {
     const secondBody = parseSlackRequestBody(fetchMock.mock.calls[1]![1] as RequestInit);
     expect(secondBody.thread_ts).toBe("1800000000.123456");
 
-    // Once anchored, setContinuationToken does not fire again — the
+    // Once anchored, continuation.rekey does not fire again — the
     // raw token is unchanged across subsequent posts.
     const allTokenWrites = writes.filter(([key]) => key === "eve.continuationToken");
     expect(allTokenWrites).toHaveLength(1);
@@ -943,10 +1262,14 @@ describe("slackChannel() inbound mention pipeline", () => {
 
   beforeEach(() => {
     process.env.SLACK_SIGNING_SECRET = SIGNING_SECRET;
-    fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
-        headers: { "content-type": "application/json" },
-      }),
+    fetchMock = vi.fn(async (request: string | URL | Request) =>
+      String(request).includes("conversations.info")
+        ? new Response(JSON.stringify({ ok: true, channel: { is_private: false } }), {
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+            headers: { "content-type": "application/json" },
+          }),
     );
     vi.stubGlobal("fetch", fetchMock);
   });
@@ -996,6 +1319,162 @@ describe("slackChannel() inbound mention pipeline", () => {
       principalId: "U999",
       principalType: "user",
     });
+  });
+
+  it("uses the app installation workspace for mention credentials", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const channel = slackChannel({
+      credentials: { botToken },
+      async onAppMention(ctx) {
+        expect(ctx.slack.teamId).toBe("T_ACTOR");
+        return { auth: null };
+      },
+    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: "1700000000.000001",
+        text: "hello",
+        ts: "1700000000.000001",
+        type: "app_mention",
+        user: "U01",
+      },
+      {
+        authorizations: [{ is_bot: true, team_id: "T_INSTALLATION", user_id: "U_BOT" }],
+        teamId: "T_ACTOR",
+      },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(send.mock.calls[0]?.[1].state).toMatchObject({
+      installationTeamId: "T_INSTALLATION",
+      teamId: "T_ACTOR",
+    });
+  });
+
+  it("exposes private conversation detection to message handlers", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, channel: { is_private: false } }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    let isPrivate: boolean | undefined;
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        isPrivate = await ctx.isDMOrPrivateChannel();
+        return null;
+      },
+    });
+
+    const { body } = buildMentionBody({ channel: "C_PUBLIC" });
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(isPrivate).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("conversations.info");
+    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toEqual({
+      channel: "C_PUBLIC",
+    });
+  });
+
+  it("binds onAppMention to flat session operations", async () => {
+    const clear = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.clear();
+        return { auth: null };
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_BOUND",
+      threadTs: "1700000000.000300",
+    });
+
+    await firePost(channel, buildSignedRequest({ body }), { clear });
+
+    expect(clear).toHaveBeenCalledWith("C_BOUND:1700000000.000300");
+  });
+
+  it("sends from the flat message context with Slack-derived auth", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.send("Imperative follow-up");
+        return null;
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_BOUND",
+      threadTs: "1700000000.000300",
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledWith("C_BOUND:1700000000.000300", {
+      auth: expect.objectContaining({
+        authenticator: "slack-webhook",
+        principalId: "slack:T01:U01",
+      }),
+      message: "Imperative follow-up",
+      state: {
+        audience: "unknown",
+        channelId: "C_BOUND",
+        installationTeamId: null,
+        teamId: "T01",
+        threadTs: "1700000000.000300",
+        triggeringUserId: "U01",
+      },
+    });
+  });
+
+  it("lets onAppMention cancel the active turn before dispatching its replacement", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.cancel({ turnId: "turn_observed" });
+        return { auth: null };
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_STEER",
+      threadTs: "1700000000.000100",
+    });
+
+    const { cancel, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "C_STEER:1700000000.000100",
+      turnId: "turn_observed",
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(cancel.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
+  });
+
+  it("lets onAppMention reset the thread session before starting a fresh replacement", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        await ctx.reset({ reason: "Slack user requested a fresh conversation" });
+        return { auth: null };
+      },
+    });
+    const { body } = buildMentionBody({
+      channel: "C_RESET",
+      threadTs: "1700000000.000200",
+    });
+
+    const { reset, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(reset).toHaveBeenCalledWith({
+      continuationToken: "C_RESET:1700000000.000200",
+      reason: "Slack user requested a fresh conversation",
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(reset.mock.invocationCallOrder[0]).toBeLessThan(send.mock.invocationCallOrder[0]!);
   });
 
   it("drops Slack http_timeout retries without dispatching", async () => {
@@ -1100,8 +1579,8 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload] = send.mock.calls[0]!;
-    const { context, message } = payload as { context: readonly string[]; message: string };
+    const [, input] = send.mock.calls[0]!;
+    const { context, message } = input as { context: readonly string[]; message: string };
     expect(context).toEqual(["prior thread context"]);
     expect(message).toContain("<slack_message>");
     expect(message).toContain("sender_id: U01");
@@ -1118,17 +1597,135 @@ describe("slackChannel() inbound mention pipeline", () => {
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    const { context, message } = payload as { context?: readonly string[]; message: string };
+    const [, input] = send.mock.calls[0]!;
+    const { context, message } = input as { context?: readonly string[]; message: string };
     expect(context).toBeUndefined();
     expect(message).toContain("sender_id: U01");
     expect(message).toContain("message_ts:");
-    expect(options.title).toBe("hello");
+    expect(input.title).toBe("hello");
   });
 
-  it("adds one ID-attributed thread transcript without extra profile lookups", async () => {
+  it("includes the receiving bot user id in the inbound model message", async () => {
+    const onAppMention = vi.fn((_ctx, _message) => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention,
+    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: "1700000000.000001",
+        text: "<@U_BOT> Could you investigate?",
+        ts: "1700000000.000001",
+        type: "app_mention",
+        user: "U_REQUESTER",
+      },
+      { authorizations: [{ user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(onAppMention.mock.calls[0]![1].text).toBe("<@U_BOT> Could you investigate?");
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
+    expect(message).toContain(
+      [
+        "<slack_message>",
+        "sender_type: user",
+        "sender_id: U_REQUESTER",
+        "bot_user_id: U_BOT",
+        "is_mentioned: true",
+        "channel_id: C01",
+        "thread_ts: 1700000000.000001",
+        "message_ts: 1700000000.000001",
+        "team_id: T01",
+        "<content>",
+        "<@U_BOT> Could you investigate?",
+        "</content>",
+        "</slack_message>",
+      ].join("\n"),
+    );
+  });
+
+  it("marks an accepted unmentioned direct message as not mentioned", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: null }),
+    });
+    const body = buildEventBody(
+      {
+        channel: "D01",
+        channel_type: "im",
+        event_ts: "1700000000.000002",
+        text: "Could you investigate?",
+        ts: "1700000000.000002",
+        type: "message",
+        user: "U_REQUESTER",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
+    expect(message).toContain("bot_user_id: U_BOT");
+    expect(message).toContain("is_mentioned: false");
+  });
+
+  it("uses the run title returned by onAppMention for a public channel", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null, title: "Run" }),
+    });
+
+    const { body } = buildMentionBody({ text: "public message text" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.title).toBe("Run");
+    expect(input.state).toMatchObject({ audience: "public" });
+    expect(input.message).toContain("<content>\npublic message text\n</content>");
+  });
+
+  it("uses an opaque run title for private channel mentions", async () => {
+    fetchMock.mockImplementation(async (request: string | URL | Request) =>
+      String(request).includes("conversations.info")
+        ? new Response(JSON.stringify({ ok: true, channel: { is_private: true } }), {
+            headers: { "content-type": "application/json" },
+          })
+        : new Response(JSON.stringify({ ok: true, messages: [] }), {
+            headers: { "content-type": "application/json" },
+          }),
+    );
+    let isPrivate: boolean | undefined;
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onAppMention(ctx) {
+        isPrivate = await ctx.isDMOrPrivateChannel();
+        return { auth: null, title: "sensitive message" };
+      },
+    });
+
+    const { body } = buildMentionBody({ text: "sensitive message" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(isPrivate).toBe(true);
+    expect(
+      fetchMock.mock.calls.filter(([request]) => String(request).includes("conversations.info")),
+    ).toHaveLength(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, input] = send.mock.calls[0]!;
+    expect(input.title).toBe("Private message");
+    expect(input.state).toMatchObject({ audience: "private" });
+    expect(input.title).not.toContain("sensitive message");
+    expect(input.message).toContain("<content>\nsensitive message\n</content>");
+  });
+
+  it("uses only this app's reply as the incremental thread context boundary", async () => {
     const threadTs = "1700000000.000001";
-    const currentTs = "1700000000.000005";
+    const currentTs = "1700000000.000006";
     fetchMock.mockImplementation(async (request: string | URL | Request) => {
       const url = String(request);
       if (url.includes("conversations.replies")) {
@@ -1138,10 +1735,12 @@ describe("slackChannel() inbound mention pipeline", () => {
             messages: [
               { user: "U_ROOT", text: "root", ts: threadTs, thread_ts: threadTs },
               {
+                app_id: "A01",
                 bot_id: "B_AGENT",
                 text: "What changed?",
                 ts: "1700000000.000002",
                 thread_ts: threadTs,
+                user: "U_BOT",
               },
               {
                 user: "U_BACKEND",
@@ -1150,9 +1749,17 @@ describe("slackChannel() inbound mention pipeline", () => {
                 thread_ts: threadTs,
               },
               {
+                app_id: "A_OTHER",
+                bot_id: "B_OTHER",
+                text: "Other bot follow-up.",
+                ts: "1700000000.000004",
+                thread_ts: threadTs,
+                user: "U_OTHER_BOT",
+              },
+              {
                 user: "U_FRONTEND",
                 text: "I changed the UI.",
-                ts: "1700000000.000004",
+                ts: "1700000000.000005",
                 thread_ts: threadTs,
               },
               {
@@ -1175,18 +1782,25 @@ describe("slackChannel() inbound mention pipeline", () => {
       onAppMention: () => ({ auth: null }),
       threadContext: { since: "last-agent-reply" },
     });
-    const { body } = buildMentionBody({
-      threadTs,
-      ts: currentTs,
-      text: "Summarize ownership.",
-      user: "U_CURRENT",
-    });
+    const body = buildEventBody(
+      {
+        channel: "C01",
+        event_ts: currentTs,
+        text: "Summarize ownership.",
+        thread_ts: threadTs,
+        ts: currentTs,
+        type: "app_mention",
+        user: "U_CURRENT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
 
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
-    const [{ message }] = send.mock.calls[0]! as [{ message: string }];
+    const [, { message }] = send.mock.calls[0]! as [string, { message: string }];
     expect(message).toContain("<slack_thread_context>");
     expect(message).toContain("sender_id: U_BACKEND");
+    expect(message).toContain("sender_id: U_OTHER_BOT");
     expect(message).toContain("sender_id: U_FRONTEND");
     expect(message).toContain("sender_id: U_CURRENT");
     expect(message).not.toContain("sender_id: U_ROOT");
@@ -1277,6 +1891,511 @@ describe("slackChannel() inbound mention pipeline", () => {
   });
 });
 
+describe("slackChannel() onMessage", () => {
+  it("exposes mention and subscription helpers", async () => {
+    const observed: Array<{ mentioned: boolean; subscribed: boolean }> = [];
+    const onMessage = vi.fn(async (ctx) => {
+      observed.push({
+        mentioned: ctx.isBotMentioned(),
+        subscribed: await ctx.isSubscribed(),
+      });
+      return null;
+    });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onMessage,
+    });
+
+    const mention = buildMentionBody({ text: "<@U_BOT> help" });
+    await firePost(channel, buildSignedRequest({ body: mention.body }));
+
+    const reply = buildEventBody(
+      {
+        channel: "C01",
+        channel_type: "channel",
+        text: "continue",
+        thread_ts: "1700000000.000100",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U01",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+    await firePost(channel, buildSignedRequest({ body: reply }));
+
+    expect(observed).toEqual([
+      { mentioned: true, subscribed: true },
+      { mentioned: false, subscribed: true },
+    ]);
+  });
+
+  it("allows a simple mention-or-subscription policy", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onMessage(ctx) {
+        return ctx.isBotMentioned() || (await ctx.isSubscribed()) ? { auth: null } : null;
+      },
+    });
+    const reply = buildEventBody(
+      {
+        channel: "C01",
+        channel_type: "channel",
+        text: "continue",
+        thread_ts: "1700000000.000100",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U01",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body: reply }));
+
+    expect(send).toHaveBeenCalledWith(
+      "C01:1700000000.000100",
+      expect.objectContaining({ message: expect.any(String) }),
+    );
+  });
+
+  it("passes messages from other bots to onMessage", async () => {
+    const onMessage = vi.fn((_ctx, _message: { author?: { isBot: boolean } }) => null);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onMessage,
+    });
+    const body = buildEventBody(
+      {
+        app_id: "A_OTHER",
+        bot_id: "B_OTHER",
+        channel: "C01",
+        text: "automated",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_OTHER_BOT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(onMessage.mock.calls[0]![1].author?.isBot).toBe(true);
+  });
+
+  it.each([
+    [
+      "bot user id",
+      {
+        bot_id: "B01",
+        channel: "C01",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_BOT",
+      },
+    ],
+    [
+      "app id when user is absent",
+      {
+        app_id: "A01",
+        bot_id: "B01",
+        channel: "C01",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+      },
+    ],
+    [
+      "bot user id in a direct message",
+      {
+        bot_id: "B01",
+        channel: "D01",
+        channel_type: "im",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_BOT",
+      },
+    ],
+  ])("drops the app's own message identified by %s", async (_label, event) => {
+    const onMessage = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onMessage,
+    });
+    const body = buildEventBody(event, {
+      authorizations: [{ is_bot: true, user_id: "U_BOT" }],
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("gives specialized message hooks precedence", async () => {
+    const onAppMention = vi.fn(() => null);
+    const onMessage = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      onAppMention,
+      onMessage,
+    });
+    const { body } = buildMentionBody();
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onAppMention).toHaveBeenCalledTimes(1);
+    expect(onMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("slackChannel() generic Events API pipeline", () => {
+  const ORIGINAL_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
+  const ORIGINAL_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    process.env.SLACK_SIGNING_SECRET = SIGNING_SECRET;
+    fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_SIGNING_SECRET === undefined) {
+      delete process.env.SLACK_SIGNING_SECRET;
+    } else {
+      process.env.SLACK_SIGNING_SECRET = ORIGINAL_SIGNING_SECRET;
+    }
+    if (ORIGINAL_BOT_TOKEN === undefined) {
+      delete process.env.SLACK_BOT_TOKEN;
+    } else {
+      process.env.SLACK_BOT_TOKEN = ORIGINAL_BOT_TOKEN;
+    }
+  });
+
+  it("passes arbitrary Events API payloads with workspace API access", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const onEvent = vi.fn(async (ctx, event) => {
+      expect(event).toEqual({
+        item: { channel: "C01", ts: "1700000000.000001", type: "message" },
+        reaction: "eyes",
+        type: "reaction_added",
+        user: "U01",
+      });
+      expect(ctx.envelope).toMatchObject({
+        api_app_id: "A01",
+        event_id: "Ev_reaction",
+        event_time: 1_700_000_123,
+        team_id: "T_ACTOR",
+      });
+      expect(ctx.slack.teamId).toBe("T_ACTOR");
+      await ctx.slack.request("reactions.get", {
+        channel: "C01",
+        timestamp: "1700000000.000001",
+      });
+    });
+    const channel = slackChannel({
+      credentials: { botToken },
+      onEvent,
+    });
+    const body = buildEventBody(
+      {
+        item: { channel: "C01", ts: "1700000000.000001", type: "message" },
+        reaction: "eyes",
+        type: "reaction_added",
+        user: "U01",
+      },
+      {
+        authorizations: [{ is_bot: true, team_id: "T_INSTALLATION", user_id: "U_BOT" }],
+        eventId: "Ev_reaction",
+        eventTime: 1_700_000_123,
+        teamId: "T_ACTOR",
+      },
+    );
+
+    const { response, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(response.status).toBe(200);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toBe("https://slack.com/api/reactions.get");
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+  });
+
+  it("cancels a targeted Slack thread from onEvent", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.cancel({
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+          turnId: "turn_observed",
+        });
+      },
+    });
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+
+    const { cancel } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      turnId: "turn_observed",
+    });
+  });
+
+  it("targets session operations from generic Slack events", async () => {
+    const compact = vi.fn().mockResolvedValue({ sessionId: "s1", status: "accepted" });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.compact({
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
+      },
+    });
+
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+    await firePost(channel, buildSignedRequest({ body }), { compact });
+
+    expect(compact).toHaveBeenCalledWith("C01:1700000000.000001");
+  });
+
+  it("binds Slack session state and title when a generic event send creates", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.send("follow up", {
+          auth: null,
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+          title: "Reaction follow-up",
+        });
+      },
+    });
+
+    const body = buildEventBody({ type: "reaction_added", user: "U01" }, { teamId: "T_WORKSPACE" });
+    await firePost(channel, buildSignedRequest({ body }), { send });
+
+    expect(send).toHaveBeenCalledWith("C01:1700000000.000001", {
+      auth: null,
+      message: "follow up",
+      state: {
+        channelId: "C01",
+        installationTeamId: null,
+        teamId: "T_WORKSPACE",
+        threadTs: "1700000000.000001",
+        triggeringUserId: "U01",
+      },
+      title: "Reaction follow-up",
+    });
+  });
+
+  it("resets a targeted Slack thread from onEvent", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx) {
+        await ctx.reset({
+          reason: "Reaction requested a fresh conversation",
+          target: { channelId: "C01", threadTs: "1700000000.000001" },
+        });
+      },
+    });
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+
+    const { reset } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(reset).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      reason: "Reaction requested a fresh conversation",
+    });
+  });
+
+  it("can start multiple turns through ctx.send", async () => {
+    const auth = {
+      attributes: { source: "reaction" },
+      authenticator: "test",
+      principalId: "U01",
+      principalType: "user" as const,
+    };
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onEvent(ctx, event) {
+        expect(event.type).toBe("reaction_added");
+        await Promise.all([
+          ctx.send("Investigate the first message.", {
+            auth,
+            target: { channelId: "C01", threadTs: "1700000000.000001" },
+          }),
+          ctx.send("Investigate the second message.", {
+            auth: null,
+            target: { channelId: "C02", threadTs: "1700000000.000002" },
+          }),
+        ]);
+      },
+    });
+    const body = buildEventBody(
+      { reaction: "eyes", type: "reaction_added", user: "U01" },
+      { teamId: "T_WORKSPACE" },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls.map(([, input]) => input.message)).toEqual([
+      "Investigate the first message.",
+      "Investigate the second message.",
+    ]);
+    expect(send.mock.calls.map(([continuationToken]) => continuationToken)).toEqual([
+      "C01:1700000000.000001",
+      "C02:1700000000.000002",
+    ]);
+    expect(send.mock.calls.map(([, input]) => input.state.teamId)).toEqual([
+      "T_WORKSPACE",
+      "T_WORKSPACE",
+    ]);
+    expect(send.mock.calls[0]![1].auth).toEqual(auth);
+    expect(send.mock.calls[1]![1].auth).toBeNull();
+  });
+
+  it("keeps detached send calls alive through the handler waitUntil", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onEvent(ctx) {
+        ctx.waitUntil(
+          ctx.send("Run detached work.", {
+            auth: null,
+            target: { channelId: "C01" },
+          }),
+        );
+      },
+    });
+    const body = buildEventBody({ type: "team_join", user: { id: "U01" } });
+
+    const { send, waitUntil } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses onEvent instead of the mention default when no onAppMention is authored", async () => {
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onEvent,
+    });
+    const { body } = buildMentionBody();
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent.mock.calls[0]![1]).toMatchObject({ type: "app_mention" });
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses onEvent instead of the DM default when no onDirectMessage is authored", async () => {
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onEvent,
+    });
+    const { body } = buildDirectMessageBody();
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent.mock.calls[0]![1]).toMatchObject({ channel_type: "im", type: "message" });
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("gives an authored onAppMention precedence over onEvent", async () => {
+    const onAppMention = vi.fn().mockReturnValue(null);
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention,
+      onEvent,
+    });
+    const { body } = buildMentionBody();
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onAppMention).toHaveBeenCalledTimes(1);
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it("gives an authored onDirectMessage precedence over onEvent", async () => {
+    const onDirectMessage = vi.fn().mockReturnValue(null);
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage,
+      onEvent,
+    });
+    const { body } = buildDirectMessageBody();
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onDirectMessage).toHaveBeenCalledTimes(1);
+    expect(onEvent).not.toHaveBeenCalled();
+  });
+
+  it("routes DMs rejected by the specialized filter to onEvent", async () => {
+    const onDirectMessage = vi.fn();
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage,
+      onEvent,
+    });
+    const { body } = buildDirectMessageBody({ botId: "B01" });
+
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onDirectMessage).not.toHaveBeenCalled();
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent.mock.calls[0]![1]).toMatchObject({ bot_id: "B01", type: "message" });
+  });
+
+  it("deduplicates generic events by event_id", async () => {
+    const onEvent = vi.fn();
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onEvent,
+    });
+    const body = buildEventBody(
+      { type: "reaction_added", user: "U01" },
+      { eventId: "Ev_duplicate" },
+    );
+
+    await firePost(channel, buildSignedRequest({ body }));
+    await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("acks and logs handler failures without starting a turn", async () => {
+    const onEvent = vi.fn().mockRejectedValue(new Error("event failed"));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onEvent,
+    });
+    const body = buildEventBody({ type: "reaction_added", user: "U01" });
+
+    const { response, send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(response.status).toBe(200);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe("slackChannel() inbound direct message pipeline", () => {
   const ORIGINAL_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
   const ORIGINAL_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -1328,6 +2447,23 @@ describe("slackChannel() inbound direct message pipeline", () => {
     const opts = options as { auth: unknown; state: { channelId: string } };
     expect(opts.auth).toMatchObject({ principalId: "U01", authenticator: "test" });
     expect(opts.state.channelId).toBe(channelId);
+    expect(options.title).toBe("Private message");
+  });
+
+  it("uses an opaque run title for direct messages", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: null, title: "sensitive message" }),
+    });
+
+    const { body } = buildDirectMessageBody({ text: "sensitive message" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [, options] = send.mock.calls[0]!;
+    expect(options.title).toBe("Private message");
+    expect(options.title).not.toContain("sensitive message");
+    expect(options.message).toContain("<content>\nsensitive message\n</content>");
   });
 
   it("does not dispatch when onDirectMessage resolves to null", async () => {
@@ -1364,6 +2500,30 @@ describe("slackChannel() inbound direct message pipeline", () => {
     });
 
     const { body } = buildDirectMessageBody({ botId: "B01" });
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    expect(onDirectMessage).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("filters the app's own DM by its authorized bot user id", async () => {
+    const onDirectMessage = vi.fn(() => ({ auth: null }));
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage,
+    });
+    const body = buildEventBody(
+      {
+        channel: "D01",
+        channel_type: "im",
+        text: "agent reply",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U_BOT",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
     const { send } = await firePost(channel, buildSignedRequest({ body }));
 
     expect(onDirectMessage).not.toHaveBeenCalled();
@@ -1428,6 +2588,27 @@ describe("slackChannel() HITL interaction pipeline", () => {
     vi.stubGlobal("fetch", fetchMock);
   });
 
+  function buildHitlButtonRequest(userId = "U_APPROVER"): Request {
+    return buildSignedInteractionRequest({
+      type: "block_actions",
+      team: { id: "T01" },
+      user: { id: userId, username: "ada", name: "ada", team_id: "T01" },
+      channel: { id: "C01" },
+      message: {
+        ts: "1700000000.000010",
+        thread_ts: "1700000000.000001",
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Approve?" } }],
+      },
+      actions: [
+        {
+          action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+          text: { type: "plain_text", text: "Approve" },
+          value: "approve",
+        },
+      ],
+    });
+  }
+
   afterAll(() => {
     if (ORIGINAL_SIGNING_SECRET === undefined) {
       delete process.env.SLACK_SIGNING_SECRET;
@@ -1441,8 +2622,388 @@ describe("slackChannel() HITL interaction pipeline", () => {
     }
   });
 
+  it("cancels the interaction's Slack thread from onInteraction", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onInteraction(action, ctx) {
+        expect(action.actionId).toBe("stop");
+        await ctx.cancel({ turnId: "turn_observed" });
+      },
+    });
+
+    const { cancel, send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [],
+        },
+        actions: [{ action_id: "stop", text: { type: "plain_text", text: "Stop" } }],
+      }),
+    );
+
+    expect(cancel).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      turnId: "turn_observed",
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("keeps interaction auth on the actor workspace and credentials on the installation", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const channel = slackChannel({
+      credentials: { botToken },
+      async onInteraction(_action, ctx) {
+        expect(ctx.slack.teamId).toBe("T_ACTOR");
+        await ctx.slack.request("auth.test", {});
+        await ctx.send("inspect result");
+      },
+    });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [],
+        },
+        actions: [{ action_id: "inspect", text: { type: "plain_text", text: "Inspect" } }],
+      }),
+    );
+
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      auth: { principalId: "slack:T_ACTOR:U01" },
+      state: { installationTeamId: "T_INSTALLATION", teamId: "T_ACTOR" },
+    });
+  });
+
+  it("resets the interaction's Slack thread from onInteraction", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      async onInteraction(action, ctx) {
+        expect(action.actionId).toBe("new-conversation");
+        await ctx.reset({ reason: "New conversation button clicked" });
+      },
+    });
+
+    const { reset, send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01", username: "ada" },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [],
+        },
+        actions: [
+          {
+            action_id: "new-conversation",
+            text: { type: "plain_text", text: "New conversation" },
+          },
+        ],
+      }),
+    );
+
+    expect(reset).toHaveBeenCalledWith({
+      continuationToken: "C01:1700000000.000001",
+      reason: "New conversation button clicked",
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("resumes HITL button answers with the approving Slack user auth", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const channel = slackChannel({ credentials: { botToken } });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T_INSTALLATION" },
+        user: {
+          id: "U_APPROVER",
+          username: "ada",
+          name: "ada",
+          team_id: "T_ACTOR",
+        },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [{ type: "section", text: { type: "mrkdwn", text: "Approve?" } }],
+        },
+        actions: [
+          {
+            action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+            text: { type: "plain_text", text: "Approve" },
+            value: "approve",
+          },
+        ],
+      }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C01:1700000000.000001");
+    expect(input).toMatchObject({
+      auth: {
+        attributes: {
+          author_type: "user",
+          channel_id: "C01",
+          team_id: "T_ACTOR",
+          thread_ts: "1700000000.000001",
+          user_id: "U_APPROVER",
+          user_name: "ada",
+        },
+        authenticator: "slack-webhook",
+        issuer: "slack:T_ACTOR",
+        principalId: "slack:T_ACTOR:U_APPROVER",
+        principalType: "user",
+      },
+      inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
+      state: {
+        approvalResponderUsers: { "slack:T_ACTOR:U_APPROVER": "U_APPROVER" },
+      },
+    });
+    expect(
+      sessionInboxWire.encode(
+        { kind: "send", payload: { inputResponses: input.inputResponses } },
+        { version: 1 },
+      ),
+    ).toMatchObject({
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }] }],
+      version: 1,
+    });
+  });
+
+  it("opens freeform modals with installation-scoped credentials and metadata", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const channel = slackChannel({ credentials: { botToken } });
+
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        trigger_id: "trigger-123",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: [{ type: "section", text: { type: "mrkdwn", text: "Explain" } }],
+        },
+        actions: [
+          {
+            action_id: `${HITL_FREEFORM_ACTION_PREFIX}call_abc123`,
+            text: { type: "plain_text", text: "Type your answer" },
+            value: "call_abc123",
+          },
+        ],
+      }),
+    );
+
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    const openCall = fetchMock.mock.calls.find(
+      ([url]) => String(url) === "https://slack.com/api/views.open",
+    );
+    expect(openCall).toBeDefined();
+    const body = JSON.parse(String((openCall![1] as RequestInit).body)) as {
+      view: { private_metadata: string };
+    };
+    expect(JSON.parse(body.view.private_metadata)).toMatchObject({
+      installationTeamId: "T_INSTALLATION",
+    });
+  });
+
+  it("authorizes HITL button answers before resuming with the returned auth", async () => {
+    const customAuth = {
+      attributes: { role: "deployer" },
+      authenticator: "secure-slack",
+      principalId: "employee:ada",
+      principalType: "user" as const,
+    };
+    const onInputResponse = vi.fn(
+      (ctx: SlackInputResponseContext, submission: SlackInputResponseSubmission) => {
+        expect(ctx.defaultAuth.principalId).toBe("slack:T01:U_APPROVER");
+        expect(submission).toMatchObject({
+          type: "block_actions",
+          inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
+          messageTs: "1700000000.000010",
+          user: { id: "U_APPROVER", username: "ada" },
+        });
+        return { auth: customAuth };
+      },
+    );
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onInputResponse,
+    });
+
+    const { send } = await firePost(channel, buildHitlButtonRequest());
+
+    expect(onInputResponse).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      auth: customAuth,
+      state: { approvalResponderUsers: { "employee:ada": "U_APPROVER" } },
+    });
+  });
+
+  it("persists the responder mapping for later approval candidate feedback", async () => {
+    fetchMock.mockImplementation(
+      () =>
+        new Response(JSON.stringify({ ok: true, ts: "1700000001.000001" }), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
     const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const { send } = await firePost(channel, buildHitlButtonRequest());
+    const delivery = send.mock.calls[0]?.[1] as Extract<
+      ObservedChannelDelivery<SlackChannelState>,
+      { readonly inputResponses: readonly unknown[] }
+    >;
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await adapter.deliver!(
+      {
+        inputResponses: delivery.inputResponses,
+        state: delivery.state,
+      },
+      ctx,
+    );
+
+    expect(ctx.state.approvalResponderUsers).toEqual({ "slack:T01:U_APPROVER": "U_APPROVER" });
+
+    await callEvent(
+      adapter,
+      makeEvent("approval.candidate", {
+        candidateId: "candidate-1",
+        outcome: "pending",
+        requestId: "approval_abc123",
+        responderPrincipalId: "slack:T01:U_APPROVER",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    await callEvent(
+      adapter,
+      makeEvent("approval.candidate", {
+        candidateId: "candidate-1",
+        outcome: "rejected",
+        reason: "Test policy: all approval responses are rejected.",
+        requestId: "approval_abc123",
+        responderPrincipalId: "slack:T01:U_APPROVER",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    const ephemeralBodies = fetchMock.mock.calls
+      .filter(([url]) => String(url) === "https://slack.com/api/chat.postEphemeral")
+      .map(([, init]) => parseSlackRequestBody(init as RequestInit));
+    expect(ephemeralBodies).toEqual([
+      expect.objectContaining({
+        channel: "C01",
+        markdown_text: "Checking whether you can approve this action…",
+        user: "U_APPROVER",
+      }),
+      expect.objectContaining({
+        channel: "C01",
+        markdown_text: "Test policy: all approval responses are rejected.",
+        user: "U_APPROVER",
+      }),
+    ]);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.anything(),
+    );
+  });
+
+  it("keeps HITL pending when the input-response hook rejects or throws", async () => {
+    const handlers = [
+      vi.fn(() => null),
+      vi.fn(() => {
+        throw new Error("policy unavailable");
+      }),
+    ];
+
+    for (const onInputResponse of handlers) {
+      fetchMock.mockClear();
+      const channel = slackChannel({
+        credentials: { botToken: "xoxb-test" },
+        onInputResponse,
+      });
+
+      const { send } = await firePost(channel, buildHitlButtonRequest());
+
+      expect(onInputResponse).toHaveBeenCalledTimes(1);
+      expect(send).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalledWith(
+        "https://slack.com/api/chat.update",
+        expect.anything(),
+      );
+    }
+  });
+
+  it("uses default HITL auth when onAppMention is authored", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null }),
+    });
+
+    const { send } = await firePost(channel, buildHitlButtonRequest());
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[1].auth?.principalId).toBe("slack:T01:U_APPROVER");
+  });
+
+  it("does not mark a HITL card answered when response delivery fails", async () => {
+    const send = vi.fn().mockRejectedValue(new Error("target session not found"));
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    await firePost(channel, buildHitlButtonRequest(), { send });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.anything(),
+    );
+  });
+
+  it("waits for approval settlement before updating a tool-approval card", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+
+    const firstCancelActionId = `${HITL_ACTION_PREFIX}tool-approval:approval_451:button:0`;
+    const firstApproveActionId = `${HITL_ACTION_PREFIX}tool-approval:approval_451:button:1`;
+    const secondCancelActionId = `${HITL_ACTION_PREFIX}tool-approval:approval_508:button:0`;
+    const secondApproveActionId = `${HITL_ACTION_PREFIX}tool-approval:approval_508:button:1`;
 
     const { send } = await firePost(
       channel,
@@ -1459,12 +3020,75 @@ describe("slackChannel() HITL interaction pipeline", () => {
         message: {
           ts: "1700000000.000010",
           thread_ts: "1700000000.000001",
-          blocks: [{ type: "section", text: { type: "mrkdwn", text: "Approve?" } }],
+          blocks: [
+            {
+              type: "card",
+              body: {
+                type: "mrkdwn",
+                text: "*Approve issue 451?*",
+                verbatim: false,
+              },
+              actions: [
+                {
+                  type: "button",
+                  action_id: firstCancelActionId,
+                  text: { type: "plain_text", text: "Cancel" },
+                  value: "cancel",
+                },
+                {
+                  type: "button",
+                  action_id: firstApproveActionId,
+                  text: { type: "plain_text", text: "Allow" },
+                  value: "approve",
+                },
+              ],
+            },
+            {
+              type: "container",
+              title: { type: "plain_text", text: "Tool input" },
+              is_collapsible: true,
+              default_collapsed: false,
+              child_blocks: [
+                { type: "section", text: { type: "mrkdwn", text: '```\n{"issue":451}\n```' } },
+              ],
+            },
+            {
+              type: "card",
+              body: {
+                type: "mrkdwn",
+                text: "*Approve issue 508?*",
+                verbatim: false,
+              },
+              actions: [
+                {
+                  type: "button",
+                  action_id: secondCancelActionId,
+                  text: { type: "plain_text", text: "Cancel" },
+                  value: "cancel",
+                },
+                {
+                  type: "button",
+                  action_id: secondApproveActionId,
+                  text: { type: "plain_text", text: "Allow" },
+                  value: "approve",
+                },
+              ],
+            },
+            {
+              type: "container",
+              title: { type: "plain_text", text: "Tool input" },
+              is_collapsible: true,
+              default_collapsed: false,
+              child_blocks: [
+                { type: "section", text: { type: "mrkdwn", text: '```\n{"issue":508}\n```' } },
+              ],
+            },
+          ],
         },
         actions: [
           {
-            action_id: `${HITL_ACTION_PREFIX}approval_abc123:button:0`,
-            text: { type: "plain_text", text: "Approve" },
+            action_id: firstApproveActionId,
+            text: { type: "plain_text", text: "Allow" },
             value: "approve",
           },
         ],
@@ -1472,50 +3096,158 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload).toEqual({
-      inputResponses: [{ optionId: "approve", requestId: "approval_abc123" }],
+    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      inputResponses: [{ optionId: "approve", requestId: "approval_451" }],
     });
-    expect(options).toMatchObject({
-      auth: {
-        attributes: {
-          author_type: "user",
-          channel_id: "C01",
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.anything(),
+    );
+  });
+
+  it("covers the observed e0 batched escalation approval run", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const adapter = withState(getAdapter(channel), THREAD_STATE);
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("input.requested", {
+        requests: [
+          {
+            action: {
+              callId: "toolu_escalate_451",
+              input: { issueNumber: 451, ownerSlackUserId: "U0AT7H56S90" },
+              kind: "tool-call",
+              toolName: "escalate_issue",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve tool call: escalate_issue",
+            requestId: "approval_451",
+          },
+          {
+            action: {
+              callId: "toolu_escalate_508",
+              input: { issueNumber: 508 },
+              kind: "tool-call",
+              toolName: "escalate_issue",
+            },
+            display: "confirmation",
+            kind: "tool-approval",
+            options: [
+              { id: "approve", label: "Yes" },
+              { id: "cancel", label: "Cancel" },
+            ],
+            prompt: "Approve tool call: escalate_issue",
+            requestId: "approval_508",
+          },
+        ],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_0",
+      }),
+      ctx,
+    );
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([url]) => String(url) === "https://slack.com/api/chat.postMessage",
+    );
+    expect(postCalls).toHaveLength(2);
+    const postedDetails = parseSlackRequestBody(postCalls[0]?.[1] as RequestInit) as {
+      blocks: Array<{
+        child_blocks?: Array<{ text?: { text?: string } }>;
+        title?: { text?: string };
+        type?: string;
+      }>;
+    };
+    expect(postedDetails.blocks).toHaveLength(2);
+    expect(postedDetails.blocks[0]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 451');
+    expect(postedDetails.blocks[0]?.child_blocks?.[0]?.text?.text).toContain(
+      '"ownerSlackUserId": "U0AT7H56S90"',
+    );
+    expect(postedDetails.blocks[1]?.child_blocks?.[0]?.text?.text).toContain('"issueNumber": 508');
+
+    const postedControls = parseSlackRequestBody(postCalls[1]?.[1] as RequestInit) as {
+      blocks: Array<{
+        actions?: Array<{ action_id?: string; text?: { text?: string }; value?: string }>;
+        type?: string;
+      }>;
+    };
+    expect(postedControls.blocks).toHaveLength(2);
+    expect(JSON.stringify(postedControls)).not.toContain("issueNumber");
+
+    const firstCancelAction = postedControls.blocks[0]?.actions?.find(
+      (action) => action.value === "cancel",
+    );
+    expect(firstCancelAction).toMatchObject({
+      action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_451:button:0`,
+      text: { text: "Cancel" },
+      value: "cancel",
+    });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: {
+          id: "U0AT7H56S90",
+          username: "rui",
+          name: "rui",
           team_id: "T01",
-          thread_ts: "1700000000.000001",
-          user_id: "U_APPROVER",
-          user_name: "ada",
         },
-        authenticator: "slack-webhook",
-        issuer: "slack:T01",
-        principalId: "slack:T01:U_APPROVER",
-        principalType: "user",
-      },
-      continuationToken: "C01:1700000000.000001",
-      state: {
-        channelId: "C01",
-        teamId: "T01",
-        threadTs: "1700000000.000001",
-        triggeringUserId: "U_APPROVER",
-      },
+        channel: { id: "C01" },
+        message: {
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          blocks: postedControls.blocks,
+        },
+        actions: [
+          {
+            action_id: firstCancelAction?.action_id,
+            text: { type: "plain_text", text: "Cancel" },
+            value: "cancel",
+          },
+        ],
+      }),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toBe("C01:1700000000.000001");
+    expect(send.mock.calls[0]?.[1]).toMatchObject({
+      inputResponses: [{ optionId: "cancel", requestId: "approval_451" }],
     });
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.anything(),
+    );
   });
 
   it("resumes freeform modal answers with the submitting Slack user auth", async () => {
-    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const channel = slackChannel({ credentials: { botToken } });
 
     const { send } = await firePost(
       channel,
       buildSignedInteractionRequest({
         type: "view_submission",
-        team: { id: "T01" },
+        team: { id: "T_ACTOR" },
         user: {
           id: "U_SUBMITTER",
           username: "grace",
           name: "grace",
-          team_id: "T01",
+          team_id: "T_ACTOR",
         },
         view: {
+          app_installed_team_id: "T_INSTALLATION",
           callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
           private_metadata: JSON.stringify({
             channelId: "C01",
@@ -1536,33 +3268,76 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [payload, options] = send.mock.calls[0]!;
-    expect(payload).toEqual({
-      inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
-    });
-    expect(options).toMatchObject({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C01:1700000000.000001");
+    expect(input).toMatchObject({
       auth: {
         attributes: {
           author_type: "user",
           channel_id: "C01",
-          team_id: "T01",
+          team_id: "T_ACTOR",
           thread_ts: "1700000000.000001",
           user_id: "U_SUBMITTER",
           user_name: "grace",
         },
         authenticator: "slack-webhook",
-        issuer: "slack:T01",
-        principalId: "slack:T01:U_SUBMITTER",
+        issuer: "slack:T_ACTOR",
+        principalId: "slack:T_ACTOR:U_SUBMITTER",
         principalType: "user",
       },
-      continuationToken: "C01:1700000000.000001",
-      state: {
-        channelId: "C01",
-        teamId: "T01",
-        threadTs: "1700000000.000001",
-        triggeringUserId: "U_SUBMITTER",
-      },
+      inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
     });
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+  });
+
+  it("authorizes freeform modal answers before resuming", async () => {
+    const onInputResponse = vi.fn(() => null);
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onInputResponse,
+    });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "view_submission",
+        team: { id: "T01" },
+        user: { id: "U_SUBMITTER", username: "grace", team_id: "T01" },
+        view: {
+          callback_id: HITL_FREEFORM_MODAL_CALLBACK_ID,
+          private_metadata: JSON.stringify({
+            channelId: "C01",
+            continuationToken: "C01:1700000000.000001",
+            messageTs: "1700000000.000010",
+            requestId: "call_abc123",
+            threadTs: "1700000000.000001",
+          }),
+          state: {
+            values: {
+              [HITL_FREEFORM_MODAL_BLOCK_ID]: {
+                [HITL_FREEFORM_MODAL_ACTION_ID]: { value: "approved with context" },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(onInputResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultAuth: expect.objectContaining({ principalId: "slack:T01:U_SUBMITTER" }),
+      }),
+      expect.objectContaining({
+        type: "view_submission",
+        inputResponses: [{ requestId: "call_abc123", text: "approved with context" }],
+        user: expect.objectContaining({ id: "U_SUBMITTER" }),
+      }),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "https://slack.com/api/chat.update",
+      expect.anything(),
+    );
   });
 });
 
@@ -1644,34 +3419,67 @@ describe("slackChannel().receive", () => {
     vi.unstubAllGlobals();
   });
 
-  function buildReceive() {
-    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+  function buildReceive(
+    botToken: string | ((context: { readonly teamId?: string }) => string) = "xoxb-test",
+  ) {
+    const channel = slackChannel({ credentials: { botToken } });
     const compiled = asCompiled(channel);
     if (!compiled.receive) throw new Error("expected compiled.receive");
     return compiled.receive;
   }
 
   it("sends with an explicit continuation token built from channelId + threadTs", async () => {
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
     await buildReceive()(
       {
         message: "do the thing",
         target: { channelId: "C123", threadTs: "1700000000.000001" },
         auth: { attributes: {}, authenticator: "app", principalId: "p", principalType: "user" },
       },
-      { send },
+      mockChannelContext(send),
     );
     expect(send).toHaveBeenCalledTimes(1);
-    const [message, options] = send.mock.calls[0]!;
-    expect(message).toBe("do the thing");
-    expect(options.continuationToken).toBe("C123:1700000000.000001");
-    expect(options.state).toEqual({
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C123:1700000000.000001");
+    expect(input.message).toBe("do the thing");
+    expect(input.state).toEqual({
       channelId: "C123",
+      installationTeamId: null,
       threadTs: "1700000000.000001",
       teamId: null,
       triggeringUserId: null,
     });
-    expect(options.auth.principalId).toBe("p");
+    expect(input.auth.principalId).toBe("p");
+  });
+
+  it("selects and persists the installation workspace for proactive sends", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, ts: "1800000000.000900" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const send = vi.fn().mockResolvedValue({ id: "s" });
+    const { Card, CardText } = await import("#compiled/chat/index.js");
+
+    await buildReceive(botToken)(
+      {
+        message: "start the investigation",
+        target: {
+          channelId: "C123",
+          installationTeamId: "T_INSTALLATION",
+          initialMessage: { card: Card({ children: [CardText("Investigation")] }) },
+        },
+        auth: null,
+      },
+      mockChannelContext(send),
+    );
+
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(send.mock.calls[0]?.[1].state).toMatchObject({
+      installationTeamId: "T_INSTALLATION",
+      teamId: null,
+    });
   });
 
   it("gives each threadless proactive session a unique temporary continuation token", async () => {
@@ -1679,7 +3487,7 @@ describe("slackChannel().receive", () => {
       .spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
 
     try {
       const receive = buildReceive();
@@ -1689,14 +3497,14 @@ describe("slackChannel().receive", () => {
         auth: null,
       };
 
-      await receive(input, { send });
-      await receive(input, { send });
+      await receive(input, mockChannelContext(send));
+      await receive(input, mockChannelContext(send));
 
-      expect(send.mock.calls.map(([, options]) => options.continuationToken)).toEqual([
+      expect(send.mock.calls.map(([continuationToken]) => continuationToken)).toEqual([
         "C123:00000000-0000-4000-8000-000000000001",
         "C123:00000000-0000-4000-8000-000000000002",
       ]);
-      expect(send.mock.calls.map(([, options]) => options.state.threadTs)).toEqual([null, null]);
+      expect(send.mock.calls.map(([, input]) => input.state.threadTs)).toEqual([null, null]);
     } finally {
       randomUUID.mockRestore();
     }
@@ -1705,7 +3513,7 @@ describe("slackChannel().receive", () => {
   it("requires channelId", async () => {
     const send = vi.fn();
     await expect(
-      buildReceive()({ message: "x", target: {}, auth: null }, { send }),
+      buildReceive()({ message: "x", target: {}, auth: null }, mockChannelContext(send)),
     ).rejects.toThrow(/requires target.channelId/);
     expect(send).not.toHaveBeenCalled();
   });
@@ -1716,7 +3524,7 @@ describe("slackChannel().receive", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
 
     const { Card, CardText } = await import("#compiled/chat/index.js");
     await buildReceive()(
@@ -1731,7 +3539,7 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      { send },
+      mockChannelContext(send),
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1745,9 +3553,9 @@ describe("slackChannel().receive", () => {
     expect(Array.isArray(body.blocks)).toBe(true);
 
     expect(send).toHaveBeenCalledTimes(1);
-    const [, options] = send.mock.calls[0]!;
-    expect(options.continuationToken).toBe("C123:1800000000.000900");
-    expect(options.state.threadTs).toBe("1800000000.000900");
+    const [continuationToken, input] = send.mock.calls[0]!;
+    expect(continuationToken).toBe("C123:1800000000.000900");
+    expect(input.state.threadTs).toBe("1800000000.000900");
   });
 
   it("rejects passing both threadTs and initialMessage", async () => {
@@ -1764,7 +3572,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        { send },
+        mockChannelContext(send),
       ),
     ).rejects.toThrow(/mutually exclusive/);
     expect(send).not.toHaveBeenCalled();
@@ -1791,7 +3599,7 @@ describe("slackChannel().receive", () => {
           },
           auth: null,
         },
-        { send },
+        mockChannelContext(send),
       ),
     ).rejects.toThrow(/not_in_channel/);
     expect(send).not.toHaveBeenCalled();
@@ -1809,7 +3617,7 @@ describe("slackChannel().receive", () => {
         headers: { "content-type": "application/json" },
       }),
     );
-    const send = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const send = vi.fn().mockResolvedValue({ id: "s" });
     const { Card, CardText } = await import("#compiled/chat/index.js");
 
     await buildReceive()(
@@ -1824,17 +3632,16 @@ describe("slackChannel().receive", () => {
         },
         auth: null,
       },
-      { send },
+      mockChannelContext(send),
     );
-    const receiveToken = (send.mock.calls[0]![1] as { continuationToken: string })
-      .continuationToken;
+    const receiveToken = send.mock.calls[0]![0] as string;
     expect(receiveToken).toBe(`C123:${initialMessageTs}`);
 
     // Now simulate Slack delivering an `app_mention` reply threaded
     // under the anchor card. The inbound dispatch path builds the
     // token from `event.thread_ts` so it matches the one receive()
     // used, and the parked session resumes via runtime.deliver.
-    const inboundSend = vi.fn().mockResolvedValue({ id: "s", continuationToken: "ct" });
+    const inboundSend = vi.fn().mockResolvedValue({ id: "s" });
     const mentionBody = JSON.stringify({
       type: "event_callback",
       team_id: "T01",
@@ -1858,13 +3665,13 @@ describe("slackChannel().receive", () => {
     if (!post) throw new Error("expected POST route");
     const waitUntil = vi.fn();
     await post.handler(req, {
-      send: inboundSend,
+      attachSession: vi.fn() as any,
+      ...mockChannelContext(inboundSend),
       waitUntil,
-      getSession: vi.fn() as any,
-      receive: vi.fn() as any,
+      to: vi.fn() as any,
       params: {},
       requestIp: null,
-    } as any);
+    });
 
     let drained = 0;
     while (drained < waitUntil.mock.calls.length) {
@@ -1874,8 +3681,7 @@ describe("slackChannel().receive", () => {
     }
 
     expect(inboundSend).toHaveBeenCalledTimes(1);
-    const inboundToken = (inboundSend.mock.calls[0]![1] as { continuationToken: string })
-      .continuationToken;
+    const inboundToken = inboundSend.mock.calls[0]![0] as string;
     expect(inboundToken).toBe(receiveToken);
   });
 });

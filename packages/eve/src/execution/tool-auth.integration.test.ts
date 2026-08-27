@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
+import { buildApprovalResponseAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
 import { AuthKey, SessionIdKey } from "#context/keys.js";
@@ -9,14 +9,14 @@ import {
   PendingAuthorizationResultKey,
   isAuthorizationSignal,
 } from "#harness/authorization.js";
-import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
+import { isConnectionAuthorizationFailedError } from "#connections/errors.js";
 import { createTestRuntime } from "#internal/testing/app-harness.js";
-import type { ToolContext } from "#public/definitions/tool.js";
+import type { ToolContext } from "#tools/definition.js";
 import type {
   AuthorizationDefinition,
   ConnectionPrincipal,
   TokenResult,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 
 /**
@@ -52,6 +52,12 @@ function seedUserPrincipal(): void {
   });
 }
 
+const TEST_USER_PRINCIPAL = {
+  id: "user-1",
+  issuer: "test-idp",
+  type: "user",
+} as const;
+
 function authoredTool(input: {
   readonly name: string;
   readonly execute: (toolInput: unknown, ctx: ToolContext) => unknown;
@@ -59,17 +65,100 @@ function authoredTool(input: {
   const logicalPath = `tools/${input.name}.ts`;
   return {
     description: `${input.name} auth tool.`,
-    execute: createToolExecuteWithAuth({
-      execute: input.execute as (toolInput: unknown, ctx: unknown) => unknown,
-      scope: input.name,
-    }),
+    execute: (toolInput, runtimeContext) =>
+      input.execute(toolInput, expectToolContext(runtimeContext)),
     inputSchema: null,
     logicalPath,
     name: input.name,
+    owner: { kind: "application" },
     sourceId: logicalPath,
     sourceKind: "module",
   };
 }
+
+function expectToolContext(value: unknown): ToolContext {
+  if (typeof value !== "object" || value === null || !("getToken" in value)) {
+    throw new Error("Expected the authored tool context.");
+  }
+  return value as ToolContext;
+}
+
+describe("approval response authorization", () => {
+  it("keeps distinct connector tokens separate within one response policy", async () => {
+    const github: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "github/approver" },
+      async getToken(): Promise<TokenResult> {
+        return { token: "github-token" };
+      },
+    };
+    const linear: AuthorizationDefinition = {
+      principalType: "user",
+      vercelConnect: { connector: "linear/approver" },
+      async getToken(): Promise<TokenResult> {
+        return { token: "linear-token" };
+      },
+    };
+    const runtime = await createTestRuntime({ tools: [] });
+
+    const tokens = await runtime.runAsSession(undefined, async () => {
+      const auth = buildApprovalResponseAuth({
+        responder: {
+          attributes: {},
+          authenticator: "test-idp",
+          principalId: "bound-U1",
+          principalType: "user",
+        },
+        scope: "candidate-1",
+      });
+      return {
+        github: (await auth.getToken(github)).token,
+        linear: (await auth.getToken(linear)).token,
+      };
+    });
+
+    expect(tokens).toEqual({ github: "github-token", linear: "linear-token" });
+  });
+
+  it("resolves user tokens for the explicitly bound responder instead of ambient auth", async () => {
+    let resolvedPrincipal: ConnectionPrincipal | undefined;
+    const provider: AuthorizationDefinition = {
+      principalType: "user",
+      async getToken({ principal }): Promise<TokenResult> {
+        resolvedPrincipal = principal;
+        return { token: "bound-responder-token" };
+      },
+    };
+    const runtime = await createTestRuntime({ tools: [] });
+
+    await runtime.runAsSession(undefined, async () => {
+      loadContext().set(AuthKey, {
+        attributes: {},
+        authenticator: "test-idp",
+        principalId: "ambient-U2",
+        principalType: "user",
+      });
+      return await buildApprovalResponseAuth({
+        responder: {
+          attributes: { role: ["approver"] },
+          authenticator: "test-idp",
+          issuer: "test-idp",
+          principalId: "bound-U1",
+          principalType: "user",
+          subject: "bound-subject-U1",
+        },
+        scope: "candidate-1",
+      }).getToken(provider);
+    });
+
+    expect(resolvedPrincipal).toMatchObject({
+      attributes: { role: ["approver"] },
+      id: "bound-U1",
+      issuer: "test-idp",
+      type: "user",
+    });
+  });
+});
 
 describe("tool-hosted authorization", () => {
   it("resolves and caches the bearer through ctx.getToken(provider)", async () => {
@@ -89,7 +178,7 @@ describe("tool-hosted authorization", () => {
         return { first: first.token, second: second.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
@@ -98,19 +187,19 @@ describe("tool-hosted authorization", () => {
     expect(calls).toBe(1);
   });
 
-  it("exposes the tool call id on the authored context", async () => {
+  it("exposes the tool call metadata on the authored context", async () => {
     const tool = authoredTool({
-      name: "observe_call_id",
+      name: "observe_call_metadata",
       execute(_input, ctx) {
-        return { callId: ctx.callId };
+        return { callId: ctx.callId, toolName: ctx.toolName };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
     // The test harness dispatches every executeTool call as "call_test".
-    expect(result).toEqual({ callId: "call_test" });
+    expect(result).toEqual({ callId: "call_test", toolName: "observe_call_metadata" });
   });
 
   it("resolves and caches an inline provider on a plain tool", async () => {
@@ -130,7 +219,7 @@ describe("tool-hosted authorization", () => {
         return { first: first.token, second: second.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
@@ -159,7 +248,7 @@ describe("tool-hosted authorization", () => {
         return { github: github.token, linear: linear.token };
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {}));
 
@@ -186,7 +275,7 @@ describe("tool-hosted authorization", () => {
         await ctx.getToken(linearAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     await expect(
       runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
@@ -200,7 +289,7 @@ describe("tool-hosted authorization", () => {
         return await (ctx.getToken as () => Promise<TokenResult>)();
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     await expect(
       runtime.runAsSession(undefined, async () => runtime.executeTool(tool, {})),
@@ -227,7 +316,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth, { displayName: "Linear" });
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_inline_auth_park" },
@@ -269,7 +358,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_connect_callback" },
@@ -283,7 +372,7 @@ describe("tool-hosted authorization", () => {
     expect(isAuthorizationSignal(result)).toBe(true);
     if (!isAuthorizationSignal(result)) throw new Error("expected signal");
     expect(receivedCallbackUrl).toBe(
-      "http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/session_auth%3Aauth",
+      `http://localhost:2000/eve/v1/connections/search_notion__mcp.notion.com_notion/callback/${result.challenges[0]?.attemptId}/session_auth%3Aauth`,
     );
     expect(result.challenges[0]?.hookUrl).toBe(receivedCallbackUrl);
   });
@@ -307,7 +396,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_auth_park" }, async () => {
       seedUserPrincipal();
@@ -346,7 +435,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_display_name" }, async () => {
       seedUserPrincipal();
@@ -382,7 +471,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(
       { sessionId: "session_display_name_strategy" },
@@ -417,7 +506,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_require_auth" }, async () => {
       seedUserPrincipal();
@@ -452,15 +541,17 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_resume" }, async () => {
       seedUserPrincipal();
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       loadContext().set(PendingAuthorizationResultKey, [
         {
+          attemptId: "attempt-list-groups",
           name: "list_groups__inline_auth",
           hookUrl: "https://app.example/callback",
+          principal: TEST_USER_PRINCIPAL,
           callback: {
             params: { code: "abc" },
             method: "GET",
@@ -496,15 +587,17 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_inline_resume" }, async () => {
       seedUserPrincipal();
       loadContext().set(CallbackBaseUrlKey, "https://app.example");
       loadContext().set(PendingAuthorizationResultKey, [
         {
+          attemptId: "attempt-sync-ticket",
           name: "sync_ticket__oauth_linear",
           hookUrl: "https://app.example/callback",
+          principal: TEST_USER_PRINCIPAL,
           callback: {
             params: { code: "abc" },
             method: "GET",
@@ -543,7 +636,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession({ sessionId: "session_inline_require" }, async () => {
       seedUserPrincipal();
@@ -583,7 +676,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const error = await runtime
       .runAsSession({ sessionId: "session_loop_guard" }, async () => {
@@ -591,8 +684,10 @@ describe("tool-hosted authorization", () => {
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
         loadContext().set(PendingAuthorizationResultKey, [
           {
+            attemptId: "attempt-list-groups",
             name: "list_groups__inline_auth",
             hookUrl: "https://app.example/callback",
+            principal: TEST_USER_PRINCIPAL,
             callback: {
               params: { code: "abc" },
               method: "GET",
@@ -630,7 +725,7 @@ describe("tool-hosted authorization", () => {
         ctx.requireAuth(inlineAuth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     const error = await runtime
       .runAsSession({ sessionId: "session_inline_loop_guard" }, async () => {
@@ -638,8 +733,10 @@ describe("tool-hosted authorization", () => {
         loadContext().set(CallbackBaseUrlKey, "https://app.example");
         loadContext().set(PendingAuthorizationResultKey, [
           {
+            attemptId: "attempt-sync-ticket",
             name: "sync_ticket__oauth_github",
             hookUrl: "https://app.example/callback",
+            principal: TEST_USER_PRINCIPAL,
             callback: {
               params: { code: "abc" },
               method: "GET",
@@ -666,7 +763,7 @@ describe("tool-hosted authorization", () => {
       },
     };
     const scoped = { authorization: auth, connection: { url: "" }, scope: "list_groups" };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     const tokens = await runtime.runAsSession({ sessionId: "session_evict" }, async () => {
       seedUserPrincipal();
@@ -697,7 +794,7 @@ describe("tool-hosted authorization", () => {
       },
     };
     const scoped = { authorization: auth, connection: { url: "" }, scope: "list_groups" };
-    const runtime = createTestRuntime({ tools: [] });
+    const runtime = await createTestRuntime({ tools: [] });
 
     await runtime.runAsSession({ sessionId: "session_evict_cascade" }, async () => {
       seedUserPrincipal();
@@ -728,7 +825,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     // No CallbackBaseUrlKey set → getHookUrl returns undefined → no park
     // signal. The interactive path must NOT leak the raw Required into the
@@ -760,7 +857,7 @@ describe("tool-hosted authorization", () => {
         return await ctx.getToken(auth);
       },
     });
-    const runtime = createTestRuntime({ tools: [tool] });
+    const runtime = await createTestRuntime({ tools: [tool] });
 
     // Non-interactive strategies have no consent flow to park on, so the
     // model should see the original failure.

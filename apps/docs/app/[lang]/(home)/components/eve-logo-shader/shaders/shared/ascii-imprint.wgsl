@@ -1,158 +1,75 @@
-export fn sd_box(p: vec2f, halfSize: vec2f) -> f32 {
-  let q = abs(p) - halfSize;
-  return length(max(q, vec2f(0.0))) + min(max(q.x, q.y), 0.0);
-}
+import { sd_box } from "./sdf.wgsl";
+import { hash3, voronoi_cell_value_and_edge_3d } from "./voronoi.wgsl";
+import { ASCII_BASE_DOT_RADIUS, ASCII_EDGE_SQUARE_HALF_SIZE, HOVER_ENTRY_START, HOVER_ENTRY_FULL, shape_distance, hover_shape_distance } from "./ascii-glyphs.wgsl";
 
-export fn sd_equilateral_triangle(p0: vec2f) -> f32 {
-  let k = sqrt(3.0);
-  var p = p0;
-  p.x = abs(p.x) - 0.42;
-  p.y = p.y + 0.24;
-  if (p.x + k * p.y > 0.0) {
-    p = vec2f(p.x - k * p.y, -k * p.x - p.y) / 2.0;
-  }
-  p.x = p.x - clamp(p.x, -0.84, 0.0);
-  return -length(p) * sign(p.y);
-}
+// ASCII imprint combiner for front-glass coverage.
+// INVARIANT: fwidth calls stay in this function's uniform control flow; do not move them behind non-uniform branches.
+// Entry shaders provide textures/bindings and material masks; this module declares none.
 
-export fn hash_u32(value: u32) -> u32 {
-  var x = value;
-  x ^= x >> 16u;
-  x *= 0x7feb352du;
-  x ^= x >> 15u;
-  x *= 0x846ca68bu;
-  x ^= x >> 16u;
-  return x;
-}
-
-export fn hash3(cell: vec3i) -> f32 {
-  let ux = bitcast<u32>(cell.x);
-  let uy = bitcast<u32>(cell.y);
-  let uz = bitcast<u32>(cell.z);
-  let mixed = (ux * 0x8da6b343u) ^ (uy * 0xd8163841u) ^ (uz * 0xcb1ab31fu);
-  return f32(hash_u32(mixed) & 0x00ffffffu) / 16777215.0;
-}
-
-fn hash3_feature_point(cell: vec3i) -> vec3f {
-  return vec3f(
-    hash3(cell + vec3i(17, 59, 113)),
-    hash3(cell + vec3i(101, 191, 53)),
-    hash3(cell + vec3i(47, 223, 149)),
-  );
-}
-
-const VORONOI_EDGE_WIDTH = 0.08;
-const VORONOI_EDGE_SOFTNESS = 0.04;
-
-export fn voronoi_cell_value_and_edge_3d(p: vec3f) -> vec2f {
-  let baseCell = vec3i(floor(p));
-  let localPosition = fract(p);
-  var nearestDistanceSquared = 1000.0;
-  var secondNearestDistanceSquared = 1000.0;
-  var winningCell = baseCell;
-
-  for (var z = -1; z <= 1; z = z + 1) {
-    for (var y = -1; y <= 1; y = y + 1) {
-      for (var x = -1; x <= 1; x = x + 1) {
-        let neighborOffset = vec3i(x, y, z);
-        let neighborCell = baseCell + neighborOffset;
-        let featurePoint = vec3f(neighborOffset) + hash3_feature_point(neighborCell);
-        let delta = featurePoint - localPosition;
-        let distanceSquared = dot(delta, delta);
-        if (distanceSquared < nearestDistanceSquared) {
-          secondNearestDistanceSquared = nearestDistanceSquared;
-          nearestDistanceSquared = distanceSquared;
-          winningCell = neighborCell;
-        } else if (distanceSquared < secondNearestDistanceSquared) {
-          secondNearestDistanceSquared = distanceSquared;
-        }
-      }
-    }
-  }
-
-  // Hard-cell Voronoi: the nearest feature cell gets one random value for glyph type.
-  // The F2-F1 gap controls a pure-white edge overlay, while interiors keep the full
-  // random-selected glyph instead of being masked away.
-  let cellValue = hash3(winningCell + vec3i(211, 37, 173));
-  let edgeGap = sqrt(secondNearestDistanceSquared) - sqrt(nearestDistanceSquared);
-  let edgeMask = 1.0 - smoothstep(VORONOI_EDGE_WIDTH, VORONOI_EDGE_WIDTH + VORONOI_EDGE_SOFTNESS, edgeGap);
-  return vec2f(cellValue, edgeMask);
-}
-
-const ASCII_BASE_DOT_RADIUS = 0.075;
-const ASCII_EDGE_SQUARE_HALF_SIZE = 0.22;
-
-export fn shape_distance(p: vec2f, value: f32) -> f32 {
-  if (value < 0.002) {
-    return 1.0;
-  }
-  // Luminance/noise selects the glyph only. Keep each glyph's dimensions fixed so
-  // glyph size is controlled by grid geometry and the glyphScale uniform, not value.
-  if (value < 0.18) {
-    return length(p) - ASCII_BASE_DOT_RADIUS;
-  }
-  if (value < 0.36) {
-    return length(p) - 0.145;
-  }
-  if (value < 0.58) {
-    return sd_box(p, vec2f(0.27, 0.055));
-  }
-  if (value < 0.78) {
-    return length(p) - 0.235;
-  }
-  if (value < 0.93) {
-    let scale = 0.66;
-    return sd_equilateral_triangle(p / scale) * scale;
-  }
-  return sd_box(p, vec2f(0.255, 0.255));
-}
-
-const IMPRINT_VORONOI_FREQUENCY = 2.4;
+const IMPRINT_VORONOI_FREQUENCY = 4.8;
 const ASCII_VORONOI_Z_SPEED = 0.35;
 const REVEAL_STAGGER_WINDOW = 0.25;
+export const HOVER_OVERLAY_SCALE = 0.5; // scales hover spinner-glyph opacity only
+
+export fn ascii_voronoi_noise_for_cell(modelPosXY: vec2f, gridScale: f32, time: f32) -> vec2f {
+  let safeGridScale = max(gridScale, 0.001);
+  let gridPosition = modelPosXY * safeGridScale;
+  let cellCoord = floor(gridPosition);
+  let cellCenter = (cellCoord + vec2f(0.5)) / safeGridScale;
+  let samplePosition = vec3f(cellCenter * IMPRINT_VORONOI_FREQUENCY, time * ASCII_VORONOI_Z_SPEED);
+  return voronoi_cell_value_and_edge_3d(samplePosition);
+}
 
 // Returns glyph coverage 0..1 for a model-space X/Y position. The caller applies the
 // geometric front-face mask so this module stays independent of material normals.
-export fn ascii_imprint_coverage(modelPosXY: vec2f, gridScale: f32, glyphScale: f32, time: f32, mouse: vec2f, prog: f32) -> f32 {
+export fn ascii_imprint_coverage(modelPosXY: vec2f, gridScale: f32, glyphScale: f32, time: f32, mouse: vec2f, prog: f32, hover: f32, voronoi: vec2f) -> f32 {
   let safeProgress = clamp(prog, 0.0, 1.0);
-  if (safeProgress <= 0.0) {
-    return 0.0;
-  }
+  let safeHover = clamp(hover, 0.0, 1.0);
 
   let safeGridScale = max(gridScale, 0.001);
   let safeGlyphScale = max(glyphScale, 0.1);
   let gridPosition = modelPosXY * safeGridScale;
   let cellCoord = floor(gridPosition);
-  let cellCenter = (cellCoord + vec2f(0.5)) / safeGridScale;
   let glyphUv = fract(gridPosition);
   let p = (glyphUv - vec2f(0.5)) * 2.0;
 
-  let samplePosition = vec3f(cellCenter * IMPRINT_VORONOI_FREQUENCY, time * ASCII_VORONOI_Z_SPEED);
-  let voronoi = voronoi_cell_value_and_edge_3d(samplePosition);
   let cellValue = voronoi.x;
   let edgeMask = voronoi.y;
 
   let scaledP = p / safeGlyphScale;
   let baseDotDistance = (length(scaledP) - ASCII_BASE_DOT_RADIUS) * safeGlyphScale;
   let selectedGlyphDistance = shape_distance(scaledP, cellValue) * safeGlyphScale;
+  let hoverGlyphDistance = hover_shape_distance(scaledP, safeHover) * safeGlyphScale;
   let baseDotAa = max(fwidth(baseDotDistance), 0.01);
   let selectedGlyphAa = max(fwidth(selectedGlyphDistance), 0.01);
+  let hoverGlyphAa = max(fwidth(hoverGlyphDistance), 0.01);
   let baseDotCoverage = 1.0 - smoothstep(0.0, baseDotAa, baseDotDistance);
   let selectedGlyphCoverage = 1.0 - smoothstep(0.0, selectedGlyphAa, selectedGlyphDistance);
-  let interiorGlyph = max(selectedGlyphCoverage, baseDotCoverage);
+  let hoverGlyphCoverage = 1.0 - smoothstep(0.0, hoverGlyphAa, hoverGlyphDistance);
+  let hoverEntry = smoothstep(HOVER_ENTRY_START, HOVER_ENTRY_FULL, safeHover);
+  let selectedCoverage = selectedGlyphCoverage;
+  let interiorGlyph = max(selectedCoverage, baseDotCoverage);
   let edgeGlyphDistance = sd_box(scaledP, vec2f(ASCII_EDGE_SQUARE_HALF_SIZE)) * safeGlyphScale;
   let edgeGlyphAa = max(fwidth(edgeGlyphDistance), 0.01);
   let edgeGlyphCoverage = (1.0 - smoothstep(0.0, edgeGlyphAa, edgeGlyphDistance)) * edgeMask;
-  // Draw the full random-selected glyph throughout each Voronoi region; the minimum dot only
-  // prevents empty branches. F2-F1 edge proximity boosts a small SDF-shaped square at
-  // boundaries instead of bypassing the SDF and filling the whole ASCII quad.
-  let glyph = max(interiorGlyph, edgeGlyphCoverage);
+  // The noisy ASCII chain is controlled only by imprint progress: random selected glyph,
+  // minimum dot, Voronoi edge square, then per-cell stagger reveal.
+  let imprintGlyph = max(interiorGlyph, edgeGlyphCoverage);
 
   let cellRand = hash3(vec3i(vec2i(cellCoord), 0));
   // Spread each cell's 0.25-wide reveal window across the full transition instead of scaling
   // progress by the stagger range. This keeps p=0.5 as a true mid-state while preserving exact
   // endpoints: p=0 reveals no cells, p=1 reveals every cell fully.
   let revealStart = cellRand * (1.0 - REVEAL_STAGGER_WINDOW);
-  let reveal = smoothstep(revealStart, revealStart + REVEAL_STAGGER_WINDOW, safeProgress);
-  return glyph * reveal;
+  let staggerReveal = smoothstep(revealStart, revealStart + REVEAL_STAGGER_WINDOW, safeProgress);
+  let imprintCoverage = imprintGlyph * staggerReveal;
+
+  // Paint reveal is independent from the noise chain. On glass (progress=0) this contributes
+  // only the clean station ramp; in ASCII mode it cleanly overrides the selected glyph while
+  // the base dots/edge squares remain part of the imprint chain.
+  let hoverCoverage = hoverGlyphCoverage * hoverEntry * HOVER_OVERLAY_SCALE;
+  // Hard per-cell switchover: once hover passes the entry threshold, the entire cell shows
+  // only the spinner glyph; otherwise only the imprint glyph contributes.
+  let hoverGate = step(HOVER_ENTRY_START, safeHover);
+  return mix(imprintCoverage, hoverCoverage, hoverGate);
 }

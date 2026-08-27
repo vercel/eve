@@ -12,6 +12,7 @@ import {
   type DevelopmentCredentialGate,
 } from "#services/dev-client/credential-gate.js";
 import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import type { RemoteAuthPreparation } from "./remote-auth-result.js";
 import {
@@ -43,51 +44,24 @@ const NEWER_VERIFIED_TARGET = await resolveTestVercelTarget({
   projectName: "inbound-next",
 });
 
-const INFO: AgentInfoResult = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: { id: "gpt-5" },
-    name: "Weather Agent",
-  },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: {
-    dynamic: [],
-    static: {
-      logicalPath: "agent/instructions.md",
-      markdown: "You are a weather assistant.",
-      name: "instructions",
-      sourceKind: "markdown",
-    },
-  },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 1,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
-};
+const INFO: AgentInfoResult = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  modelId: "gpt-5",
+  name: "Weather Agent",
+});
 
 const VERCEL_SSO_CHALLENGE = `
 <title>Authentication Required</title>
 <a href="https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools">
   Vercel Authentication
 </a>`;
+const VERCEL_SSO_URL =
+  "https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools&nonce=test";
+const VERCEL_PROTECTED_DEPLOYMENT = JSON.stringify({
+  error: { code: "401", message: "Protected deployment" },
+  protection: { vercel_auth_callback: VERCEL_SSO_URL },
+});
 const TRUSTED_SOURCES_MISMATCH = [
   "The caller environment is not permitted.",
   "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
@@ -162,6 +136,32 @@ describe("createRemoteConnectionController", () => {
     {
       name: "the Vercel Deployment Protection challenge",
       error: new ClientError(401, VERCEL_SSO_CHALLENGE),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "the Vercel Deployment Protection redirect",
+      error: new ClientError(302, "Redirecting...", { location: VERCEL_SSO_URL }),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "the structured Vercel Deployment Protection challenge",
+      error: new ClientError(401, VERCEL_PROTECTED_DEPLOYMENT),
+      expected: {
+        state: "auth-required",
+        challenge: { kind: "vercel-deployment-protection" },
+      },
+    },
+    {
+      name: "Vercel's credentialed Deployment Protection rejection",
+      error: new ClientError(401, "You must sign in\n\nUNAUTHORIZED\n\niad1::request-id\n", {
+        "x-vercel-error": "UNAUTHORIZED",
+      }),
       expected: {
         state: "auth-required",
         challenge: { kind: "vercel-deployment-protection" },

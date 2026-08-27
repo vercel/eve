@@ -8,9 +8,11 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach } from "vitest";
 
@@ -76,6 +78,13 @@ export interface ScenarioAppDescriptor {
    * us having to maintain a bespoke template-then-copy cache.
    */
   readonly installDependencies?: boolean;
+  /**
+   * Package manager used for {@link installDependencies}. Defaults to pnpm.
+   * npm and bun installs are slower but produce the hoisted real-directory
+   * `node_modules/` layout, which exercises dependency resolution paths that
+   * pnpm's symlinked store never hits.
+   */
+  readonly packageManager?: "bun" | "npm" | "pnpm";
 }
 
 /**
@@ -262,6 +271,36 @@ async function installScenarioDependencies(input: {
   readonly appRoot: string;
   readonly descriptor: ScenarioAppDescriptor;
 }): Promise<void> {
+  if (input.descriptor.packageManager === "npm") {
+    // A project .npmrc overrides any host-global release-age gate, which
+    // would otherwise reject the workspace's freshly published dependency
+    // versions and make the test outcome depend on host configuration.
+    await writeFile(
+      join(input.appRoot, ".npmrc"),
+      "registry=https://registry.npmjs.org/\nmin-release-age=0\n",
+    );
+    await runInstallCommand(input.appRoot, "npm", [
+      "install",
+      "--no-audit",
+      "--no-fund",
+      "--ignore-scripts",
+      "--prefer-offline",
+    ]);
+    return;
+  }
+  if (input.descriptor.packageManager === "bun") {
+    // A local bunfig overrides any host-global minimumReleaseAge gate, which
+    // would otherwise reject the workspace's freshly published dependency
+    // versions and make the test outcome depend on host configuration.
+    await writeFile(
+      join(input.appRoot, "bunfig.toml"),
+      ["[install]", "minimumReleaseAge = 0", ""].join("\n"),
+    );
+    await writeFile(join(input.appRoot, ".npmrc"), "registry=https://registry.npmjs.org/\n");
+    await runInstallCommand(input.appRoot, "bun", ["install", "--ignore-scripts"]);
+    return;
+  }
+
   await runPnpmCommand({
     args: [
       "install",
@@ -273,6 +312,37 @@ async function installScenarioDependencies(input: {
     ],
     cwd: input.appRoot,
   });
+}
+
+const runFile = promisify(execFile);
+
+async function runInstallCommand(
+  appRoot: string,
+  command: "bun" | "npm",
+  args: readonly string[],
+): Promise<void> {
+  try {
+    await runFile(command, [...args], {
+      cwd: appRoot,
+      env: {
+        ...process.env,
+        NPM_CONFIG_USERCONFIG: join(appRoot, ".npmrc"),
+      },
+      maxBuffer: 10 * 1024 * 1024,
+      shell: process.platform === "win32",
+    });
+  } catch (error) {
+    const failure = error as { readonly stderr?: unknown; readonly stdout?: unknown };
+    throw new Error(
+      [
+        `Command failed: ${command} ${args.join(" ")}`,
+        `cwd: ${appRoot}`,
+        `stdout:\n${typeof failure.stdout === "string" ? failure.stdout : ""}`,
+        `stderr:\n${typeof failure.stderr === "string" ? failure.stderr : ""}`,
+      ].join("\n\n"),
+      { cause: error },
+    );
+  }
 }
 
 const EVE_SCENARIO_EVE_TARBALL_PATH_ENV = "EVE_SCENARIO_EVE_TARBALL_PATH";
@@ -288,7 +358,8 @@ let cachedScenarioEveTarballPromise: Promise<string> | null = null;
  * `EVE_SCENARIO_EVE_TARBALL_PATH` env var. When the env var is missing
  * (e.g. a developer invokes `vitest` against a single scenario file
  * directly), this falls back to packing into a worker-local cache
- * directory, which is safe because only one worker is running.
+ * directory with lifecycle scripts disabled, so the fallback never mutates
+ * the shared workspace `dist/` even under parallel workers.
  */
 export async function ensureScenarioEveTarballPath(): Promise<string> {
   cachedScenarioEveTarballPromise ??= resolveOrPackScenarioEveTarball();
@@ -308,6 +379,14 @@ async function resolveOrPackScenarioEveTarball(): Promise<string> {
 async function packScenarioEveTarball(): Promise<string> {
   const cacheRoot = await resolveScenarioWorkerCacheDirectory();
   const tarballsRoot = join(cacheRoot, "tarballs");
+  const packageRoot = resolvePackageRoot();
+  const prebuiltEntryPath = join(packageRoot, "dist", "src", "index.js");
+
+  if (!(await isFilePresent(prebuiltEntryPath))) {
+    throw new Error(
+      `Scenario tests require a prebuilt eve package. Run "pnpm build" first. Missing: ${prebuiltEntryPath}`,
+    );
+  }
 
   await rm(tarballsRoot, {
     force: true,
@@ -317,10 +396,8 @@ async function packScenarioEveTarball(): Promise<string> {
     recursive: true,
   });
 
-  const packageRoot = resolvePackageRoot();
-
   await runPnpmCommand({
-    args: ["pack", "--pack-destination", tarballsRoot],
+    args: ["pack", "--config.ignore-scripts=true", "--pack-destination", tarballsRoot],
     cwd: packageRoot,
   });
 

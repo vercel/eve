@@ -1,12 +1,17 @@
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runCli } from "../../src/cli/run.js";
+import {
+  clearActiveSandboxHandlesForTest,
+  trackActiveSandboxHandle,
+} from "../../src/execution/sandbox/active-handles.js";
 import { useTemporaryDirectories } from "../../src/internal/testing/use-temporary-app-roots.js";
 
 const mockedEvalDependencies = vi.hoisted(() => ({
+  createDevelopmentServer: vi.fn(),
   discoverAndImportEvals: vi.fn(),
   discoverEvalConfig: vi.fn(),
   executeEval: vi.fn(),
@@ -26,6 +31,10 @@ vi.mock("../../src/evals/target.js", () => ({
   resolveEvalTargetHandle: mockedEvalDependencies.resolveEvalTargetHandle,
 }));
 
+vi.mock("../../src/internal/nitro/host.js", () => ({
+  createDevelopmentServer: mockedEvalDependencies.createDevelopmentServer,
+}));
+
 const createScratchDirectory = useTemporaryDirectories();
 
 const DEVELOPMENT_ENV_KEYS = [
@@ -35,10 +44,23 @@ const DEVELOPMENT_ENV_KEYS = [
   "EVE_DEV_LOCAL_ONLY",
   "EVE_DEV_SHARED",
   "EVE_DEV_SHELL_ONLY",
+  "EVE_EVALUATION",
+  "EVE_EVALUATION_RUN_ID",
 ] as const;
 
 async function createEnvironmentFixture(): Promise<string> {
   const fixtureRoot = await createScratchDirectory("eve-eval-env-");
+
+  await mkdir(join(fixtureRoot, "agent"), { recursive: true });
+  await writeFile(
+    join(fixtureRoot, "package.json"),
+    `${JSON.stringify({ name: "eve-eval-env-test", private: true, type: "module" })}\n`,
+  );
+  await writeFile(
+    join(fixtureRoot, "agent", "agent.mjs"),
+    'export default { model: "openai/gpt-5.4" };\n',
+  );
+  await writeFile(join(fixtureRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
 
   await writeFile(
     join(fixtureRoot, ".env"),
@@ -74,6 +96,8 @@ afterEach(() => {
   clearDevelopmentEnvironment();
   process.exitCode = undefined;
   vi.restoreAllMocks();
+  clearActiveSandboxHandlesForTest();
+  mockedEvalDependencies.createDevelopmentServer.mockReset();
   mockedEvalDependencies.discoverAndImportEvals.mockReset();
   mockedEvalDependencies.discoverEvalConfig.mockReset();
   mockedEvalDependencies.executeEval.mockReset();
@@ -139,6 +163,53 @@ describe("eve eval environment loading", () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
+  it("shuts down tracked sandbox handles after a local eval run", async () => {
+    const fixtureRoot = await createEnvironmentFixture();
+    const previousCwd = process.cwd();
+    const logger = {
+      error: vi.fn(),
+      log: vi.fn(),
+    };
+    const exit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
+    const close = vi.fn(async () => {});
+    const handle = { shutdown: vi.fn(async () => {}) };
+    const evaluation = makeEvaluation("local");
+
+    trackActiveSandboxHandle({ backendName: "microsandbox", handle, sessionKey: "session-1" });
+    process.chdir(fixtureRoot);
+    mockedEvalDependencies.createDevelopmentServer.mockReturnValue({
+      close,
+      start: vi.fn(async () => ({
+        appRoot: fixtureRoot,
+        kind: "started" as const,
+        url: "http://127.0.0.1:43123",
+      })),
+    });
+    mockedEvalDependencies.discoverAndImportEvals.mockResolvedValue([evaluation]);
+    mockedEvalDependencies.discoverEvalConfig.mockResolvedValue(TEST_CONFIG);
+    mockedEvalDependencies.resolveEvalTargetHandle.mockResolvedValue({
+      attachSession: vi.fn(),
+      capabilities: { devRoutes: true },
+      dispatchSchedule: vi.fn(),
+      fetch: vi.fn(),
+      kind: "local",
+      url: "http://127.0.0.1:43123",
+    });
+    mockedEvalDependencies.executeEval.mockResolvedValue(makeEvalResult(evaluation.id));
+
+    try {
+      await runCli(["eval"], logger);
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(handle.shutdown).toHaveBeenCalledTimes(1);
+    expect(process.env.EVE_EVALUATION).toBe("1");
+    expect(process.env.EVE_EVALUATION_RUN_ID).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+
   it("writes all evals to one JUnit file", async () => {
     const fixtureRoot = await createEnvironmentFixture();
     const previousCwd = process.cwd();
@@ -187,7 +258,7 @@ describe("eve eval environment loading", () => {
     expect(xml).toContain('<testsuite name="eve evals" tests="2" failures="1" skipped="0"');
     expect(xml).toContain('name="alpha"');
     expect(xml).toContain('name="beta"');
-    expect(xml).toContain('<failure message="check: nope">');
+    expect(xml).toContain('<failure message="check (0% &lt; 100%): nope">');
     expect(exit).toHaveBeenCalledWith(1);
   });
 });

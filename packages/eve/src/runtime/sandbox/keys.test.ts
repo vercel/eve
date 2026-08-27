@@ -1,16 +1,20 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   COMPILE_METADATA_KIND,
   COMPILE_METADATA_VERSION,
   type CompileMetadata,
 } from "#compiler/artifacts.js";
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { createFakeVercelOidcToken } from "#internal/testing/vercel-oidc-token.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { withBundledCompiledArtifacts } from "#runtime/loaders/bundled-artifacts.js";
-import { createRuntimeSandboxTemplateKey } from "#runtime/sandbox/keys.js";
+import {
+  createRuntimeSandboxKeys,
+  createRuntimeSandboxTemplateKey,
+} from "#runtime/sandbox/keys.js";
 
 const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
 
@@ -19,6 +23,7 @@ const CONTENT_HASH = "a".repeat(64);
 function createMetadataFixture(generatorVersion: string): CompileMetadata {
   return {
     compile: {
+      manifest: { path: ".eve/compile/agent-manifest.json", sha256: "a".repeat(64) },
       moduleMap: { path: ".eve/compile/module-map.mjs", sha256: "b".repeat(64) },
     },
     discovery: {
@@ -57,21 +62,123 @@ async function deriveTemplateKey(): Promise<string | null> {
   });
 }
 
-function withBundledMetadata<T>(
+async function withBundledMetadata<T>(
   metadata: CompileMetadata | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const manifest = createCompiledAgentManifest({
+  const { manifest, moduleMap } = await compileFromMemory({
     agentRoot: "/virtual/app/agent",
     appRoot: "/virtual/app",
-    config: {
-      model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
-      name: "keys-test-agent",
-    },
+    model: "openai/gpt-5.4",
+    name: "keys-test-agent",
   });
 
-  return withBundledCompiledArtifacts({ manifest, metadata, moduleMap: { nodes: {} } }, fn);
+  return await withBundledCompiledArtifacts({ manifest, metadata, moduleMap }, fn);
 }
+
+async function deriveSessionKey(input?: {
+  readonly backendName?: string;
+  readonly contentHash?: string;
+}): Promise<string> {
+  const keys = await createRuntimeSandboxKeys({
+    backendName: input?.backendName ?? "local",
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    nodeId: "__root__",
+    sessionId: "session_1",
+    sourceId: "eve:default-sandbox",
+    templatePlan: {
+      contentHash: input?.contentHash ?? CONTENT_HASH,
+      kind: "workspace-content",
+    },
+  });
+  return keys.sessionKey;
+}
+
+/**
+ * Derives one vercel-backed session key under exactly the given env.
+ * Unlisted project and deployment variables are stubbed empty so ambient
+ * CI values cannot leak into the derivation.
+ */
+async function deriveVercelSessionKey(env: Record<string, string>): Promise<string> {
+  const stubbed = {
+    VERCEL_DEPLOYMENT_ID: "",
+    VERCEL_OIDC_TOKEN: "",
+    VERCEL_PROJECT_ID: "",
+    ...env,
+  };
+  for (const [key, value] of Object.entries(stubbed)) {
+    vi.stubEnv(key, value);
+  }
+
+  return await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
+    deriveSessionKey({ backendName: "vercel" }),
+  );
+}
+
+describe("createRuntimeSandboxKeys", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("pins the vercel session key across deployments when only the OIDC token names the project", async () => {
+    const token = createFakeVercelOidcToken({ project_id: "prj_123" });
+
+    const first = await deriveVercelSessionKey({
+      VERCEL_DEPLOYMENT_ID: "dpl_first",
+      VERCEL_OIDC_TOKEN: token,
+    });
+    const second = await deriveVercelSessionKey({
+      VERCEL_DEPLOYMENT_ID: "dpl_second",
+      VERCEL_OIDC_TOKEN: token,
+    });
+
+    expect(first).toBe(second);
+  });
+
+  it("derives the same session key from the project id env var and the OIDC token claim", async () => {
+    const fromEnv = await deriveVercelSessionKey({ VERCEL_PROJECT_ID: "prj_123" });
+    const fromToken = await deriveVercelSessionKey({
+      VERCEL_OIDC_TOKEN: createFakeVercelOidcToken({ project_id: "prj_123" }),
+    });
+
+    expect(fromEnv).toBe(fromToken);
+  });
+
+  it("never scopes the session key by deployment id, even without a resolvable project id", async () => {
+    const first = await deriveVercelSessionKey({ VERCEL_DEPLOYMENT_ID: "dpl_first" });
+    const second = await deriveVercelSessionKey({ VERCEL_DEPLOYMENT_ID: "dpl_second" });
+
+    expect(first).toBe(second);
+  });
+
+  it("keeps the session key stable across unrelated source and eve version changes", async () => {
+    const changedMetadata = createMetadataFixture("2.0.0");
+
+    const first = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
+      deriveSessionKey(),
+    );
+    const second = await withBundledMetadata(
+      {
+        ...changedMetadata,
+        discovery: { ...changedMetadata.discovery, sourceGraphHash: "f".repeat(64) },
+      },
+      () => deriveSessionKey(),
+    );
+
+    expect(first).toBe(second);
+  });
+
+  it("rotates the session key when the sandbox content changes", async () => {
+    const first = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
+      deriveSessionKey(),
+    );
+    const second = await withBundledMetadata(createMetadataFixture("1.0.0"), () =>
+      deriveSessionKey({ contentHash: "b".repeat(64) }),
+    );
+
+    expect(first).not.toBe(second);
+  });
+});
 
 describe("createRuntimeSandboxTemplateKey", () => {
   it("derives the version segment from compile metadata so build and runtime agree", async () => {

@@ -1,16 +1,8 @@
 import {
   formatSlackLink,
-  linkBareSlackMentions,
   markdownBoldToSlackMrkdwn,
   slackMrkdwnToMarkdown,
 } from "#compiled/@chat-adapter/slack/format.js";
-
-const BARE_MENTION_RE = /(?<![<\w])@(\w+)/gu;
-
-/** Rewrites bare Slack mention tokens into Slack's linked mention syntax. */
-export function rewriteBareMentions(text: string): string {
-  return linkBareSlackMentions(text).replace(BARE_MENTION_RE, "<@$1>");
-}
 
 /** Converts markdown into Slack mrkdwn for legacy Slack text surfaces. */
 export function gfmToSlackMrkdwn(input: string): string {

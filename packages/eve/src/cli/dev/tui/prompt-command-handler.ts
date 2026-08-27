@@ -1,4 +1,4 @@
-import type { ApplyModelOutcome } from "#setup/flows/model.js";
+import type { ApplyModelOutcome } from "#setup/flows/model-source-change.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 import type {
@@ -55,11 +55,9 @@ export function createPromptCommandHandler(
         const appRoot = target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
-          const {
-            changeAgentModel,
-            formatApplyModelOutcome,
-            modelChangeRefusalForUneditableModel,
-          } = await import("#setup/flows/model.js");
+          const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
+          const { changeAgentModel, formatApplyModelOutcome } =
+            await import("#setup/flows/model-source-change.js");
           // A source-backed model (an SDK model call) isn't a string literal eve
           // can rewrite; refuse with a clear reason rather than silently no-op.
           const checkRefusal = options.modelChangeRefusal ?? modelChangeRefusalForUneditableModel;
@@ -118,15 +116,21 @@ export function createPromptCommandHandler(
           command: command.name,
           appRoot: target.workspaceRoot,
           renderer: flow,
-          disabledConnectionReasons: context.disabledConnectionReasons,
+          withExclusiveTerminal: context.withExclusiveTerminal,
+          chatGptAccountLabel: context.chatGptAccountLabel,
         };
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
+        }
+        // `/add <item>` opens that registry item directly; bare `/add` browses.
+        if (command.name === "add" && command.argument.length > 0) {
+          commandInput.initialRegistryAddress = command.argument;
         }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
         const outcome: PromptCommandOutcome = { message: result.message };
+        if (result.tone !== undefined) outcome.tone = result.tone;
         if (result.effect !== undefined) outcome.effect = result.effect;
         return outcome;
       } finally {

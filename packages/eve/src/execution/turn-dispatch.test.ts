@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
+import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
-import type { SessionDeliveryHook } from "#execution/session-delivery-hook.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
+import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 
 const createHookMock = vi.fn();
@@ -13,7 +13,7 @@ vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
 }));
 
-vi.mock("./workflow-steps.js", () => ({
+vi.mock("./dispatch-turn-step.js", () => ({
   dispatchTurnStep: vi.fn(async () => ({ runId: "turn-run" })),
 }));
 
@@ -37,13 +37,14 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
     const rekeyHook = vi.fn();
-    const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
+    const commandInbox = createCommandInbox({ rekeyContinuation: rekeyHook });
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -70,13 +71,14 @@ describe("dispatchAndAwaitTurn", () => {
       },
     ]);
     const rekeyHook = vi.fn();
-    const deliveryHook = createDeliveryHook({ rekey: rekeyHook });
+    const commandInbox = createCommandInbox({ rekeyContinuation: rekeyHook });
 
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook,
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -130,29 +132,38 @@ describe("dispatchAndAwaitTurn", () => {
     const bufferedDeliveries: DeliverHookPayload[] = [];
     await dispatchAndAwaitTurn({
       bufferedDeliveries,
-      controlToken: "turn-control",
-      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook({
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox({
         next: async () => ({
           done: false,
-          value: { kind: "deliver", payloads: [{ message: "later delivery" }] },
+          value: {
+            kind: "send",
+            payload: { inputResponses: [{ optionId: "yes", requestId: "input-1" }] },
+          },
         }),
       }),
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
       sessionState: state,
     });
 
-    expect(bufferedDeliveries.map((item) => item.payloads[0]?.message)).toEqual([
-      "earlier remainder",
-      "later delivery",
+    expect(bufferedDeliveries).toEqual([
+      { kind: "deliver", payloads: [{ message: "earlier remainder" }] },
+      expect.objectContaining({
+        payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+      }),
     ]);
   });
 
   it("re-buffers a forwarded delivery when the turn inbox is already gone", async () => {
     const state = createState("http:test");
-    const delivery: DeliverHookPayload = { kind: "deliver", payloads: [{ message: "relayed" }] };
+    const delivery: DeliverHookPayload = {
+      kind: "deliver",
+      payloads: [{ inputResponses: [{ optionId: "yes", requestId: "input-1" }] }],
+    };
     vi.mocked(forwardTurnDeliveryStep).mockRejectedValue(
       Object.assign(new Error("inbox gone"), { name: "HookNotFoundError" }),
     );
@@ -170,11 +181,12 @@ describe("dispatchAndAwaitTurn", () => {
     ]);
 
     const bufferedDeliveries: DeliverHookPayload[] = [delivery];
-    const action = await dispatchAndAwaitTurn({
+    const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
-      deliveryHook: createDeliveryHook(),
       mode: "conversation",
       parentWritable: new WritableStream<Uint8Array>(),
       serializedContext: {},
@@ -182,16 +194,52 @@ describe("dispatchAndAwaitTurn", () => {
     });
 
     expect(forwardTurnDeliveryStep).toHaveBeenCalledOnce();
-    expect(action.kind).toBe("park");
+    expect(turn.action.kind).toBe("park");
     expect(bufferedDeliveries).toEqual([delivery]);
+  });
+
+  it("defers control-hook disposal until the caller invokes dispose()", async () => {
+    const state = createState("http:test");
+    installControlHook([
+      {
+        action: { kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    // The turn run's final control send is at-least-once; a late
+    // duplicate resume must land on a live hook (see DispatchedTurn).
+    const hook = createHookMock.mock.results[0]?.value as { dispose: ReturnType<typeof vi.fn> };
+    expect(hook.dispose).not.toHaveBeenCalled();
+    await turn.dispose();
+    expect(hook.dispose).toHaveBeenCalledOnce();
   });
 });
 
-function createDeliveryHook(overrides: Partial<SessionDeliveryHook> = {}): SessionDeliveryHook {
+function createCommandInbox(overrides: Partial<SessionCommandInbox> = {}): SessionCommandInbox {
   return {
+    claimAuthorization: vi.fn(),
+    claimStable: vi.fn(),
     consumeNext: vi.fn(),
-    next: vi.fn(() => new Promise<IteratorResult<HookPayload>>(() => {})),
-    rekey: vi.fn(),
+    hasReadyAuthorization: vi.fn(() => false),
+    next: vi.fn(() => new Promise<IteratorResult<SessionInboxPayload>>(() => {})),
+    nextWithSource: vi.fn(() =>
+      Promise.reject(new Error("nextWithSource is not modeled by this test inbox.")),
+    ),
+    rekeyContinuation: vi.fn(),
+    setAuthorizationWindow: vi.fn(),
     ...overrides,
   };
 }

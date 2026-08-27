@@ -1,34 +1,29 @@
 import type {
   CompiledAgentManifest,
   CompiledAgentNodeManifest,
+  CompiledAgentResources,
   CompiledRemoteAgentNode,
   CompiledSubagentNode,
 } from "#compiler/manifest.js";
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
+import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import type { HeadersValue } from "#client/types.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import { createResolvedRuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
-import {
-  getAllFrameworkChannelNames,
-  getFrameworkChannelDefinitions,
-} from "#runtime/framework-channels/index.js";
-import { createConnectionSearchResolver } from "#runtime/framework-tools/connection-search-dynamic.js";
-import {
-  getAllFrameworkToolNames,
-  getFrameworkToolDefinitions,
-} from "#runtime/framework-tools/index.js";
 import { type ResolvedAgentGraphBundle, ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveDynamicSubagentDefinition } from "#runtime/resolve-dynamic-subagent.js";
 import { loadResolvedModuleExport } from "#runtime/resolve-helpers.js";
 import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type {
-  ResolvedChannelDefinition,
+  ResolvedDynamicSubagentDefinition,
   ResolvedRuntimeDelegationNode,
   ResolvedRuntimeRemoteAgentNode,
   ResolvedRuntimeSubagentNode,
@@ -84,6 +79,7 @@ class ResolveRuntimeAgentGraphError extends Error {
 export async function resolveRuntimeAgentGraph(
   input: ResolveRuntimeAgentGraphInput,
 ): Promise<ResolvedAgentGraphBundle> {
+  validateCompiledModuleMap(input.manifest, input.moduleMap);
   const nodesByNodeId = new Map<string, ResolvedAgentGraphBundle["root"]>();
   const childNodeIdsByParentNodeId = createChildNodeIdsByParentNodeId(input.manifest);
   const subagentNodesById = new Map(
@@ -97,6 +93,10 @@ export async function resolveRuntimeAgentGraph(
     nodesByNodeId,
     subagentNodesById,
   });
+  attachInheritedSandboxWorkspaceResources({
+    manifest: input.manifest,
+    nodesByNodeId,
+  });
 
   return {
     nodesByNodeId,
@@ -106,7 +106,8 @@ export async function resolveRuntimeAgentGraph(
 
 interface ResolveRuntimeAgentNodeInput {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
-  readonly manifest: CompiledAgentNodeManifest;
+  readonly agentId?: string;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMap: CompiledModuleMap;
   readonly nodeId: string;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
@@ -134,81 +135,15 @@ async function resolveRuntimeAgentNode(
     moduleMap: input.moduleMap,
     nodeId: input.nodeId,
   });
-  const hasConnections = agent.connections.length > 0;
-  const frameworkTools = getFrameworkToolDefinitions({ hasConnections });
-  const frameworkToolNames = new Set(frameworkTools.map((t) => t.name));
-  const allFrameworkToolNames = getAllFrameworkToolNames();
-
-  // Authored tools whose filename slug matches a framework default replace
-  // it. Authored disable sentinels (whose target is also taken from the
-  // file's slug) remove a framework default. Both interactions happen here,
-  // before the registry is built, so the duplicate-name guard inside
-  // `createRuntimeToolRegistry` keeps doing its job for authored-vs-authored
-  // collisions.
-  const authoredToolNames = new Set(agent.tools.map((tool) => tool.name));
-
-  for (const disabledName of agent.disabledFrameworkTools) {
-    if (!allFrameworkToolNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/tools/${disabledName}.ts exports disableTool() but "${disabledName}" is not a framework tool. ` +
-          `Rename the file to one of: ${[...allFrameworkToolNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkTools = new Set(agent.disabledFrameworkTools);
-  const activeFrameworkTools = frameworkTools.filter(
-    (tool) => !authoredToolNames.has(tool.name) && !disabledFrameworkTools.has(tool.name),
-  );
-
   const toolRegistry = await createRuntimeToolRegistry(
+    { tools: agent.tools },
     {
-      tools: [...activeFrameworkTools, ...agent.tools],
-    },
-    {
-      reservedToolNames: [
-        WORKFLOW_TOOL_NAME,
-        ...(frameworkToolNames.has(LOAD_SKILL_TOOL_NAME) ||
-        authoredToolNames.has(LOAD_SKILL_TOOL_NAME)
-          ? []
-          : [LOAD_SKILL_TOOL_NAME]),
-      ],
+      reservedToolNames: [WORKFLOW_TOOL_NAME],
     },
   );
-  // Authored channels override framework defaults by matching logical name;
-  // disable sentinels remove framework defaults with the same name.
-  const authoredChannelNames = new Set(agent.channels.map((channel) => channel.name));
-  const allFrameworkChannelNames = getAllFrameworkChannelNames();
-
-  for (const disabledName of agent.disabledFrameworkChannels) {
-    if (!allFrameworkChannelNames.has(disabledName)) {
-      throw new ResolveRuntimeAgentGraphError(
-        `agent/channels/${disabledName}.ts exports disableRoute() but "${disabledName}" is not a framework channel. ` +
-          `Rename the file to one of: ${[...allFrameworkChannelNames].sort().join(", ")}.`,
-        {
-          nodeId,
-          sourceId: input.sourceId,
-        },
-      );
-    }
-  }
-
-  const disabledFrameworkChannels = new Set(agent.disabledFrameworkChannels);
-  const activeFrameworkChannels = getFrameworkChannelDefinitions().filter(
-    (channel) =>
-      !authoredChannelNames.has(channel.name) && !disabledFrameworkChannels.has(channel.name),
-  );
-  const channels: readonly ResolvedChannelDefinition[] = [
-    ...activeFrameworkChannels,
-    ...agent.channels,
-  ];
 
   const sandboxRegistry = createRuntimeSandboxRegistry({
-    authoredSandbox: agent.sandbox,
+    sandbox: agent.sandbox,
     workspaceResourceRoot: agent.workspaceResourceRoot,
   });
   const subagentRegistry = createRuntimeSubagentRegistry({
@@ -225,24 +160,18 @@ async function resolveRuntimeAgentNode(
       subagentNodesById: input.subagentNodesById,
     }),
   });
-  const resolvedAgent = hasConnections
-    ? {
-        ...agent,
-        dynamicToolResolvers: [...agent.dynamicToolResolvers, createConnectionSearchResolver()],
-      }
-    : agent;
-
   const node: ResolvedAgentGraphBundle["root"] = {
-    agent: resolvedAgent,
-    channels,
-    hookRegistry: createRuntimeHookRegistry(resolvedAgent.hooks),
+    agent,
+    channels: agent.channels,
+    hookRegistry: createRuntimeHookRegistry(agent.hooks),
     nodeId,
     sandboxRegistry,
     sourceId: input.sourceId,
     subagentRegistry,
     toolRegistry,
     turnAgent: createResolvedRuntimeTurnAgent({
-      agent: resolvedAgent,
+      agent,
+      id: input.agentId,
       nodeId,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],
     }),
@@ -255,7 +184,7 @@ async function resolveRuntimeAgentNode(
 
 async function resolveRuntimeSubagents(input: {
   readonly childNodeIdsByParentNodeId: ReadonlyMap<string, readonly string[]>;
-  readonly manifest: CompiledAgentNodeManifest;
+  readonly manifest: CompiledAgentNodeManifest | CompiledAgentResources;
   readonly moduleMap: CompiledModuleMap;
   readonly nodesByNodeId: Map<string, ResolvedAgentGraphBundle["root"]>;
   readonly parentNodeId: string;
@@ -308,8 +237,20 @@ async function resolveRuntimeSubagent(input: {
   readonly sourceRef: CompiledSubagentNode;
   readonly subagentNodesById: ReadonlyMap<string, CompiledSubagentNode>;
 }): Promise<ResolvedRuntimeSubagentNode> {
+  const variant:
+    | { readonly description: string; readonly dynamic?: never }
+    | { readonly description?: never; readonly dynamic: ResolvedDynamicSubagentDefinition } =
+    input.sourceRef.configResolver === undefined
+      ? { description: input.sourceRef.description }
+      : {
+          dynamic: await resolveDynamicSubagentDefinition({
+            definition: input.sourceRef.configResolver,
+            moduleMap: input.moduleMap,
+            nodeId: input.sourceRef.nodeId,
+          }),
+        };
   const resolvedSubagent: ResolvedRuntimeSubagentNode = {
-    description: input.sourceRef.description,
+    ...variant,
     kind: "subagent",
     logicalPath: input.sourceRef.logicalPath,
     name: input.sourceRef.name,
@@ -318,6 +259,7 @@ async function resolveRuntimeSubagent(input: {
     sourceKind: "module",
   };
   await resolveRuntimeAgentNode({
+    agentId: input.sourceRef.name,
     childNodeIdsByParentNodeId: input.childNodeIdsByParentNodeId,
     manifest: input.sourceRef.agent,
     moduleMap: input.moduleMap,
@@ -349,6 +291,7 @@ async function resolveRuntimeRemoteAgent(input: {
   const resolvedRemoteAgent: {
     auth?: ResolvedRuntimeRemoteAgentNode["auth"];
     description: string;
+    forwardPrincipal?: boolean;
     headers?: HeadersValue;
     kind: "remote";
     logicalPath: string;
@@ -369,11 +312,19 @@ async function resolveRuntimeRemoteAgent(input: {
     path: input.sourceRef.path,
     sourceId: input.sourceRef.sourceId,
     sourceKind: "module",
-    url: input.sourceRef.url,
+    url: await resolveRemoteAgentUrl({
+      bakedUrl: input.sourceRef.url,
+      logicalPath: input.sourceRef.logicalPath,
+      resolvedUrl: resolvedRecord.url,
+    }),
   };
 
   if (typeof resolvedRecord.auth === "function") {
     resolvedRemoteAgent.auth = resolvedRecord.auth as ResolvedRuntimeRemoteAgentNode["auth"];
+  }
+
+  if (resolvedRecord.forwardPrincipal === true) {
+    resolvedRemoteAgent.forwardPrincipal = true;
   }
 
   const headers = resolveRemoteAgentHeaders(resolvedRecord.headers);
@@ -383,6 +334,28 @@ async function resolveRuntimeRemoteAgent(input: {
   }
 
   return resolvedRemoteAgent;
+}
+
+async function resolveRemoteAgentUrl(input: {
+  readonly bakedUrl: string | undefined;
+  readonly logicalPath: string;
+  readonly resolvedUrl: unknown;
+}): Promise<string> {
+  if (typeof input.resolvedUrl === "function") {
+    const resolved = await (input.resolvedUrl as () => unknown)();
+    if (typeof resolved !== "string" || resolved.length === 0) {
+      throw new Error(
+        `Remote agent "${input.logicalPath}" url function must return a non-empty string.`,
+      );
+    }
+    return resolved;
+  }
+
+  const url = input.bakedUrl ?? (typeof input.resolvedUrl === "string" ? input.resolvedUrl : "");
+  if (url.length === 0) {
+    throw new Error(`Remote agent "${input.logicalPath}" is missing a url.`);
+  }
+  return url;
 }
 
 function resolveRemoteAgentHeaders(value: unknown): HeadersValue | undefined {
@@ -409,20 +382,89 @@ function resolveRemoteAgentHeaders(value: unknown): HeadersValue | undefined {
   return headers;
 }
 
+function attachInheritedSandboxWorkspaceResources(input: {
+  readonly manifest: CompiledAgentManifest;
+  readonly nodesByNodeId: ReadonlyMap<string, ResolvedAgentGraphBundle["root"]>;
+}): void {
+  const parentNodeIdByChildNodeId = new Map(
+    input.manifest.subagents.map((subagent) => [subagent.nodeId, subagent.parentNodeId]),
+  );
+
+  for (const [nodeId, node] of input.nodesByNodeId) {
+    if (node.sandboxRegistry.sandbox.definition.inheritsParent !== true) continue;
+    if (node.agent.dynamicSkillResolvers.length > 0) {
+      throw new ResolveRuntimeAgentGraphError(
+        `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" defines dynamic skills. Remove the child dynamic skills or give the child its own sandbox.`,
+        { nodeId },
+      );
+    }
+
+    const parentNodeId = parentNodeIdByChildNodeId.get(nodeId);
+    if (parentNodeId === undefined) {
+      throw new ResolveRuntimeAgentGraphError(
+        `Sandbox "${node.sandboxRegistry.sandbox.definition.logicalPath}" selects parent.sandbox but agent node "${nodeId}" has no parent.`,
+        { nodeId },
+      );
+    }
+    const owner = resolveSandboxOwnerNode({
+      nodeId: parentNodeId,
+      nodesByNodeId: input.nodesByNodeId,
+      parentNodeIdByChildNodeId,
+    });
+    (node.sandboxRegistry.sandbox as { inheritance?: unknown }).inheritance = {
+      definition: owner.sandboxRegistry.sandbox.definition,
+      nodeId: owner.nodeId,
+      workspaceResourceRoot: owner.sandboxRegistry.sandbox.workspaceResourceRoot,
+    };
+    const workspacePrompt = createWorkspacePromptSection(owner.agent.workspaceSpec);
+    if (workspacePrompt !== undefined) {
+      (node.turnAgent as { instructions: readonly string[] }).instructions = [
+        ...node.turnAgent.instructions,
+        workspacePrompt,
+      ];
+    }
+  }
+}
+
+function resolveSandboxOwnerNode(input: {
+  readonly nodeId: string;
+  readonly nodesByNodeId: ReadonlyMap<string, ResolvedAgentGraphBundle["root"]>;
+  readonly parentNodeIdByChildNodeId: ReadonlyMap<string, string>;
+}): ResolvedAgentGraphBundle["root"] {
+  const node = input.nodesByNodeId.get(toRuntimeNodeId(input.nodeId));
+  if (node === undefined) {
+    throw new ResolveRuntimeAgentGraphError(`Missing parent runtime node "${input.nodeId}".`, {
+      nodeId: input.nodeId,
+    });
+  }
+  if (node.sandboxRegistry.sandbox.definition.inheritsParent !== true) return node;
+
+  const parentNodeId = input.parentNodeIdByChildNodeId.get(input.nodeId);
+  if (parentNodeId === undefined) {
+    throw new ResolveRuntimeAgentGraphError(
+      `Inherited sandbox node "${input.nodeId}" has no parent.`,
+      {
+        nodeId: input.nodeId,
+      },
+    );
+  }
+  return resolveSandboxOwnerNode({ ...input, nodeId: parentNodeId });
+}
+
 function createChildNodeIdsByParentNodeId(
   manifest: CompiledAgentManifest,
 ): ReadonlyMap<string, readonly string[]> {
   const childNodeIdsByParentNodeId = new Map<string, string[]>();
 
-  for (const edge of manifest.subagentEdges) {
-    const existing = childNodeIdsByParentNodeId.get(edge.parentNodeId);
+  for (const subagent of manifest.subagents) {
+    const existing = childNodeIdsByParentNodeId.get(subagent.parentNodeId);
 
     if (existing === undefined) {
-      childNodeIdsByParentNodeId.set(edge.parentNodeId, [edge.childNodeId]);
+      childNodeIdsByParentNodeId.set(subagent.parentNodeId, [subagent.nodeId]);
       continue;
     }
 
-    existing.push(edge.childNodeId);
+    existing.push(subagent.nodeId);
   }
 
   return childNodeIdsByParentNodeId;
