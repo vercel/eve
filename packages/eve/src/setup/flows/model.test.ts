@@ -23,10 +23,10 @@ const APP_ROOT = "/app/my-agent";
 
 const CATALOG: GatewayCatalogModel[] = [
   {
-    id: "zai/glm-5.2",
-    name: "GLM 5.2",
+    id: "openai/gpt-5.6-luna-fast",
+    name: "GPT-5.6 Luna Fast",
     type: "language",
-    owned_by: "zai",
+    owned_by: "openai",
     tags: ["reasoning"],
   },
   {
@@ -433,7 +433,7 @@ describe("runModelFlow", () => {
     expect(captured?.model).toEqual({
       kind: "pick",
       options: expect.arrayContaining([
-        expect.objectContaining({ value: "zai/glm-5.2", featured: true }),
+        expect.objectContaining({ value: "openai/gpt-5.6-luna-fast", featured: true }),
         expect.objectContaining({ value: "anthropic/claude-sonnet-5" }),
         expect.objectContaining({ value: "test/no-frills" }),
       ]),

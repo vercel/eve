@@ -54,7 +54,7 @@ After scaffolding, a human terminal usually continues into `eve dev`. If a codin
 
 | Flag                   | Type   | Default          | Description                                                                                                              |
 | ---------------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`      | string | `zai/glm-5.2`    | Set the root agent's AI Gateway model ID.                                                                                |
+| `--model <model>`      | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
 | `--reasoning <effort>` | enum   | provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
 | `--channel-web-nextjs` | flag   | off              | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
 
