@@ -81,6 +81,29 @@ export function normalizeUserContent(
   return parts.length === content.length ? content : parts;
 }
 
+/** Removes non-replayable reasoning before an OpenAI Responses model sees history. */
+export function removeNonReplayableOpenAIReasoning(
+  messages: readonly ModelMessage[],
+): ModelMessage[] {
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) return [message];
+
+    const content = message.content.filter((part) => {
+      if (part.type !== "reasoning") return true;
+
+      const openai = part.providerOptions?.openai as Record<string, unknown> | undefined;
+      return (
+        typeof openai?.itemId === "string" || typeof openai?.reasoningEncryptedContent === "string"
+      );
+    });
+
+    if (content.length === 0) return [];
+    return content.length === message.content.length
+      ? [message]
+      : [{ ...message, content } as ModelMessage];
+  });
+}
+
 /** Removes blank text blocks that some providers reject from model-bound history. */
 export function normalizeModelMessages(messages: readonly ModelMessage[]): ModelMessage[] {
   return messages.flatMap((message) => {

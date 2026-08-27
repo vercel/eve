@@ -886,6 +886,48 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
+  it("removes non-replayable reasoning from OpenAI Responses model calls", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Continued.", role: "assistant" }] },
+      text: "Continued.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const history: ModelMessage[] = [
+      {
+        content: [
+          { text: "private reasoning", type: "reasoning" },
+          { text: "Previous reply", type: "text" },
+        ],
+        role: "assistant",
+      },
+    ];
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        resolveModel: vi.fn().mockResolvedValue({
+          modelId: "openai/gpt-5.6-luna-fast",
+          provider: "gateway",
+        } as LanguageModel),
+      }),
+    );
+
+    const result = await runStep(createTestSession({ history }), { message: "Continue" });
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+
+    expect(agent.generate.mock.calls[0]?.[0].messages).toEqual([
+      {
+        content: [{ text: "Previous reply", type: "text" }],
+        role: "assistant",
+      },
+      { content: "Continue", role: "user" },
+    ]);
+    expect(result.session.history[0]).toEqual(history[0]);
+  });
+
   it.each([
     ["literal", EMPTY_DELIVERY_SENTINEL],
     ["HTML-escaped", "&lt;eve-empty-delivery/&gt;"],

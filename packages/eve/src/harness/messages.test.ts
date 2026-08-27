@@ -5,6 +5,7 @@ import {
   coalesceTurnInputs,
   normalizeModelMessages,
   normalizeUserContent,
+  removeNonReplayableOpenAIReasoning,
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
@@ -243,6 +244,44 @@ describe("normalizeModelMessages", () => {
         visible,
       ]),
     ).toEqual([{ content: [toolCall], role: "assistant" }, visible]);
+  });
+});
+
+describe("removeNonReplayableOpenAIReasoning", () => {
+  it("removes reasoning without OpenAI replay metadata", () => {
+    expect(
+      removeNonReplayableOpenAIReasoning([
+        {
+          content: [
+            { text: "private reasoning", type: "reasoning" },
+            { text: "Visible reply", type: "text" },
+          ],
+          role: "assistant",
+        },
+      ]),
+    ).toEqual([
+      {
+        content: [{ text: "Visible reply", type: "text" }],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("preserves reasoning with OpenAI replay metadata", () => {
+    const messages: ModelMessage[] = [
+      {
+        content: [
+          {
+            providerOptions: { openai: { itemId: "reasoning-1" } },
+            text: "replayable reasoning",
+            type: "reasoning",
+          },
+        ],
+        role: "assistant",
+      },
+    ];
+
+    expect(removeNonReplayableOpenAIReasoning(messages)).toEqual(messages);
   });
 });
 

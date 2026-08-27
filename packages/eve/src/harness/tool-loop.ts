@@ -199,6 +199,7 @@ import {
 import {
   normalizeModelMessages,
   normalizeUserContent,
+  removeNonReplayableOpenAIReasoning,
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
@@ -414,6 +415,13 @@ function mergeSystemInstructions(
     merged.providerOptions = providerOptions;
   }
   return merged;
+}
+
+function usesOpenAIResponses(model: LanguageModel): boolean {
+  if (typeof model === "string") return model.startsWith("openai/");
+  if (typeof model.provider !== "string" || typeof model.modelId !== "string") return false;
+  if (model.provider === "openai.responses") return true;
+  return model.provider.split(".")[0] === "gateway" && model.modelId.startsWith("openai/");
 }
 
 /**
@@ -1349,6 +1357,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       messages = compaction.messages;
     }
     projectedMessages = normalizeModelMessages(projectHistory(messages, session.state));
+    if (usesOpenAIResponses(model)) {
+      projectedMessages = removeNonReplayableOpenAIReasoning(projectedMessages);
+    }
 
     if (emit) {
       await emitStepStarted(
