@@ -611,7 +611,7 @@ function createPendingBashApprovalSession(): HarnessSession {
   });
 }
 
-function createPendingProtectedActionApprovalSession(): HarnessSession {
+function createPendingProtectedActionApprovalSessionWithSiblingCall(): HarnessSession {
   return appendPendingInputBatch({
     requests: [
       {
@@ -645,6 +645,12 @@ function createPendingProtectedActionApprovalSession(): HarnessSession {
             approvalId: "approval-1",
             toolCallId: "call-1",
             type: "tool-approval-request",
+          },
+          {
+            input: { action: "sibling" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-call",
           },
         ],
         role: "assistant",
@@ -1616,7 +1622,7 @@ describe("createToolLoopHarness", () => {
     setupMockAgent({
       content: [
         gateToolCall,
-        { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+        { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
         delegateToolCall,
       ],
       finishReason: "tool-calls",
@@ -1625,13 +1631,34 @@ describe("createToolLoopHarness", () => {
           {
             content: [
               gateToolCall,
-              { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+              { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
               delegateToolCall,
             ],
             role: "assistant",
           },
         ],
       },
+      responseMessages: [
+        {
+          content: [
+            {
+              output: { type: "text", value: "/workspace" },
+              toolCallId: "call-1",
+              toolName: "bash",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        {
+          content: [
+            gateToolCall,
+            { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+            delegateToolCall,
+          ],
+          role: "assistant",
+        },
+      ],
       text: "",
       toolCalls: [gateToolCall, delegateToolCall],
       toolResults: [],
@@ -1642,7 +1669,9 @@ describe("createToolLoopHarness", () => {
       createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
     );
 
-    const parked = await runStep(createTestSession(), { message: "Gate and delegate." });
+    const parked = await runStep(createPendingBashApprovalSession(), {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
 
     expect(parked.next).toBeNull();
     expect(getPendingRuntimeActionBatch(parked.session.state)?.actions).toEqual([
@@ -1650,6 +1679,15 @@ describe("createToolLoopHarness", () => {
     ]);
     expect(hasPendingInputBatch(parked.session.state)).toBe(true);
     expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+    expect(
+      parked.session.history.flatMap((message) =>
+        Array.isArray(message.content)
+          ? message.content.filter(
+              (part) => part.type === "tool-result" && part.toolCallId === "call-1",
+            )
+          : [],
+      ),
+    ).toHaveLength(1);
 
     const parkedWithRunningDelegate = {
       ...parked.session,
@@ -5946,12 +5984,51 @@ describe("createToolLoopHarness", () => {
             toolName: "protected_action",
             type: "tool-result",
           },
+          {
+            output: { type: "text", value: "sibling completed" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
           { finishReason: "stop", type: "finish-step" },
         ],
-        response: { messages: [] },
+        response: {
+          messages: [
+            {
+              content: [
+                {
+                  output: modelFacing,
+                  toolCallId: "call-1",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+                {
+                  output: { type: "text", value: "sibling completed" },
+                  toolCallId: "call-2",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
+          ],
+        },
         text: "",
         toolCalls: [],
-        toolResults: [],
+        toolResults: [
+          {
+            output: modelFacing,
+            toolCallId: "call-1",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+          {
+            output: { type: "text", value: "sibling completed" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+        ],
       });
 
       const { emit, events } = createEventCollector();
@@ -5974,7 +6051,7 @@ describe("createToolLoopHarness", () => {
       stashToolInterrupt(ctx, "call-1", full);
 
       const result = await contextStorage.run(ctx, () =>
-        runStep(createPendingProtectedActionApprovalSession(), {
+        runStep(createPendingProtectedActionApprovalSessionWithSiblingCall(), {
           inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
         }),
       );
@@ -5998,11 +6075,60 @@ describe("createToolLoopHarness", () => {
       });
 
       const actionResults = events.filter((event) => event.type === "action.result");
-      expect(actionResults).toHaveLength(0);
+      expect(actionResults).toHaveLength(1);
+      expect(actionResults[0]?.data).toMatchObject({
+        result: { callId: "call-2", kind: "tool-result", toolName: "protected_action" },
+      });
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.filter(
+                (part) => part.type === "tool-result" && part.toolCallId === "call-1",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "assistant" && Array.isArray(message.content)
+            ? message.content.filter(
+                (part) => part.type === "tool-call" && part.toolCallId === "call-1",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.filter(
+                (part) => part.type === "tool-result" && part.toolCallId === "call-2",
+              )
+            : [],
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "assistant" && Array.isArray(message.content)
+            ? message.content.filter(
+                (part) => part.type === "tool-call" && part.toolCallId === "call-2",
+              )
+            : [],
+        ),
+      ).toHaveLength(1);
     });
 
-    it("still parks on authorization without emitting action.result when interactive auth fires in the same step", async () => {
+    it("parks on authorization while preserving completed sibling results from the same step", async () => {
       const { full, modelFacing } = createAuthSignals();
+      const secondFull = requestAuthorization([
+        {
+          attemptId: "attempt-2",
+          challenge: { instructions: "Sign in again", url: "https://idp.example/auth-2" },
+          hookUrl: "https://app.example/callback-2",
+          name: "protected_action",
+          principal: { type: "app" },
+        },
+      ]);
+      const secondModelFacing = modelFacingAuthorizationOutput(secondFull);
 
       setupMockAgent({
         finishReason: "tool-calls",
@@ -6014,8 +6140,32 @@ describe("createToolLoopHarness", () => {
             type: "tool-call",
           },
           {
+            input: { action: "sibling" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-call",
+          },
+          {
+            input: { action: "authorize-again" },
+            toolCallId: "call-3",
+            toolName: "protected_action",
+            type: "tool-call",
+          },
+          {
             output: modelFacing,
             toolCallId: "call-1",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+          {
+            output: { type: "text", value: "sibling completed" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+          {
+            output: secondModelFacing,
+            toolCallId: "call-3",
             toolName: "protected_action",
             type: "tool-result",
           },
@@ -6031,8 +6181,43 @@ describe("createToolLoopHarness", () => {
                   toolName: "protected_action",
                   type: "tool-call",
                 },
+                {
+                  input: { action: "sibling" },
+                  toolCallId: "call-2",
+                  toolName: "protected_action",
+                  type: "tool-call",
+                },
+                {
+                  input: { action: "authorize-again" },
+                  toolCallId: "call-3",
+                  toolName: "protected_action",
+                  type: "tool-call",
+                },
               ],
               role: "assistant",
+            },
+            {
+              content: [
+                {
+                  output: modelFacing,
+                  toolCallId: "call-1",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+                {
+                  output: { type: "text", value: "sibling completed" },
+                  toolCallId: "call-2",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+                {
+                  output: secondModelFacing,
+                  toolCallId: "call-3",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
             },
           ],
         },
@@ -6044,11 +6229,35 @@ describe("createToolLoopHarness", () => {
             toolName: "protected_action",
             type: "tool-call",
           },
+          {
+            input: { action: "sibling" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-call",
+          },
+          {
+            input: { action: "authorize-again" },
+            toolCallId: "call-3",
+            toolName: "protected_action",
+            type: "tool-call",
+          },
         ],
         toolResults: [
           {
             output: modelFacing,
             toolCallId: "call-1",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+          {
+            output: { type: "text", value: "sibling completed" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+          {
+            output: secondModelFacing,
+            toolCallId: "call-3",
             toolName: "protected_action",
             type: "tool-result",
           },
@@ -6073,6 +6282,7 @@ describe("createToolLoopHarness", () => {
       );
       const ctx = new ContextContainer();
       stashToolInterrupt(ctx, "call-1", full);
+      stashToolInterrupt(ctx, "call-3", secondFull);
 
       const result = await contextStorage.run(ctx, () =>
         runStep(createTestSession(), { message: "run protected action" }),
@@ -6081,14 +6291,73 @@ describe("createToolLoopHarness", () => {
       expect(result.next).toBeNull();
       expect(result.settledTurn).toBeUndefined();
       expect(getPendingAuthorization(result.session.state)).toEqual({
-        challenges: full.challenges,
+        challenges: secondFull.challenges,
       });
 
       const authRequired = events.filter((event) => event.type === "authorization.required");
       expect(authRequired).toHaveLength(1);
+      expect(authRequired[0]?.data).toMatchObject({ attemptId: "attempt-2" });
+      expect(events.filter((event) => event.type === "authorization.completed")).toHaveLength(0);
 
       const actionResults = events.filter((event) => event.type === "action.result");
-      expect(actionResults).toHaveLength(0);
+      expect(actionResults).toHaveLength(1);
+      expect(actionResults[0]?.data).toMatchObject({
+        result: { callId: "call-2", kind: "tool-result", toolName: "protected_action" },
+      });
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.filter(
+                (part) => part.type === "tool-result" && part.toolCallId === "call-1",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "assistant" && Array.isArray(message.content)
+            ? message.content.filter(
+                (part) => part.type === "tool-call" && part.toolCallId === "call-1",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.filter(
+                (part) => part.type === "tool-result" && part.toolCallId === "call-2",
+              )
+            : [],
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "assistant" && Array.isArray(message.content)
+            ? message.content.filter(
+                (part) => part.type === "tool-call" && part.toolCallId === "call-2",
+              )
+            : [],
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.filter(
+                (part) => part.type === "tool-result" && part.toolCallId === "call-3",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "assistant" && Array.isArray(message.content)
+            ? message.content.filter(
+                (part) => part.type === "tool-call" && part.toolCallId === "call-3",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
     });
   });
 
