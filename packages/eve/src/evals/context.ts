@@ -44,6 +44,9 @@ export function createEvalContext(deps: {
     get events() {
       return primary().events;
     },
+    get transcript() {
+      return primary().transcript;
+    },
     get pendingInputRequests() {
       return primary().pendingInputRequests;
     },
