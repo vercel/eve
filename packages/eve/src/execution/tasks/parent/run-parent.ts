@@ -1,4 +1,7 @@
-import type { TaskRunWorkflowInput } from "#execution/tasks/child/workflow.js";
+import {
+  createTaskRunWorkflowInput,
+  type TaskRunWorkflowDispatchInput,
+} from "#execution/durable-session-migrations/task-run-workflow.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import {
   startWorkflowPreferLatest,
@@ -28,8 +31,8 @@ const TASK_VIEW_READ_TIMEOUT_MS = 10_000;
  */
 
 /** Starts the durable run owning one task's lifecycle. */
-export async function startTaskRun(input: TaskRunWorkflowInput): Promise<void> {
-  await startWorkflowPreferLatest(taskRunWorkflowReference, [input]);
+export async function startTaskRun(input: TaskRunWorkflowDispatchInput): Promise<void> {
+  await startWorkflowPreferLatest(taskRunWorkflowReference, [createTaskRunWorkflowInput(input)]);
 }
 
 /** Resolves the task run that won ownership of one replay-stable command token. */

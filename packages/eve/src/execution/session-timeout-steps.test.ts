@@ -5,6 +5,7 @@ import {
   signalSessionTimeoutStep,
   startSessionTimeoutStep,
 } from "#execution/session-timeout-steps.js";
+import { SESSION_TIMEOUT_WORKFLOW_INPUT_VERSION } from "#execution/durable-session-migrations/session-timeout-workflow.js";
 import { sessionTimeoutWorkflowReference } from "#execution/workflow-runtime.js";
 
 const cancelRunMock = vi.fn();
@@ -50,7 +51,9 @@ describe("session timeout steps", () => {
     };
 
     await expect(startSessionTimeoutStep(input)).resolves.toEqual({ runId: "timer-run" });
-    expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [input]);
+    expect(startMock).toHaveBeenCalledWith(sessionTimeoutWorkflowReference, [
+      { ...input, version: SESSION_TIMEOUT_WORKFLOW_INPUT_VERSION },
+    ]);
   });
 
   it("signals the owning session hook", async () => {

@@ -9,18 +9,23 @@ import {
   startWorkflowPreferLatest,
   sessionTimeoutWorkflowReference,
 } from "#execution/workflow-runtime.js";
-import type { SessionTimeoutWorkflowInput } from "#execution/session-timeout-workflow.js";
+import {
+  createSessionTimeoutWorkflowInput,
+  type SessionTimeoutWorkflowDispatchInput,
+} from "#execution/durable-session-migrations/session-timeout-workflow.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
 /** Starts the durable timer that signals one session deadline. */
 export async function startSessionTimeoutStep(
-  input: SessionTimeoutWorkflowInput,
+  input: SessionTimeoutWorkflowDispatchInput,
 ): Promise<{ readonly runId: string }> {
   "use step";
 
-  const run = await startWorkflowPreferLatest(sessionTimeoutWorkflowReference, [input]);
+  const run = await startWorkflowPreferLatest(sessionTimeoutWorkflowReference, [
+    createSessionTimeoutWorkflowInput(input),
+  ]);
   return { runId: run.runId };
 }
 

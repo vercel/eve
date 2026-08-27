@@ -50,9 +50,10 @@ initial inventory includes:
 Stable workflow IDs are immutable routing keys. A workflow input without an
 explicit version is recorded as `null`; this identifies an unsafe gap rather
 than treating the historical shape as version zero or claiming compatibility.
-Existing numeric versions identify only the current emitted contract. Supported
-version ranges and schema identities are added when each family adopts a
-declared schema and migration chain.
+Every current stable workflow input now emits version 1 and treats the prior
+unversioned shape as version 0 for migration. Existing numeric versions identify
+only the current emitted contract. Supported version ranges and schema identities
+are added when each family adopts a declared schema and migration chain.
 
 Every versioned family follows the same rules:
 
@@ -85,11 +86,21 @@ currently owns:
   "workflows": [
     {
       "inputVersion": 1,
+      "name": "sessionTimeoutWorkflow",
+      "workflowId": "workflow//eve//sessionTimeoutWorkflow"
+    },
+    {
+      "inputVersion": 1,
+      "name": "taskRunWorkflow",
+      "workflowId": "workflow//eve//taskRunWorkflow"
+    },
+    {
+      "inputVersion": 1,
       "name": "turnWorkflow",
       "workflowId": "workflow//eve//turnWorkflow"
     },
     {
-      "inputVersion": null,
+      "inputVersion": 1,
       "name": "workflowEntry",
       "workflowId": "workflow//eve//workflowEntry"
     }
@@ -97,10 +108,15 @@ currently owns:
 }
 ```
 
-The excerpt omits the other stable workflows for brevity. The actual artifact
-is complete and lexically sorted. It contains no timestamp, absolute path, Git
-SHA, or deployment-local value, so identical package inputs produce identical
-bytes.
+The artifact is complete and lexically sorted. It contains no timestamp,
+absolute path, Git SHA, or deployment-local value, so identical package inputs
+produce identical bytes.
+
+The version-1 task input dual-writes `taskInboxToken` and its historical name,
+`continuationToken`, so a new producer can still start an older task workflow
+during a deployment transition. Its migration accepts either pre-version name;
+the other version-1 migrations are identity stamps that preserve additive
+fields.
 
 The registry that creates the manifest also owns the stable workflow IDs used
 by runtime references and the workflow bundler. Tests transform every real
