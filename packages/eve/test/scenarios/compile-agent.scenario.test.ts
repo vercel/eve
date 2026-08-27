@@ -47,7 +47,7 @@ const ROOT_TYPE_DEFINITIONS = fileURLToPath(
 const TSC_BIN_PATH = fileURLToPath(
   new URL("../../../../node_modules/typescript/bin/tsc", import.meta.url),
 );
-const DEFAULT_AGENT_MODEL_ID = "zai/glm-5.2";
+const DEFAULT_AGENT_MODEL_ID = "xai/glm-5.3-flash";
 
 function applicationOwnedEntries<TEntry extends { readonly sourceId: string }>(
   manifest: CompiledAgentManifest,

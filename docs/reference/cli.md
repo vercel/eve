@@ -52,11 +52,11 @@ Coding-agent launches and non-interactive terminals cannot answer the location p
 
 After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type   | Default          | Description                                                                                                              |
-| ---------------------- | ------ | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`      | string | `zai/glm-5.2`    | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>` | enum   | provider default | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs` | flag   | off              | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| Flag                   | Type   | Default             | Description                                                                                                              |
+| ---------------------- | ------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--model <model>`      | string | `xai/glm-5.3-flash` | Set the root agent's AI Gateway model ID.                                                                                |
+| `--reasoning <effort>` | enum   | provider default    | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
+| `--channel-web-nextjs` | flag   | off                 | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
 
 ## `eve extension`
 
