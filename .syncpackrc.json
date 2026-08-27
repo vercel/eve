@@ -25,8 +25,8 @@
       "pinVersion": "workspace:^"
     },
     {
-      "label": "Workspace packages must use the workspace: protocol",
-      "dependencies": ["eve-*", "eve"],
+      "label": "The eve workspace package must use the workspace: protocol",
+      "dependencies": ["eve"],
       "dependencyTypes": ["dev", "prod", "peer"],
       "pinVersion": "workspace:*"
     },
