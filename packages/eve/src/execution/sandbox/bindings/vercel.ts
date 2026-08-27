@@ -33,6 +33,8 @@ import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
 import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
+import { registerManagedSandboxCommandBackend } from "#execution/sandbox/managed-command.js";
+import { createVercelManagedCommandBackend } from "#execution/sandbox/bindings/vercel-managed-command.js";
 import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import {
   createVercelEveImageSandbox,
@@ -454,18 +456,12 @@ function createHandle(
   sessionKey: string,
 ): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
   return {
-    session: buildSandboxSession(
-      createVercelInternalSandboxSession(sandbox, sessionKey),
-      createVercelNetworkPolicySetter(sandbox),
-    ),
+    session: createVercelSandboxSession(sandbox, sessionKey),
     useSessionFn: async (options?: VercelSandboxSessionUseOptions) => {
       if (options !== undefined) {
         await sandbox.update(options);
       }
-      return buildSandboxSession(
-        createVercelInternalSandboxSession(sandbox, sessionKey),
-        createVercelNetworkPolicySetter(sandbox),
-      );
+      return createVercelSandboxSession(sandbox, sessionKey);
     },
     async captureState() {
       return {
@@ -500,6 +496,15 @@ function createVercelNetworkPolicySetter(
   return async (policy) => {
     await sandbox.update({ networkPolicy: policy });
   };
+}
+
+function createVercelSandboxSession(sandbox: VercelSandbox, sessionKey: string): SandboxSession {
+  const session = buildSandboxSession(
+    createVercelInternalSandboxSession(sandbox, sessionKey),
+    createVercelNetworkPolicySetter(sandbox),
+  );
+  registerManagedSandboxCommandBackend(session, createVercelManagedCommandBackend(sandbox));
+  return session;
 }
 
 function createVercelInternalSandboxSession(

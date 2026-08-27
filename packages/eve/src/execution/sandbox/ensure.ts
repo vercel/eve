@@ -12,6 +12,7 @@ import {
   type RuntimeCompiledArtifactsSource,
 } from "#runtime/compiled-artifacts-source.js";
 import { trackActiveSandboxHandle } from "#execution/sandbox/active-handles.js";
+import { clearManagedSandboxCommands } from "#execution/sandbox/managed-command.js";
 import { waitForDevelopmentSandboxPrewarm } from "#execution/sandbox/development-prewarm.js";
 import { prewarmAppSandboxes } from "#execution/sandbox/prewarm.js";
 import { waitForSandboxTemplatePrewarmLock } from "#execution/sandbox/template-prewarm-lock.js";
@@ -141,7 +142,15 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
     );
     trackActiveSandboxHandle({
       backendName: backend.name,
-      handle,
+      handle: {
+        async shutdown() {
+          try {
+            await handle.shutdown();
+          } finally {
+            clearManagedSandboxCommands(handle.session.id);
+          }
+        },
+      },
       sessionKey: keys.sessionKey,
     });
 
@@ -188,6 +197,7 @@ export async function ensureSandboxAccess(input: EnsureSandboxAccessInput): Prom
         throw new Error("The sandbox is not available in the current authored runtime context.");
       }
       await handle.stop();
+      clearManagedSandboxCommands(handle.session.id);
     },
   };
 }
