@@ -645,7 +645,7 @@ describe("createVercelSandbox", () => {
     expect(get).toHaveBeenCalledWith({
       fetch: expect.any(Function),
       name: "session-key",
-      resume: false,
+      resume: true,
     });
     expect(create).toHaveBeenCalledTimes(1);
     expect(create.mock.calls[0]?.[0]).toMatchObject({
@@ -1067,12 +1067,99 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith({
       fetch: expect.any(Function),
       name: "persisted-sandbox-name",
-      resume: false,
+      resume: true,
     });
     expect(handle.session).toBeDefined();
 
     const state = await handle.captureState();
     expect(state.metadata).toEqual({ sandboxName: "persisted-sandbox-name" });
+  });
+
+  it("replaces a session sandbox when its persisted snapshot is unavailable", async () => {
+    const templateSandbox = createMockSandbox({
+      name: "template-key",
+      snapshotId: "template-snapshot",
+    });
+    const staleSessionSandbox = createMockSandbox({ name: "persisted-sandbox-name" });
+    const replacementSessionSandbox = createMockSandbox({ name: "persisted-sandbox-name" });
+    const snapshotUnavailable = Object.assign(new Error("snapshot_not_found"), {
+      json: { error: { code: "snapshot_not_found" } },
+      response: { status: 410 },
+    });
+    const create = vi.fn().mockResolvedValue(replacementSessionSandbox);
+    const get = vi
+      .fn()
+      .mockImplementation(async ({ name, resume }: { name: string; resume: boolean }) => {
+        if (name === "template-key") return templateSandbox;
+        if (name === "persisted-sandbox-name" && resume) throw snapshotUnavailable;
+        if (name === "persisted-sandbox-name") return staleSessionSandbox;
+        return null;
+      });
+    const sandboxModule = { Sandbox: { create, get } };
+
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+
+    const handle = await backend.create({
+      existingMetadata: { sandboxName: "persisted-sandbox-name" },
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+
+    expect(staleSessionSandbox.delete).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "persisted-sandbox-name",
+        persistent: true,
+        source: { snapshotId: "template-snapshot", type: "snapshot" },
+      }),
+    );
+    expect((await handle.captureState()).metadata).toEqual({
+      sandboxName: "persisted-sandbox-name",
+    });
+  });
+
+  it("does not replace a session sandbox for an unrelated 410 response", async () => {
+    const templateSandbox = createMockSandbox({
+      name: "template-key",
+      snapshotId: "template-snapshot",
+    });
+    const unrelatedGone = Object.assign(new Error("resource gone"), {
+      json: { error: { code: "resource_gone" } },
+      response: { status: 410 },
+    });
+    const create = vi.fn();
+    const get = vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+      if (name === "template-key") return templateSandbox;
+      throw unrelatedGone;
+    });
+    const backend = createTestVercelSandbox({
+      loadSandboxModule: async () => ({ Sandbox: { create, get } }) as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+
+    await expect(
+      backend.create({
+        existingMetadata: { sandboxName: "persisted-sandbox-name" },
+        runtimeContext: { appRoot: "/tmp/test-app-root" },
+        sessionKey: "session-key",
+        templateKey: "template-key",
+      }),
+    ).rejects.toThrow("Failed to create sandbox session");
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("stops the session sandbox on shutdown so no VM outlives the server", async () => {
@@ -1173,7 +1260,7 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.get).toHaveBeenCalledWith({
       fetch: expect.any(Function),
       name: "deleted-sandbox",
-      resume: false,
+      resume: true,
     });
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(

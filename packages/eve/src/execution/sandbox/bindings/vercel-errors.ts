@@ -12,6 +12,21 @@ export function isVercelSnapshotUnavailableError(error: unknown): boolean {
   return false;
 }
 
+export function isVercelSnapshotNotFoundError(error: unknown): boolean {
+  for (const candidate of walkErrorChain(error)) {
+    const status =
+      (candidate as { response?: { status?: number } }).response?.status ??
+      (candidate as { status?: number }).status ??
+      (candidate as { statusCode?: number }).statusCode;
+    const code = (candidate as { json?: { error?: { code?: unknown } } }).json?.error?.code;
+    if (status === 410 && code === "snapshot_not_found") {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function isVercelSandboxMissingError(error: unknown): boolean {
   for (const candidate of walkErrorChain(error)) {
     const status =
