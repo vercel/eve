@@ -1,4 +1,4 @@
-import { BlobNotFoundError, get, head, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 
 /**
  * Blob access scoped to the artifacts namespace.
@@ -35,20 +35,10 @@ export async function writeDocument(
   if (!key.startsWith(ARTIFACTS_PREFIX)) {
     throw new Error(`Key "${key}" is outside the artifacts namespace.`);
   }
-  if (!options.allowOverwrite) {
-    const existing = await head(key).catch((error: unknown) => {
-      if (error instanceof BlobNotFoundError) {
-        return null;
-      }
-      throw error;
-    });
-    if (existing !== null) {
-      throw new Error(`Artifact "${key}" already exists.`);
-    }
-  }
   await put(key, content, {
     access: "public",
     addRandomSuffix: false,
+    allowOverwrite: options.allowOverwrite,
     contentType: "text/markdown",
   });
 }
@@ -65,24 +55,13 @@ export async function readDocument(
   if (!key.startsWith(ARTIFACTS_PREFIX)) {
     return { found: false };
   }
-  try {
-    const blob = await get(key);
-    if (blob === null) {
-      return { found: false };
-    }
-    const response = await fetch(blob.url);
-    if (!response.ok) {
-      return { found: false };
-    }
-    return {
-      content: await response.text(),
-      found: true,
-      uploadedAt: blob.uploadedAt.toISOString(),
-    };
-  } catch (error) {
-    if (error instanceof BlobNotFoundError) {
-      return { found: false };
-    }
-    throw error;
+  const result = await get(key, { access: "public" });
+  if (!result?.stream) {
+    return { found: false };
   }
+  return {
+    content: await new Response(result.stream).text(),
+    found: true,
+    uploadedAt: result.blob.uploadedAt.toISOString(),
+  };
 }
