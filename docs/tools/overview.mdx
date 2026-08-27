@@ -72,6 +72,8 @@ framework-owned and is not yet a stable authored-tool API.
 
 After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
 cohort and instructs the model to acknowledge that the work started without waiting for results.
+[Schedule](/docs/schedules)-initiated turns are the exception: no user prompted them, so their
+launches keep conditional delivery and send no acknowledgement.
 Later task-triggered parent turns receive fresh state for the same cohort. The model is instructed
 to keep related intermediate results silent while any task remains pending. Once every related
 task is terminal, the state includes their outputs so the model can combine the useful results.

@@ -72,6 +72,8 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
+/** Authored schedule whose dispatch created this session. */
+export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(

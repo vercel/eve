@@ -37,6 +37,7 @@ import {
   ChannelInstrumentationKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  ScheduleIdKey,
   SessionCallbackKey,
   SessionTraceSeedKey,
   TurnTaskDeliveryKey,
@@ -219,16 +220,8 @@ import {
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import {
-  CONDITIONAL_DELIVERY_INSTRUCTION,
-  EMPTY_DELIVERY_SENTINEL,
-  hasEmptyDeliverySentinel,
-} from "#shared/empty-delivery.js";
-import {
-  TASK_DELIVERY_INITIATING_INSTRUCTION,
-  TASK_DELIVERY_PENDING_INSTRUCTION,
-  TASK_DELIVERY_SETTLED_INSTRUCTION,
-} from "#tasks/delivery-context.js";
+import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
+import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import {
   ensureOtelIntegration,
@@ -1348,27 +1341,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     const approvedTools = getApprovedTools(session);
 
-    const taskDeliveryPhase = ctx?.get(TurnTaskDeliveryKey);
-    const deliveryInstruction =
-      // A structured-output run must always produce its declared result.
-      session.outputSchema !== undefined ||
-      // Eligibility requires durable framework provenance from the active context.
-      ctx === undefined ||
-      // A child must always return its result to its parent, even when framework-triggered.
-      ctx.get(ParentSessionKey) !== undefined
-        ? undefined
-        : taskDeliveryPhase === "pending"
-          ? TASK_DELIVERY_PENDING_INSTRUCTION
-          : taskDeliveryPhase === "settled"
-            ? TASK_DELIVERY_SETTLED_INSTRUCTION
-            : // A schedule-initiated root turn may have nothing worth delivering.
-              isScheduleAppAuth(ctx.get(AuthKey))
-              ? CONDITIONAL_DELIVERY_INSTRUCTION
-              : taskDeliveryPhase === "initiating"
-                ? TASK_DELIVERY_INITIATING_INSTRUCTION
-                : undefined;
-    const emptyDeliveryEnabled =
-      deliveryInstruction !== undefined && taskDeliveryPhase !== "initiating";
+    const activeAuth = ctx?.get(AuthKey);
+    const isScheduledTurn =
+      isScheduleAppAuth(activeAuth) ||
+      (emissionState.sequence === 0 && ctx?.get(ScheduleIdKey) !== undefined);
+    const deliveryPolicy = resolveDeliveryPolicy({
+      hasOutputSchema: session.outputSchema !== undefined,
+      isChild: ctx?.get(ParentSessionKey) !== undefined,
+      isScheduledTurn,
+      taskDeliveryPhase: ctx?.get(TurnTaskDeliveryKey),
+    });
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
@@ -1405,10 +1387,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         systemMessages.push({ role: "system", content: taskState });
       }
     }
-    if (deliveryInstruction !== undefined) {
+    if (deliveryPolicy.instruction !== undefined) {
       systemMessages.push({
         role: "system",
-        content: deliveryInstruction,
+        content: deliveryPolicy.instruction,
       });
     }
     const pendingApprovals = renderPendingApprovalsInstruction(
@@ -1826,7 +1808,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
           (current) =>
             attemptEmptyResponseRecovery({
-              emptyDeliveryEnabled,
+              emptyDeliveryEnabled: deliveryPolicy.allowsEmptyDelivery,
               error: current.error,
               retryCallOptions: current.retryCallOptions,
               runOneModelCall,

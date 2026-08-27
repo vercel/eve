@@ -21,6 +21,7 @@ import {
   LiveStepDynamicModelSelectionKey,
   ParentSessionKey,
   SandboxKey,
+  ScheduleIdKey,
   SessionTraceSeedKey,
   SessionKey,
   SessionIdKey,
@@ -43,7 +44,11 @@ import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
-import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
+import {
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
 import {
   getPendingAuthorization,
   modelFacingAuthorizationOutput,
@@ -236,6 +241,20 @@ function createScheduleContext(): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, SCHEDULE_APP_AUTH);
   ctx.set(InitiatorAuthKey, SCHEDULE_APP_AUTH);
+  return ctx;
+}
+
+function createScheduledUserContext(): ContextContainer {
+  const auth = {
+    attributes: {},
+    authenticator: "fixture-user",
+    principalId: "scheduled-owner",
+    principalType: "user" as const,
+  };
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, auth);
+  ctx.set(InitiatorAuthKey, auth);
+  ctx.set(ScheduleIdKey, "dynamic-tasks");
   return ctx;
 }
 
@@ -5221,6 +5240,32 @@ describe("createToolLoopHarness", () => {
           role: "user",
         });
         expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("offers silent delivery on a user-auth scheduled initiating retry", async () => {
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const ctx = createScheduledUserContext();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      try {
+        await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "[Task state]" }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)?.content).toContain(EMPTY_DELIVERY_SENTINEL);
       } finally {
         warnSpy.mockRestore();
       }
@@ -11744,7 +11789,7 @@ describe("createToolLoopHarness", () => {
     it("keeps a scheduled initiating task turn conditionally deliverable", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = createScheduleContext();
+      const ctx = createScheduledUserContext();
       ctx.set(TurnTaskDeliveryKey, "initiating");
 
       await contextStorage.run(ctx, () =>
@@ -11756,6 +11801,22 @@ describe("createToolLoopHarness", () => {
         role: "system",
         content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
       });
+    });
+
+    it("does not apply session schedule provenance to a later human turn", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = createScheduledUserContext();
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
+
+      await contextStorage.run(ctx, () => runStep(session, { message: "What happened?" }));
+
+      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
     });
 
     it.each([

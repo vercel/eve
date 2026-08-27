@@ -12,9 +12,10 @@ import {
   readParentLineage,
   readParentSessionId,
   readRootSessionId,
+  readScheduleId,
   readSessionTraceId,
 } from "#execution/eve-workflow-attributes.js";
-import { ChannelRequestIdKey } from "#context/keys.js";
+import { ChannelRequestIdKey, ScheduleIdKey } from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 
 const slackChannelCtx = {
@@ -44,6 +45,14 @@ describe("readChannelKind", () => {
     expect(readChannelKind({})).toBeUndefined();
     expect(readChannelKind({ "eve.channel": { kind: "" } })).toBeUndefined();
     expect(readChannelKind({ "eve.channel": { kind: 42 } })).toBeUndefined();
+  });
+});
+
+describe("readScheduleId", () => {
+  it("reads only a non-empty schedule name", () => {
+    expect(readScheduleId({ [ScheduleIdKey.name]: "dynamic-tasks" })).toBe("dynamic-tasks");
+    expect(readScheduleId({ [ScheduleIdKey.name]: "" })).toBeUndefined();
+    expect(readScheduleId({ [ScheduleIdKey.name]: 42 })).toBeUndefined();
   });
 });
 
@@ -165,6 +174,7 @@ describe("buildSessionAttributes", () => {
       "$eve.channel_request_id": undefined,
       "$eve.is_otel_trace_enabled": false,
       "$eve.is_trace_content_visible": true,
+      "$eve.schedule": undefined,
       "$eve.trace_id": undefined,
       "$eve.type": "session",
       "$eve.trigger": "slack",
@@ -217,6 +227,19 @@ describe("buildSessionAttributes", () => {
     });
 
     expect(attrs["$eve.channel_request_id"]).toBe("req_session");
+  });
+
+  it("emits the schedule while retaining the target channel trigger", () => {
+    const attrs = buildSessionAttributes({
+      inputMessage: "run the scheduled task",
+      serializedContext: {
+        ...slackChannelCtx,
+        [ScheduleIdKey.name]: "dynamic-tasks",
+      },
+    });
+
+    expect(attrs["$eve.schedule"]).toBe("dynamic-tasks");
+    expect(attrs["$eve.trigger"]).toBe("slack");
   });
 
   it("emits $eve.trace_id from a sampled trace seed", () => {
