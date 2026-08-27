@@ -224,6 +224,58 @@ describe("defaultEvents approval lifecycle", () => {
     };
     expect(JSON.stringify(update.blocks)).not.toContain("eve_input:tool-approval:approval-1");
   });
+
+  it("keeps settled controls removed when sibling approvals share a message", async () => {
+    const messageBlocks = [
+      {
+        actions: [{ action_id: "eve_input:approval-1:button:1" }],
+        body: { text: "Approve first?", type: "mrkdwn" },
+        type: "card",
+      },
+      {
+        actions: [{ action_id: "eve_input:approval-2:button:1" }],
+        body: { text: "Approve second?", type: "mrkdwn" },
+        type: "card",
+      },
+    ];
+    const { channel, request } = buildChannelStub({
+      pendingApprovalCards: {
+        "approval-1": { messageBlocks, messageTs: "123.456", userId: "U777" },
+        "approval-2": { messageBlocks, messageTs: "123.456", userId: "U777" },
+      },
+    });
+
+    await defaultEvents["approval.settled"]!(
+      {
+        outcome: "approved",
+        requestId: "approval-1",
+        responderPrincipalId: "slack:T1:U777",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+    await defaultEvents["approval.settled"]!(
+      {
+        outcome: "approved",
+        requestId: "approval-2",
+        responderPrincipalId: "slack:T1:U777",
+        sequence: 2,
+        stepIndex: 1,
+        turnId: "turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    const secondUpdate = request.mock.calls[1]?.[1] as {
+      blocks?: unknown[];
+    };
+    expect(JSON.stringify(secondUpdate.blocks)).not.toContain("eve_input:approval-1");
+    expect(JSON.stringify(secondUpdate.blocks)).not.toContain("eve_input:approval-2");
+  });
 });
 
 describe("defaultEvents authorization.required", () => {
