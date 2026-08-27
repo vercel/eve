@@ -1,6 +1,6 @@
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
-import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
@@ -10,6 +10,7 @@ import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
+import { runInteractiveDevelopmentUi } from "#cli/dev/run-interactive-ui.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
   registerAcpCommand,
@@ -19,7 +20,6 @@ import {
 import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
-  type CommandLifecycle,
   waitForShutdownSignal,
 } from "#cli/shutdown.js";
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
@@ -40,11 +40,6 @@ import {
   parseStatsMode,
 } from "#cli/option-parsers.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
-import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
-import {
-  resumeDevelopmentRuntimeArtifacts,
-  suspendDevelopmentRuntimeArtifacts,
-} from "#services/dev-client/runtime-artifacts.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -398,69 +393,6 @@ function createCliProgram(
           serverUrl: remoteServerUrl,
         });
       }
-      const runInteractiveUi = async (
-        input: {
-          readonly appRoot?: string;
-          readonly serverUrl: string;
-        },
-        report?: DevBootProgressReporter,
-        lifecycle?: CommandLifecycle,
-        startup?: DevelopmentTuiStartup,
-      ): Promise<void> => {
-        const runDevelopmentTui = await devBootPhase(
-          "loading interactive UI",
-          async () =>
-            runtime.runDevelopmentTui ?? (await loadDevelopmentTuiModule()).runDevelopmentTui,
-          report,
-        );
-        const display = resolveTuiDisplayOptions(options);
-        const target: DevelopmentTuiTarget =
-          remoteServerUrl === undefined || existingLocalDevelopmentServer
-            ? {
-                kind: "local",
-                serverUrl: input.serverUrl,
-                workspaceRoot: input.appRoot ?? applicationContext.root,
-              }
-            : {
-                kind: "remote",
-                serverUrl: input.serverUrl,
-                workspaceRoot: applicationContext.root,
-              };
-        const title = resolveTuiTitle({ name: options.name, target });
-        if (title !== undefined) display.name = title;
-        const tuiInput: RunDevelopmentTuiInput = {
-          target,
-          initialInput: options.input,
-          onBootProgress: report,
-          lifecycle,
-          ...display,
-        };
-        if (startup !== undefined) tuiInput.startup = startup;
-        if (target.kind === "local") {
-          tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-            const run = async (): Promise<T> => {
-              if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: input.serverUrl }))) {
-                throw new Error("Could not pause the development server for integration setup.");
-              }
-              try {
-                return await task();
-              } finally {
-                await resumeDevelopmentRuntimeArtifacts({
-                  serverUrl: input.serverUrl,
-                  silent: true,
-                });
-              }
-            };
-            return await run();
-          };
-        }
-        if (remoteTarget?.headers !== undefined) {
-          await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
-        } else {
-          await runDevelopmentTui(tuiInput);
-        }
-      };
-
       if (remoteServerUrl) {
         const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
         loadDevelopmentEnvironmentFiles(applicationContext.root);
@@ -481,7 +413,15 @@ function createCliProgram(
         logger.log("");
         const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
         try {
-          await runInteractiveUi({ serverUrl: remoteServerUrl }, undefined, lifecycle);
+          await runInteractiveDevelopmentUi({
+            applicationRoot: applicationContext.root,
+            existingLocalServer: existingLocalDevelopmentServer,
+            lifecycle,
+            options,
+            remoteTarget,
+            runDevelopmentTui: runtime.runDevelopmentTui,
+            server: { serverUrl: remoteServerUrl },
+          });
         } finally {
           lifecycle.dispose();
         }
@@ -574,12 +514,16 @@ function createCliProgram(
           lifecycle,
           server,
           runUi: async () =>
-            await runInteractiveUi(
-              { appRoot: handle.appRoot, serverUrl: handle.url },
-              onBootProgress,
+            await runInteractiveDevelopmentUi({
+              applicationRoot: applicationContext.root,
+              existingLocalServer: false,
               lifecycle,
-              tuiStartup,
-            ),
+              options,
+              report: onBootProgress,
+              runDevelopmentTui: runtime.runDevelopmentTui,
+              server: { appRoot: handle.appRoot, serverUrl: handle.url },
+              startup: tuiStartup,
+            }),
         });
       } finally {
         buildProgress?.stop();
