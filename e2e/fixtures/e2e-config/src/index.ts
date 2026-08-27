@@ -65,16 +65,21 @@ export function e2eModel(options?: E2EModelOptions): E2EModel {
 /**
  * Returns the harness-owned configuration shared by e2e fixture root agents:
  * the matrix model from `EVE_E2E_MODEL` (or a mock when the world suite
- * requests one) and the workflow world override from `EVE_E2E_WORKFLOW_WORLD`.
+ * requests one), five agent steps per Workflow step, and the workflow world
+ * override from `EVE_E2E_WORKFLOW_WORLD` when set.
  */
 export function e2eAgentConfig(options?: E2EModelOptions): E2EAgentConfig {
   const base = e2eSubagentConfig(options);
-  const workflowWorld = process.env.EVE_E2E_WORKFLOW_WORLD;
-  if (workflowWorld === undefined) {
-    return base;
-  }
 
-  return { ...base, experimental: { workflow: { world: workflowWorld } } };
+  return {
+    ...base,
+    experimental: {
+      workflow: {
+        agentStepsPerWorkflowStep: 5,
+        world: process.env.EVE_E2E_WORKFLOW_WORLD,
+      },
+    },
+  };
 }
 
 /**
