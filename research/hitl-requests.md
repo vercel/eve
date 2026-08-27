@@ -6,88 +6,91 @@ last_updated: "2026-08-27"
 
 # HITL requests: one parking mechanism, independent variants
 
-## Summary
+## Motivation
 
-eve's HITL surfaces — tool approval, `ask_question`, session limits, and
+eve's HITL surfaces — tool approval, `ask_question`, session limits,
 connection authorization — share one essential mechanism: the session owes an
 answer, parks something, and resumes when data arrives. Today that mechanism
-is re-implemented per variant and fused to each variant's rules, which is the
-structural cause of the wedge-class bugs catalogued in the HITL request
-lifecycle research
-([#1224](https://github.com/vercel/eve/issues/1224), referenced below as
-"#1224" with its transition-catalog anchors).
+is re-implemented per surface and fused to each surface's rules. The HITL
+request lifecycle research
+([#1224](https://github.com/vercel/eve/issues/1224)) measured the cost:
+interpretation smeared across ~6,800 lines in 14 principal modules, with no
+single seam that sees the whole state — which is exactly how both
+wedge-class bugs shipped (#1224, #1830, #1868: an obligation encoded as a
+blocked continuation instead of as data).
 
-This proposal factors the machine along two orthogonal axes:
+| Fragment | Today lives in |
+| --- | --- |
+| batch resolution, defer decisions | `harness/input-requests.ts` |
+| batch + deferred-input storage | `harness/pending-input-batches.ts` |
+| stale-response conversion (a second interpreter) | `harness/stale-input-responses.ts` |
+| required/dismissable classification | `harness/input-request-class.ts` |
+| approval candidates + response policies | `harness/approval-delivery-coordinator.ts`, `harness/approval-candidates.ts` |
+| limit prompt creation + resolution special cases | `harness/session-limit-*.ts` |
+| challenge storage + callback pairing | `harness/authorization.ts`, `execution/workflow-steps.ts` |
+| projection routing | `harness/proxy-input-requests.ts`, `execution/subagent-hitl-proxy.ts` |
+
+#1224 proposes the fix: one obligation state machine, one pure interpreter,
+everything else an adapter. This doc refines that target with one more seam —
+**the interpreter splits into a variant-agnostic core and four independent
+reducers** — and adds an owner axis that turns the same machine into a
+user-facing capability: tools that park on human input mid-task.
+
+## The factoring
+
+Two orthogonal axes, entangled today:
 
 - **Variant** — _what is owed_: adjudication rules, outcome vocabulary,
-  supersession. Four exist: Approval, Question, Limit, Challenge.
-- **Owner** — _who waits_: the parked session turn, a framework gate, or a
-  durable tool-body run. An owner is a hook token — nothing more.
+  supersession. Approval, Question, Limit, Challenge.
+- **Owner** — _who waits_: the parked session turn, the framework approval
+  gate, or a durable tool-body run. An owner is a hook token — nothing more.
 
-A shared **interpreter** owns everything variant- and owner-agnostic: rows, candidate
-races, groups, continuations, tombstones, staleness, forced closure,
-projection routes, and park/resume addressing. Variants become small pure
-reducers. Owners become hook consumers. The #1224 transition catalog was
-audited row-by-row against this model: `owner.batch.*`, `scheduler.*`,
-`projector.*`, and all cancellation rows land in the interpreter and are proven
-once; `owner.approval.*`, `owner.question.*`, `owner.limit.*`, `owner.auth.*`
-each land in exactly one variant file and are proven in isolation. The audit
-surfaced exactly three modulations, absorbed without new exported concepts:
-held-candidate cancellation (`candidate-cancelled`), per-variant stale
-visibility (`staleResponses`), and interpreter-scheduled deadlines. Invariant 10 ("composite states add
-no cases") becomes structural: variants cannot reference each other, so
-composite behavior is the row-wise union by construction.
+```text
+                  ┌──────────────────────────────┐
+ variants ───────▶│         INTERPRETER          │◀─────── owners
+ (what is owed)   │ rows · candidates · groups · │  (who waits)
+                  │ continuations · tombstones · │
+ approval         │ staleness · forced closure · │  session turn
+ question         │ intent dedup · routes ·      │  framework gate
+ limit            │ park/resume addressing       │  tool-body run (new)
+ challenge        └──────────────────────────────┘
+```
 
-The first new owner class is the **tool-body run**: background tools whose
-`execute` is a workflow function may open requests mid-body and `await`
-them, giving framework users mid-task HITL (`ctx.request`, `ctx.auth`)
-through the same interpreter that implements eve's internal permissioning.
+The interpreter owns everything on the middle box, with no per-kind
+branches. Each variant is one reducer — `resolve(row, input) → verdict` — a
+screen of code, pure over its inputs, unaware of parks, sessions, batches,
+or the other variants. Each owner is a consumer of settlement payloads on a
+hook token. #1224's invariant 10 ("composite states add no cases") becomes
+structural: variants cannot reference each other, so composite behavior is
+the row-wise union by construction.
+
+A compiling prototype lives in [`hitl-requests/`](./hitl-requests/):
+
+- `interpret.ts` — the pass: staleness → candidate identity → reducer
+  dispatch → verdict application → group closure; `closeForced`; `raiseRows`
+  (intent dedup)
+- `variants/{approval,question,limit,challenge}.ts` — the complete rule set
+  for each #1224 catalog family, one file each
+- `ledger.ts` — derivation from the existing batch state
+- `seam.ts` — the `tool-loop.ts` call site, unchanged
+- `types.ts` — the three exported concepts below
 
 ## Model
 
-Three exported concepts. Everything else is interpreter-internal or an existing
-eve concept reused. A compiling prototype lives beside this doc in
-[`hitl-requests/`](./hitl-requests/): `interpret.ts` (the
-interpreter), `variants/` (one file per reducer against real harness shapes),
-`ledger.ts` (derivation from the existing batch state), and `seam.ts` (the
-`tool-loop.ts` call site, unchanged).
-
-**A row is one element of today's `PendingInputBatch.requests`** — one open
-request, flattened out of the batch it arrived in. A batch is not a state
-shape of its own: it is the set of rows sharing a `groupId`, and the batch's
-withheld `responseMessages` become that group's continuation payload. The
-existing batch semantics are preserved by construction, not reimplemented:
-independent answerability across batches (`appendPendingInputBatch`) is rows
-in different groups never interacting; request-id uniqueness
-(`assertUniqueRequestIds`) is uniqueness in the flat table; removal-only
-shrinkage (`removePendingInputBatches`) is rows transitioning open → terminal
-with nothing overwriting rows it never resolved; withheld output appearing
-zero times until closure is the continuation payload spliced exactly at
-claim. During migration the batch collection remains the persisted
-representation — the interpreter derives its ledger from it
-(`ledgerFromSessionState`); only interpretation moves.
-
 ```ts
-/** One open item, durably stored. Interpreter-owned shape. */
+/** One open request — one element of today's PendingInputBatch.requests. */
 interface Row<Spec> {
   id: RequestId;
-  kind: VariantKind;
-  spec: Spec; // variant-owned data, opaque to the interpreter
-  owner: string; // hook token — where closure payloads deliver
-  groupId: GroupId;
+  kind: "approval" | "question" | "limit" | "challenge";
+  spec: Spec; // variant-owned, opaque to the interpreter; durable facts only
+  owner: string; // hook token — where settlement payloads deliver
+  groupId: GroupId; // rows raised by one park; closure fires once per group
 }
 
-/**
- * What the interpreter feeds a variant. `message` carries no text:
- * text-matching against open requests is unrepresentable by construction.
- */
+/** What the interpreter feeds a reducer. `message` carries no text. */
 type Input =
-  | {
-      kind: "response";
-      response: InputResponse;
-      responder: Responder | null;
-      actor: "originating" | "other" | "anonymous";
-    }
+  | { kind: "response"; response: InputResponse; responder: Responder | null;
+      actor: "originating" | "other" | "anonymous" }
   | { kind: "message"; actor: "originating" | "other" | "anonymous" }
   | { kind: "callback"; params: JsonObject }
   | { kind: "deadline" }
@@ -100,253 +103,57 @@ type Verdict<Outcome> =
   | { reject: "unauthorized" | "invalid" | "policy-failed" | "candidate-cancelled" }
   | { dismiss: string; reopen?: unknown; consumeDelivery?: true }
   | { blockOn: ChallengeSpec }; // open a linked row; re-feed me via "linked"
-
-interface Variant<Spec, Outcome> {
-  resolve(row: Row<Spec>, input: Input): Verdict<Outcome> | Promise<Verdict<Outcome>>;
-  intentKey?(spec: Spec): string | undefined; // interpreter dedup (invariant 4)
-  present(row: Row<Spec>): Presentation; // InputRequest | AuthorizationChallenge
-  /**
-   * How a stale response against this variant's tombstones surfaces.
-   * Default "context-turn": synthetic context message + context turn so the
-   * agent can answer in-channel. "drop": rejected event only, no model call
-   * — required by Limit (`owner.limit.response.reject-stale`), whose stale
-   * answers must never reach the model.
-   */
-  staleResponses?: "context-turn" | "drop";
-}
 ```
 
-Notes on the boundary:
+A batch is not a state shape: it is the set of rows sharing a `groupId`, and
+its withheld `responseMessages` are that group's continuation payload,
+spliced exactly once at closure. Today's batch invariants map one-to-one —
+independent answerability is disjoint groups, `assertUniqueRequestIds` is
+flat-table uniqueness, removal-only shrinkage is open → terminal. During
+migration the batch collection stays the persisted representation; the
+ledger is derived (`ledgerFromSessionState`), only interpretation moves.
 
-- **Staleness detection is interpreter-side.** A response naming a terminal row
-  is rejected against the tombstone before any reducer runs; `"stale"` is
-  deliberately absent from the reject vocabulary and no variant implements a
-  second staleness mechanism. Stale *visibility* is the one per-variant
-  modulation (`staleResponses`), because Limit requires silent drops where
-  approval and question require a context turn.
-- **Races are interpreter-side.** Candidates derive from `{requestId,
-deliveryId}`; single-winner serialization happens before `resolve`.
-- **`present()` selects the event family.** Returning an `InputRequest`
-  implies `input.*` lifecycle events; returning a challenge implies
-  `authorization.*`. The two wire vocabularies are preserved — challenges
-  remain outside the input-request wire vocabulary, per #1224.
-- **`resolve` may be async** (authored approval policies run inside it,
-  step-wrapped). This deviates from #1224's strictly pure `interpretHitl`;
-  policy evaluation is deterministic-by-journaling rather than pure. A
-  policy throw or timeout becomes `{ reject: "policy-failed" }` and the row
-  stays open (interpreter rule).
+Boundary rules, each the collapse of a module from the fragment table:
 
-## Interpreter contract
+- **Staleness is interpreter-side** — a response naming a terminal row
+  rejects against the tombstone before any reducer runs (`stale` for
+  tombstones, `invalid` for unknown ids). Deletes
+  `stale-input-responses.ts`. The one per-variant modulation is visibility:
+  Limit drops stale answers silently; others produce a context turn.
+- **Races are interpreter-side** — candidate identity is
+  `{requestId, deliveryId}`; single-winner before `resolve`; redeliveries
+  reuse held candidates. Absorbs `approval-candidates.ts`.
+- **Classification is the variant kind.** Deletes
+  `input-request-class.ts` — "text never settles an approval" is the
+  approval reducer returning `"ignore"` for non-responses, one line.
+- **The reducer never sees text.** Message inputs carry only the actor
+  relation, so text-matching against open requests is unrepresentable.
+- **`blockOn`/`linked` is the one cross-variant edge** — a reducer parks a
+  candidate on another row reaching terminal (approval's
+  needs-auth), naming a row it wants terminal, never the other variant's
+  rules. Held candidates settle-cancel and dedupe interpreter-side.
+- **`resolve` may be async** — authored approval policies run inside it,
+  step-wrapped; throw/timeout becomes `policy-failed` with the row open.
+  This deviates from #1224's strictly pure `interpretHitl` (open question 1).
 
-Owned unconditionally, with no per-kind branches:
+## Dynamic approval policies
 
-| Primitive              | Guarantee                                                                                                                                                              |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Rows                   | open → terminal exactly once; tombstones retained until session end                                                                                                    |
-| Candidates             | atomic single-winner; later candidates rejected stale                                                                                                                  |
-| Groups + continuations | closure iff all members terminal; `pending → claimed \| suppressed` exactly once                                                                                       |
-| Forced closure         | turn-cancel / session-end dismisses rows and suppresses continuations uniformly                                                                                        |
-| Intent dedup           | a raise whose `intentKey` matches an open row resolves already-pending (fail-open when unkeyed)                                                                        |
-| Projection routes      | the #1224 Route machine verbatim, inherited unchanged (not prototyped — see catalog coverage); routes reference rows by id, never by kind                              |
-| Park/resume addressing | durable hook + capability-alias demux; registration committed before any resume URL is advertised; disposed owners reject resumes (route-lost, never a parent failure) |
-| Events                 | state persisted before effects; every admitted input yields an observable event                                                                                        |
+Approval policies are authored code, and dynamic tools exist only in the
+steps that advertised them — a policy function cannot be persisted with a
+row. Specs store durable facts only (the gated `action`, the computed
+`approvalKey` string, and `responseAuthRequired`: "this tool had a response
+policy when it asked" — today's `responseAuthRequiredRequestIds`). The
+policy is late-bound every pass from the live `HarnessToolMap`
+(`seam.ts:bindApprovalPolicy` — the `authorizeCandidate` lookup at
+`approval-delivery-coordinator.ts:334`, generalized). When the lookup finds
+nothing (ephemeral tool, redeploy), the park-time flag decides: no policy
+ever required → settle directly; policy required but unavailable → fail
+closed with `policy-failed`, row stays open and answerable after a redeploy.
 
-Two verdict fields are the licensed irregularities, both interpreter-enforced:
-`consumeDelivery` (at most one consumer per delivery; the consumed message
-still emits observable events — Limit is its only user) and `reopen`
-(dismiss-and-replace with interpreter-owned monotonic identity).
+## The seam does not move
 
-`blockOn`/`linked` is the one cross-variant linkage: a reducer may park a
-candidate on another row reaching terminal state. The blocking variant names
-a row it wants terminal, never the other variant's rules; the blocked-on
-variant never knows it was watched. Held candidates are interpreter state with two
-rules: a duplicate delivery of the same candidate returns the existing held
-candidate and never opens a second linked row, and a row settling while a
-candidate is held (for example an authenticated cancel racing a pending
-sign-in, `owner.approval.response.settle-cancel-pending-candidate`) completes
-the linked row as `cancelled` and rejects the held candidate as
-`candidate-cancelled` — the variant is not consulted.
-
-Timers are interpreter-scheduled: a spec carrying a deadline gets a `deadline`
-input as a first-class interpreter producer (the producer #1224 stage 3 notes is
-missing today), never a variant-owned wait.
-
-## The four variants
-
-Reference implementations; each is the complete rule set for its #1224
-catalog family.
-
-```ts
-export const question = defineVariant<QuestionSpec, QuestionOutcome>({
-  present: (row) => inputRequest("question", row.spec),
-  resolve(row, input) {
-    switch (input.kind) {
-      case "response": {
-        const { optionId, text } = input.response;
-        if (optionId !== undefined && !row.spec.options?.some((o) => o.id === optionId))
-          return { reject: "invalid" };
-        return { settle: { status: "answered", optionId, text } };
-      }
-      case "message":
-        return input.actor === "originating" && row.spec.supersedable
-          ? { dismiss: "superseded" }
-          : "ignore";
-      default:
-        return "ignore";
-    }
-  },
-});
-```
-
-```ts
-export const approval = defineVariant<ApprovalSpec, ApprovalOutcome>({
-  intentKey: (spec) => spec.approvalKey,
-  present: (row) =>
-    inputRequest("tool-approval", { action: row.spec.action, display: "confirmation" }),
-  async resolve(row, input) {
-    if (input.kind === "linked")
-      return input.outcome === "authorized"
-        ? adjudicate(row, input.heldResponse)
-        : { reject: input.outcome === "declined" ? "unauthorized" : "policy-failed" };
-    if (input.kind !== "response") return "ignore"; // text never settles an approval
-    if (!["allow", "deny", "cancel"].includes(input.response.optionId ?? ""))
-      return { reject: "invalid" }; // owner.approval.response.reject-invalid
-    if (input.response.optionId === "cancel")
-      return input.responder !== null ? { settle: "cancelled" } : { reject: "unauthorized" };
-    return adjudicate(row, input);
-  },
-});
-
-async function adjudicate(row, input): Promise<Verdict<ApprovalOutcome>> {
-  const outcome = input.response.optionId === "allow" ? "allowed" : "denied";
-  if (row.spec.responsePolicy === undefined)
-    // Ephemerality rule (see below): settle when no policy was required;
-    // fail closed when one was required but is unavailable this pass.
-    return row.spec.responseAuthRequired ? { reject: "policy-failed" } : { settle: outcome };
-  const decision = await row.spec.responsePolicy({
-    responder: input.responder,
-    request: row.spec.action,
-  });
-  if (decision.status === "rejected") return { reject: "unauthorized" };
-  if (decision.status === "needs-auth") return { blockOn: decision.challenge };
-  return { settle: outcome };
-}
-```
-
-Per-tool dynamic approval semantics stay where they live today. Approval
-policies are authored code and dynamic tools (`defineDynamic`) exist only in
-the steps that advertised them, so a policy function cannot be persisted
-with a row. The spec stores only durable facts — the gated `action`, the
-computed `intentKey` string, and `responseAuthRequired` (today's
-`PendingInputBatch.responseAuthRequiredRequestIds`: "this tool had a
-response policy when it asked"). The policy itself is late-bound on every
-interpretation pass: the seam re-resolves `toolName → policy` from the live
-`HarnessToolMap` (prototype `seam.ts`, `bindApprovalPolicy`) — the same
-lookup `authorizeCandidate` performs today
-(`approval-delivery-coordinator.ts:334`), generalized from the approval key
-(`resolveApprovalKeyFromTools`) to the whole policy surface. A tool changing
-its approval semantics between park and response is adjudicated by the
-current policy, exactly as today; the reducer never sees the registry.
-
-When the lookup finds nothing — the dynamic tool vanished, or a redeploy
-removed it — the rule recorded at park time decides, in the reducer:
-
-- `responseAuthRequired: false` — no response policy ever existed; a
-  correlated allow/deny settles directly (today's
-  `settleDirectApprovalResponse`). Consent was fully specified at raise
-  time; whether the underlying call can still execute is the continuation's
-  problem, which rechecks tool existence at dispatch and fails the call,
-  not the consent.
-- `responseAuthRequired: true` — fail closed: reject `policy-failed`, the
-  row stays open (today's `failCandidate`, "authorization temporarily
-  unavailable"). A redeploy restoring the tool makes the same row
-  answerable again — the row outlives the policy's availability, never the
-  reverse.
-
-```ts
-export const limit = defineVariant<LimitSpec, LimitOutcome>({
-  present: (row) => inputRequest("session-limit", promptFor(row.spec)),
-  staleResponses: "drop", // stale limit answers must never reach the model
-  resolve(row, input) {
-    switch (input.kind) {
-      case "response":
-        return { settle: input.response.optionId === "continue" ? "continued" : "stopped" };
-      case "message":
-        return {
-          dismiss: "superseded",
-          reopen: { ...row.spec, generation: row.spec.generation + 1 },
-          consumeDelivery: true,
-        };
-      default:
-        return "ignore";
-    }
-  },
-});
-```
-
-```ts
-export const challenge = defineVariant<ChallengeSpec, ChallengeOutcome>({
-  present: (row) => authorizationChallenge(row.spec),
-  resolve(row, input) {
-    switch (input.kind) {
-      case "callback":
-        return { settle: readCallbackOutcome(input.params) };
-      case "deadline":
-        return { settle: "timed-out" };
-      default:
-        return "ignore";
-    }
-  },
-});
-```
-
-Stale generations never reach the Limit reducer: the generation is part of
-the request id, so a `gen-1` response hits a tombstone. Forced closure of a
-Challenge maps to `completed(cancelled)` in the interpreter's dismissal-to-
-vocabulary translation — the one place kind leaks into interpreter output.
-
-## Catalog coverage
-
-Every #1224 transition row is accounted for in exactly one of three places;
-none is silently out of scope.
-
-**Encoded in the prototype** — the interpreter pass and the variant
-reducers: all `owner.approval.*` rows (including `pend-authorization` with
-same-pass re-feed, held-candidate dedupe by `{rowId, deliveryId}`, and
-`settle-cancel-pending-candidate`), all `owner.question.*` and
-`owner.limit.*` rows, `owner.auth.callback.*` / `deadline.*` /
-`message.run-open` / `close.complete`, `owner.batch.response.settle-partial`
-/ `close.fire-continuation` / `message.dismiss-question-only` /
-`park.append` / `park.dedupe-open-intent`, both `owner.obligation.*`
-cancellation rows, and `owner.batch.forced-close.no-continuation`
-(`closeForced`). `owner.approval.message.no-retroactive-binding` holds by
-construction — message inputs carry no text and responses name explicit
-request ids, so an earlier message cannot become a candidate for a later
-row.
-
-**Inherited from #1224 unchanged, not prototyped** — the projector
-(`projector.route.*`, six rows): routes stay a parent-side machine exactly
-as specified there; this proposal changes nothing about projection and the
-prototype deliberately omits it. Likewise the scheduler admission rows
-(`scheduler.delivery.admit-*`): arrival ordering and actor partitioning
-happen in the inbox/driver, upstream of the interpreter.
-
-**Park-side, outside the interpreter** — rows about raising, not
-resolving: `owner.batch.park.persist-with-runtime-action` and
-`park.fail-closed-metadata` live in the harness park path
-(`appendPendingInputBatch` and its callers), unchanged by this proposal.
-The compound-delivery rows (`*.compound.*`) split across the seam: response
-parts resolve before the message part observes (the pass order guarantees
-it), and the two-turn sequencing (closure resume, then message turn) is the
-`translateEffects` contract.
-
-## Where the interpreter runs: the existing seam
-
-HITL interpretation runs today between harness steps — the model step ends,
-the harness parks (`appendPendingInputBatch`, `tool-loop.ts:2806`), and the
-next step begins by resolving pending input (`resolvePendingInput`,
-`tool-loop.ts:1050`, preceded by `coordinateApprovalDelivery`). The interpreter
-does not move that seam; it replaces what runs inside it:
+HITL interpretation runs today between harness steps; the interpreter
+replaces what runs inside that seam, not where it sits:
 
 ```text
 today:   coordinateApprovalDelivery → routePendingInput → one of three
@@ -354,166 +161,110 @@ today:   coordinateApprovalDelivery → routePendingInput → one of three
          → ResolvePendingInputResult
 
 target:  ledgerFromSessionState → interpretDelivery → translateEffects
-         → ResolvePendingInputResult          (same call site, same contract)
+         → ResolvePendingInputResult        (same call site, same contract)
 ```
 
-Convergence means one interpreter inside the existing seam instead of
-coordinator + router + three domain resolvers — not a new execution point.
+Same call site (`tool-loop.ts:1050`), same park side
+(`appendPendingInputBatch` → consumed by `raiseRows`), same result contract.
 Mid-step approval gating still surfaces at step end via AI SDK approval
-parts; the park side (`appendPendingInputBatch`) is consumed by `raiseRows`
-at the next pass. The body-run owner introduces no second seam either: it is
-reachable only in background tasks where the step already ended with a
-receipt, and its deliveries arrive through its own inbox, interpreted by the
-same interpreter pass. The prototype's `seam.ts` states the exact call-site
-contract, including how each `LedgerEffect` translates into today's
-`ResolvePendingInputResult` fields (`rejectedActions`, `resolvedInputs`,
-`deferredMessage`, `limitContinuation`).
+parts.
 
-## Owners
+## Owners and mid-task HITL
 
-An owner is a hook token. The interpreter delivers settlement and dismissal
-payloads to `row.owner` over the existing durable session-inbox envelope
-(`resumeSessionInbox`); what the consumer does with them is its own business.
-
-- **Session turn** — today's behavior, unchanged: resume restores withheld
-  output, appends member outcomes, runs allowed tools once, resumes the
-  model. The ApprovalBatch continuation is a interpreter group whose owner is the
-  session inbox.
-- **Framework gate** — the step-end approval park; same rows, no bespoke
-  AI SDK approval-part state.
-- **Tool-body run** _(new)_ — a framework-owned workflow run hosting a
-  background tool's `"use workflow"` `execute`. Its inbox is a new executor
-  kind on the existing task child wire; the task run workflow stays the
-  single lifecycle writer, unchanged. The parent session projects body-owned
-  rows through the interpreter's Route machine, exactly as for child sessions.
-
-The #1224 rule "no blocked continuation anywhere" (invariant 1) becomes an
-owner-contract clause: every owner's waiting frame must be force-resumable
-from row state alone. The body run's `await` is legal because forced closure
-rejects the promise (running `finally` blocks); the historical wedges were
-waits that only one specific input could release.
-
-## Authoring surface: mid-task HITL
-
-Available only in task-backed workflow tools, where a receipt has already
-settled the model-facing call and the session stays receptive:
+The interpreter delivers settlement/dismissal payloads to `row.owner` over
+the existing session-inbox envelope; what the consumer does is its own
+business. Session turn and framework gate reproduce today's behavior. The
+new owner class is the **tool-body run**: a background tool whose `execute`
+is a workflow function opens rows and awaits them —
 
 ```ts
-export default defineTool({
-  description: "Deploy a service to production.",
-  inputSchema: z.object({ service: z.string(), ref: z.string() }),
-  async execute(input, ctx: WorkflowToolContext) {
-    "use workflow";
-    const plan = await buildPlan(input);
-
-    const approval = ctx.request({
-      // opens an Approval row, owner = this run
-      id: "approve-plan",
-      kind: "approval",
-      prompt: `Apply ${plan.changes.length} changes to ${input.service}?`,
-      options: [
-        { id: "apply", label: "Apply", style: "danger" },
-        { id: "abort", label: "Abort" },
-      ],
-    });
-
-    const decision = await Promise.race([
-      approval,
-      ctx.sleep("4h").then(() => ({ optionId: "abort", timedOut: true })),
-    ]);
-    if (decision.optionId === "abort") return { status: "aborted" };
-
-    const token = await ctx.auth("acme"); // opens a Challenge row, same interpreter
-    return await applyPlan(plan, token);
-  },
-});
+async execute(input, ctx: WorkflowToolContext) {
+  "use workflow";
+  const plan = await buildPlan(input);
+  const decision = await Promise.race([
+    ctx.request({ id: "approve-plan", kind: "approval", prompt, options }),
+    ctx.sleep("4h").then(() => ({ optionId: "abort" })),
+  ]);
+  if (decision.optionId === "abort") return { status: "aborted" };
+  const token = await ctx.auth("acme"); // Challenge row, same interpreter
+  return applyPlan(plan, token);
+}
 ```
 
-Semantics:
+- No new variants or verdicts: `ctx.request` opens a Question/Approval row
+  with the body run's inbox as owner; `ctx.auth` opens a Challenge row and
+  replaces the signal-return park for workflow tools (plain tools keep
+  re-entrant `requestAuthorization`; only their representation unifies).
+- Task-backed only: a receipt already settled the model-facing call, so the
+  session stays receptive while the body parks.
+- `.url` on the handle is a capability alias (`POST eve/v1/task-input/:token`)
+  resuming anonymously (`responder: null` — the response policy decides if
+  that is acceptable); identity-bearing paths forward the verified responder
+  unchanged. The parent projects body-owned rows through the existing route
+  machine; the task shows `input_required` while rows are open.
+- #1224's "no blocked continuation anywhere" becomes an owner-contract
+  clause: every waiting frame must be force-resumable from row state alone.
+  The body `await` qualifies because forced closure rejects the promise
+  (running `finally`); the historical wedges were waits only one specific
+  input could release.
 
-- `ctx.request` opens a Question or Approval row and returns a promise
-  resolved by the interpreter's demux over the body run's single inbox. No new
-  variants, no new verdicts: the parking mechanism is `row.owner`.
-- Every result carries a status (`answered | ignored | allowed | denied |
-cancelled`); dismissal and cancellation resolve or reject the promise so
-  authored `finally` blocks run.
-- Request ids are authored (unique per run, deterministic error on
-  collision) or journal-order derived for replay determinism.
-- `.url` on the returned handle is a capability alias
-  (`POST eve/v1/task-input/:token`); it resumes anonymously
-  (`responder: null`) and the variant's response policy decides whether
-  that is acceptable. Identity-bearing paths (channel delivery, parent
-  projection) forward the verified responder unchanged; the body run owns
-  adjudication.
-- `ctx.auth` opens a Challenge row and resolves to the token result; it
-  replaces the signal-return park (`requestAuthorization` /
-  `getAuthorizationResult`) for workflow tools. Plain tools keep the
-  re-entrant signal mechanics; their representation unifies as Challenge
-  rows, their authoring surface does not change.
-- While rows are open and the run is suspended, the task projects
-  `input_required` with the open requests; the parent wake/proxy wire is
-  today's.
+## Catalog coverage
+
+Every #1224 transition row lands in exactly one place: the four reducers
+encode their `owner.{approval,question,limit,auth}.*` families completely
+(including pend-authorization with same-pass re-feed and
+settle-cancel-pending-candidate); the interpreter encodes `owner.batch.*`
+and cancellation rows once for all variants. Projection
+(`projector.route.*`) and scheduler admission are inherited from #1224
+unchanged — this proposal does not touch them. Park-side rows
+(`park.persist-with-runtime-action`, `park.fail-closed-metadata`) stay in
+the harness park path; compound-delivery sequencing is the
+`translateEffects` contract, with responses-before-message guaranteed by
+pass order.
 
 ## Migration
 
-Each legacy HITL store has exactly one destination:
+| Legacy | Destination |
+| --- | --- |
+| `eve.runtime.pendingInputBatches` | groups + Approval/Question rows; `responseMessages` → continuation payload |
+| `eve.runtime.deferredStepInput` | deleted as a mechanism (per #1224); wedged messages release as ordinary turns |
+| `eve.runtime.pendingAuthorization` | Challenge rows in one group; journaled `resume` → continuation payload |
+| `eve.runtime.hitl.approvalState` | interpreter candidate records and tombstones |
+| `eve.runtime.hitl.approvedTools` | unchanged — policy input, not request state |
+| task `task:authorization:*` synthetic ids | deleted; a child's challenge is a real row, projected as a route |
 
-| Legacy                                            | Destination                                                                                                                                    |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve.runtime.pendingInputBatches`                 | One interpreter group per batch; each request becomes an Approval/Question row; withheld `responseMessages` become the group's continuation payload |
-| `eve.runtime.deferredStepInput`                   | Deleted as a mechanism (per #1224); wedged messages release as ordinary message turns on the first delivery after upgrade                      |
-| `eve.runtime.pendingAuthorization`                | Challenge rows in one group; the journaled `resume` payload becomes continuation payload                                                       |
-| `eve.runtime.hitl.approvalState`                  | Interpreter candidate records and tombstones                                                                                                        |
-| `eve.runtime.hitl.approvedTools`                  | Unchanged — policy input (`ApprovalContext.approvedTools`), not request state                                                               |
-| Task synthetic `task:authorization:*` blocker ids | Deleted; a child's challenge is a real Challenge row owned by the child, projected to the parent as an interpreter route                             |
+One-shot migration on first load per session
+(`execution/durable-session-migrations/`); first write persists only the new
+shape. Wire untouched: `InputRequest`/`InputResponse`, request ids, and
+capability URLs survive byte-identically. One scoped break shared with
+#1224: pre-cutover challenge URLs embed the old `${sessionId}:auth` token.
 
-Mechanics:
+## Sequencing
 
-- One-shot migration on first load per session through
-  `execution/durable-session-migrations/`: read legacy keys, build the
-  ledger, first write persists only the new shape. No dual-write period, no
-  legacy fallback logic.
-- Task views need no rewrite: the `eve.task` stream is append-only; new code
-  appends new-shape `input_required` views, old snapshots stay historically
-  readable, and the task run translates on its next transition.
-- The wire is untouched: `InputRequest`/`InputResponse` shapes, request ids,
-  and capability URLs survive migration byte-identically. One scoped break,
-  shared with #1224: challenge URLs minted pre-cutover embed the old
-  `${sessionId}:auth` hook token — ship a one-release token alias or accept
-  the in-flight break under pre-1.0 policy.
-
-## Relationship to #1224 and sequencing
-
-This is a refinement of the #1224 target architecture, not a competitor:
-stages 1–2 (store foundation, interpreter extraction) build the interpreter;
-this doc adds the internal seam `interpret.ts` + `variants/*.ts` and the owner
-axis. Stage 3 (auth through the machine) becomes the Challenge variant.
-The transition catalog and its eval anchors remain the conformance suite,
-re-anchored by axis: interpreter rows proven once, variant rows proven per
-variant, composite coverage generated as unions.
-
-Order of work:
+Refinement of #1224's staged plan, not a competitor; the transition catalog
+and its eval anchors remain the conformance suite, re-anchored by axis
+(interpreter rows proven once, variant rows per variant, composites as
+unions).
 
 1. **Interpreter + variants** — #1224 stages 1–3 with the variant seam.
-2. **Body-run owner** — new executor kind on the task child wire; demux;
-   `ctx.request` / `ctx.auth`; responder forwarding added to the task
-   input wire (additive). Depends on workflow functions as
-   `defineTool.execute` (the subagents-as-workflow-tools research, §6.1).
+2. **Body-run owner** — new executor kind on the task child wire;
+   `ctx.request` / `ctx.auth`; responder forwarding on the task input wire
+   (additive). Depends on workflow functions as `defineTool.execute`
+   (subagents-as-workflow-tools research, §6.1).
 3. **Gate unification** — the framework approval gate re-expressed as
-   interpreter rows (representation change; step-end park mechanics retained).
+   interpreter rows (representation change; step-end mechanics retained).
 
 ## Open questions
 
-1. **Async `resolve` vs. pure interpreter.** Policy evaluation inside the
+1. **Async `resolve` vs. pure interpreter** — policy evaluation inside the
    reducer trades #1224's strict purity for one seam; the alternative
-   (policy as a pre-resolved input) doubles the input alphabet. Decide at
+   (pre-resolved policy as input) doubles the input alphabet. Decide at
    stage-2 extraction.
-2. **Deployment pinning for parked bodies.** Multi-hour parks across
-   redeploys are the common case for body-run owners; the pinning policy
-   (subagents doc §7.3) must be stated publicly before the authoring
-   surface ships.
-3. **Journal growth.** Row specs (prompts, options) persist in the ledger
-   and task view snapshots; a size cap and truncation rule are needed.
-4. **Foreground workflow tools.** `ctx.request` is task-backed only; the
-   foreground example in the subagents doc (§4) should be amended or
-   scoped to receipts.
+2. **Deployment pinning for parked bodies** — multi-hour parks across
+   redeploys are the common case; the pinning policy must be public before
+   the authoring surface ships.
+3. **Journal growth** — row specs persist in the ledger and task views; a
+   size cap and truncation rule are needed.
+4. **Foreground workflow tools** — `ctx.request` is task-backed only; the
+   foreground example in the subagents research should be scoped to
+   receipts.
