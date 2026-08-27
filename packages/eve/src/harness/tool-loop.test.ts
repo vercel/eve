@@ -21,6 +21,7 @@ import {
   LiveStepDynamicModelSelectionKey,
   ParentSessionKey,
   SandboxKey,
+  ScheduleIdKey,
   SessionTraceSeedKey,
   SessionKey,
   SessionIdKey,
@@ -43,7 +44,11 @@ import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
-import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
+import {
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
 import {
   getPendingAuthorization,
   modelFacingAuthorizationOutput,
@@ -236,6 +241,21 @@ function createScheduleContext(): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, SCHEDULE_APP_AUTH);
   ctx.set(InitiatorAuthKey, SCHEDULE_APP_AUTH);
+  ctx.set(ScheduleIdKey, "test-schedule");
+  return ctx;
+}
+
+function createScheduledUserContext(): ContextContainer {
+  const auth = {
+    attributes: {},
+    authenticator: "fixture-user",
+    principalId: "scheduled-owner",
+    principalType: "user" as const,
+  };
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, auth);
+  ctx.set(InitiatorAuthKey, auth);
+  ctx.set(ScheduleIdKey, "dynamic-tasks");
   return ctx;
 }
 
@@ -5221,6 +5241,32 @@ describe("createToolLoopHarness", () => {
           role: "user",
         });
         expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("offers silent delivery on a user-auth scheduled initiating retry", async () => {
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const ctx = createScheduledUserContext();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      try {
+        await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "[Task state]" }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)?.content).toContain(EMPTY_DELIVERY_SENTINEL);
       } finally {
         warnSpy.mockRestore();
       }
@@ -11875,10 +11921,37 @@ describe("createToolLoopHarness", () => {
       });
     });
 
+    it("routes later-turn initiating task context through user messages", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      const taskState = '[Task state]\n{"tasks":[]}';
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+      ctx.set(TurnTaskStateKey, taskState);
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
+
+      await contextStorage.run(ctx, () =>
+        runStep(session, { message: "Start the background work." }),
+      );
+
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+      expect(messages.slice(-3)).toEqual([
+        { role: "user", content: taskState },
+        { role: "user", content: TASK_DELIVERY_INITIATING_INSTRUCTION },
+        { role: "user", content: "Start the background work." },
+      ]);
+    });
+
     it("keeps a scheduled initiating task turn conditionally deliverable", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = createScheduleContext();
+      const ctx = createScheduledUserContext();
       ctx.set(TurnTaskDeliveryKey, "initiating");
 
       await contextStorage.run(ctx, () =>
@@ -11892,6 +11965,22 @@ describe("createToolLoopHarness", () => {
       });
     });
 
+    it("does not apply session schedule provenance to a later human turn", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = createScheduledUserContext();
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
+
+      await contextStorage.run(ctx, () => runStep(session, { message: "What happened?" }));
+
+      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
+    });
+
     it.each([
       ["pending", TASK_DELIVERY_PENDING_INSTRUCTION],
       ["settled", TASK_DELIVERY_SETTLED_INSTRUCTION],
@@ -11902,37 +11991,25 @@ describe("createToolLoopHarness", () => {
         const runStep = createToolLoopHarness(createTestConfig("conversation"));
         const ctx = new ContextContainer();
         ctx.set(TurnTaskDeliveryKey, phase);
+        const session = setHarnessEmissionState(createTestSession(), {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        });
 
         await contextStorage.run(ctx, () =>
-          runStep(createTestSession(), { message: "Background task task_1 is completed." }),
+          runStep(session, { message: "Background task task_1 is completed." }),
         );
 
-        const { instructions } = getLastAgentSettings();
-        expect(instructions).toEqual({
-          role: "system",
-          content: `You are a test assistant.\n\n${instruction}`,
-        });
+        const { instructions, messages } = getLastAgentSettings();
+        expect(instructions).toBe("You are a test assistant.");
+        expect(messages.slice(-2)).toEqual([
+          { role: "user", content: instruction },
+          { role: "user", content: "Background task task_1 is completed." },
+        ]);
       },
     );
-
-    it("does not add conditional-delivery guidance to a human continuation", async () => {
-      setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = createScheduleContext();
-      ctx.set(AuthKey, {
-        attributes: {},
-        authenticator: "slack",
-        principalId: "U123",
-        principalType: "user",
-      });
-
-      await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "What happened?" }),
-      );
-
-      const { instructions } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
-    });
 
     it("does not add conditional-delivery guidance to a task-owned conversation child", async () => {
       setupMockAgent(defaultModelResult());

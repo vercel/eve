@@ -80,6 +80,7 @@ describe("sandboxProvider", () => {
 
     expect(ensureSandboxAccess).toHaveBeenCalledWith(
       expect.objectContaining({
+        ownsSandbox: false,
         sessionId: "root-sandbox-session",
         state: parentSandboxState,
       }),
@@ -98,6 +99,7 @@ describe("sandboxProvider", () => {
 
     expect(ensureSandboxAccess).toHaveBeenCalledWith(
       expect.objectContaining({
+        ownsSandbox: true,
         tags: {
           agent: "weather-agent",
           channel: "slack",

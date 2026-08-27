@@ -1,5 +1,5 @@
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   AuthKey,
@@ -13,6 +13,7 @@ import {
   ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  ScheduleIdKey,
   SessionCallbackKey,
   SubagentDepthKey,
 } from "#context/keys.js";
@@ -60,6 +61,11 @@ export function buildRunContext(input: {
 
   if (run.requestId !== undefined) {
     ctx.set(ChannelRequestIdKey, run.requestId);
+  }
+
+  const scheduleId = contextStorage.getStore()?.get(ScheduleIdKey);
+  if (scheduleId !== undefined) {
+    ctx.set(ScheduleIdKey, scheduleId);
   }
 
   if (run.delivery !== undefined) {

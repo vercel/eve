@@ -34,6 +34,7 @@ export type {
   SandboxBackendPrewarmInput,
   SandboxBackendRuntimeContext,
   SandboxBackendSessionState,
+  SandboxDeleteOptions,
   SandboxSeedFile,
 } from "#public/definitions/sandbox-backend.js";
 export type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";

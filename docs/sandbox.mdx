@@ -202,14 +202,14 @@ export default defineSandbox({
 
 Custom commands are registered on live and reopened sessions, not during template prewarming. They run trusted host application code and create an explicit bridge from the sandbox to that code. Adapters can use this extension point to expose application APIs such as a Capable App's CLI; the outer eve `bash` tool does not automatically provide per-command Capable approvals.
 
-You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. Handles returned by `create` implement `shutdown()`, which stops the underlying compute at server shutdown. See the `SandboxBackend*` types on `eve/sandbox`.
+You can also write your own backend. A `SandboxBackend` is an adapter object with a `name`, a `create`, and an optional `prewarm`. It can point at your own container runner, VM pool, internal sandbox service, or another isolation layer, as long as it returns the `SandboxSession` operations eve needs. Handles returned by `create` implement `delete()`, `stop()`, and `shutdown()`. See the `SandboxBackend*` types on `eve/sandbox`.
 
 ## Lifecycle
 
 There are two hooks, scoped differently:
 
 - **`bootstrap({ use })`** is template-scoped and runs once when the template is built. Put reusable setup here that every later session inherits, such as cloning a baseline repo, installing dependencies, or seeding files. Call `use()` to get a `SandboxSession`. Only template filesystem state and supported backend metadata carry into later sessions; config like network policy does not. If external inputs affect what bootstrap produces, set `revalidationKey: () => string` so eve knows when to rebuild the template (authored sandbox source and seed contents are already tracked for you).
-- **`onSession({ use, ctx })`** is durable-session-scoped and runs once per session (and again if a sandbox definition change replaces the session's sandbox). Put per-session setup here, including network policy, resources, timeout, per-user credentials, and one-time markers. Because it runs inside the active runtime context, it can read `ctx.session` and derive the current principal without baking credentials into the template. Call `use(opts?)` to get a `SandboxSession`; `opts` flow to the backend's update path after create.
+- **`onSession({ use, ctx })`** is durable-session-scoped and runs once per session (and again if a sandbox definition change replaces the session's sandbox). Put per-session setup here, including network policy, resources, timeout, per-user credentials, and one-time markers. `ctx` contains only the active session metadata, so it can identify the current principal without exposing runtime lifecycle operations while the sandbox is initializing. Call `use(opts?)` to get a `SandboxSession`; `opts` flow to the backend's update path after create.
 
 If you require a network policy or other configuration for every session, configure it on the backend factory or in `onSession`; do not rely on bootstrap-only configuration.
 
@@ -247,6 +247,29 @@ just as it would after an inactivity timeout. No separate reconnect step or
 stop-specific state is needed. Lifecycle `use()` calls return the I/O-only
 `SandboxSession` because bootstrap and session initialization do not own runtime
 teardown.
+
+### Delete a sandbox
+
+Permanently delete the current session sandbox from an authored runtime callback:
+
+```ts
+const sandbox = await ctx.getSandbox();
+await sandbox.delete();
+```
+
+eve stops compute first, deletes the physical sandbox and its disposable backend state, and clears the saved reconnect state. It preserves reusable template state that contains `bootstrap` and seeded workspace files.
+
+The durable eve session remains active. The next call to `ctx.getSandbox()` provisions a fresh workspace from the current sandbox definition and runs `onSession` again. Files and other workspace changes from the deleted sandbox are not restored.
+
+Backend behavior differs:
+
+- **Vercel Sandbox**: stops the persistent sandbox, deletes its record, and asks Vercel to delete snapshots that no other sandbox uses. Snapshot cleanup runs asynchronously.
+- **microsandbox**: stops and removes the session VM and its persisted state snapshot
+- **Docker and just-bash**: stop compute and discard their session runtime state
+
+Only the session that owns a shared sandbox can delete it. Deleting the owner's sandbox affects every parent or child currently using it. If the backend rejects deletion, eve preserves the current reconnect state so you can retry.
+
+Custom backend handles implement the same boundary in `delete()`: remove the session runtime and disposable persisted state without deleting reusable templates.
 
 Session sandboxes are keyed per durable session, not per deployment, so redeploying your app does not by itself discard them. A definition change to the authored sandbox source, workspace seed content, or `revalidationKey` replaces the sandbox on the next turn and runs `onSession` again.
 

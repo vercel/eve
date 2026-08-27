@@ -1320,6 +1320,7 @@ function createSandboxBackend() {
       metadata: {},
       sessionKey: input.sessionKey,
     }),
+    delete: async () => {},
     session: sandbox.session,
     shutdown: async () => {},
     stop: async () => {},
