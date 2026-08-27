@@ -153,6 +153,10 @@ describe("framework-next build", () => {
           destination: { service: "eve", type: "service" },
           src: "^/eve/v1/(.*)$",
         }),
+        expect.objectContaining({
+          destination: { service: "eve", type: "service" },
+          src: "^/\\.well-known/ucp$",
+        }),
       ]),
     );
     await expect(

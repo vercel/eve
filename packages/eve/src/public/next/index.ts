@@ -6,6 +6,7 @@ import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
+import { createEvePublicRouteMounts, type EvePublicRouteMount } from "./public-route-mounts.js";
 import { resolveEveDestinationPrefix } from "./server.js";
 import { ensureEveVercelOutputConfig } from "./vercel-output-config.js";
 
@@ -91,6 +92,8 @@ export interface WithEveAgentOptions {
    * service and non-Vercel production proxying.
    */
   readonly servicePrefix?: string;
+  /** Channel route paths to expose through the Next.js host for this agent. */
+  readonly publicRoutes?: readonly string[];
 }
 
 /**
@@ -137,6 +140,11 @@ export interface WithEveOptions {
    * root route.
    */
   readonly servicePrefix?: string;
+  /**
+   * Channel route paths to expose through the Next.js host. Registered paths
+   * take precedence over Next.js filesystem routes at the same URL.
+   */
+  readonly publicRoutes?: readonly string[];
 }
 
 interface ResolvedEveNextAgent {
@@ -144,6 +152,7 @@ interface ResolvedEveNextAgent {
   readonly buildCommand: string;
   readonly localProductionPortOffset: number;
   readonly name?: string;
+  readonly publicRouteMounts: readonly EvePublicRouteMount[];
   readonly publicRoutePrefix: string;
   readonly servicePrefix: string;
 }
@@ -264,6 +273,16 @@ function createEveRewriteRule(input: {
   };
 }
 
+function createChannelRewriteRule(input: {
+  readonly destinationPrefix: string;
+  readonly mount: EvePublicRouteMount;
+}): EveNextRewriteRule {
+  return {
+    destination: joinRoutePrefix(input.destinationPrefix, input.mount.routePath),
+    source: input.mount.publicPath,
+  };
+}
+
 async function resolveExistingRewrites(
   rewrites: EveNextConfig["rewrites"],
 ): Promise<EveNextRewrites | undefined> {
@@ -333,6 +352,10 @@ function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNex
         appRoot,
         buildCommand: resolveBuildCommand(appRoot, undefined),
         localProductionPortOffset: 0,
+        publicRouteMounts: createEvePublicRouteMounts({
+          publicRoutePrefix: "",
+          publicRoutes: options.publicRoutes ?? [],
+        }),
         publicRoutePrefix: "",
         servicePrefix: servicePrefixBase,
       },
@@ -341,6 +364,11 @@ function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNex
 
   if (options.eveRoot !== undefined) {
     throw new Error("withEve cannot combine eveRoot with agents. Use one configuration form.");
+  }
+  if (options.publicRoutes !== undefined) {
+    throw new Error(
+      "withEve cannot combine top-level publicRoutes with agents. Register routes on each named agent.",
+    );
   }
 
   const entries = Object.entries(options.agents);
@@ -353,13 +381,18 @@ function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNex
 
     const agentConfig = typeof config === "string" ? { root: config } : config;
     const appRoot = resolveApplicationRoot(agentConfig.root);
+    const publicRoutePrefix = createNamedAgentRoutePrefix(name);
 
     return {
       appRoot,
       buildCommand: resolveBuildCommand(appRoot, agentConfig.buildCommand),
       localProductionPortOffset: index,
       name,
-      publicRoutePrefix: createNamedAgentRoutePrefix(name),
+      publicRouteMounts: createEvePublicRouteMounts({
+        publicRoutePrefix,
+        publicRoutes: agentConfig.publicRoutes ?? [],
+      }),
+      publicRoutePrefix,
       servicePrefix: normalizeRoutePrefix(
         agentConfig.servicePrefix ?? createNamedAgentServicePrefix(servicePrefixBase, name),
       ),
@@ -372,9 +405,9 @@ function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNex
  * service.
  *
  * In development, starts `eve dev --no-ui --port 0` for the eve app and
- * rewrites eve protocol endpoints to that local URL. In Vercel production,
- * writes Build Output service routes so Vercel sends eve protocol endpoints to
- * the eve service directly.
+ * rewrites eve protocol and channel endpoints to that local URL. In Vercel
+ * production, writes Build Output service routes so Vercel sends those
+ * endpoints to the eve service directly.
  * Outside Vercel production, serves an existing `.output/server/index.mjs` build
  * on a stable local port when present; otherwise set `EVE_NEXT_PRODUCTION_ORIGIN`
  * to the origin serving the eve service namespace.
@@ -394,6 +427,7 @@ export function withEve<TConfig extends EveNextConfig>(
       agents: agents.map((agent) => ({
         appRoot: agent.appRoot,
         buildCommand: agent.buildCommand,
+        publicRouteMounts: agent.publicRouteMounts,
         name: agent.name,
         publicRoutePrefix: agent.publicRoutePrefix,
         servicePrefix: agent.servicePrefix,
@@ -437,15 +471,20 @@ export function withEve<TConfig extends EveNextConfig>(
                 productionServerOrigin: agent.productionDestination.localServerOrigin,
               });
 
-              return createEveRewriteRule({
-                destinationPrefix,
-                publicRoutePrefix: agent.publicRoutePrefix,
-              });
+              return [
+                createEveRewriteRule({
+                  destinationPrefix,
+                  publicRoutePrefix: agent.publicRoutePrefix,
+                }),
+                ...agent.publicRouteMounts.map((mount) =>
+                  createChannelRewriteRule({ destinationPrefix, mount }),
+                ),
+              ];
             }),
           ),
         ]);
 
-        return mergeRewriteRules(existing, eveRules);
+        return mergeRewriteRules(existing, eveRules.flat());
       },
     };
   };
