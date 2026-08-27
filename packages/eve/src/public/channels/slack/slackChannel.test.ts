@@ -2622,6 +2622,82 @@ describe("slackChannel() HITL interaction pipeline", () => {
     }
   });
 
+  it("delivers message shortcuts with workspace-scoped Slack API access", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const onShortcut = vi.fn(async (shortcut, ctx) => {
+      expect(shortcut).toMatchObject({
+        type: "message_action",
+        callbackId: "summarize_message",
+        triggerId: "trigger-123",
+        channelId: "C01",
+        message: {
+          text: "Please summarize this",
+          ts: "1700000000.000010",
+          threadTs: "1700000000.000001",
+          userId: "U02",
+        },
+        user: { id: "U01", username: "ada" },
+        teamId: "T_ACTOR",
+      });
+      expect(ctx.slack.teamId).toBe("T_ACTOR");
+      await ctx.slack.request("auth.test", {});
+    });
+    const channel = slackChannel({ credentials: { botToken }, onShortcut });
+
+    const { response, waitUntil } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "message_action",
+        callback_id: "summarize_message",
+        trigger_id: "trigger-123",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+        channel: { id: "C01" },
+        message: {
+          text: "Please summarize this",
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          user: "U02",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(onShortcut).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://slack.com/api/auth.test");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe("POST");
+  });
+
+  it("delivers global shortcuts without channel or message fields", async () => {
+    const onShortcut = vi.fn();
+    const channel = slackChannel({ onShortcut });
+
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "shortcut",
+        callback_id: "new_request",
+        trigger_id: "trigger-456",
+        team: { id: "T01" },
+        user: { id: "U01", name: "ada" },
+      }),
+    );
+
+    expect(onShortcut).toHaveBeenCalledWith(
+      {
+        type: "shortcut",
+        callbackId: "new_request",
+        triggerId: "trigger-456",
+        teamId: "T01",
+        user: { id: "U01", username: undefined, name: "ada" },
+      },
+      expect.objectContaining({ slack: expect.any(Object) }),
+    );
+  });
+
   it("cancels the interaction's Slack thread from onInteraction", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
