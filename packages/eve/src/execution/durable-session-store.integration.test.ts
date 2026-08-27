@@ -68,7 +68,7 @@ describe("durableSessionStore integration", () => {
   });
 
   it("retains an agent-loop checkpoint across a physical step retry", async () => {
-    const runtime = createTestRuntime({ agent: { name: "agent-loop-checkpoint-retry" } });
+    const runtime = await createTestRuntime({ agent: { name: "agent-loop-checkpoint-retry" } });
 
     await runtime.run(async () => {
       const run = await start(agentLoopCheckpointRetryFixtureWorkflow, [
@@ -83,7 +83,7 @@ describe("durableSessionStore integration", () => {
   });
 
   it("retries logical step one without blocking on an empty checkpoint journal", async () => {
-    const runtime = createTestRuntime({ agent: { name: "agent-loop-checkpoint-empty" } });
+    const runtime = await createTestRuntime({ agent: { name: "agent-loop-checkpoint-empty" } });
 
     await runtime.run(async () => {
       const run = await start(agentLoopCheckpointRetryFixtureWorkflow, [
