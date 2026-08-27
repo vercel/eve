@@ -42,41 +42,44 @@ export default defineSelfModificationConfig({
   development: {
     enabled: false,
   },
-  pullRequests: {
+  source: {
     git: {
-      repository: "acme/support-agent",
-      baseBranch: "main",
+      repository: "github.com/acme/support-agent",
     },
+  },
+  change: {
+    behavior: "review",
+    branch: "main",
   },
 });
 ```
 
-`development.enabled` controls direct source edits under `eve dev` and defaults to `true`. Omitting `pullRequests` disables self-modification outside local development. `pullRequests.git` makes both the Git boundary and the result explicit: `repository` is the only GitHub repository the flow may access, and `baseBranch` is the pull request target.
+`development.enabled` controls direct source edits under `eve dev` and defaults to `true`. Omitting either `source` or `change` disables self-modification outside local development. `source.git.repository` is the only GitHub repository the flow may access, and `change.branch` is the pull request target.
 
 The same config is passed to the agent and sandbox definitions and mounted as the extension config. The model belongs to the agent definition; a custom process-capable sandbox backend belongs to the sandbox definition. The PAT is operational configuration, never authored configuration.
 
-Any deployed application that includes `pullRequests` enables the draft-pull-request capability.
+A deployed application becomes eligible for draft pull requests only when it includes both `source` and `change`; trusted deployment source metadata must also be available. The GitHub credential is required when the sandbox prepares or publishes a proposal.
 
 ## One authoring surface, two execution modes
 
 Local editing and draft pull requests use the same dynamic self-modification subagent and typed configuration module, but they have different effect boundaries:
 
-| Shared boundary   | Local development                                                                 | Deployed pull request                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Purpose           | Makes persistent authored-source changes; changes do not affect the current turn. | Makes persistent authored-source changes; changes do not affect the current turn.                     |
-| Source workspace  | Directly edits the authored `agent/` directory mounted at `/source`.              | Edits an isolated checkout of the configured pull request base.                                       |
-| Result            | The change is available on a subsequent local turn.                               | The change becomes effective only after review, merge, and redeployment.                              |
-| Activation        | Selected when `EVE_DEV=1`; `development.enabled` defaults to `true`.              | Selected outside development when `pullRequests` is configured.                                       |
-| Sandbox boundary  | Uses the constrained `just-bash` filesystem.                                      | Uses a per-session VM or container, trusted deployment source, and proposal capture.                  |
-| GitHub capability | Has no GitHub credential or publication capability.                               | Trusted checkout and publication boundaries resolve the credential separately from the model sandbox. |
+| Shared boundary   | Local development                                                                 | Deployed pull request                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Purpose           | Makes persistent authored-source changes; changes do not affect the current turn. | Makes persistent authored-source changes; changes do not affect the current turn.                      |
+| Source workspace  | Directly edits the authored `agent/` directory mounted at `/source`.              | Edits an isolated checkout of the configured target branch.                                            |
+| Result            | The change is available on a subsequent local turn.                               | The change becomes effective only after review, merge, and redeployment.                               |
+| Activation        | Selected when `EVE_DEV=1`; `development.enabled` defaults to `true`.              | Selected outside development when `source` and `change` are configured and trusted prerequisites pass. |
+| Sandbox boundary  | Uses the constrained `just-bash` filesystem.                                      | Uses a per-session VM or container, trusted deployment source, and proposal capture.                   |
+| GitHub capability | Has no GitHub credential or publication capability.                               | Trusted checkout and publication boundaries resolve the credential separately from the model sandbox.  |
 
-The modes are mutually exclusive. Even when `pullRequests` is configured, `eve dev` selects local editing unless `development.enabled` is `false`; it never uses the deployed pull request workflow.
+The modes are mutually exclusive. Even when `source` and `change` are configured, `eve dev` selects local editing unless `development.enabled` is `false`; it never uses the deployed pull request workflow.
 
 ## Vercel deployments
 
 When the deployment runs on Vercel, the self-modification sandbox selects Vercel Sandbox automatically. A self-hosted deployment instead needs the process-capable backend supplied by its sandbox definition.
 
-Vercel Git metadata supplies the deployment source when no explicit `EVE_SOURCE_*` source metadata is set. The metadata identifies the GitHub owner and repository, deployed commit SHA and ref, plus the Vercel deployment ID and creation time. The deployed revision remains the inspection baseline; self-modification still edits the configured pull request base. Explicit source metadata takes precedence over the Vercel metadata.
+Vercel Git metadata supplies the deployment source when no explicit `EVE_SOURCE_*` source metadata is set. The metadata identifies the GitHub owner and repository, deployed commit SHA and ref, plus the Vercel deployment ID and creation time. The deployed revision remains the inspection baseline; self-modification still edits the configured target branch. Explicit source metadata takes precedence over the Vercel metadata.
 
 ## Trusted deployment source
 
@@ -86,9 +89,9 @@ A proposal starts from the immutable source identity captured when eve builds th
 
 A checkout of the repository's current default branch alone cannot establish what the running agent represents. That branch can advance after deployment, be renamed, or contain commits that were never deployed. Starting there would let self-modification investigate and propose against arbitrary repository state rather than the source the requester is using.
 
-The captured deployment revision gives the sandbox an immutable investigation baseline, while the configured base branch remains the intentional target for a mergeable pull request. Fetching both and requiring the deployed revision to be an ancestor of the base answers two separate questions: which source produced this deployment, and whether the proposal can safely target the current review branch. The repository-relative application root also prevents a monorepo checkout from treating an unrelated application as the deployed agent. Deployment source is the provenance boundary; the base checkout is only the editing target.
+The captured deployment revision gives the sandbox an immutable investigation baseline, while the configured target branch remains the intentional target for a mergeable pull request. Fetching both and requiring the deployed revision to be an ancestor of that branch answers two separate questions: which source produced this deployment, and whether the proposal can safely target the current review branch. The repository-relative application root also prevents a monorepo checkout from treating an unrelated application as the deployed agent. Deployment source is the provenance boundary; the target checkout is only the editing target.
 
-Before checkout, self-modification verifies that deployment source metadata exists, was not derived from a local build, and identifies `github.com/<configured repository>`. The checkout fetches both the deployed revision and the latest configured base branch. The deployed tree supports investigation; edits apply only to the base checkout. The deployed revision must be an ancestor of the base.
+Before checkout, self-modification verifies that deployment source metadata exists, was not derived from a local build, and identifies `github.com/<configured repository>`. The checkout fetches both the deployed revision and the latest configured target branch. The deployed tree supports investigation; edits apply only to the target checkout. The deployed revision must be an ancestor of that branch.
 
 ## Proposal API
 
@@ -114,7 +117,7 @@ The publisher captures this value after editing, validates its paths, file kinds
 
 ## Publish tool API
 
-The publish tool is available only in a delegated session when `pullRequests` is configured and trusted deployment source checks pass. Its model-facing input is deliberately limited to pull request presentation:
+The publish tool is available only in a delegated session when `source` and `change` are configured and trusted deployment source checks pass. Its model-facing input is deliberately limited to pull request presentation:
 
 ```ts
 {
@@ -123,9 +126,9 @@ The publish tool is available only in a delegated session when `pullRequests` is
 }
 ```
 
-The tool derives the repository, base branch, deployed revision, prepared workspace, and replay-safe operation identifier from trusted configuration and session context. It does not accept a branch name, repository, base revision, file list, Git object ID, credential, or operation ID from the model.
+The tool derives the repository, target branch, deployed revision, prepared workspace, and replay-safe operation identifier from trusted configuration and session context. It does not accept a branch name, repository, base revision, file list, Git object ID, credential, or operation ID from the model.
 
-On success it returns the configured base branch, generated namespaced branch, changed paths, commit SHA, deployed SHA, draft flag, pull request state, and pull request URL. The result describes a draft pull request only; the tool cannot merge, approve, close, retarget, or update the base branch.
+On success it returns the configured target branch, generated namespaced branch, changed paths, commit SHA, deployed SHA, draft flag, pull request state, and pull request URL. The result describes a draft pull request only; the tool cannot merge, approve, close, retarget, or update the target branch.
 
 ## Isolated editing and publication
 
@@ -133,21 +136,21 @@ The model edits a per-session sandbox checkout. Checkout briefly enables a GitHu
 
 Proposal capture treats the sandbox as untrusted. It limits edits to the deployed application’s `agent/` directory, excludes generated configuration and build artifacts, rejects unsafe file kinds and malformed paths, and enforces file and byte limits. Repository-specific typechecking, tests, dependency installation, and preview builds belong in pull request CI.
 
-The trusted publisher captures and validates the complete proposal before resolving the PAT. It may create Git objects, a branch under `eve-self-modification/`, and a draft pull request against the configured base. It cannot update the base branch, merge, approve, close, or retarget a pull request. A stable operation identifier makes retrying publication replay-safe.
+Publication receives a trusted request containing the configured destination, deployed revision, workspace, and replay-safe operation identifier; the model provides only pull request presentation. The initial GitHub publisher captures and validates the complete proposal before resolving the PAT. It may create Git objects, a branch under `eve-self-modification/`, and a draft pull request against the configured target branch. It cannot update that branch, merge, approve, close, or retarget a pull request. A stable operation identifier makes retrying publication replay-safe.
 
 ## Setup and scaffolding
 
 `eve add experimental/self-modification` generates `config.ts`. The scaffold makes draft-pull-request configuration an explicit, reviewable authoring decision instead of a collection of environment variables whose repository and branch settings can drift apart. Non-interactive installation leaves the default local-editing configuration intact.
 
-Interactive setup detects and confirms the GitHub repository and base branch, writes `pullRequests.git`, and instructs the operator to set `EVE_SELF_MODIFICATION_GITHUB_TOKEN` in the deployment’s secret configuration. The shared configuration is then passed to the agent, sandbox, and extension, so they use the same repository and pull request target. Re-running setup may fill in missing generated configuration, but must not silently broaden an existing repository or branch selection.
+Interactive setup detects and confirms the GitHub repository and base branch, writes `source` and `change`, and instructs the operator to set `EVE_SELF_MODIFICATION_GITHUB_TOKEN` in the deployment’s secret configuration. The shared configuration is then passed to the agent, sandbox, and extension, so they use the same repository and pull request target. Re-running setup may fill in missing generated configuration, but must not silently broaden an existing repository or branch selection.
 
 The recommended credential is a fine-grained PAT restricted to the configured repository with Contents read and write, Pull requests read and write, and Metadata read. Setup never writes the PAT into source.
 
 ## Scope and limitations
 
-The initial flow supports one GitHub repository and one base branch per definition. It does not support GitLab, Bitbucket, forks, coordinated multi-repository proposals, private package registry credentials, Git LFS content, networked pre-publication validation, deployment actions, or amending an existing proposal.
+The initial flow supports one GitHub repository and one target branch per definition. It does not support GitLab, Bitbucket, forks, coordinated multi-repository proposals, private package registry credentials, Git LFS content, networked pre-publication validation, deployment actions, or amending an existing proposal.
 
-There is no self-modification-specific principal policy or in-session approval prompt. Every session accepted by an application with `pullRequests` configured can request a draft pull request. Applications must protect inbound routes and channels before enabling it.
+There is no self-modification-specific principal policy or in-session approval prompt. Every session accepted by an application with deployed source changes configured can request a draft pull request. Applications must protect inbound routes and channels before enabling it.
 
 ## Future work
 
