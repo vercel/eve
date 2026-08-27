@@ -87,6 +87,9 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
     );
   }
 
+  if (input.tip !== undefined) {
+    lines.push(row(`${c.bold("Tip:")} ${renderTip(input.tip, innerWidth - 7, theme)}`));
+  }
   lines.push(c.dim(`${bottomLeft}${border}${bottomRight}`));
 
   if (info && (info.diagnostics.discoveryErrors > 0 || info.diagnostics.discoveryWarnings > 0)) {
@@ -108,10 +111,6 @@ export function buildAgentHeader(input: AgentHeaderInput): string[] {
       );
     }
     lines.push("", `  ${c.dim(theme.glyph.warning)} ${parts.join(c.dim(" · "))}`);
-  }
-
-  if (input.tip !== undefined) {
-    lines.push("", `  ${c.bold("Tip:")} ${renderTip(input.tip, Math.max(8, width - 7), theme)}`);
   }
 
   return lines;

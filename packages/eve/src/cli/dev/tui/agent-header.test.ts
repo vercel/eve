@@ -52,9 +52,11 @@ describe("buildAgentHeader", () => {
     expect(tip).toBe("Use the /add command to install an integration.");
     if (tip === undefined) return;
 
-    const line = buildAgentHeader({ info: INFO, theme, width: 120, tip }).at(-1);
+    const line = buildAgentHeader({ info: INFO, theme, width: 120, tip }).find((candidate) =>
+      candidate.includes("Tip:"),
+    );
 
-    expect(stripAnsi(line ?? "")).toBe(`  Tip: ${tip}`);
+    expect(stripAnsi(line ?? "")).toContain(`| Tip: ${tip}`);
     expect(line).toContain(theme.colors.blue("/add"));
   });
 
