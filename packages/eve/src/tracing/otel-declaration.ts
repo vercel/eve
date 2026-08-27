@@ -9,6 +9,7 @@ import type {
 import { PROVIDER, type InstrumentationProvider } from "#public/instrumentation/provider.js";
 import type { InstrumentationRuntimeContextInput } from "#public/instrumentation/index.js";
 import type { JsonObject } from "#shared/json.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
 import type { ResolvedContentOptions } from "#tracing/content-attributes.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
@@ -114,7 +115,7 @@ export interface TraceCaptureContext {
   readonly channelType?: string;
 }
 
-export type TracePolicyDecision = "drop" | "metadata" | "inputs" | "outputs" | "content";
+export type TracePolicyDecision = InstrumentationDecision;
 
 export type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 

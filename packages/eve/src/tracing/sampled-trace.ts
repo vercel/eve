@@ -51,19 +51,10 @@ export function resolveTracePolicyDecision(
   decision: TracePolicyDecision | boolean,
   audience: ChannelAudience,
 ): InstrumentationDecision {
-  if (decision === false || decision === "drop") return DROP_INSTRUMENTATION;
+  if (decision === false) return DROP_INSTRUMENTATION;
   if (decision === true) {
     const content = shouldCaptureInstrumentationContent(audience);
     return { action: "record", recordInputs: content, recordOutputs: content };
   }
-  switch (decision) {
-    case "metadata":
-      return { action: "record", recordInputs: false, recordOutputs: false };
-    case "inputs":
-      return { action: "record", recordInputs: true, recordOutputs: false };
-    case "outputs":
-      return { action: "record", recordInputs: false, recordOutputs: true };
-    case "content":
-      return { action: "record", recordInputs: true, recordOutputs: true };
-  }
+  return decision;
 }

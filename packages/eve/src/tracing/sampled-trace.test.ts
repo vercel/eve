@@ -6,13 +6,13 @@ describe("resolveTracePolicyDecision", () => {
   afterEach(() => vi.unstubAllEnvs());
 
   it.each([
-    ["drop", { action: "drop" }],
-    ["metadata", { action: "record", recordInputs: false, recordOutputs: false }],
-    ["inputs", { action: "record", recordInputs: true, recordOutputs: false }],
-    ["outputs", { action: "record", recordInputs: false, recordOutputs: true }],
-    ["content", { action: "record", recordInputs: true, recordOutputs: true }],
-  ] as const)("normalizes %s", (decision, expected) => {
-    expect(resolveTracePolicyDecision(decision, "private")).toEqual(expected);
+    { action: "drop" },
+    { action: "record", recordInputs: false, recordOutputs: false },
+    { action: "record", recordInputs: true, recordOutputs: false },
+    { action: "record", recordInputs: false, recordOutputs: true },
+    { action: "record", recordInputs: true, recordOutputs: true },
+  ] as const)("preserves the explicit $action decision", (decision) => {
+    expect(resolveTracePolicyDecision(decision, "private")).toEqual(decision);
   });
 
   it("maps false to the legacy drop behavior", () => {

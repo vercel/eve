@@ -10945,11 +10945,11 @@ describe("createToolLoopHarness", () => {
     });
 
     it.each([
-      ["metadata", false, false],
-      ["inputs", true, false],
-      ["outputs", false, true],
-      ["content", true, true],
-    ] as const)("applies the %s trace policy decision", async (decision, inputs, outputs) => {
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const)("applies the explicit %s/%s capture decision", async (inputs, outputs) => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -10960,7 +10960,11 @@ describe("createToolLoopHarness", () => {
       declareTelemetry({
         recordInputs: true,
         recordOutputs: true,
-        tracePolicy: () => decision,
+        tracePolicy: () => ({
+          action: "record",
+          recordInputs: inputs,
+          recordOutputs: outputs,
+        }),
       });
       const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
@@ -10991,7 +10995,11 @@ describe("createToolLoopHarness", () => {
       declareTelemetry({
         recordInputs: false,
         recordOutputs: true,
-        tracePolicy: () => "content",
+        tracePolicy: () => ({
+          action: "record",
+          recordInputs: true,
+          recordOutputs: true,
+        }),
       });
       const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
