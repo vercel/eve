@@ -1,0 +1,375 @@
+---
+issue: https://github.com/vercel/eve/issues/1224
+status: draft
+last_updated: "2026-08-27"
+---
+
+# HITL obligation kernel: one parking mechanism, independent variants
+
+## Summary
+
+eve's HITL surfaces — tool approval, `ask_question`, session limits, and
+connection authorization — share one essential mechanism: the session owes an
+answer, parks something, and resumes when data arrives. Today that mechanism
+is re-implemented per variant and fused to each variant's rules, which is the
+structural cause of the wedge-class bugs catalogued in the HITL request
+lifecycle research
+([#1224](https://github.com/vercel/eve/issues/1224), referenced below as
+"#1224" with its transition-catalog anchors).
+
+This proposal factors the machine along two orthogonal axes:
+
+- **Variant** — _what is owed_: adjudication rules, outcome vocabulary,
+  supersession. Four exist: Approval, Question, Limit, Challenge.
+- **Owner** — _who waits_: the parked session turn, a framework gate, or a
+  durable tool-body run. An owner is a hook token — nothing more.
+
+A **kernel** owns everything variant- and owner-agnostic: rows, candidate
+races, groups, continuations, tombstones, staleness, forced closure,
+projection routes, and park/resume addressing. Variants become small pure
+reducers. Owners become hook consumers. The #1224 transition catalog
+partitions cleanly: `owner.batch.*`, `scheduler.*`, `projector.*`, and all
+cancellation rows land in the kernel and are proven once; `owner.approval.*`,
+`owner.question.*`, `owner.limit.*`, `owner.auth.*` each land in exactly one
+variant file and are proven in isolation. Invariant 10 ("composite states add
+no cases") becomes structural: variants cannot reference each other, so
+composite behavior is the row-wise union by construction.
+
+The first new owner class is the **tool-body run**: background tools whose
+`execute` is a workflow function may open obligations mid-body and `await`
+them, giving framework users mid-task HITL (`ctx.request`, `ctx.auth`)
+through the same kernel that implements eve's internal permissioning.
+
+## Model
+
+Three exported concepts. Everything else is kernel-internal or an existing
+eve concept reused.
+
+```ts
+/** One open item, durably stored. Kernel-owned shape. */
+interface Row<Spec> {
+  id: RequestId;
+  kind: VariantKind;
+  spec: Spec; // variant-owned data, opaque to the kernel
+  owner: string; // hook token — where closure payloads deliver
+  groupId: GroupId;
+}
+
+/**
+ * What the kernel feeds a variant. `message` carries no text:
+ * text-matching against obligations is unrepresentable by construction.
+ */
+type Input =
+  | {
+      kind: "response";
+      response: InputResponse;
+      responder: Responder | null;
+      actor: "originating" | "other" | "anonymous";
+    }
+  | { kind: "message"; actor: "originating" | "other" | "anonymous" }
+  | { kind: "callback"; params: JsonObject }
+  | { kind: "deadline" }
+  | { kind: "linked"; outcome: string }; // a row this one blocked on completed
+
+/** Complete verdict vocabulary — nothing else exists. */
+type Verdict<Outcome> =
+  | "ignore"
+  | { settle: Outcome }
+  | { reject: "unauthorized" | "invalid" | "policy-failed" }
+  | { dismiss: string; reopen?: unknown; consumeDelivery?: true }
+  | { blockOn: ChallengeSpec }; // open a linked row; re-feed me via "linked"
+
+interface Variant<Spec, Outcome> {
+  resolve(row: Row<Spec>, input: Input): Verdict<Outcome> | Promise<Verdict<Outcome>>;
+  intentKey?(spec: Spec): string | undefined; // kernel dedup (invariant 4)
+  present(row: Row<Spec>): Presentation; // InputRequest | AuthorizationChallenge
+}
+```
+
+Notes on the boundary:
+
+- **Staleness is kernel-side.** A response naming a terminal row is rejected
+  against the tombstone before any reducer runs; `"stale"` is deliberately
+  absent from the reject vocabulary and no variant implements a second
+  staleness mechanism.
+- **Races are kernel-side.** Candidates derive from `{requestId,
+deliveryId}`; single-winner serialization happens before `resolve`.
+- **`present()` selects the event family.** Returning an `InputRequest`
+  implies `input.*` lifecycle events; returning a challenge implies
+  `authorization.*`. The two wire vocabularies are preserved — challenges
+  remain non-input-request obligations, per #1224.
+- **`resolve` may be async** (authored approval policies run inside it,
+  step-wrapped). This deviates from #1224's strictly pure `interpretHitl`;
+  policy evaluation is deterministic-by-journaling rather than pure. A
+  policy throw or timeout becomes `{ reject: "policy-failed" }` and the row
+  stays open (kernel rule).
+
+## Kernel contract
+
+Owned unconditionally, with no per-kind branches:
+
+| Primitive              | Guarantee                                                                                                                                                              |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rows                   | open → terminal exactly once; tombstones retained until session end                                                                                                    |
+| Candidates             | atomic single-winner; later candidates rejected stale                                                                                                                  |
+| Groups + continuations | closure iff all members terminal; `pending → claimed \| suppressed` exactly once                                                                                       |
+| Forced closure         | turn-cancel / session-end dismisses rows and suppresses continuations uniformly                                                                                        |
+| Intent dedup           | a raise whose `intentKey` matches an open row resolves already-pending (fail-open when unkeyed)                                                                        |
+| Projection routes      | the #1224 Route machine verbatim; routes reference rows by id, never by kind                                                                                           |
+| Park/resume addressing | durable hook + capability-alias demux; registration committed before any resume URL is advertised; disposed owners reject resumes (route-lost, never a parent failure) |
+| Events                 | state persisted before effects; every admitted input yields an observable event                                                                                        |
+
+Two verdict fields are the licensed irregularities, both kernel-enforced:
+`consumeDelivery` (at most one consumer per delivery; the consumed message
+still emits observable events — Limit is its only user) and `reopen`
+(dismiss-and-replace with kernel-owned monotonic identity).
+
+`blockOn`/`linked` is the one cross-variant linkage: a reducer may park a
+candidate on another row reaching terminal state. The blocking variant names
+a row it wants terminal, never the other variant's rules; the blocked-on
+variant never knows it was watched.
+
+## The four variants
+
+Reference implementations; each is the complete rule set for its #1224
+catalog family.
+
+```ts
+export const question = defineVariant<QuestionSpec, QuestionOutcome>({
+  present: (row) => inputRequest("question", row.spec),
+  resolve(row, input) {
+    switch (input.kind) {
+      case "response": {
+        const { optionId, text } = input.response;
+        if (optionId !== undefined && !row.spec.options?.some((o) => o.id === optionId))
+          return { reject: "invalid" };
+        return { settle: { status: "answered", optionId, text } };
+      }
+      case "message":
+        return input.actor === "originating" && row.spec.supersedable
+          ? { dismiss: "superseded" }
+          : "ignore";
+      default:
+        return "ignore";
+    }
+  },
+});
+```
+
+```ts
+export const approval = defineVariant<ApprovalSpec, ApprovalOutcome>({
+  intentKey: (spec) => spec.approvalKey,
+  present: (row) =>
+    inputRequest("tool-approval", { action: row.spec.action, display: "confirmation" }),
+  async resolve(row, input) {
+    if (input.kind === "linked")
+      return input.outcome === "authorized"
+        ? adjudicate(row, input.heldResponse)
+        : { reject: input.outcome === "declined" ? "unauthorized" : "policy-failed" };
+    if (input.kind !== "response") return "ignore"; // text never settles an approval
+    if (input.response.optionId === "cancel")
+      return input.responder !== null ? { settle: "cancelled" } : { reject: "unauthorized" };
+    return adjudicate(row, input);
+  },
+});
+
+async function adjudicate(row, input): Promise<Verdict<ApprovalOutcome>> {
+  const decision = await row.spec.responsePolicy({
+    responder: input.responder,
+    request: row.spec.action,
+  });
+  if (decision.status === "rejected") return { reject: "unauthorized" };
+  if (decision.status === "needs-auth") return { blockOn: decision.challenge };
+  return { settle: input.response.optionId === "allow" ? "allowed" : "denied" };
+}
+```
+
+```ts
+export const limit = defineVariant<LimitSpec, LimitOutcome>({
+  present: (row) => inputRequest("session-limit", promptFor(row.spec)),
+  resolve(row, input) {
+    switch (input.kind) {
+      case "response":
+        return { settle: input.response.optionId === "continue" ? "continued" : "stopped" };
+      case "message":
+        return {
+          dismiss: "superseded",
+          reopen: { ...row.spec, generation: row.spec.generation + 1 },
+          consumeDelivery: true,
+        };
+      default:
+        return "ignore";
+    }
+  },
+});
+```
+
+```ts
+export const challenge = defineVariant<ChallengeSpec, ChallengeOutcome>({
+  present: (row) => authorizationChallenge(row.spec),
+  resolve(row, input) {
+    switch (input.kind) {
+      case "callback":
+        return { settle: readCallbackOutcome(input.params) };
+      case "deadline":
+        return { settle: "timed-out" };
+      default:
+        return "ignore";
+    }
+  },
+});
+```
+
+Stale generations never reach the Limit reducer: the generation is part of
+the request id, so a `gen-1` response hits a tombstone. Forced closure of a
+Challenge maps to `completed(cancelled)` in the kernel's dismissal-to-
+vocabulary translation — the one place kind leaks into kernel output.
+
+## Owners
+
+An owner is a hook token. The kernel delivers settlement and dismissal
+payloads to `row.owner` over the existing durable session-inbox envelope
+(`resumeSessionInbox`); what the consumer does with them is its own business.
+
+- **Session turn** — today's behavior, unchanged: resume restores withheld
+  output, appends member outcomes, runs allowed tools once, resumes the
+  model. The ApprovalBatch continuation is a kernel group whose owner is the
+  session inbox.
+- **Framework gate** — the step-end approval park; same rows, no bespoke
+  AI SDK approval-part state.
+- **Tool-body run** _(new)_ — a framework-owned workflow run hosting a
+  background tool's `"use workflow"` `execute`. Its inbox is a new executor
+  kind on the existing task child wire; the task run workflow stays the
+  single lifecycle writer, unchanged. The parent session projects body-owned
+  rows through the kernel's Route machine, exactly as for child sessions.
+
+The #1224 rule "no blocked continuation anywhere" (invariant 1) becomes an
+owner-contract clause: every owner's waiting frame must be force-resumable
+from row state alone. The body run's `await` is legal because forced closure
+rejects the promise (running `finally` blocks); the historical wedges were
+waits that only one specific input could release.
+
+## Authoring surface: mid-task HITL
+
+Available only in task-backed workflow tools, where a receipt has already
+settled the model-facing call and the session stays receptive:
+
+```ts
+export default defineTool({
+  description: "Deploy a service to production.",
+  inputSchema: z.object({ service: z.string(), ref: z.string() }),
+  async execute(input, ctx: WorkflowToolContext) {
+    "use workflow";
+    const plan = await buildPlan(input);
+
+    const approval = ctx.request({
+      // opens an Approval row, owner = this run
+      id: "approve-plan",
+      kind: "approval",
+      prompt: `Apply ${plan.changes.length} changes to ${input.service}?`,
+      options: [
+        { id: "apply", label: "Apply", style: "danger" },
+        { id: "abort", label: "Abort" },
+      ],
+    });
+
+    const decision = await Promise.race([
+      approval,
+      ctx.sleep("4h").then(() => ({ optionId: "abort", timedOut: true })),
+    ]);
+    if (decision.optionId === "abort") return { status: "aborted" };
+
+    const token = await ctx.auth("acme"); // opens a Challenge row, same kernel
+    return await applyPlan(plan, token);
+  },
+});
+```
+
+Semantics:
+
+- `ctx.request` opens a Question or Approval row and returns a promise
+  resolved by the kernel's demux over the body run's single inbox. No new
+  variants, no new verdicts: the parking mechanism is `row.owner`.
+- Every result carries a status (`answered | ignored | allowed | denied |
+cancelled`); dismissal and cancellation resolve or reject the promise so
+  authored `finally` blocks run.
+- Request ids are authored (unique per run, deterministic error on
+  collision) or journal-order derived for replay determinism.
+- `.url` on the returned handle is a capability alias
+  (`POST eve/v1/task-input/:token`); it resumes anonymously
+  (`responder: null`) and the variant's response policy decides whether
+  that is acceptable. Identity-bearing paths (channel delivery, parent
+  projection) forward the verified responder unchanged; the body run owns
+  adjudication.
+- `ctx.auth` opens a Challenge row and resolves to the token result; it
+  replaces the signal-return park (`requestAuthorization` /
+  `getAuthorizationResult`) for workflow tools. Plain tools keep the
+  re-entrant signal mechanics; their representation unifies as Challenge
+  rows, their authoring surface does not change.
+- While rows are open and the run is suspended, the task projects
+  `input_required` with the open requests; the parent wake/proxy wire is
+  today's.
+
+## Migration
+
+Each legacy obligation store has exactly one destination:
+
+| Legacy                                            | Destination                                                                                                                                    |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eve.runtime.pendingInputBatches`                 | One kernel group per batch; each request becomes an Approval/Question row; withheld `responseMessages` become the group's continuation payload |
+| `eve.runtime.deferredStepInput`                   | Deleted as a mechanism (per #1224); wedged messages release as ordinary message turns on the first delivery after upgrade                      |
+| `eve.runtime.pendingAuthorization`                | Challenge rows in one group; the journaled `resume` payload becomes continuation payload                                                       |
+| `eve.runtime.hitl.approvalState`                  | Kernel candidate records and tombstones                                                                                                        |
+| `eve.runtime.hitl.approvedTools`                  | Unchanged — policy input (`ApprovalContext.approvedTools`), not obligation state                                                               |
+| Task synthetic `task:authorization:*` blocker ids | Deleted; a child's challenge is a real Challenge row owned by the child, projected to the parent as a kernel route                             |
+
+Mechanics:
+
+- One-shot migration on first load per session through
+  `execution/durable-session-migrations/`: read legacy keys, build the
+  ledger, first write persists only the new shape. No dual-write period, no
+  legacy fallback logic.
+- Task views need no rewrite: the `eve.task` stream is append-only; new code
+  appends new-shape `input_required` views, old snapshots stay historically
+  readable, and the task run translates on its next transition.
+- The wire is untouched: `InputRequest`/`InputResponse` shapes, request ids,
+  and capability URLs survive migration byte-identically. One scoped break,
+  shared with #1224: challenge URLs minted pre-cutover embed the old
+  `${sessionId}:auth` hook token — ship a one-release token alias or accept
+  the in-flight break under pre-1.0 policy.
+
+## Relationship to #1224 and sequencing
+
+This is a refinement of the #1224 target architecture, not a competitor:
+stages 1–2 (store foundation, interpreter extraction) build the kernel;
+this doc adds the internal seam `kernel.ts` + `variants/*.ts` and the owner
+axis. Stage 3 (auth through the machine) becomes the Challenge variant.
+The transition catalog and its eval anchors remain the conformance suite,
+re-anchored by axis: kernel rows proven once, variant rows proven per
+variant, composite coverage generated as unions.
+
+Order of work:
+
+1. **Kernel + variants** — #1224 stages 1–3 with the variant seam.
+2. **Body-run owner** — new executor kind on the task child wire; demux;
+   `ctx.request` / `ctx.auth`; responder forwarding added to the task
+   input wire (additive). Depends on workflow functions as
+   `defineTool.execute` (the subagents-as-workflow-tools research, §6.1).
+3. **Gate unification** — the framework approval gate re-expressed as
+   kernel rows (representation change; step-end park mechanics retained).
+
+## Open questions
+
+1. **Async `resolve` vs. pure interpreter.** Policy evaluation inside the
+   reducer trades #1224's strict purity for one seam; the alternative
+   (policy as a pre-resolved input) doubles the input alphabet. Decide at
+   stage-2 extraction.
+2. **Deployment pinning for parked bodies.** Multi-hour parks across
+   redeploys are the common case for body-run owners; the pinning policy
+   (subagents doc §7.3) must be stated publicly before the authoring
+   surface ships.
+3. **Journal growth.** Row specs (prompts, options) persist in the ledger
+   and task view snapshots; a size cap and truncation rule are needed.
+4. **Foreground workflow tools.** `ctx.request` is task-backed only; the
+   foreground example in the subagents doc (§4) should be amended or
+   scoped to receipts.
