@@ -1,9 +1,10 @@
 /**
- * The ledger is DERIVED from the existing session state — it is not a new
- * store. This file is the answer to "this doesn't touch the existing batch
- * semantics": every field of `PendingInputBatch` maps onto ledger shapes,
- * and the batch collection remains the persisted representation during
- * migration (the interpreter reads it; only the interpretation moves).
+ * The ledger is DERIVED from the existing session state. This file is the
+ * answer to "this doesn't touch the existing batch semantics": every field
+ * of `PendingInputBatch` maps onto ledger shapes. It is also the one-shot
+ * migration import: on first load the legacy keys are read through this
+ * derivation, written to the RequestLedgerStore (store.ts), and dropped
+ * from the session snapshot.
  *
  *   PendingInputBatch                     Ledger
  *   ─────────────────                     ──────

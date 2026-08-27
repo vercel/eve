@@ -71,7 +71,9 @@ A compiling prototype lives in [`hitl-requests/`](./hitl-requests/):
   (intent dedup)
 - `variants/{approval,question,limit,challenge}.ts` — the complete rule set
   for each #1224 catalog family, one file each
-- `ledger.ts` — derivation from the existing batch state
+- `ledger.ts` — derivation from the existing batch state (the migration
+  import)
+- `store.ts` — consistent storage: `read` / CAS `write`, blobs held apart
 - `call-site.ts` — the `tool-loop.ts` integration point, unchanged
 - `types.ts` — the three exported concepts below
 
@@ -109,9 +111,9 @@ A batch is not a state shape: it is the set of rows sharing a `groupId`, and
 its withheld `responseMessages` are that group's continuation payload,
 spliced exactly once at closure. Today's batch invariants map one-to-one —
 independent answerability is disjoint groups, `assertUniqueRequestIds` is
-flat-table uniqueness, removal-only shrinkage is open → terminal. During
-migration the batch collection stays the persisted representation; the
-ledger is derived (`ledgerFromSessionState`), only interpretation moves.
+flat-table uniqueness, removal-only shrinkage is open → terminal.
+`ledgerFromSessionState` derives the ledger from the legacy batch keys; it
+is the one-shot migration import (see Storage and Migration).
 
 Boundary rules — each one deletes a module from the table above:
 
@@ -168,6 +170,55 @@ Same call site (`tool-loop.ts:1050`), same park side
 (`appendPendingInputBatch` → consumed by `raiseRows`), same result contract.
 Mid-step approval gating still surfaces at step end via AI SDK approval
 parts.
+
+## Storage
+
+Today HITL state rides in workflow step results — the whole
+`SessionStateMap` (pending batches, `pendingAuthorization`, approval audit
+state, the withheld `responseMessages`) re-serializes into every
+`DurableSessionSnapshot`. Free atomicity, but: no read path without
+hydrating a run, full-snapshot rewrite per step, unbounded journal growth
+from the withheld blobs.
+
+The ledger moves to a dedicated store (prototype
+[`store.ts`](./hitl-requests/store.ts)) — the same shape as
+`MemoryDocumentBackend`: `read` / conditional `write` / conflict error.
+Derived reads (`openRows`) are pure functions over the ledger, not store
+methods, so backends cannot diverge on query semantics. Default backend via
+nitro (`db0` locally, the deployment's database in production); the
+interface stays eve-owned.
+
+```ts
+interface RequestLedgerStore {
+  read(scope: LedgerScope): Promise<VersionedLedger | null>;
+  write(scope, ledger, expectedVersion: string | null): Promise<VersionedLedger>; // CAS
+}
+```
+
+Rules that keep the store from becoming a coordination point:
+
+- **The store is the persistence and read plane; the inbox stays the
+  serialization plane.** Only the interpreter pass writes, still fed
+  through the owner's inbox — one writer per scope, arrival order unchanged
+  (#1224 invariant 5). Routes and channels read; they never write.
+- **Scope is the root session id.** Body-run rows live under their root
+  session's scope — the parent projection reads them — never under the
+  run's own id.
+- **Blobs live beside the ledger, not in it.** A group's continuation
+  payload (the withheld model output) is a separate record written once at
+  park, read once at claim; `read` returns rows, groups, and held
+  candidates only. This closes most of the journal-growth question.
+- **Crash consistency by idempotence, not step atomicity.** Interpretation
+  is deterministic over `(ledger version, deliveryId)`: the step does
+  read → interpret → write(CAS) → effects; a crash after the write retries,
+  the CAS conflicts, the re-read hits tombstones and held-candidate dedupe,
+  and the same effects re-derive. "State before effects" (invariant 8)
+  holds verbatim, pointed at the store.
+
+What stays in the session snapshot: `approvedTools` (policy input),
+emission state, history — transcript and configuration, not request state.
+`input_required` task views stop being separately journaled and derive from
+`openRows`.
 
 ## Owners and mid-task HITL
 
@@ -233,11 +284,12 @@ pass order.
 | `eve.runtime.hitl.approvedTools` | unchanged — policy input, not request state |
 | task `task:authorization:*` synthetic ids | deleted; a child's challenge is a real row, projected as a route |
 
-One-shot migration on first load per session
-(`execution/durable-session-migrations/`); first write persists only the new
-shape. Wire untouched: `InputRequest`/`InputResponse`, request ids, and
-capability URLs survive byte-identically. One scoped break shared with
-#1224: pre-cutover challenge URLs embed the old `${sessionId}:auth` token.
+One-shot migration on first load per session: read the legacy session-state
+keys, write ledger v1 to the store (`ledgerFromSessionState` is the import),
+drop the keys from the snapshot. No dual-write period. Wire untouched:
+`InputRequest`/`InputResponse`, request ids, and capability URLs survive
+byte-identically. One scoped break shared with #1224: pre-cutover challenge
+URLs embed the old `${sessionId}:auth` token.
 
 ## Sequencing
 
@@ -263,8 +315,10 @@ unions).
 2. **Deployment pinning for parked bodies** — multi-hour parks across
    redeploys are the common case; the pinning policy must be public before
    the authoring surface ships.
-3. **Journal growth** — row specs persist in the ledger and task views; a
-   size cap and truncation rule are needed.
+3. **Ledger retention** — moving blobs out of the ledger and deriving task
+   views from `openRows` closes the growth problem, but tombstones are
+   retained "until session end" (#1224) and long-lived sessions need a
+   stated retention rule for terminal rows and settled groups.
 4. **Foreground workflow tools** — `ctx.request` is task-backed only; the
    foreground example in the subagents research should be scoped to
    receipts.
