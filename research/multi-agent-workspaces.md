@@ -63,7 +63,7 @@ import { defineWorkspaceSubagents } from "eve";
 
 export default defineWorkspaceSubagents({
   include: ["agents/tasks/*", "agents/utilities/*"],
-  exclude: ["agents/triage"],
+  exclude: ["agents/tasks/triage"],
 });
 ```
 
@@ -101,8 +101,6 @@ it does not need to be duplicated in the consumer's code.
   workspace, hand-selected endpoints, or custom transport configuration.
 - Providing an eve-managed reverse proxy, service mesh, or process supervisor
   for every self-hosted deployment.
-- Inferring agent roles, tool descriptions, or capabilities from directory
-  names.
 
 ## Workspace format and member identity
 
@@ -146,7 +144,7 @@ A workspace member's final directory name is its **agent name**. Names must be
 unique across the entire workspace, including nested groups.
 
 The existing workspace deployment stack already uses this name for its public route and
-service identity, so this proposal preserves that model:
+service identity, and this proposal preserves that model:
 
 ```text
 member directory                       agent name       public route
@@ -157,8 +155,9 @@ agents/utilities/company-knowledge      company-knowledge /eve/agents/company-kn
 products/escalation                     escalation       /eve/agents/escalation/eve/v1/*
 ```
 
-If two members would otherwise be named `review`, authors must choose distinct
-names such as `security-review` and `content-review`. This is an intentional
+If two members share a name, e.g. `agents/tasks/review` and `agents/utilities/review`
+both mapping to `review`, this results in a compile-time error. Authors must choose
+distinct names such as `security-review` and `content-review`. This is an intentional
 workspace constraint, as it simplifies routing and identity logic considerably.
 
 The agent name is the shared identity in catalog entries, routes, generated
@@ -195,9 +194,7 @@ type WorkspaceAgentCatalogEntry = {
 
 The exact serialized artifact is internal. The key invariant is that all member
 artifacts arise from the same resolved catalog in one build. The catalog is
-build input and inspection data, not a public live-discovery API. Fetching
-`/eve/v1/info` from candidate agents would make tool availability depend on
-network availability, runtime authorization, and deployment version skew.
+build input and inspection data, not a public live-discovery API.
 
 ## Workspace subagents
 
@@ -219,13 +216,10 @@ Several selectors can organize a larger delegation surface:
 
 ```ts
 export default defineWorkspaceSubagents({
-  include: ["content-review", "agents/utilities/*"],
-  exclude: ["experimental-knowledge"],
+  include: ["agents/content-review", "agents/utilities/*"],
+  exclude: ["agents/experimental-knowledge"],
 });
 ```
-
-Workspace selection is static rather than session-dependent, so the compiler
-can validate the complete tool set, descriptions, and targets before deployment.
 
 The initial input is:
 
@@ -233,11 +227,15 @@ The initial input is:
 type WorkspaceSubagentsDefinition = {
   readonly include?: readonly string[];
   readonly exclude?: readonly string[];
+  readonly forwardPrincipal?: boolean;
 };
 ```
 
 - `include` and `exclude` accept glob patterns, e.g. `agents/utilities/*`
 - `exclude` wins over `include`.
+- `forwardPrincipal` defaults to `false`. When enabled, generated remote-agent
+  calls carry the caller's current and initiating principal assertions, as with
+  `defineRemoteAgent({ forwardPrincipal: true })`.
 - A member never selects itself, even when a selector matches it.
 - An unmatched name or path is a build error. A glob that matches no members
   also fails by default: silently deploying an expected delegation surface with
@@ -248,13 +246,7 @@ type WorkspaceSubagentsDefinition = {
 
 ### Generated subagent names
 
-Each selected member's workspace-unique agent name becomes its model tool name:
-
-```text
-content-review       → content-review
-company-knowledge    → company-knowledge
-```
-
+Each selected member's workspace-unique agent name becomes its model tool name.
 The agent name remains the durable identity and the model-facing projection; no
 path encoding or generated disambiguation is needed.
 
@@ -286,9 +278,10 @@ export default defineDynamic({
 });
 ```
 
-The record keys are bare model tool names (`triage`, `company-knowledge`), not
-`specialists__triage`. A single-definition return retains its existing
-path-derived name; an empty record is the map equivalent of no subagents.
+The resolver path namespaces each record key into a model tool name:
+`agent/subagents/specialists.ts` maps `triage` to `specialists__triage`. A
+single-definition return retains its existing path-derived name; an empty record
+is the map equivalent of no subagents.
 
 Each map entry needs a durable internal identity: resolver node plus record
 key, such as `subagents/specialists#triage`. Session and turn selections persist
@@ -298,9 +291,9 @@ reset, and inspection resolve this durable identity without rerunning the
 resolver.
 
 Dynamic entries must not collide with authored tools/subagents or entries from
-another dynamic resolver. The initial map form permits only
-`defineRemoteAgent()` entries. Mapping local `defineAgent()` values would make
-several apparent agents share one subagent directory's resources, so local
+another dynamic resolver after name derivation. The initial map form permits
+only `defineRemoteAgent()` entries. Mapping local `defineAgent()` values would
+make several apparent agents share one subagent directory's resources, so local
 agents remain one-per-directory.
 
 `defineWorkspaceSubagents()` remains build-time/static, but can compile to the
@@ -326,7 +319,13 @@ compiled remote subagent entries
 subagent tool registry → remote session dispatch → callback / continuation
 ```
 
-The resulting tools have the normal remote-agent contract.
+The resulting tools have the normal remote-agent contract. For a Vercel
+workspace deployment, lowering binds every selected catalog entry to that
+member's generated service route. At runtime, the target URL is derived from
+the active deployment origin and that route, rather than from an authored fixed
+URL. The generated request can use the caller's ambient Vercel OIDC token, so
+members configured to accept same-project Vercel OIDC calls need no pairwise
+URL or service-credential configuration.
 
 `defineWorkspaceSubagents()` does not itself need to expose a URL, `auth`, or
 `headers` field. It describes a same-workspace target. Direct
@@ -354,15 +353,18 @@ prefixes.
 
 ### Authentication and forwarded identity
 
-Workspace membership does not relax remote-agent trust requirements. A
-workspace call is an HTTP call from one independently running service to
-another.
+On Vercel, members in the generated Services graph share a Vercel project. A
+receiving member that includes `vercelOidc()` accepts Vercel OIDC tokens minted
+for that project, allowing workspace service-to-service calls without
+configuring each sibling as an external OIDC subject.
 
-On Vercel, a workspace transport helper may select Vercel OIDC for the calling
-service. The receiving member still owns its normal eve-channel authentication
-policy. If the child needs to act as the end user, the caller must opt in to
-`forwardPrincipal`, and the receiver must explicitly trust the verified
-forwarding service through `eveChannel({ trustedForwarders })`.
+Forwarded principals remain separately opt-in. A caller enables
+`forwardPrincipal` only for workspace subagents that need user-scoped behavior;
+otherwise the child runs under the verified calling service identity. A
+receiving member enables `trustedForwarders` only when it is willing to accept
+principal assertions from authenticated same-project callers. In a workspace,
+that is deliberately project-wide trust rather than a guarantee that only a
+specific catalog member made the request.
 
 This preserves the split already established for `defineRemoteAgent()`:
 
@@ -372,10 +374,9 @@ This preserves the split already established for `defineRemoteAgent()`:
 - only principal metadata crosses the hop; per-user tokens and connections are
   resolved by the receiving deployment.
 
-A convenience helper must not silently make all workspace members trusted
-forwarders or bypass a member's channel policy. Being in the same repository or
-Vercel project is not a substitute for explicit receiver-side authentication
-configuration.
+A convenience helper must not bypass a member's channel policy. Being in the
+same repository or Vercel project is not a substitute for explicit
+receiver-side authentication and forwarded-principal configuration.
 
 ### Self-hosting
 
@@ -383,13 +384,9 @@ A workspace build outside Vercel can build all member outputs, but it does not
 create network routing or service identity. The operator remains responsible
 for process topology, DNS or ingress, TLS, and authentication.
 
-For self-hosting, workspace-subagent compilation requires an operator-provided
-workspace target resolver. It maps a workspace agent name to a base URL and
-supplies whatever outbound transport authentication the deployment
-uses. The concrete public configuration is intentionally unresolved; it must
-be deployment-level configuration rather than authored per calling agent so it
-can vary between Docker Compose, Kubernetes, Nomad, and separate hosts without
-baking secrets into the compiled catalog.
+For self-hosting, workspace-subagent compilation requires additional
+configuration to map a workspace agent name to a base URL and supply
+whatever outbound transport authentication the deployment uses.
 
 Conceptually:
 
@@ -402,10 +399,7 @@ type WorkspaceTargetResolver = (agent: { readonly name: string }) => {
 ```
 
 The resolver is resolved at runtime like function-valued remote-agent URLs and
-must not serialize credentials into durable state or the build artifact. A
-self-hosted workspace build should fail clearly when it contains workspace
-subagents but has no configured target resolver. It must not guess that an
-`/eve/agents/...` route exists.
+must not serialize credentials into durable state or the build artifact.
 
 ## Compatibility and boundaries
 
@@ -448,32 +442,3 @@ subagents but has no configured target resolver. It must not guess that an
 6. **Expose topology in inspection and diagnostics.** `eve info` and
    agent-info should show workspace members, workspace-expanded subagents, and
    unresolved configuration errors without exposing credential material.
-
-## Validation
-
-- Workspace discovery: exact paths, `*` and `**` patterns, nested members,
-  invalid segments, duplicate agent names, missing `agent/`, and child package
-  membership.
-- Build planning: member build scripts, plain eve members, Vercel services,
-  route uniqueness, route-prefix preservation, and per-member outputs.
-- Catalog: description required, deterministic order, source provenance, and
-  no runtime network lookup.
-- Dynamic subagent maps: single-entry compatibility, key-derived internal
-  identities, session/turn replacement and empty-map hiding, duplicate and
-  authored-name conflicts, durable dispatch and continuation, cancellation,
-  reset, and map-entry inspection.
-- `defineWorkspaceSubagents`: exact and glob selection, exclusion precedence,
-  self omission, name and path-glob matching, empty/unmatched selector
-  failures, agent-name preservation, stable tool order, and standalone
-  rejection.
-- Runtime: generated tools use remote dispatch, preserve output schemas,
-  callbacks, continuation, task receipts, cancellation, reset, tracing, and
-  token usage.
-- Auth: same-workspace service authentication remains enforced; forwarding is
-  rejected until both the sender and receiver opt in; no tokens or credentials
-  appear in the catalog or durable action state.
-- Deployment-shaped scenario: at least three nested members (foreman, task,
-  utility), distinct prefixes, a delegated call and callback, and a selector
-  that includes a future-facing category but excludes one task member.
-- Self-hosting: target-resolution success, missing resolver failure, invalid
-  resolved URL, and credentials kept runtime-only.
