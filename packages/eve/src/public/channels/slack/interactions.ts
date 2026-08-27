@@ -1,7 +1,7 @@
 /**
- * Slack `block_actions` + `view_submission` wire handling. It decodes and
- * authorizes framework HITL responses, opens freeform modals inline before
- * Slack's trigger expires, and forwards user-owned actions to `onInteraction`.
+ * Slack interactivity wire handling. It decodes and authorizes framework HITL
+ * responses, opens freeform modals inline before Slack's trigger expires, and
+ * forwards user-owned actions and shortcuts to their authored hooks.
  */
 
 import {
@@ -13,6 +13,7 @@ import {
 import { createLogger } from "#internal/logging.js";
 import {
   buildSlackBinding,
+  buildSlackWorkspaceHandle,
   resolveSlackBotToken,
   slackContinuationToken,
 } from "#public/channels/slack/api.js";
@@ -44,6 +45,8 @@ import type {
   SlackInteractionAction,
   SlackInteractionContext,
   SlackInteractionUser,
+  SlackShortcut,
+  SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
@@ -238,7 +241,8 @@ export interface InteractionHandlerDeps {
  * `view_submission` payloads to the freeform-answer flow, intercepts
  * "Type your answer" button clicks to open a modal, resolves
  * framework HITL clicks through `onInputResponse` to the parked session,
- * and forwards anything else to `config.onInteraction`.
+ * forwards other block actions to `config.onInteraction`, and forwards Slack
+ * shortcuts to `config.onShortcut`.
  */
 export async function handleInteractionPost(
   rawBody: string,
@@ -265,7 +269,20 @@ export async function handleInteractionPost(
     return handleViewSubmission(payload, ctx, deps);
   }
 
-  if (payload.kind !== "block_actions") return ack;
+  if (payload.kind === "unsupported") {
+    const shortcut = parseShortcutPayload(payload.raw);
+    if (shortcut !== null) {
+      dispatchShortcut(shortcut, readInstallationTeamId(payload.raw), ctx, deps);
+      return new Response(null, { status: 200 });
+    }
+    log.warn("unsupported Slack interaction payload ignored", { type: payload.type });
+    return ack;
+  }
+
+  if (payload.kind !== "block_actions") {
+    log.warn("unsupported Slack interaction payload ignored", { type: payload.kind });
+    return ack;
+  }
 
   const interaction = parseBlockActionsPayload(payload);
   if (!interaction) return ack;
@@ -346,6 +363,111 @@ export async function handleInteractionPost(
   }
 
   return ack;
+}
+
+/** Normalizes Slack's two shortcut payload variants. */
+export function parseShortcutPayload(raw: unknown): SlackShortcut | null {
+  if (!isObjectRecord(raw)) return null;
+  const type = raw.type;
+  if (type !== "message_action" && type !== "shortcut") return null;
+
+  const callbackId = readRequiredString(raw.callback_id);
+  const triggerId = readRequiredString(raw.trigger_id);
+  const userBlock = isObjectRecord(raw.user) ? raw.user : undefined;
+  const userId = readRequiredString(userBlock?.id);
+  if (callbackId === null || triggerId === null || userId === null) return null;
+
+  const teamBlock = isObjectRecord(raw.team) ? raw.team : undefined;
+  const teamId = readOptionalString(userBlock?.team_id) ?? readOptionalString(teamBlock?.id);
+  const user: SlackInteractionUser = {
+    id: userId,
+    username: readOptionalString(userBlock?.username),
+    name: readOptionalString(userBlock?.name),
+  };
+
+  if (type === "shortcut") {
+    return { type, callbackId, triggerId, user, teamId };
+  }
+
+  const channelBlock = isObjectRecord(raw.channel) ? raw.channel : undefined;
+  const messageBlock = isObjectRecord(raw.message) ? raw.message : undefined;
+  const channelId = readRequiredString(channelBlock?.id);
+  const messageTs = readRequiredString(messageBlock?.ts);
+  if (channelId === null || messageTs === null || messageBlock === undefined) return null;
+
+  return {
+    type,
+    callbackId,
+    triggerId,
+    user,
+    teamId,
+    channelId,
+    message: {
+      text: typeof messageBlock.text === "string" ? messageBlock.text : "",
+      ts: messageTs,
+      threadTs: readOptionalString(messageBlock.thread_ts),
+      userId: readOptionalString(messageBlock.user),
+    },
+    responseUrl: readOptionalString(raw.response_url),
+  };
+}
+
+function readRequiredString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function dispatchShortcut(
+  shortcut: SlackShortcut,
+  installationTeamId: string | undefined,
+  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
+  deps: InteractionHandlerDeps,
+): void {
+  const onShortcut = deps.config.onShortcut;
+  if (onShortcut === undefined) {
+    log.warn("Slack shortcut ignored because onShortcut is not configured", {
+      type: shortcut.type,
+    });
+    return;
+  }
+
+  const shortcutCtx: SlackShortcutContext = buildShortcutContext({
+    config: deps.config,
+    installationTeamId,
+    teamId: shortcut.teamId,
+  });
+  dispatchInteractionHook(() => onShortcut(shortcut, shortcutCtx), ctx, "shortcut handler failed");
+}
+
+function buildShortcutContext(input: {
+  readonly config: SlackChannelConfig;
+  readonly installationTeamId: string | undefined;
+  readonly teamId: string | undefined;
+}): SlackShortcutContext {
+  return {
+    slack: buildSlackWorkspaceHandle({
+      botToken: input.config.credentials?.botToken,
+      installationTeamId: input.installationTeamId,
+      teamId: input.teamId,
+    }),
+  };
+}
+
+function dispatchInteractionHook(
+  handler: () => void | Promise<void>,
+  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
+  failureMessage: string,
+): void {
+  ctx.waitUntil(
+    Promise.resolve()
+      .then(handler)
+      .catch((error: unknown) => {
+        log.error(failureMessage, { error });
+      }),
+  );
 }
 
 async function dispatchBlockInputResponses(input: {
