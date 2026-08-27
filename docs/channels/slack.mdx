@@ -158,6 +158,8 @@ Only the first available handler runs. A message hook returning `null` drops the
 
 Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
 
+When a shortcut opens a custom modal, handle its submission with `onViewSubmission(submission, ctx)`. The submission contains the callback ID, private metadata, submitting user, workspace, and flattened Block Kit values. Text inputs use `value`; single-select inputs use `selectedOptionValue`. eve-owned HITL modals continue through `onInputResponse` instead.
+
 The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
 When a Slack message shares another Slack message, eve extracts the forwarded message body from Slack's message-unfurl attachment and includes it in `<content>`. The original top-level comment, when present, remains alongside the forwarded content.
@@ -366,7 +368,7 @@ const session = await ctx.resolveSession({ target });
 
 ### Slack API calls outside a handler
 
-Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside an `events` handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
+Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, `onViewSubmission`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside an `events` handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
 messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 

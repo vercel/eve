@@ -3307,6 +3307,83 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
   });
 
+  it("delivers custom modal submissions to onViewSubmission", async () => {
+    const onViewSubmission = vi.fn();
+    const channel = slackChannel({ onViewSubmission });
+
+    const { response, waitUntil } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "view_submission",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+        view: {
+          callback_id: "create_ticket",
+          private_metadata: '{"channelId":"C01"}',
+          state: {
+            values: {
+              title: { title_input: { type: "plain_text_input", value: "Broken deploy" } },
+              priority: {
+                priority_select: {
+                  type: "static_select",
+                  selected_option: { value: "1", text: { type: "plain_text", text: "P1" } },
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(onViewSubmission).toHaveBeenCalledWith(
+      {
+        callbackId: "create_ticket",
+        privateMetadata: '{"channelId":"C01"}',
+        teamId: "T_ACTOR",
+        user: { id: "U01", username: "ada", name: undefined },
+        values: [
+          {
+            actionId: "title_input",
+            blockId: "title",
+            type: "plain_text_input",
+            value: "Broken deploy",
+            selectedOptionValue: undefined,
+          },
+          {
+            actionId: "priority_select",
+            blockId: "priority",
+            type: "static_select",
+            value: undefined,
+            selectedOptionValue: "1",
+          },
+        ],
+      },
+      expect.objectContaining({ slack: expect.any(Object) }),
+    );
+  });
+
+  it("keeps custom modal submissions out of the eve-owned HITL hook", async () => {
+    const onInputResponse = vi.fn();
+    const channel = slackChannel({ onInputResponse });
+
+    const { response, send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "view_submission",
+        team: { id: "T01" },
+        user: { id: "U01" },
+        view: { callback_id: "custom_modal", state: { values: {} } },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(onInputResponse).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("resumes freeform modal answers with the submitting Slack user auth", async () => {
     const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
     const channel = slackChannel({ credentials: { botToken } });

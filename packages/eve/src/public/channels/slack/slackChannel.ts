@@ -396,11 +396,14 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
 /** Interaction-scoped context handed to `slackChannel({ onInteraction })`. */
 export interface SlackInteractionContext extends SlackContext, SlackSessionOperations {}
 
-/** Workspace-scoped context handed to `slackChannel({ onShortcut })`. */
+/** Workspace-scoped context handed to Slack shortcut and modal hooks. */
 export interface SlackShortcutContext {
   /** Slack workspace identity and raw Web API escape hatch. */
   readonly slack: SlackWorkspaceHandle;
 }
+
+/** Workspace-scoped context handed to `slackChannel({ onViewSubmission })`. */
+export type SlackViewSubmissionContext = SlackShortcutContext;
 
 /** Context handed to `slackChannel({ onInputResponse })` before eve resumes HITL. */
 export interface SlackInputResponseContext extends SlackContext {
@@ -475,6 +478,24 @@ export type SlackShortcut =
       readonly user: SlackInteractionUser;
       readonly teamId?: string;
     };
+
+/** One input submitted from a custom Slack modal. */
+export interface SlackViewSubmissionValue {
+  readonly actionId: string;
+  readonly blockId: string;
+  readonly type?: string;
+  readonly value?: string;
+  readonly selectedOptionValue?: string;
+}
+
+/** Decoded submission from a custom Slack modal. */
+export interface SlackViewSubmission {
+  readonly callbackId: string;
+  readonly privateMetadata?: string;
+  readonly values: readonly SlackViewSubmissionValue[];
+  readonly user: SlackInteractionUser;
+  readonly teamId?: string;
+}
 
 /** Decoded eve-owned HITL response submitted through Slack interactivity. */
 export type SlackInputResponseSubmission =
@@ -693,6 +714,19 @@ export interface SlackChannelConfig {
    * `waitUntil()`. Errors are caught and logged.
    */
   onShortcut?(shortcut: SlackShortcut, ctx: SlackShortcutContext): void | Promise<void>;
+
+  /**
+   * Handles submissions from custom Slack modals not owned by eve's HITL
+   * pipeline. The submission includes the modal callback ID, private metadata,
+   * actor, workspace, and flattened Block Kit input values.
+   *
+   * eve returns an empty `200 OK` immediately and keeps the handler alive
+   * through `waitUntil()`. Errors are caught and logged.
+   */
+  onViewSubmission?(
+    submission: SlackViewSubmission,
+    ctx: SlackViewSubmissionContext,
+  ): void | Promise<void>;
 
   /**
    * Authorizes an eve-owned HITL answer before the pending input resolves.

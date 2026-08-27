@@ -47,6 +47,8 @@ import type {
   SlackInteractionUser,
   SlackShortcut,
   SlackShortcutContext,
+  SlackViewSubmission,
+  SlackViewSubmissionContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
@@ -266,7 +268,11 @@ export async function handleInteractionPost(
   }
 
   if (payload.kind === "view_submission") {
-    return handleViewSubmission(payload, ctx, deps);
+    if (payload.callbackId === HITL_FREEFORM_MODAL_CALLBACK_ID) {
+      return handleViewSubmission(payload, ctx, deps);
+    }
+    dispatchCustomViewSubmission(payload, ctx, deps);
+    return new Response(null, { status: 200 });
   }
 
   if (payload.kind === "unsupported") {
@@ -440,6 +446,54 @@ function dispatchShortcut(
     teamId: shortcut.teamId,
   });
   dispatchInteractionHook(() => onShortcut(shortcut, shortcutCtx), ctx, "shortcut handler failed");
+}
+
+function dispatchCustomViewSubmission(
+  payload: SlackViewSubmissionPayload,
+  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
+  deps: InteractionHandlerDeps,
+): void {
+  const onViewSubmission = deps.config.onViewSubmission;
+  if (onViewSubmission === undefined) {
+    log.warn("custom Slack view submission ignored because onViewSubmission is not configured", {
+      callbackId: payload.callbackId,
+    });
+    return;
+  }
+
+  const callbackId = readRequiredString(payload.callbackId);
+  if (callbackId === null) {
+    log.warn("custom Slack view submission ignored because callback_id is missing");
+    return;
+  }
+
+  const submission: SlackViewSubmission = {
+    callbackId,
+    privateMetadata: payload.privateMetadata,
+    values: (payload.values ?? []).map((value) => ({
+      actionId: value.actionId,
+      blockId: value.blockId,
+      type: value.type,
+      value: value.value,
+      selectedOptionValue: value.selectedOptionValue,
+    })),
+    user: {
+      id: payload.userId,
+      username: payload.user?.username,
+      name: payload.user?.name,
+    },
+    teamId: payload.user?.teamId ?? payload.teamId,
+  };
+  const submissionCtx: SlackViewSubmissionContext = buildShortcutContext({
+    config: deps.config,
+    installationTeamId: readInstallationTeamId(payload.raw),
+    teamId: submission.teamId,
+  });
+  dispatchInteractionHook(
+    () => onViewSubmission(submission, submissionCtx),
+    ctx,
+    "custom view submission handler failed",
+  );
 }
 
 function buildShortcutContext(input: {
