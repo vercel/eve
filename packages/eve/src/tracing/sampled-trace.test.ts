@@ -62,4 +62,16 @@ describe("resolveTracePolicyDecision", () => {
       ),
     ).toEqual({ action: "drop" });
   });
+
+  it.each([
+    ["public", true],
+    ["private", false],
+    ["unknown", false],
+  ] as const)("emits the default %s trace with the expected content", (audience, content) => {
+    expect(resolveTracePolicy(undefined, { audience })).toEqual({
+      action: "record",
+      recordInputs: content,
+      recordOutputs: content,
+    });
+  });
 });

@@ -800,7 +800,7 @@ describe("createAgentOtelInstrumentation", () => {
   });
 
   it.each(["private", "unknown"] as const)(
-    "does not record %s conversation traces by default",
+    "records %s conversation traces by default",
     async (audience) => {
       const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
 
@@ -814,7 +814,7 @@ describe("createAgentOtelInstrumentation", () => {
       });
       await runtime.provider.forceFlush();
 
-      expect(runtime.exporter.getFinishedSpans()).toEqual([]);
+      expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(1);
     },
   );
 

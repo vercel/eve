@@ -34,12 +34,17 @@ export function resolveTracePolicy(
   },
 ): InstrumentationDecision {
   try {
+    const decision = policy?.({
+      agentName: trace.agentName,
+      audience: trace.audience,
+      channelType: trace.channelType,
+    });
     return resolveTracePolicyDecision(
-      policy?.({
-        agentName: trace.agentName,
-        audience: trace.audience,
-        channelType: trace.channelType,
-      }) ?? trace.audience === "public",
+      decision ?? {
+        emit: true,
+        recordInputs: trace.audience === "public",
+        recordOutputs: trace.audience === "public",
+      },
       trace.audience,
     );
   } catch {

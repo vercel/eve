@@ -11295,7 +11295,7 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("does not emit hosted unknown model telemetry", async () => {
+    it("emits hosted unknown model telemetry without content", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -11311,7 +11311,10 @@ describe("createToolLoopHarness", () => {
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
       };
-      expect(agentCall.telemetry).toBeUndefined();
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: false,
+        recordOutputs: false,
+      });
     });
 
     it("keeps unknown model telemetry content in a local development worker", async () => {

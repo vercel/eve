@@ -141,14 +141,18 @@ export default agentRuns({
 The default authored and production head policy is equivalent to:
 
 ```ts
-({ audience }) => audience === "public";
+({ audience }) => ({
+  emit: true,
+  recordInputs: audience === "public",
+  recordOutputs: audience === "public",
+});
 ```
 
 | Audience  | Trace created by default | Content when admitted by a custom trace policy |
 | --------- | ------------------------ | ---------------------------------------------- |
-| `public`  | Yes                      | Unchanged unless an export policy redacts it   |
-| `private` | No                       | Unchanged unless an export policy redacts it   |
-| `unknown` | No                       | Unchanged unless an export policy redacts it   |
+| `public`  | Yes                      | Yes                                            |
+| `private` | Yes                      | No                                             |
+| `unknown` | Yes                      | No                                             |
 
 The default policy for local tracing for `eve dev` is equivalent to:
 

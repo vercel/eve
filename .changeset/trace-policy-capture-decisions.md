@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Allow `tracePolicy` to explicitly disable emission or select directional content capture while preserving existing boolean policies, lifecycle delivery, and per-delivery audience ceilings.
+Emit traces for every audience by default while recording content only for public conversations. `tracePolicy` can explicitly disable emission or select directional content capture, and existing boolean policies retain their current behavior.
