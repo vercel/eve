@@ -8,6 +8,7 @@ import {
   type SessionAuthContext,
   SessionIdKey,
   SessionKey,
+  ScheduleIdKey,
 } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 
@@ -176,6 +177,26 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.require(AuthKey)).toBeNull();
+  });
+
+  it("inherits schedule provenance independently from run auth", () => {
+    const scope = new ContextContainer();
+    scope.set(ScheduleIdKey, "dynamic-tasks");
+
+    const ctx = contextStorage.run(scope, () =>
+      buildRunContext({
+        bundle: createMinimalBundle(),
+        run: {
+          auth: testAuth,
+          adapter: { kind: "channel:slack" },
+          input: { message: "run the scheduled task" },
+          mode: "conversation",
+        },
+      }),
+    );
+
+    expect(ctx.require(AuthKey)).toEqual(testAuth);
+    expect(ctx.require(ScheduleIdKey)).toBe("dynamic-tasks");
   });
 
   it("does not invent a continuation for an ID-only run", () => {

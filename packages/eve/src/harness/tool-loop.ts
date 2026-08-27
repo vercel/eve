@@ -19,7 +19,6 @@ import {
   type TypedToolError,
   type TypedToolResult,
 } from "ai";
-import { isScheduleAppAuth } from "#channel/schedule-auth.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { resolveProviderHeaders } from "#internal/gateway.js";
@@ -37,6 +36,7 @@ import {
   ChannelInstrumentationKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  ScheduleIdKey,
   SessionCallbackKey,
   SessionTraceSeedKey,
   TurnTaskDeliveryKey,
@@ -110,6 +110,7 @@ import {
   resolveCompactionModel,
   shouldCompact,
 } from "#harness/compaction.js";
+import { createCurrentMessages } from "#harness/current-messages.js";
 import {
   accumulateTurnUsage,
   getTurnUsageState,
@@ -219,16 +220,8 @@ import {
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import {
-  CONDITIONAL_DELIVERY_INSTRUCTION,
-  EMPTY_DELIVERY_SENTINEL,
-  hasEmptyDeliverySentinel,
-} from "#shared/empty-delivery.js";
-import {
-  TASK_DELIVERY_INITIATING_INSTRUCTION,
-  TASK_DELIVERY_PENDING_INSTRUCTION,
-  TASK_DELIVERY_SETTLED_INSTRUCTION,
-} from "#tasks/delivery-context.js";
+import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
+import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
 import {
   ensureOtelIntegration,
@@ -1348,27 +1341,15 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
     const approvedTools = getApprovedTools(session);
 
-    const taskDeliveryPhase = ctx?.get(TurnTaskDeliveryKey);
-    const deliveryInstruction =
-      // A structured-output run must always produce its declared result.
-      session.outputSchema !== undefined ||
-      // Eligibility requires durable framework provenance from the active context.
-      ctx === undefined ||
-      // A child must always return its result to its parent, even when framework-triggered.
-      ctx.get(ParentSessionKey) !== undefined
-        ? undefined
-        : taskDeliveryPhase === "pending"
-          ? TASK_DELIVERY_PENDING_INSTRUCTION
-          : taskDeliveryPhase === "settled"
-            ? TASK_DELIVERY_SETTLED_INSTRUCTION
-            : // A schedule-initiated root turn may have nothing worth delivering.
-              isScheduleAppAuth(ctx.get(AuthKey))
-              ? CONDITIONAL_DELIVERY_INSTRUCTION
-              : taskDeliveryPhase === "initiating"
-                ? TASK_DELIVERY_INITIATING_INSTRUCTION
-                : undefined;
-    const emptyDeliveryEnabled =
-      deliveryInstruction !== undefined && taskDeliveryPhase !== "initiating";
+    const isFirstTurn = emissionState.sequence === 0;
+    const hasScheduleProvenance = isFirstTurn && ctx?.get(ScheduleIdKey) !== undefined;
+    const deliveryPolicy = resolveDeliveryPolicy({
+      hasScheduleProvenance,
+      hasOutputSchema: session.outputSchema !== undefined,
+      isChild: ctx?.get(ParentSessionKey) !== undefined,
+      isFirstTurn,
+      taskDeliveryPhase: ctx?.get(TurnTaskDeliveryKey),
+    });
 
     // --- Execute via ToolLoopAgent ------------------------------------------
 
@@ -1377,48 +1358,37 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
      * `console.error(error)` handler inside `streamText`. Errors are
      * handled by the harness catch block and emitted as stream events.
      */
-    // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the
-    // model call only. The result is transient — `messages` itself
-    // remains ref-only so it can flow into `session.history` without
-    // bloating every future step boundary.
-    const hydratedMessages = await hydrateSandboxAttachments(projectedMessages);
-
-    // AI SDK rejects role:"system" in `messages` — route system entries
-    // from durable history to `instructions` instead.
-    const systemMessages: SystemModelMessage[] = [];
-    const nonSystemMessages: ModelMessage[] = [];
-    for (const entry of hydratedMessages) {
-      if (entry.role === "system") {
-        systemMessages.push(entry);
-      } else {
-        nonSystemMessages.push(entry);
-      }
-    }
+    // AI SDK rejects role:"system" in `messages`; currentMessages also keeps
+    // later turn-local context out of the stable system prompt cache prefix.
+    // Insert that context before the current delivery so the triggering user
+    // message remains the model's latest request.
+    const currentMessages = createCurrentMessages(projectedMessages, {
+      currentTurnMessages: preparedTurnInput,
+    });
     if (ctx !== undefined) {
-      systemMessages.push(...buildDynamicInstructionMessages(ctx));
+      currentMessages.addSystem(buildDynamicInstructionMessages(ctx));
       const skillAnnouncement = ctx.get(PendingSkillAnnouncementKey);
       if (skillAnnouncement !== undefined && skillAnnouncement.length > 0) {
-        systemMessages.push({ role: "system", content: skillAnnouncement });
+        currentMessages.add(emissionState.sequence, skillAnnouncement);
       }
       const taskState = ctx.get(TurnTaskStateKey);
       if (taskState !== undefined) {
-        systemMessages.push({ role: "system", content: taskState });
+        currentMessages.add(emissionState.sequence, taskState);
       }
     }
-    if (deliveryInstruction !== undefined) {
-      systemMessages.push({
-        role: "system",
-        content: deliveryInstruction,
-      });
+    if (deliveryPolicy.instruction !== undefined) {
+      currentMessages.add(emissionState.sequence, deliveryPolicy.instruction);
     }
     const pendingApprovals = renderPendingApprovalsInstruction(
       getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
     );
     if (pendingApprovals !== undefined) {
-      systemMessages.push({ role: "system", content: pendingApprovals });
+      currentMessages.add(emissionState.sequence, pendingApprovals, { cacheFriendly: false });
     }
 
-    const modelMessages = nonSystemMessages;
+    // Hydrate `eve-sandbox:` ref FileParts into inline bytes for the model call
+    // only. Session history remains ref-only across future step boundaries.
+    const modelMessages = await hydrateSandboxAttachments(currentMessages.nonSystemMessages);
 
     const prepareModelCallInput = (extraSystemNote?: string) => {
       const extraSystemEntry: SystemModelMessage[] = extraSystemNote
@@ -1428,8 +1398,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         ? [{ role: "system" as const, content: session.agent.system }]
         : [];
       const rawInstructions =
-        systemMessages.length > 0 || extraSystemEntry.length > 0
-          ? [...extraSystemEntry, ...baseSystemEntry, ...systemMessages]
+        currentMessages.systemMessages.length > 0 || extraSystemEntry.length > 0
+          ? [...extraSystemEntry, ...baseSystemEntry, ...currentMessages.systemMessages]
           : undefined;
       const markedInstructions =
         rawInstructions !== undefined && marker
@@ -1493,7 +1463,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // call's wire request.
       const callMessages = opts.trailingUserNote
         ? [...modelMessages, { role: "user" as const, content: opts.trailingUserNote }]
-        : modelMessages;
+        : [...modelMessages];
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
@@ -1826,7 +1796,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             }),
           (current) =>
             attemptEmptyResponseRecovery({
-              emptyDeliveryEnabled,
+              emptyDeliveryEnabled: deliveryPolicy.allowsEmptyDelivery,
               error: current.error,
               retryCallOptions: current.retryCallOptions,
               runOneModelCall,
