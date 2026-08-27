@@ -16,6 +16,7 @@ import type {
   Runtime,
   SessionCommand,
   SessionCommandResult,
+  SessionTraceContext,
 } from "#channel/types.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -462,17 +463,12 @@ function allocateSessionTraceSeed(input: {
   readonly agentName?: string;
   readonly audience: ReturnType<typeof normalizeChannelAudience>;
   readonly channelType?: string;
-  readonly parentTraceContext?: {
-    readonly traceId: string;
-    readonly spanId: string;
-    readonly traceFlags: number;
-  };
+  readonly parentTraceContext?: SessionTraceContext;
 }): SessionTraceSeed | undefined {
   if (input.parentTraceContext !== undefined) {
-    const decision = resolveTracePolicyDecision(
-      isSampledTrace(input.parentTraceContext),
-      input.audience,
-    );
+    const decision =
+      input.parentTraceContext.decision ??
+      resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.audience);
     return {
       decision,
       spanId: input.parentTraceContext.spanId,

@@ -128,7 +128,7 @@ function hooksForContext(
   const decision = ctx.get(SessionTraceSeedKey)?.decision;
   return decision === undefined
     ? instrumentationHooksForAudience(hooks, audience)
-    : instrumentationHooksForDecision(hooks, decision);
+    : instrumentationHooksForDecision(hooks, decision, audience);
 }
 
 function projectDeliveryInput(payload: DeliverPayload) {

@@ -1,5 +1,5 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import {
   DROP_INSTRUMENTATION,
   type InstrumentationDecision,

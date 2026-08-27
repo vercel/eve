@@ -50,6 +50,11 @@ interface OtelOptions {
 declare function otel(options?: OtelOptions): OtelDeclaration;
 ```
 
+The trace decision is a process-wide ceiling. Each delivery is intersected with
+its own audience classification, and destination capture settings may narrow it
+further. A boolean return keeps the existing behavior: `false` drops trace
+production, while `true` records content only where the audience ceiling permits.
+
 Agent Runs and local traces expose the managed export policy:
 
 ```ts

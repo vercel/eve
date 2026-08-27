@@ -3,27 +3,32 @@ import {
   withInstrumentationDecision,
   withoutInstrumentationContent,
 } from "#harness/instrumentation/content.js";
-import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import {
+  applyAudienceCeiling,
+  shouldCaptureInstrumentationContent,
+} from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-
-/** Hosted instrumentation records conversation content only for known-public channels. */
-export function shouldCaptureInstrumentationContent(audience: ChannelAudience): boolean {
-  if (audience === "public") return true;
-  return audience === "unknown" && isEveDevEnvironment();
-}
+export { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 
 export function instrumentationHooksForDecision(
   hooks: InstrumentationHooks | undefined,
   decision: InstrumentationDecision,
+  audience: ChannelAudience,
 ): InstrumentationHooks | undefined {
-  if (hooks === undefined || decision.action === "drop") return undefined;
-  if (!hooks.capturesContent || (decision.recordInputs && decision.recordOutputs)) {
+  if (decision.action === "drop") return instrumentationHooksForAudience(hooks, audience);
+  const effective = applyAudienceCeiling(decision, audience);
+  if (
+    effective.action === "drop" ||
+    hooks === undefined ||
+    !hooks.capturesContent ||
+    (effective.recordInputs && effective.recordOutputs)
+  ) {
     return hooks;
   }
   return {
-    capturesContent: decision.recordInputs || decision.recordOutputs,
-    publish: (event) => hooks.publish(withInstrumentationDecision(event, decision)),
+    capturesContent: effective.recordInputs || effective.recordOutputs,
+    publish: (event) => hooks.publish(withInstrumentationDecision(event, effective)),
   };
 }
 

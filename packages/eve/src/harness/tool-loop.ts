@@ -188,6 +188,7 @@ import {
 import { getInstrumentationConfig } from "#harness/instrumentation/config.js";
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import { applyAudienceCeiling } from "#shared/instrumentation-content.js";
 import type { OtelHarnessSettings } from "#tracing/otel-declaration.js";
 import {
   isSampledTrace,
@@ -366,6 +367,8 @@ function enrichTelemetry(
     includeRuntimeContext[key] = true;
   }
 
+  const effectiveDecision =
+    decision === undefined ? undefined : applyAudienceCeiling(decision, channelAudience);
   return {
     functionId: settings?.functionId ?? agentName,
     includeRuntimeContext,
@@ -377,13 +380,13 @@ function enrichTelemetry(
         : [bridgeIntegration, ...getRegisteredTelemetryIntegrations()],
     isEnabled: true,
     recordInputs:
-      (decision?.action === "record"
-        ? decision.recordInputs
+      (effectiveDecision?.action === "record"
+        ? effectiveDecision.recordInputs
         : shouldCaptureInstrumentationContent(channelAudience)) &&
       (settings?.recordInputs ?? false),
     recordOutputs:
-      (decision?.action === "record"
-        ? decision.recordOutputs
+      (effectiveDecision?.action === "record"
+        ? effectiveDecision.recordOutputs
         : shouldCaptureInstrumentationContent(channelAudience)) &&
       (settings?.recordOutputs ?? false),
   };
@@ -696,7 +699,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const instrumentationHooks =
       instrumentationDecision === undefined
         ? instrumentationHooksForAudience(config.instrumentation?.hooks, channelAudience)
-        : instrumentationHooksForDecision(config.instrumentation?.hooks, instrumentationDecision);
+        : instrumentationHooksForDecision(
+            config.instrumentation?.hooks,
+            instrumentationDecision,
+            channelAudience,
+          );
     const parent = store?.get(ParentSessionKey);
     const channel = store?.get(ChannelKey);
     const callback = store?.get(SessionCallbackKey);

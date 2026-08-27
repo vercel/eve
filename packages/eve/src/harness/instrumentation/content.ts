@@ -10,6 +10,13 @@ export function withoutInstrumentationContent(event: InstrumentationEvent): Inst
   });
 }
 
+/**
+ * Projects lifecycle content by direction.
+ *
+ * Inputs are data entering the agent: delivery/action/tool/model starts and a
+ * resolved user's response. Outputs are data produced by the agent: requests
+ * for user input, action/tool/model terminals, provider metadata, and errors.
+ */
 export function withInstrumentationDecision(
   event: InstrumentationEvent,
   decision: Extract<InstrumentationDecision, { action: "record" }>,

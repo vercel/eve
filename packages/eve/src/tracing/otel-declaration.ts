@@ -63,7 +63,9 @@ export interface OtelOptions {
    * Process-wide trace and content decision. Boolean returns preserve the
    * existing audience-aware behavior; explicit decisions can drop a trace or
    * retain metadata, inputs, outputs, or all content. Defaults to retaining
-   * public conversations with content. A thrown error rejects the trace.
+   * public conversations with content. The result is a capture ceiling:
+   * per-delivery audience and destination settings can only narrow it. A thrown
+   * error rejects trace production without silencing lifecycle providers.
    */
   readonly tracePolicy?: TraceCapturePolicy;
   /**
