@@ -1,4 +1,5 @@
 import { defineEval } from "eve/evals";
+import { satisfies } from "eve/evals/expect";
 
 /**
  * Runs against the classifier directly — no Foreman in the loop. This is the
@@ -16,13 +17,17 @@ export default defineEval({
         "from /api/export.",
     );
     t.succeeded();
-    t.replySatisfies("classified as an actionable bug", (reply) => {
-      const parsed = JSON.parse(reply) as {
-        type: string;
-        actionable: boolean;
-        needs_clarification: boolean;
-      };
-      return parsed.type === "bug" && parsed.actionable && !parsed.needs_clarification;
-    });
+    t.check(
+      t.reply,
+      satisfies((reply: string | null) => {
+        if (reply === null) return false;
+        const parsed = JSON.parse(reply) as {
+          type: string;
+          actionable: boolean;
+          needs_clarification: boolean;
+        };
+        return parsed.type === "bug" && parsed.actionable && !parsed.needs_clarification;
+      }, "classified as an actionable bug"),
+    );
   },
 });

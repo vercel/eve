@@ -1,3 +1,1 @@
-import { defineGrepTool } from "eve/tools";
-
-export default defineGrepTool();
+export { default } from "eve/tools/grep";

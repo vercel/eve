@@ -1,7 +1,7 @@
 // PROPOSED API — see research/local-agents.md. `defineLocalAgent` does not
 // exist yet; this file illustrates the authoring experience.
 import { defineLocalAgent } from "eve";
-import classifier from "#agents/classifier/agent/agent.js";
+import classifier from "#agents/classifier/agent/agent.ts";
 
 /**
  * Mounts the classifier station from this workspace. The import is the address:

@@ -1,3 +1,1 @@
-import { defineGlobTool } from "eve/tools";
-
-export default defineGlobTool();
+export { default } from "eve/tools/glob";

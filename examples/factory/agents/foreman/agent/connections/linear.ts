@@ -1,5 +1,5 @@
 import { defineMcpClientConnection } from "eve/connections";
-import type { ApprovalContext, ApprovalStatus } from "eve/tools";
+import type { ApprovalContext, ApprovalStatus } from "eve/tools/approval";
 import { linearAuth } from "#lib/constants.js";
 import { isAutonomous } from "#lib/trust.js";
 

@@ -1,7 +1,7 @@
 // PROPOSED API — see research/local-agents.md. `defineLocalAgent` does not
 // exist yet; this file illustrates the authoring experience.
 import { defineLocalAgent } from "eve";
-import reviewer from "#agents/reviewer/agent/agent.js";
+import reviewer from "#agents/reviewer/agent/agent.ts";
 
 /**
  * Mounts the reviewer station from this workspace. The import is the address:

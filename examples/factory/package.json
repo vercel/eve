@@ -9,6 +9,15 @@
     "#agents/*": "./agents/*",
     "#lib/*": "./lib/*"
   },
+  "scripts": {
+    "build": "pnpm run build:artifacts && pnpm run build:foreman",
+    "build:artifacts": "pnpm --filter @factory/artifacts build",
+    "build:foreman": "set -a; [ ! -f .env ] || . ./.env; set +a; cd agents/foreman && eve build --skip-sandbox-prewarm",
+    "dev:foreman": "set -a; [ ! -f .env ] || . ./.env; set +a; cd agents/foreman && eve dev",
+    "eval:classifier": "set -a; [ ! -f .env ] || . ./.env; set +a; cd agents/classifier && eve eval",
+    "eval:foreman": "set -a; [ ! -f .env ] || . ./.env; set +a; cd agents/foreman && eve eval",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
   "dependencies": {
     "@factory/artifacts": "workspace:*",
     "@github-tools/eve-extension": "^0.3.2",

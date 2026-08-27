@@ -1,4 +1,4 @@
-import type { ApprovalContext, ApprovalStatus } from "eve/tools";
+import type { ApprovalContext, ApprovalStatus } from "eve/tools/approval";
 import { intakeIssueNumber, isAutonomous, isScheduleAppAuth, isTrusted } from "../trust.js";
 
 /**

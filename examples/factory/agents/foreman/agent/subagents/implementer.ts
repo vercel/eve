@@ -1,7 +1,7 @@
 // PROPOSED API — see research/local-agents.md. `defineLocalAgent` does not
 // exist yet; this file illustrates the authoring experience.
 import { defineLocalAgent } from "eve";
-import implementer from "#agents/implementer/agent/agent.js";
+import implementer from "#agents/implementer/agent/agent.ts";
 
 /**
  * Mounts the implementer station from this workspace. The import is the address:
