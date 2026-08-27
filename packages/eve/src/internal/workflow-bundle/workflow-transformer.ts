@@ -87,7 +87,7 @@ export async function transformWorkflowDirectives(input: {
   /**
    * Workflow function names whose bundled id should be emitted without
    * the package version stamp. See `STABLE_WORKFLOW_NAMES` in
-   * `workflow-runtime.ts` for the canonical set eve itself uses.
+   * `durable-contract-registry.ts` for the canonical set eve itself uses.
    */
   stableWorkflowNames?: ReadonlySet<string>;
 }): Promise<{

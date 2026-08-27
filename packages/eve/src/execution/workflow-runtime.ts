@@ -29,7 +29,6 @@ import {
   buildSubagentRootAttributes,
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
-import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
@@ -59,35 +58,14 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { evaluateTracePolicy } from "#tracing/sampled-trace.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { DURABLE_WORKFLOW_CONTRACTS } from "#internal/durable-contract-registry.js";
 
-const WORKFLOW_ENTRY_NAME = "workflowEntry";
-const TURN_WORKFLOW_NAME = "turnWorkflow";
-const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
-const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
-const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
+export { STABLE_WORKFLOW_NAMES } from "#internal/durable-contract-registry.js";
+
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
-
-/**
- * Workflow function names whose bundled id is stable across deployments
- * (no `@<pkg.version>` stamp). The bundler reads this set when emitting
- * the workflow id so cross-deployment routing — `start(ref, args, {
- * deploymentId: "latest" })` — finds the same workflow on a newer
- * deployment even when the eve version differs.
- *
- * Both halves of the contract (bundler output and runtime reference
- * template) read this single set so they cannot drift.
- */
-export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
-  WORKFLOW_ENTRY_NAME,
-  TURN_WORKFLOW_NAME,
-  SESSION_TIMEOUT_WORKFLOW_NAME,
-  TASK_RUN_WORKFLOW_NAME,
-]);
-
-const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
 const log = createLogger("execution.workflow-runtime");
 
@@ -102,7 +80,7 @@ interface WorkflowHookRecord {
  * deployments without rewriting the registry key.
  */
 export const workflowEntryReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_ENTRY_NAME}`,
+  workflowId: DURABLE_WORKFLOW_CONTRACTS.workflowEntry.workflowId,
 };
 
 /**
@@ -113,17 +91,17 @@ export const workflowEntryReference = {
  * version differs from the caller's deployment.
  */
 export const turnWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
+  workflowId: DURABLE_WORKFLOW_CONTRACTS.turnWorkflow.workflowId,
 };
 
 /** Stable workflow reference for session deadline timers. */
 export const sessionTimeoutWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${SESSION_TIMEOUT_WORKFLOW_NAME}`,
+  workflowId: DURABLE_WORKFLOW_CONTRACTS.sessionTimeoutWorkflow.workflowId,
 };
 
 /** Stable workflow reference for durable task runs (`experimental.tasks`). */
 export const taskRunWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
+  workflowId: DURABLE_WORKFLOW_CONTRACTS.taskRunWorkflow.workflowId,
 };
 
 /**
