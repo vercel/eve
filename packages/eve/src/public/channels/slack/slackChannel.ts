@@ -402,6 +402,12 @@ export interface SlackShortcutContext {
   readonly slack: SlackWorkspaceHandle;
 }
 
+/** Workspace-scoped context handed to `slackChannel({ onSlashCommand })`. */
+export interface SlackSlashCommandContext {
+  /** Slack workspace identity and raw Web API escape hatch. */
+  readonly slack: SlackWorkspaceHandle;
+}
+
 /** Context handed to `slackChannel({ onInputResponse })` before eve resumes HITL. */
 export interface SlackInputResponseContext extends SlackContext {
   /** Auth derived from the Slack user who submitted the signed interaction. */
@@ -446,6 +452,21 @@ export interface SlackInteractionUser {
   readonly username?: string;
   /** Legacy display handle, kept for older workspaces. */
   readonly name?: string;
+}
+
+/** Decoded Slack slash command invocation. */
+export interface SlackSlashCommand {
+  /** Configured command name, including its leading slash. */
+  readonly command: string;
+  readonly text: string;
+  readonly user: SlackInteractionUser;
+  readonly teamId?: string;
+  readonly channelId: string;
+  readonly channelName?: string;
+  readonly enterpriseId?: string;
+  readonly isEnterpriseInstall: boolean;
+  readonly triggerId?: string;
+  readonly responseUrl?: string;
 }
 
 /** Message selected through a Slack message shortcut. */
@@ -693,6 +714,16 @@ export interface SlackChannelConfig {
    * `waitUntil()`. Errors are caught and logged.
    */
   onShortcut?(shortcut: SlackShortcut, ctx: SlackShortcutContext): void | Promise<void>;
+
+  /**
+   * Handles Slack slash commands configured with this channel's webhook route.
+   * The command includes the configured command name, arguments, invoking user,
+   * channel, workspace, trigger ID, and response URL.
+   *
+   * eve returns an empty `200 OK` immediately and keeps the handler alive
+   * through `waitUntil()`. Errors are caught and logged.
+   */
+  onSlashCommand?(command: SlackSlashCommand, ctx: SlackSlashCommandContext): void | Promise<void>;
 
   /**
    * Authorizes an eve-owned HITL answer before the pending input resolves.

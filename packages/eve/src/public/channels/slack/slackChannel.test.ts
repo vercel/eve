@@ -192,6 +192,27 @@ function buildSignedInteractionRequest(payload: Record<string, unknown>): Reques
   });
 }
 
+function buildSignedSlashCommandRequest(overrides: Record<string, string> = {}): Request {
+  const body = new URLSearchParams({
+    command: "/ask",
+    text: "summarize this channel",
+    user_id: "U01",
+    user_name: "ada",
+    team_id: "T01",
+    channel_id: "C01",
+    channel_name: "general",
+    enterprise_id: "E01",
+    is_enterprise_install: "true",
+    trigger_id: "trigger-123",
+    response_url: "https://hooks.slack.com/commands/example",
+    ...overrides,
+  }).toString();
+  return buildSignedRequest({
+    body,
+    contentType: "application/x-www-form-urlencoded",
+  });
+}
+
 let mentionCounter = 0;
 
 function buildMentionBody(overrides?: {
@@ -2620,6 +2641,47 @@ describe("slackChannel() HITL interaction pipeline", () => {
     } else {
       process.env.SLACK_BOT_TOKEN = ORIGINAL_BOT_TOKEN;
     }
+  });
+
+  it("delivers slash commands with workspace-scoped Slack API access", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const onSlashCommand = vi.fn(async (command, ctx) => {
+      expect(command).toEqual({
+        command: "/ask",
+        text: "summarize this channel",
+        user: { id: "U01", username: "ada" },
+        teamId: "T01",
+        channelId: "C01",
+        channelName: "general",
+        enterpriseId: "E01",
+        isEnterpriseInstall: true,
+        triggerId: "trigger-123",
+        responseUrl: "https://hooks.slack.com/commands/example",
+      });
+      expect(ctx.slack.teamId).toBe("T01");
+      await ctx.slack.request("auth.test", {});
+    });
+    const channel = slackChannel({ credentials: { botToken }, onSlashCommand });
+
+    const { response, waitUntil } = await firePost(channel, buildSignedSlashCommandRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(onSlashCommand).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T01" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://slack.com/api/auth.test");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe("POST");
+  });
+
+  it("acknowledges slash commands without a configured handler", async () => {
+    const channel = slackChannel({});
+
+    const { response, waitUntil } = await firePost(channel, buildSignedSlashCommandRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(waitUntil).not.toHaveBeenCalled();
   });
 
   it("delivers message shortcuts with workspace-scoped Slack API access", async () => {

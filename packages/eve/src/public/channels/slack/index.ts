@@ -35,6 +35,8 @@ export {
   type SlackInstrumentationMetadata,
   type SlackInteractionAction,
   type SlackInteractionContext,
+  type SlackSlashCommand,
+  type SlackSlashCommandContext,
   type SlackShortcut,
   type SlackShortcutContext,
   type SlackShortcutMessage,
