@@ -100,24 +100,25 @@ export function unsetEnvVars(
 /**
  * Builds the handoff a `needs-terminal` item carries.
  *
- * `/add <address>` (`runRegistryFlow`'s `initialAddress`) skips the category
- * and search screens and opens that item's confirmation directly, so an
- * interactive client is offered the address-specific command rather than bare
- * `/add`, which would make the developer re-find the item in the category
- * browser. Headless `eve dev` has no TUI to dispatch a slash command into, so
- * the shell command is the only honest answer there.
+ * The interactive TUI consumes `status` and `address` to open the existing
+ * address-specific setup flow itself, so its model-facing result deliberately
+ * carries no command for the model to repeat. Headless `eve dev` has no TUI to
+ * dispatch into, so the shell command is the only honest answer there.
  */
 export function handoffMessage(input: {
   readonly address: string;
   readonly interactiveClient: boolean;
   readonly reason: string;
   readonly title: string;
-}): { readonly message: string; readonly nextCommand: string } {
-  const nextCommand = input.interactiveClient
-    ? `/add ${input.address}`
-    : `eve add ${input.address}`;
+}): { readonly message: string; readonly nextCommand?: string } {
+  if (input.interactiveClient) {
+    return {
+      message: `${input.title} was not installed by this tool. ${input.reason} Continue in the setup panel that opens here; do not ask the developer to run another command.`,
+    };
+  }
+  const nextCommand = `eve add ${input.address}`;
   return {
-    message: `${input.title} was not installed. ${input.reason} Run \`${nextCommand}\` ${input.interactiveClient ? "here" : "in a terminal"} to finish it.`,
+    message: `${input.title} was not installed. ${input.reason} Run \`${nextCommand}\` in a terminal to finish it.`,
     nextCommand,
   };
 }

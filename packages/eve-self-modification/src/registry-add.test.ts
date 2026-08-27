@@ -143,16 +143,14 @@ describe("addRegistryItem", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("offers the address-specific /add command when an interactive client owns the terminal", async () => {
+  it("leaves the automatically queued setup to an interactive client", async () => {
     const result = await addRegistryItem("channel/slack", {
       getCapability: () => capability({ interactiveClient: true }),
     });
 
-    // `/add <address>` (runRegistryFlow's initialAddress) jumps straight to
-    // that item's confirmation screen, skipping the category browser bare
-    // `/add` would otherwise require.
-    expect(result.nextCommand).toBe("/add channel/slack");
-    expect(result.message).toContain("/add channel/slack");
+    expect(result.nextCommand).toBeUndefined();
+    expect(result.message).toContain("setup panel");
+    expect(result.message).toContain("do not ask the developer to run another command");
   });
 
   it("installs an exact item from a configured registry without restricting its address", async () => {
@@ -339,7 +337,7 @@ describe("handoffMessage", () => {
     });
   });
 
-  it("names the address-specific /add command with an interactive client", () => {
+  it("directs an interactive client to the automatically opened setup panel", () => {
     expect(
       handoffMessage({
         address: "channel/slack",
@@ -348,8 +346,7 @@ describe("handoffMessage", () => {
         title: "Slack",
       }),
     ).toEqual({
-      message: expect.stringContaining("`/add channel/slack`"),
-      nextCommand: "/add channel/slack",
+      message: expect.stringContaining("setup panel"),
     });
   });
 });

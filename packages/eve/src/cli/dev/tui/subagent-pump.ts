@@ -65,6 +65,7 @@ type SubagentToolState = {
 
 export type SubagentRun = {
   name: string;
+  childSessionId: string;
   /** Parent turn that originated this dispatch; cancellation is scoped to it. */
   parentTurnId: string;
   /** A receipt-returned task survives cancellation of its originating turn. */
@@ -123,19 +124,25 @@ export interface SubagentPumpOptions {
   client?: Client;
   view?: SubagentView;
   formatActionResultError: (event: ActionResultStreamEvent) => string;
+  /** Runs TUI-owned handling after a child tool result becomes visible. */
+  onToolCompleted?: (toolName: string, output: unknown) => Promise<void>;
 }
 
 export class SubagentPump {
   readonly #client: Client | undefined;
   readonly #view: SubagentView | undefined;
   readonly #formatActionResultError: (event: ActionResultStreamEvent) => string;
+  readonly #onToolCompleted: ((toolName: string, output: unknown) => Promise<void>) | undefined;
   readonly #runs = new Map<string, SubagentRun>();
   readonly #pumps = new Map<string, AbortController>();
+  /** Durable child cursor shared by repeated calls into one conversation subagent. */
+  readonly #childStreamIndices = new Map<string, number>();
 
   constructor(options: SubagentPumpOptions) {
     this.#client = options.client;
     this.#view = options.view;
     this.#formatActionResultError = options.formatActionResultError;
+    this.#onToolCompleted = options.onToolCompleted;
   }
 
   /**
@@ -153,11 +160,12 @@ export class SubagentPump {
     if (existing === undefined) {
       this.#runs.set(callId, {
         name: called.data.name,
+        childSessionId: called.data.childSessionId,
         parentTurnId: called.data.turnId,
         background: false,
         status: "open",
         childStreamPath: called.data.childStreamPath,
-        childStreamIndex: 0,
+        childStreamIndex: this.#childStreamIndices.get(called.data.childSessionId) ?? 0,
         steps: new Map(),
         currentSectionKey: null,
         nextSectionKey: 0,
@@ -201,6 +209,7 @@ export class SubagentPump {
     }
     this.#pumps.clear();
     this.#runs.clear();
+    this.#childStreamIndices.clear();
   }
 
   /**
@@ -261,8 +270,14 @@ export class SubagentPump {
               if (controller.signal.aborted) return;
               deliveredEvent = true;
               run.childStreamIndex += 1;
-              this.#applyChildEvent(callId, event);
+              this.#childStreamIndices.set(run.childSessionId, run.childStreamIndex);
+              const childEventWork = this.#applyChildEvent(callId, event);
+              if (childEventWork !== undefined) await childEventWork;
               if (isCurrentTurnBoundaryEvent(event)) {
+                // A proxied child approval parks at an intermediate
+                // `session.waiting`. Keep following from this cursor so the
+                // approved tool result can still update the nested view.
+                if (event.type === "session.waiting" && hasPendingChildApproval(run)) continue;
                 this.#finalizeRun(callId, true);
                 return;
               }
@@ -299,19 +314,26 @@ export class SubagentPump {
       status: request.status,
     };
     if (existing) {
-      // Promote status only when the new status is "stronger" — e.g.
-      // approval-requested → executing once the parent approves, but
-      // never demote from done/failed back to executing.
-      const priority: Record<SubagentToolState["status"], number> = {
-        preparing: 0,
-        "approval-requested": 1,
-        executing: 2,
-        done: 3,
-        failed: 3,
-        rejected: 3,
-      };
-      if (priority[request.status] > priority[existing.status]) {
+      const terminal =
+        existing.status === "done" ||
+        existing.status === "failed" ||
+        existing.status === "rejected";
+      if (request.status === "approval-requested" && !terminal) {
+        // Some providers announce the action before eve parks it for
+        // approval. The later input request is the live state, not a demotion.
         existing.status = request.status;
+      } else {
+        const priority: Record<SubagentToolState["status"], number> = {
+          preparing: 0,
+          "approval-requested": 1,
+          executing: 2,
+          done: 3,
+          failed: 3,
+          rejected: 3,
+        };
+        if (priority[request.status] > priority[existing.status]) {
+          existing.status = request.status;
+        }
       }
       // A late `preparing` announcement must not wipe input the full call
       // already delivered.
@@ -376,7 +398,7 @@ export class SubagentPump {
     }
   }
 
-  #applyChildEvent(callId: string, event: MessageStreamEvent) {
+  #applyChildEvent(callId: string, event: MessageStreamEvent): Promise<void> | undefined {
     const run = this.#runs.get(callId);
     if (!run) return;
     if (!run.seenChildEvents.admit(event)) return;
@@ -511,6 +533,9 @@ export class SubagentPump {
         if (tool.output !== undefined) update.output = tool.output;
         if (tool.errorText !== undefined) update.errorText = tool.errorText;
         view?.upsertTool(update);
+        if (event.data.status === "completed") {
+          return this.#onToolCompleted?.(tool.toolName, result.output);
+        }
         break;
       }
       default:
@@ -519,6 +544,10 @@ export class SubagentPump {
         break;
     }
   }
+}
+
+function hasPendingChildApproval(run: SubagentRun): boolean {
+  return [...run.tools.values()].some((tool) => tool.status === "approval-requested");
 }
 
 function streamPathAt(path: string, startIndex: number): string {
