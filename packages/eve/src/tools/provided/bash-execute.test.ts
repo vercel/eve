@@ -4,8 +4,15 @@ import type { RuntimeSandboxSession } from "#shared/sandbox-session.js";
 import {
   executeBashOnSandbox,
   getBackgroundBashProcess,
+  supportsDurableBashCompletion,
   waitForBackgroundBashProcess,
 } from "#execution/sandbox/bash.js";
+import {
+  activateBashCompletionMonitor,
+  closeBashCompletionMonitor,
+  killBashCompletionMonitor,
+  startBashCompletionMonitor,
+} from "#execution/sandbox/bash-completion.js";
 
 import { executeBashTool } from "./bash.js";
 
@@ -13,7 +20,15 @@ vi.mock("#execution/sandbox/bash.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("#execution/sandbox/bash.js")>()),
   executeBashOnSandbox: vi.fn(),
   getBackgroundBashProcess: vi.fn(),
+  supportsDurableBashCompletion: vi.fn(() => false),
   waitForBackgroundBashProcess: vi.fn(),
+}));
+
+vi.mock("#execution/sandbox/bash-completion.js", () => ({
+  activateBashCompletionMonitor: vi.fn(),
+  closeBashCompletionMonitor: vi.fn(),
+  killBashCompletionMonitor: vi.fn(),
+  startBashCompletionMonitor: vi.fn(),
 }));
 
 const context = {
@@ -39,7 +54,10 @@ function process(state: {
 }
 
 describe("executeBashTool process actions", () => {
-  afterEach(() => vi.resetAllMocks());
+  afterEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(supportsDurableBashCompletion).mockReturnValue(false);
+  });
 
   it("scopes start idempotency to the durable session", async () => {
     vi.mocked(executeBashOnSandbox).mockResolvedValue({
@@ -59,6 +77,7 @@ describe("executeBashTool process actions", () => {
       {
         abortSignal: context.abortSignal,
         idempotencyKey: "session-1:call-1",
+        onStarted: expect.any(Function),
       },
     );
   });
@@ -77,6 +96,32 @@ describe("executeBashTool process actions", () => {
       truncated: true,
       wallTimeSeconds: expect.any(Number),
     });
+  });
+
+  it("activates a durable monitor only after the foreground call yields", async () => {
+    const monitor = { controlToken: "control", processId: "process-1" };
+    vi.mocked(startBashCompletionMonitor).mockResolvedValue(monitor);
+    vi.mocked(executeBashOnSandbox).mockImplementation(async (_sandbox, _input, options) => {
+      await options?.onStarted?.({ commandId: "process-1" } as never);
+      expect(activateBashCompletionMonitor).not.toHaveBeenCalled();
+      return {
+        processId: "process-1",
+        status: "running",
+        stderr: "",
+        stdout: "partial",
+        truncated: false,
+        wallTimeSeconds: 30,
+      };
+    });
+
+    await executeBashTool({ action: "run", command: "sleep 60" }, context);
+
+    expect(startBashCompletionMonitor).toHaveBeenCalledWith({
+      processId: "process-1",
+      sessionId: "session-1",
+    });
+    expect(activateBashCompletionMonitor).toHaveBeenCalledExactlyOnceWith(monitor);
+    expect(closeBashCompletionMonitor).not.toHaveBeenCalled();
   });
 
   it("waits for a process through bash", async () => {
@@ -103,8 +148,20 @@ describe("executeBashTool process actions", () => {
     expect(waitForBackgroundBashProcess).toHaveBeenCalledWith({
       abortSignal: context.abortSignal,
       process: running,
-      yieldTimeMs: 300_000,
+      yieldTimeMs: 30_000,
     });
+  });
+
+  it("inspects once without entering the wait loop when no inline time remains", async () => {
+    const running = process({ stderr: "", stdout: "partial" });
+    vi.mocked(getBackgroundBashProcess).mockResolvedValue(running);
+
+    await expect(
+      executeBashTool({ action: "wait", processId: running.commandId, yieldTimeMs: 0 }, context),
+    ).resolves.toMatchObject({ processId: running.commandId, status: "running" });
+
+    expect(waitForBackgroundBashProcess).not.toHaveBeenCalled();
+    expect(running.inspect).toHaveBeenCalledOnce();
   });
 
   it("kills a running process but preserves a completed result", async () => {
@@ -122,5 +179,26 @@ describe("executeBashTool process actions", () => {
       executeBashTool({ action: "kill", processId: completed.commandId }, context),
     ).resolves.toMatchObject({ exitCode: 7, status: "completed" });
     expect(completed.terminate).not.toHaveBeenCalled();
+  });
+
+  it("returns an accepted monitor kill without terminating the process twice", async () => {
+    const running = process({ stderr: "", stdout: "partial" });
+    vi.mocked(getBackgroundBashProcess).mockResolvedValue(running);
+    vi.mocked(supportsDurableBashCompletion).mockReturnValue(true);
+    vi.mocked(killBashCompletionMonitor).mockResolvedValue({
+      observation: { stderr: "", stdout: "partial", truncated: false },
+      status: "killed",
+    });
+
+    await expect(
+      executeBashTool({ action: "kill", processId: running.commandId }, context),
+    ).resolves.toMatchObject({ status: "killed", stdout: "partial" });
+
+    expect(killBashCompletionMonitor).toHaveBeenCalledWith({
+      processId: running.commandId,
+      sessionId: "session-1",
+      timeoutMs: 30_000,
+    });
+    expect(running.terminate).not.toHaveBeenCalled();
   });
 });

@@ -10,7 +10,10 @@ import {
   executeBashOnSandbox,
   formatBashOutput,
   getBackgroundBashProcess,
+  BASH_SETTLEMENT_HEADROOM_MS,
   MAX_BACKGROUND_BASH_PROCESSES,
+  MAX_BASH_INLINE_WAIT_MS,
+  resolveBashInlineWaitMs,
   startBackgroundBashProcess,
   waitForBackgroundBashProcess,
 } from "./bash.js";
@@ -146,6 +149,20 @@ describe("executeBashOnSandbox", () => {
     expect(process.kill).toHaveBeenCalledOnce();
   });
 
+  it("kills a detached command when monitor registration fails", async () => {
+    const process = sandboxProcess({ running: true });
+    const session = sandbox(() => process);
+
+    await expect(
+      executeBashOnSandbox(
+        session,
+        { command: "build" },
+        { onStarted: async () => await Promise.reject(new Error("monitor unavailable")) },
+      ),
+    ).rejects.toThrow("monitor unavailable");
+    expect(process.kill).toHaveBeenCalledOnce();
+  });
+
   it("logs command progress in development", async () => {
     process.env[EVE_DEV_ENV_FLAG] = "1";
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
@@ -157,9 +174,39 @@ describe("executeBashOnSandbox", () => {
     expect(log).toHaveBeenCalledWith("eve: sandbox command finished (exit 0): pwd");
   });
 
-  it("uses a short run yield and a longer follow-up wait", () => {
+  it("caps run and follow-up waits to one short Function-safe interval", () => {
     expect(DEFAULT_BASH_RUN_YIELD_TIME_MS).toBe(30_000);
-    expect(DEFAULT_BASH_WAIT_YIELD_TIME_MS).toBe(300_000);
+    expect(DEFAULT_BASH_WAIT_YIELD_TIME_MS).toBe(30_000);
+    expect(MAX_BASH_INLINE_WAIT_MS).toBe(30_000);
+    expect(BASH_SETTLEMENT_HEADROOM_MS).toBe(5_000);
+  });
+
+  it("bounds an inline wait by the Function deadline minus settlement headroom", () => {
+    const nowMs = Date.parse("2026-08-27T15:00:00.000Z");
+
+    expect(
+      resolveBashInlineWaitMs(120_000, {
+        deadline: new Date(nowMs + 18_000),
+        nowMs,
+      }),
+    ).toBe(13_000);
+    expect(
+      resolveBashInlineWaitMs(10_000, {
+        deadline: new Date(nowMs + 18_000),
+        nowMs,
+      }),
+    ).toBe(10_000);
+    expect(resolveBashInlineWaitMs(120_000, { nowMs })).toBe(30_000);
+  });
+
+  it("yields immediately when only settlement headroom remains", () => {
+    const nowMs = Date.parse("2026-08-27T15:00:00.000Z");
+    expect(
+      resolveBashInlineWaitMs(30_000, {
+        deadline: new Date(nowMs + 4_999),
+        nowMs,
+      }),
+    ).toBe(0);
   });
 });
 

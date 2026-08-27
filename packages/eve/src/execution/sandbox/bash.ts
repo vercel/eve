@@ -2,18 +2,22 @@ import { randomUUID } from "node:crypto";
 
 import type { SandboxSession } from "#shared/sandbox-session.js";
 import {
+  canReconnectManagedSandboxCommands,
   getManagedSandboxCommands,
   MAX_MANAGED_SANDBOX_COMMANDS,
   type ManagedSandboxCommand,
 } from "#execution/sandbox/managed-command.js";
 import { truncateTail } from "#execution/sandbox/truncate-output.js";
+import { getInvocationDeadline } from "#internal/invocation/deadline.js";
 import { isEveDevEnvironment } from "#internal/application/optional-package-install.js";
 
 const MAX_LOG_COMMAND_LENGTH = 240;
 const POLL_INTERVAL_MS = 250;
 
 export const DEFAULT_BASH_RUN_YIELD_TIME_MS = 30_000;
-export const DEFAULT_BASH_WAIT_YIELD_TIME_MS = 300_000;
+export const DEFAULT_BASH_WAIT_YIELD_TIME_MS = 30_000;
+export const MAX_BASH_INLINE_WAIT_MS = 30_000;
+export const BASH_SETTLEMENT_HEADROOM_MS = 5_000;
 export const MAX_BACKGROUND_BASH_PROCESSES = MAX_MANAGED_SANDBOX_COMMANDS;
 
 export interface BashInput {
@@ -24,6 +28,7 @@ export interface BashInput {
 export interface BashExecuteOptions {
   readonly abortSignal?: AbortSignal;
   readonly idempotencyKey?: string;
+  readonly onStarted?: (process: ManagedSandboxCommand) => Promise<void>;
 }
 
 export type BashResult = BashOutput &
@@ -66,12 +71,27 @@ export async function executeBashOnSandbox(
       args.command,
       options?.idempotencyKey ?? randomUUID(),
     );
+    if (options?.onStarted !== undefined) {
+      try {
+        await options.onStarted(process);
+      } catch (error) {
+        await process.terminate().catch(() => {});
+        throw error;
+      }
+    }
     try {
-      await waitForBackgroundBashProcess({
-        abortSignal: options?.abortSignal,
-        process,
-        yieldTimeMs: args.yieldTimeMs ?? DEFAULT_BASH_RUN_YIELD_TIME_MS,
-      });
+      const yieldTimeMs = resolveBashInlineWaitMs(
+        args.yieldTimeMs ?? DEFAULT_BASH_RUN_YIELD_TIME_MS,
+      );
+      if (yieldTimeMs === 0) {
+        options?.abortSignal?.throwIfAborted();
+      } else {
+        await waitForBackgroundBashProcess({
+          abortSignal: options?.abortSignal,
+          process,
+          yieldTimeMs,
+        });
+      }
     } catch (error) {
       if (!options?.abortSignal?.aborted) throw error;
       try {
@@ -109,6 +129,30 @@ export async function executeBashOnSandbox(
   } finally {
     if (progressTimer !== undefined) clearInterval(progressTimer);
   }
+}
+
+export function supportsDurableBashCompletion(sandbox: SandboxSession): boolean {
+  return canReconnectManagedSandboxCommands(sandbox);
+}
+
+/** Bounds one inline wait by the requested interval and Function lifetime. */
+export function resolveBashInlineWaitMs(
+  requestedMs: number,
+  input: {
+    readonly deadline?: Date;
+    readonly nowMs?: number;
+    readonly settlementHeadroomMs?: number;
+  } = {},
+): number {
+  const requested = Math.min(Math.max(0, requestedMs), MAX_BASH_INLINE_WAIT_MS);
+  const deadline = input.deadline ?? getInvocationDeadline();
+  if (deadline === undefined) return requested;
+
+  const remaining =
+    deadline.getTime() -
+    (input.nowMs ?? Date.now()) -
+    (input.settlementHeadroomMs ?? BASH_SETTLEMENT_HEADROOM_MS);
+  return Math.min(requested, Math.max(0, remaining));
 }
 
 export async function startBackgroundBashProcess(

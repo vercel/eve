@@ -19,6 +19,9 @@ describe("bash schemas", () => {
       true,
     );
     expect(BASH_INPUT_SCHEMA.safeParse({ command: "pnpm test" }).success).toBe(true);
+    expect(
+      BASH_INPUT_SCHEMA.safeParse({ command: "pnpm test", yieldTimeMs: 10 * 60_000 }).success,
+    ).toBe(true);
     expect(BASH_INPUT_SCHEMA.safeParse({ command: "pnpm test", yieldTimeMs: -1 }).success).toBe(
       false,
     );

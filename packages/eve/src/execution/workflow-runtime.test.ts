@@ -4,6 +4,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
+  bashCompletionWorkflowReference,
   createWorkflowRuntime,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   sessionTimeoutWorkflowReference,
@@ -70,6 +71,11 @@ describe("workflowEntryReference", () => {
     );
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
+    expect(bashCompletionWorkflowReference.workflowId).toBe(
+      `workflow//${packageInfo.name}//bashCompletionWorkflow`,
+    );
+    expect(bashCompletionWorkflowReference.workflowId).not.toContain("/src/execution/");
+    expect(bashCompletionWorkflowReference.workflowId).not.toContain("@");
   });
 });
 

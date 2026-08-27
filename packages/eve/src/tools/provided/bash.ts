@@ -2,11 +2,20 @@ import { z } from "#compiled/zod/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
 import {
+  activateBashCompletionMonitor,
+  closeBashCompletionMonitor,
+  killBashCompletionMonitor,
+  startBashCompletionMonitor,
+  type BashCompletionMonitorHandle,
+} from "#execution/sandbox/bash-completion.js";
+import {
   DEFAULT_BASH_RUN_YIELD_TIME_MS,
   DEFAULT_BASH_WAIT_YIELD_TIME_MS,
   executeBashOnSandbox,
   formatBashOutput,
   getBackgroundBashProcess,
+  resolveBashInlineWaitMs,
+  supportsDurableBashCompletion,
   waitForBackgroundBashProcess,
   type BashInput,
 } from "#execution/sandbox/bash.js";
@@ -16,7 +25,7 @@ const YIELD_TIME_SCHEMA = z
   .number()
   .nonnegative()
   .describe(
-    `Maximum time in milliseconds to wait before returning. Run defaults to ${DEFAULT_BASH_RUN_YIELD_TIME_MS} ms; wait defaults to ${DEFAULT_BASH_WAIT_YIELD_TIME_MS} ms.`,
+    `Requested time in milliseconds to wait before returning. Every inline wait is capped at ${DEFAULT_BASH_RUN_YIELD_TIME_MS} ms and may yield earlier near the current Function deadline.`,
   )
   .nullable()
   .optional();
@@ -101,16 +110,49 @@ export async function executeBashTool(
 ): Promise<BashToolOutput> {
   const sandbox = await context.getSandbox();
   if (input.action === undefined || input.action === "run") {
-    return await executeBashOnSandbox(sandbox, input as BashInput, {
+    let monitor: BashCompletionMonitorHandle | undefined;
+    const result = await executeBashOnSandbox(sandbox, input as BashInput, {
       abortSignal: context.abortSignal,
       idempotencyKey: `${context.session.id}:${context.callId}`,
+      onStarted: async (process) => {
+        monitor = await startBashCompletionMonitor({
+          processId: process.commandId,
+          sessionId: context.session.id,
+        });
+      },
     });
+    if (monitor !== undefined) {
+      if (result.status === "running") {
+        await activateBashCompletionMonitor(monitor);
+      } else {
+        await closeBashCompletionMonitor(monitor);
+      }
+    }
+    return result;
   }
 
   const processInput = input as BashProcessToolInput;
   const startedAt = Date.now();
   const process = await getBackgroundBashProcess(sandbox, processInput.processId);
   if (processInput.action === "kill") {
+    if (supportsDurableBashCompletion(sandbox)) {
+      const monitored = await killBashCompletionMonitor({
+        processId: processInput.processId,
+        sessionId: context.session.id,
+        timeoutMs: resolveBashInlineWaitMs(DEFAULT_BASH_WAIT_YIELD_TIME_MS),
+      });
+      if (monitored?.status === "killed" || monitored?.status === "completed") {
+        const output = formatBashOutput(
+          monitored.observation.stdout,
+          monitored.observation.stderr,
+          startedAt,
+          monitored.observation.truncated,
+        );
+        return monitored.status === "completed"
+          ? { ...output, exitCode: monitored.observation.exitCode!, status: "completed" }
+          : { ...output, status: "killed" };
+      }
+    }
     const before = await process.inspect();
     if (before.exitCode !== undefined) {
       const output = formatBashOutput(before.stdout, before.stderr, startedAt, before.truncated);
@@ -123,11 +165,18 @@ export async function executeBashTool(
     };
   }
   if (processInput.action === "wait") {
-    await waitForBackgroundBashProcess({
-      abortSignal: context.abortSignal,
-      process,
-      yieldTimeMs: processInput.yieldTimeMs ?? DEFAULT_BASH_WAIT_YIELD_TIME_MS,
-    });
+    const yieldTimeMs = resolveBashInlineWaitMs(
+      processInput.yieldTimeMs ?? DEFAULT_BASH_WAIT_YIELD_TIME_MS,
+    );
+    if (yieldTimeMs === 0) {
+      context.abortSignal.throwIfAborted();
+    } else {
+      await waitForBackgroundBashProcess({
+        abortSignal: context.abortSignal,
+        process,
+        yieldTimeMs,
+      });
+    }
   }
   const state = await process.inspect();
   if (state.exitCode === undefined) {
@@ -148,8 +197,8 @@ export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
   description: [
     "Run shell commands and manage commands that continue in the background.",
     `Use action run with command for a new command; it waits up to ${DEFAULT_BASH_RUN_YIELD_TIME_MS} ms by default, then returns a process id if still running.`,
-    `Pass that process id back with action poll, wait, or kill; wait blocks up to ${DEFAULT_BASH_WAIT_YIELD_TIME_MS} ms by default.`,
-    "When run yields, wait if the user asked for completion; otherwise report that the command is still running.",
+    `Pass that process id back with action poll, wait, or kill; every inline wait is capped at ${DEFAULT_BASH_WAIT_YIELD_TIME_MS} ms and may yield earlier near the Function deadline.`,
+    "On reconnectable backends, a yielded command sends its completion as a new session message; polling is not required.",
   ].join(" "),
   execute: executeBashTool,
   inputSchema: BASH_INPUT_SCHEMA,

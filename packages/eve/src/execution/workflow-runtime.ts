@@ -64,6 +64,7 @@ const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
+const BASH_COMPLETION_WORKFLOW_NAME = "bashCompletionWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 
@@ -85,6 +86,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
+  BASH_COMPLETION_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -124,6 +126,11 @@ export const sessionTimeoutWorkflowReference = {
 /** Stable workflow reference for durable task runs (`experimental.tasks`). */
 export const taskRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for detached Bash completion monitors. */
+export const bashCompletionWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${BASH_COMPLETION_WORKFLOW_NAME}`,
 };
 
 /**
@@ -368,8 +375,11 @@ async function waitForOwnedCommandHook(token: string, sessionId: string): Promis
   }
 }
 
-export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
-  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
+export async function waitForCommandHookOwner(
+  token: string,
+  options: { readonly timeoutMs?: number } = {},
+): Promise<WorkflowHookRecord> {
+  const deadline = Date.now() + (options.timeoutMs ?? COMMAND_HOOK_READY_TIMEOUT_MS);
   while (true) {
     try {
       return normalizeWorkflowHook(await getHookByToken(token));

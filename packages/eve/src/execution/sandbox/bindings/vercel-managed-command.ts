@@ -11,6 +11,7 @@ export function createVercelManagedCommandBackend(
   sandbox: VercelSandbox,
 ): ManagedSandboxCommandBackend {
   return {
+    reconnectable: true,
     async start(command) {
       const started = await sandbox.runCommand({
         args: ["-lc", command],

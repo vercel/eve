@@ -24,6 +24,7 @@ export interface ManagedSandboxCommand {
 }
 
 export interface ManagedSandboxCommandBackend {
+  readonly reconnectable?: boolean;
   start(command: string): Promise<ManagedSandboxCommandBackendProcess>;
   reconnect(commandId: string): Promise<ManagedSandboxCommandBackendProcess | null>;
 }
@@ -58,6 +59,11 @@ export function getManagedSandboxCommands(sandbox: SandboxSession): ManagedComma
   const registry = new ManagedCommandRegistry(backend);
   registries.set(sandbox.id, registry);
   return registry;
+}
+
+/** Whether a fresh Function invocation can reconnect to this backend's commands. */
+export function canReconnectManagedSandboxCommands(sandbox: SandboxSession): boolean {
+  return backends.get(sandbox.id)?.reconnectable === true;
 }
 
 function createSpawnBackend(sandbox: SandboxSession): ManagedSandboxCommandBackend {

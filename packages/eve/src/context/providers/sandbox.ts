@@ -17,34 +17,7 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
   key: SandboxKey,
 
   async create(ctx: ContextContainer, session: HarnessSession) {
-    const bundle = ctx.get(BundleKey);
-    if (bundle === undefined) return undefined;
-    const node = getActiveRuntimeNode(ctx);
-    const registry = node.sandboxRegistry;
-    const sessionId = ctx.require(SessionIdKey);
-    const channel = ctx.get(ChannelKey);
-    const adapterState = channel?.state as Record<string, unknown> | undefined;
-    const parentSandboxState = adapterState?.parentSandboxState as SandboxState | undefined;
-    const inheritsParent = registry.sandbox?.definition.inheritsParent === true;
-    const sharedSandboxSessionId = adapterState?.sandboxSessionId as string | undefined;
-    const sharesSandbox = inheritsParent || sharedSandboxSessionId !== undefined;
-    const sandboxSessionId = sharesSandbox ? (sharedSandboxSessionId ?? sessionId) : sessionId;
-
-    return {
-      value: await ensureSandboxAccess({
-        compiledArtifactsSource: bundle.compiledArtifactsSource,
-        nodeId: node.nodeId,
-        registry,
-        runOnSession: async (callback) => await contextStorage.run(ctx, callback),
-        sessionId: sandboxSessionId,
-        state: session.sandboxState ?? (sharesSandbox ? parentSandboxState : undefined) ?? null,
-        tags: {
-          agent: resolveTagAgentName({ bundle, node }),
-          channel: resolveTagChannelKind(channel),
-          sessionId,
-        },
-      }),
-    };
+    return await createSandboxProviderValue(ctx, session.sandboxState ?? null);
   },
 
   async commit(access, session) {
@@ -52,6 +25,41 @@ export const sandboxProvider: FrameworkContextProvider<SandboxAccess> = {
     return { ...session, sandboxState: state };
   },
 };
+
+/** Reopens a sandbox from persisted state without constructing a harness session. */
+export async function createSandboxProviderValue(
+  ctx: ContextContainer,
+  state: SandboxState | null,
+): Promise<{ readonly value: SandboxAccess } | undefined> {
+  const bundle = ctx.get(BundleKey);
+  if (bundle === undefined) return undefined;
+  const node = getActiveRuntimeNode(ctx);
+  const registry = node.sandboxRegistry;
+  const sessionId = ctx.require(SessionIdKey);
+  const channel = ctx.get(ChannelKey);
+  const adapterState = channel?.state as Record<string, unknown> | undefined;
+  const parentSandboxState = adapterState?.parentSandboxState as SandboxState | undefined;
+  const inheritsParent = registry.sandbox?.definition.inheritsParent === true;
+  const sharedSandboxSessionId = adapterState?.sandboxSessionId as string | undefined;
+  const sharesSandbox = inheritsParent || sharedSandboxSessionId !== undefined;
+  const sandboxSessionId = sharesSandbox ? (sharedSandboxSessionId ?? sessionId) : sessionId;
+
+  return {
+    value: await ensureSandboxAccess({
+      compiledArtifactsSource: bundle.compiledArtifactsSource,
+      nodeId: node.nodeId,
+      registry,
+      runOnSession: async (callback) => await contextStorage.run(ctx, callback),
+      sessionId: sandboxSessionId,
+      state: state ?? (sharesSandbox ? parentSandboxState : undefined) ?? null,
+      tags: {
+        agent: resolveTagAgentName({ bundle, node }),
+        channel: resolveTagChannelKind(channel),
+        sessionId,
+      },
+    }),
+  };
+}
 
 function resolveTagAgentName(input: {
   readonly bundle: CompiledBundle;
