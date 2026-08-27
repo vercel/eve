@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { emitRecordedTaskInputRequestStep } from "#execution/subagent-event-proxy-step.js";
+import { emitTaskViewDeliveriesStep } from "#execution/tasks/parent/client-events.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 
 vi.mock("#execution/subagent-event-proxy-step.js", () => ({
   emitRecordedTaskInputRequestStep: vi.fn(),
+}));
+vi.mock("#execution/tasks/parent/client-events.js", () => ({
+  emitTaskViewDeliveriesStep: vi.fn(),
 }));
 vi.mock("#execution/tasks/parent/hitl-proxy-steps.js", () => ({
   recordTaskInputRequestStep: vi.fn(),
@@ -47,6 +51,45 @@ const hookPayload = {
 
 describe("task HITL delivery routing", () => {
   beforeEach(() => vi.resetAllMocks());
+
+  it("emits task views with their framework notification and consumes the task envelope", async () => {
+    const emittedState = state(false);
+    vi.mocked(emitTaskViewDeliveriesStep).mockResolvedValue({
+      serializedContext: { adapter: "updated" },
+      sessionState: emittedState,
+    });
+    const view = {
+      metadata: {
+        agentId: "agent_1",
+        kind: "subagent" as const,
+        mode: "local" as const,
+        name: "research",
+      },
+      status: "working" as const,
+      taskId: "task-1",
+    };
+
+    const result = await routeDeliverToChildren({
+      delivery: {
+        kind: "deliver",
+        payloads: [{ message: "Checking inventory.", task: { views: [view] } }],
+      },
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state(false),
+    });
+
+    expect(emitTaskViewDeliveriesStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveries: [{ message: "Checking inventory.", view }],
+      }),
+    );
+    expect(result).toMatchObject({
+      kind: "continue",
+      serializedContext: { adapter: "updated" },
+      sessionState: emittedState,
+    });
+  });
 
   it("commits the task route before emitting and consumes the framework-only delivery", async () => {
     const recordedState = state(true);

@@ -26,7 +26,7 @@ interface SessionControlContext {
 
 export async function cancelClientSession(input: {
   readonly context: SessionControlContext;
-  readonly options?: { readonly turnId?: string };
+  readonly options?: { readonly taskId?: string; readonly turnId?: string };
   readonly sessionId: string;
 }): Promise<CancelSessionResult> {
   const { payload, response } = await postJson({

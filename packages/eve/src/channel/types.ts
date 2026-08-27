@@ -24,7 +24,7 @@ export type RunSessionLimits = Pick<
 /** Identifies the session turn to cancel. */
 export interface CancelTurnInput {
   readonly sessionId: string;
-  /** Framework task whose queued child deliveries should be discarded. */
+  /** Framework task owned by this session to cancel. */
   readonly taskId?: string;
   /** Limits the request to the turn the caller observed. */
   readonly turnId?: string;

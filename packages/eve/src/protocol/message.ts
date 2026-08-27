@@ -20,6 +20,7 @@ import type {
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { ClientTaskView } from "#tasks/client.js";
 
 export const EVE_SESSION_ID_HEADER = "x-eve-session-id";
 export const EVE_STREAM_FORMAT_HEADER = "x-eve-stream-format";
@@ -27,7 +28,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "24";
+export const EVE_MESSAGE_STREAM_VERSION = "25";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -409,6 +410,20 @@ export interface SubagentCompletedStreamEvent {
 }
 
 /**
+ * Durable public state for one background task owned by this session.
+ *
+ * The task view omits private executor routing. `message` is present for
+ * child-authored progress and framework lifecycle notifications.
+ */
+export interface TaskUpdatedStreamEvent {
+  data: {
+    message?: string;
+    task: ClientTaskView;
+  };
+  type: "task.updated";
+}
+
+/**
  * Stream event emitted when one assistant text delta is appended to the
  * current message for the current step.
  */
@@ -754,6 +769,7 @@ export type UnstampedMessageStreamEvent =
   | SubagentChildEventStreamEvent
   | SubagentCompletedStreamEvent
   | SubagentStartedStreamEvent
+  | TaskUpdatedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
   | InputResolvedStreamEvent
@@ -843,6 +859,20 @@ export function createSessionStartedEvent(input?: {
   return {
     data,
     type: "session.started",
+  };
+}
+
+/** Creates a client-safe background task update. */
+export function createTaskUpdatedEvent(input: {
+  readonly message?: string;
+  readonly task: ClientTaskView;
+}): TaskUpdatedStreamEvent {
+  return {
+    data: {
+      message: input.message,
+      task: input.task,
+    },
+    type: "task.updated",
   };
 }
 
@@ -1699,7 +1729,9 @@ export function createSessionCompletedEvent(): SessionCompletedStreamEvent {
  * One stamping seam is what makes the persisted stream and authored hooks
  * observe the same `meta.id`.
  */
-export function stampMessageStreamEvent(event: UnstampedMessageStreamEvent): MessageStreamEvent {
+export function stampMessageStreamEvent<TEvent extends UnstampedMessageStreamEvent>(
+  event: TEvent,
+): TEvent & { readonly meta: MessageStreamEventMeta } {
   return {
     ...event,
     meta: {

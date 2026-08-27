@@ -47,6 +47,8 @@ import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
+import { createSessionTaskCanceller } from "#execution/tasks/parent/session-task-canceller.js";
+import { discardCancelledTaskDeliveries } from "#execution/cancelled-task-deliveries.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -350,6 +352,7 @@ async function runDriverLoop(input: {
         awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
         bufferedDeliveries,
         bufferedSessionControls,
+        cancelTask: taskCanceller.cancelParked,
         cancelledTaskIds,
         commandInbox,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
@@ -413,6 +416,7 @@ async function runDriverLoop(input: {
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
+  const taskCanceller = createSessionTaskCanceller(stateCursor);
 
   // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
@@ -433,6 +437,7 @@ async function runDriverLoop(input: {
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls,
+      cancelTask: taskCanceller.cancelActive,
       cancelledTaskIds,
       capabilities: input.capabilities,
       commandInbox,
@@ -447,6 +452,9 @@ async function runDriverLoop(input: {
     await disposeSettledTurnControl?.();
     disposeSettledTurnControl = turn.dispose;
     stateCursor.adoptState(turn.action);
+    for (const taskId of await taskCanceller.drain()) {
+      discardCancelledTaskDeliveries({ bufferedDeliveries, cancelledTaskIds, taskId });
+    }
     input.crashCleanupState.lastSessionState = stateCursor.sessionState;
     return turn.action;
   };

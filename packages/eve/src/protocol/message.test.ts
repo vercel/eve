@@ -16,6 +16,7 @@ import {
   createSessionWaitingEvent,
   createStepStartedEvent,
   createSubagentCalledEvent,
+  createTaskUpdatedEvent,
   createTurnCancelledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
@@ -25,7 +26,40 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("24");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
+  });
+
+  it("creates client-safe task updates", () => {
+    expect(
+      createTaskUpdatedEvent({
+        message: "Checking inventory.",
+        task: {
+          metadata: {
+            agentId: "agent_1",
+            kind: "subagent",
+            mode: "local",
+            name: "research",
+          },
+          status: "working",
+          taskId: "task_1",
+        },
+      }),
+    ).toEqual({
+      data: {
+        message: "Checking inventory.",
+        task: {
+          metadata: {
+            agentId: "agent_1",
+            kind: "subagent",
+            mode: "local",
+            name: "research",
+          },
+          status: "working",
+          taskId: "task_1",
+        },
+      },
+      type: "task.updated",
+    });
   });
 
   it("creates authoritative input resolution batches", () => {

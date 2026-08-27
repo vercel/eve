@@ -119,6 +119,22 @@ describe("ClientSession", () => {
     expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
   });
 
+  it("targets one background task through its parent session", async () => {
+    let requestBody: unknown;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return Response.json(
+        { ok: true, sessionId: "session_1", status: "accepted" },
+        { status: 202 },
+      );
+    });
+    const session = createSession();
+
+    await session.cancel({ taskId: "task_1" });
+
+    expect(requestBody).toEqual({ taskId: "task_1" });
+  });
+
   it("snapshots the session from the start through one pinned durable tail", async () => {
     const requests: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {

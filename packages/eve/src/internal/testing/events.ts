@@ -1,4 +1,4 @@
-import type { UnstampedMessageStreamEvent, MessageStreamEvent } from "#protocol/message.js";
+import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 
 /**

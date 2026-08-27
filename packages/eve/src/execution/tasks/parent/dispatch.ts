@@ -254,12 +254,10 @@ export async function propagateSubagentExecutorCancel(input: {
         headers?: Record<string, string>;
         readonly remote: typeof resolved & { readonly url: string };
         readonly sessionId: string;
-        readonly taskId: string;
         turnId?: string;
       } = {
         remote,
         sessionId: childSessionId,
-        taskId: input.taskId,
       };
       if (headers !== undefined) cancelInput.headers = headers;
       if (childTurnId !== undefined) cancelInput.turnId = childTurnId;
@@ -269,11 +267,9 @@ export async function propagateSubagentExecutorCancel(input: {
           headers?: Record<string, string>;
           remote: typeof resolved & { readonly url: string };
           sessionId: string;
-          taskId: string;
         } = {
           remote,
           sessionId: childSessionId,
-          taskId: input.taskId,
         };
         if (headers !== undefined) retryInput.headers = headers;
         await cancelRemoteAgentTurn(retryInput);
@@ -282,18 +278,15 @@ export async function propagateSubagentExecutorCancel(input: {
     }
     const cancelInput: {
       readonly sessionId: string;
-      readonly taskId: string;
       turnId?: string;
     } = {
       sessionId: childSessionId,
-      taskId: input.taskId,
     };
     if (childTurnId !== undefined) cancelInput.turnId = childTurnId;
     const result = await requestWorkflowTurnCancellation(cancelInput);
     if (result.status === "no_active_turn") {
       await requestWorkflowTurnCancellation({
         sessionId: childSessionId,
-        taskId: input.taskId,
       });
     }
   } catch (error) {

@@ -11,6 +11,7 @@ import type {
   EveMessageMetadata,
   EveMessagePart,
 } from "#client/message-reducer-types.js";
+import { upsertTask } from "#client/task-reducer.js";
 import {
   approvedApproval,
   createToolMetadata,
@@ -42,22 +43,16 @@ export type {
   EveMessageMetadata,
   EveMessagePart,
   EveMessageToolMetadata,
+  EveTask,
 } from "#client/message-reducer-types.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
 
-/**
- * Creates a UIMessage-compatible eve reducer for chat and agent UIs.
- *
- * The returned projection keeps eve-owned types while following the AI SDK
- * `messages[].parts[]` rendering convention used by AI Elements. It projects
- * text, reasoning, tool calls, tool results, tool approvals, submitted HITL
- * responses, and authorization prompts.
- */
+/** Creates the default render-ready message and task projection. */
 export function defaultMessageReducer(): EveAgentReducer<EveMessageData> {
   return {
     initial() {
-      return { messages: [] };
+      return { messages: [], tasks: [] };
     },
     reduce(data, event) {
       return reduceMessageData(data, event);
@@ -104,6 +99,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       }
       return next;
     }
+
+    case "task.updated":
+      return upsertTask(data, event);
 
     case "message.received":
       return upsertMessage(data, {

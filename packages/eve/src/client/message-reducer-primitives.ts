@@ -40,10 +40,11 @@ export function partKey(part: EveMessagePart): string {
 export function upsertMessage(data: EveMessageData, next: EveMessage): EveMessageData {
   const index = data.messages.findIndex((message) => message.id === next.id);
   if (index === -1) {
-    return { messages: [...data.messages, next] };
+    return { ...data, messages: [...data.messages, next] };
   }
 
   return {
+    ...data,
     messages: [...data.messages.slice(0, index), next, ...data.messages.slice(index + 1)],
   };
 }

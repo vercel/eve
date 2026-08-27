@@ -10,6 +10,7 @@ import {
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
   wakeTaskUpdateParentStep,
+  wakeTaskViewParentStep,
 } from "#execution/tasks/child/steps.js";
 import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
 import type {
@@ -36,6 +37,7 @@ vi.mock("#execution/tasks/child/steps.js", () => ({
   wakeTaskInputRequestParentStep: vi.fn(),
   wakeTaskParentStep: vi.fn(),
   wakeTaskUpdateParentStep: vi.fn(),
+  wakeTaskViewParentStep: vi.fn(),
 }));
 
 afterEach(() => {
@@ -174,6 +176,11 @@ describe("taskRunWorkflow", () => {
       "working",
       "completed",
     ]);
+    expect(wakeTaskViewParentStep).toHaveBeenCalledWith({
+      index: 0,
+      token: "parent-session-token",
+      view: expect.objectContaining({ status: "working", taskId: "task_abc123" }),
+    });
     expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 

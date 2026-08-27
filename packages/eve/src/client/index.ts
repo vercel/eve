@@ -86,6 +86,7 @@ export type {
   EveMessageMetadata,
   EveMessagePart,
   EveMessageToolMetadata,
+  EveTask,
 } from "#client/message-reducer.js";
 
 // ---------------------------------------------------------------------------
@@ -130,12 +131,15 @@ export type {
   SubagentChildEventStreamEvent,
   SubagentCompletedStreamEvent,
   SubagentStartedStreamEvent,
+  TaskUpdatedStreamEvent,
   TurnCancelledStreamEvent,
   TurnCompletedStreamEvent,
   TurnFailedStreamEvent,
   TurnStartedStreamEvent,
   TurnFailureStreamEvent,
 } from "#protocol/message.js";
+
+export type { ClientTaskView } from "#tasks/client.js";
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 

@@ -81,9 +81,9 @@ creates or follows a replacement session.
 
 Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/stream`. The [session protocol](../concepts/sessions-runs-and-streaming#stream-a-session) defines the event set, envelopes, cursors, and reconnection behavior.
 
-### Cancel a turn
+### Cancel a turn or background task
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. Include the observed `turnId` to keep a late request from cancelling a newer turn, or include `taskId` to cancel one background task owned by the session. Cancellation is asynchronous. Turn cancellation settles as `turn.cancelled` followed by `session.waiting`; task cancellation settles through a `task.updated` event whose view has status `cancelled`.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 

@@ -17,6 +17,7 @@ import {
   createReasoningCompletedEvent,
   createResultCompletedEvent,
   createStepStartedEvent,
+  createTaskUpdatedEvent,
   createTurnCancelledEvent,
   createTurnFailedEvent,
   type UnstampedMessageStreamEvent,
@@ -1206,6 +1207,94 @@ describe("defaultMessageReducer", () => {
 
     const userMessage = data.messages.find((message) => message.role === "user");
     expect(userMessage?.parts).toEqual([{ state: "done", text: "hello there", type: "text" }]);
+  });
+
+  it("projects durable task activity and terminal state", () => {
+    const reducer = defaultMessageReducer();
+    const metadata = {
+      agentId: "agent_1",
+      kind: "subagent" as const,
+      mode: "local" as const,
+      name: "research",
+    };
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createTaskUpdatedEvent({
+        task: { metadata, status: "working", taskId: "task_1" },
+      }),
+      createTaskUpdatedEvent({
+        message: "Checking inventory.",
+        task: { metadata, status: "working", taskId: "task_1" },
+      }),
+      createTaskUpdatedEvent({
+        task: {
+          inputRequests: [{ requestId: "input_1" }],
+          metadata,
+          status: "input_required",
+          taskId: "task_1",
+        },
+      }),
+      createTaskUpdatedEvent({
+        task: {
+          lastOutput: { data: { message: "Found it." }, type: "result" },
+          metadata,
+          status: "completed",
+          taskId: "task_1",
+          usage: {
+            cacheReadTokens: 3,
+            cacheWriteTokens: 2,
+            inputTokens: 10,
+            outputTokens: 5,
+          },
+        },
+      }),
+    ]);
+
+    expect(data.tasks).toEqual([
+      {
+        activity: "Checking inventory.",
+        completedAt: "2026-01-01T00:00:00.003Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        lastOutput: { data: { message: "Found it." }, type: "result" },
+        metadata,
+        status: "completed",
+        taskId: "task_1",
+        updatedAt: "2026-01-01T00:00:00.003Z",
+        usage: {
+          cacheReadTokens: 3,
+          cacheWriteTokens: 2,
+          inputTokens: 10,
+          outputTokens: 5,
+        },
+      },
+    ]);
+  });
+
+  it("keeps the first terminal timestamp across late task settlement", () => {
+    const reducer = defaultMessageReducer();
+    const metadata = { kind: "background", name: "export" };
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createTaskUpdatedEvent({
+        message: "Writing export.",
+        task: { metadata, status: "working", taskId: "task_2" },
+      }),
+      createTaskUpdatedEvent({
+        task: { metadata, status: "cancelled", taskId: "task_2" },
+      }),
+      createTaskUpdatedEvent({
+        message: "Late worker update.",
+        task: { metadata, status: "working", taskId: "task_2" },
+      }),
+      createTaskUpdatedEvent({
+        task: { metadata, status: "cancelled", taskId: "task_2" },
+      }),
+    ]);
+
+    expect(data.tasks[0]).toMatchObject({
+      activity: "Writing export.",
+      completedAt: "2026-01-01T00:00:00.001Z",
+      status: "cancelled",
+      updatedAt: "2026-01-01T00:00:00.003Z",
+    });
   });
 });
 

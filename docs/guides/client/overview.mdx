@@ -137,6 +137,7 @@ const response = await session.send("Continue the analysis.");
 await response.result();
 
 await session.cancel({ turnId: "turn_123" });
+await session.cancel({ taskId: "task_123" });
 await session.compact();
 await session.clear();
 
@@ -148,6 +149,8 @@ await session.reset({ reason: "User requested a fresh session" });
 ```
 
 `client.sessions` stores only the session ID and stream cursor. Every method calls an ID-addressed `/eve/v1/session/:sessionId/...` route. Sending through a handle for an unknown or terminal ID fails instead of creating a replacement, and reset leaves the handle pinned to the retired ID.
+
+Background tasks owned by the session publish `task.updated` events on the same durable stream. The event carries a client-safe task view with private executor routing removed. It reports `working`, `input_required`, `completed`, `failed`, or `cancelled`, plus the current framework notification and terminal output or token usage when available. `session.cancel({ taskId })` targets that owned task; omit `taskId` to cancel the active parent turn instead.
 
 A client can own many independent fixed sessions at once:
 

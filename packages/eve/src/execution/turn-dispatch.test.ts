@@ -42,6 +42,7 @@ describe("dispatchAndAwaitTurn", () => {
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       bufferedSessionControls: [],
+      cancelTask: vi.fn(),
       commandInbox,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
@@ -76,6 +77,7 @@ describe("dispatchAndAwaitTurn", () => {
     await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       bufferedSessionControls: [],
+      cancelTask: vi.fn(),
       commandInbox,
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
@@ -133,6 +135,7 @@ describe("dispatchAndAwaitTurn", () => {
     await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls: [],
+      cancelTask: vi.fn(),
       commandInbox: createCommandInbox({
         next: async () => ({
           done: false,
@@ -184,6 +187,7 @@ describe("dispatchAndAwaitTurn", () => {
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls: [],
+      cancelTask: vi.fn(),
       commandInbox: createCommandInbox(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
@@ -210,6 +214,7 @@ describe("dispatchAndAwaitTurn", () => {
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries: [],
       bufferedSessionControls: [],
+      cancelTask: vi.fn(),
       commandInbox: createCommandInbox(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },

@@ -11,9 +11,9 @@ import {
 } from "#execution/subagent-event-proxy-step.js";
 import {
   acceptTaskAuthorizationEventStep,
-  recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import { emitTaskViewDeliveriesStep } from "#execution/tasks/parent/client-events.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -35,11 +35,21 @@ export async function routeDeliverToChildren(input: {
   let serializedContext = input.serializedContext;
   let sessionState = input.sessionState;
 
-  if ((payload.task?.views?.length ?? 0) > 0) {
-    sessionState = await recordTerminalTaskViewsStep({
+  const taskViewDeliveries = input.delivery.payloads.flatMap((sourcePayload) =>
+    (sourcePayload.task?.views ?? []).map((view) => ({
+      message: typeof sourcePayload.message === "string" ? sourcePayload.message : undefined,
+      view,
+    })),
+  );
+  if (taskViewDeliveries.length > 0) {
+    const emitted = await emitTaskViewDeliveriesStep({
+      deliveries: taskViewDeliveries,
+      parentWritable: input.parentWritable,
+      serializedContext,
       sessionState,
-      views: payload.task?.views ?? [],
     });
+    serializedContext = emitted.serializedContext;
+    sessionState = emitted.sessionState;
   }
 
   for (const request of payload.task?.inputRequests ?? []) {

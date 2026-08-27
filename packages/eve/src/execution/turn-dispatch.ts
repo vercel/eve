@@ -5,7 +5,6 @@ import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
-import { activeTurnId } from "#harness/active-turn-id.js";
 
 /** One settled turn: its terminal driver action plus deferred hook cleanup. */
 export interface DispatchedTurn {
@@ -25,8 +24,9 @@ export interface DispatchedTurn {
 export async function dispatchAndAwaitTurn(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-  readonly capabilities?: SessionCapabilities;
+  readonly cancelTask: (taskId: string) => Promise<boolean>;
   readonly cancelledTaskIds?: Set<string>;
+  readonly capabilities?: SessionCapabilities;
   readonly controlToken: string;
   readonly delivery: HookPayload;
   readonly commandInbox: SessionCommandInbox;
@@ -39,9 +39,9 @@ export async function dispatchAndAwaitTurn(input: {
   const control = new TurnControlReceiver({
     bufferedDeliveries: input.bufferedDeliveries,
     bufferedSessionControls: input.bufferedSessionControls,
+    cancelTask: input.cancelTask,
     cancelledTaskIds: input.cancelledTaskIds,
     commandInbox: input.commandInbox,
-    expectedTurnId: activeTurnId(input.sessionState.emissionState),
     seenTaskDeliveries: input.seenTaskDeliveries ?? new Set(),
     token: input.controlToken,
   });

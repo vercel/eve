@@ -9,6 +9,7 @@ import {
   wakeTaskInputRequestParentStep,
   wakeTaskParentStep,
   wakeTaskUpdateParentStep,
+  wakeTaskViewParentStep,
 } from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
@@ -93,6 +94,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
     let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
+    let clientViewIndex = 0;
     await appendTaskViewStep({ view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
@@ -154,6 +156,12 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       }
       if (command === undefined) continue;
       if (isReadinessCommand && isTerminalTaskStatus(view.status)) {
+        await wakeTaskViewParentStep({
+          index: clientViewIndex,
+          token: input.parentContinuationToken,
+          view,
+        });
+        clientViewIndex += 1;
         for (const update of pendingUpdates) {
           await wakeTaskUpdateParentStep({
             token: input.parentContinuationToken,
@@ -172,6 +180,14 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
       await appendTaskViewStep({ view });
+      if (dispatchAcknowledged) {
+        await wakeTaskViewParentStep({
+          index: clientViewIndex,
+          token: input.parentContinuationToken,
+          view,
+        });
+        clientViewIndex += 1;
+      }
       const routableAuthorizationEvents =
         dispatchAcknowledged && !becameTerminal ? pendingAuthorizationEvents : [];
       for (const request of routableAuthorizationEvents) {

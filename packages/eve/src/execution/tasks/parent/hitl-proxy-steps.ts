@@ -10,11 +10,10 @@ import {
   upsertProxyInputRequestState,
 } from "#harness/proxy-input-requests.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
-import { removeTaskAgentAddressFromState } from "#harness/handles/transitions.js";
 import { isInputRequest } from "#shared/input.js";
-import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
+import { findSessionTaskEntry } from "#tasks/session-index.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
-import { isTerminalTaskStatus, readSubagentTaskMetadata, type TaskView } from "#tasks/types.js";
+import { isTerminalTaskStatus, readSubagentTaskMetadata } from "#tasks/types.js";
 
 /** Validates and durably records one task-owned child HITL route batch. */
 export async function recordTaskInputRequestStep(input: {
@@ -162,32 +161,4 @@ export async function acceptTaskAuthorizationEventStep(input: {
     view.executor?.childSessionId === input.hookPayload.childSessionId &&
     viewMetadata?.agentId === entryMetadata.agentId
   );
-}
-
-/** Caches terminal task views before their workflow runs can expire. */
-export async function recordTerminalTaskViewsStep(input: {
-  readonly sessionState: DurableSessionState;
-  readonly views: readonly TaskView[];
-}): Promise<DurableSessionState> {
-  "use step";
-
-  const durableSession = await readDurableSession(input.sessionState);
-  let state = durableSession.state;
-  for (const view of input.views) {
-    state = cacheTerminalTaskView(state, view);
-    if (view.executor?.lifecycle === "terminal") {
-      const metadata = readSubagentTaskMetadata(view);
-      if (metadata !== undefined) {
-        state = removeTaskAgentAddressFromState(state, metadata.agentId);
-      }
-    }
-  }
-  if (state === durableSession.state) return input.sessionState;
-  return {
-    ...input.sessionState,
-    snapshot: {
-      session: { ...durableSession, state },
-      version: input.sessionState.version,
-    },
-  };
 }

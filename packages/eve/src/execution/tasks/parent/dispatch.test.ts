@@ -131,7 +131,6 @@ describe("task cancellation identity", () => {
       if (mode === "local") {
         expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
           sessionId: "child-1",
-          taskId: "task-1",
           turnId: "turn_child_7",
         });
         expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
@@ -139,7 +138,6 @@ describe("task cancellation identity", () => {
         expect(cancelRemoteAgentTurn).toHaveBeenCalledWith(
           expect.objectContaining({
             sessionId: "child-1",
-            taskId: "task-1",
             turnId: "turn_child_7",
           }),
         );
@@ -380,7 +378,7 @@ describe("task cancellation identity", () => {
     expect(vi.mocked(cancelRemoteAgentTurn).mock.calls[1]?.[0]).not.toHaveProperty("turnId");
   });
 
-  it("uses task-scoped cancellation before child-turn identity arrives", async () => {
+  it("cancels the current child turn before its turn identity arrives", async () => {
     vi.mocked(readLatestTaskView).mockResolvedValue({
       metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
       status: "cancelled",
@@ -396,7 +394,6 @@ describe("task cancellation identity", () => {
 
     expect(requestWorkflowTurnCancellation).toHaveBeenCalledWith({
       sessionId: "child-1",
-      taskId: "task-1",
     });
     expect(cancelRemoteAgentTurn).not.toHaveBeenCalled();
   });

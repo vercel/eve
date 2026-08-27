@@ -3,7 +3,6 @@ import { satisfies } from "eve/evals/expect";
 
 const TASK_COUNT = 3;
 const RESULTS = ["WAKE-MECHANISM", "CHANNEL-DELIVERY", "REPORTING-POLICY"] as const;
-const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./giu;
 
 function reportingEval() {
   return defineEval({
@@ -14,9 +13,9 @@ function reportingEval() {
       const started =
         await t.send(`Please investigate these three independent checks using the built-in agent tool. Start them sequentially within this same turn: issue at most one agent call per model step, then use the next model step after its working receipt to issue the next call. Do not wait for a completed result before starting the next agent, and do not call other tools yourself.
 
-1. "Call probe exactly once with check=first. After it returns, reply with exactly the result value from the tool."
-2. "Call probe exactly once with check=second. After it returns, reply with exactly the result value from the tool."
-3. "Call probe exactly once with check=third. After it returns, reply with exactly the result value from the tool."`);
+1. "First call task_update with message=checking first, then call probe exactly once with check=first. After it returns, reply with exactly the result value from the tool."
+2. "First call task_update with message=checking second, then call probe exactly once with check=second. After it returns, reply with exactly the result value from the tool."
+3. "First call task_update with message=checking third, then call probe exactly once with check=third. After it returns, reply with exactly the result value from the tool."`);
 
       started.expectOk();
       started.calledSubagent("agent", { count: TASK_COUNT });
@@ -47,7 +46,12 @@ function reportingEval() {
       );
 
       let session: EveEvalSession | typeof t = t;
-      const observed = new Set<string>();
+      const observed = new Set(
+        completedTaskIds(started).filter((taskId) => taskIds.includes(taskId)),
+      );
+      const observedUpdates = new Set(
+        updatedTaskIds(started).filter((taskId) => taskIds.includes(taskId)),
+      );
       let finalReports = 0;
       let compacted = false;
       for (let attempt = 0; attempt < 8 && observed.size < TASK_COUNT; attempt += 1) {
@@ -57,6 +61,9 @@ function reportingEval() {
         const turn = await live.result();
         const completed = completedTaskIds(turn).filter((taskId) => taskIds.includes(taskId));
         for (const taskId of completed) observed.add(taskId);
+        for (const taskId of updatedTaskIds(turn)) {
+          if (taskIds.includes(taskId)) observedUpdates.add(taskId);
+        }
         t.log(
           `wake ${String(attempt + 1)}: completed=${String(observed.size)}/${String(TASK_COUNT)} message=${JSON.stringify(turn.message)}`,
         );
@@ -109,6 +116,13 @@ function reportingEval() {
         satisfies((ids: readonly string[]) => ids.length === TASK_COUNT, "all task wakes observed"),
       );
       await t.require(
+        [...observedUpdates],
+        satisfies(
+          (ids: readonly string[]) => ids.length === TASK_COUNT,
+          "all client task updates observed",
+        ),
+      );
+      await t.require(
         finalReports,
         satisfies((count: number) => count === 1, "exactly one final user-facing report"),
       );
@@ -154,12 +168,21 @@ function hasPostReceiptAcknowledgement(turn: EveEvalTurn): boolean {
 }
 
 function completedTaskIds(turn: EveEvalTurn): readonly string[] {
-  return turn.events.flatMap((event) => {
-    if (event.type !== "message.received") return [];
-    return [...messageText(event.data.message).matchAll(COMPLETION)].map(
-      (match) => match[1] as string,
-    );
-  });
+  return turn.events.flatMap((event) =>
+    event.type === "task.updated" && event.data.task.status === "completed"
+      ? [event.data.task.taskId]
+      : [],
+  );
+}
+
+function updatedTaskIds(turn: EveEvalTurn): readonly string[] {
+  return turn.events.flatMap((event) =>
+    event.type === "task.updated" &&
+    event.data.task.status === "working" &&
+    event.data.message !== undefined
+      ? [event.data.task.taskId]
+      : [],
+  );
 }
 
 function requireStreamIndex(
@@ -167,19 +190,4 @@ function requireStreamIndex(
 ) {
   if (session.state === undefined) throw new Error("Task reporting session has no stream index.");
   return session.state.streamIndex;
-}
-
-function messageText(message: unknown): string {
-  if (typeof message === "string") return message;
-  if (!Array.isArray(message)) return "";
-  return message
-    .flatMap((part) =>
-      part !== null &&
-      typeof part === "object" &&
-      Reflect.get(part, "type") === "text" &&
-      typeof Reflect.get(part, "text") === "string"
-        ? [Reflect.get(part, "text") as string]
-        : [],
-    )
-    .join("\n");
 }

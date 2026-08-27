@@ -202,27 +202,54 @@ describe("TurnControlReceiver", () => {
     ).toEqual(["q1", "q2"]);
   });
 
-  it("discards queued deliveries when their task is cancelled", async () => {
+  it("cancels an owned task without cancelling its parent turn", async () => {
     installControlHook([parkResult()], true);
     const bufferedDeliveries: DeliverHookPayload[] = [];
+    const cancelTask = vi.fn().mockResolvedValue(true);
 
     await runReceiver(bufferedDeliveries, {
+      cancelTask,
       commandInbox: createCommandInbox([
         {
           kind: "send",
           payload: { inputResponses: [{ requestId: "q1" }] },
           taskDeliveryId: "task-1:q1",
         },
+        {
+          kind: "send",
+          payload: { task: { views: [] } },
+          taskDeliveryId: "task-1:client:0",
+        },
         { kind: "cancel", taskId: "task-1", turnId: "turn_3" },
       ]),
       seenTaskDeliveries: new Set(),
     });
 
-    expect(bufferedDeliveries).toEqual([]);
-    expect(forwardTurnCancellationStep).toHaveBeenCalledWith({
-      payload: {},
-      token: "turn-control:cancel",
+    expect(cancelTask).toHaveBeenCalledWith("task-1");
+    expect(bufferedDeliveries).toHaveLength(1);
+    expect(bufferedDeliveries[0]?.taskDeliveryId).toBe("task-1:client:0");
+    expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
+  });
+
+  it("keeps task deliveries when active-turn cancellation did not commit", async () => {
+    installControlHook([parkResult()], true);
+    const bufferedDeliveries: DeliverHookPayload[] = [];
+    const cancelTask = vi.fn().mockResolvedValue(false);
+
+    await runReceiver(bufferedDeliveries, {
+      cancelTask,
+      commandInbox: createCommandInbox([
+        {
+          kind: "send",
+          payload: { message: "still running" },
+          taskDeliveryId: "task-1:update:0",
+        },
+        { kind: "cancel", taskId: "task-1" },
+      ]),
     });
+
+    expect(bufferedDeliveries).toHaveLength(1);
+    expect(forwardTurnCancellationStep).not.toHaveBeenCalled();
   });
 
   it("drops an unknown wire version loudly and keeps consuming the inbox", async () => {
@@ -279,6 +306,7 @@ function runReceiver(
   bufferedDeliveries: DeliverHookPayload[],
   options: {
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly cancelTask?: (taskId: string) => Promise<boolean>;
     readonly commandInbox?: SessionCommandInbox;
     readonly seenTaskDeliveries?: Set<string>;
   } = {},
@@ -286,8 +314,8 @@ function runReceiver(
   const receiver = new TurnControlReceiver({
     bufferedDeliveries,
     bufferedSessionControls: options.bufferedSessionControls ?? [],
+    cancelTask: options.cancelTask ?? vi.fn(),
     commandInbox: options.commandInbox ?? createCommandInbox(),
-    expectedTurnId: "turn_0",
     seenTaskDeliveries: options.seenTaskDeliveries,
     token: "turn-control",
   });

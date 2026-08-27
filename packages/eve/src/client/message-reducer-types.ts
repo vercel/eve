@@ -1,12 +1,22 @@
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { AuthorizationOutcome } from "#protocol/message.js";
+import type { ClientTaskView } from "#tasks/client.js";
 
 /**
  * UIMessage-compatible eve message projection for chat and agent UIs.
  */
 export interface EveMessageData {
   readonly messages: readonly EveMessage[];
+  readonly tasks: readonly EveTask[];
 }
+
+/** Render-ready background task state projected from durable task events. */
+export type EveTask = ClientTaskView & {
+  readonly activity?: string;
+  readonly completedAt?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
 
 /**
  * eve-owned message shape that follows the AI SDK UIMessage convention.

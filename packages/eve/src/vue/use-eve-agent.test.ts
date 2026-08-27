@@ -94,6 +94,7 @@ function completedTurnData(input: {
             },
           ]),
     ],
+    tasks: [],
   };
 }
 
@@ -181,6 +182,7 @@ describe("EveAgentStore (Vue composable backing store)", () => {
           role: "user",
         },
       ],
+      tasks: [],
     });
 
     startResponse.resolve(createStartedMessageResponse("session_1", "http:session_1"));

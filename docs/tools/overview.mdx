@@ -78,6 +78,10 @@ Later task-triggered parent turns receive fresh state for the same cohort. The m
 to keep related intermediate results silent while any task remains pending. Once every related
 task is terminal, the state includes their outputs so the model can combine the useful results.
 
+Client applications observe the same lifecycle through durable `task.updated` events on the
+parent session stream. The default frontend reducer exposes those views as `data.tasks`, including
+explicit `task_update` activity and terminal output or token usage when available.
+
 ### The `ctx` parameter
 
 `execute` gets a `ctx` carrying the runtime accessors:

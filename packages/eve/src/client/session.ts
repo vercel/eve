@@ -125,8 +125,11 @@ export class ClientSession {
     return this.#messageResponse<TOutput>(response, input, initialStreamIndex);
   }
 
-  /** Requests cooperative cancellation of this session's active turn. */
-  async cancel(options?: { readonly turnId?: string }): Promise<CancelSessionResult> {
+  /** Requests cooperative cancellation of this session's active turn or one owned task. */
+  async cancel(options?: {
+    readonly taskId?: string;
+    readonly turnId?: string;
+  }): Promise<CancelSessionResult> {
     return await cancelClientSession({
       context: this.#context,
       options,

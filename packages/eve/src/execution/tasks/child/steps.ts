@@ -10,7 +10,6 @@ import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { createLogger } from "#internal/logging.js";
 import type { JsonValue } from "#shared/json.js";
 import {
-  isTerminalTaskStatus,
   taskAuthorizationRequestId,
   TASK_VIEW_STREAM_NAMESPACE,
   type TaskInboundAnswerInput,
@@ -94,10 +93,9 @@ export async function wakeTaskParentStep(input: {
 }): Promise<void> {
   "use step";
 
-  const payload: { message: string; task?: { views: readonly TaskView[] } } = {
+  const payload = {
     message: formatTaskNotification(input.view),
   };
-  if (isTerminalTaskStatus(input.view.status)) payload.task = { views: [input.view] };
   const command: SessionCommand = {
     kind: "send",
     payload,
@@ -117,6 +115,27 @@ export async function wakeTaskParentStep(input: {
   }
 }
 
+/** Publishes the initial task view without starting a parent model turn. */
+export async function wakeTaskViewParentStep(input: {
+  readonly index: number;
+  readonly token: string;
+  readonly view: TaskView;
+}): Promise<void> {
+  "use step";
+
+  const command: SessionCommand = {
+    kind: "send",
+    payload: { task: { views: [input.view] } },
+    taskDeliveryId: `${input.view.taskId}:client:${String(input.index)}`,
+  };
+  try {
+    await resumeSessionInbox(input.token, command);
+  } catch (error) {
+    if (isTaskWorkflowTargetGone(error)) return;
+    throw error;
+  }
+}
+
 /** Forwards a running child's intermediate update to its parent session. */
 export async function wakeTaskUpdateParentStep(input: {
   readonly token: string;
@@ -129,6 +148,7 @@ export async function wakeTaskUpdateParentStep(input: {
     kind: "send",
     payload: {
       message: `Background task ${input.view.taskId} (${input.view.metadata.name}) update: ${input.update.message}`,
+      task: { views: [input.view] },
     },
     taskDeliveryId: `${input.view.taskId}:update:${input.update.updateEpoch}:${input.update.updateIndex}:${input.update.callId}`,
   };

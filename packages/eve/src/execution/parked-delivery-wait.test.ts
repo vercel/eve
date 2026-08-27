@@ -84,6 +84,13 @@ function cancelRead(): ScriptedRead {
   };
 }
 
+function taskCancelRead(taskId: string): ScriptedRead {
+  return {
+    result: { done: false, value: { kind: "cancel", taskId } },
+    source: "session",
+  };
+}
+
 function messageRead(message: string): ScriptedRead {
   return {
     result: { done: false, value: { kind: "send", payload: { message } } },
@@ -100,6 +107,7 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
     awaitAuthorizationCallbacks: true,
     bufferedDeliveries: [],
     bufferedSessionControls: [],
+    cancelTask: vi.fn(),
     commandInbox: inbox,
     driverWritable: new WritableStream<Uint8Array>(),
     stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState }),
@@ -133,6 +141,38 @@ describe("nextTurnDelivery", () => {
 
     expect(next.kind).toBe("authorization");
     expect(inbox.windowTransitions).toEqual([true, false]);
+  });
+
+  it("cancels an owned task while the parent session remains parked", async () => {
+    const inbox = createMockInbox([taskCancelRead("task-1"), authorizationRead()]);
+    const cancelTask = vi.fn().mockResolvedValue(true);
+
+    const next = await nextTurnDelivery({ ...waitInput(inbox), cancelTask });
+
+    expect(cancelTask).toHaveBeenCalledWith("task-1");
+    expect(next.kind).toBe("authorization");
+  });
+
+  it("does not suppress task deliveries when durable cancellation fails", async () => {
+    const inbox = createMockInbox([taskCancelRead("task-1"), authorizationRead()]);
+    const bufferedDeliveries: DeliverHookPayload[] = [
+      {
+        kind: "deliver",
+        payloads: [{ message: "still live" }],
+        taskDeliveryId: "task-1:update:0",
+      },
+    ];
+    const cancelTask = vi.fn().mockRejectedValue(new Error("cancel failed"));
+
+    await expect(
+      nextTurnDelivery({
+        ...waitInput(inbox),
+        bufferedDeliveries,
+        cancelTask,
+        deferDeliveries: true,
+      }),
+    ).rejects.toThrow("cancel failed");
+    expect(bufferedDeliveries).toHaveLength(1);
   });
 
   it("does not let buffered deliveries bypass a ready authorization callback", async () => {
@@ -261,6 +301,7 @@ describe("nextTurnDelivery routing", () => {
     const result = await nextTurnDelivery({
       bufferedDeliveries: [],
       bufferedSessionControls: [],
+      cancelTask: vi.fn(),
       commandInbox,
       driverWritable: new WritableStream<Uint8Array>(),
       stateCursor,

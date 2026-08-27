@@ -15,6 +15,10 @@ import {
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
+import {
+  discardCancelledTaskDeliveries,
+  isCancelledTaskDeliveryId,
+} from "#execution/cancelled-task-deliveries.js";
 
 type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delivery-request" }>;
 
@@ -27,7 +31,7 @@ export class TurnControlReceiver {
   private readonly commandInbox: SessionCommandInbox;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
-  private readonly expectedTurnId: string;
+  private readonly cancelTask: (taskId: string) => Promise<boolean>;
   private readonly cancelledTaskIds: Set<string>;
   private readonly seenTaskDeliveries: Set<string>;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
@@ -35,20 +39,20 @@ export class TurnControlReceiver {
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+    readonly cancelTask: (taskId: string) => Promise<boolean>;
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
-    readonly expectedTurnId: string;
     readonly seenTaskDeliveries?: Set<string>;
     readonly token: string;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
     this.bufferedSessionControls = input.bufferedSessionControls;
+    this.cancelTask = input.cancelTask;
     this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
     this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
-    this.expectedTurnId = input.expectedTurnId;
   }
 
   /** Token passed to the turn workflow so it can publish control messages. */
@@ -100,15 +104,12 @@ export class TurnControlReceiver {
       return undefined;
     }
     if (command.kind === "cancel") {
-      if (command.taskId !== undefined) this.discardTaskDeliveries(command.taskId);
-      const turnId =
-        command.taskId !== undefined &&
-        command.turnId !== undefined &&
-        command.turnId !== this.expectedTurnId
-          ? undefined
-          : command.turnId;
+      if (command.taskId !== undefined) {
+        if (await this.cancelTask(command.taskId)) this.discardTaskDeliveries(command.taskId);
+        return undefined;
+      }
       await forwardTurnCancellationStep({
-        payload: turnId === undefined ? {} : { turnId },
+        payload: command.turnId === undefined ? {} : { turnId: command.turnId },
         token: turnCancellationHookToken(this.control.token),
       });
       return undefined;
@@ -341,29 +342,21 @@ export class TurnControlReceiver {
   }
 
   private discardTaskDeliveries(taskId: string): void {
-    this.cancelledTaskIds.add(taskId);
-    const kept = this.bufferedDeliveries.filter((delivery) => !this.shouldDiscard(delivery));
-    this.bufferedDeliveries.splice(0, this.bufferedDeliveries.length, ...kept);
+    discardCancelledTaskDeliveries({
+      bufferedDeliveries: this.bufferedDeliveries,
+      cancelledTaskIds: this.cancelledTaskIds,
+      taskId,
+    });
   }
 
   private originatesFromCancelledTask(deliveryId: string): boolean {
-    return [...this.cancelledTaskIds].some((taskId) =>
-      deliveryOriginatesFromTask(deliveryId, taskId),
-    );
+    return isCancelledTaskDeliveryId(deliveryId, this.cancelledTaskIds);
   }
 
   private shouldDiscard(delivery: DeliverHookPayload): boolean {
     const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
     return deliveryId !== undefined && this.originatesFromCancelledTask(deliveryId);
   }
-}
-
-/**
- * Task delivery ids are either a bare task id (the `caller.taskId` fallback)
- * or `${taskId}:${discriminator}` as minted in tasks/child/steps.ts.
- */
-function deliveryOriginatesFromTask(deliveryId: string, taskId: string): boolean {
-  return deliveryId === taskId || deliveryId.startsWith(`${taskId}:`);
 }
 
 function deliveryHasMessage(delivery: DeliverHookPayload): boolean {

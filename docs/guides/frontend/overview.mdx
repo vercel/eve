@@ -72,7 +72,7 @@ export function Chat() {
 
 | Field     | What it is                                                                                |
 | --------- | ----------------------------------------------------------------------------------------- |
-| `data`    | Projected UI state from the reducer. Defaults to `{ messages }`.                          |
+| `data`    | Projected UI state from the reducer. Defaults to `{ messages, tasks }`.                   |
 | `status`  | `"ready"`, `"resuming"`, `"submitted"`, `"streaming"`, or `"error"`. Drives the composer. |
 | `error`   | The last `Error` thrown, if any.                                                          |
 | `events`  | Raw eve stream events for this session.                                                   |
@@ -83,11 +83,13 @@ export function Chat() {
 | `cancel`  | Request durable cancellation of the active turn.                                          |
 | `reset`   | Clear local events, data, errors, and the local session cursor.                           |
 
-Most chat UIs only need `data.messages` and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
+Most chat UIs only need `data.messages`, `data.tasks`, and `status`. Drop down to `events` when you need the authoritative wire events directly, for example to persist an audit log or build a custom projection.
 
 `data.messages` are eve-owned `EveMessage[]`. Common text, reasoning, file, and dynamic-tool parts follow the [AI SDK `UIMessage`](https://ai-sdk.dev/docs/reference/ai-sdk-core/ui-message) rendering convention, but the types are not interchangeable. eve also exposes authorization and HITL metadata, and a file part's URL can be absent. Adapt those parts before passing messages to an API typed as `UIMessage[]`.
 
-When the root agent delegates, its stream emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the child returns. Detailed child progress lives on the child session's stream instead of being flattened into the root `data.messages`. Use the lower-level [TypeScript client](../client/overview#sessions) to attach to that ID when your UI needs live subagent activity. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
+`data.tasks` are eve-owned `EveTask[]`. Each task carries its durable status, metadata, latest `task_update` activity, timestamps, terminal output, and terminal token usage when available. The projection rebuilds from replayed `task.updated` events after a reload. To cancel one task without cancelling the parent turn, attach a fixed [TypeScript client](../client/overview#sessions) session and call `session.cancel({ taskId })`.
+
+When the root agent delegates, its stream also emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the tool returns its background receipt. `data.tasks` covers the task lifecycle and explicit `task_update` messages; detailed child reasoning and tool calls remain on the child session stream. Attach the lower-level TypeScript client to that child ID only when the UI needs those execution details. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
 ## Sending and streaming
 
@@ -241,7 +243,7 @@ The `optimistic` option (default `true`) projects submitted user messages into `
 
 ## Custom reducer
 
-The default reducer projects events into `{ messages }` (`EveMessageData`). When you want `data` shaped differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
+The default reducer projects events into `{ messages, tasks }` (`EveMessageData`). When you want `data` shaped differently, pass a `reducer` implementing `EveAgentReducer<TData>`:
 
 ```tsx
 import { useEveAgent } from "eve/react";

@@ -90,7 +90,7 @@ interface WaitToolFixture {
   toolStarts(): number;
 }
 
-async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture> {
+async function createWaitToolRuntime(agentName: string, tasks = false): Promise<WaitToolFixture> {
   let aborts = 0;
   let starts = 0;
   let resolveStarted: (() => void) | undefined;
@@ -107,6 +107,12 @@ async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture
     },
   );
   const runtime = await createTestRuntime({ agent: { name: agentName }, tools: [waitTool] });
+  if (tasks) {
+    runtime.manifest.config.experimental = {
+      ...runtime.manifest.config.experimental,
+      tasks: true,
+    };
+  }
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
   if (manifestTool === undefined) {
     throw new Error(`Expected ${WAIT_TOOL_NAME} to be present in the test manifest.`);
@@ -208,7 +214,7 @@ function expectNoFailureEvents(events: readonly UnstampedMessageStreamEvent[]): 
 /** Builds a cancel-route caller backed by the workflow runtime. */
 function createCancelRouteCaller(): (
   sessionId: string,
-  body?: { readonly turnId?: string },
+  body?: { readonly taskId?: string; readonly turnId?: string },
 ) => Promise<Response> {
   const channel = eveChannel({ auth: none() });
   const cancelRoute = (
@@ -476,6 +482,63 @@ describe("turn cancellation integration", () => {
               event.data.message?.includes("follow up after route cancel") === true,
           ),
         ).toBe(true);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 60_000);
+
+  it("cancels an owned background task and aborts its real child turn", async () => {
+    const fixture = await createWaitToolRuntime("task-cancel-route", true);
+    const continuationToken = "http:task-cancel-route";
+    const cancelViaRoute = createCancelRouteCaller();
+
+    await fixture.runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: `Delegate to a subagent: use the ${WAIT_TOOL_NAME} tool.` },
+          serializedContext: buildSerializedContext({
+            channelKind: "http",
+            continuationToken,
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const started = await stream.nextTurn();
+        const receipt = filterEventsByType(started, "subagent.completed").find(
+          (event) => event.data.backgroundTask !== undefined,
+        );
+        const taskId = receipt?.data.backgroundTask?.taskId;
+        expect(taskId).toBeDefined();
+        await fixture.toolStarted;
+
+        const cancelled = await cancelViaRoute(run.runId, { taskId });
+        await expectCancelResponse(cancelled, { sessionId: run.runId, status: "accepted" });
+
+        const deadline = Date.now() + 10_000;
+        while (fixture.toolAborts() === 0 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        expect(fixture.toolAborts()).toBe(1);
+
+        await waitForHook({ runId: run.runId }, { token: continuationToken });
+        await resumeHook(continuationToken, {
+          kind: "send",
+          payload: { message: "follow up after task cancel" },
+        });
+        const followUp = await stream.nextTurn();
+
+        expect(filterEventsByType(followUp, "turn.cancelled")).toHaveLength(0);
+        expect(
+          filterEventsByType(followUp, "task.updated").some(
+            (event) => event.data.task.taskId === taskId && event.data.task.status === "cancelled",
+          ),
+        ).toBe(true);
+        expect(fixture.toolStarts()).toBe(1);
       } finally {
         stream.dispose();
         await run.cancel();

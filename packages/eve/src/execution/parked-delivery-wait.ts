@@ -9,6 +9,11 @@ import {
   type DecodedSessionInbox,
 } from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
+import {
+  discardCancelledTaskDeliveries,
+  isCancelledTaskDelivery,
+  isCancelledTaskDeliveryId,
+} from "#execution/cancelled-task-deliveries.js";
 
 type NextSessionAction =
   | { readonly kind: "clear" }
@@ -63,6 +68,7 @@ export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly cancelTask: (taskId: string) => Promise<boolean>;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -85,6 +91,7 @@ export async function nextTurnDelivery(input: {
 async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly cancelTask: (taskId: string) => Promise<boolean>;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -98,6 +105,7 @@ async function awaitNextTurnDelivery(input: {
     const nextAction = await waitForNextSessionAction({
       bufferedDeliveries: input.bufferedDeliveries,
       bufferedSessionControls: input.bufferedSessionControls,
+      cancelTask: input.cancelTask,
       cancelledTaskIds,
       commandInbox: input.commandInbox,
       deferDeliveries: input.deferDeliveries,
@@ -141,6 +149,7 @@ async function awaitNextTurnDelivery(input: {
 async function waitForNextSessionAction(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly cancelTask: (taskId: string) => Promise<boolean>;
   readonly cancelledTaskIds: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -157,6 +166,7 @@ async function waitForNextSessionAction(input: {
   ) {
     input.bufferedDeliveries.shift();
   }
+
   if (
     input.deferDeliveries !== true &&
     !input.commandInbox.hasReadyAuthorization() &&
@@ -215,11 +225,13 @@ async function waitForNextSessionAction(input: {
 
     if (decoded.kind === "cancel") {
       if (decoded.taskId !== undefined) {
-        input.cancelledTaskIds.add(decoded.taskId);
-        const kept = input.bufferedDeliveries.filter(
-          (delivery) => !isCancelledTaskDelivery(delivery, input.cancelledTaskIds),
-        );
-        input.bufferedDeliveries.splice(0, input.bufferedDeliveries.length, ...kept);
+        if (await input.cancelTask(decoded.taskId)) {
+          discardCancelledTaskDeliveries({
+            bufferedDeliveries: input.bufferedDeliveries,
+            cancelledTaskIds: input.cancelledTaskIds,
+            taskId: decoded.taskId,
+          });
+        }
       }
       continue;
     }
@@ -239,23 +251,6 @@ async function waitForNextSessionAction(input: {
     }
     return { delivery: decoded, kind: "delivery" };
   }
-}
-
-function isCancelledTaskDelivery(
-  delivery: DeliverHookPayload,
-  cancelledTaskIds: ReadonlySet<string>,
-): boolean {
-  const deliveryId = delivery.taskDeliveryId ?? delivery.caller?.taskId;
-  return deliveryId !== undefined && isCancelledTaskDeliveryId(deliveryId, cancelledTaskIds);
-}
-
-function isCancelledTaskDeliveryId(
-  deliveryId: string,
-  cancelledTaskIds: ReadonlySet<string>,
-): boolean {
-  return [...cancelledTaskIds].some(
-    (taskId) => deliveryId === taskId || deliveryId.startsWith(`${taskId}:`),
-  );
 }
 
 function takeBufferedTurnDelivery(bufferedDeliveries: DeliverHookPayload[]): DeliverHookPayload {

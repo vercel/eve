@@ -80,6 +80,7 @@ function optimisticUserData(message: string, status: "failed" | "submitted") {
         role: "user",
       },
     ],
+    tasks: [],
   };
 }
 
@@ -121,6 +122,7 @@ function completedTurnData(input: {
             },
           ]),
     ],
+    tasks: [],
   };
 }
 
