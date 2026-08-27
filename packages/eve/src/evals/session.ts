@@ -115,6 +115,10 @@ export class EvalSessionDriver implements EveEvalSession {
     return this.#events;
   }
 
+  get transcript(): string {
+    return formatTranscript(this.#events);
+  }
+
   get lastTurn(): EveEvalTurn | undefined {
     return this.#lastTurn;
   }
@@ -681,6 +685,18 @@ function assertRequestHasOption(request: InputRequest, optionId: string): void {
   if (!request.options.some((option) => option.id === optionId)) {
     throw new Error(`Input request "${request.requestId}" does not offer option "${optionId}".`);
   }
+}
+
+function formatTranscript(events: readonly MessageStreamEvent[]): string {
+  const messages: string[] = [];
+  for (const event of events) {
+    if (event.type === "message.received") {
+      messages.push(`User:\n${event.data.message}`);
+    } else if (event.type === "message.completed" && event.data.message !== null) {
+      messages.push(`Assistant:\n${event.data.message}`);
+    }
+  }
+  return messages.join("\n\n");
 }
 
 function inferMediaType(filePath: string): string {

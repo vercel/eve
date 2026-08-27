@@ -291,6 +291,11 @@ export interface EveEvalLiveTurn {
 export interface EveEvalSessionDriver {
   /** All events observed on this session so far. */
   readonly events: readonly MessageStreamEvent[];
+  /**
+   * User and assistant messages observed on this session in turn order. Pass
+   * this to a judge's `on` option to grade the complete conversation.
+   */
+  readonly transcript: string;
   /** Input requests left pending by the last parked turn. */
   readonly pendingInputRequests: readonly InputRequest[];
   /** Serializable cursor for resuming this session. */
