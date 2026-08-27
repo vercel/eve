@@ -414,6 +414,7 @@ async function executeDiscoveredConnectionTool(
     const client = registry.getClient(connectionName);
     return await client.executeTool(toolName, input, {
       abortSignal: executeCtx.abortSignal,
+      callId: executeCtx.callId,
     });
   } catch (error) {
     if (!isConnectionAuthorizationRequiredError(error) || !interactiveAuth) throw error;

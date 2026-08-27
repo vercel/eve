@@ -3,6 +3,8 @@ import type { JsonValue } from "#public/types/json.js";
 
 /** Context available while resolving an application-provided connection tool argument. */
 export type ProvidedArgumentContext = SessionContext & {
+  /** Replay-stable id of the current connection tool call. */
+  readonly callId: string;
   /** Bare tool or operation name published by the remote connection. */
   readonly toolName: string;
 };

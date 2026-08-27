@@ -99,7 +99,8 @@ describe("McpConnectionClient", () => {
     };
     createMCPClient.mockResolvedValue(client);
 
-    const resolver = vi.fn(({ session, toolName }) => ({
+    const resolver = vi.fn(({ callId, session, toolName }) => ({
+      callId,
       sessionId: session.id,
       toolName,
     }));
@@ -121,7 +122,11 @@ describe("McpConnectionClient", () => {
         }),
       ]);
       await expect(
-        mcpClient.executeTool("lookup", { context: { from: "model" }, query: "boots" }),
+        mcpClient.executeTool(
+          "lookup",
+          { context: { from: "model" }, query: "boots" },
+          { callId: "call-1" },
+        ),
       ).resolves.toEqual({ ok: true });
     });
 
@@ -139,6 +144,7 @@ describe("McpConnectionClient", () => {
     expect(execute).toHaveBeenCalledWith(
       {
         context: {
+          callId: "call-1",
           sessionId: "session-1",
           toolName: "lookup",
         },
@@ -389,7 +395,7 @@ describe("McpConnectionClient authorization recovery", () => {
     createMCPClient.mockResolvedValue(client);
 
     const mcpClient = new McpConnectionClient(makeConnection());
-    const err = await mcpClient.executeTool("do_thing", {}).catch((e) => e);
+    const err = await mcpClient.executeTool("do_thing", {}, { callId: "call-1" }).catch((e) => e);
 
     expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
   });
