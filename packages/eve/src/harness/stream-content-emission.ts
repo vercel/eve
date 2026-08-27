@@ -33,10 +33,7 @@ import {
   isInvalidToolCall,
   resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeToolResultActionResult,
-} from "#shared/action-types.js";
+import type { RuntimeActionRequest, RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -131,7 +128,7 @@ async function consumeStreamContent(
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
-  const streamingActionInputs = new Map<string, { text: string; toolName: string }>();
+  const streamingActionInputs = new Map<string, { offset: number; toolName: string }>();
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -153,13 +150,13 @@ async function consumeStreamContent(
     callId: string,
     toolName: string,
     inputTextDelta: string,
-    inputTextSoFar: string,
+    inputTextOffset: number,
   ): Promise<void> =>
     emitFn(
       createActionInputAppendedEvent({
         callId,
         inputTextDelta,
-        inputTextSoFar,
+        inputTextOffset,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         toolName,
@@ -334,8 +331,8 @@ async function consumeStreamContent(
         if (currentMessage.trim().length > 0) {
           await flushCurrentMessage();
         }
-        streamingActionInputs.set(part.id, { text: "", toolName: part.toolName });
-        await emitActionInput(part.id, part.toolName, "", "");
+        streamingActionInputs.set(part.id, { offset: 0, toolName: part.toolName });
+        await emitActionInput(part.id, part.toolName, "", 0);
         break;
       }
       case "tool-input-delta": {
@@ -344,8 +341,9 @@ async function consumeStreamContent(
           break;
         }
         await providerActionBatch.flush();
-        input.text += part.delta;
-        await emitActionInput(part.id, input.toolName, part.delta, input.text);
+        const inputTextOffset = input.offset;
+        input.offset += part.delta.length;
+        await emitActionInput(part.id, input.toolName, part.delta, inputTextOffset);
         break;
       }
       case "tool-input-end":

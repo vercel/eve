@@ -41,7 +41,7 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "",
-        inputTextSoFar: "",
+        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -50,7 +50,7 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: '{"title":"Hel',
-        inputTextSoFar: '{"title":"Hel',
+        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -68,6 +68,20 @@ describe("defaultMessageReducer", () => {
       toolName: "render",
       type: "dynamic-tool",
     });
+
+    const contiguous = data;
+    data = reduceServerEvents(reducer, data, [
+      createActionInputAppendedEvent({
+        callId: "call_render",
+        inputTextDelta: "gap",
+        inputTextOffset: 99,
+        sequence: 1,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      }),
+    ]);
+    expect(data).toBe(contiguous);
 
     data = reduceServerEvents(reducer, data, [
       createActionsRequestedEvent({
@@ -100,7 +114,7 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "late",
-        inputTextSoFar: "late",
+        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -116,7 +130,7 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "{",
-        inputTextSoFar: "{",
+        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",

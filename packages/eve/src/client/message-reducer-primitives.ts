@@ -69,3 +69,13 @@ export function removeStreamingToolPartsForTurn(
 export function optimisticUserMessageId(submissionId: string): string {
   return `optimistic:${submissionId}:user`;
 }
+
+export function appendToolInputDelta(
+  inputText: string | undefined,
+  offset: number,
+  delta: string,
+): string | undefined {
+  if (offset === 0) return delta;
+  if (inputText?.length !== offset) return undefined;
+  return inputText + delta;
+}

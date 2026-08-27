@@ -21,6 +21,7 @@ import {
   toMessageInputRequest,
 } from "#client/message-action-parts.js";
 import {
+  appendToolInputDelta,
   optimisticUserMessageId,
   partKey,
   projectReceivedParts,
@@ -142,13 +143,18 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "action.input.appended": {
       const existing = findToolPart(data, event.data.callId);
-      if (existing !== undefined && existing.state !== "input-streaming") {
-        return data;
-      }
+      if (existing !== undefined && existing.state !== "input-streaming") return data;
+
+      const inputText = appendToolInputDelta(
+        existing?.state === "input-streaming" ? existing.inputText : undefined,
+        event.data.inputTextOffset,
+        event.data.inputTextDelta,
+      );
+      if (inputText === undefined) return data;
 
       const nextPart: EveDynamicToolPart = {
         input: undefined,
-        inputText: event.data.inputTextSoFar,
+        inputText,
         state: "input-streaming",
         stepIndex: event.data.stepIndex,
         toolCallId: event.data.callId,

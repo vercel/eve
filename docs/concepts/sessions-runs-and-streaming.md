@@ -49,6 +49,7 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                         |
 | `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
 | `step.started`            | A model step began.                                                                                              |
+| `action.input.appended`   | A raw tool-input text delta, its character offset, and tool-call identity.                                       |
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
 | `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                         |
 | `action.result`           | A tool call returned.                                                                                            |
@@ -60,7 +61,6 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `reasoning.completed`     | The finalized reasoning block.                                                                                   |
 | `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                              |
 | `message.completed`       | A finalized assistant text block.                                                                                |
-| `action.input.appended`   | A tool-input text delta, with the cumulative raw input and tool-call identity.                                   |
 | `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                    |
 | `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                   |
 | `compaction.completed`    | A compaction checkpoint was written to durable history.                                                          |
@@ -77,9 +77,9 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 
 The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
 
-`reasoning.appended`, `message.appended`, and `action.input.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas of the same type; the text remains in source order, and any other event forms an ordering barrier. Each append carries both the new delta and the cumulative text for the current block. The finalized text and reasoning blocks show up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+`reasoning.appended`, `message.appended`, and `action.input.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas for the same text block or tool call; the text remains in source order, and a different event type, tool `callId`, or stream coordinate forms an ordering barrier. Text and reasoning appends carry both the new delta and the cumulative text for the current block. The finalized blocks show up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
 
-`action.input.appended` arrives before the matching `actions.requested` event. It carries `callId`, `toolName`, `inputTextDelta`, and `inputTextSoFar`; the input text may be incomplete JSON. The default client reducer projects it as a `dynamic-tool` part with `state: "input-streaming"` and the cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
+When a streamed tool input becomes a validated call, its `action.input.appended` events precede the matching `actions.requested` event. Each append carries `callId`, `toolName`, `inputTextDelta`, and `inputTextOffset`; the offset is the zero-based UTF-16 code-unit position where the delta begins. Storing only the delta and offset avoids repeating the cumulative input in every durable event. The default client reducer starts or restarts accumulation at offset `0`, ignores a nonzero offset that is not contiguous, and projects the potentially incomplete JSON as a `dynamic-tool` part with `state: "input-streaming"` and cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
 
 `action.partial` carries one complete preliminary output snapshot from an authored async-generator tool. A later partial for the same `callId` replaces it, and `action.result` is the final snapshot. When the durable writer is busy, eve may keep only the newest adjacent partial for a call. Treat partials as last-write-wins: a durable step can retry and replay overlapping event runs. Provider-executed tool progress and MCP progress notifications are not projected as `action.partial` events.
 

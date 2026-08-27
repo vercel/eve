@@ -431,7 +431,8 @@ export interface ActionInputAppendedStreamEvent {
   data: {
     callId: string;
     inputTextDelta: string;
-    inputTextSoFar: string;
+    /** Zero-based UTF-16 code-unit offset where `inputTextDelta` begins. */
+    inputTextOffset: number;
     sequence: number;
     stepIndex: number;
     toolName: string;
@@ -1103,7 +1104,7 @@ export function createActionsRequestedEvent(input: {
 export function createActionInputAppendedEvent(input: {
   readonly callId: string;
   readonly inputTextDelta: string;
-  readonly inputTextSoFar: string;
+  readonly inputTextOffset: number;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly toolName: string;
@@ -1113,7 +1114,7 @@ export function createActionInputAppendedEvent(input: {
     data: {
       callId: input.callId,
       inputTextDelta: input.inputTextDelta,
-      inputTextSoFar: input.inputTextSoFar,
+      inputTextOffset: input.inputTextOffset,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       toolName: input.toolName,

@@ -319,20 +319,34 @@ describe("emitStreamContent action requests", () => {
       "action.input.appended",
       "actions.requested",
     ]);
-    expect(events.slice(1, 3)).toMatchObject([
+    const inputEvents = events.filter((event) => event.type === "action.input.appended");
+    expect(inputEvents.map((event) => event.data)).toEqual([
       {
-        data: {
-          callId: "call-render",
-          inputTextDelta: '{"title":"Hel',
-          inputTextSoFar: '{"title":"Hel',
-        },
+        callId: "call-render",
+        inputTextDelta: "",
+        inputTextOffset: 0,
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
       },
       {
-        data: {
-          callId: "call-render",
-          inputTextDelta: 'lo"}',
-          inputTextSoFar: '{"title":"Hello"}',
-        },
+        callId: "call-render",
+        inputTextDelta: '{"title":"Hel',
+        inputTextOffset: 0,
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
+      },
+      {
+        callId: "call-render",
+        inputTextDelta: 'lo"}',
+        inputTextOffset: 13,
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
       },
     ]);
   });

@@ -140,6 +140,7 @@ export type EveDynamicToolPart = {
       readonly approval?: never;
       readonly errorText?: never;
       readonly input: unknown | undefined;
+      /** Accumulated raw tool input, which may be incomplete JSON. */
       readonly inputText: string;
       readonly output?: never;
       readonly state: "input-streaming";
