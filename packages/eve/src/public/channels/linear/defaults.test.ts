@@ -11,7 +11,6 @@ function sessionContext(): SessionContext {
   return {
     getSandbox: vi.fn(),
     getSkill: vi.fn(),
-    sandbox: { delete: vi.fn() },
     session: {
       auth: {
         current: {

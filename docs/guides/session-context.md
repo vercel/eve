@@ -9,7 +9,6 @@ eve passes a runtime `ctx` to tool executors, hook handlers, channel event handl
 | ---------------------------- | --------------------------------------------------------- | ----------------------------------------------- |
 | `ctx.session`                | Session identity, turn metadata, auth, and parent lineage | This page                                       |
 | `ctx.getSandbox()`           | The current agent's live sandbox handle                   | [Sandbox](../sandbox)                           |
-| `ctx.sandbox.delete()`       | Permanent deletion of the current session sandbox         | [Sandbox](../sandbox#delete-a-sandbox)          |
 | `ctx.getSkill(identifier)`   | A handle for a skill visible to the current agent         | [Skills](../skills#read-skill-files-at-runtime) |
 | `defineState(name, initial)` | Durable typed state shared by runtime code in one session | [State](../concepts/state)                      |
 
@@ -60,14 +59,11 @@ const sandbox = await ctx.getSandbox();
 const result = await sandbox.run({ command: "npm test" });
 ```
 
-The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned runtime handle can also stop compute while preserving the durable sandbox state. See [Sandbox](../sandbox#using-the-sandbox) for the I/O API and lifecycle.
-
-## `ctx.sandbox.delete()`
-
-Call `ctx.sandbox.delete()` to permanently remove the current session sandbox:
+The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned runtime handle can also stop compute while preserving the durable sandbox state, or permanently delete the sandbox:
 
 ```ts
-await ctx.sandbox.delete();
+const sandbox = await ctx.getSandbox();
+await sandbox.delete();
 ```
 
 eve stops compute, deletes the session's physical sandbox and disposable backend state, then clears reconnect state. The next sandbox access provisions a fresh workspace and runs `onSession` again. Reusable template state remains available. Only the owning session can delete a shared sandbox. See [Delete a sandbox](../sandbox#delete-a-sandbox) for backend behavior and shared sandbox ownership.

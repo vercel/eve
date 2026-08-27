@@ -253,7 +253,8 @@ teardown.
 Permanently delete the current session sandbox from an authored runtime callback:
 
 ```ts
-await ctx.sandbox.delete();
+const sandbox = await ctx.getSandbox();
+await sandbox.delete();
 ```
 
 eve stops compute first, deletes the physical sandbox and its disposable backend state, and clears the saved reconnect state. It preserves reusable template state that contains `bootstrap` and seeded workspace files.
