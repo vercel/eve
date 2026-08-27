@@ -3,6 +3,7 @@ import { defineAgent } from "eve";
 
 export default defineAgent({
   ...e2eAgentConfig({
+    agentStepsPerWorkflowStep: false,
     mock: ({ lastUserMessage }) =>
       lastUserMessage?.includes("Please wait for cross-version follow-up.") === true
         ? {

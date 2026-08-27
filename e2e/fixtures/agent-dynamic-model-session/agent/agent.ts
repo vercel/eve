@@ -11,7 +11,9 @@ if (requestedModel === MOCK_MODEL_SENTINEL) {
   process.env.EVE_MOCK_AUTHORED_MODELS = "1";
 }
 
-const { experimental } = e2eAgentConfig();
+const { experimental } = e2eAgentConfig({
+  agentStepsPerWorkflowStep: process.env.EVE_E2E_WORKFLOW_WORLD === undefined ? 5 : 1,
+});
 
 export default defineAgent({
   experimental,
