@@ -818,6 +818,28 @@ describe("createAgentOtelInstrumentation", () => {
     },
   );
 
+  it.each([
+    ["legacy false", (): boolean => false],
+    ["explicit emit false", (): { readonly emit: false } => ({ emit: false })],
+  ] as const)(
+    "does not emit a trace when the policy overrides the default with %s",
+    async (_name, tracePolicy) => {
+      const runtime = createRuntime(new InMemoryAgentTraceStateStore(), tracePolicy);
+
+      await emitAttempt({
+        channelAudience: "public",
+        hooks: runtime.hooks,
+        runInContext: runtime.runInContext,
+        sessionId: "session-rejected",
+        turnId: "turn-rejected",
+        turnSequence: 0,
+      });
+      await runtime.provider.forceFlush();
+
+      expect(runtime.exporter.getFinishedSpans()).toEqual([]);
+    },
+  );
+
   it("preserves the parent's sampling decision for adopted traces", async () => {
     const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
 
