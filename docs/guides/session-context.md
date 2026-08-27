@@ -59,14 +59,7 @@ const sandbox = await ctx.getSandbox();
 const result = await sandbox.run({ command: "npm test" });
 ```
 
-The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned runtime handle can also stop compute while preserving the durable sandbox state, or permanently delete the sandbox:
-
-```ts
-const sandbox = await ctx.getSandbox();
-await sandbox.delete();
-```
-
-eve stops compute, deletes the session's physical sandbox and disposable backend state, then clears reconnect state. The next sandbox access provisions a fresh workspace and runs `onSession` again. Reusable template state remains available. Only the owning session can delete a shared sandbox. See [Delete a sandbox](../sandbox#delete-a-sandbox) for backend behavior and shared sandbox ownership.
+The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
 
 ## `ctx.getSkill(identifier)`
 
