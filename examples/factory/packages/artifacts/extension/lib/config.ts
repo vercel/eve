@@ -1,4 +1,4 @@
-import { ARTIFACTS_PREFIX } from "../blob.js";
+import { ARTIFACTS_PREFIX } from "./blob.js";
 
 /**
  * Key layout, bounds, and id handling for handoff artifacts.

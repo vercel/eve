@@ -24,6 +24,6 @@ The factory's target repository is checked out at `/workspace/repo`. Use it:
 - **open_questions**: external facts you could not resolve from the repository; list them instead of guessing
 - **artifact_id**: the id of the analysis artifact you saved, or null when you didn't save one
 
-Where the work item came with research findings, build on them and cite them in the plan rather than re-deriving. When the message also hands you a research artifact id, open it with `read_artifact` before planning; it holds the full memo behind the findings.
+Where the work item came with research findings, build on them and cite them in the plan rather than re-deriving. When the message also hands you a research artifact id, open it with `artifacts__read_artifact` before planning; it holds the full memo behind the findings.
 
-When your analysis carries depth beyond the structured fields (file-level notes, code excerpts, alternatives you explored in detail), save that document as an `analysis` artifact with `save_artifact` and return its id in `artifact_id`. The structured plan stays the contract the implementer and reviewer work from; the artifact is supporting detail for whoever needs it.
+When your analysis carries depth beyond the structured fields (file-level notes, code excerpts, alternatives you explored in detail), save that document as an `analysis` artifact with `artifacts__save_artifact` and return its id in `artifact_id`. The structured plan stays the contract the implementer and reviewer work from; the artifact is supporting detail for whoever needs it.

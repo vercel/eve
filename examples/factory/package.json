@@ -10,6 +10,7 @@
     "#lib/*": "./lib/*"
   },
   "dependencies": {
+    "@factory/artifacts": "workspace:*",
     "@github-tools/eve-extension": "^0.3.2",
     "@vercel/blob": "^2.8.0",
     "@vercel/connect": "0.8.0",

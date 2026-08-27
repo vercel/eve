@@ -1,6 +1,6 @@
 import { defineTool } from "eve/tools";
 import { z } from "zod";
-import { readDocument, writeDocument } from "../blob.js";
+import { readDocument, writeDocument } from "./blob.js";
 import {
   ARTIFACT_KINDS,
   artifactId,

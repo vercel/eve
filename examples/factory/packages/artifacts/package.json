@@ -1,0 +1,21 @@
+{
+  "name": "@factory/artifacts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Handoff-artifact tools for factory stations, mounted as an eve extension.",
+  "type": "module",
+  "scripts": {
+    "build": "eve extension build"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0",
+    "eve": "^0.39.3",
+    "zod": "4.4.3"
+  },
+  "eve": {
+    "extension": {
+      "source": "./extension",
+      "dist": "./dist/extension"
+    }
+  }
+}
