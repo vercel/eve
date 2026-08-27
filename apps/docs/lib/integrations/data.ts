@@ -26,9 +26,9 @@ import type { ConnectionProtocol } from "@eve/catalog";
 
 /**
  * How a connection authenticates. A mode uses either Vercel Connect (`user`,
- * `app`, or `jwtBearer`), a server-side API key, or no authentication.
+ * `app`, or `jwtBearer`) or a server-side API key.
  */
-export type AuthMode = "user" | "app" | "jwtBearer" | "apiKey" | "none";
+export type AuthMode = "user" | "app" | "jwtBearer" | "apiKey";
 
 export interface ApiKeySpec {
   /** Server-side environment variable containing the API key. */
@@ -1835,7 +1835,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     logo: "shopify",
     docsHref: "https://shopify.dev/docs/apps/build/storefront-mcp",
     keywords: ["mcp", "ucp", "commerce", "products", "carts", "checkouts"],
-    authModes: ["none"],
+    authModes: [],
     quickStart: `Create \`agent/connections/shopify.ts\`:
 
 \`\`\`ts
@@ -2383,7 +2383,6 @@ export const authModeLabel: Record<AuthMode, string> = {
   app: "App",
   jwtBearer: "JWT bearer",
   apiKey: "API key",
-  none: "None",
 };
 
 export const integrations: Integration[] = [

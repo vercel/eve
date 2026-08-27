@@ -104,9 +104,6 @@ const authNote = (auth: AuthMode): string => {
   if (auth === "apiKey") {
     return "Keep the API key in a server-side environment variable. eve sends it directly to the MCP server and does not expose it to the model.";
   }
-  if (auth === "none") {
-    return "";
-  }
   return "Connect exchanges a JWT bearer assertion for a provider token. `principalToSubject` maps each principal to the subject your IdP expects.";
 };
 
@@ -139,7 +136,7 @@ const buildConfigureVariant = (integration: Integration, auth: AuthMode): string
   }
   const sections: string[] = [];
 
-  if (auth !== "apiKey" && auth !== "none") {
+  if (auth !== "apiKey") {
     const connector = connectorOf(integration.slug, spec, auth);
     const modeService = spec.connectorServices?.[auth];
     const connectorService = modeService ?? spec.connectorService ?? connector;
@@ -201,8 +198,8 @@ export const buildConnectionSetup = (integration: Integration): ConnectionSetup 
   for (const protocol of protocols) {
     for (const auth of authModes) {
       const key = setupKey(protocol, auth);
-      variants[key] = integration.quickStart ?? buildVariant(integration, protocol, auth);
-      configureVariants[key] = integration.configure ?? buildConfigureVariant(integration, auth);
+      variants[key] = buildVariant(integration, protocol, auth);
+      configureVariants[key] = buildConfigureVariant(integration, auth);
     }
   }
   return { protocols, authModes, variants, configureVariants };
