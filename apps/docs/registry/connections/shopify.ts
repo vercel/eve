@@ -15,7 +15,7 @@ export default defineMcpClientConnection({
   description: "Search products and build carts and checkouts on a Shopify storefront.",
   toolCall: {
     providedArguments: {
-      meta: ({ session, toolName }) => ({
+      meta: ({ callId, session, toolName }) => ({
         "ucp-agent": {
           profile: agentProfileUrl(),
         },
@@ -23,7 +23,7 @@ export default defineMcpClientConnection({
         // These calls require a unique idempotency key.
         ...(["cancel_cart", "complete_checkout", "cancel_checkout"].includes(toolName)
           ? {
-              "idempotency-key": `${session.id}:${session.turn.id}:${toolName}`,
+              "idempotency-key": `${session.id}:${session.turn.id}:${toolName}:${callId}`,
             }
           : {}),
       }),
