@@ -1,5 +1,17 @@
 # eve
 
+## 0.46.0
+
+### Minor Changes
+
+- 1d79217: Emit traces for every audience by default while recording content only for public conversations. `tracePolicy` can explicitly disable emission or select directional content capture, and existing boolean policies retain their current behavior.
+
+### Patch Changes
+
+- 47b3e48: Static authored definitions now remain build-only, while runtime entries and their assets use the same bundling semantics in development and production.
+- 9c0a138: Replace the eve TUI's separate banner and text header with a startup card showing the installed version, active model, and the instructions, tools, skills, subagents, and schedules loaded by the agent.
+- 7acb4ec: Include the original message body when Slack users share a message into an eve conversation. Agents now receive Slack crosspost content alongside distinct top-level comments without repeating content already present in the comment.
+
 ## 0.45.2
 
 ### Patch Changes
