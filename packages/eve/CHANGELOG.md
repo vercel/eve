@@ -1,5 +1,15 @@
 # eve
 
+## 0.46.1
+
+### Patch Changes
+
+- 16c8b63: Expose a replay-stable `callId` to MCP and OpenAPI `providedArguments` callbacks so connection tools can derive per-call idempotency keys.
+- e2d9162: Update the Linq channel adapter to preserve supported text decorations, including bold, italic, strikethrough, and underline, in outbound messages.
+- fbc3080: Add Shopify registry setup for searching products and building UCP carts and checkouts. Setup now generates an anonymous UCP profile that the connection advertises in production.
+- 2af4a4c: Tool inputs now stream through the durable event protocol as `action.input.appended` before the matching validated `actions.requested` event. Each event stores only its raw delta and UTF-16 offset, while the default message reducer exposes cumulative raw input on `dynamic-tool.inputText` in the `input-streaming` state. This advances the stream protocol to version 24; when assistant text precedes a tool call, `message.completed` now arrives before that call's streamed input events.
+- 122f565: Add a local dev TUI `/info` command that shows the same application, artifact, diagnostic, and messaging details as `eve info`. The human-readable report now begins directly with its application details instead of repeating an `eve Info` heading.
+
 ## 0.46.0
 
 ### Minor Changes
