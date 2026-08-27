@@ -1,5 +1,20 @@
 # eve
 
+## 0.47.0
+
+### Minor Changes
+
+- 52e89ef: Add `delete()` to the runtime sandbox handle for permanently deleting the current session sandbox and reprovisioning it on the next access. Docker handles stay bound to one physical container, and sandbox `onSession` callbacks now receive session metadata through `ctx` while using `use()` for sandbox access.
+
+### Patch Changes
+
+- a3b23c0: Eval contexts and sessions now expose a formatted `transcript` of observed user and assistant messages, which can be passed directly to an LLM judge for multi-turn conversation grading.
+- 56514d9: Models with slug ending in `-thinking` are now resolved to the
+  correct model instead of failing with `does not have known AI Gateway context window metadata` error or silently using the base model's context window.
+- 41c8286: Restore Bash process substitution in Vercel sandboxes by providing the standard `/dev/fd` path whenever eve creates or resumes a sandbox session.
+- bdb3973: Preserve schedule provenance when a handler starts a session with user credentials. Scheduled background-task launches now stay silent instead of sending a launch acknowledgement, and schedule-created workflow runs expose `$eve.schedule` for attribution.
+- fccbf2b: Fix a TypeScript error in the generated Web Chat `tool.tsx` where `trimEnd` was called on `string | number` values returned by the tool output helper.
+
 ## 0.46.1
 
 ### Patch Changes
