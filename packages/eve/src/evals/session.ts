@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { basename } from "node:path";
 
 import { createTextWithFileContent } from "#client/file-parts.js";
 import type { Client } from "#client/client.js";
@@ -21,6 +21,7 @@ import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
 import { EvalRequirementFailed } from "#evals/control-flow.js";
@@ -116,7 +117,7 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   get transcript(): string {
-    return formatTranscript(this.#events);
+    return formatEvalTranscript(this.#events);
   }
 
   get lastTurn(): EveEvalTurn | undefined {
@@ -684,33 +685,5 @@ function assertRequestHasOption(request: InputRequest, optionId: string): void {
 
   if (!request.options.some((option) => option.id === optionId)) {
     throw new Error(`Input request "${request.requestId}" does not offer option "${optionId}".`);
-  }
-}
-
-function formatTranscript(events: readonly MessageStreamEvent[]): string {
-  const messages: string[] = [];
-  for (const event of events) {
-    if (event.type === "message.received") {
-      messages.push(`User:\n${event.data.message}`);
-    } else if (event.type === "message.completed" && event.data.message !== null) {
-      messages.push(`Assistant:\n${event.data.message}`);
-    }
-  }
-  return messages.join("\n\n");
-}
-
-function inferMediaType(filePath: string): string {
-  switch (extname(filePath).toLowerCase()) {
-    case ".gif":
-      return "image/gif";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    default:
-      return "application/octet-stream";
   }
 }
