@@ -78,6 +78,8 @@ export interface HeldCandidate {
   readonly rowId: string;
   readonly linkedRowId: string;
   readonly response: InputResponse;
+  /** Admission identity: redeliveries dedupe on {rowId, deliveryId}. */
+  readonly deliveryId: string;
 }
 
 export interface Group {
@@ -108,4 +110,6 @@ export type LedgerEffect =
       readonly visibility: "context-turn" | "drop";
     }
   | { readonly kind: "claim-continuation"; readonly groupId: string }
-  | { readonly kind: "consume-message" };
+  | { readonly kind: "consume-message" }
+  /** input.response.pending(reason: authorization-required) on the wire. */
+  | { readonly kind: "candidate-pending"; readonly rowId: string; readonly linkedRowId: string };

@@ -147,7 +147,7 @@ Owned unconditionally, with no per-kind branches:
 | Groups + continuations | closure iff all members terminal; `pending → claimed \| suppressed` exactly once                                                                                       |
 | Forced closure         | turn-cancel / session-end dismisses rows and suppresses continuations uniformly                                                                                        |
 | Intent dedup           | a raise whose `intentKey` matches an open row resolves already-pending (fail-open when unkeyed)                                                                        |
-| Projection routes      | the #1224 Route machine verbatim; routes reference rows by id, never by kind                                                                                           |
+| Projection routes      | the #1224 Route machine verbatim, inherited unchanged (not prototyped — see catalog coverage); routes reference rows by id, never by kind                              |
 | Park/resume addressing | durable hook + capability-alias demux; registration committed before any resume URL is advertised; disposed owners reject resumes (route-lost, never a parent failure) |
 | Events                 | state persisted before effects; every admitted input yields an observable event                                                                                        |
 
@@ -304,6 +304,41 @@ Stale generations never reach the Limit reducer: the generation is part of
 the request id, so a `gen-1` response hits a tombstone. Forced closure of a
 Challenge maps to `completed(cancelled)` in the interpreter's dismissal-to-
 vocabulary translation — the one place kind leaks into interpreter output.
+
+## Catalog coverage
+
+Every #1224 transition row is accounted for in exactly one of three places;
+none is silently out of scope.
+
+**Encoded in the prototype** — the interpreter pass and the variant
+reducers: all `owner.approval.*` rows (including `pend-authorization` with
+same-pass re-feed, held-candidate dedupe by `{rowId, deliveryId}`, and
+`settle-cancel-pending-candidate`), all `owner.question.*` and
+`owner.limit.*` rows, `owner.auth.callback.*` / `deadline.*` /
+`message.run-open` / `close.complete`, `owner.batch.response.settle-partial`
+/ `close.fire-continuation` / `message.dismiss-question-only` /
+`park.append` / `park.dedupe-open-intent`, both `owner.obligation.*`
+cancellation rows, and `owner.batch.forced-close.no-continuation`
+(`closeForced`). `owner.approval.message.no-retroactive-binding` holds by
+construction — message inputs carry no text and responses name explicit
+request ids, so an earlier message cannot become a candidate for a later
+row.
+
+**Inherited from #1224 unchanged, not prototyped** — the projector
+(`projector.route.*`, six rows): routes stay a parent-side machine exactly
+as specified there; this proposal changes nothing about projection and the
+prototype deliberately omits it. Likewise the scheduler admission rows
+(`scheduler.delivery.admit-*`): arrival ordering and actor partitioning
+happen in the inbox/driver, upstream of the interpreter.
+
+**Park-side, outside the interpreter** — rows about raising, not
+resolving: `owner.batch.park.persist-with-runtime-action` and
+`park.fail-closed-metadata` live in the harness park path
+(`appendPendingInputBatch` and its callers), unchanged by this proposal.
+The compound-delivery rows (`*.compound.*`) split across the seam: response
+parts resolve before the message part observes (the pass order guarantees
+it), and the two-turn sequencing (closure resume, then message turn) is the
+`translateEffects` contract.
 
 ## Where the interpreter runs: the existing seam
 

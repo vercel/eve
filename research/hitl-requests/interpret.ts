@@ -36,8 +36,17 @@ import type {
  */
 export async function interpretDelivery(input: {
   readonly ledger: Ledger;
+  /**
+   * Server-assigned admission id for this delivery. Candidate identity is
+   * {requestId, deliveryId}: a workflow-level redelivery reuses it (held
+   * candidates dedupe on it); a new delivery is a new candidate.
+   */
+  readonly deliveryId: string;
   readonly responses: readonly InputResponse[];
   readonly message: { readonly actor: "originating" | "other" | "anonymous" } | undefined;
+  /** Connection-authorization callbacks and fired deadlines, arrival-ordered. */
+  readonly callbacks?: readonly { readonly rowId: string; readonly params: Record<string, unknown> }[];
+  readonly deadlines?: readonly { readonly rowId: string }[];
   readonly variants: VariantRegistry;
 }): Promise<{ ledger: Ledger; effects: LedgerEffect[] }> {
   let ledger = input.ledger;
@@ -48,15 +57,25 @@ export async function interpretDelivery(input: {
   for (const response of input.responses) {
     const row = ledger.rows.find((candidate) => candidate.id === response.requestId);
 
-    if (row === undefined || row.state.phase !== "open") {
-      // Interpreter-side staleness: tombstone or unknown id. Visibility is the
-      // variant's one modulation (staleResponses); unknown ids default to
-      // context-turn so the agent can react.
-      const visibility =
-        row === undefined ? "context-turn" : input.variants[row.kind].staleResponses ?? "context-turn";
+    if (row === undefined) {
+      // Unknown id: malformed, never raised. #1224 reason "invalid".
+      effects.push({ kind: "reject-response", reason: "invalid", response, visibility: "context-turn" });
+      continue;
+    }
+    if (row.state.phase !== "open") {
+      // Tombstone: single-winner already decided. Visibility is the
+      // variant's one modulation (staleResponses).
+      const visibility = input.variants[row.kind].staleResponses ?? "context-turn";
       effects.push({ kind: "reject-response", reason: "stale", response, visibility });
       continue;
     }
+    // Redelivery of a delivery whose candidate is already held on a
+    // challenge: return the existing pending candidate, never a second
+    // challenge (owner.approval.response.pend-authorization dedupe).
+    const held = ledger.heldCandidates.find(
+      (candidate) => candidate.rowId === row.id && candidate.deliveryId === input.deliveryId,
+    );
+    if (held !== undefined) continue;
 
     const verdict = await input.variants[row.kind].resolve(row, {
       kind: "response",
@@ -64,8 +83,20 @@ export async function interpretDelivery(input: {
       responder: response.responder ?? null,
       actor: response.actor ?? "anonymous",
     });
-    ({ ledger } = applyVerdict({ ledger, row, verdict, effects, response }));
+    ({ ledger } = applyVerdict({ ledger, row, verdict, effects, response, deliveryId: input.deliveryId }));
   }
+
+  // Callbacks and deadlines dispatch to their challenge rows, then any row
+  // that was blocked on a newly terminal linked row is re-fed in the SAME
+  // pass (pend-authorization: authorized → re-run the authorizer without
+  // a further external delivery).
+  for (const callback of input.callbacks ?? []) {
+    ledger = await dispatchToRow(ledger, callback.rowId, { kind: "callback", params: callback.params }, input.variants, effects);
+  }
+  for (const deadline of input.deadlines ?? []) {
+    ledger = await dispatchToRow(ledger, deadline.rowId, { kind: "deadline" }, input.variants, effects);
+  }
+  ledger = await refeedUnblockedCandidates(ledger, input.variants, effects);
 
   // 3. Message observation: broadcast to every open row. Variants answer
   // independently; mixed batches (owner.batch.message.dismiss-question-only)
@@ -97,6 +128,55 @@ export async function interpretDelivery(input: {
   return { ledger, effects };
 }
 
+/** Dispatches one input to one open row and applies the verdict. */
+async function dispatchToRow(
+  ledger: Ledger,
+  rowId: string,
+  rowInput: { readonly kind: "callback"; readonly params: Record<string, unknown> } | { readonly kind: "deadline" },
+  variants: VariantRegistry,
+  effects: LedgerEffect[],
+): Promise<Ledger> {
+  const row = ledger.rows.find((candidate) => candidate.id === rowId);
+  // A callback after completion, or with no matching challenge, is rejected
+  // stale — never silently queued (owner.auth.callback.reject-stale).
+  if (row === undefined || row.state.phase !== "open") {
+    effects.push({ kind: "reject-response", reason: "stale", response: undefined, visibility: "context-turn" });
+    return ledger;
+  }
+  const verdict = await variants[row.kind].resolve(row, rowInput);
+  return applyVerdict({ ledger, row, verdict, effects }).ledger;
+}
+
+/**
+ * Re-feeds every row whose held candidate's linked row reached terminal
+ * state in this pass, with the linked outcome as data. The blocking variant
+ * re-adjudicates (pend-authorization: authorized re-runs the authorizer;
+ * declined → unauthorized; failed/timed-out → policy-failed).
+ */
+async function refeedUnblockedCandidates(
+  input: Ledger,
+  variants: VariantRegistry,
+  effects: LedgerEffect[],
+): Promise<Ledger> {
+  let ledger = input;
+  for (const held of [...ledger.heldCandidates]) {
+    const linked = ledger.rows.find((row) => row.id === held.linkedRowId);
+    if (linked === undefined || linked.state.phase === "open") continue;
+    const row = ledger.rows.find((candidate) => candidate.id === held.rowId);
+    ledger = { ...ledger, heldCandidates: ledger.heldCandidates.filter((c) => c !== held) };
+    if (row === undefined || row.state.phase !== "open") continue;
+    const outcome =
+      linked.state.phase === "settled" ? String(linked.state.outcome) : "failed";
+    const verdict = await variants[row.kind].resolve(row, {
+      kind: "linked",
+      outcome,
+      heldResponse: held.response,
+    });
+    ({ ledger } = applyVerdict({ ledger, row, verdict, effects, response: held.response, deliveryId: held.deliveryId }));
+  }
+  return ledger;
+}
+
 /** Applies one verdict to one row. The only writer of row phases. */
 function applyVerdict(input: {
   readonly ledger: Ledger;
@@ -104,6 +184,7 @@ function applyVerdict(input: {
   readonly verdict: Verdict;
   readonly effects: LedgerEffect[];
   readonly response?: InputResponse;
+  readonly deliveryId?: string;
 }): { ledger: Ledger } {
   const { row, verdict, effects } = input;
   let ledger = input.ledger;
@@ -151,9 +232,9 @@ function applyVerdict(input: {
     return { ledger };
   }
 
-  // blockOn: open the linked challenge row, hold the candidate. When the
-  // linked row reaches terminal, the interpreter re-feeds the blocking row with
-  // a "linked" input carrying the outcome (driven by the next pass).
+  // blockOn: open the linked challenge row, hold the candidate. The row is
+  // re-fed a "linked" input when the linked row reaches terminal — same
+  // pass via refeedUnblockedCandidates, or a later one.
   const linked: Row = {
     id: `${row.id}:challenge`,
     baseId: `${row.id}:challenge`,
@@ -164,13 +245,19 @@ function applyVerdict(input: {
     groupId: row.groupId,
     state: { phase: "open" },
   };
+  effects.push({ kind: "candidate-pending", rowId: row.id, linkedRowId: linked.id });
   return {
     ledger: {
       ...ledger,
       rows: [...ledger.rows, linked],
       heldCandidates: [
         ...ledger.heldCandidates,
-        { rowId: row.id, linkedRowId: linked.id, response: input.response! },
+        {
+          rowId: row.id,
+          linkedRowId: linked.id,
+          response: input.response!,
+          deliveryId: input.deliveryId ?? "",
+        },
       ],
     },
   };

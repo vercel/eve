@@ -66,6 +66,7 @@ export async function resolvePendingInputViaInterpreter(input: {
 
   const { ledger: next, effects } = await interpretDelivery({
     ledger,
+    deliveryId: deliveryIdOf(input.stepInput),
     responses: input.stepInput?.inputResponses ?? [],
     message:
       input.stepInput?.message !== undefined
@@ -164,3 +165,5 @@ declare function actorOf(
   stepInput: StepInput,
   session: HarnessSession,
 ): "originating" | "other" | "anonymous";
+/** Server-assigned admission id for the delivery this step input carries. */
+declare function deliveryIdOf(stepInput: StepInput | undefined): string;
