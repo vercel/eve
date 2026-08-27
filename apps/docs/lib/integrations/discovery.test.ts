@@ -145,6 +145,16 @@ describe("integration discovery", () => {
     expect(markdown).toContain("agent/connections/notion.ts");
   });
 
+  it("renders hand-authored connection setup without generated variant headings", () => {
+    const shopify = getIntegration("shopify");
+    expect(shopify).toBeDefined();
+
+    const markdown = integrationMarkdown(shopify!);
+    expect(markdown).toContain('process.env.EVE_DEV === "1"');
+    expect(markdown).toContain("SHOPIFY_STORE_DOMAIN");
+    expect(markdown).not.toContain("### MCP ·");
+  });
+
   it("renders instrumentation providers with registry installation", () => {
     const braintrust = getIntegration("braintrust");
     expect(braintrust).toBeDefined();

@@ -135,7 +135,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
           </Markdown>
         </Section>
         <Section title="Quick start">
-          {setup ? (
+          {setup && integration.quickStart === undefined ? (
             <Suspense
               fallback={
                 <Markdown>
@@ -157,7 +157,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
           )}
         </Section>
         <Section id="configure" title="Configure">
-          {setup ? (
+          {setup && integration.configure === undefined ? (
             <Suspense
               fallback={
                 <Markdown>
