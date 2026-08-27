@@ -13,6 +13,7 @@ import provider from "./@ai-sdk/provider.mjs";
 import providerUtils from "./@ai-sdk/provider-utils.mjs";
 
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
+import chatAdapterSendblue from "./chat-adapter-sendblue.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
@@ -58,6 +59,7 @@ export const MODULES = [
   anthropic,
   chat,
   chatAdapterSlack,
+  chatAdapterSendblue,
   chatAdapterStateMemory,
   chatAdapterTwilio,
   chokidar,

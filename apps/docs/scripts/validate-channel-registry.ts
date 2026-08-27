@@ -39,6 +39,7 @@ const registrySlugsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
   linq: "linq",
   photon: "photon-imessage",
+  sendblue: "sendblue",
 };
 
 const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
@@ -48,6 +49,7 @@ const setupKindsByCatalogSlug: Readonly<Record<string, string>> = {
   eve: "web",
   linq: "linq",
   photon: "photon",
+  sendblue: "sendblue",
 };
 
 const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
@@ -57,7 +59,6 @@ const adapterDependenciesByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-messenger": "@chat-adapter/messenger",
   "chat-sdk-zernio": "@zernio/chat-sdk-adapter",
   "chat-sdk-velt": "@veltdev/chat-sdk-adapter",
-  "chat-sdk-sendblue": "chat-adapter-sendblue",
   "chat-sdk-novu": "@novu/chat-sdk-adapter",
   "chat-sdk-liveblocks": "@liveblocks/chat-sdk-adapter",
   "chat-sdk-kapso": "@kapso/chat-adapter",
@@ -76,7 +77,6 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-messenger": "messenger",
   "chat-sdk-zernio": "zernio",
   "chat-sdk-velt": "velt",
-  "chat-sdk-sendblue": "sendblue",
   "chat-sdk-novu": "novu",
   "chat-sdk-liveblocks": "liveblocks",
   "chat-sdk-kapso": "kapso",
@@ -87,7 +87,7 @@ const targetSlugsByCatalogSlug: Readonly<Record<string, string>> = {
   "chat-sdk-resend": "resend",
 };
 
-const nonStreamingCatalogSlugs = new Set(["chat-sdk-sendblue"]);
+const nonStreamingCatalogSlugs = new Set<string>();
 
 const docsRoot = join(import.meta.dirname, "..");
 const registry = JSON.parse(await readFile(join(docsRoot, "registry.json"), "utf8")) as Registry;
@@ -152,7 +152,8 @@ for (const [index, item] of items.entries()) {
     entry.slug === "linear-agent" ||
     entry.slug === "eve" ||
     entry.slug === "linq" ||
-    entry.slug === "photon"
+    entry.slug === "photon" ||
+    entry.slug === "sendblue"
   ) {
     const expectedArgs = [
       "integration",
