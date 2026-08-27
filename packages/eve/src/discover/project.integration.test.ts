@@ -25,6 +25,25 @@ describe("resolveDiscoveryProject (memory)", () => {
     });
   });
 
+  it("resolves a markerless nested app when starting from its app root", async () => {
+    const project = buildMemoryAgentProject({
+      agentFiles: {
+        "instructions.md": "",
+      },
+      omitPackageJson: true,
+    });
+
+    await expect(
+      resolveDiscoveryProject(project.appRoot, {
+        source: project.source,
+      }),
+    ).resolves.toEqual({
+      agentRoot: resolve(project.agentRoot),
+      appRoot: resolve(project.appRoot),
+      layout: "nested",
+    });
+  });
+
   it("resolves a nested app root when starting from inside the agent tree", async () => {
     const project = buildMemoryAgentProject({
       agentDirectories: ["context"],

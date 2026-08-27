@@ -70,6 +70,9 @@ export async function resolveDiscoveryProject(
     const nestedProjectFromAppRoot = await tryResolveNestedProjectFromAppRoot(
       source,
       currentDirectory,
+      {
+        allowMarkerless: currentDirectory === startDirectory,
+      },
     );
 
     if (nestedProjectFromAppRoot !== null) {
@@ -137,8 +140,9 @@ async function tryResolveNestedProjectFromAgentDirectory(
 async function tryResolveNestedProjectFromAppRoot(
   source: ProjectSource,
   directoryPath: string,
+  options: { readonly allowMarkerless?: boolean } = {},
 ): Promise<ResolvedDiscoveryProject | null> {
-  if (!(await hasProjectMarkers(source, directoryPath))) {
+  if (!options.allowMarkerless && !(await hasProjectMarkers(source, directoryPath))) {
     return null;
   }
 
