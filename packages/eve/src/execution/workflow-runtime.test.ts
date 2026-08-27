@@ -718,9 +718,14 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const [, workflowInput] = startMock.mock.calls[0]!;
     const serialized = workflowInput[0].serializedContext as Record<string, unknown>;
     const seed = serialized["eve.sessionTraceSeed"] as
-      | { traceId: string; traceFlags: number }
+      | { decision: unknown; traceId: string; traceFlags: number }
       | undefined;
     expect(seed).toBeDefined();
+    expect(seed!.decision).toEqual({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    });
     expect(seed!.traceFlags).toBe(1);
     expect(seed!.traceId).toMatch(/^[0-9a-f]{32}$/u);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
@@ -777,9 +782,10 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const [, workflowInput] = startMock.mock.calls[0]!;
     const serialized = workflowInput[0].serializedContext as Record<string, unknown>;
     const seed = serialized["eve.sessionTraceSeed"] as
-      | { traceId: string; traceFlags: number }
+      | { decision: unknown; traceId: string; traceFlags: number }
       | undefined;
     expect(seed).toBeDefined();
+    expect(seed!.decision).toEqual({ action: "drop" });
     expect(seed!.traceFlags).toBe(0);
   });
 
@@ -809,7 +815,10 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const seed = serialized["eve.sessionTraceSeed"] as
       | { traceId: string; spanId: string; traceFlags: number }
       | undefined;
-    expect(seed).toEqual(parentTrace);
+    expect(seed).toEqual({
+      ...parentTrace,
+      decision: { action: "record", recordInputs: false, recordOutputs: false },
+    });
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
   });

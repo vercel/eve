@@ -7,6 +7,7 @@
 import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
 import type { JsonObject } from "#shared/json.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type {
   ChannelInstrumentationProjection,
   ChannelDeliveryMetadata,
@@ -99,6 +100,7 @@ export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession
 export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 
 export interface SessionTraceSeed {
+  readonly decision?: InstrumentationDecision;
   readonly traceId: string;
   readonly spanId: string;
   readonly traceFlags: number;

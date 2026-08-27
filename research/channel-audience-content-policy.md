@@ -38,7 +38,9 @@ interface TraceCaptureContext {
   readonly sessionId: string;
 }
 
-type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;
+type TracePolicyDecision = "drop" | "metadata" | "inputs" | "outputs" | "content";
+
+type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 
 interface OtelOptions {
   // Other process-wide OTel settings are unchanged.
@@ -101,25 +103,21 @@ declare function localTraces(options?: ManagedTraceOptions): OtelIntegration;
 
 `composeSpanExportPolicies()` applies policies in declaration order. A later span or attribute policy sees the facade produced by earlier redactors. A span predicate returning `false` removes that span from one destination without suppressing the rest of its trace. Attribute policies run once for each attribute still visible at their stage.
 
-For example, this admits public and private conversations at the head gate while redacting private content before applying destination-specific filtering:
+For example, this retains every conversation while capturing content only for public audiences:
 
 ```ts
 // agent/instrumentation/otel.ts
 export default otel({
-  tracePolicy: ({ audience }) => audience === "public" || audience === "private",
+  tracePolicy: ({ audience }) => (audience === "public" ? "content" : "metadata"),
 });
 
 // agent/instrumentation/agent-runs.ts
 export default agentRuns({
-  exportPolicy: composeSpanExportPolicies(
-    redactSpanInputs(({ audience }) => audience !== "public"),
-    redactSpanOutputs(({ audience }) => audience !== "public"),
-    {
-      span: ({ name }) => name !== "internal.cache.refresh",
-      attribute: ({ key }) =>
-        key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
-    },
-  ),
+  exportPolicy: composeSpanExportPolicies({
+    span: ({ name }) => name !== "internal.cache.refresh",
+    attribute: ({ key }) =>
+      key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
+  }),
 });
 ```
 

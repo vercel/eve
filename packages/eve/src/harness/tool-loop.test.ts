@@ -10842,7 +10842,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
       });
 
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const step1Config = createTestConfig("conversation");
       const step1 = createToolLoopHarness(step1Config);
       const result1 = await step1(createTestSession(), { message: "add stuff" });
@@ -10916,6 +10916,37 @@ describe("createToolLoopHarness", () => {
       expect(mockCreateAiSdkHookBridge).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ["metadata", false, false],
+      ["inputs", true, false],
+      ["outputs", false, true],
+      ["content", true, true],
+    ] as const)("applies the %s trace policy decision", async (decision, inputs, outputs) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({
+        recordInputs: true,
+        recordOutputs: true,
+        tracePolicy: () => decision,
+      });
+      const runStep = createToolLoopHarness(createTestConfig());
+
+      await runStep(createTestSession(), { message: "hello" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: inputs,
+        recordOutputs: outputs,
+      });
+    });
+
     it("reuses the persisted rejected trace decision", async () => {
       setupMockAgent({
         finishReason: "stop",
@@ -10929,6 +10960,7 @@ describe("createToolLoopHarness", () => {
       const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
       ctx.set(SessionTraceSeedKey, {
+        decision: { action: "drop" },
         spanId: "1".repeat(16),
         traceFlags: 0,
         traceId: "2".repeat(32),
@@ -10961,7 +10993,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
       const events: UnstampedMessageStreamEvent[] = [];
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", async (event) => {
           events.push(event);

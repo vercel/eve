@@ -1,12 +1,30 @@
 import type { InstrumentationHooks } from "#harness/instrumentation/lifecycle.js";
-import { withoutInstrumentationContent } from "#harness/instrumentation/content.js";
+import {
+  withInstrumentationDecision,
+  withoutInstrumentationContent,
+} from "#harness/instrumentation/content.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
 /** Hosted instrumentation records conversation content only for known-public channels. */
 export function shouldCaptureInstrumentationContent(audience: ChannelAudience): boolean {
   if (audience === "public") return true;
   return audience === "unknown" && isEveDevEnvironment();
+}
+
+export function instrumentationHooksForDecision(
+  hooks: InstrumentationHooks | undefined,
+  decision: InstrumentationDecision,
+): InstrumentationHooks | undefined {
+  if (hooks === undefined || decision.action === "drop") return undefined;
+  if (!hooks.capturesContent || (decision.recordInputs && decision.recordOutputs)) {
+    return hooks;
+  }
+  return {
+    capturesContent: decision.recordInputs || decision.recordOutputs,
+    publish: (event) => hooks.publish(withInstrumentationDecision(event, decision)),
+  };
 }
 
 /** Applies the audience ceiling before any content-capable provider sees an event. */

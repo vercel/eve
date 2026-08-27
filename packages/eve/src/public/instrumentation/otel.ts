@@ -38,6 +38,7 @@ export {
   type SpanExportPredicate,
   type TraceCaptureContext,
   type TraceCapturePolicy,
+  type TracePolicyDecision,
 } from "#tracing/otel-declaration.js";
 
 export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
