@@ -1040,8 +1040,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       };
     }
 
+    // Conversation messages normally run alongside pending approvals. A
+    // same-step runtime action can commit the shared assistant message first,
+    // so defer only while its approval call would make provider history invalid.
     const pending = resolvePendingInput({
-      deferMessagesWhileApprovalsPending: config.mode !== "conversation",
+      deferMessagesWhileApprovalsPending:
+        config.mode !== "conversation" || hasUnansweredToolCall(resolvedRuntimeActions.messages),
       history: resolvedRuntimeActions.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
