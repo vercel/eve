@@ -49,6 +49,7 @@ import { preserveSerializedInstrumentationState } from "#harness/instrumentation
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
+import { renderAuthorizationResumeSnippet } from "#harness/hitl/authorization-prompt.js";
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
@@ -481,10 +482,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           }
           schemaSession = setHarnessEmissionState(schemaSession, emissionState);
         }
-        for (const { authorization, result } of completedAuths) {
-          const candidateId = pendingAuth?.challenges.find(
-            (challenge) => challenge.attemptId === result.attemptId,
-          )?.candidateId;
+        for (const { authorization, candidateId, result } of completedAuths) {
           await handleEvent(
             createAuthorizationCompletedEvent({
               attemptId: result.attemptId,
@@ -498,6 +496,20 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
             }),
           );
         }
+        const authorizationUpdate = renderAuthorizationResumeSnippet({
+          authorized: completedAuths.map(({ result }) => result.name),
+          pending:
+            getPendingAuthorization(schemaSession.state)?.challenges.map(
+              (challenge) => challenge.name,
+            ) ?? [],
+        });
+        schemaSession = {
+          ...schemaSession,
+          history: [
+            ...schemaSession.history,
+            { content: authorizationUpdate, role: "user" as const },
+          ],
+        };
       }
 
       const capabilities = ctx.get(CapabilitiesKey);

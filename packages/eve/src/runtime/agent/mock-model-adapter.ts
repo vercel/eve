@@ -33,6 +33,7 @@ import {
 import { createJsonSchemaSample } from "#runtime/agent/mock-structured-output.js";
 import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
+import { isAuthorizationResumeSnippet } from "#harness/hitl/authorization-prompt.js";
 
 const MOCK_RUNTIME_MODEL_PROVIDER = "eve-runtime-mock";
 const LOAD_SKILL_TOOL_CALL_ID = "call_load_skill";
@@ -313,7 +314,10 @@ function createAuthoredToolCallResult(
   }
 
   const city = resolveWeatherCity(lastUserMessage);
-  const toolInput = createMockAuthoredToolInput(tool, lastUserMessage, city);
+  const resumedInput = isAuthorizationResumeSnippet(lastUserMessage)
+    ? getLastAuthoredToolInput(options.prompt, tool.name)
+    : undefined;
+  const toolInput = resumedInput ?? createMockAuthoredToolInput(tool, lastUserMessage, city);
 
   return createToolCallGenerateResult({
     input: toolInput,
@@ -323,6 +327,31 @@ function createAuthoredToolCallResult(
     toolCallId: createToolCallId(tool.name),
     toolName: tool.name,
   });
+}
+
+/** Reuses the original call input when an authorization callback resumes it. */
+function getLastAuthoredToolInput(
+  prompt: BootstrapPrompt,
+  toolName: string,
+): Record<string, unknown> | undefined {
+  for (const message of [...prompt].reverse()) {
+    if (message.role !== "assistant") continue;
+
+    for (const part of [...message.content].reverse()) {
+      if (typeof part === "string" || part.type !== "tool-call" || part.toolName !== toolName) {
+        continue;
+      }
+
+      try {
+        const parsed = typeof part.input === "string" ? JSON.parse(part.input) : part.input;
+        return isRecord(parsed) ? parsed : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 /**
@@ -340,6 +369,11 @@ function createFollowUpToolCallResult(input: {
   readonly options: BootstrapGenerateOptions;
   readonly result: BootstrapToolResult;
 }): BootstrapGenerateResult | null {
+  const lastUserMessage = getLastUserPromptText(input.options.prompt);
+  if (lastUserMessage !== null && isAuthorizationResumeSnippet(lastUserMessage)) {
+    return null;
+  }
+
   const nextTool = findNextExplicitToolAfterResult({
     previousToolName: input.result.toolName,
     prompt: input.options.prompt,

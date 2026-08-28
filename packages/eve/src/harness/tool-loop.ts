@@ -206,6 +206,7 @@ import {
   type AuthorizationSignal,
   getSupersededAuthorizationChallenges,
   isAuthorizationSignal,
+  requestAuthorization,
   setPendingAuthorization,
 } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
@@ -2904,7 +2905,10 @@ async function handleStepResult(input: {
       session: setHarnessEmissionState(
         {
           ...baseSession,
-          history: [...promptMessages],
+          // Unlike an approval request, authorization has already produced a
+          // complete tool result. Commit that transcript so a callback resumes
+          // after the original tool batch instead of recreating it.
+          history: [...promptMessages, ...responseMessages],
           state: setPendingAuthorization(baseSession.state, { challenges }),
         },
         emissionState,
@@ -3493,20 +3497,19 @@ function findAuthorizationSignalFromToolResults(
   toolResults: readonly TypedToolResult<ToolSet>[] | undefined,
 ): AuthorizationSignal | undefined {
   const ctx = contextStorage.getStore();
-  if (ctx !== undefined) {
-    for (const toolResult of toolResults ?? []) {
-      const stashed = readToolInterrupt(ctx, toolResult.toolCallId);
-      if (stashed !== undefined && isAuthorizationSignal(stashed)) {
-        return stashed;
-      }
-    }
-  }
-
+  const challenges: AuthorizationSignal["challenges"][number][] = [];
   for (const toolResult of toolResults ?? []) {
-    if (isAuthorizationSignal(toolResult.output)) {
-      return toolResult.output;
+    const stashed = ctx === undefined ? undefined : readToolInterrupt(ctx, toolResult.toolCallId);
+    const signal =
+      stashed !== undefined && isAuthorizationSignal(stashed)
+        ? stashed
+        : isAuthorizationSignal(toolResult.output)
+          ? toolResult.output
+          : undefined;
+    if (signal !== undefined) {
+      challenges.push(...signal.challenges);
     }
   }
 
-  return undefined;
+  return challenges.length === 0 ? undefined : requestAuthorization(challenges);
 }
