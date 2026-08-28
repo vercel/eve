@@ -68,11 +68,8 @@ import {
 import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   BOOT_DETECTIONS,
-  CLI_MISSING_SETUP_ISSUE,
   detectSetupIssues,
   formatSetupIssuesLine,
-  LOGIN_SETUP_ISSUE,
-  orderedSetupIssues,
   normalizeLocalModelEndpoint,
   type BootDetection,
   type BootDetectionContext,
@@ -101,7 +98,6 @@ import {
   type McpConnectionStatusTracker,
 } from "./mcp-connection-status.js";
 import type { detectProjectIdentity } from "#setup/project-resolution.js";
-import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 import type { CommandLifecycle } from "../../shutdown.js";
 
@@ -463,8 +459,6 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   detectProjectIdentity?: typeof detectProjectIdentity;
   /** Test seam for `/info`; defaults to the filesystem application inspector. */
   inspectApplication?: typeof inspectApplication;
-  /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
-  getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
   onBootProgress?: DevBootProgressReporter;
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
@@ -473,13 +467,6 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Editing-only startup state retained until the final agent header is ready to paint. */
   startup?: TuiStartup;
 };
-
-/** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
-function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
-  if (status === "logged-out") return LOGIN_SETUP_ISSUE;
-  if (status === "cli-missing") return CLI_MISSING_SETUP_ISSUE;
-  return undefined;
-}
 
 export class EveTUIRunner {
   #session: ClientSession | undefined;
@@ -507,23 +494,10 @@ export class EveTUIRunner {
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
-  readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
   readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
-  /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
-  #disposed = false;
-  /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
-  readonly #authProbeAbort = new AbortController();
-  /**
-   * Set once a setup command changes Vercel state (any status-line effect), so
-   * a slow boot login probe that resolves afterward cannot paint a stale
-   * "not logged in" hint over a session the user has since logged into.
-   */
-  #authHintStale = false;
-  /** Cheap-and-local boot detection issues, cached so the auth probe can re-combine. */
+  /** Cheap-and-local boot detection issues. */
   #bootIssues: SetupIssue[] = [];
-  /** The current Vercel auth issue (login / CLI-missing), or undefined when fine. */
-  #authIssue: SetupIssue | undefined;
   /**
    * Vercel segment of the status line (link identity + session-scoped
    * pending-deploy flag). Only local sessions carry one — a remote `--url`
@@ -639,7 +613,6 @@ export class EveTUIRunner {
       });
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
-    this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
     this.#inspectApplication = options.inspectApplication ?? inspectApplication;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
@@ -720,8 +693,6 @@ export class EveTUIRunner {
       await this.#run();
     } finally {
       this.#lifecycle?.signal.removeEventListener("abort", onStop);
-      this.#disposed = true;
-      this.#authProbeAbort.abort();
       this.#subagentPump.abortAll();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#unsubscribeDevelopmentSandboxLogs?.();
@@ -1530,42 +1501,20 @@ export class EveTUIRunner {
     this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
     if (this.#renderer.renderSetupWarning === undefined) return;
     this.#paintSetupAttention();
-    // Login state is a `vercel whoami` round-trip — too costly for the
-    // cheap-and-local boot detections above — so it rides its own probe off
-    // the critical path and never delays the first prompt.
-    this.#probeAuthIssue();
   }
 
-  /** Repaints the attention line from the cached detection + auth issues, or clears it. */
+  /** Repaints the attention line from the cached detection issues, or clears it. */
   #paintSetupAttention(): void {
-    const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
-    if (issues.length > 0) {
-      this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
+    if (this.#bootIssues.length > 0) {
+      this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(this.#bootIssues));
     } else {
       this.#renderer.clearSetupWarning?.();
     }
   }
 
-  /** Checks Vercel auth after boot without delaying the first prompt. */
-  async #probeAuthIssue(): Promise<void> {
-    const appRoot = this.#appRoot;
-    if (appRoot === undefined) return;
-    let status: VercelAuthStatus;
-    try {
-      status = await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
-    } catch {
-      return;
-    }
-    if (this.#disposed || this.#authHintStale) return;
-    this.#authIssue = authIssueForStatus(status);
-    this.#paintSetupAttention();
-  }
-
   /**
-   * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /vc:login` line disappears
-   * once `/vc:login` succeeds) instead of lingering stale. Authoritative: unlike
-   * the boot probe it re-reads detections and auth and is not stale-guarded.
+   * Re-evaluates the attention line after a setup command changed local state
+   * so a fixed issue clears instead of lingering stale.
    */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
     const appRoot = this.#appRoot;
@@ -1575,14 +1524,9 @@ export class EveTUIRunner {
     if (info !== undefined) context.info = info;
     try {
       this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-      const status = await this.#getVercelAuthStatus(appRoot, {
-        signal: this.#authProbeAbort.signal,
-      });
-      this.#authIssue = authIssueForStatus(status);
     } catch {
       return;
     }
-    if (this.#disposed) return;
     this.#paintSetupAttention();
   }
 
@@ -1655,14 +1599,12 @@ export class EveTUIRunner {
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
-      this.#authHintStale = true;
       await this.#refreshModelAccess();
       return;
     }
     if (effect === undefined) return;
 
     this.#vercelStatus?.applyEffect(effect);
-    this.#authHintStale = true;
     void this.#refreshSetupAttention(this.#agentInfo);
   }
 
@@ -1687,52 +1629,13 @@ export class EveTUIRunner {
   }
 
   /**
-   * Fresh `eve init` launches the TUI with `/model` prefilled. Project-backed
-   * model access depends on the Vercel CLI and a Vercel session, so resolve
-   * only those missing prerequisites before entering the model picker. A probe
-   * failure still opens `/model`: its API-key and external-provider paths do
-   * not require Vercel. After model setup, open the categorized registry hub so
-   * a new user has concrete next steps before reaching the chat prompt.
+   * Fresh `eve init` launches the TUI with `/model` prefilled. Open the model
+   * picker directly so API-key and external-provider paths do not depend on the
+   * Vercel CLI. Vercel-backed choices own their own prerequisites. After model
+   * setup, open the categorized registry hub so a new user has concrete next
+   * steps before reaching the chat prompt.
    */
   async #runInitialModelOnboarding(title: string): Promise<void> {
-    const appRoot = this.#appRoot;
-    if (appRoot === undefined) return;
-
-    const authStatus = async (): Promise<VercelAuthStatus | undefined> => {
-      try {
-        return await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
-      } catch {
-        return undefined;
-      }
-    };
-
-    let status = await authStatus();
-    if (status === "cli-missing") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:install", argument: "" },
-        title,
-        { trigger: "startup", keepSetupFlowOpen: true },
-      );
-      status = await authStatus();
-      if (status === "cli-missing") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
-    }
-
-    if (status === "logged-out") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:login", argument: "" },
-        title,
-        { trigger: "startup", keepSetupFlowOpen: true },
-      );
-      status = await authStatus();
-      if (status === "cli-missing" || status === "logged-out") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
-    }
-
     await this.#executeExtensionCommand({ type: "extension", name: "model", argument: "" }, title, {
       trigger: "startup",
       initialModelStep: "provider",
@@ -1828,8 +1731,7 @@ export class EveTUIRunner {
   /**
    * Setup commands can write authored source and env files. Force the local
    * runtime snapshot to catch up, then cache the credential-normalized `/info`
-   * shared by the status bar and setup detector. The Vercel auth probe stays
-   * off the prompt path.
+   * shared by the status bar and setup detector.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;

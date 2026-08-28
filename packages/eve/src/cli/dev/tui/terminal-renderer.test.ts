@@ -1595,11 +1595,11 @@ describe("TerminalRenderer (inline scrollback)", () => {
 
   it("clears the setup attention line once its issue is resolved", () => {
     const { screen, renderer } = makeRenderer();
-    renderer.renderSetupWarning("1 setup issue: not logged in · /vc:login");
-    expect(screen.snapshot()).toContain("not logged in");
+    renderer.renderSetupWarning("1 setup issue: model provider not linked · /model");
+    expect(screen.snapshot()).toContain("model provider not linked");
 
     renderer.clearSetupWarning();
-    expect(screen.snapshot()).not.toContain("not logged in");
+    expect(screen.snapshot()).not.toContain("model provider not linked");
     renderer.shutdown();
   });
 

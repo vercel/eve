@@ -102,7 +102,6 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       appRoot,
       client,
       detectProjectIdentity: vi.fn(async () => undefined),
-      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: { handle },
       renderer,
       serverUrl: "http://localhost:3000",
