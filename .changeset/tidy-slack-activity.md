@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Add `slackActivityMessage()`, an optional update-in-place Slack activity message that groups root, descendant, and background work by originating turn and recovers message identity from Slack metadata.
+Add experimental Unicode tree and native streaming plan Slack activity renderers. The plan keeps stable top-level tasks, appends descendant lifecycle updates, and compacts completed streams to top-level work.

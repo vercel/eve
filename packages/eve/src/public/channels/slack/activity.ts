@@ -6,10 +6,14 @@ import type {
   ActivityWorkStateV1,
 } from "#protocol/activity.js";
 import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
+import {
+  createSlackPlanRenderer,
+  SLACK_ACTIVITY_PLAN_RENDERER_ID,
+} from "#public/channels/slack/activity-plan.js";
 import { truncateTypingStatus } from "#public/channels/slack/limits.js";
 
 const SLACK_ACTIVITY_STATUS_RENDERER_ID = "slack.status.v1";
-const SLACK_ACTIVITY_MESSAGE_RENDERER_ID = "slack.activity.v1";
+const SLACK_ACTIVITY_MESSAGE_RENDERER_ID = "slack.experimental.tree.v1";
 const SLACK_ACTIVITY_RENDERER = Symbol("eve.slack.activity-renderer");
 
 export interface SlackActivityRenderer {
@@ -28,7 +32,9 @@ export type ExperimentalSlackActivitySnapshot = ActivitySnapshotV1;
 export interface ExperimentalSlackActivityDestination {
   readonly channelId: string | null;
   readonly installationTeamId: string | null;
+  readonly teamId: string | null;
   readonly threadTs: string | null;
+  readonly triggeringUserId: string | null;
 }
 
 /**
@@ -63,9 +69,14 @@ export function experimental_slackActivityStatus(): SlackActivityRenderer {
   return { [SLACK_ACTIVITY_RENDERER]: true, id: SLACK_ACTIVITY_STATUS_RENDERER_ID };
 }
 
-/** Creates one update-in-place activity message per originating root turn. */
-export function slackActivityMessage(): SlackActivityRenderer {
+/** Creates one experimental update-in-place Unicode activity tree per root turn. */
+export function experimental_slackActivityTree(): SlackActivityRenderer {
   return { [SLACK_ACTIVITY_RENDERER]: true, id: SLACK_ACTIVITY_MESSAGE_RENDERER_ID };
+}
+
+/** Creates one experimental native Slack plan stream per root turn. */
+export function experimental_slackActivityPlan(): SlackActivityRenderer {
+  return { [SLACK_ACTIVITY_RENDERER]: true, id: SLACK_ACTIVITY_PLAN_RENDERER_ID };
 }
 
 /**
@@ -107,6 +118,9 @@ export function buildSlackActivityRenderers(input: {
     if (renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID) {
       return createSlackActivityRenderer(input.botToken);
     }
+    if (renderer.id === SLACK_ACTIVITY_PLAN_RENDERER_ID) {
+      return createSlackPlanRenderer(input.botToken);
+    }
     if (renderer.id === SLACK_ACTIVITY_STATUS_RENDERER_ID) {
       return createSlackStatusRenderer(input.botToken);
     }
@@ -129,7 +143,8 @@ function assertCustomSlackActivityRenderer(
   }
   if (
     renderer.id === SLACK_ACTIVITY_STATUS_RENDERER_ID ||
-    renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID
+    renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID ||
+    renderer.id === SLACK_ACTIVITY_PLAN_RENDERER_ID
   ) {
     throw new TypeError(`Slack activity renderer id "${renderer.id}" is reserved by eve.`);
   }
@@ -175,7 +190,10 @@ function experimentalSlackActivityDestination(
       typeof destination["installationTeamId"] === "string"
         ? destination["installationTeamId"]
         : null,
+    teamId: typeof destination["teamId"] === "string" ? destination["teamId"] : null,
     threadTs: typeof destination["threadTs"] === "string" ? destination["threadTs"] : null,
+    triggeringUserId:
+      typeof destination["triggeringUserId"] === "string" ? destination["triggeringUserId"] : null,
   };
 }
 
@@ -441,21 +459,30 @@ function renderWorkTree(
   const append = (line: string): void => {
     if (lines.length < 20) lines.push(line);
   };
-  const visit = (item: ActivityWorkStateV1, depth: number): void => {
+  const visit = (item: ActivityWorkStateV1, prefix: string, connector: string): void => {
     const label = item.kind === "root-turn" ? "Working" : (item.name ?? "Agent work");
-    append(`${"  ".repeat(depth)}${phaseIcon(item.phase)} ${escapeSlackText(label)}`);
-    for (const blocker of blockersByParent.get(item.id) ?? []) {
-      append(
-        `${"  ".repeat(depth + 1)}${blockerIcon(blocker.phase)} ${escapeSlackText(blocker.label ?? blockerLabel(blocker.kind))}`,
-      );
-    }
-    for (const action of actionsByParent.get(item.id) ?? []) {
-      append(`${"  ".repeat(depth + 1)}${phaseIcon(action.phase)} ${escapeSlackText(action.name)}`);
-    }
-    for (const child of byParent.get(item.id) ?? []) visit(child, depth + 1);
+    append(`${prefix}${connector}${phaseIcon(item.phase)} ${escapeSlackText(label)}`);
+    const descendants = [
+      ...(blockersByParent.get(item.id) ?? []).map((blocker) => ({ blocker })),
+      ...(actionsByParent.get(item.id) ?? []).map((action) => ({ action })),
+      ...(byParent.get(item.id) ?? []).map((child) => ({ child })),
+    ];
+    const childPrefix = `${prefix}${connector === "├── " ? "│   " : connector === "└── " ? "    " : ""}`;
+    descendants.forEach((descendant, index) => {
+      const branch = index === descendants.length - 1 ? "└── " : "├── ";
+      if ("blocker" in descendant)
+        append(
+          `${childPrefix}${branch}${blockerIcon(descendant.blocker.phase)} ${escapeSlackText(descendant.blocker.label ?? blockerLabel(descendant.blocker.kind))}`,
+        );
+      else if ("action" in descendant)
+        append(
+          `${childPrefix}${branch}${phaseIcon(descendant.action.phase)} ${escapeSlackText(descendant.action.name)}`,
+        );
+      else visit(descendant.child, childPrefix, branch);
+    });
   };
-  for (const root of byParent.get(undefined) ?? []) visit(root, 0);
-  return lines.join("\n");
+  for (const root of byParent.get(undefined) ?? []) visit(root, "", "");
+  return `\`\`\`\n${lines.join("\n")}\n\`\`\``;
 }
 
 function phaseIcon(phase: ActivityWorkStateV1["phase"] | ActivityActionStateV1["phase"]): string {

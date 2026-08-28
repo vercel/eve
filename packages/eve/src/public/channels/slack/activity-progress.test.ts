@@ -4,8 +4,8 @@ import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-
 import {
   activityMessages,
   buildSlackActivityRenderers,
-  slackActivityMessage,
-  slackActivityStatus,
+  experimental_slackActivityTree,
+  experimental_slackActivityStatus,
 } from "#public/channels/slack/activity.js";
 
 const root = {
@@ -69,10 +69,12 @@ describe("Slack activity activity", () => {
         [
           "turn",
           [
+            "```",
             "• Working",
-            "  • research &lt;team&gt;",
-            "    • tester &amp; reviewer",
-            "      • search &lt;web&gt;",
+            "└── • research &lt;team&gt;",
+            "    └── • tester &amp; reviewer",
+            "        └── • search &lt;web&gt;",
+            "```",
           ].join("\n"),
         ],
       ]),
@@ -110,7 +112,7 @@ describe("Slack activity activity", () => {
       version: 1,
     });
 
-    expect(activityMessages(background).get("turn")).toBe("• Working\n  • researcher");
+    expect(activityMessages(background).get("turn")).toBe("```\n• Working\n└── • researcher\n```");
   });
 
   it("keeps temporarily orphaned nested work renderable", () => {
@@ -141,7 +143,7 @@ describe("Slack activity activity", () => {
     );
     const renderer = buildSlackActivityRenderers({
       botToken: "xoxb-test",
-      renderers: [slackActivityMessage()],
+      renderers: [experimental_slackActivityTree()],
     })[0]!;
     const state = await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
@@ -191,7 +193,7 @@ describe("Slack activity activity", () => {
     );
     const renderer = buildSlackActivityRenderers({
       botToken: "xoxb-test",
-      renderers: [slackActivityMessage()],
+      renderers: [experimental_slackActivityTree()],
     })[0]!;
     const state = await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
@@ -210,7 +212,7 @@ describe("Slack activity activity", () => {
     );
     const renderer = buildSlackActivityRenderers({
       botToken: tokenContext,
-      renderers: [slackActivityMessage()],
+      renderers: [experimental_slackActivityTree()],
     })[0]!;
 
     await renderer.render({
@@ -249,7 +251,7 @@ describe("Slack activity activity", () => {
     );
     const renderer = buildSlackActivityRenderers({
       botToken: "xoxb-test",
-      renderers: [slackActivityMessage()],
+      renderers: [experimental_slackActivityTree()],
     })[0]!;
     await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
@@ -295,7 +297,7 @@ describe("Slack activity activity", () => {
     );
     const renderer = buildSlackActivityRenderers({
       botToken: "xoxb-test",
-      renderers: [slackActivityMessage()],
+      renderers: [experimental_slackActivityTree()],
     })[0]!;
     await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
@@ -324,7 +326,7 @@ describe("Slack activity activity", () => {
     );
     const renderer = buildSlackActivityRenderers({
       botToken: "xoxb-test",
-      renderers: [slackActivityMessage()],
+      renderers: [experimental_slackActivityTree()],
     })[0]!;
     await renderer.render({
       destination: { channelId: "C1", threadTs: "T1" },
@@ -342,11 +344,11 @@ describe("Slack activity activity", () => {
   it("composes activity and status with isolated renderer state", () => {
     const renderers = buildSlackActivityRenderers({
       botToken: "xoxb-test",
-      renderers: [slackActivityStatus(), slackActivityMessage()],
+      renderers: [experimental_slackActivityStatus(), experimental_slackActivityTree()],
     });
     expect(renderers.map((renderer) => renderer.id)).toEqual([
       "slack.status.v1",
-      "slack.activity.v1",
+      "slack.experimental.tree.v1",
     ]);
   });
 });

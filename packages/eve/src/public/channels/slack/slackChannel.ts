@@ -985,7 +985,9 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       return {
         channelId: slack?.channelId ?? null,
         installationTeamId: slack?.installationTeamId ?? null,
+        teamId: slack?.teamId ?? null,
         threadTs: slack?.threadTs ?? null,
+        triggeringUserId: slack?.triggeringUserId ?? null,
       };
     },
     renderers: activityRenderers,

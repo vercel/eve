@@ -47,7 +47,13 @@ describe("Slack status activity", () => {
     expect(presentation?.renderers).toHaveLength(1);
     expect(
       presentation?.destination({ channelId: "C1", secret: "hidden", threadTs: "T1" }),
-    ).toEqual({ channelId: "C1", installationTeamId: null, threadTs: "T1" });
+    ).toEqual({
+      channelId: "C1",
+      installationTeamId: null,
+      teamId: null,
+      threadTs: "T1",
+      triggeringUserId: null,
+    });
   });
 
   it("installs an experimental custom renderer", async () => {
@@ -67,23 +73,47 @@ describe("Slack status activity", () => {
 
     await expect(
       renderer?.render({
-        destination: { channelId: "C1", installationTeamId: "T1", threadTs: "M1" },
+        destination: {
+          channelId: "C1",
+          installationTeamId: "T1",
+          teamId: null,
+          threadTs: "M1",
+          triggeringUserId: null,
+        },
         snapshot: activitySnapshot,
         state: undefined,
       }),
     ).resolves.toBe(1);
     await renderer?.dispose?.({
-      destination: { channelId: "C1", installationTeamId: "T1", threadTs: "M1" },
+      destination: {
+        channelId: "C1",
+        installationTeamId: "T1",
+        teamId: null,
+        threadTs: "M1",
+        triggeringUserId: null,
+      },
       state: 1,
     });
 
     expect(render).toHaveBeenCalledWith({
-      destination: { channelId: "C1", installationTeamId: "T1", threadTs: "M1" },
+      destination: {
+        channelId: "C1",
+        installationTeamId: "T1",
+        teamId: null,
+        threadTs: "M1",
+        triggeringUserId: null,
+      },
       snapshot: activitySnapshot,
       state: undefined,
     });
     expect(dispose).toHaveBeenCalledWith({
-      destination: { channelId: "C1", installationTeamId: "T1", threadTs: "M1" },
+      destination: {
+        channelId: "C1",
+        installationTeamId: "T1",
+        teamId: null,
+        threadTs: "M1",
+        triggeringUserId: null,
+      },
       state: 1,
     });
   });
@@ -94,7 +124,7 @@ describe("Slack status activity", () => {
     ).toThrow("ids must be non-empty");
     expect(() =>
       experimental_slackActivityRenderer({
-        id: slackActivityStatus().id,
+        id: experimental_slackActivityStatus().id,
         render: async () => undefined,
       }),
     ).toThrow("reserved by eve");
