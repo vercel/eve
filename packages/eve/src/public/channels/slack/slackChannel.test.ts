@@ -1016,7 +1016,89 @@ describe("slackChannel() default event handlers", () => {
     expect(statuses).toEqual(["Need to inspect the repo.", "Working...", "Fresh turn reasoning."]);
   });
 
-  it("session.failed posts a terminal markdown message with error hint and id", async () => {
+  it("turn.failed posts a semantic error's remediation hint", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    const message =
+      "AI Gateway requires a valid credit card on file to service requests. Please visit https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card to continue.";
+    await callEvent(
+      adapter,
+      makeEvent("turn.failed", {
+        code: "MODEL_CALL_FAILED",
+        details: {
+          errorId: "abc-123",
+          hint: "Add a valid credit card or credits in the Vercel dashboard, then retry in the same thread.",
+          message,
+          name: "AI Gateway billing setup required",
+          semanticErrorId: "gateway-billing-required",
+        },
+        message,
+        sequence: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.markdown_text).toBe(
+      [
+        "I hit an error while handling your request.",
+        "",
+        "> ### AI Gateway billing setup required",
+        "> ",
+        `> ${message}`,
+        "> ",
+        "> **How to fix**",
+        "> Add a valid credit card or credits in the Vercel dashboard, then retry in the same thread.",
+        "> ",
+        "> _Error id: `abc-123`_",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps fallback remediation outside a semantic error block without a hint", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.failed", {
+        code: "MODEL_CALL_FAILED",
+        details: {
+          message: "The model did not respond.",
+          name: "Model request failed",
+          semanticErrorId: "model-request-failed",
+        },
+        message: "The model did not respond.",
+        sequence: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.markdown_text).toBe(
+      [
+        "I hit an error while handling your request.",
+        "",
+        "> ### Model request failed",
+        "> ",
+        "> The model did not respond.",
+        "",
+        "Please try again, rephrase, or reach out if it keeps failing.",
+      ].join("\n"),
+    );
+  });
+
+  it("session.failed posts a terminal markdown message with remediation and id", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -1027,7 +1109,13 @@ describe("slackChannel() default event handlers", () => {
       adapter,
       makeEvent("session.failed", {
         code: "internal",
-        details: { errorId: "abc-123", name: "WorkflowExecutionFailed" },
+        details: {
+          errorId: "abc-123",
+          hint: "Resolve the configuration issue before trying again.",
+          message: "boom",
+          name: "Workflow execution failed",
+          semanticErrorId: "workflow-execution-failed",
+        },
         message: "boom",
         sessionId: "s1",
       }),
@@ -1036,10 +1124,22 @@ describe("slackChannel() default event handlers", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
-    expect(body.markdown_text).toContain("couldn't recover");
-    expect(body.markdown_text).toContain("Start a new thread");
-    expect(body.markdown_text).toContain("WorkflowExecutionFailed");
-    expect(body.markdown_text).toContain("abc-123");
+    expect(body.markdown_text).toBe(
+      [
+        "This session couldn't recover from an error.",
+        "",
+        "> ### Workflow execution failed",
+        "> ",
+        "> boom",
+        "> ",
+        "> **How to fix**",
+        "> Resolve the configuration issue before trying again.",
+        "> ",
+        "> _Error id: `abc-123`_",
+        "",
+        "Start a new thread to continue — I can't pick this one back up.",
+      ].join("\n"),
+    );
   });
 
   it("actions.requested typing indicator is truncated to Slack's length cap", async () => {
