@@ -96,6 +96,7 @@ export type {
 export type {
   ActionPartialStreamEvent,
   ActionResultStreamEvent,
+  ActionUpdatedStreamEvent,
   ActionsRequestedStreamEvent,
   AssistantStepFinishReason,
   AuthorizationOutcome,

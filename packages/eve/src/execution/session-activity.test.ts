@@ -138,7 +138,10 @@ describe("activity protocol and reducer", () => {
     });
   });
 
-  it("retains normalized action updates and ignores them after settlement", () => {
+  it.each([
+    ["newer before older", ["work", "action", "newer", "older"]],
+    ["settlement before updates", ["work", "action", "settled", "newer", "older"]],
+  ] as const)("converges action updates for %s delivery", (_name, order) => {
     const action = {
       id: "action",
       kind: "tool" as const,
@@ -147,35 +150,38 @@ describe("activity protocol and reducer", () => {
       rootTurnId: "turn",
       stepIndex: 0,
     };
-    const snapshot = reduce([
-      { eventId: "work", kind: "work.started", startedAt: "1", work },
-      { action, eventId: "action", kind: "action.started", startedAt: "2" },
-      {
+    const events: Record<string, ActivityEventV1> = {
+      work: { eventId: "work", kind: "work.started", startedAt: "1", work },
+      action: { action, eventId: "action", kind: "action.started", startedAt: "2" },
+      older: {
         actionId: action.id,
-        eventId: "updated",
+        eventId: "updated-1",
         kind: "action.updated",
-        message: "Uploading\u0007   artifacts",
+        message: "Older update",
         updatedAt: "3",
       },
-      {
+      newer: {
+        actionId: action.id,
+        eventId: "updated-2",
+        kind: "action.updated",
+        message: "Newer update",
+        updatedAt: "4",
+      },
+      settled: {
         actionId: action.id,
         eventId: "settled-action",
         kind: "action.settled",
         outcome: "completed",
-        settledAt: "4",
+        settledAt: "5",
       },
-      {
-        actionId: action.id,
-        eventId: "late-update",
-        kind: "action.updated",
-        message: "Stale update",
-        updatedAt: "5",
-      },
-    ]);
+    };
+
+    const snapshot = reduce(order.map((key) => events[key]!));
 
     expect(snapshot.actions.action?.update).toEqual({
-      message: "Uploading artifacts",
-      updatedAt: "3",
+      eventId: "updated-2",
+      message: "Newer update",
+      updatedAt: "4",
     });
   });
 
@@ -201,6 +207,7 @@ describe("activity protocol and reducer", () => {
     ]);
 
     expect(snapshot.actions.action?.update).toEqual({
+      eventId: "updated",
       message: "Uploading artifacts",
       updatedAt: "3",
     });

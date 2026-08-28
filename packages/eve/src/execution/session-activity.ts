@@ -178,10 +178,7 @@ function startAction(
       phase: phase as ActivityActionPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,
-      update:
-        phase === "running" && pendingUpdate !== undefined
-          ? { message: pendingUpdate.message, updatedAt: pendingUpdate.updatedAt }
-          : undefined,
+      update: pendingUpdate,
     }),
     pendingActionUpdates: removeKey(snapshot.pendingActionUpdates, event.action.id),
     pendingSettlements: removeKey(
@@ -212,30 +209,29 @@ function updateAction(
   snapshot: ActivitySnapshotV1,
   event: Extract<ActivityEventV1, { readonly kind: "action.updated" }>,
 ): ActivitySnapshotV1 {
+  const update = {
+    eventId: event.eventId,
+    message: normalizeActivityText(event.message),
+    updatedAt: event.updatedAt,
+  };
   const current = snapshot.actions[event.actionId];
   if (current === undefined) {
-    if (pendingFor(snapshot, "action", event.actionId) !== undefined) return snapshot;
+    const pending = snapshot.pendingActionUpdates[event.actionId];
+    if (pending !== undefined && !isNewerUpdate(update, pending)) return snapshot;
     return {
       ...snapshot,
       pendingActionUpdates: replaceBounded(
         snapshot.pendingActionUpdates,
         event.actionId,
-        {
-          eventId: event.eventId,
-          message: normalizeActivityText(event.message),
-          updatedAt: event.updatedAt,
-        },
+        update,
         MAX_ACTIVITY_PENDING_WORK_UPDATES,
       ),
     };
   }
-  if (current.phase !== "running") return snapshot;
+  if (current.update !== undefined && !isNewerUpdate(update, current.update)) return snapshot;
   return {
     ...snapshot,
-    actions: replaceBounded(snapshot.actions, event.actionId, {
-      ...current,
-      update: { message: normalizeActivityText(event.message), updatedAt: event.updatedAt },
-    }),
+    actions: replaceBounded(snapshot.actions, event.actionId, { ...current, update }),
   };
 }
 

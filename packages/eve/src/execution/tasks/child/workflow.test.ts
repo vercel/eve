@@ -316,12 +316,17 @@ describe("taskRunWorkflow", () => {
     ]);
 
     await taskRunWorkflow({
+      activityObserver,
       taskInboxToken: "task-token",
       initialView: createWorkingView(),
       parentContinuationToken: "parent-session-token",
     });
 
     expect(appendedStatuses()).toEqual(["working", "failed"]);
+    expect(appendTaskViewStep).toHaveBeenLastCalledWith({
+      activityObserver,
+      view: expect.objectContaining({ status: "failed" }),
+    });
     expect(wakeTaskParentStep).not.toHaveBeenCalled();
     expect(disposeHook).toHaveBeenCalledTimes(1);
   });
