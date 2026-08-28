@@ -83,7 +83,7 @@ function formatSemanticErrorBlock(
     "",
     summary.message,
     ...(summary.hint ? ["", "**How to fix**", summary.hint] : []),
-    ...(errorId ? ["", `_Error id: \`${errorId}\`_`] : []),
+    ...(errorId ? ["", "**Error id:**", `\`${errorId}\``] : []),
   ];
   return lines
     .flatMap((line) => line.split("\n"))
@@ -103,7 +103,7 @@ function formatSemanticErrorReply(input: {
     "",
     formatSemanticErrorBlock(input.summary, input.errorId),
     ...(!input.summary.hint ? ["", input.nextStep] : []),
-    ...(input.followUp ? ["", input.followUp] : []),
+    ...(input.summary.hint && input.followUp ? ["", input.followUp] : []),
   ].join("\n");
 }
 

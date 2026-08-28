@@ -1056,7 +1056,8 @@ describe("slackChannel() default event handlers", () => {
         "> **How to fix**",
         "> Add a valid credit card or credits in the Vercel dashboard, then retry in the same thread.",
         "> ",
-        "> _Error id: `abc-123`_",
+        "> **Error id:**",
+        "> `abc-123`",
       ].join("\n"),
     );
   });
@@ -1135,9 +1136,50 @@ describe("slackChannel() default event handlers", () => {
         "> **How to fix**",
         "> Resolve the configuration issue before trying again.",
         "> ",
-        "> _Error id: `abc-123`_",
+        "> **Error id:**",
+        "> `abc-123`",
         "",
         "Start a new thread to continue — I can't pick this one back up.",
+      ].join("\n"),
+    );
+  });
+
+  it("session.failed does not repeat its fallback remediation without a hint", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("session.failed", {
+        code: "internal",
+        details: {
+          errorId: "abc-123",
+          message: "boom",
+          name: "Workflow execution failed",
+          semanticErrorId: "workflow-execution-failed",
+        },
+        message: "boom",
+        sessionId: "s1",
+      }),
+      ctx,
+    );
+
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.markdown_text).toBe(
+      [
+        "This session couldn't recover from an error.",
+        "",
+        "> ### Workflow execution failed",
+        "> ",
+        "> boom",
+        "> ",
+        "> **Error id:**",
+        "> `abc-123`",
+        "",
+        "Resolve the issue, then start a new thread — I can't pick this one back up.",
       ].join("\n"),
     );
   });
