@@ -421,7 +421,7 @@ importers:
   apps/fixtures/datadog-eval-reporter:
     dependencies:
       '@opentelemetry/sdk-trace-base':
-        specifier: 2.6.1
+        specifier: 'catalog:'
         version: 2.6.1(@opentelemetry/api@1.9.1)
       '@vercel/otel':
         specifier: 'catalog:'

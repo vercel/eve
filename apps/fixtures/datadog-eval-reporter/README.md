@@ -11,6 +11,10 @@ export DD_APP_KEY="..."
 pnpm --filter datadog-eval-reporter-fixture eval
 ```
 
+The fixture enables `Datadog()` when both credentials are present. Without
+them, it still runs the deterministic eval cases without reporting, including
+in the repository's e2e matrix.
+
 Runtime tracing is optional. To also export the agent traces to Datadog, set the
 standard OTLP variables before running the same command:
 
@@ -22,7 +26,6 @@ export OTEL_EXPORTER_OTLP_TRACES_HEADERS="dd-api-key=${DD_API_KEY},dd-otlp-sourc
 pnpm --filter datadog-eval-reporter-fixture eval
 ```
 
-The experiment rows and runtime spans share `eve.eval.run_id`, the generated
-case id in `eve.eval.id`, and `eve.session.id`; `eve.eval.name` retains the
-path-derived eval name on the experiment row. The reporter also records every
-observed runtime trace context on that row.
+When runtime tracing is enabled, the reporter includes the trace contexts
+captured by the eval runner on each experiment row. This is the same
+`eveTraceIds` and `eveTraceContexts` metadata used by the Braintrust reporter.

@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { Client } from "#client/client.js";
 import type {
   EveEval,
@@ -72,14 +70,12 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
     applyConfigDefaults(evaluation, config),
   );
   const startedAt = new Date().toISOString();
-  const runId = randomUUID();
   const bindings = buildReporterBindings({ ...options, evaluations });
 
   for (const binding of bindings) {
     await binding.reporter.onRunStart(
       evaluations.filter((evaluation) => binding.evalIds.has(evaluation.id)),
       target,
-      { runId, startedAt },
     );
   }
 
@@ -108,14 +104,11 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
     while (pending.length > 0 && executing.size < maxConcurrency) {
       const evaluation = pending.shift();
       if (evaluation === undefined) break;
-      const caseId = randomUUID();
       const evalStartedAt = new Date().toISOString();
 
       enqueueReporterCallback(evaluation, async (reporter) => {
         await reporter.onEvalStart?.({
-          caseId,
           evaluation,
-          runId,
           startedAt: evalStartedAt,
           target,
         });
@@ -123,7 +116,6 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
 
       const task = (async () => {
         const result = await executeEval({
-          caseId,
           client,
           evaluation,
           onLog:
@@ -133,9 +125,7 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
           onSessionStart: (event) => {
             enqueueReporterCallback(evaluation, async (reporter) => {
               await reporter.onSessionStart?.({
-                caseId,
                 evaluation,
-                runId,
                 primary: event.primary,
                 sessionId: event.sessionId,
                 startedAt: event.startedAt,
@@ -146,16 +136,13 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
           },
           startedAt: evalStartedAt,
           target,
-          runId,
           timeoutMs: options.timeoutMs,
         });
         results.push(result);
 
         enqueueReporterCallback(evaluation, async (reporter) => {
           await reporter.onEvalComplete(result, {
-            caseId,
             evaluation,
-            runId,
             target,
             traceContexts: result.result.traceContexts,
           });
@@ -179,7 +166,7 @@ export async function runEvals(options: RunEvalsOptions): Promise<EveEvalRunSumm
   const order = new Map(evaluations.map((evaluation, index) => [evaluation.id, index]));
   results.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
 
-  const summary = buildSummary(runId, target, results, startedAt);
+  const summary = buildSummary(target, results, startedAt);
 
   const artifactDir = resolveArtifactDirectory(appRoot);
   await writeArtifacts(artifactDir, summary);
@@ -249,13 +236,11 @@ function applyConfigDefaults(evaluation: EveEval, config: EveEvalConfig): EveEva
 }
 
 function buildSummary(
-  runId: string,
   target: RunEvalsOptions["target"],
   results: readonly EveEvalResult[],
   startedAt: string,
 ): EveEvalRunSummary {
   return {
-    runId,
     target,
     results,
     startedAt,

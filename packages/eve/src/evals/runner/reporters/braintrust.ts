@@ -1,7 +1,7 @@
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
-import { buildEvalTraceMetadata } from "#evals/runner/reporters/trace-metadata.js";
+import { buildEvalResultMetadata } from "#evals/runner/reporters/result-metadata.js";
 
 /**
  * Configuration for the Braintrust reporter. Every field is optional and maps
@@ -143,32 +143,7 @@ class BraintrustReporter implements EvalReporter {
       scores[key] = assertion.score;
     }
 
-    const failedAssertions = result.assertions
-      .filter((assertion) => !assertion.passed)
-      .map((assertion) => ({ ...assertion }));
-
-    const metadata: Record<string, unknown> = {
-      ...evaluation?.metadata,
-      eveEvalId: result.caseId,
-      eveEvalName: result.id,
-      eveEvalRunId: result.runId,
-      eveSessionId: result.result.sessionId,
-      eveStatus: result.result.status,
-      eveVerdict: result.verdict,
-      eveSkipReason: result.skipReason,
-      eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
-      eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
-      eveParked: result.result.derived.parked,
-      ...buildEvalTraceMetadata(result.result.traceContexts),
-    };
-
-    if (failedAssertions.length > 0) {
-      metadata.eveFailedAssertions = failedAssertions;
-    }
-
-    if (result.result.derived.failureCode) {
-      metadata.eveFailureCode = result.result.derived.failureCode;
-    }
+    const metadata = buildEvalResultMetadata(evaluation, result);
 
     const metrics: Record<string, number> = {
       toolCallCount: result.result.derived.toolCallCount,

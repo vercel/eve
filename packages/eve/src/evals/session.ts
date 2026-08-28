@@ -22,7 +22,6 @@ import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
 import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
-import { attachEvalIdentity, type EvalIdentity } from "#evals/session-identity.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
 import { EvalRequirementFailed } from "#evals/control-flow.js";
@@ -78,7 +77,6 @@ export class EvalSessionDriver implements EveEvalSession {
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
   readonly #events: MessageStreamEvent[] = [];
-  readonly #evalIdentity: EvalIdentity | undefined;
   readonly #primary: boolean;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #traceContexts: RuntimeTraceContext[] = [];
@@ -90,7 +88,6 @@ export class EvalSessionDriver implements EveEvalSession {
   constructor(input: {
     readonly client: Client;
     readonly collector: AssertionCollector;
-    readonly evalIdentity?: EvalIdentity;
     readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
     readonly primary: boolean;
     readonly session?: ClientSession;
@@ -98,7 +95,6 @@ export class EvalSessionDriver implements EveEvalSession {
   }) {
     this.#client = input.client;
     this.#collector = input.collector;
-    this.#evalIdentity = input.evalIdentity;
     this.#onSessionStart = input.onSessionStart;
     this.#primary = input.primary;
     this.#session = input.session;
@@ -215,7 +211,7 @@ export class EvalSessionDriver implements EveEvalSession {
   }
 
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
-    const turnInput = attachEvalIdentity(attachSignal(input, this.#signal), this.#evalIdentity);
+    const turnInput = attachSignal(input, this.#signal);
     let response;
     if (this.#session === undefined) {
       if (turnInput.message === undefined) {
@@ -567,7 +563,6 @@ export class EvalSessionManager {
   readonly #client: Client;
   readonly #signal: AbortSignal | undefined;
   readonly #collector: AssertionCollector;
-  readonly #evalIdentity: EvalIdentity | undefined;
   readonly #onSessionStart: ((event: EvalSessionStartedEvent) => void) | undefined;
   readonly #sessions: EvalSessionDriver[] = [];
   #primary: EvalSessionDriver | undefined;
@@ -575,13 +570,11 @@ export class EvalSessionManager {
   constructor(input: {
     readonly client: Client;
     readonly collector?: AssertionCollector;
-    readonly evalIdentity?: EvalIdentity;
     readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
     readonly signal?: AbortSignal;
   }) {
     this.#client = input.client;
     this.#collector = input.collector ?? new AssertionCollector();
-    this.#evalIdentity = input.evalIdentity;
     this.#onSessionStart = input.onSessionStart;
     this.#signal = input.signal;
   }
@@ -628,7 +621,6 @@ export class EvalSessionManager {
     const session = new EvalSessionDriver({
       client: this.#client,
       collector: this.#collector,
-      evalIdentity: this.#evalIdentity,
       onSessionStart: this.#onSessionStart,
       primary,
       signal: this.#signal,
@@ -644,7 +636,6 @@ export class EvalSessionManager {
     const session = new EvalSessionDriver({
       client: this.#client,
       collector: this.#collector,
-      evalIdentity: this.#evalIdentity,
       onSessionStart: this.#onSessionStart,
       primary: false,
       session: this.#client.sessions.attach(sessionId, {

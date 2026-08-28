@@ -31,7 +31,6 @@ import {
 } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { contextStorage } from "#context/container.js";
-import { buildEvalCorrelationContext } from "#harness/instrumentation/eval-correlation.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
@@ -637,9 +636,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (tracer && instrumentationDecision?.action !== "drop" && hasStepInput(input)) {
       const functionId = otelSettings?.functionId ?? agentName;
       const attributes: Record<string, string> = {
-        ...buildEvalCorrelationContext(initialSession.sessionId),
         "eve.version": eveVersion,
         "eve.environment": environment,
+        "eve.session.id": initialSession.sessionId,
       };
       if (functionId) {
         attributes["ai.telemetry.functionId"] = functionId;
@@ -773,7 +772,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         channelAudience,
         channelType: channelInstrumentation?.channelType,
         instrumentation: config.instrumentation,
-        runtimeContext: buildEvalCorrelationContext(session.sessionId),
         parentLineage,
         parentTraceContext,
         rootSessionId: parent?.rootSessionId ?? session.rootSessionId ?? session.sessionId,

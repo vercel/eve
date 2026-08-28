@@ -103,7 +103,6 @@ describe("executeTask", () => {
 
     const { result } = await executeTask({
       client: new Client({ host: target.url }),
-      evalIdentity: { evalId: "case-1", runId: "run-1" },
       target,
       evaluation: createTestEval(async (t) => {
         const parked = await t.send("run pwd");
@@ -133,10 +132,6 @@ describe("executeTask", () => {
       {
         inputResponses: [{ optionId: "approve", requestId: "approval_1" }],
       },
-    ]);
-    expect(server.posts.map((post) => post.headers)).toEqual([
-      expect.objectContaining({ "x-eve-eval-id": "case-1", "x-eve-eval-run-id": "run-1" }),
-      expect.objectContaining({ "x-eve-eval-id": "case-1", "x-eve-eval-run-id": "run-1" }),
     ]);
   });
 
@@ -734,12 +729,7 @@ function createScriptedServer(
 ) {
   const pendingTurns = [...turns];
   const streamQueues = new Map<string, UnstampedMessageStreamEvent[][]>();
-  const posts: Array<{
-    body: unknown;
-    headers: Readonly<Record<string, string>>;
-    method: string;
-    url: string;
-  }> = [];
+  const posts: Array<{ body: unknown; method: string; url: string }> = [];
   const cancels: string[] = [];
 
   for (const stream of options.streams ?? []) {
@@ -775,12 +765,7 @@ function createScriptedServer(
           return Response.json({ error: "No scripted turn.", ok: false }, { status: 500 });
         }
 
-        posts.push({
-          body: JSON.parse(String(init?.body)),
-          headers: Object.fromEntries(new Headers(init?.headers).entries()),
-          method,
-          url,
-        });
+        posts.push({ body: JSON.parse(String(init?.body)), method, url });
         const queue = streamQueues.get(next.sessionId) ?? [];
         queue.push([...next.events]);
         streamQueues.set(next.sessionId, queue);

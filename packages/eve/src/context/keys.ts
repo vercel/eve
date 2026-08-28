@@ -27,7 +27,6 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { EvalExecutionIdentity } from "#protocol/eval-identity.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import type { MemoryScope, MemoryTurnContext } from "#public/memory/index.js";
@@ -76,8 +75,6 @@ export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToke
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
-/** Eval case whose runner-created request started this session. */
-export const EvalExecutionIdentityKey = new ContextKey<EvalExecutionIdentity>("eve.evalIdentity");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(

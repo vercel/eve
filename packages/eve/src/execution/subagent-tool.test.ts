@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { EvalExecutionIdentityKey } from "#context/keys.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
@@ -50,24 +48,6 @@ function makeInheritingGraph(nodeId: string) {
 }
 
 describe("buildSubagentRunInput", () => {
-  it("inherits eval execution identity from the parent context", () => {
-    const ctx = new ContextContainer();
-    const evalIdentity = { evalId: "case-1", runId: "eval-run-1" };
-    ctx.set(EvalExecutionIdentityKey, evalIdentity);
-
-    const { runInput } = contextStorage.run(ctx, () =>
-      buildRuntimeSubagentRunInput({
-        action: makeAction(),
-        auth: null,
-        batchEvent: { sequence: 0, turnId: "turn-0" },
-        initiatorAuth: null,
-        session: makeSession(),
-      }),
-    );
-
-    expect(runInput.evalIdentity).toEqual(evalIdentity);
-  });
-
   it("forwards parent capabilities to the child run input", () => {
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),

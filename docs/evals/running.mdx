@@ -37,7 +37,7 @@ An eval that calls `t.skip(reason)` is reported as skipped, does not count as pa
 
 ## Artifacts
 
-Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. The summary carries a generated `runId`; every eval result carries its generated `caseId`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
+Each run drops artifacts under `.eve/evals/<timestamp>/`: a run `summary.json`, a `results.jsonl` index, and per-eval assertion results, verdicts, captured event streams, and `t.log` lines under `evals/`. The console output stays tight on purpose; when an eval fails, the artifact has the full story.
 
 ## CI
 

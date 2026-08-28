@@ -9,7 +9,6 @@ export { JUnit, type JUnitReporterConfig } from "#evals/runner/reporters/junit.j
 export type {
   EvalReporter,
   EveEvalCompleteContext,
-  EveEvalRunStartContext,
   EveEvalSessionStartEvent,
   EveEvalStartEvent,
 } from "#evals/runner/reporters/types.js";

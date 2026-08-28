@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 import type { Client } from "#client/client.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
@@ -18,11 +16,7 @@ import { computeEvalVerdict } from "#evals/runner/verdict.js";
  * Options for executing one eval.
  */
 export interface ExecuteEvalOptions {
-  /** Unique identity for this execution of the eval case. */
-  readonly caseId?: string;
   readonly evaluation: EveEval;
-  /** Runner-owned identity propagated into every session created by this eval. */
-  readonly runId?: string;
   /** Receives `t.log` lines as the eval runs (used by `--verbose`). */
   readonly onLog?: (message: string) => void;
   /** Receives the first trace context observed for each session. */
@@ -46,8 +40,6 @@ export interface ExecuteEvalOptions {
  */
 export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalResult> {
   const { evaluation, target, client } = options;
-  const caseId = options.caseId ?? randomUUID();
-  const runId = options.runId ?? randomUUID();
   const startedAt = options.startedAt ?? new Date().toISOString();
 
   let result: EveEvalTaskResult;
@@ -58,7 +50,6 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
   try {
     const outcome = await executeTask({
       client,
-      evalIdentity: { evalId: caseId, runId },
       evaluation,
       onLog: options.onLog,
       onSessionStart: options.onSessionStart,
@@ -84,9 +75,7 @@ export async function executeEval(options: ExecuteEvalOptions): Promise<EveEvalR
   const verdict = computeEvalVerdict({ error, assertions, skipReason });
 
   return {
-    caseId,
     id: evaluation.id,
-    runId,
     result,
     assertions,
     verdict,

@@ -283,16 +283,8 @@ describe("runEvals", () => {
       traceId: "0123456789abcdef0123456789abcdef",
     };
     mockArtifacts();
-    let executedIdentity: { readonly evalId: string; readonly runId: string } | undefined;
     mockedRunnerDependencies.executeTask.mockImplementation(
-      async ({
-        evalIdentity,
-        onSessionStart,
-      }: {
-        evalIdentity?: { readonly evalId: string; readonly runId: string };
-        onSessionStart?: (event: unknown) => void;
-      }) => {
-        executedIdentity = evalIdentity;
+      async ({ onSessionStart }: { onSessionStart?: (event: unknown) => void }) => {
         onSessionStart?.({
           primary: true,
           sessionId: "session-1",
@@ -311,32 +303,20 @@ describe("runEvals", () => {
     );
 
     const seen: string[] = [];
-    let caseId: string | undefined;
-    let runId: string | undefined;
     const reporter: EvalReporter = {
-      onRunStart: (_evaluations, _target, context) => {
-        runId = context?.runId;
+      onRunStart: () => {
         seen.push("run:start");
       },
       onEvalStart: (event) => {
-        caseId = event.caseId;
-        expect(event.runId).toBe(runId);
         seen.push(`eval:start:${event.evaluation.id}`);
       },
       onSessionStart: (event) => {
-        expect(event.caseId).toBe(caseId);
-        expect(event.runId).toBe(runId);
         seen.push(`session:start:${event.sessionId}:${event.traceContext.traceId}`);
       },
       onEvalComplete: (result, context) => {
-        expect(result.caseId).toBe(caseId);
-        expect(context?.caseId).toBe(caseId);
-        expect(result.runId).toBe(runId);
-        expect(context?.runId).toBe(runId);
         seen.push(`eval:complete:${result.id}:${context?.traceContexts.length}`);
       },
-      onRunComplete: (summary) => {
-        expect(summary.runId).toBe(runId);
+      onRunComplete: () => {
         seen.push("run:complete");
       },
     };
@@ -357,9 +337,6 @@ describe("runEvals", () => {
       "eval:complete:traced:1",
       "run:complete",
     ]);
-    expect(caseId).toEqual(expect.any(String));
-    expect(runId).toEqual(expect.any(String));
-    expect(executedIdentity).toEqual({ evalId: caseId, runId });
   });
 
   it("scopes eval-defined reporters to the evals referencing them", async () => {

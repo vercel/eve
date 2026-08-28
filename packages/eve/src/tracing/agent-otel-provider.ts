@@ -47,7 +47,6 @@ import type {
   InstrumentationTurnTerminalEvent,
 } from "#harness/instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
-import { evalCorrelationSpanAttributes } from "#harness/instrumentation/eval-correlation.js";
 
 interface SpanState {
   readonly context: Context;
@@ -167,7 +166,6 @@ export function createAgentOtelInstrumentation(
               "agent.step.index": event.scope.stepIndex,
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
-              ...evalCorrelationSpanAttributes(event.runtimeContext),
               ...runtimeContextAttributes(event.runtimeContext),
             },
             links:
@@ -193,7 +191,6 @@ export function createAgentOtelInstrumentation(
           "ai.operation.name": operationName,
           "ai.provider.name": event.operation.provider,
           "ai.request.model": event.operation.modelId,
-          ...evalCorrelationSpanAttributes(event.runtimeContext),
           ...runtimeContextAttributes(event.runtimeContext),
         },
       },
@@ -273,7 +270,6 @@ export function createAgentOtelInstrumentation(
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
-                  ...evalCorrelationSpanAttributes(turn.runtimeContext),
                 },
                 startTime: turn.startTimeMs,
               },
@@ -319,7 +315,6 @@ export function createAgentOtelInstrumentation(
           "gen_ai.operation.name": "chat",
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
-          ...evalCorrelationSpanAttributes(event.runtimeContext),
           ...runtimeContextAttributes(event.runtimeContext),
         },
       },

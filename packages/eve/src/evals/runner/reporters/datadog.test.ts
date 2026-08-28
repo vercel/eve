@@ -52,7 +52,6 @@ function makeEval(): EveEval {
 function makeResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   return {
     id: "weather/forecast",
-    runId: "eval-run-1",
     result: {
       output: { answer: "sunny" },
       finalMessage: "sunny",
@@ -109,13 +108,11 @@ function makeResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
     startedAt: "2026-08-28T00:00:00.000Z",
     completedAt: "2026-08-28T00:00:01.000Z",
     ...overrides,
-    caseId: overrides.caseId ?? "case-1",
   };
 }
 
 function makeSummary(): EveEvalRunSummary {
   return {
-    runId: "eval-run-1",
     target: makeTarget(),
     results: [makeResult()],
     startedAt: "2026-08-28T00:00:00.000Z",
@@ -132,10 +129,7 @@ async function startReporter(config: DatadogReporterConfig = {}) {
   const reporter = Datadog(config);
   const evaluation = makeEval();
   const target = makeTarget();
-  await reporter.onRunStart([evaluation], target, {
-    runId: "eval-run-1",
-    startedAt: "2026-08-28T00:00:00.000Z",
-  });
+  await reporter.onRunStart([evaluation], target);
   return { evaluation, reporter, target };
 }
 
@@ -158,7 +152,7 @@ describe("Datadog", () => {
     vi.unstubAllEnvs();
   });
 
-  it("starts one external experiment with eve run metadata", async () => {
+  it("starts one external experiment with eval metadata", async () => {
     await startReporter({
       description: "Weather agent evals",
       experimentConfig: { model: "mock/weather" },
@@ -180,12 +174,10 @@ describe("Datadog", () => {
         metadata: expect.objectContaining({
           owner: "agents",
           "eve.eval.names": ["weather/forecast"],
-          "eve.eval.run_id": "eval-run-1",
           "eve.target.kind": "local",
         }),
         tags: {
           team: "agents",
-          "eve.eval.run_id": "eval-run-1",
           "eve.framework": "eve",
           "eve.target.kind": "local",
         },
@@ -194,16 +186,10 @@ describe("Datadog", () => {
   });
 
   it("submits eval output, trace correlation, and sanitized evaluation metrics", async () => {
-    const { evaluation, reporter, target } = await startReporter();
+    const { reporter } = await startReporter();
     const result = makeResult();
 
-    await reporter.onEvalComplete(result, {
-      caseId: result.caseId,
-      evaluation,
-      runId: result.runId,
-      target,
-      traceContexts: result.result.traceContexts,
-    });
+    await reporter.onEvalComplete(result);
 
     expect(datadogMocks.submitSpan).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -214,19 +200,25 @@ describe("Datadog", () => {
         completedAt: "2026-08-28T00:00:01.000Z",
         metadata: expect.objectContaining({
           suite: "weather",
-          "eve.eval.id": "case-1",
-          "eve.eval.name": "weather/forecast",
-          "eve.eval.run_id": "eval-run-1",
-          "eve.session.id": "session-1",
+          eveFailedAssertions: [
+            {
+              name: "judge.autoevals.quality",
+              passed: false,
+              score: 0.4,
+              severity: "soft",
+              threshold: 0.7,
+            },
+          ],
+          eveParked: false,
+          eveSessionId: "session-1",
+          eveStatus: "completed",
+          eveSubagentCalls: [],
           eveTraceContexts: result.result.traceContexts,
           eveTraceIds: ["1".repeat(32)],
-          "eve.verdict": "scored",
+          eveToolCalls: ["weather"],
+          eveVerdict: "scored",
         }),
         tags: {
-          "eve.eval.id": "case-1",
-          "eve.eval.name": "weather/forecast",
-          "eve.eval.run_id": "eval-run-1",
-          "eve.session.id": "session-1",
           "eve.verdict": "scored",
         },
       }),
@@ -235,7 +227,6 @@ describe("Datadog", () => {
     const submittedInput = datadogMocks.submitSpan.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(submittedInput).not.toHaveProperty("spanId");
     expect(submittedInput).not.toHaveProperty("traceId");
-    expect(submittedInput).not.toHaveProperty("runId");
     expect(datadogMocks.submitEvaluationMetrics).toHaveBeenCalledWith(DATADOG_SPAN, [
       { label: "eve_verdict", source: "eve", value: "scored" },
       {

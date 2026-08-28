@@ -1020,22 +1020,6 @@ describe("eveChannel — create session (text)", () => {
     expect(handler.send.mock.calls[0]?.[0]).toBe("hi");
   });
 
-  it("seeds eval correlation identity from framework headers", async () => {
-    const handler = createEveCreateHandler({ auth: none() });
-    const request = createJsonMessageRequest({ message: "hi" });
-    request.headers.set("x-eve-eval-id", "case-1");
-    request.headers.set("x-eve-eval-run-id", "run-1");
-
-    const response = await handler.fetch(request);
-
-    expect(response.status).toBe(202);
-    expect(handler.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        evalIdentity: { evalId: "case-1", runId: "run-1" },
-      }),
-    );
-  });
-
   it("accepts task mode for callback-driven session creation", async () => {
     const handler = createEveCreateHandler({ auth: none() });
 

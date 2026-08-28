@@ -8,7 +8,6 @@ import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
-import type { EvalExecutionIdentity } from "#protocol/eval-identity.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -432,8 +431,6 @@ export interface RunInput {
   readonly channelMetadata?: ChannelInstrumentationProjection;
   /** Inbound channel operation that created this session. */
   readonly delivery?: ChannelDeliveryMetadata;
-  /** Framework-owned identity when an eval runner created this session. */
-  readonly evalIdentity?: EvalExecutionIdentity;
   /**
    * Authenticated caller principal for this session. `null` means the
    * request was accepted with no credentials.

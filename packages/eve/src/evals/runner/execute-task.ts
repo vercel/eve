@@ -1,6 +1,5 @@
 import type { Client } from "#client/client.js";
 import type { MessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
-import type { EvalExecutionIdentity } from "#protocol/eval-identity.js";
 import { toErrorMessage } from "#shared/errors.js";
 import type {
   AssertionResult,
@@ -25,7 +24,6 @@ import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
 interface ExecuteTaskOptions {
   readonly client: Client;
   readonly evaluation: EveEval;
-  readonly evalIdentity?: EvalExecutionIdentity;
   /** Receives each `t.log` line as it is written (used by `--verbose`). */
   readonly onLog?: (message: string) => void;
   /** Receives the first trace context observed for each session. */
@@ -58,7 +56,6 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   const manager = new EvalSessionManager({
     client,
     collector,
-    evalIdentity: options.evalIdentity,
     onSessionStart: options.onSessionStart,
     signal,
   });

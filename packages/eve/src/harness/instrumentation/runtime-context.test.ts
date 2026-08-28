@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, ChannelInstrumentationKey, EvalExecutionIdentityKey } from "#context/keys.js";
+import { AuthKey, ChannelInstrumentationKey } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   buildTelemetryRuntimeContext,
@@ -63,22 +63,6 @@ function build(
 describe("buildTelemetryRuntimeContext", () => {
   it("returns undefined when no instrumentation is authored", () => {
     expect(build({ authored: undefined })).toBeUndefined();
-  });
-
-  it("emits eval correlation even when no instrumentation is authored", () => {
-    const ctx = new ContextContainer();
-    ctx.set(EvalExecutionIdentityKey, {
-      evalId: "case-1",
-      runId: "eval-run-1",
-    });
-
-    const runtimeContext = contextStorage.run(ctx, () => build({ authored: undefined }));
-
-    expect(runtimeContext).toEqual({
-      ...FRAMEWORK_KEYS,
-      "eve.eval.id": "case-1",
-      "eve.eval.run_id": "eval-run-1",
-    });
   });
 
   it("emits framework identifiers when no resolver is configured", () => {

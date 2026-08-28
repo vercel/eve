@@ -292,7 +292,6 @@ export interface InstrumentationSessionStartedEvent {
   readonly idempotencyKey: string;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
-  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
   readonly traceSeed?: InstrumentationTraceContext;
 }
@@ -343,7 +342,6 @@ export interface InstrumentationTurnStartedEvent {
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
-  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sequence: number;
   readonly sessionId: string;
   readonly turnId: string;

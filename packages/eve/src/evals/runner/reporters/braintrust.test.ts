@@ -38,7 +38,6 @@ function makeConfig(overrides: Partial<BraintrustReporterConfig> = {}): Braintru
 function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   return {
     id: "eval-1",
-    runId: "run-1",
     result: {
       output: "actual output",
       finalMessage: "actual output",
@@ -74,7 +73,6 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
     startedAt: "2026-01-01T00:00:00.000Z",
     completedAt: "2026-01-01T00:00:01.000Z",
     ...overrides,
-    caseId: overrides.caseId ?? "case-1",
   };
 }
 
@@ -120,7 +118,6 @@ describe("Braintrust", () => {
 
     // Should not throw when called before onRunStart
     await reporter.onRunComplete({
-      runId: "run-1",
       target: makeTarget(),
       results: [],
       startedAt: "2026-01-01T00:00:00.000Z",
@@ -201,9 +198,6 @@ describe("Braintrust", () => {
     expect(braintrustMocks.log).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
-          eveEvalId: "case-1",
-          eveEvalName: "eval-1",
-          eveEvalRunId: "run-1",
           eveTraceContexts: [traceContext],
           eveTraceIds: [traceContext.traceId],
         }),

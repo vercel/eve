@@ -17,8 +17,6 @@ import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
 import type { JsonObject } from "#shared/json.js";
-import { contextStorage } from "#context/container.js";
-import { EvalExecutionIdentityKey } from "#context/keys.js";
 
 /**
  * Pending runtime-action batch event metadata needed for child run lineage.
@@ -158,7 +156,6 @@ export function buildSubagentRunInput(input: {
     capabilities,
     channelMetadata,
     continuationToken: childContinuationToken,
-    evalIdentity: contextStorage.getStore()?.get(EvalExecutionIdentityKey),
     initiatorAuth,
     input: {
       message: formatSubagentCallInputMessage({

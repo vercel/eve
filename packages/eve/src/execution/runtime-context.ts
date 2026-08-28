@@ -9,7 +9,6 @@ import {
   ChannelRequestIdKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
-  EvalExecutionIdentityKey,
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
@@ -71,10 +70,6 @@ export function buildRunContext(input: {
 
   if (run.delivery !== undefined) {
     ctx.set(ChannelDeliveryKey, run.delivery);
-  }
-
-  if (run.evalIdentity !== undefined) {
-    ctx.set(EvalExecutionIdentityKey, run.evalIdentity);
   }
 
   if (run.callback !== undefined) {

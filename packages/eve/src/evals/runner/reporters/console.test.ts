@@ -36,10 +36,8 @@ describe("Console", () => {
           threshold: 0.8,
         },
       ],
-      caseId: "case-1",
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "sourcing",
-      runId: "run-1",
       result: {
         derived: createEmptyDerivedFacts(),
         events: [],
@@ -72,10 +70,8 @@ describe("Console", () => {
           severity: "gate",
         },
       ],
-      caseId: "case-1",
       completedAt: "2026-01-01T00:00:01.000Z",
       id: "sourcing",
-      runId: "run-1",
       result: {
         derived: createEmptyDerivedFacts(),
         events: [],
@@ -95,10 +91,8 @@ describe("Console", () => {
 function skippedResult(): EveEvalResult {
   return {
     assertions: [],
-    caseId: "case-1",
     completedAt: "2026-01-01T00:00:01.000Z",
     id: "schedule",
-    runId: "run-1",
     result: {
       derived: createEmptyDerivedFacts(),
       events: [],
@@ -115,7 +109,6 @@ function skippedResult(): EveEvalResult {
 
 function summary(result: EveEvalResult): EveEvalRunSummary {
   return {
-    runId: result.runId,
     completedAt: result.completedAt,
     errored: 0,
     failed: 0,

@@ -1,7 +1,7 @@
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
-import type { EvalReporter, EveEvalRunStartContext } from "#evals/runner/reporters/types.js";
-import { buildEvalTraceMetadata } from "#evals/runner/reporters/trace-metadata.js";
+import type { EvalReporter } from "#evals/runner/reporters/types.js";
+import { buildEvalResultMetadata } from "#evals/runner/reporters/result-metadata.js";
 import { parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
 
 /** Dataset associated with a Datadog external experiment. */
@@ -93,9 +93,9 @@ interface DatadogExperiment {
 
 /**
  * Creates an {@link EvalReporter} that uploads one external Datadog experiment
- * per eval run. Requires `dd-trace` 6.12 or newer plus `DD_API_KEY` and
- * `DD_APP_KEY`. Runtime tracing is optional; when present, eve records the
- * observed runtime trace contexts as eval metadata and stable correlation tags.
+ * per eval run. Requires a compatible `dd-trace` peer (`^6.12.0`) plus `DD_API_KEY` and
+ * `DD_APP_KEY`. Runtime tracing is optional; when present, the reporter includes
+ * the trace metadata already captured by the eval runner.
  */
 export function Datadog(config: DatadogReporterConfig = {}): EvalReporter {
   return new DatadogReporter(config);
@@ -110,11 +110,7 @@ class DatadogReporter implements EvalReporter {
     this.#config = config;
   }
 
-  async onRunStart(
-    evaluations: readonly EveEval[],
-    target: EveEvalTarget,
-    context?: EveEvalRunStartContext,
-  ): Promise<void> {
+  async onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): Promise<void> {
     requireDatadogCredentials();
     const tracer = await loadDatadogTracer();
     const projectName = this.#config.projectName ?? evaluations[0]?.id ?? "eve evals";
@@ -131,7 +127,7 @@ class DatadogReporter implements EvalReporter {
     }
 
     const git = resolveLocalGitMetadata(process.cwd());
-    const startedAt = context?.startedAt ?? new Date().toISOString();
+    const startedAt = new Date().toISOString();
     this.#experiment = await tracer.llmobs.experiments.startExperiment({
       name: this.#config.experimentName ?? `eve eval ${startedAt}`,
       description: this.#config.description,
@@ -141,7 +137,6 @@ class DatadogReporter implements EvalReporter {
       metadata: compactJsonObject({
         ...this.#config.metadata,
         "eve.eval.names": evaluations.map((evaluation) => evaluation.id),
-        "eve.eval.run_id": context?.runId,
         "eve.git.branch": git.branch,
         "eve.git.sha": git.sha,
         "eve.target.kind": target.kind,
@@ -149,7 +144,6 @@ class DatadogReporter implements EvalReporter {
       }),
       tags: compactStringRecord({
         ...this.#config.tags,
-        "eve.eval.run_id": context?.runId,
         "eve.framework": "eve",
         "eve.target.kind": target.kind,
       }),
@@ -159,39 +153,15 @@ class DatadogReporter implements EvalReporter {
   async onEvalComplete(result: EveEvalResult): Promise<void> {
     if (!this.#experiment) return;
     const evaluation = this.#evaluations.get(result.id);
-    const failedAssertions = result.assertions
-      .filter((assertion) => !assertion.passed)
-      .map((assertion) => ({ ...assertion }));
-
-    const metadata = compactJsonObject({
-      ...normalizeMetadata(evaluation?.metadata),
-      "eve.assertions.failed": failedAssertions,
-      "eve.eval.id": result.caseId,
-      "eve.eval.name": result.id,
-      "eve.eval.run_id": result.runId,
-      "eve.eval.tags": evaluation?.tags,
-      "eve.failure.code": result.result.derived.failureCode,
-      "eve.parked": result.result.derived.parked,
-      "eve.session.id": result.result.sessionId,
-      "eve.skip.reason": result.skipReason,
-      "eve.status": result.result.status,
-      "eve.subagent.calls": result.result.derived.subagentCalls.map((call) => call.name),
-      "eve.tool.calls": result.result.derived.toolCalls.map((call) => call.name),
-      "eve.verdict": result.verdict,
-      ...buildEvalTraceMetadata(result.result.traceContexts),
-    });
+    const metadata = compactJsonObject(buildEvalResultMetadata(evaluation, result));
     const output = normalizeJsonValue(result.result.output);
     const span = await this.#experiment.submitSpan({
       name: result.id,
-      input: evaluation?.description ?? result.id,
+      input: evaluation?.description ?? "",
       output,
       metadata,
       tags: compactStringRecord({
         ...this.#config.tags,
-        "eve.eval.id": result.caseId,
-        "eve.eval.name": result.id,
-        "eve.eval.run_id": result.runId,
-        "eve.session.id": result.result.sessionId,
         "eve.verdict": result.verdict,
       }),
       startedAt: result.startedAt,
@@ -228,7 +198,7 @@ async function loadDatadogTracer(): Promise<DatadogTracer> {
   } catch {
     throw new Error(
       [
-        "The 'dd-trace' package (version 6.12 or newer) is required for Datadog reporting but was not found.",
+        "The 'dd-trace' package (compatible with ^6.12.0) is required for Datadog reporting but was not found.",
         "",
         "Install it with:",
         "  npm install dd-trace",
@@ -278,19 +248,6 @@ function buildMetrics(result: EveEvalResult): DatadogExperimentMetric[] {
 function normalizeMetricLabel(label: string): string {
   const normalized = label.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
   return normalized || "eve_score";
-}
-
-function normalizeMetadata(
-  metadata: Readonly<Record<string, unknown>> | undefined,
-): Readonly<Record<string, JsonValue>> {
-  if (metadata === undefined) return {};
-
-  const normalized: Record<string, JsonValue> = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    const json = normalizeJsonValue(value);
-    if (json !== undefined) normalized[key] = json;
-  }
-  return normalized;
 }
 
 function normalizeJsonValue(value: unknown): JsonValue | undefined {

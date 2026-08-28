@@ -13,7 +13,6 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { EvalExecutionIdentityKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
 import {
@@ -292,7 +291,6 @@ async function publishTurnStarted(input: {
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
-  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
   readonly turnId: string;
   readonly turnSequence: number;
@@ -305,7 +303,6 @@ async function publishTurnStarted(input: {
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
-    runtimeContext: input.runtimeContext,
     sessionId: input.sessionId,
     type: "session.started",
   });
@@ -314,7 +311,6 @@ async function publishTurnStarted(input: {
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
-    runtimeContext: input.runtimeContext,
     sequence: input.turnSequence,
     sessionId: input.sessionId,
     turnId: input.turnId,
@@ -351,31 +347,6 @@ function nanos(hrTime: readonly [number, number]): bigint {
 }
 
 describe("createAgentOtelInstrumentation", () => {
-  it("derives eval correlation when session tracing starts before the turn", async () => {
-    const runtime = createRuntime();
-    const ctx = new ContextContainer();
-    ctx.set(EvalExecutionIdentityKey, { evalId: "case-1", runId: "eval-run-1" });
-
-    await contextStorage.run(ctx, () =>
-      runtime.prepareSessionTrace({
-        agentName: "weather",
-        idempotencyKey: sessionIdempotencyKey("session-1"),
-        rootSessionId: "session-1",
-        sessionId: "session-1",
-        type: "session.started",
-      }),
-    );
-    await runtime.provider.forceFlush();
-
-    expect(
-      byName(runtime.exporter.getFinishedSpans(), "agent.session")[0]!.attributes,
-    ).toMatchObject({
-      "eve.eval.id": "case-1",
-      "eve.eval.run_id": "eval-run-1",
-      "eve.session.id": "session-1",
-    });
-  });
-
   it("prepares a stable stream trace before lifecycle hooks observe the turn", async () => {
     const runtime = createRuntime();
     const sessionEvent = {
@@ -918,8 +889,6 @@ describe("createAgentOtelInstrumentation", () => {
       hooks: runtime.hooks,
       runInContext: runtime.runInContext,
       runtimeContext: {
-        "eve.eval.id": "case-1",
-        "eve.eval.run_id": "eval-run-1",
         "eve.session.id": "session-1",
         "posthog.distinct_id": "user-123",
         nested: { ignored: undefined, team: "platform" },
@@ -937,23 +906,10 @@ describe("createAgentOtelInstrumentation", () => {
     const model = byName(spans, "chat claude-test")[0]!;
     for (const span of [step, operation, model]) {
       expect(span.attributes).toMatchObject({
-        "eve.eval.id": "case-1",
-        "eve.eval.run_id": "eval-run-1",
-        "eve.session.id": "session-1",
-        "ai.settings.context.eve.eval.id": "case-1",
-        "ai.settings.context.eve.eval.run_id": "eval-run-1",
         "ai.settings.context.eve.session.id": "session-1",
         "ai.settings.context.posthog.distinct_id": "user-123",
         "ai.settings.context.nested.team": "platform",
         "ai.settings.context.tags": ["a", "b"],
-      });
-    }
-
-    for (const span of [byName(spans, "agent.session")[0]!, byName(spans, "agent.turn")[0]!]) {
-      expect(span.attributes).toMatchObject({
-        "eve.eval.id": "case-1",
-        "eve.eval.run_id": "eval-run-1",
-        "eve.session.id": "session-1",
       });
     }
   });
