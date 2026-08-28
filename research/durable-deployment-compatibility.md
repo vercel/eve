@@ -165,12 +165,28 @@ the candidate in the development world, and continue those sessions through
 parked turns, active turns, cancellation, runtime actions, subagents, tasks,
 and timeouts.
 
+The first required local cohort builds the published eve 0.30.8 handler and the
+candidate handler independently against one test-only promotable Workflow
+World. It proves the historical session driver remains deployment-affine while
+its next turn is created and delivered by the promoted candidate. Additional
+cohorts and suspension points are added only when they represent a distinct
+shipped protocol contract; package releases alone do not grow the matrix.
+
 Production routing ultimately targets the latest compatibility-approved
 deployment rather than the most recently created deployment. Promotion is not
 long-lived blue/green routing: after approval, every new turn takes the promoted
 code. The pointer exists to keep an unverified build out of the latest path and
 to provide an immediate demotion control if a semantic regression escapes the
 build gate.
+
+Two implementation boundaries remain outside this stack. Turn-control producer
+gating builds on the fail-loud decoder and terminal skew path in #2625; it should
+land after that work rather than duplicate its workflow-bundle changes. An
+immediate production demotion control requires Vercel's dynamic
+`resolve-latest-deployment` path to return an audited approved deployment. An
+eve-only resolver can protect newly deployed drivers, but it cannot retrofit
+that behavior into older immutable drivers already calling the platform's
+existing latest resolver.
 
 ## Why history replay is insufficient
 
