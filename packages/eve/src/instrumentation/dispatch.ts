@@ -13,7 +13,7 @@ import {
   withoutInstrumentationContent,
 } from "#instrumentation/content.js";
 import { createLogger, formatError } from "#internal/logging.js";
-import { resolveTracePolicy } from "#shared/trace-policy.js";
+import { legacyCaptureTracePolicy, resolveTracePolicy } from "#shared/trace-policy.js";
 import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
 import type {
@@ -42,10 +42,25 @@ export function createInstrumentationDispatcher(
   const groups = normalizeDispatchGroups(input);
   const snapshots = new WeakMap<object, unknown>();
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
+  const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
   const forTrace = (trace: TraceCaptureContext): InstrumentationHooks => {
     const decisions = new Map(
-      providers.map((provider) => [provider, resolveTracePolicy(provider.tracePolicy, trace)]),
+      providers.map((provider) => [
+        provider,
+        resolveTracePolicy(
+          provider.tracePolicy ?? legacyCaptureTracePolicy(provider.capture),
+          trace,
+          (error) => {
+            if (warnedPolicyFailures.has(provider)) return;
+            warnedPolicyFailures.add(provider);
+            log.warn("instrumentation provider trace policy failed", {
+              error: formatError(error),
+              provider: provider.name,
+            });
+          },
+        ),
+      ]),
     );
     const capturesInputs = [...decisions.values()].some(
       (decision) => decision.action === "record" && decision.recordInputs,
@@ -56,7 +71,14 @@ export function createInstrumentationDispatcher(
     const capturesContent = capturesInputs || capturesOutputs;
 
     const publish = async (event: InstrumentationEvent): Promise<void> => {
-      const snapshot = snapshotInstrumentationEvent(event, snapshots);
+      const snapshot = snapshotInstrumentationEvent(
+        withInstrumentationDecision(event, {
+          action: "record",
+          recordInputs: capturesInputs,
+          recordOutputs: capturesOutputs,
+        }),
+        snapshots,
+      );
       const cleanupSession =
         snapshot.type === "session.completed" || snapshot.type === "session.failed";
       const cleanupTurn = snapshot.type === "turn.cancelled" || snapshot.type === "turn.failed";
@@ -78,8 +100,10 @@ export function createInstrumentationDispatcher(
 
       const projections = new Map<string, InstrumentationEvent>();
       const visibleEvent = (provider: InstrumentationProviderDefinition): InstrumentationEvent => {
-        const decision = decisions.get(provider)!;
-        if (decision.action === "drop") return snapshot;
+        const decision = decisions.get(provider);
+        if (decision === undefined || decision.action === "drop") {
+          return withoutInstrumentationContent(snapshot);
+        }
         if (decision.recordInputs && decision.recordOutputs) return snapshot;
         const key = `${String(decision.recordInputs)}:${String(decision.recordOutputs)}`;
         let projected = projections.get(key);
@@ -136,50 +160,17 @@ export function createInstrumentationDispatcher(
     return { capturesContent, capturesInputs, capturesOutputs, forTrace, publish };
   };
 
-  const boundBySession = new Map<string, InstrumentationHooks>();
+  let unboundHooks: InstrumentationHooks | undefined;
   return {
-    capturesContent: providers.length > 0,
+    capturesContent: providers.some(
+      (provider) => provider.tracePolicy === undefined && provider.capture === "content",
+    ),
     forTrace,
     async publish(event) {
-      const sessionId = sessionIdForEvent(event);
-      let bound = boundBySession.get(sessionId);
-      if (bound === undefined) {
-        bound = forTrace(traceContextForEvent(event));
-        boundBySession.set(sessionId, bound);
-      }
-      await bound.publish(event);
-      if (event.type === "session.completed" || event.type === "session.failed") {
-        boundBySession.delete(sessionId);
-      }
+      unboundHooks ??= forTrace({ audience: "unknown" });
+      await unboundHooks.publish(event);
     },
   };
-}
-
-function sessionIdForEvent(event: InstrumentationEvent): string {
-  return "scope" in event ? event.scope.sessionId : event.sessionId;
-}
-
-function traceContextForEvent(event: InstrumentationEvent): TraceCaptureContext {
-  if (event.type === "session.started") {
-    return {
-      agentName: event.agentName,
-      audience: event.channelAudience ?? "unknown",
-      channelType: event.channelType,
-    };
-  }
-  if ("delivery" in event) {
-    return {
-      agentName: event.agentName,
-      audience: event.delivery.channelAudience ?? "unknown",
-    };
-  }
-  if ("scope" in event) {
-    return {
-      agentName: event.scope.functionId,
-      audience: event.scope.channelAudience ?? "unknown",
-    };
-  }
-  return { audience: "unknown" };
 }
 
 function snapshotInstrumentationEvent(

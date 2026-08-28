@@ -87,6 +87,7 @@ export interface ActiveChannelDelivery {
   readonly agentName?: string;
   readonly channelType?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
+  readonly policyAgentName?: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;

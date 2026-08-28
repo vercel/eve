@@ -143,11 +143,12 @@ describe("channel delivery instrumentation", () => {
 
   it("uses delivery-start context when a bound turn publishes the terminal", async () => {
     const completed = vi.fn();
+    const tracePolicy = vi.fn(({ audience }) => audience === "public");
     const hooks = createInstrumentationHooks([
       {
         events: { "channel.delivery.completed": completed },
         name: "public-only",
-        tracePolicy: ({ audience }) => audience === "public",
+        tracePolicy,
       },
     ]);
     const ctx = new ContextContainer();
@@ -174,6 +175,7 @@ describe("channel delivery instrumentation", () => {
           payloads: [{ message: "hello" }],
         },
         hooks,
+        policyAgentName: "Weather Display Name",
         rootSessionId: "session-1",
         sequence: 0,
         sessionId: "session-1",
@@ -188,5 +190,11 @@ describe("channel delivery instrumentation", () => {
     });
 
     expect(completed).toHaveBeenCalledOnce();
+    expect(completed.mock.calls[0]?.[0].agentName).toBe("weather");
+    expect(tracePolicy.mock.calls[0]?.[0]).toEqual({
+      agentName: "Weather Display Name",
+      audience: "public",
+      channelType: "slack",
+    });
   });
 });

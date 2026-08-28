@@ -42,10 +42,9 @@ export function createAiSdkHookBridge(
   runInContext: InstrumentationContextRunner = directRunInContext,
   runtimeContext?: Readonly<Record<string, unknown>>,
 ): Telemetry {
-  const providerHooks = hooks;
   const state: AttemptState = {
-    capturesInputs: providerHooks.capturesInputs ?? providerHooks.capturesContent,
-    capturesOutputs: providerHooks.capturesOutputs ?? providerHooks.capturesContent,
+    capturesInputs: hooks.capturesInputs ?? hooks.capturesContent,
+    capturesOutputs: hooks.capturesOutputs ?? hooks.capturesContent,
     modelKeys: new Map(),
     runtimeContext:
       runtimeContext !== undefined && Object.keys(runtimeContext).length > 0
@@ -66,13 +65,13 @@ export function createAiSdkHookBridge(
     async onStepStart(event) {
       state.stepNumber = event.stepNumber;
       const started = toStepAttemptStarted(state);
-      if (started !== undefined) await providerHooks.publish(started);
+      if (started !== undefined) await hooks.publish(started);
     },
     async onLanguageModelCallStart(event) {
       const key = modelCallIdempotencyKey(state.scope, state.stepNumber ?? 0);
       state.modelKeys.set(event.callId, key);
       const started = toModelCallStarted(state, key, event);
-      await providerHooks.publish(started);
+      await hooks.publish(started);
     },
     executeLanguageModelCall({ callId, execute }) {
       const key = state.modelKeys.get(callId);
@@ -85,7 +84,7 @@ export function createAiSdkHookBridge(
       if (key === undefined) return;
       state.modelKeys.delete(event.callId);
       const completed = toModelCallCompleted(state, key, event);
-      await providerHooks.publish(completed);
+      await hooks.publish(completed);
     },
     async onStepEnd(event) {
       // Step results carry provider metadata (e.g. Vercel AI Gateway cost)
@@ -95,7 +94,7 @@ export function createAiSdkHookBridge(
       const providerMetadata = state.capturesOutputs
         ? event.providerMetadata
         : structuralProviderMetadata(event.providerMetadata);
-      await providerHooks.publish(
+      await hooks.publish(
         Object.freeze({
           idempotencyKey: attemptIdempotencyKey(state.scope),
           providerMetadata,
@@ -112,7 +111,7 @@ export function createAiSdkHookBridge(
       );
       state.toolKeys.set(event.toolCall.toolCallId, key);
       const started = toToolCallStarted(state, key, event);
-      await providerHooks.publish(started);
+      await hooks.publish(started);
     },
     executeTool({ toolCallId, execute }) {
       const key = state.toolKeys.get(toolCallId);
@@ -126,7 +125,7 @@ export function createAiSdkHookBridge(
       if (key === undefined) return;
       state.toolKeys.delete(toolCallId);
       const completed = toToolCallCompleted(state, key, event);
-      await providerHooks.publish(completed);
+      await hooks.publish(completed);
     },
     async onAbort(event) {
       await failOpenOperations(event.reason);
@@ -140,16 +139,12 @@ export function createAiSdkHookBridge(
     const pending: Promise<void>[] = [];
     for (const idempotencyKey of state.modelKeys.values()) {
       pending.push(
-        providerHooks.publish(
-          Object.freeze({ error, idempotencyKey, scope, type: "model.call.failed" }),
-        ),
+        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "model.call.failed" })),
       );
     }
     for (const idempotencyKey of state.toolKeys.values()) {
       pending.push(
-        providerHooks.publish(
-          Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" }),
-        ),
+        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" })),
       );
     }
     state.modelKeys.clear();

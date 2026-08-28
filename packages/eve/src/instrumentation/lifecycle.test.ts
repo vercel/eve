@@ -848,39 +848,30 @@ describe("trace policies", () => {
     expect(tracePolicy).toHaveBeenCalledExactlyOnceWith(trace);
   });
 
-  it("keeps one unbound policy decision across a session lifecycle", async () => {
-    const observed: string[] = [];
-    const tracePolicy = vi.fn(
-      ({ agentName, channelType }) => agentName === "weather" && channelType === "slack",
-    );
-    const hooks = createInstrumentationHooks([
-      {
-        events: {
-          "session.completed": (event) => void observed.push(event.type),
-          "session.started": (event) => void observed.push(event.type),
-        },
-        name: "provider",
-        tracePolicy,
-      },
-    ]);
+  it("evaluates unbound policies once with an unknown trace", async () => {
+    const tracePolicy = vi.fn(() => true);
+    const hooks = createInstrumentationHooks([{ name: "provider", tracePolicy }]);
 
     await hooks.publish({
-      agentName: "weather",
-      channelAudience: "public",
-      channelType: "slack",
-      idempotencyKey: sessionIdempotencyKey("session-1"),
+      idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
       rootSessionId: "session-1",
+      sequence: 0,
       sessionId: "session-1",
-      type: "session.started",
+      turnId: "turn-1",
+      type: "turn.started",
     });
     await hooks.publish({
-      idempotencyKey: sessionIdempotencyKey("session-1"),
+      idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
       sessionId: "session-1",
-      type: "session.completed",
+      turnId: "turn-1",
+      type: "turn.completed",
     });
 
-    expect(observed).toEqual(["session.started", "session.completed"]);
-    expect(tracePolicy).toHaveBeenCalledOnce();
+    expect(tracePolicy).toHaveBeenCalledExactlyOnceWith({
+      agentName: undefined,
+      audience: "unknown",
+      channelType: undefined,
+    });
   });
 
   it("lets an explicit provider policy authorize private content", async () => {
@@ -952,7 +943,54 @@ describe("trace policies", () => {
     ]);
   });
 
+  it("does not snapshot denied error content", async () => {
+    const observed = vi.fn();
+    const error = Object.defineProperty({}, "secret", {
+      enumerable: true,
+      get: () => {
+        throw new Error("error content was read");
+      },
+    });
+    const hooks = createInstrumentationHooks([
+      {
+        events: { "turn.failed": observed },
+        name: "inputs-only",
+        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: false }),
+      },
+    ]).forTrace!({ audience: "public" });
+
+    await hooks.publish({
+      error,
+      idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "turn.failed",
+    });
+
+    expect(observed.mock.calls[0]?.[0].error).toBeUndefined();
+  });
+
   it("reports content capture only when an admitted provider requests it", () => {
+    expect(
+      createInstrumentationHooks([
+        {
+          name: "unbound",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+        },
+      ]).capturesContent,
+    ).toBe(false);
+    expect(
+      createInstrumentationHooks([{ capture: "content", name: "legacy" }]).capturesContent,
+    ).toBe(true);
+    expect(
+      createInstrumentationHooks([
+        {
+          capture: "content",
+          name: "explicit-policy",
+          tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+        },
+      ]).capturesContent,
+    ).toBe(false);
     expect(
       createInstrumentationHooks([{ name: "quiet" }]).forTrace!({ audience: "private" })
         .capturesContent,
@@ -1015,7 +1053,7 @@ describe("trace policies", () => {
   it("isolates a throwing policy to its provider", async () => {
     const rejected = vi.fn();
     const observed = vi.fn();
-    const hooks = createInstrumentationHooks([
+    const unboundHooks = createInstrumentationHooks([
       {
         events: { "turn.started": rejected },
         name: "rejected",
@@ -1028,7 +1066,9 @@ describe("trace policies", () => {
         name: "observed",
         tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
       },
-    ]).forTrace!({ audience: "public" });
+    ]);
+    const hooks = unboundHooks.forTrace!({ audience: "public" });
+    unboundHooks.forTrace!({ audience: "private" });
 
     await hooks.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
@@ -1041,6 +1081,15 @@ describe("trace policies", () => {
 
     expect(rejected).not.toHaveBeenCalled();
     expect(observed).toHaveBeenCalledOnce();
+    expect(logWarn).toHaveBeenCalledWith(
+      "instrumentation provider trace policy failed",
+      expect.objectContaining({ provider: "rejected" }),
+    );
+    expect(
+      logWarn.mock.calls.filter(
+        ([message]) => message === "instrumentation provider trace policy failed",
+      ),
+    ).toHaveLength(1);
   });
 
   it("allows only structural provider metadata by default", async () => {

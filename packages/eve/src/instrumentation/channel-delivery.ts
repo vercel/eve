@@ -20,6 +20,7 @@ export interface ChannelDeliveryStartInstrumentation {
   readonly ctx: AlsContext;
   readonly delivery: DeliverHookPayload;
   readonly hooks: InstrumentationHooks | undefined;
+  readonly policyAgentName?: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;
@@ -46,7 +47,7 @@ export async function instrumentChannelDelivery(
     for (const item of active) {
       const hooks =
         input.hooks.forTrace?.({
-          agentName: item.agentName,
+          agentName: item.policyAgentName,
           audience: normalizeChannelAudience(item.delivery.channelAudience),
           channelType: item.channelType,
         }) ?? input.hooks;
@@ -75,7 +76,7 @@ export async function instrumentChannelDelivery(
   const channelAudience = normalizeChannelAudience(channel?.metadata.audience);
   const hooks =
     input.hooks.forTrace?.({
-      agentName: input.agentName,
+      agentName: input.policyAgentName,
       audience: channelAudience,
       channelType: channel?.channelType,
     }) ?? input.hooks;
@@ -96,6 +97,7 @@ export async function instrumentChannelDelivery(
       agentName: input.agentName,
       channelType: channel?.channelType,
       delivery,
+      policyAgentName: input.policyAgentName,
       rootSessionId: input.rootSessionId,
       sequence: input.sequence,
       sessionId: input.sessionId,

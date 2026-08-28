@@ -12,10 +12,8 @@ import { collectOtelPipeline } from "#tracing/otel-declaration.js";
 import {
   isInstrumentationDisabled,
   isInstrumentationProvider,
-  type InstrumentationCapture,
   type InstrumentationProvider,
 } from "#public/instrumentation/provider.js";
-import type { TraceCapturePolicy } from "#shared/trace-policy.js";
 
 /**
  * Process-global registry of the providers authored under
@@ -148,6 +146,7 @@ function toProviderDefinition(
   entry: RegisteredInstrumentationProvider,
 ): InstrumentationProviderDefinition {
   return {
+    capture: entry.provider.capture,
     events: entry.provider.events as InstrumentationProviderDefinition["events"],
     flush: entry.provider.flush,
     // The file the provider came from, which is the only name an author can
@@ -155,18 +154,6 @@ function toProviderDefinition(
     name: entry.slot,
     shutdown: entry.provider.shutdown,
     stateNamespace: `authored:${entry.slot}`,
-    tracePolicy: entry.provider.tracePolicy ?? legacyCaptureTracePolicy(entry.provider.capture),
+    tracePolicy: entry.provider.tracePolicy,
   };
-}
-
-function legacyCaptureTracePolicy(
-  capture: InstrumentationCapture | undefined,
-): TraceCapturePolicy | undefined {
-  if (capture === undefined) return undefined;
-  const recordsContent = capture === "content";
-  return () => ({
-    emit: true,
-    recordInputs: recordsContent,
-    recordOutputs: recordsContent,
-  });
 }

@@ -24,7 +24,7 @@ const scope: InstrumentationAttemptScope = {
 };
 
 describe("createAiSdkHookBridge", () => {
-  it("binds an unscoped bridge to its public attempt before projecting content", async () => {
+  it("withholds content when a bridge is not bound to a trace", async () => {
     const started = vi.fn();
     const hooks = createInstrumentationHooks([
       { events: { "model.call.started": started }, name: "default-policy" },
@@ -41,10 +41,7 @@ describe("createAiSdkHookBridge", () => {
       },
     ]);
 
-    expect(started.mock.calls[0]?.[0].input).toMatchObject({
-      instructions: "private instructions",
-      messages: [{ content: "private message", role: "user" }],
-    });
+    expect(started.mock.calls[0]?.[0].input).toBeUndefined();
   });
 
   it("publishes normalized model lifecycle to every provider", async () => {
@@ -339,11 +336,7 @@ describe("createAiSdkHookBridge", () => {
   it("terminalizes started operations when the attempt errors", async () => {
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
-      {
-        events: { "model.call.failed": after },
-        name: "after",
-        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
-      },
+      { capture: "content", events: { "model.call.failed": after }, name: "after" },
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks);
 
@@ -362,11 +355,7 @@ describe("createAiSdkHookBridge", () => {
   it("terminalizes started operations with the abort reason", async () => {
     const after = vi.fn();
     const hooks = createInstrumentationHooks([
-      {
-        events: { "tool.call.failed": after },
-        name: "after",
-        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
-      },
+      { capture: "content", events: { "tool.call.failed": after }, name: "after" },
     ]);
     const bridge = createAiSdkHookBridge(scope, hooks);
     const toolCall = { input: {}, toolCallId: "tool-1", toolName: "search" };
@@ -430,7 +419,7 @@ describe("createAiSdkHookBridge", () => {
     });
     const hooks = createInstrumentationHooks([
       {
-        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+        capture: "content",
         events: { "model.call.completed": after, "model.call.started": before },
         name: "spy",
       },
@@ -551,7 +540,7 @@ describe("createAiSdkHookBridge", () => {
       const actionStarted = vi.fn();
       const hooks = createInstrumentationHooks([
         {
-          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+          capture: "content",
           events: {
             "action.started": actionStarted,
             "tool.call.completed": after,
@@ -657,7 +646,7 @@ describe("createAiSdkHookBridge", () => {
     const hooks = createInstrumentationHooks([
       { events: { "tool.call.started": metadataOnly }, name: "metadata-only" },
       {
-        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+        capture: "content",
         events: { "tool.call.started": wantsContent },
         name: "wants-content",
       },

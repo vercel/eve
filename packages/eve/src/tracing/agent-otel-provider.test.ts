@@ -131,16 +131,16 @@ async function emitAttempt(input: {
     stepIndex: 0,
     turnId: input.turnId,
   };
+  const hooks =
+    input.hooks.forTrace?.({
+      agentName: "weather",
+      audience: scope.channelAudience ?? "unknown",
+    }) ?? input.hooks;
   if (input.turnAlreadyStarted !== true) {
-    await publishTurnStarted(input);
+    await publishTurnStarted({ ...input, hooks });
   }
 
-  const bridge = createAiSdkHookBridge(
-    scope,
-    input.hooks,
-    input.runInContext,
-    input.runtimeContext,
-  );
+  const bridge = createAiSdkHookBridge(scope, hooks, input.runInContext, input.runtimeContext);
   Reflect.apply(bridge.onStart!, bridge, [
     {
       callId: "call-1",
@@ -203,7 +203,7 @@ async function emitAttempt(input: {
     ]);
   }
   const actionKey = actionIdempotencyKey(input.sessionId, input.turnId, "tool-1");
-  await input.hooks.publish({
+  await hooks.publish({
     callId: "tool-1",
     idempotencyKey: actionKey,
     input: { secret: "value" },
@@ -236,7 +236,7 @@ async function emitAttempt(input: {
             : { error: input.toolError, type: "tool-error" },
       },
     ]);
-    await input.hooks.publish(
+    await hooks.publish(
       input.toolError === undefined
         ? {
             idempotencyKey: actionKey,
@@ -258,7 +258,7 @@ async function emitAttempt(input: {
   }
 
   if (input.providerMetadata !== undefined) {
-    await input.hooks.publish({
+    await hooks.publish({
       idempotencyKey: attemptIdempotencyKey(scope),
       providerMetadata: input.providerMetadata,
       scope,
@@ -266,7 +266,7 @@ async function emitAttempt(input: {
     });
   }
 
-  await input.hooks.publish(
+  await hooks.publish(
     input.attemptError === undefined
       ? {
           idempotencyKey: attemptIdempotencyKey(scope),
@@ -280,13 +280,13 @@ async function emitAttempt(input: {
           type: "step.attempt.failed",
         },
   );
-  await input.hooks.publish({
+  await hooks.publish({
     idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
     sessionId: input.sessionId,
     turnId: input.turnId,
     type: "turn.completed",
   });
-  await input.hooks.publish({
+  await hooks.publish({
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
     sessionId: input.sessionId,
     turnId: input.turnId,
@@ -1548,7 +1548,8 @@ describe("createAgentOtelInstrumentation", () => {
       stepIndex: 0,
       turnId: "turn-1",
     };
-    await runtime.hooks.publish({
+    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "public" });
+    await hooks.publish({
       agentName: "weather",
       channelAudience: "public",
       channelKind: "http",
@@ -1557,7 +1558,7 @@ describe("createAgentOtelInstrumentation", () => {
       sessionId: "session-1",
       type: "session.started",
     });
-    await runtime.hooks.publish({
+    await hooks.publish({
       idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
       rootSessionId: "session-1",
       sequence: 0,
@@ -1565,7 +1566,7 @@ describe("createAgentOtelInstrumentation", () => {
       turnId: "turn-1",
       type: "turn.started",
     });
-    const bridge = createAiSdkHookBridge(scope, runtime.hooks, runtime.runInContext);
+    const bridge = createAiSdkHookBridge(scope, hooks, runtime.runInContext);
     Reflect.apply(bridge.onStart!, bridge, [
       {
         callId: "call-1",

@@ -5,6 +5,9 @@ import {
   type InstrumentationDecision,
 } from "#shared/instrumentation-decision.js";
 
+/** @deprecated Use `TraceCapturePolicy` to select directional content. */
+export type InstrumentationCapture = "content" | "metadata";
+
 export interface TraceCaptureContext {
   readonly agentName?: string;
   readonly audience: ChannelAudience;
@@ -21,9 +24,22 @@ export type TracePolicyDecision =
 
 export type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 
+export function legacyCaptureTracePolicy(
+  capture: InstrumentationCapture | undefined,
+): TraceCapturePolicy | undefined {
+  if (capture === undefined) return undefined;
+  const recordsContent = capture === "content";
+  return () => ({
+    emit: true,
+    recordInputs: recordsContent,
+    recordOutputs: recordsContent,
+  });
+}
+
 export function resolveTracePolicy(
   policy: TraceCapturePolicy | undefined,
   trace: TraceCaptureContext,
+  onError?: (error: unknown) => void,
 ): InstrumentationDecision {
   try {
     const decision = policy?.({
@@ -39,7 +55,8 @@ export function resolveTracePolicy(
       },
       trace.audience,
     );
-  } catch {
+  } catch (error) {
+    onError?.(error);
     return DROP_INSTRUMENTATION;
   }
 }
