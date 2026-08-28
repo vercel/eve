@@ -116,7 +116,7 @@ import { AltScreen } from "#cli/ui/alt-screen.js";
 import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
-import { buildStatusLine } from "./status-line.js";
+import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
@@ -336,6 +336,10 @@ const incompletePasteFlushMs = 1_000;
 // How long the transient Ctrl+L log-mode hint stays in the status line after
 // the last cycle before it clears itself.
 const logLevelHintMs = 5_000;
+// Fast authored-source rebuilds skip their intermediate state to avoid a
+// distracting status-bar flash; genuinely slow builds still show progress.
+const devBuildProgressDelayMs = 250;
+const devBuildLoadedStatusMs = 4_000;
 
 const STATUS = {
   processing: "Working…",
@@ -520,6 +524,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * an ordinary log block, and the next rebuild line opens a fresh cycle.
    */
   #devRebuild?: { id: string; summary: string };
+  /** Log-filter-independent authored-source state shown in the bottom status bar. */
+  #devBuildStatus?: DevBuildStatus;
+  #devBuildStatusVisible = false;
+  #devBuildStatusTimer?: ReturnType<typeof setTimeout>;
   /** Monotonic id source — committed cycle ids must never be reused. */
   #devRebuildSequence = 0;
   #pendingEchoedPrompt?: string;
@@ -2964,6 +2972,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#logLevelHintTimer = undefined;
     }
     this.#logLevelHintActive = false;
+    this.#clearDevBuildStatus();
 
     if (!this.#isInteractive) return;
 
@@ -4345,6 +4354,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       theme: this.#theme,
       width: contentWidth,
     };
+    if (this.#devBuildStatusVisible && this.#devBuildStatus !== undefined) {
+      input.devBuild = this.#devBuildStatus;
+    }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const serverUrl = this.#agentHeader?.serverUrl;
     if (serverUrl !== undefined && this.#remoteConnection === undefined) {
@@ -4601,6 +4613,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #handleDevRebuildFailure(body: string): void {
+    this.#clearDevBuildStatus();
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
       this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
@@ -4627,6 +4640,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     if (update.kind === "rebuilding") {
       const summary = summarizeChangedFiles(update.events, update.more);
+      this.#setDevBuildStatus({ phase: "building", summary });
       if (cycle !== undefined) {
         cycle.state.summary = summary;
         cycle.block.body = formatDevRebuildStatus(summary, "rebuilding");
@@ -4645,6 +4659,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
 
+    const summary = cycle?.state.summary ?? this.#devBuildStatus?.summary;
+    if (summary !== undefined) this.#setDevBuildStatus({ phase: "complete", summary });
     if (cycle !== undefined) {
       cycle.block.body = formatDevRebuildStatus(cycle.state.summary, update.kind);
       if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
@@ -4652,6 +4668,31 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
     this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
+  }
+
+  #setDevBuildStatus(status: DevBuildStatus): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = status;
+    this.#devBuildStatusVisible = status.phase === "complete";
+    this.#devBuildStatusTimer = setTimeout(
+      () => {
+        if (status.phase === "building") {
+          this.#devBuildStatusVisible = true;
+          this.#devBuildStatusTimer = undefined;
+        } else {
+          this.#clearDevBuildStatus();
+        }
+        this.#paint();
+      },
+      status.phase === "building" ? devBuildProgressDelayMs : devBuildLoadedStatusMs,
+    );
+  }
+
+  #clearDevBuildStatus(): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = undefined;
+    this.#devBuildStatusVisible = false;
+    this.#devBuildStatusTimer = undefined;
   }
 
   /** The rebuild status block still cycling in place, if any. */
