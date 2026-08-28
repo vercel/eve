@@ -1,5 +1,8 @@
 import { createActionsRequestedEvent } from "#protocol/message.js";
-import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import {
+  collectActionActivityLabels,
+  type RuntimeActionRequestProjection,
+} from "#harness/action-activity.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 
 interface ActionEventCoordinates {
@@ -11,7 +14,7 @@ interface ActionEventCoordinates {
 interface ProviderStreamActionBatch {
   cancel(): Promise<void>;
   flush(): Promise<void>;
-  observe(action: RuntimeToolCallActionRequest): void;
+  observe(action: RuntimeActionRequestProjection): void;
 }
 
 /** Batches provider-managed calls that arrive in one streamed model response. */
@@ -19,7 +22,7 @@ export function createProviderStreamActionBatch(input: {
   readonly emitFn: HarnessEmitFn;
   readonly state: ActionEventCoordinates;
 }): ProviderStreamActionBatch {
-  const pendingActions = new Map<string, RuntimeToolCallActionRequest>();
+  const pendingActions = new Map<string, RuntimeActionRequestProjection>();
   let actionFlush: Promise<void> = Promise.resolve();
   let actionFlushError: unknown;
   let actionFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -33,15 +36,17 @@ export function createProviderStreamActionBatch(input: {
     }
     if (pendingActions.size === 0) return;
 
-    const actions = [...pendingActions.values()];
+    const projections = [...pendingActions.values()];
     pendingActions.clear();
     await input.emitFn(
       createActionsRequestedEvent({
-        actions,
+        actions: projections.map(({ action }) => action),
         sequence: input.state.sequence,
         stepIndex: input.state.stepIndex,
         turnId: input.state.turnId,
       }),
+      undefined,
+      collectActionActivityLabels(projections),
     );
   };
 
@@ -86,7 +91,7 @@ export function createProviderStreamActionBatch(input: {
     },
     observe(action) {
       if (cancelled) return;
-      pendingActions.set(action.callId, action);
+      pendingActions.set(action.action.callId, action);
       scheduleFlush();
     },
     async flush() {

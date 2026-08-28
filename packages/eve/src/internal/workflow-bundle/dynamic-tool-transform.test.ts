@@ -52,6 +52,7 @@ async function transformAndEval(
     stampDurableDynamicToolCallbacks(
       entry,
       collectDurableDynamicToolCallbacks({
+        activityLabel: (entry.activity as { label?: never } | undefined)?.label,
         approval: entry.approval as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
@@ -103,6 +104,7 @@ import { defineDynamic, defineTool } from "eve/tools";
 export default defineDynamic({
   events: {
     "session.started": async () => {
+      const activityPrefix = "Deploy";
       const executePrefix = "execute";
       const requestReason = "confirm";
       const allowedResponder = "user-123";
@@ -111,6 +113,11 @@ export default defineDynamic({
         guarded: defineTool({
           description: "Guarded",
           inputSchema: { type: "object" },
+          activity: {
+            label(input) {
+              return activityPrefix + " " + input.value;
+            },
+          },
           approval: {
             request(ctx) {
               return ctx.toolInput.force ? { type: "user-approval", reason: requestReason } : "not-applicable";
@@ -141,15 +148,17 @@ export default defineDynamic({
 
     expect(Object.keys(callbacks)).toEqual([
       "execute",
+      "activityLabel",
       "approvalRequest",
       "approvalResponse",
       "toModelOutput",
     ]);
     expect(callbacks.execute!.closure).toEqual({ executePrefix: "execute" });
+    expect(callbacks.activityLabel!.closure).toEqual({ activityPrefix: "Deploy" });
     expect(callbacks.approvalRequest!.closure).toEqual({ requestReason: "confirm" });
     expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
     expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
-    expect(new Set(Object.values(callbacks).map((callback) => callback!.callback)).size).toBe(4);
+    expect(new Set(Object.values(callbacks).map((callback) => callback!.callback)).size).toBe(5);
     for (const callback of Object.values(callbacks)) {
       expect(callback!.callback).toBeTypeOf("function");
     }

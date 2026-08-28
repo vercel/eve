@@ -22,7 +22,8 @@ import {
   createRuntimeToolResultFromStepResult,
 } from "#harness/action-result-helpers.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
-import { emitStepStarted, normalizeAssistantStepFinishReason } from "#harness/emission.js";
+import { emitStepStarted } from "#harness/emission.js";
+import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 import {
   type AnthropicCacheMarker,
@@ -30,6 +31,7 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
+import { collectActionActivityLabels } from "#harness/action-activity.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
@@ -279,11 +281,13 @@ export async function emitStepActions(
   if (actions.length > 0) {
     await emitFn(
       createActionsRequestedEvent({
-        actions,
+        actions: actions.map(({ action }) => action),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
+      undefined,
+      collectActionActivityLabels(actions),
     );
   }
 

@@ -1476,6 +1476,34 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
+  it("replays an activity label callback", () => {
+    const ctx = createCtx();
+    registerTestCallback("deploy", "execute", () => ({ ok: true }));
+    registerTestCallback(
+      "deploy",
+      "activityLabel",
+      (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
+    );
+    ctx.set(TurnDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          activityLabel: { closure: {} },
+          execute: { closure: {} },
+        },
+        description: "Deploy.",
+        entryKey: "legacy:deploy",
+        inputSchema: { type: "object" },
+        name: "deploy",
+        resolverSlug: "legacy",
+      },
+    ]);
+
+    expect(buildDynamicTools(ctx)[0]?.activityLabel?.({ environment: "preview" })).toBe(
+      "Deploy to preview",
+    );
+    getDynamicCallbackRegistry().delete("deploy");
+  });
+
   it("replays phase-specific turn metadata", async () => {
     const ctx = createCtx();
     const approval = vi.fn(() => "user-approval" as const);

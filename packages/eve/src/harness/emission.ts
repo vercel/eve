@@ -49,7 +49,11 @@ import {
   isInvalidToolCall,
   resolveProviderToolCallRequest,
 } from "#harness/tool-call-input-errors.js";
-import type { RuntimeActionRequest, RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import {
+  collectActionActivityLabels,
+  type RuntimeActionRequestProjection,
+} from "#harness/action-activity.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -57,6 +61,7 @@ import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessEmitFn, HarnessToolMap, StepInput } from "#harness/types.js";
+import { normalizeAssistantStepFinishReason } from "#harness/finish-reason.js";
 
 export {
   getHarnessEmissionState,
@@ -238,29 +243,6 @@ export async function emitTurnEpilogue(
 }
 
 // ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Maps an AI SDK finish reason string to the eve-owned
- * {@link AssistantStepFinishReason} union. Unknown values become `"other"`.
- */
-export function normalizeAssistantStepFinishReason(
-  value: string | undefined,
-): AssistantStepFinishReason {
-  switch (value) {
-    case "content-filter":
-    case "error":
-    case "length":
-    case "stop":
-    case "tool-calls":
-      return value;
-    default:
-      return "other";
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Stream content emission
 // ---------------------------------------------------------------------------
 
@@ -387,7 +369,8 @@ async function consumeStreamContent(
       }),
     );
 
-  const emitActionRequest = async (action: RuntimeActionRequest): Promise<void> => {
+  const emitActionRequest = async (projection: RuntimeActionRequestProjection): Promise<void> => {
+    const { action } = projection;
     if (emittedActionCallIds.has(action.callId)) {
       return;
     }
@@ -404,6 +387,8 @@ async function consumeStreamContent(
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
+      undefined,
+      collectActionActivityLabels([projection]),
     );
   };
 
@@ -425,7 +410,7 @@ async function consumeStreamContent(
       await flushCurrentMessage();
     }
 
-    const resolved = resolveProviderToolCallRequest(toolCall);
+    const resolved = resolveProviderToolCallRequest(toolCall, options?.tools ?? new Map());
     if (resolved.toolError !== undefined) {
       invalidInputToolCallIds.add(toolCall.toolCallId);
       await emitActionResult(createRuntimeToolResultFromToolError(resolved.toolError));

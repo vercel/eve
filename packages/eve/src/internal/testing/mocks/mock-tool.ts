@@ -13,6 +13,8 @@ import { toInputSchema } from "#tools/schema.js";
  * and an `execute` function. Everything else is overrideable.
  */
 export interface MockToolInput {
+  /** Human-readable activity label derived from one invocation's input. */
+  readonly activityLabel?: (input: unknown) => string;
   /** Tool name exposed to the model. */
   readonly name: string;
   /** Human-readable description surfaced in the prompt. */
@@ -48,6 +50,7 @@ export interface MockToolInput {
 export function mockTool(input: MockToolInput): ResolvedToolDefinition {
   const logicalPath = input.logicalPath ?? `tools/${sanitizeLogicalPathSegment(input.name)}.ts`;
   const definition: ResolvedToolDefinition = {
+    activityLabel: input.activityLabel,
     description: input.description ?? `${input.name} mock tool.`,
     inputSchema: toInputSchema(input.inputSchema ?? null),
     logicalPath,

@@ -185,6 +185,7 @@ export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Pro
     Object.assign(compileInput, {
       tools: descriptor.tools.map((tool) => ({
         name: tool.name,
+        activity: tool.activityLabel === undefined ? undefined : { label: tool.activityLabel },
         description: tool.description,
         execute: tool.execute,
         inputSchema: serializeInputSchema(tool.inputSchema),

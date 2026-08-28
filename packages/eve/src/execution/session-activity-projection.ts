@@ -5,9 +5,11 @@ import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { submitActivity } from "#execution/submit-activity.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import type { ActionActivityLabels } from "#harness/action-activity.js";
 
 /** Projects one canonical session event into best-effort activity presentation. */
 export async function observeSessionActivity(input: {
+  readonly activityLabels?: ActionActivityLabels;
   readonly ctx: ContextContainer;
   readonly event: MessageStreamEvent;
   readonly sessionId: string;
@@ -22,6 +24,7 @@ export async function observeSessionActivity(input: {
     return;
   await submitActivity({
     events: projectSessionActivity({
+      activityLabels: input.activityLabels,
       event: input.event,
       sessionId: input.sessionId,
       workIdentity: observer.workIdentity,
@@ -31,6 +34,7 @@ export async function observeSessionActivity(input: {
 }
 
 export function projectSessionActivity(input: {
+  readonly activityLabels?: ActionActivityLabels;
   readonly event: MessageStreamEvent;
   readonly sessionId: string;
   readonly workIdentity?: ActivityWorkIdentityV1;
@@ -52,7 +56,12 @@ export function projectSessionActivity(input: {
     });
   }
   events.push(
-    ...projectActivityEvents({ at: input.event.meta.at, event: input.event, lineage: work }),
+    ...projectActivityEvents({
+      activityLabels: input.activityLabels,
+      at: input.event.meta.at,
+      event: input.event,
+      lineage: work,
+    }),
   );
   return events;
 }

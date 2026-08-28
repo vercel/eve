@@ -111,7 +111,7 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [K in "activityLabel" | "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -124,6 +124,17 @@ function extractOptionalHooks(
   definition: CompiledToolDefinition,
 ): OptionalResolvedFields {
   const optional: OptionalResolvedFields = {};
+
+  if (record.activity !== undefined) {
+    const activity = expectObjectRecord(
+      record.activity,
+      describe(definition, "to provide a valid activity definition"),
+    );
+    optional.activityLabel = expectFunction(
+      activity.label,
+      describe(definition, "to provide an activity label function"),
+    ) as ResolvedToolDefinition["activityLabel"];
+  }
 
   if (record.approval !== undefined) {
     optional.approval = normalizeApproval(

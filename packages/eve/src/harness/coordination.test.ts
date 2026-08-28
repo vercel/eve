@@ -61,9 +61,72 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         ]),
       }),
     ).toEqual({
-      callId: "call-skill",
-      input: { skill: "research" },
-      kind: "load-skill",
+      action: {
+        callId: "call-skill",
+        input: { skill: "research" },
+        kind: "load-skill",
+      },
+    });
+  });
+
+  it("uses the tool-authored activity label without exposing it in event data", () => {
+    const action = createRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { environment: "production", secret: "hidden" },
+        toolCallId: "call-deploy",
+        toolName: "deploy",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "deploy",
+          {
+            activityLabel: (input) =>
+              `Deploy to ${String((input as { environment: unknown }).environment)}`,
+            description: "Deploy.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "deploy",
+          },
+        ],
+      ]),
+    });
+
+    expect(action).toEqual({
+      action: {
+        callId: "call-deploy",
+        input: { environment: "production", secret: "hidden" },
+        kind: "tool-call",
+        toolName: "deploy",
+      },
+      activityLabel: "Deploy to production",
+    });
+  });
+
+  it("ignores an activity label callback that fails", () => {
+    expect(
+      createRuntimeActionRequestFromToolCall({
+        toolCall: {
+          input: {},
+          toolCallId: "call-deploy",
+          toolName: "deploy",
+          type: "tool-call",
+        },
+        tools: new Map([
+          [
+            "deploy",
+            {
+              activityLabel: () => {
+                throw new Error("presentation failed");
+              },
+              description: "Deploy.",
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "deploy",
+            },
+          ],
+        ]),
+      }),
+    ).toEqual({
+      action: { callId: "call-deploy", input: {}, kind: "tool-call", toolName: "deploy" },
     });
   });
 
@@ -74,10 +137,12 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         tools: new Map(),
       }),
     ).toEqual({
-      callId: "call-skill",
-      input: { skill: "research" },
-      kind: "tool-call",
-      toolName: "load_skill",
+      action: {
+        callId: "call-skill",
+        input: { skill: "research" },
+        kind: "tool-call",
+        toolName: "load_skill",
+      },
     });
   });
 });

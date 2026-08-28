@@ -254,6 +254,7 @@ export function defineTool<
   inputSchema: TSchema;
   outputSchema?: PublicToolDefinition<unknown, TaskReceipt>["outputSchema"];
   execute(input: StandardSchemaV1.InferOutput<TSchema>, ctx: ToolContext, task: TaskExec): TReturn;
+  activity?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["activity"];
   approval?: BackgroundToolDefinition<StandardSchemaV1.InferOutput<TSchema>, unknown>["approval"];
   toModelOutput?: BackgroundToolDefinition<
     unknown,

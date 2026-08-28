@@ -180,6 +180,7 @@ export function validateDurableDynamicToolCallbacks(
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
       key !== "execute" &&
+      key !== "activityLabel" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
       key !== "toModelOutput",
@@ -190,6 +191,7 @@ export function validateDurableDynamicToolCallbacks(
     );
   }
 
+  const hasActivityLabel = entry.activity?.label !== undefined;
   const hasApproval = entry.approval !== undefined;
   const hasApprovalResponse =
     entry.approval !== undefined &&
@@ -201,6 +203,12 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.execute,
     required: true,
   })!;
+  const activityLabel = validateReference({
+    name,
+    phase: "activityLabel",
+    stamped: raw.activityLabel,
+    required: hasActivityLabel,
+  });
   const approvalRequest = validateReference({
     name,
     phase: "approvalRequest",
@@ -222,10 +230,12 @@ export function validateDurableDynamicToolCallbacks(
 
   const callbacks: {
     execute: DurableDynamicCallbackReference;
+    activityLabel?: DurableDynamicCallbackReference;
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
   } = { execute };
+  if (activityLabel !== undefined) callbacks.activityLabel = activityLabel;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

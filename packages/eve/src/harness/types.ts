@@ -13,6 +13,7 @@ import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { InputResponse } from "#shared/input.js";
 import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ActionActivityLabels } from "#harness/action-activity.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
@@ -258,6 +259,7 @@ export type HarnessToolMap = ReadonlyMap<string, HarnessToolDefinition>;
 export type HarnessEmitFn = (
   event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
+  activityLabels?: ActionActivityLabels,
 ) => Promise<void>;
 
 /**
@@ -271,6 +273,7 @@ export type HarnessEmitFn = (
 export type HandleEventFn = (
   event: UnstampedMessageStreamEvent,
   messages?: readonly import("ai").ModelMessage[],
+  activityLabels?: ActionActivityLabels,
 ) => Promise<void>;
 
 /**

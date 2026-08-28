@@ -32,6 +32,30 @@ A tool definition needs:
 
 When a tool returns structured data, add an optional `outputSchema`. With Zod or Standard Schema it also types the `execute` return.
 
+### Label tool activity
+
+Use `activity.label(input)` to describe a call in user-facing activity. The callback receives the validated tool input, so it can select the useful fields without exposing the full argument object:
+
+```ts title="agent/tools/deploy.ts"
+export default defineTool({
+  description: "Deploy a project to an environment.",
+  inputSchema: z.object({
+    project: z.string(),
+    environment: z.enum(["preview", "production"]),
+  }),
+  activity: {
+    label: ({ project, environment }) => `Deploy ${project} to ${environment}`,
+  },
+  async execute(input) {
+    return deploy(input);
+  },
+});
+```
+
+The label is presentation only. It does not replace the path-derived tool name, enter model input, change execution, or persist in the public action event. Built-in channel activity can show `Deploy storefront to production` instead of `deploy`. eve normalizes and bounds the returned string; if the callback throws or returns an empty label, activity falls back to the tool name.
+
+Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
+
 ### Stream preliminary tool results
 
 For a `defineTool` executor with the default execution mode, an async generator streams complete

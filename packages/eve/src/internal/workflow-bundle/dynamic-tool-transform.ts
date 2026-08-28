@@ -171,6 +171,18 @@ function collectToolCallbacks(
   if (!isWorkflowExecute(execute, context)) {
     collectCallbackProperty(source, execute, "execute", "execute", results, nestedScopes);
   }
+  const activity = findProperty(tool, "activity");
+  const activityValue = activity?.value as AstNode | undefined;
+  if (activityValue?.type === "ObjectExpression") {
+    collectCallbackProperty(
+      source,
+      findProperty(activityValue, "label"),
+      "activityLabel",
+      "label",
+      results,
+      nestedScopes,
+    );
+  }
   collectCallbackProperty(
     source,
     findProperty(tool, "toModelOutput"),

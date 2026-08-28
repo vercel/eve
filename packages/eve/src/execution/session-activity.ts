@@ -1,4 +1,4 @@
-import { normalizeActivityText } from "#execution/activity-text.js";
+import { normalizeActivityText } from "#shared/activity-text.js";
 import {
   type PendingActivitySettlementV1,
   type ActivityActionPhase,
@@ -137,6 +137,8 @@ function startAction(
     ...snapshot,
     actions: replaceBounded(snapshot.actions, event.action.id, {
       ...event.action,
+      label:
+        event.action.label === undefined ? undefined : normalizeActivityText(event.action.label),
       name: normalizeActivityText(event.action.name),
       phase: phase as ActivityActionPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),

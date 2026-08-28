@@ -35,6 +35,7 @@ export interface ActivityWorkStateV1 extends ActivityWorkIdentityV1 {
 export interface ActivityActionIdentityV1 {
   readonly id: string;
   readonly kind: ActivityActionKind;
+  readonly label?: string;
   readonly name: string;
   readonly parentWorkId: string;
   readonly rootTurnId: string;
@@ -272,12 +273,13 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
 function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefined {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["id", "kind", "name", "parentWorkId", "rootTurnId", "stepIndex"])
+    !hasOnlyKeys(value, ["id", "kind", "label", "name", "parentWorkId", "rootTurnId", "stepIndex"])
   )
     return undefined;
   if (
     !isIdentity(value.id) ||
     !isOneOf(value.kind, ["tool", "skill"] as const) ||
+    !isOptionalBoundedString(value.label) ||
     !isBoundedString(value.name) ||
     !isIdentity(value.parentWorkId) ||
     !isIdentity(value.rootTurnId) ||
@@ -288,6 +290,7 @@ function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefin
   return {
     id: value.id,
     kind: value.kind,
+    label: value.label,
     name: value.name,
     parentWorkId: value.parentWorkId,
     rootTurnId: value.rootTurnId,
