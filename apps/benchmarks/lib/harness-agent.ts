@@ -30,7 +30,7 @@ import { BenchmarkTimings } from "./timing.js";
 
 const HARNESS_BRIDGE_PORT = 4172;
 const POST_RUN_GRADER_DIRECTORY = ".eve-grader";
-const BOOTSTRAP_VERSION = "v8";
+const BOOTSTRAP_VERSION = "v9";
 // A turn that stops producing output should end the turn, not the eval: the
 // remaining turns still run and the graders still see what the agent did.
 const TURN_TIMEOUT_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_TIMEOUT ?? 480);
@@ -157,6 +157,12 @@ export function createAuthoringAgent(subject: {
             activeSandbox = current as HarnessV1NetworkSandboxSession;
             workspace = sessionWorkDir;
             const context = setupContext(activeSandbox, workspace);
+            await ensureWorkspace(
+              context,
+              authoringCase.startingPoint.workspace,
+              subject.archive,
+              timings,
+            );
             await timings.measure("session.setup", async () => {
               for (const setup of setups) await setup.onSession?.(context);
               if (options.agentOptions?.agentsMd !== true) await installBaselineEveWrapper(context);
@@ -560,15 +566,8 @@ async function bootstrapSubject(
   if (workspaceKind === "scaffolded") {
     workspaceCommands.push(`cd ${shellQuote(workspace)} && AI_AGENT=benchmark eve init .`);
   }
-  // Grader files must not change what subject commands observe in the project directory.
-  workspaceCommands.push(
-    `rm -rf ${AGENT_EVAL_DIRECTORY} && mkdir -p ${AGENT_EVAL_DIRECTORY}`,
-    `printf '{"private":true,"type":"module"}\\n' >${AGENT_EVAL_DIRECTORY}/package.json`,
-    "command -v vitest >/dev/null",
-  );
-  if (workspaceKind === "scaffolded") {
-    workspaceCommands.push(`test -f ${workspace}/package.json`);
-  }
+  // Grader files are created after the agent finishes so an empty starting point remains empty.
+  workspaceCommands.push("command -v vitest >/dev/null");
   await timings.measure("subject.workspace-bootstrap", () =>
     run(sandbox, workspaceCommands.join(" && ")),
   );
@@ -597,6 +596,44 @@ function setupContext(
 // Created only after the agent's turns finish: an `empty` starting point has to
 // look empty to `eve init .`, which refuses to scaffold into a directory that
 // already holds entries it does not recognize.
+async function ensureWorkspace(
+  context: AuthoringSetupContext,
+  workspaceKind: "scaffolded" | "empty",
+  archive: Uint8Array,
+  timings: BenchmarkTimings,
+): Promise<void> {
+  if (workspaceKind === "empty") {
+    await verifyWorkspace(context, workspaceKind);
+    return;
+  }
+  if (await hasPreparedWorkspace(context)) return;
+
+  await timings.measure("session.workspace-recovery", () =>
+    bootstrapSubject(context.sandbox, context.workspace, workspaceKind, archive, timings),
+  );
+  await verifyWorkspace(context, workspaceKind);
+}
+
+async function hasPreparedWorkspace(context: AuthoringSetupContext): Promise<boolean> {
+  const result = await resultOf(
+    context.sandbox,
+    `test -f package.json && test -f agent/instructions.md && test -f AGENTS.md && test -f ${EVE_PACKAGE_PATH}`,
+    context.workspace,
+  );
+  return result.exitCode === 0;
+}
+
+async function verifyWorkspace(
+  context: AuthoringSetupContext,
+  workspaceKind: "scaffolded" | "empty",
+): Promise<void> {
+  const command =
+    workspaceKind === "empty"
+      ? "test ! -e package.json && test ! -e AGENTS.md && test ! -e agent && test ! -e .eve-grader"
+      : `for path in package.json agent/instructions.md AGENTS.md ${EVE_PACKAGE_PATH}; do test -f "$path" || { echo "Missing prepared workspace file: $path" >&2; exit 1; }; done`;
+  await context.run(command);
+}
+
 async function prepareGraderDirectory(context: AuthoringSetupContext): Promise<void> {
   await context.run(
     `mkdir -p ${AGENT_EVAL_DIRECTORY} && printf '{"private":true,"type":"module"}\\n' >${AGENT_EVAL_DIRECTORY}/package.json`,
