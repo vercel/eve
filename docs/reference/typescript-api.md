@@ -122,7 +122,7 @@ import template from "../../prompts/template.txt?raw";
 | `eve/memory/file/vercel`                                                    | `vercelBlob` and Vercel Blob backend options                              |
 | `eve/context`                                                               | `defineState`, session and state types                                    |
 | `eve/sandbox`                                                               | `defineSandbox`, backends                                                 |
-| `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`, provider and trace-policy types     |
+| `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                      |
 | `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                              |
 | `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                 |
 | `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                             |

@@ -40,46 +40,6 @@ export default defineInstrumentation({
 
 Export the result of `defineInstrumentation` as the default export.
 
-## Provider trace policies
-
-With `experimental.instrumentationProviders` enabled, each file under
-`agent/instrumentation/` is an independent lifecycle provider. Use its
-`tracePolicy` to decide whether the provider receives events and which content
-directions those events include. Enable the layout with
-`experimental: { instrumentationProviders: true }` in `defineAgent`:
-
-```ts title="agent/instrumentation/audit.ts"
-import { defineInstrumentation } from "eve/instrumentation";
-
-export default defineInstrumentation({
-  tracePolicy: ({ audience }) => ({
-    emit: true,
-    recordInputs: audience !== "private",
-    recordOutputs: true,
-  }),
-  events: {
-    "model.call.completed"(event) {
-      // event.content follows this provider's recordOutputs decision.
-    },
-  },
-});
-```
-
-An omitted policy emits events with content for public conversations and
-metadata only for private or unknown audiences. Returning `true` uses the same
-audience-aware content rule. Returning `false` or `{ emit: false }` skips this
-provider. An explicit `{ emit: true, recordInputs, recordOutputs }` decision is
-authoritative and can admit either content direction for any audience. A thrown
-error fails closed for that provider only. The callback receives the agent name,
-normalized `audience`, and channel type when available.
-
-Provider policies can run again across durable steps and must be deterministic.
-They are independent of the process-wide `tracePolicy` declared by `otel()`:
-one provider can retain content while OTel records metadata only, or vice versa.
-The former `capture: "content" | "metadata"` provider option is deprecated and
-automatically mapped to an equivalent fixed policy. Use `tracePolicy` for new
-providers.
-
 ## OpenTelemetry
 
 Use the `setup` callback to register your OTel provider (for example `registerOTel` from `@vercel/otel`). The framework invokes it at server startup with the resolved agent name. `context.agentName` is resolved at compile time from your project (the package's `name`, falling back to the app directory name), so you never hard-code a service name.
