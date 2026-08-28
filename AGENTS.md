@@ -258,5 +258,5 @@ instead of reinventing the wheel.
   depth, max bytes) so one caller can't force unbounded work.
 - **Validate outbound destinations before fetching.** Server-side fetches,
   webhooks, and imports whose URL or host comes from user input must block
-  access to internal resources (SSRF). Could use the NPM guarded-fetch library
-  or @vercel/safe-fetch when available.
+  access to internal resources (SSRF). Use established patterns / libraries from
+  the project already.
