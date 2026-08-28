@@ -1,5 +1,92 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`legacy session instrumentation compatibility > disabled OTel marker without a seed from historical-eve-0-45-0 > disabled OTel marker without a seed 1`] = `
+{
+  "migrated": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": false,
+    "eve.sessionInstrumentation": {
+      "decision": {
+        "action": "drop",
+      },
+      "otelTraceEnabled": false,
+      "schemaVersion": 1,
+      "traceSeed": {
+        "decision": {
+          "action": "drop",
+        },
+        "spanId": "bbbbbbbbbbbbbbbb",
+        "traceFlags": 0,
+        "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    },
+    "eve.sessionInstrumentationDecision": {
+      "action": "drop",
+    },
+    "eve.sessionTraceSeed": {
+      "decision": {
+        "action": "drop",
+      },
+      "spanId": "bbbbbbbbbbbbbbbb",
+      "traceFlags": 0,
+      "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+  },
+  "rollback": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": false,
+    "eve.sessionInstrumentation": {
+      "decision": {
+        "action": "drop",
+      },
+      "otelTraceEnabled": false,
+      "schemaVersion": 1,
+      "traceSeed": {
+        "decision": {
+          "action": "drop",
+        },
+        "spanId": "bbbbbbbbbbbbbbbb",
+        "traceFlags": 0,
+        "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    },
+    "eve.sessionInstrumentationDecision": {
+      "action": "drop",
+    },
+    "eve.sessionTraceSeed": {
+      "decision": {
+        "action": "drop",
+      },
+      "spanId": "bbbbbbbbbbbbbbbb",
+      "traceFlags": 0,
+      "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    },
+  },
+  "source": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": false,
+  },
+}
+`;
+
 exports[`legacy session instrumentation compatibility > private sampled session trace seed from historical-eve-0-45-0 > private sampled session trace seed 1`] = `
 {
   "migrated": {
