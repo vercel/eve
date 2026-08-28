@@ -1696,6 +1696,18 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
   },
+  stacktree: {
+    logo: "stacktree",
+    docsHref: "https://stacktr.ee/developers",
+    keywords: ["mcp", "publish", "html", "private link", "client delivery", "hosting"],
+    authModes: ["apiKey"],
+    apiKey: {
+      env: "STACKTREE_API_KEY",
+      header: "authorization",
+    },
+    configureNote:
+      "Send the key as `Authorization: Bearer <key>`. Keys are minted on a free account at https://app.stacktr.ee/api-keys; anonymous 24-hour publishes need no key at all.",
+  },
   agentcard: {
     logo: "agentcard",
     docsHref: "/docs/connections/mcp",

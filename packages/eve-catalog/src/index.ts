@@ -354,6 +354,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "stacktree",
+    name: "Stacktree",
+    kind: "connection",
+    tagline: "Publish and update private HTML pages through Stacktree's MCP server.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Stacktree: publish HTML to a live private link, update it in place so an already-sent link stays current, gate pages with a passcode or one email domain, file pages under client spaces, and read viewer feedback.",
+      mcp: { url: "https://api.stacktr.ee/mcp" },
+    },
+  },
+  {
     slug: "vercel",
     name: "Vercel",
     kind: "connection",
