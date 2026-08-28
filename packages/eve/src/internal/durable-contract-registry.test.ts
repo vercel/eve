@@ -51,20 +51,28 @@ describe("durable contract registry", () => {
     });
     expect(DURABLE_DATA_CONTRACTS).toEqual({
       attachmentRef: {
+        acceptedVersions: [1],
         currentVersion: Number(ATTACHMENT_REF_WIRE_VERSION),
         name: "attachmentRef",
+        schemaHashes: { 1: null },
       },
       durableSession: {
+        acceptedVersions: [1],
         currentVersion: DURABLE_SESSION_VERSION,
         name: "durableSession",
+        schemaHashes: { 1: null },
       },
       messageStream: {
+        acceptedVersions: null,
         currentVersion: Number(EVE_MESSAGE_STREAM_VERSION),
         name: "messageStream",
+        schemaHashes: null,
       },
       sessionInboxWire: {
+        acceptedVersions: [0, 1],
         currentVersion: SESSION_INBOX_WIRE_VERSION,
         name: "sessionInboxWire",
+        schemaHashes: { 0: null, 1: null },
       },
     });
   });
@@ -84,6 +92,24 @@ describe("durable contract registry", () => {
       "turnWorkflow",
       "workflowEntry",
     ]);
+    expect(manifest.workflows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          acceptedInputVersions: [0, 1],
+          inputSchemaHashes: { 0: null, 1: null },
+        }),
+      ]),
+    );
+  });
+
+  it("applies build-only schema hashes to declared versions", () => {
+    const hash = `sha256:${"a".repeat(64)}`;
+
+    expect(
+      createDurableContractManifest("1.2.3-test", {
+        dataContracts: { sessionInboxWire: { 1: hash } },
+      }).dataContracts.find((contract) => contract.name === "sessionInboxWire"),
+    ).toMatchObject({ schemaHashes: { 0: null, 1: hash } });
   });
 
   it("serializes deterministically", () => {
@@ -95,41 +121,95 @@ describe("durable contract registry", () => {
   "builtWithEve": "1.2.3-test",
   "dataContracts": [
     {
+      "acceptedVersions": [
+        1
+      ],
       "currentVersion": 1,
-      "name": "attachmentRef"
+      "name": "attachmentRef",
+      "schemaHashes": {
+        "1": null
+      }
     },
     {
+      "acceptedVersions": [
+        1
+      ],
       "currentVersion": 1,
-      "name": "durableSession"
+      "name": "durableSession",
+      "schemaHashes": {
+        "1": null
+      }
     },
     {
+      "acceptedVersions": null,
       "currentVersion": 23,
-      "name": "messageStream"
+      "name": "messageStream",
+      "schemaHashes": null
     },
     {
+      "acceptedVersions": [
+        0,
+        1
+      ],
       "currentVersion": 1,
-      "name": "sessionInboxWire"
+      "name": "sessionInboxWire",
+      "schemaHashes": {
+        "0": null,
+        "1": null
+      }
     }
   ],
-  "formatVersion": 1,
+  "formatVersion": 2,
   "kind": "eve-durable-contracts",
   "workflows": [
     {
+      "acceptedInputVersions": [
+        0,
+        1
+      ],
+      "inputSchemaHashes": {
+        "0": null,
+        "1": null
+      },
       "inputVersion": 1,
       "name": "sessionTimeoutWorkflow",
       "workflowId": "workflow//eve//sessionTimeoutWorkflow"
     },
     {
+      "acceptedInputVersions": [
+        0,
+        1
+      ],
+      "inputSchemaHashes": {
+        "0": null,
+        "1": null
+      },
       "inputVersion": 1,
       "name": "taskRunWorkflow",
       "workflowId": "workflow//eve//taskRunWorkflow"
     },
     {
+      "acceptedInputVersions": [
+        0,
+        1
+      ],
+      "inputSchemaHashes": {
+        "0": null,
+        "1": null
+      },
       "inputVersion": 1,
       "name": "turnWorkflow",
       "workflowId": "workflow//eve//turnWorkflow"
     },
     {
+      "acceptedInputVersions": [
+        0,
+        1
+      ],
+      "inputSchemaHashes": {
+        "0": null,
+        "1": null
+      },
       "inputVersion": 1,
       "name": "workflowEntry",
       "workflowId": "workflow//eve//workflowEntry"

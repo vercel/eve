@@ -8,10 +8,12 @@ if (typeof packageJson.version !== "string" || packageJson.version.length === 0)
   throw new Error("eve package.json must declare a non-empty version.");
 }
 
-const { DURABLE_CONTRACT_MANIFEST_FILENAME, serializeDurableContractManifest } =
+const { DURABLE_CONTRACT_MANIFEST_FILENAME } =
   await import("../dist/src/internal/durable-contract-registry.js");
+const { serializeBuildDurableContractManifest } =
+  await import("./durable-contract-manifest-build.mjs");
 
 await writeFile(
   resolve(packageRoot, "dist", DURABLE_CONTRACT_MANIFEST_FILENAME),
-  serializeDurableContractManifest(packageJson.version),
+  serializeBuildDurableContractManifest(packageJson.version),
 );

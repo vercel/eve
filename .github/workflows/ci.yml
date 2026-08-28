@@ -68,6 +68,58 @@ jobs:
       - name: Run typecheck
         run: pnpm typecheck
 
+  durable-contract-regression-gate:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: "pnpm"
+
+      - name: Install candidate dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test durable contract regression comparator
+        run: pnpm test:durable-contract-regression
+
+      - name: Build candidate eve package
+        run: pnpm --filter eve build
+
+      - name: Preserve candidate durable contract manifest
+        run: cp packages/eve/dist/durable-contract-manifest.json "$RUNNER_TEMP/candidate-durable-contract-manifest.json"
+
+      - name: Prepare pull request base worktree
+        id: base
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          BASE_ROOT="$RUNNER_TEMP/eve-durable-contract-base"
+          git worktree add --detach "$BASE_ROOT" "$BASE_SHA"
+          echo "root=$BASE_ROOT" >> "$GITHUB_OUTPUT"
+
+      - name: Install base dependencies
+        working-directory: ${{ steps.base.outputs.root }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build base eve package
+        working-directory: ${{ steps.base.outputs.root }}
+        run: pnpm --filter eve build
+
+      - name: Run durable contract regression gate
+        run: pnpm check:durable-contract-regression "${{ steps.base.outputs.root }}/packages/eve/dist/durable-contract-manifest.json" "$RUNNER_TEMP/candidate-durable-contract-manifest.json"
+
   test-unit:
     runs-on: ubuntu-latest
 

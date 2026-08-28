@@ -32,8 +32,8 @@ old pinned driver
 
 The goal is to prevent a deployment from becoming latest when it breaks a
 durable contract still used by a live session. Agents should continue to take
-the newest approved code; compatibility must not require pinning an agent to an
-old deployment for its full lifetime.
+the newest code that passes the regression gate; compatibility must not require
+pinning an agent to an old deployment for its full lifetime.
 
 ## Compatibility model
 
@@ -48,12 +48,11 @@ initial inventory includes:
 - attachment references carried across step boundaries.
 
 Stable workflow IDs are immutable routing keys. A workflow input without an
-explicit version is recorded as `null`; this identifies an unsafe gap rather
-than treating the historical shape as version zero or claiming compatibility.
-Every current stable workflow input now emits version 1 and treats the prior
-unversioned shape as version 0 for migration. Existing numeric versions identify
-only the current emitted contract. Supported version ranges and schema identities
-are added when each family adopts a declared schema and migration chain.
+explicit current version is recorded as `null`; this identifies an unsafe gap
+rather than claiming compatibility. Every current stable workflow input now
+emits version 1 and treats the prior unversioned shape as version 0 for
+migration. The manifest records finite accepted sets where current code proves
+them and leaves schema hashes `null` until a family adopts a canonical schema.
 
 Every versioned family follows the same rules:
 
@@ -68,38 +67,69 @@ Every versioned family follows the same rules:
 
 ## Build manifest
 
-Every eve package build emits `dist/durable-contract-manifest.json`. The first
-format is a deterministic inventory of the contract identities the package
-currently owns:
+Every eve package build emits `dist/durable-contract-manifest.json`. Format 2 is
+a deterministic inventory of contract identities, accepted versions, and
+per-version schema hashes:
 
 ```json
 {
   "builtWithEve": "0.45.2",
   "dataContracts": [
-    { "currentVersion": 1, "name": "attachmentRef" },
-    { "currentVersion": 1, "name": "durableSession" },
-    { "currentVersion": 23, "name": "messageStream" },
-    { "currentVersion": 1, "name": "sessionInboxWire" }
+    {
+      "acceptedVersions": [1],
+      "currentVersion": 1,
+      "name": "attachmentRef",
+      "schemaHashes": { "1": null }
+    },
+    {
+      "acceptedVersions": [1],
+      "currentVersion": 1,
+      "name": "durableSession",
+      "schemaHashes": { "1": null }
+    },
+    {
+      "acceptedVersions": null,
+      "currentVersion": 23,
+      "name": "messageStream",
+      "schemaHashes": null
+    },
+    {
+      "acceptedVersions": [0, 1],
+      "currentVersion": 1,
+      "name": "sessionInboxWire",
+      "schemaHashes": {
+        "0": null,
+        "1": "sha256:81817bf2fcd37fc960ba6dccf5cef88ac85709309d439df421cf2580525ee1d5"
+      }
+    }
   ],
-  "formatVersion": 1,
+  "formatVersion": 2,
   "kind": "eve-durable-contracts",
   "workflows": [
     {
+      "acceptedInputVersions": [0, 1],
+      "inputSchemaHashes": { "0": null, "1": null },
       "inputVersion": 1,
       "name": "sessionTimeoutWorkflow",
       "workflowId": "workflow//eve//sessionTimeoutWorkflow"
     },
     {
+      "acceptedInputVersions": [0, 1],
+      "inputSchemaHashes": { "0": null, "1": null },
       "inputVersion": 1,
       "name": "taskRunWorkflow",
       "workflowId": "workflow//eve//taskRunWorkflow"
     },
     {
+      "acceptedInputVersions": [0, 1],
+      "inputSchemaHashes": { "0": null, "1": null },
       "inputVersion": 1,
       "name": "turnWorkflow",
       "workflowId": "workflow//eve//turnWorkflow"
     },
     {
+      "acceptedInputVersions": [0, 1],
+      "inputSchemaHashes": { "0": null, "1": null },
       "inputVersion": 1,
       "name": "workflowEntry",
       "workflowId": "workflow//eve//workflowEntry"
@@ -108,7 +138,13 @@ currently owns:
 }
 ```
 
-The artifact is complete and lexically sorted. It contains no timestamp,
+The artifact is complete and lexically sorted. A `null` version set means the
+current decoder does not expose a truthful finite support set; a `null` hash
+means the accepted version has no canonical schema identity yet. The message
+stream therefore leaves both fields `null`. The build hashes only the canonical
+session-inbox v1 JSON Schema, recursively sorting object keys before SHA-256.
+Hashing stays in a build-only module so Zod and `node:crypto` do not enter the
+runtime registry or workflow bundles. The artifact contains no timestamp,
 absolute path, Git SHA, or deployment-local value, so identical package inputs
 produce identical bytes.
 
@@ -132,10 +168,13 @@ stable workflow declaration and compare the emitted ID with the registry. A
 renamed function, removed directive, changed routing key, or stale version
 inventory therefore fails before release.
 
-The v1 manifest is not yet a compatibility verdict. Later manifest formats add
-the accepted version set and schema identity needed to compare a candidate with
-historical production cohorts. Recording only facts enforced by current code
-avoids publishing unsupported guarantees from the foundation release.
+The durable contract regression gate builds both the pull request base and the
+candidate instead of comparing against an editable committed baseline. Its pure
+comparator accepts format 1 as a bootstrap base and rejects contract removal,
+stable workflow ID changes, current-version decreases, accepted-version
+removal, same-version schema hash changes or removal, and a version bump that
+drops the previous current version. Adding a hash where the base had none is
+allowed; semantic compatibility still requires the behavioral layers below.
 
 ## Admission pipeline
 
@@ -145,13 +184,13 @@ semantics of arbitrary JavaScript:
 ```text
 candidate build
     │
-    ├── manifest and schema comparison
+    ├── durable contract regression gate
     ├── historical payload fixtures
     ├── mixed-version continuation scenarios
     └── suspended-session canary
               │
               ▼
-      promote as approved latest
+      promote as regression-gated latest
 ```
 
 The build comparison rejects removed stable IDs, changed schemas without a
@@ -172,9 +211,9 @@ its next turn is created and delivered by the promoted candidate. Additional
 cohorts and suspension points are added only when they represent a distinct
 shipped protocol contract; package releases alone do not grow the matrix.
 
-Production routing ultimately targets the latest compatibility-approved
-deployment rather than the most recently created deployment. Promotion is not
-long-lived blue/green routing: after approval, every new turn takes the promoted
+Production routing ultimately targets the latest regression-gated deployment
+rather than the most recently created deployment. Promotion is not
+long-lived blue/green routing: after the gate passes, every new turn takes the promoted
 code. The pointer exists to keep an unverified build out of the latest path and
 to provide an immediate demotion control if a semantic regression escapes the
 build gate.
@@ -183,7 +222,7 @@ Two implementation boundaries remain outside this stack. Turn-control producer
 gating builds on the fail-loud decoder and terminal skew path in #2625; it should
 land after that work rather than duplicate its workflow-bundle changes. An
 immediate production demotion control requires Vercel's dynamic
-`resolve-latest-deployment` path to return an audited approved deployment. An
+`resolve-latest-deployment` path to return an audited regression-gated deployment. An
 eve-only resolver can protect newly deployed drivers, but it cannot retrofit
 that behavior into older immutable drivers already calling the platform's
 existing latest resolver.
@@ -223,7 +262,7 @@ The work proceeds in independently reviewable layers:
    hook family.
 4. Compare candidate manifests with supported production cohorts and run the
    mixed-version CI matrix.
-5. Route latest turns through an explicit compatibility-approved deployment
+5. Route latest turns through an explicit regression-gated deployment
    pointer with pre-promotion canaries.
 
 ## Non-goals
