@@ -2,6 +2,7 @@ export const analyticsEvents = {
   askAiSubmitted: "Submitted docs question",
   gettingStartedOpened: "Opened getting started",
   installerCommandCopyClicked: "Clicked installer command copy",
+  vercelAgentCreationOpened: "Opened Vercel agent creation",
   installerCommandSelected: "Selected installer command",
   integrationCodeCopyClicked: "Clicked integration code copy",
   integrationDocsOpened: "Opened integration docs",
