@@ -46,13 +46,55 @@ Use the `setup` callback to register your OTel provider (for example `registerOT
 
 Any OTel-compatible backend works (Braintrust, PostHog, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification.
 
-Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
+The legacy single-file `defineInstrumentation()` API exposes two capture fields for exporters registered directly in `setup` (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
 - `recordInputs` records full message history on each step span. It defaults to `false`; set it to `true` to include input content.
 - `recordOutputs` records model outputs on spans. It defaults to `false`; set it to `true` to include output content.
+
+The provider API records complete spans for accepted traces and applies policies before each destination receives them.
+
+Trace creation and export are configured separately. `otel({ tracePolicy })` is the process-wide head gate; by default eve records only conversations classified as `public`:
+
+```ts title="agent/instrumentation/otel.ts"
+import { otel } from "eve/instrumentation/otel";
+
+export default otel({
+  tracePolicy: ({ audience }) => audience === "public",
+});
+```
+
+Zero-config `eve dev` also admits `unknown` so local HTTP/TUI sessions remain observable. It still rejects conversations classified as `private`.
+
+`tracePolicy` only decides whether a trace is created. Every accepted trace still passes through the export pipeline. Configure `exportPolicy` to redact content, drop spans, or drop and replace attributes before one destination receives them.
+
+Use the public redaction policies to remove content based on the derived audience, and compose them with span and attribute policies without mutating what another destination receives:
+
+```ts title="agent/instrumentation/agent-runs.ts"
+import {
+  agentRuns,
+  composeSpanExportPolicies,
+  redactSpanInputs,
+  redactSpanOutputs,
+} from "eve/instrumentation/otel";
+
+export default agentRuns({
+  exportPolicy: composeSpanExportPolicies(
+    redactSpanInputs(({ audience }) => audience !== "public"),
+    redactSpanOutputs(({ audience }) => audience !== "public"),
+    {
+      span: ({ name }) => name !== "internal.cache.refresh",
+      attribute: ({ key }) =>
+        key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
+    },
+  ),
+});
+```
+
+Composed policies run in declaration order, so the span and attribute policy above receives the facade produced by the input and output redactors. A trace policy that admits another audience does not bypass this export pipeline; the export pipeline can still redact it.
+
 - `functionId` overrides the function name on spans (defaults to the agent name).
 
-eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
+Review the exporter and its data-retention path before widening either the trace policy or export policy.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
@@ -184,7 +226,7 @@ Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace p
 - [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
 
-Local traces omit model and tool inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
+Local traces retain model and tool content for public and unclassified local HTTP/TUI sessions. Conversations classified as `private` are not traced by default. If a custom `tracePolicy` admits them, configure the local trace export policy when their content should be redacted.
 
 Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 
