@@ -37,7 +37,7 @@ events, assigns stable attempt/model-call/tool-call identities, terminalizes ope
 error and abort, and invokes the trusted `runInContext` while calling execution exactly once. AI
 SDK `callId` values are bridge correlation details, not provider run identities.
 
-The bridge does not create spans, export records, apply capture policy, or publish durable
+The bridge does not create spans, export records, apply provider policy, or publish durable
 eve-native events. Session, turn, compaction, suspension, and canonical step-terminal events are
 published by the harness.
 
@@ -90,9 +90,9 @@ backends can recognize agent invocations and tool calls without eve-specific map
 
 The `agent.*` namespace carries cheap structural attributes only: session/turn/step/attempt
 identity, action identity, and agent and framework identity. Standard `gen_ai.*` attributes describe
-the operation, agent, conversation, and tool. Message content, model output, and tool payloads are
-optional capture. The OTel provider owns this mapping; the bridge and hooks contain no span names,
-attributes, or parent contexts.
+the operation, agent, conversation, and tool. Message content, model output, and tool payloads follow
+each provider's audience-aware `tracePolicy`. The OTel provider owns this mapping; the bridge and
+hooks contain no span names, attributes, or parent contexts.
 
 ### The session root is a real span
 

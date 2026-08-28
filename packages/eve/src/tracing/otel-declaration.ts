@@ -14,7 +14,12 @@ import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
 import type { ResolvedContentOptions } from "#tracing/content-attributes.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { vercelRuntimeSpanProcessor } from "#tracing/vercel-runtime-span-exporter.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { TraceCapturePolicy } from "#shared/trace-policy.js";
+export type {
+  TraceCaptureContext,
+  TraceCapturePolicy,
+  TracePolicyDecision,
+} from "#shared/trace-policy.js";
 import {
   composeSpanExportPolicies,
   redactSpanInputs,
@@ -112,22 +117,6 @@ export interface ContentOptions {
   readonly recordInputs?: boolean;
   readonly recordOutputs?: boolean;
 }
-
-export interface TraceCaptureContext {
-  readonly agentName?: string;
-  readonly audience: ChannelAudience;
-  readonly channelType?: string;
-}
-
-export type TracePolicyDecision =
-  | { readonly emit: false }
-  | {
-      readonly emit: true;
-      readonly recordInputs: boolean;
-      readonly recordOutputs: boolean;
-    };
-
-export type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 
 /** Where one `otelIntegration()` sends spans and metrics. */
 export interface OtelIntegrationOptions extends ContentOptions {

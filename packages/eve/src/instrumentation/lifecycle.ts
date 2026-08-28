@@ -3,6 +3,7 @@ import type { InstrumentationStateSlot } from "#instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import type { TraceCaptureContext, TraceCapturePolicy } from "#shared/trace-policy.js";
 
 /**
  * Stable eve identity for one actual model attempt.
@@ -103,23 +104,6 @@ export type InstrumentationActionOutput =
   | { readonly type: "error"; readonly error?: unknown };
 
 /**
- * How much of an event a provider is handed.
- *
- * `"metadata"` — the default — is structure, identity, usage, and timing: every
- * field except what the conversation actually said. `"content"` adds the
- * prompt, the response, tool arguments, and tool results.
- *
- * Declared per provider rather than per process, because two consumers of one
- * bus rarely have the same retention path. Content is built at all only when
- * some provider asked for it, and a provider that did not ask never receives
- * it — which is the same guarantee a destination that declines content gets,
- * one layer lower and without an OpenTelemetry pipeline to route it through.
- * OpenTelemetry trace policy is applied only inside the OTel provider and does
- * not narrow this provider-level projection.
- */
-export type InstrumentationCapture = "content" | "metadata";
-
-/**
  * Every event carries an `idempotencyKey` naming the operation it is about: a
  * start and its terminal share one, and two operations never collide.
  *
@@ -195,7 +179,7 @@ interface InstrumentationChannelDeliveryScope {
 export interface InstrumentationChannelDeliveryStartedEvent extends InstrumentationChannelDeliveryScope {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly type: "channel.delivery.started";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: InstrumentationChannelDeliveryInput;
 }
 
@@ -206,7 +190,7 @@ export interface InstrumentationChannelDeliveryTerminalEvent extends Instrumenta
     | "channel.delivery.cancelled"
     | "channel.delivery.completed"
     | "channel.delivery.failed";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
   readonly errorCode?: string;
   readonly outcome: InstrumentationChannelDeliveryOutcome;
@@ -253,7 +237,7 @@ export interface InstrumentationInputRequestedEvent {
   };
   readonly idempotencyKey: string;
   readonly kind: InstrumentationInputKind;
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly request?: InstrumentationInputRequest;
   readonly requestId: string;
   readonly scope: InstrumentationAttemptScope;
@@ -266,7 +250,7 @@ export interface InstrumentationInputResolvedEvent {
   readonly kind: InstrumentationInputKind;
   readonly outcome: InstrumentationInputOutcome;
   readonly requestId: string;
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly response?: InstrumentationInputResponse;
   readonly scope: InstrumentationAttemptScope;
 }
@@ -329,7 +313,7 @@ export interface InstrumentationSessionSettledEvent {
 
 export interface InstrumentationSessionFailedEvent {
   readonly type: "session.failed";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly sessionId: string;
@@ -367,7 +351,7 @@ export interface InstrumentationTurnSettledEvent {
 
 export interface InstrumentationTurnFailedEvent {
   readonly type: "turn.failed";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly sessionId: string;
@@ -386,7 +370,7 @@ export interface InstrumentationStepAttemptCompletedEvent {
 
 export interface InstrumentationStepAttemptFailedEvent {
   readonly type: "step.attempt.failed";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly scope: InstrumentationAttemptScope;
@@ -411,7 +395,7 @@ export interface InstrumentationStepAttemptMetadataEvent {
 export interface InstrumentationModelCallStartedEvent {
   readonly type: "model.call.started";
   readonly idempotencyKey: string;
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: InstrumentationModelInput;
   readonly model: InstrumentationModelRef;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
@@ -420,7 +404,7 @@ export interface InstrumentationModelCallStartedEvent {
 
 export interface InstrumentationModelCallCompletedEvent {
   readonly type: "model.call.completed";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly content?: readonly InstrumentationContentPart[];
   readonly finishReason: string;
   readonly idempotencyKey: string;
@@ -430,7 +414,7 @@ export interface InstrumentationModelCallCompletedEvent {
 
 export interface InstrumentationModelCallFailedEvent {
   readonly type: "model.call.failed";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly scope: InstrumentationAttemptScope;
@@ -460,7 +444,7 @@ export interface InstrumentationToolCallCompletedEvent {
 
 export interface InstrumentationToolCallFailedEvent {
   readonly type: "tool.call.failed";
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
   readonly idempotencyKey: string;
   readonly scope: InstrumentationAttemptScope;
@@ -479,7 +463,7 @@ export interface InstrumentationActionStartedEvent {
   readonly type: "action.started";
   readonly callId: string;
   readonly idempotencyKey: string;
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: unknown;
   readonly kind: InstrumentationActionKind;
   readonly name: string;
@@ -506,7 +490,7 @@ export interface InstrumentationActionCompletedEvent {
 export interface InstrumentationActionFailedEvent {
   readonly type: "action.failed";
   readonly acceptedAtMs?: number;
-  /** Content. Absent unless this provider declared `capture: "content"`. */
+  /** Content. Absent unless this provider's trace policy records this direction. */
   readonly error?: unknown;
   readonly errorCode?: string;
   readonly idempotencyKey: string;
@@ -544,8 +528,8 @@ export interface InstrumentationProviderDefinition {
   readonly projectEvent?: (
     event: InstrumentationEvent,
   ) => InstrumentationEvent | PromiseLike<InstrumentationEvent>;
-  /** Defaults to `"metadata"`. See {@link InstrumentationCapture}. */
-  readonly capture?: InstrumentationCapture;
+  /** Provider-specific event admission and directional content policy. */
+  readonly tracePolicy?: TraceCapturePolicy;
   readonly events?: {
     readonly "channel.delivery.started"?: InstrumentationEventHandler<InstrumentationChannelDeliveryStartedEvent>;
     readonly "channel.delivery.cancelled"?: InstrumentationEventHandler<InstrumentationChannelDeliveryTerminalEvent>;
@@ -641,13 +625,18 @@ export type InstrumentationExecutionOperation =
 /** Provider-neutral hook operations consumed by the AI SDK bridge. */
 export interface InstrumentationHooks {
   /**
-   * Whether any registered provider declared `capture: "content"`.
+   * Whether any provider admitted by this bound trace requests content.
    *
    * False means nothing downstream can read what was said, so the publisher
    * should not serialize it in the first place. This is the only way the
    * projection is skipped rather than merely withheld.
    */
   readonly capturesContent: boolean;
+  /** Input-content demand for publishers that can project directions separately. */
+  readonly capturesInputs?: boolean;
+  /** Output-content demand for publishers that can project directions separately. */
+  readonly capturesOutputs?: boolean;
+  readonly forTrace?: (trace: TraceCaptureContext) => InstrumentationHooks;
   publish(event: InstrumentationEvent): Promise<void>;
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { ChannelInstrumentationKey, ParentTraceContextKey } from "#context/keys.js";
@@ -31,7 +31,7 @@ describe("channel delivery instrumentation", () => {
     const metadata: InstrumentationEvent[] = [];
     const hooks = createInstrumentationHooks([
       {
-        capture: "content",
+        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
         events: {
           "channel.delivery.started": (event) => {
             content.push(event);
@@ -40,6 +40,7 @@ describe("channel delivery instrumentation", () => {
         name: "content",
       },
       {
+        tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
         events: {
           "channel.delivery.started": (event) => {
             metadata.push(event);
@@ -100,7 +101,7 @@ describe("channel delivery instrumentation", () => {
     const events: InstrumentationEvent[] = [];
     const hooks = createInstrumentationHooks([
       {
-        capture: "content",
+        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
         events: {
           "channel.delivery.started": (event) => {
             events.push(event);
@@ -138,5 +139,54 @@ describe("channel delivery instrumentation", () => {
     );
 
     expect(events[0]).toMatchObject({ input: { message: "secret" } });
+  });
+
+  it("uses delivery-start context when a bound turn publishes the terminal", async () => {
+    const completed = vi.fn();
+    const hooks = createInstrumentationHooks([
+      {
+        events: { "channel.delivery.completed": completed },
+        name: "public-only",
+        tracePolicy: ({ audience }) => audience === "public",
+      },
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(ChannelInstrumentationKey, {
+      channelType: "slack",
+      kind: "channel:slack",
+      metadata: { audience: "public" },
+    });
+
+    await contextStorage.run(ctx, async () => {
+      await instrumentChannelDelivery({
+        agentName: "weather",
+        ctx,
+        delivery: {
+          deliveryMetadata: [
+            {
+              channelKind: "channel:slack",
+              channelName: "slack",
+              deliveryId: "delivery-1",
+              payloadIndex: 0,
+            },
+          ],
+          kind: "deliver",
+          payloads: [{ message: "hello" }],
+        },
+        hooks,
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn_0",
+      });
+      await instrumentChannelDelivery({
+        ctx,
+        hooks: hooks.forTrace!({ audience: "private" }),
+        includeTurn: true,
+        outcome: "completed",
+      });
+    });
+
+    expect(completed).toHaveBeenCalledOnce();
   });
 });

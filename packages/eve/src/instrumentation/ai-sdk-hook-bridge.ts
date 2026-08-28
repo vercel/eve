@@ -24,8 +24,8 @@ import { structuralProviderMetadata } from "#instrumentation/content.js";
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 
 interface AttemptState {
-  /** False when no provider asked for content, so none is projected at all. */
-  readonly capturesContent: boolean;
+  readonly capturesInputs: boolean;
+  readonly capturesOutputs: boolean;
   readonly modelKeys: Map<string, string>;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly scope: InstrumentationAttemptScope;
@@ -42,8 +42,10 @@ export function createAiSdkHookBridge(
   runInContext: InstrumentationContextRunner = directRunInContext,
   runtimeContext?: Readonly<Record<string, unknown>>,
 ): Telemetry {
+  const providerHooks = hooks;
   const state: AttemptState = {
-    capturesContent: hooks.capturesContent,
+    capturesInputs: providerHooks.capturesInputs ?? providerHooks.capturesContent,
+    capturesOutputs: providerHooks.capturesOutputs ?? providerHooks.capturesContent,
     modelKeys: new Map(),
     runtimeContext:
       runtimeContext !== undefined && Object.keys(runtimeContext).length > 0
@@ -64,13 +66,13 @@ export function createAiSdkHookBridge(
     async onStepStart(event) {
       state.stepNumber = event.stepNumber;
       const started = toStepAttemptStarted(state);
-      if (started !== undefined) await hooks.publish(started);
+      if (started !== undefined) await providerHooks.publish(started);
     },
     async onLanguageModelCallStart(event) {
       const key = modelCallIdempotencyKey(state.scope, state.stepNumber ?? 0);
       state.modelKeys.set(event.callId, key);
       const started = toModelCallStarted(state, key, event);
-      await hooks.publish(started);
+      await providerHooks.publish(started);
     },
     executeLanguageModelCall({ callId, execute }) {
       const key = state.modelKeys.get(callId);
@@ -83,17 +85,17 @@ export function createAiSdkHookBridge(
       if (key === undefined) return;
       state.modelKeys.delete(event.callId);
       const completed = toModelCallCompleted(state, key, event);
-      await hooks.publish(completed);
+      await providerHooks.publish(completed);
     },
     async onStepEnd(event) {
       // Step results carry provider metadata (e.g. Vercel AI Gateway cost)
       // that the per-call telemetry events don't. Publish it for providers
       // that know what to do with it; skip when there is none.
       if (event.providerMetadata === undefined) return;
-      const providerMetadata = state.capturesContent
+      const providerMetadata = state.capturesOutputs
         ? event.providerMetadata
         : structuralProviderMetadata(event.providerMetadata);
-      await hooks.publish(
+      await providerHooks.publish(
         Object.freeze({
           idempotencyKey: attemptIdempotencyKey(state.scope),
           providerMetadata,
@@ -110,7 +112,7 @@ export function createAiSdkHookBridge(
       );
       state.toolKeys.set(event.toolCall.toolCallId, key);
       const started = toToolCallStarted(state, key, event);
-      await hooks.publish(started);
+      await providerHooks.publish(started);
     },
     executeTool({ toolCallId, execute }) {
       const key = state.toolKeys.get(toolCallId);
@@ -124,7 +126,7 @@ export function createAiSdkHookBridge(
       if (key === undefined) return;
       state.toolKeys.delete(toolCallId);
       const completed = toToolCallCompleted(state, key, event);
-      await hooks.publish(completed);
+      await providerHooks.publish(completed);
     },
     async onAbort(event) {
       await failOpenOperations(event.reason);
@@ -138,12 +140,16 @@ export function createAiSdkHookBridge(
     const pending: Promise<void>[] = [];
     for (const idempotencyKey of state.modelKeys.values()) {
       pending.push(
-        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "model.call.failed" })),
+        providerHooks.publish(
+          Object.freeze({ error, idempotencyKey, scope, type: "model.call.failed" }),
+        ),
       );
     }
     for (const idempotencyKey of state.toolKeys.values()) {
       pending.push(
-        hooks.publish(Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" })),
+        providerHooks.publish(
+          Object.freeze({ error, idempotencyKey, scope, type: "tool.call.failed" }),
+        ),
       );
     }
     state.modelKeys.clear();
@@ -174,7 +180,7 @@ function toModelCallStarted(
 ): InstrumentationModelCallStartedEvent {
   return Object.freeze({
     idempotencyKey,
-    input: state.capturesContent
+    input: state.capturesInputs
       ? Object.freeze({
           instructions: source.instructions,
           messages: Object.freeze([...source.messages]),
@@ -193,7 +199,7 @@ function toModelCallCompleted(
   source: TelemetryEvent<"onLanguageModelCallEnd">,
 ): InstrumentationModelCallCompletedEvent {
   return Object.freeze({
-    content: state.capturesContent ? toContentParts(source.content) : undefined,
+    content: state.capturesOutputs ? toContentParts(source.content) : undefined,
     finishReason: source.finishReason,
     idempotencyKey,
     scope: state.scope,
@@ -271,7 +277,7 @@ function toToolCallStarted(
   return Object.freeze({
     callId: source.toolCall.toolCallId,
     idempotencyKey,
-    input: state.capturesContent ? source.toolCall.input : undefined,
+    input: state.capturesInputs ? source.toolCall.input : undefined,
     scope: state.scope,
     toolName: source.toolCall.toolName,
     type: "tool.call.started",
@@ -285,7 +291,7 @@ function toToolCallCompleted(
 ): InstrumentationToolCallCompletedEvent {
   return Object.freeze({
     idempotencyKey,
-    output: toToolOutput(source.toolOutput, state.capturesContent),
+    output: toToolOutput(source.toolOutput, state.capturesOutputs),
     scope: state.scope,
     type: "tool.call.completed",
   });

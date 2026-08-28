@@ -8,8 +8,13 @@ import {
   takeInstrumentationActionScopes,
   type InstrumentationStateOwner,
 } from "#instrumentation/state.js";
-import { withoutInstrumentationContent } from "#instrumentation/content.js";
+import {
+  withInstrumentationDecision,
+  withoutInstrumentationContent,
+} from "#instrumentation/content.js";
 import { createLogger, formatError } from "#internal/logging.js";
+import { resolveTracePolicy } from "#shared/trace-policy.js";
+import type { TraceCaptureContext } from "#shared/trace-policy.js";
 
 import type {
   CreateInstrumentationHooksOptions,
@@ -37,75 +42,144 @@ export function createInstrumentationDispatcher(
   const groups = normalizeDispatchGroups(input);
   const snapshots = new WeakMap<object, unknown>();
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
-  const capturesContent = providers.some((provider) => provider.capture === "content");
 
-  const publish = async (event: InstrumentationEvent): Promise<void> => {
-    const snapshot = snapshotInstrumentationEvent(event, snapshots);
-    const cleanupSession =
-      snapshot.type === "session.completed" || snapshot.type === "session.failed";
-    const cleanupTurn = snapshot.type === "turn.cancelled" || snapshot.type === "turn.failed";
-    if (cleanupSession || cleanupTurn) {
-      const pendingActions = takeInstrumentationActionScopes(
-        snapshot.sessionId,
-        cleanupTurn ? snapshot.turnId : undefined,
-      );
-      const failure = terminalActionFailure(snapshot);
-      for (const action of pendingActions) {
-        await publish({
-          ...failure,
-          idempotencyKey: action.idempotencyKey,
-          scope: action.scope,
-          type: "action.failed",
-        });
-      }
-    }
+  const forTrace = (trace: TraceCaptureContext): InstrumentationHooks => {
+    const decisions = new Map(
+      providers.map((provider) => [provider, resolveTracePolicy(provider.tracePolicy, trace)]),
+    );
+    const capturesInputs = [...decisions.values()].some(
+      (decision) => decision.action === "record" && decision.recordInputs,
+    );
+    const capturesOutputs = [...decisions.values()].some(
+      (decision) => decision.action === "record" && decision.recordOutputs,
+    );
+    const capturesContent = capturesInputs || capturesOutputs;
 
-    let stripped: InstrumentationEvent | undefined;
-    const visibleEvent = (provider: InstrumentationProviderDefinition): InstrumentationEvent => {
-      if (provider.capture === "content") return snapshot;
-      stripped ??= withoutInstrumentationContent(snapshot);
-      return stripped;
-    };
-
-    try {
-      try {
-        for (const provider of groups.serialBefore) {
-          await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-            visibleEvent(provider),
-          );
+    const publish = async (event: InstrumentationEvent): Promise<void> => {
+      const snapshot = snapshotInstrumentationEvent(event, snapshots);
+      const cleanupSession =
+        snapshot.type === "session.completed" || snapshot.type === "session.failed";
+      const cleanupTurn = snapshot.type === "turn.cancelled" || snapshot.type === "turn.failed";
+      if (cleanupSession || cleanupTurn) {
+        const pendingActions = takeInstrumentationActionScopes(
+          snapshot.sessionId,
+          cleanupTurn ? snapshot.turnId : undefined,
+        );
+        const failure = terminalActionFailure(snapshot);
+        for (const action of pendingActions) {
+          await publish({
+            ...failure,
+            idempotencyKey: action.idempotencyKey,
+            scope: action.scope,
+            type: "action.failed",
+          });
         }
+      }
 
-        if (groups.parallel.length === 1) {
-          const provider = groups.parallel[0]!;
-          await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-            visibleEvent(provider),
-          );
-        } else if (groups.parallel.length > 1) {
-          const results = await Promise.allSettled(
-            groups.parallel.map((provider) =>
-              dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-                visibleEvent(provider),
+      const projections = new Map<string, InstrumentationEvent>();
+      const visibleEvent = (provider: InstrumentationProviderDefinition): InstrumentationEvent => {
+        const decision = decisions.get(provider)!;
+        if (decision.action === "drop") return snapshot;
+        if (decision.recordInputs && decision.recordOutputs) return snapshot;
+        const key = `${String(decision.recordInputs)}:${String(decision.recordOutputs)}`;
+        let projected = projections.get(key);
+        if (projected === undefined) {
+          projected = withInstrumentationDecision(snapshot, decision);
+          projections.set(key, projected);
+        }
+        return projected;
+      };
+      const admitted = (provider: InstrumentationProviderDefinition): boolean =>
+        decisions.get(provider)?.action === "record";
+
+      try {
+        try {
+          for (const provider of groups.serialBefore) {
+            if (!admitted(provider)) continue;
+            await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
+              visibleEvent(provider),
+            );
+          }
+
+          const parallel = groups.parallel.filter(admitted);
+          if (parallel.length === 1) {
+            const provider = parallel[0]!;
+            await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
+              visibleEvent(provider),
+            );
+          } else if (parallel.length > 1) {
+            const results = await Promise.allSettled(
+              parallel.map((provider) =>
+                dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
+                  visibleEvent(provider),
+                ),
               ),
-            ),
-          );
-          const rejected = results.find(
-            (result): result is PromiseRejectedResult => result.status === "rejected",
-          );
-          if (rejected !== undefined) throw rejected.reason;
+            );
+            const rejected = results.find(
+              (result): result is PromiseRejectedResult => result.status === "rejected",
+            );
+            if (rejected !== undefined) throw rejected.reason;
+          }
+        } finally {
+          for (const provider of groups.serialAfter) {
+            if (!admitted(provider)) continue;
+            await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
+              visibleEvent(provider),
+            );
+          }
         }
       } finally {
-        for (const provider of groups.serialAfter) {
-          await dispatchToProvider(provider, snapshot, handlerTimeoutMs, () =>
-            visibleEvent(provider),
-          );
-        }
+        releaseTerminalState(snapshot);
       }
-    } finally {
-      releaseTerminalState(snapshot);
-    }
+    };
+
+    return { capturesContent, capturesInputs, capturesOutputs, forTrace, publish };
   };
 
-  return { capturesContent, publish };
+  const boundBySession = new Map<string, InstrumentationHooks>();
+  return {
+    capturesContent: providers.length > 0,
+    forTrace,
+    async publish(event) {
+      const sessionId = sessionIdForEvent(event);
+      let bound = boundBySession.get(sessionId);
+      if (bound === undefined) {
+        bound = forTrace(traceContextForEvent(event));
+        boundBySession.set(sessionId, bound);
+      }
+      await bound.publish(event);
+      if (event.type === "session.completed" || event.type === "session.failed") {
+        boundBySession.delete(sessionId);
+      }
+    },
+  };
+}
+
+function sessionIdForEvent(event: InstrumentationEvent): string {
+  return "scope" in event ? event.scope.sessionId : event.sessionId;
+}
+
+function traceContextForEvent(event: InstrumentationEvent): TraceCaptureContext {
+  if (event.type === "session.started") {
+    return {
+      agentName: event.agentName,
+      audience: event.channelAudience ?? "unknown",
+      channelType: event.channelType,
+    };
+  }
+  if ("delivery" in event) {
+    return {
+      agentName: event.agentName,
+      audience: event.delivery.channelAudience ?? "unknown",
+    };
+  }
+  if ("scope" in event) {
+    return {
+      agentName: event.scope.functionId,
+      audience: event.scope.channelAudience ?? "unknown",
+    };
+  }
+  return { audience: "unknown" };
 }
 
 function snapshotInstrumentationEvent(

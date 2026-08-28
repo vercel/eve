@@ -113,6 +113,7 @@ async function publishInputStarts(
 ): Promise<void> {
   const scope = input.getAttemptScope?.();
   if (scope === undefined) return;
+  const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
 
   for (const request of event.data.requests) {
     const idempotencyKey = inputIdempotencyKey(
@@ -131,7 +132,7 @@ async function publishInputStarts(
         }),
         idempotencyKey,
         kind: request.kind,
-        request: hooks.capturesContent
+        request: capturesOutputs
           ? Object.freeze({
               allowFreeform: request.allowFreeform,
               display: request.display,
@@ -153,6 +154,7 @@ export async function publishInputResolutions(input: {
   readonly hooks: InstrumentationHooks;
   readonly sessionId: string;
 }): Promise<void> {
+  const capturesInputs = input.hooks.capturesInputs ?? input.hooks.capturesContent;
   for (const resolved of input.batch.inputs) {
     const idempotencyKey = inputIdempotencyKey(
       input.sessionId,
@@ -168,7 +170,7 @@ export async function publishInputResolutions(input: {
         outcome: resolved.outcome,
         requestId: resolved.request.requestId,
         response:
-          !input.hooks.capturesContent || resolved.response === undefined
+          !capturesInputs || resolved.response === undefined
             ? undefined
             : Object.freeze({
                 optionId: resolved.response.optionId,
@@ -189,6 +191,7 @@ async function publishActionStarts(
 ): Promise<void> {
   const scope = input.getAttemptScope?.();
   if (scope === undefined) return;
+  const capturesInputs = hooks.capturesInputs ?? hooks.capturesContent;
 
   for (const action of event.data.actions) {
     const idempotencyKey = actionIdempotencyKey(input.sessionId, event.data.turnId, action.callId);
@@ -199,7 +202,7 @@ async function publishActionStarts(
       Object.freeze({
         callId: action.callId,
         idempotencyKey,
-        input: hooks.capturesContent ? action.input : undefined,
+        input: capturesInputs ? action.input : undefined,
         kind: action.kind,
         name: actionName(action),
         scope,
@@ -220,6 +223,7 @@ async function publishActionTerminal(
   );
   if (correlation === undefined) return;
   const { idempotencyKey, scope } = correlation;
+  const capturesOutputs = hooks.capturesOutputs ?? hooks.capturesContent;
 
   if (event.data.status === "completed") {
     await hooks.publish(
@@ -230,7 +234,7 @@ async function publishActionTerminal(
         idempotencyKey,
         outcome: "completed",
         output: Object.freeze(
-          hooks.capturesContent
+          capturesOutputs
             ? { output: event.data.result.output, type: "result" }
             : { type: "result" },
         ),
@@ -242,10 +246,11 @@ async function publishActionTerminal(
     return;
   }
 
-  const error =
-    event.data.error === undefined
+  const error = capturesOutputs
+    ? event.data.error === undefined
       ? event.data.result.output
-      : Object.assign(new Error(event.data.error.message), { code: event.data.error.code });
+      : Object.assign(new Error(event.data.error.message), { code: event.data.error.code })
+    : undefined;
   await hooks.publish(
     Object.freeze({
       acceptedAtMs: contextStorage.getStore()?.get(RuntimeActionSettlementTimesKey)?.[

@@ -476,10 +476,6 @@ export function createAgentOtelInstrumentation(
 
   return {
     hook: {
-      // The destinations behind this pipeline filter content per exporter, but
-      // that filter only runs on a span that has it. Declining both here is
-      // what stops the projection from being built upstream.
-      capture: recordInputs || recordOutputs ? "content" : "metadata",
       events: {
         ...channelDeliveries,
         "action.completed": actions.events["action.completed"],
@@ -508,6 +504,7 @@ export function createAgentOtelInstrumentation(
       },
       name: "eve.otel",
       projectEvent,
+      tracePolicy: () => ({ emit: true, recordInputs, recordOutputs }),
     },
     prepareSessionTrace,
     prepareTurnTrace,

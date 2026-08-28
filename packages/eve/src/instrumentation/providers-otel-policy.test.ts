@@ -46,7 +46,7 @@ describe("otel and authored provider composition", () => {
         agentName: "weather-agent",
         slot: "rows",
         value: defineInstrumentation({
-          capture: "content",
+          tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
           events: { "model.call.started": modelStarted },
         }),
       });
