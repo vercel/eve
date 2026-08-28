@@ -33,6 +33,11 @@ export type {
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 
+export interface ToolActivity {
+  /** Publishes presentation-only progress for the current tool call. */
+  update(message: string): Promise<void>;
+}
+
 export type ToolExecuteFn<TInput = unknown, TOutput = unknown> = (
   input: TInput,
   options: ToolExecuteOptions,
@@ -113,6 +118,11 @@ export type ToolContext = SessionContext & {
    * stream events and its {@link ApprovalContext}.
    */
   readonly callId: string;
+  /**
+   * Publishes presentation-only progress for this call. Updates do not enter
+   * model context, wake a parent session, or change tool lifecycle.
+   */
+  readonly activity: ToolActivity;
   /**
    * Final runtime name of the current tool, including any namespace
    * qualification. This is the same `toolName` carried by stream events and

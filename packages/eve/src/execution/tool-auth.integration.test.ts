@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildApprovalResponseAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
-import { AuthKey, SessionIdKey } from "#context/keys.js";
+import { ActivityObserverKey, AuthKey, SessionIdKey } from "#context/keys.js";
 import {
   CallbackBaseUrlKey,
   PendingAuthorizationResultKey,
@@ -161,6 +161,8 @@ describe("approval response authorization", () => {
 });
 
 describe("tool-hosted authorization", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("resolves and caches the bearer through ctx.getToken(provider)", async () => {
     let calls = 0;
     const auth: AuthorizationDefinition = {
@@ -200,6 +202,49 @@ describe("tool-hosted authorization", () => {
 
     // The test harness dispatches every executeTool call as "call_test".
     expect(result).toEqual({ callId: "call_test", toolName: "observe_call_metadata" });
+  });
+
+  it("publishes presentation-only activity from the authored context", async () => {
+    const requests: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return new Response(null, { status: 202 });
+      }),
+    );
+    const tool = authoredTool({
+      name: "deploy",
+      async execute(_input, ctx) {
+        await ctx.activity.update("Uploading artifacts");
+        return "deployed";
+      },
+    });
+    const runtime = await createTestRuntime({ tools: [tool] });
+
+    const result = await runtime.runAsSession(undefined, async () => {
+      loadContext().set(ActivityObserverKey, {
+        sink: {
+          url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+          version: 1,
+        },
+      });
+      return await runtime.executeTool(tool, {});
+    });
+
+    expect(result).toBe("deployed");
+    expect(requests).toEqual([
+      {
+        events: [
+          expect.objectContaining({
+            actionId: expect.stringContaining(":call_test"),
+            kind: "action.updated",
+            message: "Uploading artifacts",
+          }),
+        ],
+        version: 1,
+      },
+    ]);
   });
 
   it("resolves and caches an inline provider on a plain tool", async () => {

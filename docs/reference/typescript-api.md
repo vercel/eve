@@ -91,6 +91,7 @@ import template from "../../prompts/template.txt?raw";
 | Member                      | Use                                                                          |
 | --------------------------- | ---------------------------------------------------------------------------- |
 | `ctx.session`               | Current session, turn, auth, and optional parent lineage (read-only)         |
+| `ctx.activity.update()`     | Publish presentation-only progress for the current tool call                 |
 | `ctx.getSandbox()`          | Live sandbox handle; `stop()` releases compute but preserves durable state   |
 | `ctx.getSkill(identifier)`  | Handle for a named skill visible to the current agent                        |
 | `ctx.getToken(provider)`    | Resolve a bearer token for an inline auth provider such as `connect("...")`  |

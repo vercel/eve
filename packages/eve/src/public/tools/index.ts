@@ -14,6 +14,7 @@ export {
   type TaskExecutorBinding,
   type TaskReceipt,
   type ToolAuthOptions,
+  type ToolActivity,
   type ToolAuthProvider,
   type ToolDefinition,
   type ToolContext,

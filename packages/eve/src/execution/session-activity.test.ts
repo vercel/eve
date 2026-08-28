@@ -43,6 +43,12 @@ describe("activity protocol and reducer", () => {
         version: 1,
       }),
     ).toBeUndefined();
+    expect(
+      parseActivityBatchV1({
+        events: [{ actionId: "action", eventId: "updated", kind: "action.updated" }],
+        version: 1,
+      }),
+    ).toBeUndefined();
   });
 
   it("deduplicates only by event id", () => {
@@ -130,6 +136,75 @@ describe("activity protocol and reducer", () => {
       message: "Newer update",
       updatedAt: "3",
     });
+  });
+
+  it("retains normalized action updates and ignores them after settlement", () => {
+    const action = {
+      id: "action",
+      kind: "tool" as const,
+      name: "deploy",
+      parentWorkId: work.id,
+      rootTurnId: "turn",
+      stepIndex: 0,
+    };
+    const snapshot = reduce([
+      { eventId: "work", kind: "work.started", startedAt: "1", work },
+      { action, eventId: "action", kind: "action.started", startedAt: "2" },
+      {
+        actionId: action.id,
+        eventId: "updated",
+        kind: "action.updated",
+        message: "Uploading\u0007   artifacts",
+        updatedAt: "3",
+      },
+      {
+        actionId: action.id,
+        eventId: "settled-action",
+        kind: "action.settled",
+        outcome: "completed",
+        settledAt: "4",
+      },
+      {
+        actionId: action.id,
+        eventId: "late-update",
+        kind: "action.updated",
+        message: "Stale update",
+        updatedAt: "5",
+      },
+    ]);
+
+    expect(snapshot.actions.action?.update).toEqual({
+      message: "Uploading artifacts",
+      updatedAt: "3",
+    });
+  });
+
+  it("retains an action update that arrives before action startup", () => {
+    const action = {
+      id: "action",
+      kind: "tool" as const,
+      name: "deploy",
+      parentWorkId: work.id,
+      rootTurnId: "turn",
+      stepIndex: 0,
+    };
+    const snapshot = reduce([
+      {
+        actionId: action.id,
+        eventId: "updated",
+        kind: "action.updated",
+        message: "Uploading artifacts",
+        updatedAt: "3",
+      },
+      { eventId: "work", kind: "work.started", startedAt: "1", work },
+      { action, eventId: "action", kind: "action.started", startedAt: "2" },
+    ]);
+
+    expect(snapshot.actions.action?.update).toEqual({
+      message: "Uploading artifacts",
+      updatedAt: "3",
+    });
+    expect(snapshot.pendingActionUpdates).toEqual({});
   });
 
   it("applies settlement before start and never reopens terminal work", () => {

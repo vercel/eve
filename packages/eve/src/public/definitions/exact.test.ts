@@ -77,7 +77,8 @@ describe("definition helper exact inputs", () => {
     const ordinaryTool = defineTool({
       description: "React to a message.",
       inputSchema: z.object({ reaction: z.string() }),
-      async execute(input) {
+      async execute(input, ctx) {
+        expectTypeOf(ctx.activity.update).toEqualTypeOf<(message: string) => Promise<void>>();
         return { ok: input.reaction.length > 0 };
       },
     });

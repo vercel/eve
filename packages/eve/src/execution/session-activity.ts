@@ -19,6 +19,7 @@ export function createActivitySnapshot(): ActivitySnapshotV1 {
   return {
     actions: {},
     blockers: {},
+    pendingActionUpdates: {},
     pendingSettlements: {},
     pendingWorkUpdates: {},
     revision: 0,
@@ -70,6 +71,8 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return startAction(snapshot, event);
     case "action.settled":
       return settleAction(snapshot, event);
+    case "action.updated":
+      return updateAction(snapshot, event);
     case "blocker.started":
       return startBlocker(snapshot, event);
     case "blocker.settled":
@@ -162,6 +165,7 @@ function startAction(
 ): ActivitySnapshotV1 {
   if (snapshot.actions[event.action.id] !== undefined) return snapshot;
   const pending = pendingFor(snapshot, "action", event.action.id);
+  const pendingUpdate = snapshot.pendingActionUpdates[event.action.id];
   const parent = snapshot.work[event.action.parentWorkId];
   const phase =
     pending?.outcome ??
@@ -174,7 +178,12 @@ function startAction(
       phase: phase as ActivityActionPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,
+      update:
+        phase === "running" && pendingUpdate !== undefined
+          ? { message: pendingUpdate.message, updatedAt: pendingUpdate.updatedAt }
+          : undefined,
     }),
+    pendingActionUpdates: removeKey(snapshot.pendingActionUpdates, event.action.id),
     pendingSettlements: removeKey(
       snapshot.pendingSettlements,
       pendingKey("action", event.action.id),
@@ -195,6 +204,37 @@ function settleAction(
       ...current,
       phase: event.outcome,
       settledAt: event.settledAt,
+    }),
+  };
+}
+
+function updateAction(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "action.updated" }>,
+): ActivitySnapshotV1 {
+  const current = snapshot.actions[event.actionId];
+  if (current === undefined) {
+    if (pendingFor(snapshot, "action", event.actionId) !== undefined) return snapshot;
+    return {
+      ...snapshot,
+      pendingActionUpdates: replaceBounded(
+        snapshot.pendingActionUpdates,
+        event.actionId,
+        {
+          eventId: event.eventId,
+          message: normalizeActivityText(event.message),
+          updatedAt: event.updatedAt,
+        },
+        MAX_ACTIVITY_PENDING_WORK_UPDATES,
+      ),
+    };
+  }
+  if (current.phase !== "running") return snapshot;
+  return {
+    ...snapshot,
+    actions: replaceBounded(snapshot.actions, event.actionId, {
+      ...current,
+      update: { message: normalizeActivityText(event.message), updatedAt: event.updatedAt },
     }),
   };
 }

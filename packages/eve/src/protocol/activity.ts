@@ -54,6 +54,7 @@ export interface ActivityActionStateV1 extends ActivityActionIdentityV1 {
   readonly phase: ActivityActionPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
+  readonly update?: ActivityUpdateV1;
 }
 
 export interface ActivityBlockerIdentityV1 {
@@ -106,6 +107,13 @@ export type ActivityEventV1 =
       readonly settledAt: string;
     }
   | {
+      readonly actionId: string;
+      readonly eventId: string;
+      readonly kind: "action.updated";
+      readonly message: string;
+      readonly updatedAt: string;
+    }
+  | {
       readonly blocker: ActivityBlockerIdentityV1;
       readonly eventId: string;
       readonly kind: "blocker.started";
@@ -127,6 +135,7 @@ export interface ActivityBatchV1 {
 export interface ActivitySnapshotV1 {
   readonly actions: Readonly<Record<string, ActivityActionStateV1>>;
   readonly blockers: Readonly<Record<string, ActivityBlockerStateV1>>;
+  readonly pendingActionUpdates: Readonly<Record<string, PendingActivityUpdateV1>>;
   readonly pendingSettlements: Readonly<Record<string, PendingActivitySettlementV1>>;
   readonly pendingWorkUpdates: Readonly<Record<string, PendingActivityUpdateV1>>;
   readonly revision: number;
@@ -267,6 +276,24 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         kind: "action.settled",
         outcome: value.outcome,
         settledAt: value.settledAt,
+      };
+    }
+    case "action.updated": {
+      if (!hasOnlyKeys(value, ["actionId", "eventId", "kind", "message", "updatedAt"]))
+        return undefined;
+      if (
+        !isIdentity(value.actionId) ||
+        !isIdentity(value.eventId) ||
+        !isBoundedString(value.message) ||
+        !isBoundedString(value.updatedAt)
+      )
+        return undefined;
+      return {
+        actionId: value.actionId,
+        eventId: value.eventId,
+        kind: "action.updated",
+        message: value.message,
+        updatedAt: value.updatedAt,
       };
     }
     case "blocker.started": {

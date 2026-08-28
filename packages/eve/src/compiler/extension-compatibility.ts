@@ -22,13 +22,13 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22],
     dropped: { 15: "TaskExec replaces stageEffect with send" },
   },
   dynamicTool: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],
     dropped: {},
   },
   channel: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },

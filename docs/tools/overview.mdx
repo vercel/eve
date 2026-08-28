@@ -86,10 +86,24 @@ task is terminal, the state includes their outputs so the model can combine the 
 - `ctx.callId`: the id of the current tool call, carried by the call's [stream events](/docs/concepts/sessions-runs-and-streaming) and approval context.
 - `ctx.toolName`: the final runtime name the model called, including any namespace qualification.
 - `ctx.abortSignal`: aborts when the active turn is cancelled. Pass it to cancellation-aware work; sandbox sessions from `ctx.getSandbox()` are already bound to it.
+- `ctx.activity.update(message)`: publishes the latest human-readable progress for this tool call to configured channel activity renderers. The update does not enter model context, wake a parent session, or change the tool result.
 - `ctx.getSandbox()`: the live [sandbox](/docs/sandbox) handle.
 - `ctx.getSkill(id)`: read a packaged [skill](/docs/skills)'s metadata and files.
 
 Running in the app runtime is what lets a tool import shared code from `lib/`, read `process.env`, and take part in eve’s durable pause/resume model.
+
+Use `ctx.activity.update()` for occasional milestones during a long-running call:
+
+```ts
+async execute(input, ctx) {
+  await ctx.activity.update("Preparing the deployment");
+  const build = await prepare(input);
+  await ctx.activity.update("Uploading build artifacts");
+  return await deploy(build);
+}
+```
+
+Activity delivery is best-effort and only runs when the current channel has activity renderers configured. Awaiting an update waits for the bounded delivery attempt, but a delivery failure does not fail the tool. A retried tool execution may replay updates, so treat them as last-write-wins status rather than an append-only log.
 
 eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
 

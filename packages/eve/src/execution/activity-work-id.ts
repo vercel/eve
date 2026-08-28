@@ -9,6 +9,13 @@ export function deriveRootTurnActivityWorkId(input: {
   return `root:${hashTuple([input.sessionId, input.turnId])}`;
 }
 
+export function deriveActivityActionId(input: {
+  readonly callId: string;
+  readonly workId: string;
+}): string {
+  return `action:${input.workId}:${input.callId}`;
+}
+
 export function deriveChildActivityWorkId(input: {
   readonly callId: string;
   readonly parentSessionId: string;

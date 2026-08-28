@@ -1,5 +1,5 @@
 import { normalizeActivityText } from "#execution/activity-text.js";
-import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
+import { deriveActivityActionId, deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
@@ -18,7 +18,7 @@ export function projectActivityEvents(input: {
       const kind = action.kind === "load-skill" ? ("skill" as const) : ("tool" as const);
       const rawName = action.kind === "load-skill" ? "load_skill" : action.toolName;
       const name = normalizeActivityText(rawName) || (kind === "skill" ? "Skill" : "Tool");
-      const id = actionId(lineage.id, action.callId);
+      const id = deriveActivityActionId({ callId: action.callId, workId: lineage.id });
       return [
         {
           action: {
@@ -63,7 +63,7 @@ export function projectActivityEvents(input: {
         },
       ];
     }
-    const id = actionId(lineage.id, result.callId);
+    const id = deriveActivityActionId({ callId: result.callId, workId: lineage.id });
     const settled = {
       actionId: id,
       eventId: `${id}:settled:${event.data.status}`,
@@ -169,7 +169,10 @@ export function projectActivityEvents(input: {
           id,
           kind,
           label: activityLabel(request.prompt),
-          parentActionId: actionId(lineage.id, request.action.callId),
+          parentActionId: deriveActivityActionId({
+            callId: request.action.callId,
+            workId: lineage.id,
+          }),
           parentWorkId: lineage.id,
           rootTurnId: lineage.rootTurnId,
         },
@@ -251,10 +254,6 @@ function readAcceptedTaskUpdate(
 function activityLabel(value: string): string | undefined {
   const normalized = normalizeActivityText(value);
   return normalized === "" ? undefined : normalized;
-}
-
-function actionId(parentWorkId: string, callId: string): string {
-  return `action:${parentWorkId}:${callId}`;
 }
 
 function blockerId(
