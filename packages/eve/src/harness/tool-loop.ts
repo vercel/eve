@@ -203,13 +203,10 @@ import {
 } from "#harness/messages.js";
 import { normalizeProviderToolHistory } from "#harness/provider-tool-history.js";
 import {
-  type AuthorizationSignal,
   getSupersededAuthorizationChallenges,
-  isAuthorizationSignal,
-  resolveActiveAuthorizationChallenges,
   setPendingAuthorization,
 } from "#harness/authorization.js";
-import { readToolInterrupt } from "#harness/tool-interrupts.js";
+import { resolveInlineAuthorizationInterrupt } from "#harness/inline-tool-authorization.js";
 import {
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
@@ -2659,16 +2656,12 @@ async function handleStepResult(input: {
     providerExecutedOutcomeIds,
   });
   const responseMessages = normalizedProviderHistory.messages;
-  // Approval resumes can execute a previously approved call before the model
-  // reaches another approval, runtime-action, or authorization park. Commit
-  // those leading results before parking so provider history keeps tool calls
-  // and results adjacent when the session resumes.
-  const leadingToolMessageCount = responseMessages.findIndex((message) => message.role !== "tool");
-  const committedResponsePrefix =
-    leadingToolMessageCount === -1
+  const pendingResponseStart = responseMessages.findIndex((message) => message.role !== "tool");
+  const committedResponseMessages =
+    pendingResponseStart === -1
       ? responseMessages
-      : responseMessages.slice(0, leadingToolMessageCount);
-  const parkedResponseMessages = responseMessages.slice(committedResponsePrefix.length);
+      : responseMessages.slice(0, pendingResponseStart);
+  const pendingResponseMessages = responseMessages.slice(committedResponseMessages.length);
 
   const baseSession: HarnessSession = {
     ...session,
@@ -2714,7 +2707,7 @@ async function handleStepResult(input: {
   const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
   const parkedInputHistory: ModelMessage[] = [
     ...promptMessages,
-    ...committedResponsePrefix,
+    ...committedResponseMessages,
     ...(pendingApprovals === undefined
       ? []
       : [{ content: pendingApprovals, role: "user" as const }]),
@@ -2780,7 +2773,7 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
-      responseMessages: parkedResponseMessages,
+      responseMessages: pendingResponseMessages,
       session: { ...baseSession, history: parkedInputHistory },
     });
 
@@ -2837,7 +2830,7 @@ async function handleStepResult(input: {
           );
         })
         .map((request) => request.requestId),
-      responseMessages: parkedResponseMessages,
+      responseMessages: pendingResponseMessages,
       session: { ...baseSession, history: parkedInputHistory },
     });
 
@@ -2865,20 +2858,12 @@ async function handleStepResult(input: {
 
   // --- Park on authorization request ------------------------------------------
 
-  const authorizationInterrupts = findAuthorizationSignalsFromToolResults(result.toolResults);
-  if (authorizationInterrupts) {
-    const { signals, toolCallIds: authorizationToolCallIds } = authorizationInterrupts;
-    const challenges = resolveActiveAuthorizationChallenges(
-      signals.flatMap((signal) => signal.challenges),
-    );
-    // The authorization-producing result is an interrupt, not a completed
-    // outcome. Roll back both sides of each interrupted call so callback
-    // continuation sees protocol-complete history, while completed siblings
-    // remain durable and are not executed again.
-    const authorizationHistory = rollbackAuthorizationToolCalls(
-      [...promptMessages, ...responseMessages],
-      authorizationToolCallIds,
-    );
+  const authorizationInterrupt = resolveInlineAuthorizationInterrupt({
+    messages: [...promptMessages, ...responseMessages],
+    toolResults: result.toolResults,
+  });
+  if (authorizationInterrupt) {
+    const { challenges, history: authorizationHistory } = authorizationInterrupt;
 
     if (emit) {
       for (const superseded of getSupersededAuthorizationChallenges(
@@ -3510,55 +3495,4 @@ async function runModelCallWithRetries<T>(
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
-}
-
-function findAuthorizationSignalsFromToolResults(
-  toolResults: readonly TypedToolResult<ToolSet>[] | undefined,
-):
-  | {
-      readonly signals: readonly AuthorizationSignal[];
-      readonly toolCallIds: ReadonlySet<string>;
-    }
-  | undefined {
-  const ctx = contextStorage.getStore();
-  const signals: AuthorizationSignal[] = [];
-  const toolCallIds = new Set<string>();
-  for (const toolResult of toolResults ?? []) {
-    const stashed = ctx === undefined ? undefined : readToolInterrupt(ctx, toolResult.toolCallId);
-    const signal =
-      stashed !== undefined && isAuthorizationSignal(stashed)
-        ? stashed
-        : isAuthorizationSignal(toolResult.output)
-          ? toolResult.output
-          : undefined;
-    if (signal === undefined) continue;
-    signals.push(signal);
-    toolCallIds.add(toolResult.toolCallId);
-  }
-  return signals.length > 0 ? { signals, toolCallIds } : undefined;
-}
-
-function rollbackAuthorizationToolCalls(
-  messages: readonly ModelMessage[],
-  toolCallIds: ReadonlySet<string>,
-): ModelMessage[] {
-  const history: ModelMessage[] = [];
-  for (const message of messages) {
-    if (message.role === "assistant" && Array.isArray(message.content)) {
-      const content = message.content.filter(
-        (part) => part.type !== "tool-call" || !toolCallIds.has(part.toolCallId),
-      );
-      if (content.length > 0) history.push({ ...message, content });
-      continue;
-    }
-    if (message.role === "tool") {
-      const content = message.content.filter(
-        (part) => part.type !== "tool-result" || !toolCallIds.has(part.toolCallId),
-      );
-      if (content.length > 0) history.push({ ...message, content });
-      continue;
-    }
-    history.push(message);
-  }
-  return history;
 }
