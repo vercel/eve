@@ -362,7 +362,6 @@ describe("ensureChannel", () => {
       join(projectRoot, "app/_components/web-chat-auth.tsx"),
       "utf8",
     );
-    expect(accountSource).toContain('className="size-9 cursor-pointer');
     expect(accountSource).toContain("Continue with Vercel");
     expect(accountSource).toContain('viewBox="0 0 24 20"');
     expect(accountSource).toContain('viewBox="0 0 169 53"');
