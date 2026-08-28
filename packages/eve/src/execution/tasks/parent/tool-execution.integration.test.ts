@@ -102,6 +102,7 @@ describe("background subagent tool execution", () => {
             metadata: {},
             sessionKey: input.sessionKey,
           }),
+          delete: async () => {},
           session: sandbox.session,
           shutdown: async () => {},
           stop: async () => {},

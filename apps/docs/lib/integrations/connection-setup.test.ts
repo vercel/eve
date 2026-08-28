@@ -42,6 +42,23 @@ describe("Agentcard connection setup", () => {
   });
 });
 
+describe("Shopify connection setup", () => {
+  it("uses hand-authored sections without generating authentication variants", () => {
+    const integration = getIntegration("shopify")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.protocols).toEqual(["mcp"]);
+    expect(setup.authModes).toEqual([]);
+    expect(setup.variants).toEqual({});
+    expect(setup.configureVariants).toEqual({});
+    expect(integration.quickStart).toContain("defineMcpClientConnection");
+    expect(integration.quickStart).toContain('process.env.EVE_DEV === "1"');
+    expect(integration.quickStart).not.toContain("process.env.NODE_ENV");
+    expect(integration.configure).toContain("SHOPIFY_STORE_DOMAIN");
+    expect(integration.configure).not.toContain("UCP_AGENT_PROFILE_URL");
+  });
+});
+
 describe("Kernel extension setup", () => {
   it("uses Kernel's eve extension with Vercel Connect", () => {
     const integration = getIntegration("kernel")!;

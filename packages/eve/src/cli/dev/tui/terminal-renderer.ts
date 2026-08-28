@@ -398,6 +398,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
+  #startupHeader?: { readonly name: string; readonly tip: string };
   #agentHeaderRendered = false;
   /** The last committed header body, to skip re-committing an unchanged banner. */
   #agentHeaderBody?: string;
@@ -654,6 +655,43 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // paints the input line beneath it. Startup intentionally preserves the
     // user's existing scrollback instead of clearing the terminal.
     this.#live.flush(this.#renderAgentHeaderRows(), []);
+  }
+
+  beginStartupDraft(options: { initialDraft?: string; tip: string; title: string }): void {
+    this.#start({ title: options.title });
+    this.#inputActive = true;
+    this.#promptPlaceholderActive = true;
+    this.#startupHeader = { name: options.title, tip: options.tip };
+    let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
+    this.#syncInput(editor);
+    this.#startCaretBlink();
+    this.#paint();
+
+    const apply = (next: LineState) => {
+      editor = next;
+      this.#showCaret();
+      this.#syncInput(editor);
+      this.#paint();
+    };
+    this.#consumeKey = (key) => {
+      const edited = applyLineEditorKey(editor, key, { multiline: true });
+      if (edited !== undefined) {
+        apply(edited);
+        return;
+      }
+      if (key.type === "ctrl-c") this.#onExitRequest?.();
+    };
+    this.#attachInput();
+  }
+
+  finishStartupDraft(): string {
+    const draft = this.#inputText;
+    this.#detachInput();
+    this.#stopCaretBlink();
+    this.#inputActive = false;
+    this.#startupHeader = undefined;
+    this.#promptPlaceholderActive = false;
+    return draft;
   }
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
@@ -3810,7 +3848,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const maxBlockRows = Math.max(1, this.#height() - footer.length);
+    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
+    const maxBlockRows = Math.max(1, this.#height() - startupHeader.length - footer.length);
     const committed: string[] = [];
     let previous = this.#lastCommitted;
 
@@ -3863,6 +3902,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const liveRows = [
+      ...startupHeader,
       ...clipLiveRows(
         flat.map((entry) => entry.row),
         maxBlockRows,
@@ -3972,14 +4012,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #renderAgentHeaderRows(): string[] {
     const header = this.#agentHeader;
-    if (header === undefined) return [];
+    const startup = this.#startupHeader;
+    if (header === undefined && startup === undefined) return [];
     const input: Parameters<typeof buildAgentHeader>[0] = {
-      name: header.name,
+      name: header?.name ?? startup?.name,
       theme: this.#theme,
       width: this.#width(),
     };
-    if (header.info !== undefined) input.info = header.info;
-    if (header.tip !== undefined) input.tip = header.tip;
+    if (header?.info !== undefined) input.info = header.info;
+    const tip = header?.tip ?? startup?.tip;
+    if (tip !== undefined) input.tip = tip;
     return buildAgentHeader(input);
   }
 
@@ -4147,6 +4189,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
+      if (this.#startupHeader !== undefined) {
+        statusRows.push(clip(c.dim(`${this.#theme.glyph.dot} Building your agent…`), width));
+      }
       this.#pushStatusLine(statusRows, width);
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership

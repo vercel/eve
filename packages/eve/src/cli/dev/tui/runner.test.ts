@@ -8,6 +8,7 @@ import {
   type ClientSession,
   type MessageStreamEvent,
 } from "#client/index.js";
+import { getApplicationInfo } from "#internal/application/paths.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
@@ -1430,6 +1431,35 @@ describe("EveTUIRunner /traces", () => {
 });
 
 describe("EveTUIRunner initial input", () => {
+  it("uses the startup draft captured after the agent info probe", async () => {
+    const info = createDeferred<typeof AGENT_INFO>();
+    const client = stubClient();
+    vi.spyOn(client, "info").mockReturnValue(info.promise);
+    const startup = {
+      finish: vi.fn(() => "typed while loading"),
+      headerTip: "Use the /help command to see every command.",
+    };
+    const renderer = fakeRenderer();
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      startup,
+    });
+
+    const running = runner.run();
+    await settleAsyncWork();
+    expect(startup.finish).not.toHaveBeenCalled();
+    info.resolve(AGENT_INFO);
+    await running;
+
+    expect(startup.finish).toHaveBeenCalledOnce();
+    expect(renderer.readPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "typed while loading" }),
+    );
+  });
+
   it("seeds only the first prompt's editable buffer with --input text", async () => {
     const seenOptions: Array<AgentTUISessionOptions | undefined> = [];
     const prompts: Array<string | undefined> = ["edited and sent", undefined];
@@ -3415,6 +3445,39 @@ describe("EveTUIRunner command outcome rendering", () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toContain("/model");
     expect(results[0]).not.toContain("/channels");
+    expect(session.send).not.toHaveBeenCalled();
+  });
+
+  it("renders /info from the local application inspector", async () => {
+    const results: string[] = [];
+    const prompts: Array<string | undefined> = ["/info", undefined];
+    const session = sessionYielding([]);
+    const inspectApplication = vi.fn(async () => ({
+      application: getApplicationInfo("/tmp/weather-agent"),
+      compiledState: null,
+      messaging: {
+        createSessionRoutePath: "/eve/v1/session",
+        sessionMessagesRoutePattern: "/eve/v1/session/:sessionId",
+        streamRoutePattern: "/eve/v1/session/:sessionId/stream",
+      },
+    }));
+
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      inspectApplication,
+      name: "Weather Agent",
+      renderer: {
+        readPrompt: vi.fn(async () => prompts.shift()),
+        renderCommandResult: (text) => results.push(text),
+        renderStream: vi.fn(async () => {}),
+      },
+      session,
+    });
+    await runner.run();
+
+    expect(inspectApplication).toHaveBeenCalledWith("/tmp/weather-agent");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatch(/^Application\n/u);
     expect(session.send).not.toHaveBeenCalled();
   });
 

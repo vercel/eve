@@ -103,16 +103,18 @@
  *             directory and let consumers observe a partial package.
  *   rule 40 — Every shipped wire-version module
  *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
- *             `*-wire.vN.test.ts`. The session-inbox registry must also be
- *             contiguous, name every module, and identify its highest version
- *             as current. Version modules are append-only protocol history;
- *             the paired test pins that version's schema/encoder or
- *             migration/fixtures so a version cannot exist as untested code.
+ *             `*-wire.vN.test.ts`. Version modules, tests, and snapshots already
+ *             present on main are immutable. The session-inbox registry must
+ *             also be contiguous, name every module, and identify its highest
+ *             version as current. Wire versions are append-only protocol
+ *             history: change the contract by adding a version and migration,
+ *             never by updating a historical schema and its snapshot together.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
+import { execFileSync } from "node:child_process";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -427,10 +429,64 @@ function importSpecifier(node) {
 
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
 const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
+const VERSIONED_WIRE_HISTORY_RE = new RegExp(
+  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+);
 
-async function checkRule40WireContracts() {
+function gitOutput(args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function checkRule40ImmutableWireHistory() {
+  const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
+  const comparisons = [
+    ["diff", "--name-status", "--", WIRE_FAMILY_DIR],
+    ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+  ];
+  if (hasBase)
+    comparisons.push(["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR]);
+
+  const changes = new Set();
+  for (const args of comparisons) {
+    for (const line of (gitOutput(args) ?? "").trim().split("\n")) {
+      if (line !== "") changes.add(line);
+    }
+  }
+
   /** @type {Violation[]} */
   const violations = [];
+  for (const change of changes) {
+    const [status, ...paths] = change.split("\t");
+    const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
+    if (protectedPaths.length === 0 || status === "A") continue;
+    if (
+      hasBase &&
+      protectedPaths.every(
+        (path) => gitOutput(["cat-file", "-e", `origin/main:${path}`]) === undefined,
+      )
+    ) {
+      continue;
+    }
+    violations.push({
+      rule: 40,
+      file: protectedPaths.at(-1),
+      line: 1,
+      message: `shipped wire-version history is immutable (git status ${status}). Add the next wire version and migration instead of changing or deleting an existing version module, contract test, or snapshot.`,
+    });
+  }
+  return violations;
+}
+
+async function checkRule40WireContracts() {
+  const violations = checkRule40ImmutableWireHistory();
   let entries;
   try {
     entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));

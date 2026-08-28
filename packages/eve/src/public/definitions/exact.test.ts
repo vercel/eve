@@ -452,7 +452,13 @@ function typeOnlyFixtures(): void {
   defineSandbox({
     async onSession({ ctx, use }) {
       const sessionId: string = ctx.session.id;
+      // @ts-expect-error Sandbox lifecycle access is unavailable during session initialization.
+      void ctx.getSandbox;
+      // @ts-expect-error Skill access is unavailable during session initialization.
+      void ctx.getSkill;
       const sandbox = await use();
+      // @ts-expect-error Runtime lifecycle access is unavailable during session initialization.
+      void sandbox.delete;
       void sandbox;
       void sessionId;
     },

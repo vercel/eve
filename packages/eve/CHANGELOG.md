@@ -1,5 +1,55 @@
 # eve
 
+## 0.47.2
+
+### Patch Changes
+
+- c77faa5: Use `openai/gpt-5.6-luna-fast` as the default model for config-less agents, new projects, and the setup model picker.
+- edc6127: Large authored dependency graphs no longer crash `eve dev` or `eve eval` while preparing the final host. Dynamic capabilities are now transformed only while preparing the authored generation.
+
+## 0.47.1
+
+### Patch Changes
+
+- 624d07d: Show the agent card and an editing-only prompt while `eve dev` builds the local agent, and simplify the card to branding, agent name, and a Tip. Text typed during startup is preserved for the initialized terminal UI, while submission remains disabled until startup completes.
+
+## 0.47.0
+
+### Minor Changes
+
+- 52e89ef: Add `delete()` to the runtime sandbox handle for permanently deleting the current session sandbox and reprovisioning it on the next access. Docker handles stay bound to one physical container, and sandbox `onSession` callbacks now receive session metadata through `ctx` while using `use()` for sandbox access.
+
+### Patch Changes
+
+- a3b23c0: Eval contexts and sessions now expose a formatted `transcript` of observed user and assistant messages, which can be passed directly to an LLM judge for multi-turn conversation grading.
+- 56514d9: Models with slug ending in `-thinking` are now resolved to the
+  correct model instead of failing with `does not have known AI Gateway context window metadata` error or silently using the base model's context window.
+- 41c8286: Restore Bash process substitution in Vercel sandboxes by providing the standard `/dev/fd` path whenever eve creates or resumes a sandbox session.
+- bdb3973: Preserve schedule provenance when a handler starts a session with user credentials. Scheduled background-task launches now stay silent instead of sending a launch acknowledgement, and schedule-created workflow runs expose `$eve.schedule` for attribution.
+- fccbf2b: Fix a TypeScript error in the generated Web Chat `tool.tsx` where `trimEnd` was called on `string | number` values returned by the tool output helper.
+
+## 0.46.1
+
+### Patch Changes
+
+- 16c8b63: Expose a replay-stable `callId` to MCP and OpenAPI `providedArguments` callbacks so connection tools can derive per-call idempotency keys.
+- e2d9162: Update the Linq channel adapter to preserve supported text decorations, including bold, italic, strikethrough, and underline, in outbound messages.
+- fbc3080: Add Shopify registry setup for searching products and building UCP carts and checkouts. Setup now generates an anonymous UCP profile that the connection advertises in production.
+- 2af4a4c: Tool inputs now stream through the durable event protocol as `action.input.appended` before the matching validated `actions.requested` event. Each event stores only its raw delta and UTF-16 offset, while the default message reducer exposes cumulative raw input on `dynamic-tool.inputText` in the `input-streaming` state. This advances the stream protocol to version 24; when assistant text precedes a tool call, `message.completed` now arrives before that call's streamed input events.
+- 122f565: Add a local dev TUI `/info` command that shows the same application, artifact, diagnostic, and messaging details as `eve info`. The human-readable report now begins directly with its application details instead of repeating an `eve Info` heading.
+
+## 0.46.0
+
+### Minor Changes
+
+- 1d79217: Emit traces for every audience by default while recording content only for public conversations. `tracePolicy` can explicitly disable emission or select directional content capture, and existing boolean policies retain their current behavior.
+
+### Patch Changes
+
+- 47b3e48: Static authored definitions now remain build-only, while runtime entries and their assets use the same bundling semantics in development and production.
+- 9c0a138: Replace the eve TUI's separate banner and text header with a startup card showing the installed version, active model, and the instructions, tools, skills, subagents, and schedules loaded by the agent.
+- 7acb4ec: Include the original message body when Slack users share a message into an eve conversation. Agents now receive Slack crosspost content alongside distinct top-level comments without repeating content already present in the comment.
+
 ## 0.45.2
 
 ### Patch Changes

@@ -208,6 +208,37 @@ describe("createMicrosandboxHandle", () => {
     expect(runtimeMocks.createPreparedMicrosandbox).toHaveBeenCalledTimes(2);
   });
 
+  it("deletes persisted state and evicts the active-session cache", async () => {
+    const vm = createFakeMicrosandboxVm("session-key");
+    runtimeMocks.createPreparedMicrosandbox.mockResolvedValue(vm);
+    const options = resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE });
+    const createInput = {
+      runtimeContext: { appRoot: "/tmp/eve-app" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    };
+
+    const handle = await createMicrosandboxHandle({
+      backendName: "microsandbox",
+      createInput,
+      options,
+      optionsHash: "options-hash",
+    });
+    await handle.delete();
+
+    expect(vm.shutdown).toHaveBeenCalledTimes(1);
+    expect(vm.removePersisted).toHaveBeenCalledTimes(1);
+
+    const nextHandle = await createMicrosandboxHandle({
+      backendName: "microsandbox",
+      createInput,
+      options,
+      optionsHash: "options-hash",
+    });
+    expect(nextHandle).not.toBe(handle);
+    expect(runtimeMocks.createPreparedMicrosandbox).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a missing template snapshot race as not provisioned", async () => {
     runtimeMocks.createPreparedMicrosandbox.mockRejectedValueOnce(
       new Error("snapshot template-snapshot not found"),
@@ -330,7 +361,7 @@ function createFakeMicrosandboxVm(sessionKey: string) {
     async removePath({ path }: { readonly path: string }) {
       files.delete(path);
     },
-    async removePersisted() {},
+    removePersisted: vi.fn(async () => {}),
     async setNetworkPolicy() {},
     async spawn() {
       throw new Error("spawn is not used by this test.");

@@ -139,6 +139,23 @@ describe("buildCallbackContext – getSandbox", () => {
 
     expect(stops).toBe(1);
   });
+
+  it("deletes the active sandbox through the runtime session", async () => {
+    let deletions = 0;
+    const sandbox = mockSandbox({
+      delete: () => {
+        deletions += 1;
+      },
+    });
+    const runtime = await createTestRuntime();
+
+    await runtime.runAsSession({ sandbox }, async () => {
+      const live: RuntimeSandboxSession = await buildCallbackContext().getSandbox();
+      await live.delete();
+    });
+
+    expect(deletions).toBe(1);
+  });
 });
 
 describe("buildCallbackContext – getSkill", () => {

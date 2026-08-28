@@ -19,6 +19,7 @@ import {
   Client,
   ClientSession,
 } from "#client/index.js";
+import { renderApplicationInfo } from "#cli/commands/info.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
@@ -27,6 +28,7 @@ import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
+import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
@@ -400,6 +402,11 @@ export interface PromptCommandHandler {
   ): Promise<PromptCommandOutcome | undefined>;
 }
 
+type TuiStartup = {
+  readonly headerTip: string;
+  finish(): string;
+};
+
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
   session?: ClientSession;
   /** Production TUI probe injected by the launcher; omitted in hermetic runners. */
@@ -454,6 +461,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   bootDetections?: readonly BootDetection[];
   /** Test seam for the status line's Vercel link probe; defaults to the real one. */
   detectProjectIdentity?: typeof detectProjectIdentity;
+  /** Test seam for `/info`; defaults to the filesystem application inspector. */
+  inspectApplication?: typeof inspectApplication;
   /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
   getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
@@ -461,6 +470,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
   lifecycle?: CommandLifecycle;
+  /** Editing-only startup state retained until the final agent header is ready to paint. */
+  startup?: TuiStartup;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -490,12 +501,14 @@ export class EveTUIRunner {
    * fresh-agent onboarding.
    */
   readonly #initialInput?: string;
+  readonly #startup?: TuiStartup;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
+  readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
@@ -523,7 +536,7 @@ export class EveTUIRunner {
    * refreshes don't re-roll it mid-session. Local sessions only — every
    * tip references local-only slash commands.
    */
-  readonly #headerTip = pickAgentHeaderTip();
+  readonly #headerTip: string;
   #agentInfo?: AgentInfoResult;
   /**
    * approval-id → input-request map populated as `input.requested` events
@@ -580,6 +593,7 @@ export class EveTUIRunner {
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
+    this.#headerTip = options.startup?.headerTip ?? pickAgentHeaderTip();
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
@@ -589,6 +603,7 @@ export class EveTUIRunner {
     this.#contextSize = options.contextSize;
     this.#formatTransportError = options.formatTransportError ?? toErrorMessage;
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
+    if (options.startup !== undefined) this.#startup = options.startup;
     if (options.appRoot !== undefined) {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
@@ -625,6 +640,7 @@ export class EveTUIRunner {
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
+    this.#inspectApplication = options.inspectApplication ?? inspectApplication;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
     if (options.serverUrl !== undefined && options.remote === undefined) {
@@ -639,12 +655,12 @@ export class EveTUIRunner {
    * header. Never throws: a missing or unauthorized `/eve/v1/info` simply
    * yields a header without the agent's configuration detail.
    */
-  async #renderAgentHeader(): Promise<void> {
+  async #renderAgentHeader(): Promise<string | undefined> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
       await this.#renderSetupIssues(undefined);
-      return;
+      return this.#startup?.finish() ?? this.#initialInput;
     }
 
     let info: AgentInfoResult | undefined;
@@ -666,9 +682,11 @@ export class EveTUIRunner {
         }
       }
     }
+    const initialDraft = this.#startup?.finish() ?? this.#initialInput;
     this.#reportBeforeFirstPaint();
     const headerInfo = this.#replaceAgentInfo(info);
     await this.#renderSetupIssues(headerInfo);
+    return initialDraft;
   }
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
@@ -724,11 +742,7 @@ export class EveTUIRunner {
     let hasRunTurn = false;
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
-    // `--input` seed: applied to the first prompt's editable buffer, then
-    // cleared so later prompts open empty.
-    let initialDraft = this.#initialInput;
-
-    await this.#renderAgentHeader();
+    let initialDraft = await this.#renderAgentHeader();
     if (this.#remoteConnection?.current().connection.state === "auth-required") {
       await this.#executeExtensionCommand(
         { type: "extension", name: "vc:login", argument: "" },
@@ -930,6 +944,14 @@ export class EveTUIRunner {
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {
           this.#renderCommandOutcome(formatPromptCommandHelp(this.#availablePromptCommands));
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
+        if (command?.type === "info") {
+          await this.#showApplicationInfo();
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1751,6 +1773,22 @@ export class EveTUIRunner {
     } catch (error) {
       if (isInterruptedError(error)) return;
       throw error;
+    }
+  }
+
+  async #showApplicationInfo(): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) {
+      this.#renderCommandOutcome("/info is only available in local dev sessions.");
+      return;
+    }
+    try {
+      this.#renderCommandOutcome(renderApplicationInfo(await this.#inspectApplication(appRoot)));
+    } catch (error) {
+      this.#renderCommandOutcome(
+        `Couldn't inspect the application: ${toErrorMessage(error)}`,
+        "error",
+      );
     }
   }
 

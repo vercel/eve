@@ -438,6 +438,8 @@ export interface ConnectionToolMetadata {
 export interface ConnectionToolExecuteOptions {
   /** Signal forwarded into the underlying transport. */
   readonly abortSignal?: AbortSignal;
+  /** Replay-stable id of the authored tool call. */
+  readonly callId: string;
 }
 
 /** A live client for a single connection. */
@@ -447,7 +449,7 @@ export interface ConnectionClient {
   executeTool(
     toolName: string,
     args: unknown,
-    options?: ConnectionToolExecuteOptions,
+    options: ConnectionToolExecuteOptions,
   ): Promise<unknown>;
   getToolMetadata(): Promise<readonly ConnectionToolMetadata[]>;
   getTools(): Promise<ToolSet>;

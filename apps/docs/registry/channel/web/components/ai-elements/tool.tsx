@@ -125,8 +125,10 @@ export const BashToolContent = ({
             <span className="mb-2 block font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
               Output
             </span>
-            {stdout ? <span className="block">{stdout.trimEnd()}</span> : null}
-            {stderr ? <span className="block text-destructive">{stderr.trimEnd()}</span> : null}
+            {stdout ? <span className="block">{String(stdout).trimEnd()}</span> : null}
+            {stderr ? (
+              <span className="block text-destructive">{String(stderr).trimEnd()}</span>
+            ) : null}
             {typeof exitCode === "number" && exitCode !== 0 ? (
               <span className="block text-muted-foreground">Exited with code {exitCode}</span>
             ) : null}

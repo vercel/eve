@@ -25,6 +25,13 @@
       "pinVersion": "workspace:^"
     },
     {
+      "label": "Blooio is an externally published integration",
+      "dependencies": ["eve-channel-blooio"],
+      "packages": ["eve-docs"],
+      "dependencyTypes": ["dev"],
+      "isIgnored": true
+    },
+    {
       "label": "Workspace packages must use the workspace: protocol",
       "dependencies": ["eve-*", "eve"],
       "dependencyTypes": ["dev", "prod", "peer"],

@@ -1,5 +1,6 @@
 import type { Experimental_SandboxSession as AiSdkSandbox } from "ai";
 
+import type { SandboxDeleteOptions } from "#shared/sandbox-backend.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
 /**
@@ -148,9 +149,11 @@ export interface SandboxSession extends Pick<
  * `ctx.getSandbox()`.
  *
  * Unlike the I/O-only session used during sandbox initialization, this handle
- * always exposes a provider-backed `stop()` method.
+ * exposes provider-backed lifecycle operations.
  */
 export interface RuntimeSandboxSession extends SandboxSession {
+  /** Permanently deletes this sandbox and its disposable backend state. */
+  delete(options?: SandboxDeleteOptions): Promise<void>;
   /**
    * Stops the backing sandbox compute while preserving the durable session.
    * A later runtime callback reopens the session through its configured

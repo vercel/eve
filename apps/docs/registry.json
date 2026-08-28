@@ -84,6 +84,23 @@
       ]
     },
     {
+      "name": "extension/blitzreels",
+      "type": "registry:item",
+      "title": "BlitzReels",
+      "description": "Turn long videos into short clips, generate media, repair edits, and export.",
+      "dependencies": ["@blitzreels/eve"],
+      "envVars": {
+        "BLITZREELS_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/blitzreels.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/blitzreels.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/github-tools",
       "type": "registry:item",
       "title": "GitHub Tools",
@@ -1023,6 +1040,30 @@
       ]
     },
     {
+      "name": "connection/shopify",
+      "type": "registry:item",
+      "title": "Shopify",
+      "description": "Search products and manage carts and checkouts on a Shopify storefront.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "shopify"]
+          },
+          "requires": ">=0.46.1"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/connections/shopify.ts",
+          "type": "registry:file",
+          "target": "agent/connections/shopify.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/stripe",
       "type": "registry:item",
       "title": "Stripe",
@@ -1376,6 +1417,30 @@
       "meta": {
         "eve": {
           "docs": "/docs/channels/twilio",
+          "implementation": "native"
+        }
+      }
+    },
+    {
+      "name": "channel/blooio",
+      "type": "registry:item",
+      "title": "Blooio",
+      "description": "Send and receive iMessage, RCS, and SMS through Blooio, with reactions, typing indicators, read receipts, polls, groups, capability checks, and history.",
+      "dependencies": ["eve-channel-blooio"],
+      "envVars": {
+        "BLOOIO_API_KEY": "",
+        "BLOOIO_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/blooio.ts",
+          "type": "registry:file",
+          "target": "agent/channels/blooio.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/integrations/blooio#configure",
           "implementation": "native"
         }
       }

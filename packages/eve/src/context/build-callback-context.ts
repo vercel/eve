@@ -35,7 +35,16 @@ export function buildCallbackContext(): SessionContext {
         if (sandbox === null) {
           throw new Error("The sandbox is not available in the current authored runtime context.");
         }
-        return withRuntimeSandboxStop(sandbox, async () => await access.stop());
+        return withRuntimeSandboxLifecycle(
+          sandbox,
+          async (options) => {
+            if (access.delete === undefined) {
+              throw new Error("The active sandbox runtime does not support deletion.");
+            }
+            await access.delete(options);
+          },
+          async () => await access.stop(),
+        );
       });
     },
 
@@ -52,11 +61,13 @@ export function buildCallbackContext(): SessionContext {
   };
 }
 
-function withRuntimeSandboxStop(
+function withRuntimeSandboxLifecycle(
   sandbox: SandboxSession,
+  deleteSandbox: RuntimeSandboxSession["delete"],
   stop: () => Promise<void>,
 ): RuntimeSandboxSession {
   return {
+    delete: deleteSandbox,
     id: sandbox.id,
     readBinaryFile: (options) => sandbox.readBinaryFile(options),
     readFile: (options) => sandbox.readFile(options),

@@ -20,6 +20,7 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 | `/deploy`     | Deploy the agent to Vercel production. Links the directory first if needed.                                                                               |
 | `/vc:install` | Install the Vercel CLI.                                                                                                                                   |
 | `/vc:login`   | Log in to Vercel or restore access to a remote deployment.                                                                                                |
+| `/info`       | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                           |
 | `/loglevel`   | Choose which server and agent logs appear in the transcript.                                                                                              |
 | `/traces`     | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                             |
 | `/reset`      | Start a fresh session.                                                                                                                                    |
@@ -29,7 +30,7 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 | `/exit`       | Quit the UI.                                                                                                                                              |
 | `/help`       | List available commands.                                                                                                                                  |
 
-`/model`, `/add`, `/deploy`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
+`/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
 
 ## Add an integration
 

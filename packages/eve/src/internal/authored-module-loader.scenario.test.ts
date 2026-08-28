@@ -8,12 +8,51 @@ import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
   bundleAuthoredModuleForGeneration,
+  bundleAuthoredModuleMapForGeneration,
   loadAuthoredModuleNamespace,
 } from "#internal/authored-module-loader.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("loadAuthoredModuleNamespace", () => {
   const scenarioApp = useScenarioApp();
+
+  it("stamps dynamic callbacks while building the generation module map", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/tools/dynamic.ts": [
+          'import { defineDynamic, defineTool } from "eve/tools";',
+          "",
+          "const marker = defineTool({",
+          '  description: "Return a marker.",',
+          '  inputSchema: { type: "object" },',
+          '  execute: () => ({ marker: "generation" }),',
+          "});",
+          "",
+          "export default defineDynamic({",
+          "  events: {",
+          '    "session.started": () => marker,',
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+      installDependencies: true,
+      name: "generation-dynamic-callback",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const manifest = await compileAgentManifest(discovered.manifest);
+
+    const code = await bundleAuthoredModuleMapForGeneration({
+      manifest,
+      moduleMapPath: join(app.appRoot, ".eve", "compile", "module-map.mjs"),
+    });
+
+    expect(code).toContain("eve:durable-dynamic-callback");
+  });
 
   it("preserves cached channel identity for relative channel imports", async () => {
     const app = await scenarioApp({

@@ -22,33 +22,33 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 19,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19],
+    current: 21,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21],
     dropped: { 15: "TaskExec replaces stageEffect with send" },
   },
   dynamicTool: {
-    current: 19,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+    current: 21,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
     dropped: {},
   },
-  channel: { current: 9, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9], dropped: {} },
-  schedule: { current: 3, supported: [1, 2, 3], dropped: {} },
+  channel: { current: 11, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], dropped: {} },
+  schedule: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
   subagent: {
-    current: 4,
-    supported: [3, 4],
+    current: 5,
+    supported: [3, 4, 5],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
     },
   },
   connection: {
-    current: 6,
-    supported: [1, 2, 3, 4, 5, 6],
+    current: 8,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8],
     dropped: {},
   },
   hook: {
-    current: 14,
-    supported: [10, 11, 12, 13, 14],
+    current: 16,
+    supported: [10, 11, 12, 13, 14, 15, 16],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -62,15 +62,19 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
-  dynamicSkill: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
-  instructions: { current: 2, supported: [1, 2], dropped: {} },
-  dynamicInstructions: {
+  dynamicSkill: {
     current: 13,
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
     dropped: {},
   },
+  instructions: { current: 2, supported: [1, 2], dropped: {} },
+  dynamicInstructions: {
+    current: 14,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
+    dropped: {},
+  },
   config: { current: 1, supported: [1], dropped: {} },
-  state: { current: 3, supported: [1, 2, 3], dropped: {} },
+  state: { current: 4, supported: [1, 2, 3, 4], dropped: {} },
 } as const satisfies Record<string, ExtensionCapabilityContract>;
 
 /** One independently versioned extension-facing contract. */

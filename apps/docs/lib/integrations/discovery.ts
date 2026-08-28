@@ -40,12 +40,10 @@ export const integrationSearchText = (integration: Integration): string =>
 export const integrationMarkdown = (integration: Integration): string => {
   const isConnection = integration.connection !== undefined;
   const install = isConnection ? buildConnectionInstall(integration) : (integration.install ?? "");
-  const quickStart = isConnection
-    ? connectionQuickStart(integration)
-    : (integration.quickStart ?? "");
-  const configure = isConnection
-    ? buildConnectionConfigure(integration)
-    : (integration.configure ?? "");
+  const quickStart =
+    integration.quickStart ?? (isConnection ? connectionQuickStart(integration) : "");
+  const configure =
+    integration.configure ?? (isConnection ? buildConnectionConfigure(integration) : "");
 
   return [
     `${typeLabel[integration.type]} integration for eve. ${integration.tagline}`,

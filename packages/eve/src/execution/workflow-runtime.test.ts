@@ -718,9 +718,14 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const [, workflowInput] = startMock.mock.calls[0]!;
     const serialized = workflowInput[0].serializedContext as Record<string, unknown>;
     const seed = serialized["eve.sessionTraceSeed"] as
-      | { traceId: string; traceFlags: number }
+      | { decision: unknown; traceId: string; traceFlags: number }
       | undefined;
     expect(seed).toBeDefined();
+    expect(seed!.decision).toEqual({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: true,
+    });
     expect(seed!.traceFlags).toBe(1);
     expect(seed!.traceId).toMatch(/^[0-9a-f]{32}$/u);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
@@ -777,9 +782,10 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const [, workflowInput] = startMock.mock.calls[0]!;
     const serialized = workflowInput[0].serializedContext as Record<string, unknown>;
     const seed = serialized["eve.sessionTraceSeed"] as
-      | { traceId: string; traceFlags: number }
+      | { decision: unknown; traceId: string; traceFlags: number }
       | undefined;
     expect(seed).toBeDefined();
+    expect(seed!.decision).toEqual({ action: "drop" });
     expect(seed!.traceFlags).toBe(0);
   });
 
@@ -787,7 +793,12 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     installAgentOtelRuntime(new AgentSpanIdGenerator(), () => false);
     mockBundleAndRun();
 
-    const parentTrace = { spanId: "c".repeat(16), traceFlags: 1, traceId: "d".repeat(32) };
+    const parentTrace = {
+      decision: { action: "record", recordInputs: true, recordOutputs: false } as const,
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
+    };
     startMock.mockResolvedValue({ runId: "child-run" });
     getHookByTokenMock.mockResolvedValue({ runId: "child-run" });
     await buildRuntime().createSession({

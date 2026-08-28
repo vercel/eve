@@ -23,6 +23,7 @@
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
  * - `$eve.title`        — truncated session title from the first user message
  * - `$eve.channel_request_id` — inbound channel request id
+ * - `$eve.schedule`     — authored schedule that created the session
  * - `$eve.invocation_token` — channel-local continuation token for an external invocation
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
  * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
@@ -33,7 +34,12 @@
  */
 
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import { ChannelRequestIdKey, OtelTraceEnabledKey, type SessionTraceSeed } from "#context/keys.js";
+import {
+  ChannelRequestIdKey,
+  OtelTraceEnabledKey,
+  ScheduleIdKey,
+  type SessionTraceSeed,
+} from "#context/keys.js";
 import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
@@ -163,6 +169,12 @@ export function readChannelRequestId(
   return isNonEmptyString(channelRequestId) ? channelRequestId : undefined;
 }
 
+/** Reads the schedule name inherited from a schedule dispatch scope. */
+export function readScheduleId(serializedContext: Record<string, unknown>): string | undefined {
+  const scheduleId = serializedContext[ScheduleIdKey.name];
+  return isNonEmptyString(scheduleId) ? scheduleId : undefined;
+}
+
 /**
  * Maximum visible length (in code points) of a derived `$eve.title`.
  *
@@ -242,6 +254,7 @@ export function buildSessionAttributes(input: {
   const isOtelTraceEnabled = isWorkflowOtelTraceEnabled(input.serializedContext);
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
+    "$eve.schedule": readScheduleId(input.serializedContext),
     "$eve.is_otel_trace_enabled": isOtelTraceEnabled,
     "$eve.is_trace_content_visible": isTraceContentVisible,
     "$eve.trace_id": readSessionTraceId(input.serializedContext),

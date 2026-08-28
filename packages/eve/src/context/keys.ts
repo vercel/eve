@@ -7,6 +7,7 @@
 import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
 import type { JsonObject } from "#shared/json.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type {
   ChannelInstrumentationProjection,
   ChannelDeliveryMetadata,
@@ -72,6 +73,8 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
+/** Authored schedule whose dispatch created this session. */
+export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");
 /** Task-reporting phase for the active root turn. */
 export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pending" | "settled">(
@@ -99,6 +102,7 @@ export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession
 export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 
 export interface SessionTraceSeed {
+  readonly decision?: InstrumentationDecision;
   readonly traceId: string;
   readonly spanId: string;
   readonly traceFlags: number;

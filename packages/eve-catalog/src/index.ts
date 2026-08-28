@@ -121,6 +121,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "blooio",
+    name: "Blooio",
+    kind: "channel",
+    tagline: "Send and receive iMessage, RCS, and SMS through Blooio.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "github",
     name: "GitHub",
     kind: "channel",
@@ -274,6 +281,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "agent-browser",
     kind: "extension",
     tagline: "Add browser automation tools backed by agent-browser to an eve agent.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "blitzreels",
+    name: "BlitzReels",
+    kind: "extension",
+    tagline: "Turn long videos into short clips, generate media, repair edits, and export.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -698,6 +712,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Similarweb: web traffic, app, and market intelligence data.",
       mcp: { url: "https://mcp.similarweb.com" },
+    },
+  },
+  {
+    slug: "shopify",
+    name: "Shopify",
+    kind: "connection",
+    tagline: "Search products and manage carts and checkouts on a Shopify storefront.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Search products and build carts and checkouts on a Shopify storefront.",
+      mcp: { url: "https://{shop}.myshopify.com/api/ucp/mcp" },
     },
   },
   {

@@ -1069,6 +1069,11 @@ describe("createVercelSandbox", () => {
       name: "persisted-sandbox-name",
       resume: false,
     });
+    expect(sessionSandbox.runCommand).toHaveBeenCalledTimes(1);
+    expect(sessionSandbox.runCommand).toHaveBeenCalledWith({
+      args: ["-lc", expect.stringContaining("ln -s /proc/self/fd /dev/fd")],
+      cmd: "bash",
+    });
     expect(handle.session).toBeDefined();
 
     const state = await handle.captureState();
@@ -1095,6 +1100,60 @@ describe("createVercelSandbox", () => {
     expect(sessionSandbox.runCommand).toHaveBeenCalledWith(
       expect.objectContaining({ args: ["-lc", "printf resumed"], cmd: "bash" }),
     );
+  });
+
+  it("asks Vercel to delete orphan snapshots when deleting the sandbox", async () => {
+    const templateSandbox = createMockSandbox({ name: "template" });
+    const sessionSandbox = createMockSandbox({ name: "session" });
+    const order: string[] = [];
+    sessionSandbox.stop.mockImplementation(async () => {
+      order.push("stop");
+    });
+    const stableDelete = vi.fn(async () => {
+      order.push("sandbox-delete");
+    });
+    const stableGet = vi.fn(async () => {
+      order.push("sandbox-get");
+      return { delete: stableDelete };
+    });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi
+          .fn()
+          .mockResolvedValueOnce(templateSandbox)
+          .mockResolvedValueOnce(sessionSandbox),
+        get: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const backend = createTestVercelSandbox({
+      loadDeleteSandboxModule: async () => ({ Sandbox: { get: stableGet } }) as never,
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+    const handle = await backend.create({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      sessionKey: "session-key",
+      templateKey: "template-key",
+    });
+    const abortSignal = new AbortController().signal;
+
+    await expect(handle.delete({ abortSignal })).resolves.toBeUndefined();
+
+    expect(order).toEqual(["stop", "sandbox-get", "sandbox-delete"]);
+    expect(stableGet).toHaveBeenCalledWith({
+      fetch: expect.any(Function),
+      name: "session",
+      resume: false,
+      signal: abortSignal,
+    });
+    expect(stableDelete).toHaveBeenCalledWith({
+      deleteOrphanSnapshots: true,
+      signal: abortSignal,
+    });
   });
 
   it("skips the stop call on shutdown when the sandbox is not running", async () => {
@@ -1753,27 +1812,31 @@ describe("createVercelSandbox", () => {
       templateKey: "template-key",
     });
 
-    const templateCalls = vi.mocked(templateSandbox.runCommand).mock.calls;
-    expect(templateCalls).toHaveLength(1);
+    for (const sandbox of [templateSandbox, sessionSandbox]) {
+      const calls = vi.mocked(sandbox.runCommand).mock.calls;
+      expect(calls).toHaveLength(1);
 
-    const setupCall = templateCalls[0]?.[0] as {
-      args?: string[];
-      cmd?: string;
-      sudo?: boolean;
-    };
-    expect(setupCall).toMatchObject({ cmd: "bash" });
-    expect(setupCall.sudo).toBeUndefined();
-    const setupScript = setupCall.args?.[1] ?? "";
-    expect(setupScript).toContain("mkdir -p /workspace");
-    expect(setupScript).toContain("command -v bash");
-    expect(setupScript).not.toContain("apt-get");
-    expect(setupScript).not.toContain("gpgv");
-    expect(setupScript).not.toContain("node --version");
-    expect(setupScript).not.toContain("npm");
-    expect(setupScript).not.toContain("python3");
-    expect(setupScript).not.toContain("ripgrep");
-    expect(setupScript).not.toContain("sudo mkdir");
-    expect(setupScript).not.toContain("chown");
+      const setupCall = calls[0]?.[0] as {
+        args?: string[];
+        cmd?: string;
+        sudo?: boolean;
+      };
+      expect(setupCall).toMatchObject({ cmd: "bash" });
+      expect(setupCall.sudo).toBeUndefined();
+      const setupScript = setupCall.args?.[1] ?? "";
+      expect(setupScript).toContain("mkdir -p /workspace");
+      expect(setupScript).toContain("command -v bash");
+      expect(setupScript).toContain("ln -s /proc/self/fd /dev/fd");
+      expect(setupScript).toContain("test /dev/fd -ef /proc/self/fd");
+      expect(setupScript).not.toContain("apt-get");
+      expect(setupScript).not.toContain("gpgv");
+      expect(setupScript).not.toContain("node --version");
+      expect(setupScript).not.toContain("npm");
+      expect(setupScript).not.toContain("python3");
+      expect(setupScript).not.toContain("ripgrep");
+      expect(setupScript).not.toContain("sudo mkdir");
+      expect(setupScript).not.toContain("chown");
+    }
   });
 
   it("retries base runtime setup through sudo when the default user fails", async () => {

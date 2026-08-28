@@ -1,5 +1,5 @@
 import { defineEval } from "eve/evals";
-import { equals } from "eve/evals/expect";
+import { equals, includes } from "eve/evals/expect";
 
 /**
  * Core session-route runtime behavior: multi-turn session continuity.
@@ -19,5 +19,7 @@ export default defineEval({
 
     t.succeeded();
     t.messageIncludes(/marigold/i);
+    t.check(t.transcript, includes("User:\nMy favorite word is marigold. Remember it."));
+    t.check(t.transcript, includes("Assistant:\n"));
   },
 });

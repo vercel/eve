@@ -155,6 +155,7 @@ const TEST_SANDBOX_BACKEND: SandboxBackend = {
         metadata: {},
         sessionKey: input.sessionKey,
       }),
+      delete: async (options) => await sandbox.access.delete?.(options),
       shutdown: async () => undefined,
       stop: async () => undefined,
     };

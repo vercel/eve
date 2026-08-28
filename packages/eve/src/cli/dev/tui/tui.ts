@@ -13,13 +13,15 @@ import {
 import { isVercelAuthChallenge } from "#services/dev-client/vercel-auth-error.js";
 import { resolveVercelDeployment } from "#setup/vercel-deployment.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { createDevDiagnostics } from "../diagnostics.js";
+import { createDevDiagnostics, type DevDiagnostics } from "../diagnostics.js";
 
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
 import { promptCommandsFor } from "./prompt-commands.js";
+import { pickAgentHeaderTip } from "./agent-header.js";
 import { formatRemoteAuthChallengeMessage } from "./remote-auth-result.js";
 import { probeMcpConnection } from "./mcp-connection-status.js";
 import { EveTUIRunner, type EveTUIRunnerOptions } from "./runner.js";
+import { TerminalRenderer } from "./terminal-renderer.js";
 import { remoteHost, type DevelopmentTuiTarget, type RemoteDevelopmentTarget } from "./target.js";
 import type { TuiDisplayOptions } from "./types.js";
 
@@ -40,6 +42,47 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly lifecycle?: CommandLifecycle;
+  /** Prepared editing-only startup UI reused by the initialized local runner. */
+  startup?: DevelopmentTuiStartup;
+}
+
+export interface DevelopmentTuiStartup {
+  readonly diagnostics: DevDiagnostics | undefined;
+  readonly headerTip: string;
+  readonly renderer: TerminalRenderer;
+  finish(): string;
+  shutdown(): Promise<void>;
+}
+
+export async function startDevelopmentTuiStartup(
+  input: TuiDisplayOptions & {
+    readonly appRoot: string;
+    readonly initialInput?: string;
+    readonly onExitRequest: () => void;
+  },
+): Promise<DevelopmentTuiStartup> {
+  const diagnostics = await createDevDiagnostics(input.appRoot).catch(() => undefined);
+  const headerTip = pickAgentHeaderTip();
+  const renderer = new TerminalRenderer({
+    ...input,
+    diagnostics,
+    onExitRequest: input.onExitRequest,
+  });
+  renderer.beginStartupDraft({
+    initialDraft: input.initialInput,
+    tip: headerTip,
+    title: input.name ?? "eve",
+  });
+  return {
+    diagnostics,
+    headerTip,
+    renderer,
+    finish: () => renderer.finishStartupDraft(),
+    async shutdown() {
+      renderer.shutdown();
+      await diagnostics?.close();
+    },
+  };
 }
 
 function prepareRemoteTarget(target: RemoteDevelopmentTarget) {
@@ -90,6 +133,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     initialInput,
     onBootProgress,
     lifecycle,
+    startup,
     withExclusiveTerminal,
     ...display
   } = input;
@@ -129,14 +173,19 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.remote = prepared.remote;
   }
   if (initialInput !== undefined) options.initialInput = initialInput;
+  if (startup !== undefined) {
+    options.renderer = startup.renderer;
+    options.startup = startup;
+  }
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
   if (withExclusiveTerminal !== undefined) options.withExclusiveTerminal = withExclusiveTerminal;
 
   const diagnostics =
-    prepared.kind === "local"
+    startup?.diagnostics ??
+    (prepared.kind === "local"
       ? await createDevDiagnostics(prepared.target.workspaceRoot).catch(() => undefined)
-      : undefined;
+      : undefined);
   if (diagnostics !== undefined) options.diagnostics = diagnostics;
   try {
     await new EveTUIRunner(options).run();

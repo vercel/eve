@@ -72,15 +72,17 @@ Every [subagent](../subagents) starts with its own fresh state, whether it's a b
 `defineState` holds conversation-scoped working memory that lives and dies with
 the session, including counters, the current plan, and what the user has told
 you this conversation. It is the agent's short-term memory, persisted durably
-for the life of the session. For context that must outlive a session, connect a
-first-class [memory provider](../memory) to your own application store. Use a
-general [connection](../connections) instead when the data should be queried
-only through explicit model tool calls rather than recalled automatically.
+for the life of the session. For context that must outlive a session, configure
+a first-class [memory provider](../memory). Use the built-in file provider, a
+third-party provider, or a custom provider for application-specific storage and
+retrieval. Use a general [connection](../connections) instead when the data
+should be queried only through explicit model tool calls rather than recalled
+automatically.
 
 ## What to read next
 
 - Read state inside dynamic resolvers → [Dynamic capabilities](../guides/dynamic-capabilities)
 - How step durability works → [Execution model & durability](../concepts/execution-model-and-durability)
 - The `ctx` accessors available alongside state → [TypeScript API Reference](../reference/typescript-api)
-- Tenant-scoped long-term memory in your own store → [Multi-tenant memory](../patterns/multi-tenant-memory)
+- Tenant-scoped long-term memory with any provider → [Multi-tenant memory](../patterns/multi-tenant-memory)
 - First-class recall, capture, and provider tools → [Memory](../memory)

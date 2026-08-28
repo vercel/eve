@@ -48,6 +48,21 @@ const draft = await t.send("Draft the welcome email.");
 t.judge.autoevals.closedQA("professional tone", { on: draft.message }).atLeast(0.6);
 ```
 
+For a multi-turn eval, pass `t.transcript` to grade the primary session's complete observed conversation instead of only its final reply:
+
+```ts
+await t.send("My favorite word is marigold. Remember it.");
+await t.send("What is my favorite word?");
+
+t.judge.autoevals
+  .closedQA("The assistant remembers the user's favorite word across turns", {
+    on: t.transcript,
+  })
+  .atLeast(0.8);
+```
+
+`t.transcript` contains the session's user and assistant messages in turn order. It excludes reasoning, tool calls, and tool results. See [Multi-turn evals](./cases#multi-turn-evals) for the transcript format and independent sessions.
+
 ## Soft scoring and thresholds
 
 Judge assertions are soft, so the threshold rides on the assertion handle. There is no separate thresholds map:

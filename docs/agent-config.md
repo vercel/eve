@@ -21,9 +21,7 @@ For a static AI Gateway model ID, you can make the same source change from the
 project root with `eve set --model anthropic/claude-opus-4.8` or from the local
 dev TUI with `/model anthropic/claude-opus-4.8`.
 
-The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `zai/glm-5.2`; authoring the file replaces that source. GLM 5.2 does not support image input; choose a
-vision-capable model or [route image inputs to Gemini
-Flash](./guides/dynamic-capabilities#route-image-inputs-to-a-vision-model).
+The root `agent.ts` can be omitted when no runtime config is needed. eve then selects its default `agent.ts` source at the same slot, configured with `openai/gpt-5.6-luna-fast`; authoring the file replaces that source.
 When `agent.ts` is present, `model` is required.
 
 A config that selects a static Gateway model is compile-only. A config that contains a dynamic model or a direct-provider `LanguageModel` remains a runtime entry because eve must resolve that authored value while the agent runs. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).

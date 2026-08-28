@@ -92,23 +92,33 @@ for (const item of items) {
   if (slug !== "browser-use") {
     const creationType = CONNECT_CREATION_TYPES[slug];
     const connectionMethod = CONNECT_METHODS[slug];
-    const expectedSetup = {
-      command: "eve",
-      package: "eve",
-      bin: "eve",
-      args: [
-        "integration",
-        "connect",
-        slug,
-        CONNECT_SERVICES[slug] ?? slug,
-        slug,
-        ...(creationType === undefined ? [] : ["--creation-type", creationType]),
-        ...(connectionMethod === undefined ? [] : ["--connection-method", connectionMethod]),
-      ],
-    };
+    const expectedSetup =
+      slug === "shopify"
+        ? {
+            command: "eve",
+            package: "eve",
+            bin: "eve",
+            args: ["integration", "setup", "shopify"],
+          }
+        : {
+            command: "eve",
+            package: "eve",
+            bin: "eve",
+            args: [
+              "integration",
+              "connect",
+              slug,
+              CONNECT_SERVICES[slug] ?? slug,
+              slug,
+              ...(creationType === undefined ? [] : ["--creation-type", creationType]),
+              ...(connectionMethod === undefined ? [] : ["--connection-method", connectionMethod]),
+            ],
+          };
     if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {
       throw new Error(
-        `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
+        slug === "shopify"
+          ? 'Registry item "connection/shopify" must run eve integration setup shopify.'
+          : `Registry item "${item.name}" must configure its Vercel Connect connector through eve.`,
       );
     }
   }
@@ -123,13 +133,30 @@ for (const item of items) {
   }
   await access(join(docsRoot, expectedPath));
 
-  if (slug === "browser-use") {
-    if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
-      throw new Error(
-        'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
-      );
+  switch (slug) {
+    case "browser-use": {
+      if (item.dependencies !== undefined || !("BROWSER_USE_API_KEY" in (item.envVars ?? {}))) {
+        throw new Error(
+          'Registry item "connection/browser-use" must declare its API key without Vercel Connect.',
+        );
+      }
+      break;
     }
-  } else if (!item.dependencies?.includes("@vercel/connect")) {
-    throw new Error(`Registry item "${item.name}" must depend on @vercel/connect.`);
+    case "shopify": {
+      if (item.dependencies !== undefined) {
+        throw new Error('Registry item "connection/shopify" must not declare dependencies.');
+      }
+      if (item.envVars !== undefined) {
+        throw new Error(
+          'Registry item "connection/shopify" must leave environment configuration to its guided setup.',
+        );
+      }
+      break;
+    }
+    default: {
+      if (!item.dependencies?.includes("@vercel/connect")) {
+        throw new Error(`Registry item "${item.name}" must depend on @vercel/connect.`);
+      }
+    }
   }
 }

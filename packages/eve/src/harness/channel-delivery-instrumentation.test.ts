@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ChannelInstrumentationKey, ParentTraceContextKey } from "#context/keys.js";
+import {
+  ChannelInstrumentationKey,
+  ParentTraceContextKey,
+  SessionTraceSeedKey,
+} from "#context/keys.js";
 import { instrumentChannelDelivery } from "#harness/channel-delivery-instrumentation.js";
 import {
   createInstrumentationHooks,
@@ -78,5 +82,56 @@ describe("channel delivery instrumentation", () => {
       "interaction",
     );
     expect(metadata[0]).toMatchObject({ input: undefined });
+  });
+
+  it("keeps a private delivery redacted inside a content-enabled session", async () => {
+    const events: InstrumentationEvent[] = [];
+    const hooks = createInstrumentationHooks([
+      {
+        capture: "content",
+        events: {
+          "channel.delivery.started": (event) => {
+            events.push(event);
+          },
+        },
+        name: "content",
+      },
+    ]);
+    const ctx = new ContextContainer();
+    ctx.set(ChannelInstrumentationKey, {
+      kind: "channel:slack",
+      metadata: { audience: "private" },
+    });
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    });
+
+    await contextStorage.run(ctx, () =>
+      instrumentChannelDelivery({
+        ctx,
+        delivery: {
+          deliveryMetadata: [
+            {
+              channelKind: "channel:slack",
+              channelName: "slack",
+              deliveryId: "delivery-1",
+              payloadIndex: 0,
+            },
+          ],
+          kind: "deliver",
+          payloads: [{ message: "secret" }],
+        },
+        hooks,
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn_0",
+      }),
+    );
+
+    expect(events[0]).toMatchObject({ input: undefined });
   });
 });
