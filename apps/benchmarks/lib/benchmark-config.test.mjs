@@ -12,7 +12,6 @@ test("publishes only compatibility-validated models", () => {
   assert.deepEqual(
     publishedBenchmarkModels.map((benchmark) => benchmark.id),
     [
-      "claude-sonnet-4-6",
       "kimi-k3",
       "claude-fable-5",
       "grok-4-6",
@@ -41,6 +40,7 @@ test("allows candidate probes and rejects unknown models", () => {
   assert.equal(findBenchmarkModel("gpt-5-6-sol").support, "supported");
   assert.equal(findBenchmarkModel("gpt-5-6-terra").support, "supported");
   assert.equal(findBenchmarkModel("grok-4-6").support, "supported");
+  assert.equal(findBenchmarkModel("claude-sonnet-4-6").support, "superseded");
   assert.equal(findBenchmarkModel("claude-opus-5").support, "candidate");
   assert.throws(() => findBenchmarkModel("unknown"), /Unknown model/u);
 });

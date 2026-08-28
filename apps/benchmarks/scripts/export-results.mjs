@@ -16,6 +16,7 @@ import {
 } from "./cost.mjs";
 import {
   authoringTreatments,
+  benchmarkModels,
   findPublishedBenchmarkModel,
   publishedBenchmark,
   publishedBenchmarkModels,
@@ -120,15 +121,16 @@ function readPreviousResults() {
   if (!existsSync(destination)) return [];
 
   const previous = JSON.parse(readFileSync(destination, "utf8"));
-  const currentExperimentIds = new Set(
-    publishedBenchmarkModels.flatMap((benchmark) =>
-      authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
-    ),
+  const supersededExperimentIds = new Set(
+    benchmarkModels
+      .filter((benchmark) => benchmark.support === "superseded")
+      .flatMap((benchmark) =>
+        authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
+      ),
   );
-  const supersededExperiments = (previous.experiments ?? []).filter(
-    (experiment) => !currentExperimentIds.has(experiment.id),
+  const supersededExperiments = (previous.experiments ?? []).filter((experiment) =>
+    supersededExperimentIds.has(experiment.id),
   );
-  const supersededExperimentIds = new Set(supersededExperiments.map((experiment) => experiment.id));
   const supersededResults = (previous.results ?? []).filter((result) =>
     supersededExperimentIds.has(result.experimentId),
   );

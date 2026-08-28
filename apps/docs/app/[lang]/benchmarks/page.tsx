@@ -62,12 +62,11 @@ const ModelBenchmarksPage = () => {
 
       {previouslyMeasured.length > 0 ? (
         <section className="mt-20" aria-labelledby="previously-measured">
-          <h2 className="text-heading-36 text-gray-1000" id="previously-measured">
+          <h2 className="text-heading-40 text-gray-1000" id="previously-measured">
             Previously measured
           </h2>
-          <p className="mt-3 text-gray-900 text-lg">
-            Superseded model and harness combinations. These are their last results and are not
-            rerun.
+          <p className="mt-3 text-gray-700 text-lg">
+            Final benchmark results for superseded model and harness combinations.
           </p>
           <div className="mt-8">
             <ResultsTable rows={previouslyMeasured} showMeasurementDate />

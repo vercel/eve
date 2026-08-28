@@ -40,11 +40,10 @@ test("exports missing cells without publishing private artifacts", () => {
     assert.equal(output.schemaVersion, 1);
     assert.equal(output.suite.caseCount, 7);
     assert.match(output.suite.caseFingerprint, /^[0-9a-f]{64}$/u);
-    assert.equal(output.experiments.length, 18);
+    assert.equal(output.experiments.length, 16);
     assert.deepEqual(
       [...new Set(output.experiments.map((experiment) => experiment.modelDisplayName))],
       [
-        "Claude Sonnet 4.6",
         "Kimi K3",
         "Claude Fable 5",
         "Grok 4.6",
@@ -55,7 +54,7 @@ test("exports missing cells without publishing private artifacts", () => {
         "Gemini 3.1 Pro Preview",
       ],
     );
-    assert.equal(output.results.length, 126);
+    assert.equal(output.results.length, 112);
     assert.ok(output.results.every((result) => result.status === "missing"));
     for (const privateField of ["transcript", "commands", "worldEvents", "files"]) {
       assert.equal(raw.includes(`"${privateField}"`), false);
@@ -86,17 +85,17 @@ test("retains superseded experiments separately from the current matrix", () => 
         },
         experiments: [
           {
-            id: "retired--baseline",
-            groupId: "retired",
-            model: "example/retired",
-            modelDisplayName: "Retired model",
+            id: "claude-sonnet-4-6-opencode--baseline",
+            groupId: "claude-sonnet-4-6-opencode",
+            model: "claude-sonnet-4-6",
+            modelDisplayName: "Claude Sonnet 4.6",
             harness: "OpenCode",
             treatment: "baseline",
           },
         ],
         results: [
           {
-            experimentId: "retired--baseline",
+            experimentId: "claude-sonnet-4-6-opencode--baseline",
             caseId: "author-001-weather-tool",
             status: "current",
             passedRuns: 1,
@@ -122,8 +121,14 @@ test("retains superseded experiments separately from the current matrix", () => 
     );
     const output = JSON.parse(readFileSync(outputPath, "utf8"));
     assert.equal(output.previouslyMeasured.length, 1);
-    assert.equal(output.previouslyMeasured[0].experiments[0].id, "retired--baseline");
-    assert.equal(output.previouslyMeasured[0].results[0].experimentId, "retired--baseline");
+    assert.equal(
+      output.previouslyMeasured[0].experiments[0].id,
+      "claude-sonnet-4-6-opencode--baseline",
+    );
+    assert.equal(
+      output.previouslyMeasured[0].results[0].experimentId,
+      "claude-sonnet-4-6-opencode--baseline",
+    );
   } finally {
     rmSync(resultsPath, { recursive: true, force: true });
     if (existsSync(savedResultsPath)) renameSync(savedResultsPath, resultsPath);
@@ -140,7 +145,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
     if (existsSync(resultsPath)) renameSync(resultsPath, savedResultsPath);
     const runPath = join(
       resultsPath,
-      "claude-sonnet-4-6-opencode--baseline",
+      "kimi-k3-opencode--baseline",
       "run",
       "author-001-weather-tool",
       "run-1",
@@ -177,7 +182,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
         "--revision",
         "a".repeat(40),
         "--models",
-        "claude-sonnet-4-6",
+        "kimi-k3",
         "--output",
         outputPath,
       ],
@@ -186,7 +191,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
     const output = JSON.parse(readFileSync(outputPath, "utf8"));
     const result = output.results.find(
       (entry) =>
-        entry.experimentId === "claude-sonnet-4-6-opencode--baseline" &&
+        entry.experimentId === "kimi-k3-opencode--baseline" &&
         entry.caseId === "author-001-weather-tool",
     );
     assert.equal(result.meanEstimatedListCostUsd, 4.5);

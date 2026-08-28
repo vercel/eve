@@ -2,7 +2,7 @@ export const authoringTreatments = ["baseline", "guided"] as const;
 
 export type AuthoringTreatment = (typeof authoringTreatments)[number];
 
-export type AuthoringBenchmarkSupport = "supported" | "candidate";
+export type AuthoringBenchmarkSupport = "supported" | "candidate" | "superseded";
 
 export interface AuthoringBenchmarkModel {
   readonly id: string;
@@ -18,7 +18,7 @@ export const benchmarkModels = [
     model: "claude-sonnet-4-6",
     displayName: "Claude Sonnet 4.6",
     harness: "OpenCode",
-    support: "supported",
+    support: "superseded",
   },
   {
     id: "kimi-k3",
