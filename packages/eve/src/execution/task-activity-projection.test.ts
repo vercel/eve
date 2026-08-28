@@ -58,6 +58,12 @@ describe("projectTaskActivity", () => {
         }),
       ).toEqual([
         {
+          eventId: "work:task:started",
+          kind: "work.started",
+          startedAt: "2026-01-01T00:00:00.000Z",
+          work: activityObserver.workIdentity,
+        },
+        {
           eventId: `work:task:settled:${status}`,
           kind: "work.settled",
           outcome: status,
@@ -68,13 +74,20 @@ describe("projectTaskActivity", () => {
     },
   );
 
-  it("ignores nonterminal task views", () => {
+  it("starts work from the initial task view", () => {
     expect(
       projectTaskActivity({
         activityObserver,
         settledAt: "2026-01-01T00:00:00.000Z",
         view: view("working"),
       }),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        eventId: "work:task:started",
+        kind: "work.started",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        work: activityObserver.workIdentity,
+      },
+    ]);
   });
 });

@@ -95,10 +95,7 @@ function startWork(
     phase: phase as ActivityWorkPhase,
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
     startedAt: event.startedAt,
-    update:
-      phase === "running" && pendingUpdate !== undefined
-        ? { message: pendingUpdate.message, updatedAt: pendingUpdate.updatedAt }
-        : undefined,
+    update: pendingUpdate,
   };
   const started = {
     ...snapshot,
@@ -133,30 +130,29 @@ function updateWork(
   snapshot: ActivitySnapshotV1,
   event: Extract<ActivityEventV1, { readonly kind: "work.updated" }>,
 ): ActivitySnapshotV1 {
+  const update = {
+    eventId: event.eventId,
+    message: normalizeActivityText(event.message),
+    updatedAt: event.updatedAt,
+  };
   const current = snapshot.work[event.workId];
   if (current === undefined) {
-    if (pendingFor(snapshot, "work", event.workId) !== undefined) return snapshot;
+    const pending = snapshot.pendingWorkUpdates[event.workId];
+    if (pending !== undefined && !isNewerUpdate(update, pending)) return snapshot;
     return {
       ...snapshot,
       pendingWorkUpdates: replaceBounded(
         snapshot.pendingWorkUpdates,
         event.workId,
-        {
-          eventId: event.eventId,
-          message: normalizeActivityText(event.message),
-          updatedAt: event.updatedAt,
-        },
+        update,
         MAX_ACTIVITY_PENDING_WORK_UPDATES,
       ),
     };
   }
-  if (current.phase !== "running") return snapshot;
+  if (current.update !== undefined && !isNewerUpdate(update, current.update)) return snapshot;
   return {
     ...snapshot,
-    work: replaceBounded(snapshot.work, event.workId, {
-      ...current,
-      update: { message: normalizeActivityText(event.message), updatedAt: event.updatedAt },
-    }),
+    work: replaceBounded(snapshot.work, event.workId, { ...current, update }),
   };
 }
 
@@ -345,6 +341,16 @@ function replaceBounded<T>(
   const overflow = Object.keys(next).length - max;
   for (const oldKey of Object.keys(next).slice(0, Math.max(0, overflow))) delete next[oldKey];
   return next;
+}
+
+function isNewerUpdate(
+  left: { eventId: string; updatedAt: string },
+  right: { eventId: string; updatedAt: string },
+): boolean {
+  return (
+    left.updatedAt > right.updatedAt ||
+    (left.updatedAt === right.updatedAt && left.eventId > right.eventId)
+  );
 }
 
 function removeKey<T>(

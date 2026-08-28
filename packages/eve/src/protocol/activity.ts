@@ -27,13 +27,12 @@ export interface PendingActivitySettlementV1 {
 }
 
 export interface ActivityUpdateV1 {
+  readonly eventId: string;
   readonly message: string;
   readonly updatedAt: string;
 }
 
-export interface PendingActivityUpdateV1 extends ActivityUpdateV1 {
-  readonly eventId: string;
-}
+export interface PendingActivityUpdateV1 extends ActivityUpdateV1 {}
 
 export interface ActivityWorkStateV1 extends ActivityWorkIdentityV1 {
   readonly phase: ActivityWorkPhase;

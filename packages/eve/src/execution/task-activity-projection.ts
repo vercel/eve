@@ -21,14 +21,17 @@ export function projectTaskActivity(input: {
   readonly view: TaskView;
 }): readonly ActivityEventV1[] {
   const work = input.activityObserver?.workIdentity;
+  if (work === undefined) return [];
+  const started: ActivityEventV1 = {
+    eventId: `${work.id}:started`,
+    kind: "work.started",
+    startedAt: input.settledAt,
+    work,
+  };
   const status = input.view.status;
-  if (
-    work === undefined ||
-    (status !== "completed" && status !== "failed" && status !== "cancelled")
-  ) {
-    return [];
-  }
+  if (status !== "completed" && status !== "failed" && status !== "cancelled") return [started];
   return [
+    started,
     {
       eventId: `${work.id}:settled:${status}`,
       kind: "work.settled",

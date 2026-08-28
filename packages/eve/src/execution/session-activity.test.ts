@@ -94,26 +94,42 @@ describe("activity protocol and reducer", () => {
     expect(snapshot.pendingWorkUpdates).toEqual({});
   });
 
-  it("ignores milestones after work settles", () => {
-    const snapshot = reduce([
-      { eventId: "started", kind: "work.started", startedAt: "1", work },
-      {
-        eventId: "settled",
-        kind: "work.settled",
-        outcome: "completed",
-        settledAt: "2",
+  it.each([
+    ["newer before older", ["started", "newer", "older"]],
+    ["settlement before updates", ["started", "settled", "newer", "older"]],
+  ] as const)("converges work updates for %s delivery", (_name, order) => {
+    const events: Record<string, ActivityEventV1> = {
+      started: { eventId: "started", kind: "work.started", startedAt: "1", work },
+      older: {
+        eventId: "updated-1",
+        kind: "work.updated",
+        message: "Older update",
+        updatedAt: "2",
         workId: work.id,
       },
-      {
-        eventId: "late-update",
+      newer: {
+        eventId: "updated-2",
         kind: "work.updated",
-        message: "Stale update",
+        message: "Newer update",
         updatedAt: "3",
         workId: work.id,
       },
-    ]);
+      settled: {
+        eventId: "settled",
+        kind: "work.settled",
+        outcome: "completed",
+        settledAt: "4",
+        workId: work.id,
+      },
+    };
 
-    expect(snapshot.work[work.id]?.update).toBeUndefined();
+    const snapshot = reduce(order.map((key) => events[key]!));
+
+    expect(snapshot.work[work.id]?.update).toEqual({
+      eventId: "updated-2",
+      message: "Newer update",
+      updatedAt: "3",
+    });
   });
 
   it("applies settlement before start and never reopens terminal work", () => {
