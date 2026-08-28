@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { nextTurnDelivery } from "#execution/parked-delivery-wait.js";
+import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type {
   SessionCommandInbox,
@@ -13,6 +14,9 @@ import { SessionStateCursor } from "#execution/session-state-cursor.js";
 
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
+}));
+vi.mock("./report-dropped-wire-payload-step.js", () => ({
+  reportDroppedWirePayloadStep: vi.fn(),
 }));
 
 interface ScriptedRead {
@@ -58,22 +62,27 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
 }
 
 function authorizationRead(): ScriptedRead {
+  const payload = authorizationPayload();
   return {
     result: {
       done: false,
       value: {
         kind: "deliver",
-        payloads: [
-          {
-            authorizationCallback: {
-              callback: { method: "GET", params: { code: "abc" } },
-              connectionName: "weather",
-            },
-          },
-        ],
-      } satisfies DeliverHookPayload,
+        payload,
+        payloads: [payload],
+        version: 1,
+      } as SessionInboxPayload,
     },
     source: "authorization",
+  };
+}
+
+function authorizationPayload() {
+  return {
+    authorizationCallback: {
+      callback: { method: "GET", params: { code: "abc" } },
+      connectionName: "weather",
+    },
   };
 }
 
@@ -109,9 +118,10 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
 describe("nextTurnDelivery", () => {
   afterEach(() => {
     vi.mocked(routeDeliverToChildren).mockReset();
+    vi.mocked(reportDroppedWirePayloadStep).mockReset();
   });
 
-  it("surfaces an authorization callback as its own instruction", async () => {
+  it("decodes a stamped authorization callback before surfacing it", async () => {
     const inbox = createMockInbox([authorizationRead()]);
 
     const next = await nextTurnDelivery(waitInput(inbox));
@@ -120,6 +130,46 @@ describe("nextTurnDelivery", () => {
     if (next.kind !== "authorization") throw new Error("unreachable");
     expect(next.closed).toBe(false);
     expect(next.payloads).toHaveLength(1);
+    expect(inbox.windowTransitions).toEqual([true, false]);
+  });
+
+  it("decodes a markerless legacy send from the authorization alias", async () => {
+    const payload = authorizationPayload();
+    const inbox = createMockInbox([
+      {
+        result: {
+          done: false,
+          value: { kind: "send", payload } as SessionInboxPayload,
+        },
+        source: "authorization",
+      },
+    ]);
+
+    const next = await nextTurnDelivery(waitInput(inbox));
+
+    expect(next).toEqual({ closed: false, kind: "authorization", payloads: [payload] });
+  });
+
+  it("reports an unknown authorization wire version and stays parked", async () => {
+    const inbox = createMockInbox([
+      {
+        result: {
+          done: false,
+          value: { kind: "deliver", payloads: [], version: 99 } as SessionInboxPayload,
+        },
+        source: "authorization",
+      },
+      authorizationRead(),
+    ]);
+
+    const next = await nextTurnDelivery(waitInput(inbox));
+
+    expect(next.kind).toBe("authorization");
+    expect(reportDroppedWirePayloadStep).toHaveBeenCalledOnce();
+    expect(reportDroppedWirePayloadStep).toHaveBeenCalledWith({
+      detail: expect.stringMatching(/newer than the supported version/),
+      family: "session-inbox",
+    });
     expect(inbox.windowTransitions).toEqual([true, false]);
   });
 

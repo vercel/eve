@@ -10,7 +10,7 @@
  *
  * 1. Parses the inbound request into a JSON-serializable
  *    {@link AuthorizationCallback} (params only — never request headers).
- * 2. Calls `resumeHook(token, payload)` to wake the suspended workflow.
+ * 2. Encodes for the target session inbox and resumes the suspended workflow.
  * 3. Renders the standard "Authorization complete" landing page so the
  *    user sees a friendly UI instead of an empty `202 Accepted`.
  *
@@ -22,7 +22,7 @@
  * internet.
  */
 
-import { resumeHook } from "#internal/workflow/runtime.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { buildAuthorizationCompletePage } from "#runtime/connections/authorization-complete-page.js";
 import type { AuthorizationCallback } from "#shared/connection-types.js";
@@ -83,7 +83,7 @@ async function handleCallbackRequest(
     const authorizationCallback = legacy
       ? { callback, connectionName: name, legacy: true as const }
       : { attemptId: attemptId!, callback, connectionName: name };
-    await resumeHook(token, {
+    await resumeSessionInbox(token, {
       kind: "deliver" as const,
       payloads: [{ authorizationCallback }],
     });

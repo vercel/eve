@@ -176,10 +176,20 @@ async function waitForNextSessionAction(input: {
       if (first.done) {
         return { closed: true, kind: "authorization", payloads: [] };
       }
+
+      let decoded: DecodedSessionInbox;
+      try {
+        decoded = sessionInboxWire.decode(first.value);
+      } catch (error) {
+        if (!(error instanceof SessionInboxWireError)) throw error;
+        // Keep the challenge parked after reporting the dropped callback.
+        await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+        continue;
+      }
       return {
         closed: false,
         kind: "authorization",
-        payloads: first.value.kind === "deliver" ? first.value.payloads : [],
+        payloads: decoded.kind === "deliver" ? decoded.payloads : [],
       };
     }
 

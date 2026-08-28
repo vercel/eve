@@ -118,6 +118,14 @@ during a deployment transition. Its migration accepts either pre-version name;
 the other version-1 migrations are identity stamps that preserve additive
 fields.
 
+Connection authorization callbacks use the same target-aware `sessionInboxWire`
+boundary as stable and continuation session deliveries. The callback route
+inspects the target hook before encoding, including the existing markerless
+stable-inbox classification, and the authorization source decodes before it
+interprets callback payloads. An unknown payload version is reported through the
+dropped-wire step and leaves the authorization challenge parked rather than
+reinterpreting or consuming it silently.
+
 The registry that creates the manifest also owns the stable workflow IDs used
 by runtime references and the workflow bundler. Tests transform every real
 stable workflow declaration and compare the emitted ID with the registry. A
