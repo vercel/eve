@@ -274,6 +274,9 @@ export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
     );
   }
 
+  await executeCommand(process.execPath, [vendorCompiledScriptPath(options)], {
+    cwd: options.packageRoot,
+  });
   await executeCommand(
     process.execPath,
     [resolveTscCliPath({ tscCliPath: options.tscCliPath }), "-p", "tsconfig.json"],

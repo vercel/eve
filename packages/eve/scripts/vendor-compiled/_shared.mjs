@@ -427,7 +427,10 @@ export async function runVendor({
 
   const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot, toolVersions });
 
-  if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+  if (
+    stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+    (await compiledModulesExist({ compiledRoot, modules }))
+  ) {
     console.log("Compiled vendor modules are already up to date.");
     return;
   }
@@ -435,7 +438,10 @@ export async function runVendor({
   await acquireLock(lockPath);
   try {
     // A peer process may have completed while we waited for the lock.
-    if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+    if (
+      stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+      (await compiledModulesExist({ compiledRoot, modules }))
+    ) {
       console.log("Compiled vendor modules are already up to date.");
       return;
     }
@@ -459,6 +465,16 @@ export async function runVendor({
   } finally {
     await releaseLock(lockPath);
   }
+}
+
+async function compiledModulesExist({ compiledRoot, modules }) {
+  const paths = await Promise.all(
+    modules.map(async (module) => {
+      const stats = await stat(join(compiledRoot, module.compiledPath)).catch(() => null);
+      return stats?.isDirectory() ?? false;
+    }),
+  );
+  return paths.every(Boolean);
 }
 
 /**
