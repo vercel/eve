@@ -17,7 +17,7 @@ The compatibility harness then runs that value through the current boundary:
 historical producer
   -> JSON transport
   -> current hydrate
-  -> current migration
+  -> current boundary operation
   -> current serialize
   -> repeat the same pass
   -> simulate rollback
@@ -25,7 +25,7 @@ historical producer
 ```
 
 The repeated pass must serialize to exactly the same value. This catches
-migrations that appear to work once but keep changing durable state every time a
+operations that appear to work once but keep changing durable state every time a
 worker resumes.
 
 Rollback testing adds a sacrificial mutation and verifies that it is discarded.
@@ -33,7 +33,7 @@ It also checks that every declared compatibility key survives and that unrelated
 original state is unchanged. This prevents a test from passing when its rollback
 function simply returns the interrupted value.
 
-Domain assertions are still required. A migration can reach a stable but wrong
+Domain assertions are still required. A boundary can reach a stable but wrong
 result, so each consumer must assert the behavior it cares about: IDs, admission,
 capture flags, versions, or anything else with user-visible meaning.
 
@@ -51,15 +51,17 @@ enabled. For session instrumentation, isolated child processes load the pinned
 use a process-global registry; loading old and current implementations together
 would let the historical codecs replace the current ones.
 
-The checked-in snapshot shows three useful stages:
+The session instrumentation snapshot shows the two useful durable stages:
 
 - `source`: what the historical producer emitted
-- `migrated`: what current code persisted after migration
-- `rollback`: what survived cancellation rollback
+- `exercised`: what current code persisted after exercising the boundary
 
-Snapshot updates do not bypass semantic assertions. If migration reevaluates a
-frozen policy, changes a trace ID, widens content capture, or drops a required
-alias, capture fails before the new snapshot can be accepted.
+Rollback is checked structurally: declared keys must survive, original keys must
+remain unchanged, and no undeclared interrupted-state key may leak through.
+
+Snapshot updates do not bypass semantic assertions. If current code changes an
+ID, rewrites durable state unexpectedly, or drops a required field, capture
+fails before the new snapshot can be accepted.
 
 Normal verification never updates snapshots:
 
@@ -73,12 +75,11 @@ pnpm --filter eve test:durable-compatibility
    commands discover it.
 2. Provide a `capture` callback backed by the real historical producer. Use
    `serialized` only when executable historical code is unavailable.
-3. Provide the current `hydrate`, `migrate`, and `serialize` operations.
+3. Provide the current `hydrate`, `exercise`, and `serialize` operations.
 4. Add an `assert` callback for the boundary's semantic contract.
 5. Add rollback handling and list every key that must survive, when applicable.
-6. Run the capture command once, inspect the generated source and migrated
+6. Run the capture command once, inspect the generated source and exercised
    snapshots, then run the verification command without `-u`.
 
-Keep the harness test-only. Production migrations should continue using their
-own explicit, versioned code; this framework verifies those migrations rather
-than replacing them.
+Keep the harness test-only. Production compatibility logic should continue using
+its own explicit code; this framework verifies it rather than replacing it.

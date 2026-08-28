@@ -4,7 +4,7 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
 type Awaitable<T> = T | PromiseLike<T>;
 
-export interface FrozenDurableBoundaryFixture<TExpected = unknown> {
+export interface DurableBoundaryFixture<TExpected = unknown> {
   readonly capture?: () => Awaitable<unknown>;
   readonly expected: TExpected;
   readonly name: string;
@@ -20,7 +20,7 @@ export interface DurableBoundaryPass<TState, TObservation> {
 
 export interface DurableBoundaryCompatibilityResult<TState, TObservation, TExpected> {
   readonly first: DurableBoundaryPass<TState, TObservation>;
-  readonly fixture: FrozenDurableBoundaryFixture<TExpected>;
+  readonly fixture: DurableBoundaryFixture<TExpected>;
   readonly repeated: DurableBoundaryPass<TState, TObservation>;
   readonly rollback?: DurableBoundaryPass<TState, TObservation>;
   readonly rollbackSerialized?: JsonValue;
@@ -32,9 +32,9 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
     result: DurableBoundaryCompatibilityResult<TState, TObservation, TExpected>,
   ) => Awaitable<void>;
   readonly boundary: string;
-  readonly fixture: FrozenDurableBoundaryFixture<TExpected>;
+  readonly fixture: DurableBoundaryFixture<TExpected>;
   readonly hydrate: (serialized: JsonValue) => Awaitable<TState>;
-  readonly migrate: (state: TState) => Awaitable<TObservation>;
+  readonly exercise: (state: TState) => Awaitable<TObservation>;
   readonly rollback?: {
     readonly apply: (
       original: Record<string, unknown>,
@@ -60,7 +60,7 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
   }
 
   const original = requireRecord(source, "fixture source");
-  const interrupted = requireRecord(first.serialized, "first migrated value");
+  const interrupted = requireRecord(first.serialized, "first exercised value");
   const rollbackProbeKey = "__eveDurableBoundaryRollbackProbe";
   assert.ok(!Object.hasOwn(original, rollbackProbeKey));
   const interruptedWithProbe = { ...cloneRecord(interrupted), [rollbackProbeKey]: true };
@@ -78,6 +78,13 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
       rolledBack[key],
       interrupted[key],
       `${input.boundary} fixture "${input.fixture.name}" did not preserve "${key}" during rollback`,
+    );
+  }
+  const allowedKeys = new Set([...Object.keys(original), ...input.rollback.preservedKeys]);
+  for (const key of Object.keys(rolledBack)) {
+    assert.ok(
+      allowedKeys.has(key),
+      `${input.boundary} fixture "${input.fixture.name}" retained undeclared rollback key "${key}"`,
     );
   }
   for (const [key, value] of Object.entries(original)) {
@@ -109,15 +116,15 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
 
 async function runPass<TState, TObservation, TExpected>(
   input: {
-    readonly fixture: FrozenDurableBoundaryFixture<TExpected>;
+    readonly fixture: DurableBoundaryFixture<TExpected>;
     readonly hydrate: (serialized: JsonValue) => Awaitable<TState>;
-    readonly migrate: (state: TState) => Awaitable<TObservation>;
+    readonly exercise: (state: TState) => Awaitable<TObservation>;
     readonly serialize: (state: TState) => Awaitable<unknown>;
   },
   serialized: JsonValue,
 ): Promise<DurableBoundaryPass<TState, TObservation>> {
   const state = await input.hydrate(jsonTransport(serialized));
-  const observation = await input.migrate(state);
+  const observation = await input.exercise(state);
   return {
     observation,
     serialized: jsonTransport(await input.serialize(state)),
@@ -125,10 +132,7 @@ async function runPass<TState, TObservation, TExpected>(
   };
 }
 
-async function loadFixture(
-  boundary: string,
-  fixture: FrozenDurableBoundaryFixture,
-): Promise<JsonValue> {
+async function loadFixture(boundary: string, fixture: DurableBoundaryFixture): Promise<JsonValue> {
   if (fixture.capture === undefined && fixture.serialized === undefined) {
     throw new Error(`${boundary} fixture "${fixture.name}" has no capture or frozen JSON`);
   }

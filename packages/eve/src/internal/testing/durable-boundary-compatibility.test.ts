@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { assertDurableBoundaryCompatibility } from "#internal/testing/durable-boundary-compatibility.js";
 
 describe("assertDurableBoundaryCompatibility", () => {
-  it("replays a frozen fixture to a durable fixed point", async () => {
+  it("replays a historical fixture to a durable fixed point", async () => {
     const result = await assertDurableBoundaryCompatibility({
       assert: () => undefined,
       boundary: "test counter",
@@ -14,7 +14,7 @@ describe("assertDurableBoundaryCompatibility", () => {
         source: "test@v0",
       },
       hydrate: (serialized) => serialized as { counter: number },
-      migrate: (state) => {
+      exercise: (state) => {
         if (state.counter === 0) state.counter = 1;
         return state.counter;
       },
@@ -37,19 +37,19 @@ describe("assertDurableBoundaryCompatibility", () => {
         source: "test@v0",
       },
       hydrate: (serialized) => serialized as Record<string, unknown>,
-      migrate: (state) => {
-        state.canonical = { version: 1 };
+      exercise: (state) => {
+        state.retained = { version: 1 };
         return true;
       },
       rollback: {
-        apply: (original, interrupted) => ({ ...original, canonical: interrupted.canonical }),
-        preservedKeys: ["canonical"],
+        apply: (original, interrupted) => ({ ...original, retained: interrupted.retained }),
+        preservedKeys: ["retained"],
       },
       serialize: (state) => state,
     });
 
     expect(result.rollbackSerialized).toEqual({
-      canonical: { version: 1 },
+      retained: { version: 1 },
       unrelated: "original",
     });
     expect(result.rollback?.serialized).toEqual(result.first.serialized);
@@ -67,14 +67,44 @@ describe("assertDurableBoundaryCompatibility", () => {
           source: "test@v0",
         },
         hydrate: (serialized) => serialized as Record<string, unknown>,
-        migrate: () => true,
+        exercise: () => true,
         rollback: {
           apply: (original) => original,
-          preservedKeys: ["canonical"],
+          preservedKeys: ["retained"],
         },
         serialize: (state) => state,
       }),
-    ).rejects.toThrow('did not produce preserved key "canonical"');
+    ).rejects.toThrow('did not produce preserved key "retained"');
+  });
+
+  it("rejects undeclared rollback state", async () => {
+    await expect(
+      assertDurableBoundaryCompatibility({
+        assert: () => undefined,
+        boundary: "test rollback",
+        exercise: (state: Record<string, unknown>) => {
+          state.retained = true;
+          state.leaked = true;
+          return true;
+        },
+        fixture: {
+          expected: true,
+          name: "leaked key",
+          serialized: "{}",
+          source: "test@v0",
+        },
+        hydrate: (serialized) => serialized as Record<string, unknown>,
+        rollback: {
+          apply: (original, interrupted) => ({
+            ...original,
+            leaked: interrupted.leaked,
+            retained: interrupted.retained,
+          }),
+          preservedKeys: ["retained"],
+        },
+        serialize: (state) => state,
+      }),
+    ).rejects.toThrow('retained undeclared rollback key "leaked"');
   });
 
   it("rejects drift between an executable producer and frozen JSON", async () => {
@@ -90,7 +120,7 @@ describe("assertDurableBoundaryCompatibility", () => {
           source: "test@v1",
         },
         hydrate: (serialized) => serialized,
-        migrate: () => true,
+        exercise: () => true,
         serialize: (state) => state,
       }),
     ).rejects.toThrow("no longer matches its historical producer");
@@ -108,7 +138,7 @@ describe("assertDurableBoundaryCompatibility", () => {
           source: "test@v0",
         },
         hydrate: (serialized) => serialized,
-        migrate: () => true,
+        exercise: () => true,
         serialize: (state) => state,
       }),
     ).rejects.toThrow("Expected a JSON-serializable value");
