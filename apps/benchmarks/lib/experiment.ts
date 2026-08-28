@@ -16,6 +16,7 @@ export function authoringExperiment(options: {
   readonly verbose?: boolean;
 }): ExperimentConfig {
   const agent = createAuthoringAgent({
+    harness: options.benchmark.harness,
     model: options.benchmark.model,
     archive: options.archive,
     dependencyArchive: options.dependencyArchive,

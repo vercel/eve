@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
-import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
+import type { HarnessV1, HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
 import type { HarnessAgentSession } from "@ai-sdk/harness/agent";
 import { HarnessAgent } from "@ai-sdk/harness/agent";
+import { createClaudeCode } from "@ai-sdk/harness-claude-code";
 import { createOpenCode } from "@ai-sdk/harness-opencode";
 import type { Agent, AgentRunResult } from "@vercel/agent-eval";
 import { z } from "zod";
@@ -12,6 +13,7 @@ import type {
   AuthoringSetupContext,
   AuthoringTurn,
 } from "./authoring-case.js";
+import type { AuthoringBenchmarkModel } from "./benchmark-config.js";
 import { createDependencyCachedSandbox } from "./dependency-sandbox.js";
 import { loadAuthoringCase } from "./load-authoring-case.js";
 import {
@@ -49,10 +51,7 @@ const TURN_SETTLE_MILLIS = 15_000;
 // the turn, so the harness answers it immediately and points the agent at the
 // channel this benchmark can answer on: its reply, which the case's next `send`
 // responds to.
-type AuthoringHarnessAgent = HarnessAgent<
-  ReturnType<typeof createOpenCode>,
-  typeof INTERACTIVE_QUESTION_TOOL
->;
+type AuthoringHarnessAgent = HarnessAgent<HarnessV1, typeof INTERACTIVE_QUESTION_TOOL>;
 
 const INTERACTIVE_QUESTION_TOOL = {
   question: {
@@ -64,6 +63,7 @@ const INTERACTIVE_QUESTION_TOOL = {
 };
 
 export function createAuthoringAgent(subject: {
+  readonly harness: AuthoringBenchmarkModel["harness"];
   readonly model: string;
   readonly archive: Uint8Array;
   readonly dependencyArchive: Uint8Array;
@@ -71,15 +71,15 @@ export function createAuthoringAgent(subject: {
   readonly dependencyDigest: string;
 }): Agent {
   return {
-    name: "opencode",
-    displayName: "eve authoring harness",
+    name: harnessId(subject.harness),
+    displayName: `${subject.harness} eve authoring harness`,
     getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
     getDefaultModel: () => subject.model,
     definition: {
-      name: "opencode",
-      displayName: "eve authoring harness",
+      name: harnessId(subject.harness),
+      displayName: `${subject.harness} eve authoring harness`,
       defaultModel: subject.model,
-      o11yAgentName: "opencode",
+      o11yAgentName: harnessId(subject.harness),
       runnerPath: "",
       getApiKeyEnvVar: () => "AI_GATEWAY_API_KEY",
       install: () => [],
@@ -126,11 +126,7 @@ export function createAuthoringAgent(subject: {
 
       const agent = new HarnessAgent({
         id: "eve-authoring-eval",
-        harness: createOpenCode({
-          auth: "ai-gateway",
-          model: openCodeModel(options.model ?? subject.model),
-          port: HARNESS_BRIDGE_PORT,
-        }),
+        harness: createHarness(subject.harness, options.model ?? subject.model),
         sandbox,
         tools: INTERACTIVE_QUESTION_TOOL,
         sandboxConfig: {
@@ -509,6 +505,21 @@ function addUsage(total: Record<string, number>, value: unknown): void {
       total[field] += amount;
     }
   }
+}
+
+function createHarness(harness: AuthoringBenchmarkModel["harness"], model: string): HarnessV1 {
+  if (harness === "Claude Code") {
+    return createClaudeCode({ auth: { gateway: {} }, model });
+  }
+  return createOpenCode({
+    auth: "ai-gateway",
+    model: openCodeModel(model),
+    port: HARNESS_BRIDGE_PORT,
+  });
+}
+
+function harnessId(harness: AuthoringBenchmarkModel["harness"]): string {
+  return harness === "Claude Code" ? "claude-code" : "opencode";
 }
 
 function openCodeModel(model: string): string {
