@@ -12,7 +12,6 @@ import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-cont
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
-import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
   type TurnStepInput,
@@ -107,9 +106,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       };
       const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
       const pendingActionKeys =
-        result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
-          ? result.pendingRuntimeActionKeys
-          : undefined;
+        result.action === "park" ? result.pendingRuntimeActionKeys : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
 
       if (hasBackgroundTasks) {
@@ -195,9 +192,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         await cursor.adopt(result);
         const hasPendingTasks = result.action === "park" && result.tasksEnabled;
         let dispatch;
-        if (result.action === "dispatch-workflow-runtime-actions") {
-          dispatch = dispatchWorkflowRuntimeActionsStep;
-        } else if (hasPendingTasks) {
+        if (hasPendingTasks) {
           dispatch = dispatchTaskStep;
         } else {
           dispatch = dispatchRuntimeActionsStep;
@@ -398,8 +393,10 @@ async function waitForRuntimeActionResults(input: {
       // dispatch failed — is dropped; the genuine child's result (or the
       // dispatch error already in `results`) still resolves the wait.
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
-      const accepted = value.results.filter((result) =>
-        isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
+      const accepted = value.results.filter(
+        (result) =>
+          result.kind === "subagent-result" &&
+          isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
       );
       if (accepted.length > 0) {
         const acceptedAtMs = Date.now();
@@ -473,22 +470,6 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
               sessionState: result.sessionState,
               usage: result.usage,
               usageDelta: result.usageDelta,
-            },
-            kind: "turn-result",
-          },
-        });
-        return;
-      }
-
-      if (result.action === "dispatch-workflow-runtime-actions") {
-        await sendTurnControlStep({
-          controlToken: input.completionToken,
-          payload: {
-            action: {
-              kind: "dispatch-workflow-runtime-actions",
-              pendingActionKeys: result.pendingRuntimeActionKeys,
-              serializedContext: result.serializedContext,
-              sessionState: result.sessionState,
             },
             kind: "turn-result",
           },

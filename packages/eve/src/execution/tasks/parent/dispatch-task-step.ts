@@ -90,7 +90,6 @@ export async function dispatchTaskStep(
         results.push(control.result);
         continue;
       }
-
       if (entry.kind === "resume") {
         const busy = await checkTaskContinuationAvailability({
           action: entry.action,

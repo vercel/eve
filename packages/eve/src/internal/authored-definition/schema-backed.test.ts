@@ -4,7 +4,6 @@ import { z } from "#compiled/zod/index.js";
 
 import { defineDynamic } from "#dynamic/definition.js";
 import { defineTool, disableTool } from "#tools/definition.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { once } from "#tools/approval/policies.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
@@ -80,15 +79,6 @@ describe("normalizeToolDefinition", () => {
     expect(entry).toEqual({ kind: "disabled" });
   });
 
-  it("returns a configured entry for the experimental Workflow tool", () => {
-    const entry = normalizeToolDefinition(
-      experimental_workflow({ maxSubagents: 6 }),
-      FAILURE_MESSAGE,
-    );
-
-    expect(entry).toEqual({ kind: "workflow-tool", maxSubagents: 6 });
-  });
-
   it("returns a configured entry for the provider-managed web search tool", () => {
     expect(normalizeToolDefinition(webSearch({ provider: "exa" }), FAILURE_MESSAGE)).toEqual({
       kind: "web-search-tool",
@@ -100,15 +90,6 @@ describe("normalizeToolDefinition", () => {
     expect(() =>
       normalizeToolDefinition({ kind: "eve:web-search-tool", provider: "other" }, FAILURE_MESSAGE),
     ).toThrow('Expected "provider" to be one of: exa, parallel');
-  });
-
-  it.each([0, 1.5, -1, "6"])("rejects invalid workflow max subagents %j", (maxSubagents) => {
-    expect(() =>
-      normalizeToolDefinition(
-        experimental_workflow({ maxSubagents: maxSubagents as number }),
-        FAILURE_MESSAGE,
-      ),
-    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("rejects authored tool exports that carry an authored `name` field", () => {

@@ -1,0 +1,31 @@
+diff --git a/dist/runtime/manager.js b/dist/runtime/manager.js
+index 275028b94..57fee067d 100644
+--- a/dist/runtime/manager.js
++++ b/dist/runtime/manager.js
+@@ -47,6 +47,7 @@ export function getDefaultCodeModeWorkerUrl() {
+ }
+ export async function runManagedCodeMode(input) {
+     const normalizedOptions = normalizeOptions(input.options);
++    const settleDeadline = Date.now() + normalizedOptions.timeoutMs;
+     const continuationSecurity = resolveCodeModeContinuationSecurity(input.options?.continuationSecurity);
+     const maxWorkers = getMaxWorkers({
+         memoryLimitBytes: normalizedOptions.memoryLimitBytes,
+@@ -78,7 +79,17 @@ export async function runManagedCodeMode(input) {
+         });
+         releaseSlotOnExit = false;
+         void run.accountingDone.then(() => releaseInvocationSlot(normalizedOptions.memoryLimitBytes), () => releaseInvocationSlot(normalizedOptions.memoryLimitBytes));
+-        return await run.result;
++        let deadline;
++        const deadlinePromise = new Promise((resolve) => {
++            deadline = setTimeout(resolve, Math.max(0, settleDeadline - Date.now()));
++        });
++        try {
++            return await run.result;
++        }
++        finally {
++            await Promise.race([run.accountingDone, deadlinePromise]);
++            clearTimeout(deadline);
++        }
+     }
+     finally {
+         if (releaseSlotOnExit) {

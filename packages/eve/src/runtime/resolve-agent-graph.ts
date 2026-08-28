@@ -20,7 +20,7 @@ import { createRuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createRuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import { CODE_MODE_TOOL_NAME } from "#harness/code-mode-sandbox.js";
 import { createWorkspacePromptSection } from "#runtime/workspace/spec.js";
 import type {
   ResolvedDynamicSubagentDefinition,
@@ -138,7 +138,7 @@ async function resolveRuntimeAgentNode(
   const toolRegistry = await createRuntimeToolRegistry(
     { tools: agent.tools },
     {
-      reservedToolNames: [WORKFLOW_TOOL_NAME],
+      reservedToolNames: [CODE_MODE_TOOL_NAME],
     },
   );
 

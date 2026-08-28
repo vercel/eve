@@ -101,6 +101,9 @@ catalogs:
       specifier: 16.3.1
       version: 16.3.1
 
+patchedDependencies:
+  experimental-ai-sdk-code-mode@1.0.16: 98a6cbe6d151363872446f1e9d8759ea3a62c51171f189b7ca7add6dc81ed811
+
 importers:
 
   .:
@@ -691,6 +694,28 @@ importers:
       historical-eve-0-30-8:
         specifier: npm:eve@0.30.8
         version: eve@0.30.8(@opentelemetry/api@1.9.1)(@upstash/redis@1.38.0)(ai@7.0.66(zod@4.4.3))(braintrust@3.24.0(@aws-sdk/credential-provider-web-identity@3.972.49)(supports-color@10.2.2)(zod@4.4.3))(dotenv@17.4.2)(giget@3.3.0)(jiti@2.7.0)(just-bash@3.1.0(supports-color@10.2.2))(microsandbox@0.5.5)(rollup@4.62.2)(vite@8.1.5(@types/node@25.9.1)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
+  e2e/fixtures/agent-code-mode-run:
+    dependencies:
+      '@eve-e2e/config':
+        specifier: workspace:*
+        version: link:../e2e-config
+      '@workflow/world-postgres':
+        specifier: 'catalog:'
+        version: 5.0.0-beta.35(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+      eve:
+        specifier: workspace:*
+        version: link:../../../packages/eve
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.9.1
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -1435,7 +1460,7 @@ importers:
         version: 3.1.0
       experimental-ai-sdk-code-mode:
         specifier: 1.0.16
-        version: 1.0.16(ai@7.0.58(zod@4.4.3))
+        version: 1.0.16(patch_hash=98a6cbe6d151363872446f1e9d8759ea3a62c51171f189b7ca7add6dc81ed811)(ai@7.0.58(zod@4.4.3))
       gray-matter:
         specifier: 4.0.3
         version: 4.0.3
@@ -25760,7 +25785,7 @@ snapshots:
 
   expect-type@1.3.0: {}
 
-  experimental-ai-sdk-code-mode@1.0.16(ai@7.0.58(zod@4.4.3)):
+  experimental-ai-sdk-code-mode@1.0.16(patch_hash=98a6cbe6d151363872446f1e9d8759ea3a62c51171f189b7ca7add6dc81ed811)(ai@7.0.58(zod@4.4.3)):
     dependencies:
       ai: 7.0.58(zod@4.4.3)
 

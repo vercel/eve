@@ -40,7 +40,7 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-import type { CompiledAgentManifest } from "#compiler/manifest.js";
+import type { CompiledAgentDefinition, CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
  * Bare `workflow/*` specifiers that appear in pre-built workflow bundles.
@@ -87,10 +87,21 @@ function resolveProductionNitroPreset(): "vercel" | undefined {
   return process.env.VERCEL ? "vercel" : undefined;
 }
 
-/** Whether any agent needs the dynamic Workflow sandbox runtime. */
-function manifestEnablesWorkflow(manifest: CompiledAgentManifest): boolean {
+/** Whether any agent needs the code-mode QuickJS runtime. */
+function manifestNeedsCodeModeRuntime(manifest: CompiledAgentManifest): boolean {
   const nodes = [manifest, ...manifest.subagents.map((subagent) => subagent.agent)];
-  return nodes.some((node) => node.workflowTool !== undefined);
+  return nodes.some(nodeEnablesCodeMode);
+}
+
+/**
+ * Whether a compiled agent node opts into the experimental `code_mode`
+ * sandbox. Dynamic subagent resource nodes carry no static config; they
+ * cannot enable code mode.
+ */
+function nodeEnablesCodeMode(node: object): boolean {
+  if (!("config" in node)) return false;
+  const config = (node as { readonly config?: CompiledAgentDefinition }).config;
+  return config?.experimental?.codeMode === true;
 }
 
 function manifestHasWebSocketChannel(manifest: CompiledAgentManifest): boolean {
@@ -670,9 +681,9 @@ function createApplicationNitroPlugins(preparedHost: PreparedApplicationHost): s
     preparedHost.compiledArtifacts.bootstrapPath,
     preparedHost.compiledArtifacts.workflowWorldPluginPath,
   ];
-  if (manifestEnablesWorkflow(preparedHost.compileResult.manifest)) {
+  if (manifestNeedsCodeModeRuntime(preparedHost.compileResult.manifest)) {
     nitroPlugins.push(
-      resolvePackageSourceFilePath("src/internal/nitro/host/workflow-sandbox-runtime-plugin.ts"),
+      resolvePackageSourceFilePath("src/internal/nitro/host/code-mode-runtime-plugin.ts"),
     );
   }
   if (preparedHost.compiledArtifacts.instrumentationPluginPath !== undefined) {

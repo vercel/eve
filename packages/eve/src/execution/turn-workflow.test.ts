@@ -4,7 +4,6 @@ import type { HookPayload } from "#channel/types.js";
 import { SessionDynamicModelReferenceKey } from "#context/keys.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
-import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
@@ -45,10 +44,6 @@ vi.mock("./workflow-steps.js", () => ({
 
 vi.mock("./dispatch-runtime-actions-step.js", () => ({
   dispatchRuntimeActionsStep: vi.fn(),
-}));
-
-vi.mock("./dispatch-workflow-runtime-actions-step.js", () => ({
-  dispatchWorkflowRuntimeActionsStep: vi.fn(),
 }));
 
 vi.mock("./cancel-descendant-turns-step.js", () => ({
@@ -748,64 +743,6 @@ describe("turnWorkflow", () => {
     expect(vi.mocked(dispatchRuntimeActionsStep).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(cancelDescendantTurnsStep).mock.invocationCallOrder[0]!,
     );
-  });
-
-  it("keeps dynamic-workflow child dispatch and immediate remote failures in the same turn", async () => {
-    const now = vi.spyOn(Date, "now").mockReturnValue(2_345);
-    const pendingState = createSessionState();
-    const completedState = createSessionState();
-    installInbox([]);
-    vi.mocked(dispatchWorkflowRuntimeActionsStep).mockResolvedValue({
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          origin: "dispatch",
-          output: { code: "REMOTE_AGENT_START_FAILED", message: "remote unavailable" },
-          subagentName: "research",
-        },
-      ],
-      sessionState: pendingState,
-      pendingTasks: [],
-    });
-    vi.mocked(turnStep)
-      .mockResolvedValueOnce({
-        action: "dispatch-workflow-runtime-actions",
-        pendingRuntimeActionKeys: ["subagent-call:research:call-1"],
-        serializedContext: { state: "pending" },
-        sessionState: pendingState,
-      })
-      .mockResolvedValueOnce({
-        action: "done",
-        output: "handled failure",
-        serializedContext: { state: "done" },
-        sessionState: completedState,
-      });
-
-    const { input, parentWritable } = createInput({
-      driverCapabilities: { turnInbox: true },
-      mode: "task",
-      sessionState: pendingState,
-    });
-    await turnWorkflow(input);
-
-    expect(dispatchWorkflowRuntimeActionsStep).toHaveBeenCalledWith({
-      callbackBaseUrl: "https://eve.example.com",
-      parentContinuationToken: "turn-token:inbox",
-      parentWritable,
-      serializedContext: { state: "pending" },
-      sessionState: pendingState,
-    });
-    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toEqual({
-      acceptedAtMsByCallId: { "call-1": 2_345 },
-      kind: "runtime-action-result",
-      results: [expect.objectContaining({ callId: "call-1", isError: true })],
-    });
-    expect(
-      resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-result"),
-    ).toHaveLength(1);
-    now.mockRestore();
   });
 
   it("proxies child HITL and pulls the response through the active turn", async () => {

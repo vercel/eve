@@ -33,6 +33,7 @@
  *   bundling?: "shared" | "standalone",  // default "shared"
  *   banner?: string,               // standalone bundle prelude
  *   chunkGroup?: string,                  // default "node"
+ *   fingerprintFiles?: string[],   // package-relative files hashed into the vendor stamp
  *   typeOnly?: boolean,                   // skips JS bundling entirely
  * }
  * ```
@@ -838,18 +839,28 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     scriptHash.update("\0");
   }
 
-  const moduleVersions = {};
+  const moduleFingerprints = {};
   for (const module of modules) {
-    const { packageJson } = await findPackageJson(
+    const { packageJson, packageRoot: moduleRoot } = await findPackageJson(
       module.packageName,
       packageRoot,
       module.packageJsonName,
     );
-    moduleVersions[module.packageName] = packageJson.version ?? "0.0.0";
+    const hash = createHash("sha256");
+    for (const file of [...(module.fingerprintFiles ?? [])].sort()) {
+      hash.update(file);
+      hash.update("\0");
+      hash.update(await readFile(join(moduleRoot, file)));
+      hash.update("\0");
+    }
+    moduleFingerprints[module.packageName] = {
+      contentHash: hash.digest("hex"),
+      version: packageJson.version ?? "0.0.0",
+    };
   }
 
   return {
-    moduleVersions,
+    moduleFingerprints,
     scriptHash: scriptHash.digest("hex"),
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),

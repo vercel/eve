@@ -15,7 +15,7 @@ import {
   resolveModelEndpointStatus,
 } from "#internal/resolve-model-endpoint-status.js";
 import type { ChatGptAuthState } from "#public/models/openai/chatgpt/token-broker.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
+import { CODE_MODE_TOOL_NAME } from "#harness/code-mode-sandbox.js";
 
 export type AgentInfoResponse = AgentInfoResult;
 
@@ -209,13 +209,9 @@ export function buildAgentInfoResponse(
     },
     version: 4,
     workflow:
-      manifest.workflowTool === undefined
-        ? { enabled: false, toolName: WORKFLOW_TOOL_NAME }
-        : {
-            enabled: true,
-            source: toModuleSource(manifest, manifest.workflowTool),
-            toolName: WORKFLOW_TOOL_NAME,
-          },
+      manifest.config.experimental?.codeMode !== true
+        ? { enabled: false, toolName: CODE_MODE_TOOL_NAME }
+        : { enabled: true, source: configSource, toolName: CODE_MODE_TOOL_NAME },
     workspace: {
       resourceRoot: manifest.workspaceResourceRoot,
       rootEntries: [...manifest.workspaceResourceRoot.rootEntries],

@@ -26,7 +26,6 @@ import { resolveAgent } from "#runtime/resolve-agent.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
-import { experimental_workflow } from "#tools/workflow.js";
 import { webSearch } from "#tools/provided/web-search.js";
 
 function manifest() {
@@ -208,10 +207,6 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
-        logicalPath: "tools/workflow.ts",
-        loadNamespace: async () => ({ default: experimental_workflow() }),
-      },
-      {
         logicalPath: "tools/web_search.ts",
         loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
       },
@@ -252,7 +247,6 @@ describe("compileAgentManifest source graph", () => {
       "tools/dynamic.ts": { compile: true, runtimeEntry: true },
       "tools/executable.ts": { compile: true, runtimeEntry: true },
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
-      "tools/workflow.ts": { compile: true, runtimeEntry: false },
     });
   });
 

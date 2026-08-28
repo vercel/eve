@@ -88,6 +88,13 @@ import {
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
+  asSchema: vi.fn((schema: unknown) => ({
+    jsonSchema: schema,
+    validate:
+      schema === undefined
+        ? undefined
+        : async (value: unknown) => ({ success: true as const, value }),
+  })),
   gateway: {
     tools: {
       exaSearch: vi.fn(() => ({})),
@@ -954,6 +961,91 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
+  it("includes a selected same-named dynamic tool in code mode", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "test-session",
+      turn: { id: "turn-test", sequence: 0 },
+    });
+    registerDurableDynamicCallback({
+      callback: async () => ({ value: 42 }),
+      phase: "execute",
+      toolName: "dynamic_query",
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: { execute: { closure: {} } },
+        description: "Run a dynamic query.",
+        entryKey: "dynamic_query",
+        inputSchema: { type: "object" },
+        name: "dynamic_query",
+        outputSchema: {
+          properties: { value: { type: "number" } },
+          required: ["value"],
+          type: "object",
+        },
+        resolverSlug: "dynamic_query",
+      },
+    ]);
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { codeMode: true }),
+    );
+    await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" }));
+
+    const tools = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].tools;
+    expect(tools).toHaveProperty("code_mode");
+    expect(tools).toHaveProperty("dynamic_query");
+    expect(tools?.code_mode?.description).toContain("Progressive catalog: 1 tools");
+  });
+
+  it("rejects a request-visible dynamic tool named code_mode", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const ctx = new ContextContainer();
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "test-session",
+      turn: { id: "turn-test", sequence: 0 },
+    });
+    registerDurableDynamicCallback({
+      callback: async () => ({ value: 42 }),
+      phase: "execute",
+      toolName: "code_mode",
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: { execute: { closure: {} } },
+        description: "Collide with code mode.",
+        entryKey: "code_mode",
+        inputSchema: { type: "object" },
+        name: "code_mode",
+        outputSchema: { type: "object" },
+        resolverSlug: "code-mode",
+      },
+    ]);
+
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
+    await expect(
+      contextStorage.run(ctx, () => runStep(createTestSession(), { message: "Hi" })),
+    ).rejects.toThrow("uses a reserved framework tool name");
+  });
+
   it("registers atomic background tool calls before AI SDK execution", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -1799,74 +1891,6 @@ describe("createToolLoopHarness", () => {
       }),
     ]);
     expect(getPendingRuntimeActionBatch(result.session.state)?.actions).toHaveLength(1);
-  });
-
-  it("keeps declared subagent tools when Workflow is unavailable outside the root", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const config = createTestConfig("conversation", undefined, {
-      workflow: true,
-      tools: new Map([
-        [
-          "delegate",
-          {
-            description: "Delegate to a subagent.",
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "delegate",
-            runtimeAction: {
-              kind: "subagent-call",
-              nodeId: "workers",
-              subagentName: "worker",
-            },
-          },
-        ],
-      ]),
-    });
-    const runStep = createToolLoopHarness(config);
-
-    await runStep(createTestSession({ subagentDepth: 99 }), {
-      message: "Hi",
-    });
-
-    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(agentCall).toBeDefined();
-    expect(agentCall!.tools).toHaveProperty("delegate");
-    expect(agentCall!.tools).not.toHaveProperty("Workflow");
-  });
-
-  it("omits Workflow from runtime subagent sessions", async () => {
-    setupMockAgent({
-      finishReason: "stop",
-      response: { messages: [{ content: "Hello!", role: "assistant" }] },
-      text: "Hello!",
-      toolCalls: [],
-      toolResults: [],
-    });
-
-    const config = createTestConfig("conversation", undefined, {
-      workflow: true,
-      tools: createDelegationToolMap(),
-    });
-    const runStep = createToolLoopHarness(config);
-
-    await runStep(
-      createTestSession({
-        rootSessionId: "root-session",
-        subagentDepth: 1,
-      }),
-      { message: "Hi" },
-    );
-
-    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
-    expect(agentCall).toBeDefined();
-    expect(agentCall!.tools).toHaveProperty("delegate");
-    expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
   it("forwards the agent reasoning effort to the model call", async () => {

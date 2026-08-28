@@ -28,7 +28,6 @@ import {
   type TaskExec,
   type ToolDefinition,
 } from "#public/tools/index.js";
-import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -51,7 +50,6 @@ describe("definition helper exact inputs", () => {
     expect(agent.limits.maxInputTokensPerSession).toBe(200_000);
     expect(agent.limits.maxOutputTokensPerSession).toBe(20_000);
     expect(agent.limits.sessionTimeoutMs).toBe(86_400_000);
-    expect(experimental_workflow({ maxSubagents: 6 }).maxSubagents).toBe(6);
     expect(schedule.cron).toBe("0 9 * * *");
   });
 
@@ -226,15 +224,10 @@ function typeOnlyFixtures(): void {
 
   defineAgent({
     limits: {
-      // @ts-expect-error Workflow fan-out is configured by experimental_workflow.
+      // @ts-expect-error Agent definitions do not accept a subagent fan-out limit.
       maxSubagents: 6,
     },
     model: "anthropic/claude-sonnet-5",
-  });
-
-  experimental_workflow({
-    // @ts-expect-error Workflow maxSubagents must be a number.
-    maxSubagents: "6",
   });
 
   const agentWithName = {

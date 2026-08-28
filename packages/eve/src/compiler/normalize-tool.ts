@@ -17,7 +17,6 @@ import {
 export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
   | { readonly kind: "disabled"; readonly name: string }
-  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | {
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
@@ -57,10 +56,6 @@ export async function compileToolEntry(
 
   if (entry.kind === "disabled") {
     return { kind: "disabled", name: toolName };
-  }
-
-  if (entry.kind === "workflow-tool") {
-    return { kind: "workflow-tool", maxSubagents: entry.maxSubagents };
   }
 
   if (entry.kind === "web-search-tool") {

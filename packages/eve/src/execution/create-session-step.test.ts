@@ -216,22 +216,4 @@ describe("createSessionStep", () => {
       maxOutputTokensPerSession: 20_000,
     });
   });
-
-  it("seeds workflow max subagents from the authored Workflow tool", async () => {
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
-      resolvedAgent: {
-        config: {},
-        workflowTool: { maxSubagents: 5 },
-      },
-      turnAgent: TestTurnAgent,
-    } as never);
-
-    const { state } = await createSessionStep({
-      compiledArtifactsSource: { kind: "bundled" },
-      continuationToken: "http:test",
-      sessionId: "sess-root",
-    });
-
-    expect(state.snapshot?.session.workflowMaxSubagents).toBe(5);
-  });
 });

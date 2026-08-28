@@ -654,7 +654,7 @@ describe("compileAgent", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "0.0.0-test",
-          requires: { extension: 1, tool: 1, instructions: 1 },
+          requires: { extension: 1, tool: 22, instructions: 1 },
         }),
         "node_modules/@acme/crm/extension/index.mjs": "export default {};\n",
         "node_modules/@acme/crm/extension/instructions/policy.mjs":
@@ -1097,7 +1097,7 @@ describe("compileAgent", () => {
     );
   });
 
-  it("rejects the removed experimental.codeMode field", async () => {
+  it("accepts the experimental codeMode boolean", async () => {
     const { agentRoot, appRoot } = await createAppRoot(
       "eve-compile-experimental-code-mode-",
       APP_ROOT_OPTIONS,
@@ -1114,8 +1114,22 @@ describe("compileAgent", () => {
         "",
       ].join("\n"),
     );
+    await mkdir(join(agentRoot, "tools"), { recursive: true });
+    await writeFile(
+      join(agentRoot, "tools/query.mjs"),
+      [
+        "export default {",
+        '  description: "Run a query.",',
+        '  inputSchema: { type: "object" },',
+        '  outputSchema: { type: "object" },',
+        "  execute: async () => ({}),",
+        "};",
+        "",
+      ].join("\n"),
+    );
 
-    await expect(compileAgent({ startPath: appRoot })).rejects.toThrow("codeMode");
+    const result = await compileAgent({ startPath: appRoot });
+    expect(result.manifest.config.experimental?.codeMode).toBe(true);
   });
 
   it("rejects the removed experimental.subagentPersistentSessions field", async () => {

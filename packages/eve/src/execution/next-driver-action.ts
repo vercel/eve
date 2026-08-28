@@ -44,11 +44,6 @@ export type DurableStepResult = (
       readonly sleepDurationMs?: number;
       readonly settled?: SettledTurn;
     }
-  | {
-      readonly action: "dispatch-workflow-runtime-actions";
-      readonly pendingRuntimeActionKeys: readonly string[];
-      readonly sleepDurationMs?: number;
-    }
 ) &
   DurableStepResultFields;
 
@@ -90,12 +85,6 @@ export type NextDriverAction =
     }
   | {
       readonly kind: "dispatch-runtime-actions";
-      readonly pendingActionKeys: readonly string[];
-      readonly sessionState: DurableSessionState;
-      readonly serializedContext: Record<string, unknown>;
-    }
-  | {
-      readonly kind: "dispatch-workflow-runtime-actions";
       readonly pendingActionKeys: readonly string[];
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;

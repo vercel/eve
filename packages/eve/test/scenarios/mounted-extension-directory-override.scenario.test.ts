@@ -12,7 +12,7 @@ const compatibilityManifest = JSON.stringify({
   kind: "eve-extension",
   formatVersion: 1,
   builtWithEve: "0.0.0-test",
-  requires: { extension: 1, tool: 1, dynamicTool: 1, config: 1 },
+  requires: { extension: 1, tool: 22, dynamicTool: 21, config: 1 },
 });
 
 /**
@@ -192,7 +192,7 @@ describe("mounted extension via directory form with override", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "0.0.0-test",
-          requires: { extension: 1, subagent: 3 },
+          requires: { extension: 1, subagent: 6 },
         }),
         "node_modules/@acme/crm/extension/extension.mjs": [
           'import { defineExtension } from "eve/extension";',

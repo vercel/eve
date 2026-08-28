@@ -70,3 +70,6 @@ minimumReleaseAgeExclude:
   - "@workflow/*"
   - nitro
   - workflow
+
+patchedDependencies:
+  experimental-ai-sdk-code-mode@1.0.16: patches/experimental-ai-sdk-code-mode@1.0.16.patch

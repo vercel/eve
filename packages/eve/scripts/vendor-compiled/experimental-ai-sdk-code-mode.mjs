@@ -10,6 +10,7 @@ export default {
   packageName: "experimental-ai-sdk-code-mode",
   compiledPath: "experimental-ai-sdk-code-mode",
   bundling: "standalone",
+  fingerprintFiles: ["dist/runtime/manager.js"],
   copyDeclarations: createDeclarationCopier({
     rewrites: {
       ai: { kind: "external" },

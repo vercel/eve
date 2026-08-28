@@ -43,7 +43,6 @@ export function createHarnessDelegationToolDefinition(
     outputSchema: toOutputSchema(tool.outputSchema) ?? undefined,
     rootOnly: tool.rootOnly,
     runtimeAction,
-    workflowCallable: true,
   };
 }
 
@@ -76,6 +75,5 @@ export function createBackgroundSubagentHarnessDefinition(
     name: tool.name,
     outputSchema: toOutputSchema(definition.outputSchema) ?? undefined,
     rootOnly: tool.rootOnly,
-    workflowCallable: true,
   };
 }

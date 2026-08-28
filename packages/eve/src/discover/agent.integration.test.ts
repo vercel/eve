@@ -41,7 +41,7 @@ const EXTENSION_COMPATIBILITY_MANIFEST = JSON.stringify({
   kind: "eve-extension",
   formatVersion: 1,
   builtWithEve: "0.0.0-test",
-  requires: { extension: 1, tool: 1 },
+  requires: { extension: 1, tool: 22 },
 });
 
 /**

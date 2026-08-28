@@ -17,7 +17,7 @@ The root session receives `agent` by default. The model calls it to delegate a t
 }
 ```
 
-The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent` and `Workflow`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. To run independent tasks in parallel, emit multiple `agent` calls in one response; eve runs the batch concurrently and returns every result before the root continues. Give parallel children non-overlapping write scopes.
+The copy uses the root's instructions, connections, auth, and sandbox. It receives the same tools except for the root-only `agent`, and starts with fresh conversation history and fresh state. Its file writes are immediately visible to the root. To run independent tasks in parallel, emit multiple `agent` calls in one response; eve runs the batch concurrently and returns every result before the root continues. Give parallel children non-overlapping write scopes.
 
 `agent` is intentionally root-only. Copies created by it cannot call `agent`, and declared subagents never receive the built-in tool. If a stale or forced recursive call reaches execution, eve rejects it instead of starting another child session.
 
@@ -151,7 +151,7 @@ eve lowers every subagent visible to the current agent (the root built-in copy, 
 
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
-`Workflow` is also root-only. Child sessions can still call their own declared or remote subagents, but they receive neither `Workflow` nor the built-in `agent`. The Workflow tool's `maxSubagents` option caps the number of calls made by one program (default 100); see [Workflow tool](./concepts/built-in-tools#workflow-tool).
+Code mode does not absorb subagent calls. Child sessions can still call their own declared or remote subagents directly; they do not receive the root-only built-in `agent`.
 
 A directly declared subagent's tool name is the bare path-derived name, with no prefix. `agent/subagents/researcher/` registers as the tool `researcher`. A subagent supplied by a mounted extension includes the mount namespace, such as `crm__reviewer`. The model, approvals, logs, and evals reference the resulting name. Its input schema is:
 
@@ -188,4 +188,3 @@ Split out a subagent when the task needs a different prompt or specialist role, 
 ## What to read next
 
 - [Remote agents](./guides/remote-agents): call another eve deployment as a subagent.
-- [Workflow tool](./concepts/built-in-tools#workflow-tool): have the model orchestrate its subagents programmatically (fan-out, map-reduce).

@@ -1,0 +1,21 @@
+{
+  "name": "agent-code-mode-run",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "eve build",
+    "test:e2e": "eve eval --strict",
+    "typecheck": "eve build && tsc"
+  },
+  "dependencies": {
+    "@eve-e2e/config": "workspace:*",
+    "@workflow/world-postgres": "catalog:",
+    "eve": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

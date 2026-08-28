@@ -192,6 +192,18 @@ export interface AgentLimitsDefinition {
  */
 export interface AgentExperimentalDefinition {
   /**
+   * Adds one synchronous `code_mode` orchestration tool over typed inline tools,
+   * while keeping ordinary tools directly callable. Generated
+   * TypeScript calls them as `tools.name(input)` inside isolated QuickJS. The
+   * description includes a capped progressive catalog and generated code can
+   * search the complete request-scoped catalog at runtime. Delegations,
+   * approval-gated tools, background tools, provider-managed tools, and
+   * control-plane tools remain direct only.
+   *
+   * Omit this setting or set it to `false` to disable code mode.
+   */
+  readonly codeMode?: boolean;
+  /**
    * Reads instrumentation from an `instrumentation/` directory of providers
    * rather than a single `agent/instrumentation.ts` config object.
    *

@@ -1,12 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { AgentInfoResultSchema } from "#client/agent-info-schema.js";
 import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import { defineInstrumentation } from "#public/instrumentation/index.js";
-import { experimental_workflow } from "#tools/workflow.js";
+import { defineAgent } from "#public/definitions/agent.js";
 import { webSearch } from "#tools/provided/web-search.js";
 import { defineMemory } from "#public/memory/index.js";
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe("buildAgentInfoResponse", () => {
   it("projects v4 exclusively from the effective compiled graph", async () => {
@@ -157,15 +159,14 @@ describe("buildAgentInfoResponse", () => {
     });
   });
 
-  it("reports selected Workflow provenance from the compiled graph", async () => {
+  it("reports code mode from the selected agent config", async () => {
     const { manifest } = await compileFromMemory({
+      agent: defineAgent({
+        experimental: { codeMode: true },
+        model: "openai/gpt-5.4",
+      }),
       model: "openai/gpt-5.4",
-      modules: [
-        {
-          loadNamespace: async () => ({ default: experimental_workflow({ maxSubagents: 5 }) }),
-          logicalPath: "tools/workflow.ts",
-        },
-      ],
+      tools: [{ name: "query", outputSchema: { type: "object" } }],
     });
     const response = buildAgentInfoResponse(
       { manifest, schedules: [] },
@@ -179,10 +180,10 @@ describe("buildAgentInfoResponse", () => {
       enabled: true,
       source: {
         binding: { backing: { kind: "programmatic" } },
-        logicalPath: "tools/workflow.ts",
+        logicalPath: "agent.ts",
         owner: { kind: "application" },
       },
-      toolName: "Workflow",
+      toolName: "code_mode",
     });
   });
 

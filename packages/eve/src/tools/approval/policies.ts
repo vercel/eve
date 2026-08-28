@@ -1,6 +1,14 @@
-import type { ApprovalContext, ApprovalPolicy } from "#approval/definition.js";
+import {
+  resolveApprovalPolicy,
+  type Approval,
+  type ApprovalContext,
+  type ApprovalPolicy,
+} from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
-import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
+import {
+  readDurableDynamicCallback,
+  stampDurableDynamicCallback,
+} from "#tools/durable-callbacks.js";
 
 function alwaysApproval(_closure: JsonObject): "user-approval" {
   return "user-approval";
@@ -37,6 +45,11 @@ export function never<TInput = unknown>(): ApprovalPolicy<TInput> {
     callback: neverApproval,
     closure: {},
   });
+}
+
+/** Whether an authored approval definition statically never requires approval. */
+export function isNeverApproval(approval: Approval<any>): boolean {
+  return readDurableDynamicCallback(resolveApprovalPolicy(approval))?.callback === neverApproval;
 }
 
 /**

@@ -124,9 +124,7 @@ shadows the session selection for that turn, including when the turn handler
 returns `null`. If a resolver throws or returns an invalid definition, eve logs the
 failure and omits the subagent.
 
-The resolved set applies to local and remote direct delegation and the
-`Workflow` tool. eve
-also checks availability again before starting the child, so a stale or
+The resolved set applies to local and remote direct delegation. eve also checks availability again before starting the child, so a stale or
 manually constructed call fails with `SUBAGENT_UNAVAILABLE`. Treat conditional
 availability as capability composition, not as the only authorization
 boundary: sensitive child tools still need their own authorization and
