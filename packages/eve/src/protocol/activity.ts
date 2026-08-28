@@ -26,12 +26,12 @@ export interface PendingActivitySettlementV1 {
   readonly settledAt: string;
 }
 
-export interface ActivityWorkUpdateV1 {
+export interface ActivityUpdateV1 {
   readonly message: string;
   readonly updatedAt: string;
 }
 
-export interface PendingActivityWorkUpdateV1 extends ActivityWorkUpdateV1 {
+export interface PendingActivityUpdateV1 extends ActivityUpdateV1 {
   readonly eventId: string;
 }
 
@@ -39,7 +39,7 @@ export interface ActivityWorkStateV1 extends ActivityWorkIdentityV1 {
   readonly phase: ActivityWorkPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
-  readonly update?: ActivityWorkUpdateV1;
+  readonly update?: ActivityUpdateV1;
 }
 
 export interface ActivityActionIdentityV1 {
@@ -129,7 +129,7 @@ export interface ActivitySnapshotV1 {
   readonly actions: Readonly<Record<string, ActivityActionStateV1>>;
   readonly blockers: Readonly<Record<string, ActivityBlockerStateV1>>;
   readonly pendingSettlements: Readonly<Record<string, PendingActivitySettlementV1>>;
-  readonly pendingWorkUpdates: Readonly<Record<string, PendingActivityWorkUpdateV1>>;
+  readonly pendingWorkUpdates: Readonly<Record<string, PendingActivityUpdateV1>>;
   readonly revision: number;
   readonly seenEventIds: readonly string[];
   readonly version: 1;
