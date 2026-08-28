@@ -5,6 +5,7 @@ import { assertDurableBoundaryCompatibility } from "#internal/testing/durable-bo
 describe("assertDurableBoundaryCompatibility", () => {
   it("replays a frozen fixture to a durable fixed point", async () => {
     const result = await assertDurableBoundaryCompatibility({
+      assert: () => undefined,
       boundary: "test counter",
       fixture: {
         capture: () => ({ counter: 0 }),
@@ -27,6 +28,7 @@ describe("assertDurableBoundaryCompatibility", () => {
 
   it("replays rollback and requires preserved keys to exist", async () => {
     const result = await assertDurableBoundaryCompatibility({
+      assert: () => undefined,
       boundary: "test rollback",
       fixture: {
         expected: true,
@@ -56,6 +58,7 @@ describe("assertDurableBoundaryCompatibility", () => {
   it("rejects vacuous rollback assertions", async () => {
     await expect(
       assertDurableBoundaryCompatibility({
+        assert: () => undefined,
         boundary: "test rollback",
         fixture: {
           expected: true,
@@ -77,6 +80,7 @@ describe("assertDurableBoundaryCompatibility", () => {
   it("rejects drift between an executable producer and frozen JSON", async () => {
     await expect(
       assertDurableBoundaryCompatibility({
+        assert: () => undefined,
         boundary: "test capture",
         fixture: {
           capture: () => ({ version: 2 }),
@@ -90,5 +94,23 @@ describe("assertDurableBoundaryCompatibility", () => {
         serialize: (state) => state,
       }),
     ).rejects.toThrow("no longer matches its historical producer");
+  });
+
+  it("rejects lossy values before JSON transport can coerce them", async () => {
+    await expect(
+      assertDurableBoundaryCompatibility({
+        assert: () => undefined,
+        boundary: "test capture",
+        fixture: {
+          capture: () => ({ capturedAt: new Date("2026-01-01T00:00:00.000Z") }),
+          expected: true,
+          name: "lossy capture",
+          source: "test@v0",
+        },
+        hydrate: (serialized) => serialized,
+        migrate: () => true,
+        serialize: (state) => state,
+      }),
+    ).rejects.toThrow("Expected a JSON-serializable value");
   });
 });

@@ -375,7 +375,7 @@
   },
   "scripts": {
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "capture:durable-compatibility": "pnpm run build:js && vitest run --config vitest.integration.config.ts durable-compatibility -u",
+    "capture:durable-compatibility": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts durable-compatibility -u",
     "build": "pnpm run check:bin-runtime-dependencies && pnpm run build:js && node ./scripts/copy-docs.mjs && node ./scripts/stamp-version-tokens.mjs",
     "build:compiled": "node ./scripts/vendor-compiled.mjs",
     "build:js": "pnpm run build:compiled && pnpm run clean && pnpm run build:types && node ./scripts/copy-compiled-assets.mjs && node --conditions=eve-source ./scripts/build-rolldown.mjs && node ./scripts/copy-runtime-assets.mjs",
@@ -384,7 +384,7 @@
     "dev": "pnpm run build:compiled && node ./scripts/copy-runtime-assets.mjs && tsc -p tsconfig.dev.json --watch --preserveWatchOutput",
     "prepack": "pnpm run build && node ../../scripts/copy-package-license.mjs .",
     "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:durable-compatibility": "pnpm run build:js && vitest run --config vitest.integration.config.ts durable-compatibility",
+    "test:durable-compatibility": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts durable-compatibility",
     "test:integration": "pnpm run build:js && vitest run --config vitest.integration.config.ts",
     "test:scenario": "pnpm run build:compiled && vitest run --config vitest.scenario.config.ts",
     "test:unit": "pnpm run build:compiled && vitest run --config vitest.unit.config.ts",

@@ -28,6 +28,9 @@ export interface DurableBoundaryCompatibilityResult<TState, TObservation, TExpec
 }
 
 export async function assertDurableBoundaryCompatibility<TState, TObservation, TExpected>(input: {
+  readonly assert: (
+    result: DurableBoundaryCompatibilityResult<TState, TObservation, TExpected>,
+  ) => Awaitable<void>;
   readonly boundary: string;
   readonly fixture: FrozenDurableBoundaryFixture<TExpected>;
   readonly hydrate: (serialized: JsonValue) => Awaitable<TState>;
@@ -51,12 +54,21 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
   );
 
   if (input.rollback === undefined) {
-    return { first, fixture: input.fixture, repeated, source };
+    const result = { first, fixture: input.fixture, repeated, source };
+    await input.assert(result);
+    return result;
   }
 
   const original = requireRecord(source, "fixture source");
   const interrupted = requireRecord(first.serialized, "first migrated value");
-  const rolledBack = input.rollback.apply(cloneRecord(original), cloneRecord(interrupted));
+  const rollbackProbeKey = "__eveDurableBoundaryRollbackProbe";
+  assert.ok(!Object.hasOwn(original, rollbackProbeKey));
+  const interruptedWithProbe = { ...cloneRecord(interrupted), [rollbackProbeKey]: true };
+  const rolledBack = input.rollback.apply(cloneRecord(original), interruptedWithProbe);
+  assert.ok(
+    !Object.hasOwn(rolledBack, rollbackProbeKey),
+    `${input.boundary} fixture "${input.fixture.name}" retained discarded rollback state`,
+  );
   for (const key of input.rollback.preservedKeys) {
     assert.ok(
       Object.hasOwn(interrupted, key),
@@ -68,6 +80,14 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
       `${input.boundary} fixture "${input.fixture.name}" did not preserve "${key}" during rollback`,
     );
   }
+  for (const [key, value] of Object.entries(original)) {
+    if (input.rollback.preservedKeys.includes(key)) continue;
+    assert.deepStrictEqual(
+      rolledBack[key],
+      value,
+      `${input.boundary} fixture "${input.fixture.name}" changed original key "${key}" during rollback`,
+    );
+  }
   const rollbackSerialized = jsonTransport(rolledBack);
   const rollback = await runPass(input, rollbackSerialized);
   assert.deepStrictEqual(
@@ -75,7 +95,7 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
     first.serialized,
     `${input.boundary} fixture "${input.fixture.name}" changed after rollback replay`,
   );
-  return {
+  const result = {
     first,
     fixture: input.fixture,
     repeated,
@@ -83,6 +103,8 @@ export async function assertDurableBoundaryCompatibility<TState, TObservation, T
     rollbackSerialized,
     source,
   };
+  await input.assert(result);
+  return result;
 }
 
 async function runPass<TState, TObservation, TExpected>(
@@ -132,7 +154,8 @@ async function loadFixture(
 }
 
 function jsonTransport(value: unknown): JsonValue {
-  const serialized = JSON.stringify(value);
+  const strict = parseJsonValue(value);
+  const serialized = JSON.stringify(strict);
   if (serialized === undefined)
     throw new TypeError("Durable boundary value is not JSON-serializable");
   return parseJsonValue(JSON.parse(serialized) as unknown);
