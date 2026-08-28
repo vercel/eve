@@ -164,15 +164,6 @@ export function createAuthoringAgent(subject: {
             }
           },
         },
-        // OpenCode subagents run outside the observed harness session: their tool
-        // calls and token usage are not captured, and the pinned adapter can hang
-        // waiting for the delegated task to return. Keep every model in one
-        // session using direct filesystem and shell tools so runs stay observable
-        // and comparable. Ending promptly after implementation also prevents a
-        // completed change from becoming an infrastructure timeout while the
-        // model continues unrequested exploration or validation.
-        instructions:
-          "Work directly in the current session. Do not delegate to subagents; use the available filesystem and shell tools yourself. Once the requested implementation is complete, stop promptly without additional exploration or validation unless the user requested it.",
         permissionMode: "allow-all",
       });
 
