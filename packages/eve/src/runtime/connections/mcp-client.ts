@@ -223,15 +223,23 @@ export class McpConnectionClient implements ConnectionClient {
   }
 
   /**
-   * Always rethrows — this only classifies the error first. A non-auth
-   * error (timeout, `5xx`, `403`, "tool not found", network failure) is
-   * rethrown unchanged. Only a server rejection of the bearer
-   * (`401`/`invalid_token`) is translated: evict the stale cached token,
-   * tear down the connection so the retry reconnects with a fresh bearer,
-   * and rethrow as {@link ConnectionAuthorizationRequiredError} so the
+   * Always rethrows — this only classifies the error first. Most errors
+   * (timeout, `5xx`, `403`, "tool not found", network failure) are
+   * rethrown unchanged. Two cases are translated: a response the SDK
+   * could not parse is wrapped with the connection URL so the failure
+   * points at the misbehaving server, and a server rejection of the
+   * bearer (`401`/`invalid_token`) evicts the stale cached token, tears
+   * down the connection so the retry reconnects with a fresh bearer,
+   * and rethrows as {@link ConnectionAuthorizationRequiredError} so the
    * re-authorization flow takes over.
    */
   async #rethrowClassified(error: unknown): Promise<never> {
+    if (isMcpResponseParseError(error)) {
+      throw new Error(
+        `Couldn't parse the response from ${this.#connection.url}. Check the MCP server response and try again.`,
+        { cause: error },
+      );
+    }
     if (!isMcpAuthRequiredError(error)) {
       throw error;
     }
@@ -273,6 +281,23 @@ export class McpConnectionClient implements ConnectionClient {
  */
 export function isMcpAuthRequiredError(error: unknown): boolean {
   return readHttpStatus(error) === 401;
+}
+
+/**
+ * Exact message the vendored `@ai-sdk/mcp` bundle throws when a JSON-RPC
+ * response fails schema validation. A unit test asserts this literal still
+ * exists in the compiled bundle so regeneration cannot silently break
+ * {@link isMcpResponseParseError}.
+ */
+export const MCP_RESPONSE_PARSE_ERROR_MESSAGE = "Failed to parse server response";
+
+function isMcpResponseParseError(error: unknown): boolean {
+  for (const candidate of walkErrorChain(error)) {
+    if (isObject(candidate) && candidate.message === MCP_RESPONSE_PARSE_ERROR_MESSAGE) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

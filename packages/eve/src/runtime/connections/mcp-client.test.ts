@@ -11,6 +11,7 @@ import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { ConnectionAuthorizationTokensKey } from "#runtime/connections/authorization-tokens.js";
 import {
   isMcpAuthRequiredError,
+  MCP_RESPONSE_PARSE_ERROR_MESSAGE,
   McpConnectionClient,
   passesToolFilter,
   resolveHeaders,
@@ -398,6 +399,43 @@ describe("McpConnectionClient authorization recovery", () => {
     const err = await mcpClient.executeTool("do_thing", {}, { callId: "call-1" }).catch((e) => e);
 
     expect(isConnectionAuthorizationRequiredError(err)).toBe(true);
+  });
+
+  it("matches the parse-error message the vendored @ai-sdk/mcp bundle throws", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const bundlePath = new URL(
+      "../../../.generated/compiled/@ai-sdk/mcp/index.js",
+      import.meta.url,
+    );
+    const bundle = await readFile(bundlePath, "utf8");
+
+    expect(bundle).toContain(MCP_RESPONSE_PARSE_ERROR_MESSAGE);
+  });
+
+  it("includes the MCP connection URL when a response cannot be parsed", async () => {
+    const parseError = new Error(MCP_RESPONSE_PARSE_ERROR_MESSAGE, {
+      cause: new Error("Invalid input: expected array, received undefined"),
+    });
+    const client = {
+      close: vi.fn(),
+      listTools: vi.fn().mockResolvedValue({
+        tools: [{ name: "do_thing", description: "", inputSchema: {} }],
+      }),
+      toolsFromDefinitions: vi.fn().mockReturnValue({
+        do_thing: { execute: vi.fn().mockRejectedValue(parseError) },
+      }),
+    };
+    createMCPClient.mockResolvedValue(client);
+
+    const mcpClient = new McpConnectionClient(makeConnection());
+    const err = await mcpClient.executeTool("do_thing", {}, { callId: "call-1" }).catch((e) => e);
+
+    expect(err).toEqual(
+      new Error(
+        "Couldn't parse the response from https://mcp.example.com. Check the MCP server response and try again.",
+        { cause: parseError },
+      ),
+    );
   });
 
   it("evicts the stale cached token when the server rejects it with 401", async () => {
