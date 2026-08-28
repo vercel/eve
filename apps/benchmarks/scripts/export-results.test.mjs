@@ -44,6 +44,7 @@ test("exports missing cells without publishing private artifacts", () => {
     assert.deepEqual(
       [...new Set(output.experiments.map((experiment) => experiment.modelDisplayName))],
       [
+        "Claude Sonnet 4.6",
         "Kimi K3",
         "Claude Fable 5",
         "Grok 4.6",
@@ -51,7 +52,6 @@ test("exports missing cells without publishing private artifacts", () => {
         "GPT-5.6 Terra",
         "Claude Sonnet 5",
         "GLM 5.2",
-        "Claude Opus 5",
         "Gemini 3.1 Pro Preview",
       ],
     );
@@ -140,7 +140,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
     if (existsSync(resultsPath)) renameSync(resultsPath, savedResultsPath);
     const runPath = join(
       resultsPath,
-      "kimi-k3-opencode--baseline",
+      "claude-sonnet-4-6-opencode--baseline",
       "run",
       "author-001-weather-tool",
       "run-1",
@@ -177,7 +177,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
         "--revision",
         "a".repeat(40),
         "--models",
-        "kimi-k3",
+        "claude-sonnet-4-6",
         "--output",
         outputPath,
       ],
@@ -186,7 +186,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
     const output = JSON.parse(readFileSync(outputPath, "utf8"));
     const result = output.results.find(
       (entry) =>
-        entry.experimentId === "kimi-k3-opencode--baseline" &&
+        entry.experimentId === "claude-sonnet-4-6-opencode--baseline" &&
         entry.caseId === "author-001-weather-tool",
     );
     assert.equal(result.meanEstimatedListCostUsd, 4.5);
