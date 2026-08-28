@@ -354,19 +354,25 @@ export class EveAgentStore<TData> {
         const pendingAuthorizations = collectPendingAuthorizations(replayed);
         if (!replaySettled) this.#status = "streaming";
         this.#publish();
-        for await (const event of session.stream({
-          signal: turn.abortController.signal,
-          streamReconnectPolicy: replaySettled ? { reconnect: false } : undefined,
-        })) {
-          if (!this.#isActiveTurn(turn)) return;
-          this.#acceptServerEvent(event);
-          updatePendingAuthorizations(pendingAuthorizations, event);
-          if (
-            isCurrentTurnBoundaryEvent(event) &&
-            (event.type !== "session.waiting" || pendingAuthorizations.size === 0)
-          ) {
-            break;
+        let followLive = !replaySettled;
+        for (;;) {
+          for await (const event of session.stream({
+            follow: followLive ? undefined : false,
+            signal: turn.abortController.signal,
+          })) {
+            if (!this.#isActiveTurn(turn)) return;
+            replayed.push(event);
+            this.#acceptServerEvent(event);
+            updatePendingAuthorizations(pendingAuthorizations, event);
+            if (
+              isCurrentTurnBoundaryEvent(event) &&
+              (event.type !== "session.waiting" || pendingAuthorizations.size === 0)
+            )
+              break;
           }
+          if (!this.#isActiveTurn(turn)) return;
+          if (followLive || isSettledSessionTail(replayed)) break;
+          followLive = true;
         }
       } else {
         this.#status = this.#error === undefined ? "ready" : "error";

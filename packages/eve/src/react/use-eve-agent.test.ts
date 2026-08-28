@@ -679,7 +679,7 @@ describe("useEveAgent", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1))
-      .mockResolvedValueOnce(createEagerStreamResponse([]));
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1));
     let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
     const statuses: string[] = [];
 
