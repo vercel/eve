@@ -512,6 +512,22 @@ function setupMockAgentSequence(results: readonly Record<string, unknown>[]): vo
       if (onStepFinish) await onStepFinish(result);
       return createMockGenerateResult(result);
     });
+    this.stream = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+      if (prepareStep) {
+        await prepareStep({
+          messages: options.messages,
+          steps: [],
+          stepNumber: 0,
+          model: {},
+          context: undefined,
+        });
+      }
+      const mockResult = createMockStreamResult(result);
+      if (onStepFinish) {
+        void Promise.resolve().then(() => onStepFinish(result));
+      }
+      return mockResult;
+    });
     return this;
   } as MockAgentConstructor);
 }
@@ -1613,29 +1629,45 @@ describe("createToolLoopHarness", () => {
       toolName: "delegate",
       type: "tool-call" as const,
     };
-    setupMockAgent({
-      content: [
-        gateToolCall,
-        { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
-        delegateToolCall,
-      ],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              gateToolCall,
-              { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
-              delegateToolCall,
-            ],
-            role: "assistant",
-          },
+    setupMockAgentSequence([
+      {
+        content: [
+          gateToolCall,
+          { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+          delegateToolCall,
         ],
+        finishReason: "tool-calls",
+        response: {
+          messages: [
+            {
+              content: [
+                gateToolCall,
+                { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+                delegateToolCall,
+              ],
+              role: "assistant",
+            },
+          ],
+        },
+        text: "",
+        toolCalls: [gateToolCall, delegateToolCall],
+        toolResults: [],
       },
-      text: "",
-      toolCalls: [gateToolCall, delegateToolCall],
-      toolResults: [],
-    });
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Approval resolved.", role: "assistant" }] },
+        text: "Approval resolved.",
+        toolCalls: [],
+        toolResults: [],
+      },
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Follow-up handled.", role: "assistant" }] },
+        text: "Follow-up handled.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
@@ -1709,6 +1741,32 @@ describe("createToolLoopHarness", () => {
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
     expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("session.waiting");
+
+    const followup = await runStep(reparked.session, {
+      message: "Handle this after the approval settles.",
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledOnce();
+    expect(followup.next).toBeNull();
+    expect(hasDeferredStepInput(followup.session)).toBe(true);
+    expect(hasPendingInputBatch(followup.session.state)).toBe(true);
+
+    const approved = await runStep(followup.session, {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
+
+    expect(hasPendingInputBatch(approved.session.state)).toBe(false);
+    expect(hasDeferredStepInput(approved.session)).toBe(true);
+    expect(typeof approved.next).toBe("function");
+    if (typeof approved.next !== "function") throw new Error("Expected deferred replay step.");
+
+    const completed = await approved.next(approved.session);
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(3);
+    expect(hasDeferredStepInput(completed.session)).toBe(false);
+    expect(JSON.stringify(completed.session.history)).toContain(
+      "Handle this after the approval settles.",
+    );
   });
 
   it("publishes declared subagent calls from deeply nested sessions", async () => {
