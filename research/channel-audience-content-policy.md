@@ -189,11 +189,13 @@ Policies fail closed at their boundary: a throwing trace policy rejects the trac
 
 ## Compatibility
 
-Instrumentation providers replace the experimental `capture` field with
-`tracePolicy`. The existing OTel destination `recordInputs` and `recordOutputs`
-options remain accepted as deprecated source-compatible aliases. An explicit
-`false` prepends the corresponding redaction policy; these options no longer
-prevent accepted spans from capturing content upstream. `EVE_TRACES_CONTENT=off`
-similarly prepends both redactors for local traces.
+Instrumentation providers deprecate the experimental `capture` field in favor
+of `tracePolicy`; `"content"` and `"metadata"` are mapped to equivalent fixed
+policies while integrations migrate. The existing OTel destination
+`recordInputs` and `recordOutputs` options remain accepted as deprecated
+source-compatible aliases. An explicit `false` prepends the corresponding
+redaction policy; these options no longer prevent accepted spans from capturing
+content upstream. `EVE_TRACES_CONTENT=off` similarly prepends both redactors for
+local traces.
 
 Filtering remains a span-processor responsibility because local trace persistence and authored processors are processors rather than uniform exporters. Keeping the filtering boundary immediately above each destination prevents one destination's policy from mutating what another destination receives.

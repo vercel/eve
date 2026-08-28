@@ -215,6 +215,34 @@ describe("finalizeInstrumentationProviders", () => {
     expect(started.mock.calls[0]?.[0]).toMatchObject({ turnId: "turn-1" });
   });
 
+  it.each([
+    ["content", true],
+    ["metadata", false],
+  ] as const)(
+    "maps the deprecated %s capture setting to provider policy",
+    async (capture, expected) => {
+      await register("legacy", defineInstrumentation({ capture }));
+
+      const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+
+      expect(runtime.hooks.forTrace?.({ audience: "private" }).capturesContent).toBe(expected);
+    },
+  );
+
+  it("prefers provider tracePolicy over deprecated capture", async () => {
+    await register(
+      "provider",
+      defineInstrumentation({
+        capture: "metadata",
+        tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+      }),
+    );
+
+    const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+
+    expect(runtime.hooks.forTrace?.({ audience: "private" }).capturesContent).toBe(true);
+  });
+
   it("still runs execution when no destination was declared", async () => {
     // A directory with no `otel()` has nothing to hang a span on, so
     // `runInContext` degrades to running the work directly rather than

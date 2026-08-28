@@ -76,8 +76,9 @@ normalized `audience`, and channel type when available.
 Provider policies can run again across durable steps and must be deterministic.
 They are independent of the process-wide `tracePolicy` declared by `otel()`:
 one provider can retain content while OTel records metadata only, or vice versa.
-The former `capture: "content" | "metadata"` provider option is no longer
-supported; use an explicit emitted decision when you need fixed behavior.
+The former `capture: "content" | "metadata"` provider option is deprecated and
+automatically mapped to an equivalent fixed policy. Use `tracePolicy` for new
+providers.
 
 ## OpenTelemetry
 

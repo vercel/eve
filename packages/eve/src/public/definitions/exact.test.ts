@@ -308,10 +308,7 @@ function typeOnlyFixtures(): void {
     },
   });
 
-  const providerWithCapture: ProviderDefinition = {
-    // @ts-expect-error Instrumentation providers use tracePolicy instead of capture.
-    capture: "content",
-  };
+  const providerWithCapture: ProviderDefinition = { capture: "content" };
   void providerWithCapture;
 
   defineInstrumentation({
