@@ -76,8 +76,12 @@ export {
 export { defaultSlackAuth } from "#public/channels/slack/defaults.js";
 
 export {
+  experimental_slackActivityRenderer,
   slackActivityMessage,
   slackActivityStatus,
+  type ExperimentalSlackActivityDestination,
+  type ExperimentalSlackActivityRenderer,
+  type ExperimentalSlackActivitySnapshot,
   type SlackActivityRenderer,
 } from "#public/channels/slack/activity.js";
 

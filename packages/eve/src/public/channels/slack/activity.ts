@@ -13,8 +13,41 @@ const SLACK_ACTIVITY_MESSAGE_RENDERER_ID = "slack.activity.v1";
 const SLACK_ACTIVITY_RENDERER = Symbol("eve.slack.activity-renderer");
 
 export interface SlackActivityRenderer {
-  readonly id: typeof SLACK_ACTIVITY_STATUS_RENDERER_ID | typeof SLACK_ACTIVITY_MESSAGE_RENDERER_ID;
+  readonly id: string;
   readonly [SLACK_ACTIVITY_RENDERER]: true;
+}
+
+/**
+ * Activity snapshot passed to an experimental Slack activity renderer.
+ *
+ * This contract is unstable and may change or be removed in any release.
+ */
+export type ExperimentalSlackActivitySnapshot = ActivitySnapshotV1;
+
+/** Slack destination passed to an experimental activity renderer. */
+export interface ExperimentalSlackActivityDestination {
+  readonly channelId: string | null;
+  readonly installationTeamId: string | null;
+  readonly threadTs: string | null;
+}
+
+/**
+ * Experimental custom Slack activity renderer.
+ *
+ * Renderer state is retained by renderer id between snapshots. This contract
+ * is unstable and may change or be removed in any release.
+ */
+export interface ExperimentalSlackActivityRenderer<State = unknown> {
+  readonly id: string;
+  render(input: {
+    readonly destination: ExperimentalSlackActivityDestination;
+    readonly snapshot: ExperimentalSlackActivitySnapshot;
+    readonly state: State | undefined;
+  }): Promise<State | undefined>;
+  dispose?(input: {
+    readonly destination: ExperimentalSlackActivityDestination;
+    readonly state: State | undefined;
+  }): Promise<void>;
 }
 
 interface SlackActivityStatusState {
@@ -35,6 +68,24 @@ export function slackActivityMessage(): SlackActivityRenderer {
   return { [SLACK_ACTIVITY_RENDERER]: true, id: SLACK_ACTIVITY_MESSAGE_RENDERER_ID };
 }
 
+/**
+ * Registers an experimental custom Slack activity renderer.
+ *
+ * The renderer contract is unstable and may change or be removed in any
+ * release.
+ */
+export function experimental_slackActivityRenderer<State>(
+  renderer: ExperimentalSlackActivityRenderer<State>,
+): SlackActivityRenderer {
+  assertCustomSlackActivityRenderer(renderer);
+  return {
+    [SLACK_ACTIVITY_RENDERER]: true,
+    id: renderer.id,
+    render: renderer.render,
+    dispose: renderer.dispose,
+  } as SlackActivityRenderer;
+}
+
 export function hasSlackActivityStatus(
   renderers: readonly SlackActivityRenderer[] | undefined,
 ): boolean {
@@ -53,10 +104,79 @@ export function buildSlackActivityRenderers(input: {
     if (ids.has(renderer.id))
       throw new TypeError(`Duplicate Slack activity renderer "${renderer.id}".`);
     ids.add(renderer.id);
-    return renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID
-      ? createSlackActivityRenderer(input.botToken)
-      : createSlackStatusRenderer(input.botToken);
+    if (renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID) {
+      return createSlackActivityRenderer(input.botToken);
+    }
+    if (renderer.id === SLACK_ACTIVITY_STATUS_RENDERER_ID) {
+      return createSlackStatusRenderer(input.botToken);
+    }
+    assertCustomSlackActivityRenderer(renderer);
+    return createCustomSlackActivityRenderer(renderer);
   });
+}
+
+function assertCustomSlackActivityRenderer(
+  renderer: unknown,
+): asserts renderer is ExperimentalSlackActivityRenderer {
+  if (
+    typeof renderer !== "object" ||
+    renderer === null ||
+    !("id" in renderer) ||
+    typeof renderer.id !== "string" ||
+    renderer.id.trim() === ""
+  ) {
+    throw new TypeError("Slack activity renderer ids must be non-empty strings.");
+  }
+  if (
+    renderer.id === SLACK_ACTIVITY_STATUS_RENDERER_ID ||
+    renderer.id === SLACK_ACTIVITY_MESSAGE_RENDERER_ID
+  ) {
+    throw new TypeError(`Slack activity renderer id "${renderer.id}" is reserved by eve.`);
+  }
+  if (!("render" in renderer) || typeof renderer.render !== "function") {
+    throw new TypeError("Custom Slack activity renderers must define a render function.");
+  }
+  if (
+    "dispose" in renderer &&
+    renderer.dispose !== undefined &&
+    typeof renderer.dispose !== "function"
+  ) {
+    throw new TypeError("Custom Slack activity renderer dispose must be a function.");
+  }
+}
+
+function createCustomSlackActivityRenderer(
+  renderer: ExperimentalSlackActivityRenderer,
+): ChannelActivityRenderer {
+  return {
+    id: renderer.id,
+    async render({ destination, snapshot, state }) {
+      return renderer.render({
+        destination: experimentalSlackActivityDestination(destination),
+        snapshot,
+        state,
+      });
+    },
+    async dispose({ destination, state }) {
+      await renderer.dispose?.({
+        destination: experimentalSlackActivityDestination(destination),
+        state,
+      });
+    },
+  };
+}
+
+function experimentalSlackActivityDestination(
+  destination: Readonly<Record<string, unknown>>,
+): ExperimentalSlackActivityDestination {
+  return {
+    channelId: typeof destination["channelId"] === "string" ? destination["channelId"] : null,
+    installationTeamId:
+      typeof destination["installationTeamId"] === "string"
+        ? destination["installationTeamId"]
+        : null,
+    threadTs: typeof destination["threadTs"] === "string" ? destination["threadTs"] : null,
+  };
 }
 
 function createSlackStatusRenderer(botToken: SlackBotToken | undefined): ChannelActivityRenderer {
