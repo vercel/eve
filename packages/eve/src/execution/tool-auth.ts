@@ -191,11 +191,7 @@ function buildToolContext(input: {
   const base = buildBaseToolContext({ options: input.options, toolName: scope });
   return {
     ...base,
-    activity: createToolActivity({
-      callId: base.callId,
-      sessionId: base.session.id,
-      turnId: base.session.turn.id,
-    }),
+    activity: createToolActivity({ callId: base.callId }),
     async getToken(provider?: ToolAuthProvider, options?: ToolAuthOptions): Promise<TokenResult> {
       if (provider === undefined) throw missingProviderError("ctx.getToken");
       return await resolveInlineToken({

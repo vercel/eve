@@ -36,6 +36,18 @@ export function projectActivityEvents(input: {
       ];
     });
   }
+  if (event.type === "action.updated") {
+    const actionId = deriveActivityActionId({ callId: event.data.callId, workId: lineage.id });
+    return [
+      {
+        actionId,
+        eventId: input.sourceEventId ?? `${actionId}:updated:${event.data.sequence}`,
+        kind: "action.updated",
+        message: event.data.message,
+        updatedAt: input.at,
+      },
+    ];
+  }
   if (event.type === "action.result") {
     const result = event.data.result;
     if (result.kind === "subagent-result") {

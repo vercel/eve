@@ -1,41 +1,33 @@
-import { randomUUID } from "node:crypto";
-
 import { contextStorage } from "#context/container.js";
-import { ActivityObserverKey } from "#context/keys.js";
+import { HandleEventKey, SessionKey } from "#context/keys.js";
 import { normalizeActivityText } from "#execution/activity-text.js";
-import {
-  deriveActivityActionId,
-  deriveRootTurnActivityWorkId,
-} from "#execution/activity-work-id.js";
-import { submitActivity } from "#execution/submit-activity.js";
+import { logError, createLogger } from "#internal/logging.js";
+import { createActionUpdatedEvent } from "#protocol/message.js";
 import type { ToolActivity } from "#tools/definition.js";
 
-export function createToolActivity(input: {
-  readonly callId: string;
-  readonly sessionId: string;
-  readonly turnId: string;
-}): ToolActivity {
-  const observer = contextStorage.getStore()?.get(ActivityObserverKey);
-  const workId =
-    observer?.workIdentity?.id ??
-    deriveRootTurnActivityWorkId({ sessionId: input.sessionId, turnId: input.turnId });
-  const actionId = deriveActivityActionId({ callId: input.callId, workId });
+const log = createLogger("execution.tool-activity");
+
+export function createToolActivity(input: { readonly callId: string }): ToolActivity {
   return {
     async update(message) {
       const normalized = normalizeActivityText(message);
-      if (observer === undefined || normalized === "") return;
-      await submitActivity({
-        events: [
-          {
-            actionId,
-            eventId: `${actionId}:updated:${randomUUID()}`,
-            kind: "action.updated",
+      if (normalized === "") return;
+      const ctx = contextStorage.getStore();
+      const emit = ctx?.get(HandleEventKey);
+      const session = ctx?.get(SessionKey);
+      if (emit === undefined || session === undefined) return;
+      try {
+        await emit(
+          createActionUpdatedEvent({
+            callId: input.callId,
             message: normalized,
-            updatedAt: new Date().toISOString(),
-          },
-        ],
-        sink: observer.sink,
-      });
+            sequence: session.turn.sequence,
+            turnId: session.turn.id,
+          }),
+        );
+      } catch (error) {
+        logError(log, "tool activity emission failed", error, { callId: input.callId });
+      }
     },
   };
 }

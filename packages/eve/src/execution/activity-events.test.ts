@@ -188,6 +188,28 @@ describe("projectActivityEvents", () => {
     ]);
   });
 
+  it("projects stamped authored tool updates", () => {
+    expect(
+      projectActivityEvents({
+        at: "2026-01-01T00:00:00.000Z",
+        event: {
+          data: { callId: "tool-1", message: "Working", sequence: 1, turnId: "turn" },
+          type: "action.updated",
+        },
+        lineage,
+        sourceEventId: "event-1",
+      }),
+    ).toEqual([
+      {
+        actionId: "action:work:root:turn:tool-1",
+        eventId: "event-1",
+        kind: "action.updated",
+        message: "Working",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+  });
+
   it("settles delegated work from its parent action result", () => {
     const workId = deriveChildActivityWorkId({
       callId: "child-1",

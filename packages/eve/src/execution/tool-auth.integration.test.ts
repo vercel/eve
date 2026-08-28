@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApprovalResponseAuth } from "#execution/tool-auth.js";
 import { evictScopedToken, resolveScopedToken } from "#runtime/connections/scoped-authorization.js";
 import { loadContext } from "#context/container.js";
-import { ActivityObserverKey, AuthKey, SessionIdKey } from "#context/keys.js";
+import { AuthKey, HandleEventKey, SessionIdKey } from "#context/keys.js";
 import {
   CallbackBaseUrlKey,
   PendingAuthorizationResultKey,
@@ -204,15 +204,8 @@ describe("tool-hosted authorization", () => {
     expect(result).toEqual({ callId: "call_test", toolName: "observe_call_metadata" });
   });
 
-  it("publishes presentation-only activity from the authored context", async () => {
-    const requests: unknown[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-        requests.push(JSON.parse(String(init?.body)));
-        return new Response(null, { status: 202 });
-      }),
-    );
+  it("emits canonical activity updates from the authored context", async () => {
+    const events: unknown[] = [];
     const tool = authoredTool({
       name: "deploy",
       async execute(_input, ctx) {
@@ -223,26 +216,22 @@ describe("tool-hosted authorization", () => {
     const runtime = await createTestRuntime({ tools: [tool] });
 
     const result = await runtime.runAsSession(undefined, async () => {
-      loadContext().set(ActivityObserverKey, {
-        sink: {
-          url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-          version: 1,
-        },
+      loadContext().setVirtualContext(HandleEventKey, async (event) => {
+        events.push(event);
       });
       return await runtime.executeTool(tool, {});
     });
 
     expect(result).toBe("deployed");
-    expect(requests).toEqual([
+    expect(events).toEqual([
       {
-        events: [
-          expect.objectContaining({
-            actionId: expect.stringContaining(":call_test"),
-            kind: "action.updated",
-            message: "Uploading artifacts",
-          }),
-        ],
-        version: 1,
+        data: {
+          callId: "call_test",
+          message: "Uploading artifacts",
+          sequence: 1,
+          turnId: "turn_test_001",
+        },
+        type: "action.updated",
       },
     ]);
   });

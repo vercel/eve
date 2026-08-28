@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "24";
+export const EVE_MESSAGE_STREAM_VERSION = "25";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -229,6 +229,17 @@ export interface ActionsRequestedStreamEvent {
     turnId: string;
   };
   type: "actions.requested";
+}
+
+/** Stream event emitted when an authored tool reports progress. */
+export interface ActionUpdatedStreamEvent {
+  data: {
+    callId: string;
+    message: string;
+    sequence: number;
+    turnId: string;
+  };
+  type: "action.updated";
 }
 
 export type ApprovalCandidateOutcome = "pending" | "rejected" | "failed" | "timed-out" | "stale";
@@ -733,6 +744,7 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ActionUpdatedStreamEvent
   | ActionInputAppendedStreamEvent
   | ApprovalCandidateStreamEvent
   | ApprovalSettledStreamEvent
@@ -1259,6 +1271,16 @@ export function createInputResolvedEvent(input: {
     },
     type: "input.resolved",
   };
+}
+
+/** Creates an `action.updated` event for authored tool progress. */
+export function createActionUpdatedEvent(input: {
+  readonly callId: string;
+  readonly message: string;
+  readonly sequence: number;
+  readonly turnId: string;
+}): ActionUpdatedStreamEvent {
+  return { data: input, type: "action.updated" };
 }
 
 /**

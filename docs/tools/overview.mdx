@@ -103,7 +103,7 @@ async execute(input, ctx) {
 }
 ```
 
-Activity delivery is best-effort and only runs when the current channel has activity renderers configured. Awaiting an update waits for the bounded delivery attempt, but a delivery failure does not fail the tool. A retried tool execution may replay updates, so treat them as last-write-wins status rather than an append-only log.
+Each update is first written as an `action.updated` event on the durable session stream. The activity observer then projects that event to configured channel activity renderers. Awaiting an update waits for event emission, but a renderer delivery failure does not fail the tool. A retried tool execution may replay updates, so treat them as last-write-wins status rather than an append-only log.
 
 eve never runs authored tools during discovery. The model sees descriptors first, and only what it actually calls gets executed. Completed steps never re-run; eve replays the recorded result. A step interrupted mid-execution re-runs, so make non-idempotent side effects like charges or emails idempotent, or gate them with approval.
 

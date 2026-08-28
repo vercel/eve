@@ -6,6 +6,7 @@ import { serializeUrlFilePart } from "#internal/attachments/url-refs.js";
 import {
   EVE_MESSAGE_STREAM_VERSION,
   createActionPartialEvent,
+  createActionUpdatedEvent,
   createActionResultEvent,
   createAuthorizationCompletedEvent,
   createAuthorizationRequiredEvent,
@@ -25,7 +26,7 @@ import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
-    expect(EVE_MESSAGE_STREAM_VERSION).toBe("24");
+    expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
   });
 
   it("creates authoritative input resolution batches", () => {
@@ -68,6 +69,25 @@ describe("message stream protocol", () => {
         turnId: "turn-1",
       },
       type: "input.resolved",
+    });
+  });
+
+  it("creates authored tool progress updates", () => {
+    expect(
+      createActionUpdatedEvent({
+        callId: "call_1",
+        message: "Uploading artifacts",
+        sequence: 1,
+        turnId: "turn_1",
+      }),
+    ).toEqual({
+      data: {
+        callId: "call_1",
+        message: "Uploading artifacts",
+        sequence: 1,
+        turnId: "turn_1",
+      },
+      type: "action.updated",
     });
   });
 

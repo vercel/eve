@@ -18,6 +18,7 @@ export interface HookEventMap {
   readonly "action.input.appended": ProtocolEvent<"action.input.appended">;
   readonly "action.partial": ProtocolEvent<"action.partial">;
   readonly "action.result": ProtocolEvent<"action.result">;
+  readonly "action.updated": ProtocolEvent<"action.updated">;
   readonly "approval.candidate": ProtocolEvent<"approval.candidate">;
   readonly "approval.settled": ProtocolEvent<"approval.settled">;
   readonly "actions.requested": ProtocolEvent<"actions.requested">;

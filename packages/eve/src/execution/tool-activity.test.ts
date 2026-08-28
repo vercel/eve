@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { ActivityObserverKey, SessionKey } from "#context/keys.js";
+import { HandleEventKey, SessionKey } from "#context/keys.js";
 import { createToolActivity } from "#execution/tool-activity.js";
-import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 
 const session = {
   auth: { current: null, initiator: null },
@@ -12,77 +11,54 @@ const session = {
 };
 
 describe("createToolActivity", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("publishes bounded action updates without session delivery", async () => {
-    const requests: unknown[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-        requests.push(JSON.parse(String(init?.body)));
-        return new Response(null, { status: 202 });
-      }),
-    );
+  it("emits normalized action updates through the canonical session event handler", async () => {
+    const events: unknown[] = [];
     const ctx = new ContextContainer();
     ctx.set(SessionKey, session);
-    ctx.set(ActivityObserverKey, {
-      sink: {
-        url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
-        version: 1,
-      },
+    ctx.setVirtualContext(HandleEventKey, async (event) => {
+      events.push(event);
     });
 
     await contextStorage.run(ctx, async () => {
-      const activity = createToolActivity({
-        callId: "call-1",
-        sessionId: session.sessionId,
-        turnId: session.turn.id,
-      });
+      const activity = createToolActivity({ callId: "call-1" });
       await activity.update("Comparing\u0007   the renderer");
       await activity.update("Validating the projection");
     });
 
-    const workId = deriveRootTurnActivityWorkId({ sessionId: "session-1", turnId: "turn-1" });
-    expect(requests).toEqual([
+    expect(events).toEqual([
       {
-        events: [
-          expect.objectContaining({
-            actionId: `action:${workId}:call-1`,
-            eventId: expect.stringMatching(`^action:${workId}:call-1:updated:`),
-            kind: "action.updated",
-            message: "Comparing the renderer",
-          }),
-        ],
-        version: 1,
+        data: {
+          callId: "call-1",
+          message: "Comparing the renderer",
+          sequence: 1,
+          turnId: "turn-1",
+        },
+        type: "action.updated",
       },
       {
-        events: [
-          expect.objectContaining({
-            actionId: `action:${workId}:call-1`,
-            eventId: expect.stringMatching(`^action:${workId}:call-1:updated:`),
-            kind: "action.updated",
-            message: "Validating the projection",
-          }),
-        ],
-        version: 1,
+        data: {
+          callId: "call-1",
+          message: "Validating the projection",
+          sequence: 1,
+          turnId: "turn-1",
+        },
+        type: "action.updated",
       },
     ]);
   });
 
-  it("is a no-op when the session has no activity collector", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
+  it("does not let event-emission failure alter the tool result", async () => {
     const ctx = new ContextContainer();
     ctx.set(SessionKey, session);
+    ctx.setVirtualContext(
+      HandleEventKey,
+      vi.fn(async () => Promise.reject(new Error("unavailable"))),
+    );
 
-    await contextStorage.run(ctx, async () => {
-      await createToolActivity({
-        callId: "call-1",
-        sessionId: session.sessionId,
-        turnId: session.turn.id,
-      }).update("Working");
-    });
-
-    expect(fetchMock).not.toHaveBeenCalled();
+    await expect(
+      contextStorage.run(ctx, async () => {
+        await createToolActivity({ callId: "call-1" }).update("Working");
+      }),
+    ).resolves.toBeUndefined();
   });
 });
