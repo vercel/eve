@@ -33,12 +33,12 @@ const POST_RUN_GRADER_DIRECTORY = ".eve-grader";
 const BOOTSTRAP_VERSION = "v9";
 // A turn that stops producing output should end the turn, not the eval: the
 // remaining turns still run and the graders still see what the agent did.
-const TURN_TIMEOUT_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_TIMEOUT ?? 480);
+const TURN_TIMEOUT_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_TIMEOUT ?? 300);
 // A turn that has produced no chunk for this long is waiting on the runtime, not
 // working. The bound is one slow tool call: the bridge reports a call and its
 // result together once the call returns, so an install that takes minutes looks
 // from here like silence rather than work in flight.
-const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 240);
+const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 120);
 // The runtime frequently never closes a turn whose last act was the model
 // talking, so silence after a closing message has to end the turn on its own.
 // Long enough that a pause before the next tool call is not mistaken for one.
