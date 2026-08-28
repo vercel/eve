@@ -187,15 +187,15 @@ describe("historical session instrumentation compatibility", () => {
             rootSessionId: SESSION_ID,
             sessionId: SESSION_ID,
           });
-          return instrumentation?.runStep(
+          return instrumentation?.prepareExecution().runStep(
             {
               environment: "test",
               eveVersion: "historical-compatibility",
               hasInput: false,
               session: { sessionId: SESSION_ID },
             },
-            async () => {
-              const telemetry = instrumentation.telemetry();
+            async (scope) => {
+              const telemetry = scope.telemetry();
               return {
                 recordInputs: telemetry?.recordInputs,
                 recordOutputs: telemetry?.recordOutputs,
