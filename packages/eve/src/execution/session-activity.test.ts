@@ -37,6 +37,12 @@ describe("activity protocol and reducer", () => {
         version: 1,
       }),
     ).toBeUndefined();
+    expect(
+      parseActivityBatchV1({
+        events: [{ eventId: "updated", kind: "work.updated", message: "Working", workId: work.id }],
+        version: 1,
+      }),
+    ).toBeUndefined();
   });
 
   it("deduplicates only by event id", () => {
@@ -44,6 +50,70 @@ describe("activity protocol and reducer", () => {
     const first = reduce([event]);
     const duplicate = reduceActivityBatch(first, { events: [event], version: 1 });
     expect(duplicate).toBe(first);
+  });
+
+  it("retains the latest normalized milestone while work is running", () => {
+    const snapshot = reduce([
+      { eventId: "started", kind: "work.started", startedAt: "1", work },
+      {
+        eventId: "updated-1",
+        kind: "work.updated",
+        message: "Comparing\u0007   the renderer",
+        updatedAt: "2",
+        workId: work.id,
+      },
+      {
+        eventId: "updated-2",
+        kind: "work.updated",
+        message: "Validating the projection",
+        updatedAt: "3",
+        workId: work.id,
+      },
+    ]);
+
+    expect(snapshot.work[work.id]).toMatchObject({
+      update: { message: "Validating the projection", updatedAt: "3" },
+    });
+  });
+
+  it("retains a milestone that arrives before work starts", () => {
+    const snapshot = reduce([
+      {
+        eventId: "updated",
+        kind: "work.updated",
+        message: "Comparing the renderer",
+        updatedAt: "2",
+        workId: work.id,
+      },
+      { eventId: "started", kind: "work.started", startedAt: "1", work },
+    ]);
+
+    expect(snapshot.work[work.id]).toMatchObject({
+      update: { message: "Comparing the renderer", updatedAt: "2" },
+    });
+    expect(snapshot.pendingWorkUpdates).toEqual({});
+  });
+
+  it("ignores milestones after work settles", () => {
+    const snapshot = reduce([
+      { eventId: "started", kind: "work.started", startedAt: "1", work },
+      {
+        eventId: "settled",
+        kind: "work.settled",
+        outcome: "completed",
+        settledAt: "2",
+        workId: work.id,
+      },
+      {
+        eventId: "late-update",
+        kind: "work.updated",
+        message: "Stale update",
+        updatedAt: "3",
+        workId: work.id,
+      },
+    ]);
+
+    expect(snapshot.work[work.id]?.update).toBeUndefined();
   });
 
   it("applies settlement before start and never reopens terminal work", () => {

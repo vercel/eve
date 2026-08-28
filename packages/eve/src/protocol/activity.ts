@@ -26,10 +26,20 @@ export interface PendingActivitySettlementV1 {
   readonly settledAt: string;
 }
 
+export interface ActivityWorkUpdateV1 {
+  readonly message: string;
+  readonly updatedAt: string;
+}
+
+export interface PendingActivityWorkUpdateV1 extends ActivityWorkUpdateV1 {
+  readonly eventId: string;
+}
+
 export interface ActivityWorkStateV1 extends ActivityWorkIdentityV1 {
   readonly phase: ActivityWorkPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
+  readonly update?: ActivityWorkUpdateV1;
 }
 
 export interface ActivityActionIdentityV1 {
@@ -77,6 +87,13 @@ export type ActivityEventV1 =
       readonly workId: string;
     }
   | {
+      readonly eventId: string;
+      readonly kind: "work.updated";
+      readonly message: string;
+      readonly updatedAt: string;
+      readonly workId: string;
+    }
+  | {
       readonly action: ActivityActionIdentityV1;
       readonly eventId: string;
       readonly kind: "action.started";
@@ -112,6 +129,7 @@ export interface ActivitySnapshotV1 {
   readonly actions: Readonly<Record<string, ActivityActionStateV1>>;
   readonly blockers: Readonly<Record<string, ActivityBlockerStateV1>>;
   readonly pendingSettlements: Readonly<Record<string, PendingActivitySettlementV1>>;
+  readonly pendingWorkUpdates: Readonly<Record<string, PendingActivityWorkUpdateV1>>;
   readonly revision: number;
   readonly seenEventIds: readonly string[];
   readonly version: 1;
@@ -206,6 +224,24 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         kind: "work.settled",
         outcome: value.outcome,
         settledAt: value.settledAt,
+        workId: value.workId,
+      };
+    }
+    case "work.updated": {
+      if (!hasOnlyKeys(value, ["eventId", "kind", "message", "updatedAt", "workId"]))
+        return undefined;
+      if (
+        !isIdentity(value.eventId) ||
+        !isBoundedString(value.message) ||
+        !isBoundedString(value.updatedAt) ||
+        !isIdentity(value.workId)
+      )
+        return undefined;
+      return {
+        eventId: value.eventId,
+        kind: "work.updated",
+        message: value.message,
+        updatedAt: value.updatedAt,
         workId: value.workId,
       };
     }

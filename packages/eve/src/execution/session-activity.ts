@@ -12,6 +12,7 @@ import {
 
 export const MAX_ACTIVITY_EVENT_IDS = 1_000;
 export const MAX_ACTIVITY_PENDING_SETTLEMENTS = 500;
+export const MAX_ACTIVITY_PENDING_WORK_UPDATES = 500;
 export const MAX_ACTIVITY_ENTITIES = 500;
 
 export function createActivitySnapshot(): ActivitySnapshotV1 {
@@ -19,6 +20,7 @@ export function createActivitySnapshot(): ActivitySnapshotV1 {
     actions: {},
     blockers: {},
     pendingSettlements: {},
+    pendingWorkUpdates: {},
     revision: 0,
     seenEventIds: [],
     version: 1,
@@ -62,6 +64,8 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return startWork(snapshot, event);
     case "work.settled":
       return settleWork(snapshot, event);
+    case "work.updated":
+      return updateWork(snapshot, event);
     case "action.started":
       return startAction(snapshot, event);
     case "action.settled":
@@ -80,6 +84,7 @@ function startWork(
   const current = snapshot.work[event.work.id];
   if (current !== undefined) return snapshot;
   const pending = pendingFor(snapshot, "work", event.work.id);
+  const pendingUpdate = snapshot.pendingWorkUpdates[event.work.id];
   const parent = event.work.parentId === undefined ? undefined : snapshot.work[event.work.parentId];
   const phase =
     pending?.outcome ??
@@ -90,10 +95,15 @@ function startWork(
     phase: phase as ActivityWorkPhase,
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
     startedAt: event.startedAt,
+    update:
+      phase === "running" && pendingUpdate !== undefined
+        ? { message: pendingUpdate.message, updatedAt: pendingUpdate.updatedAt }
+        : undefined,
   };
   const started = {
     ...snapshot,
     pendingSettlements: removeKey(snapshot.pendingSettlements, pendingKey("work", work.id)),
+    pendingWorkUpdates: removeKey(snapshot.pendingWorkUpdates, work.id),
     work: replaceBounded(snapshot.work, work.id, work),
   };
   return work.phase === "running"
@@ -117,6 +127,37 @@ function settleWork(
     settledAt: event.settledAt,
     workId: event.workId,
   });
+}
+
+function updateWork(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "work.updated" }>,
+): ActivitySnapshotV1 {
+  const current = snapshot.work[event.workId];
+  if (current === undefined) {
+    if (pendingFor(snapshot, "work", event.workId) !== undefined) return snapshot;
+    return {
+      ...snapshot,
+      pendingWorkUpdates: replaceBounded(
+        snapshot.pendingWorkUpdates,
+        event.workId,
+        {
+          eventId: event.eventId,
+          message: normalizeActivityText(event.message),
+          updatedAt: event.updatedAt,
+        },
+        MAX_ACTIVITY_PENDING_WORK_UPDATES,
+      ),
+    };
+  }
+  if (current.phase !== "running") return snapshot;
+  return {
+    ...snapshot,
+    work: replaceBounded(snapshot.work, event.workId, {
+      ...current,
+      update: { message: normalizeActivityText(event.message), updatedAt: event.updatedAt },
+    }),
+  };
 }
 
 function startAction(

@@ -42,6 +42,20 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+const activityObserver = {
+  sink: {
+    url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+    version: 1 as const,
+  },
+  workIdentity: {
+    id: "work:task",
+    kind: "task" as const,
+    name: "research",
+    rootSessionId: "root",
+    rootTurnId: "turn",
+  },
+};
+
 function createWorkingView(): TaskView {
   return {
     metadata: {
@@ -93,17 +107,20 @@ describe("taskRunWorkflow", () => {
 
     const view = createWorkingView();
     await taskRunWorkflow({
+      activityObserver,
       taskInboxToken: "task-token",
       initialView: view,
       parentContinuationToken: "parent-session-token",
     });
 
     expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(1, {
+      activityObserver,
       token: "parent-session-token",
       update,
       view,
     });
     expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(2, {
+      activityObserver,
       token: "parent-session-token",
       update: { ...update, callId: "update-call-2" },
       view,

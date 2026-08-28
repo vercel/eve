@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   formatTaskNotification,
   projectTaskActivitySettlement,
+  projectTaskUpdateActivity,
 } from "#execution/tasks/child/steps.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -67,6 +68,50 @@ describe("projectTaskActivitySettlement", () => {
     ).toEqual([
       expect.objectContaining({ kind: "work.settled", outcome: "completed", workId: "work:task" }),
     ]);
+  });
+
+  it("projects an existing task update as a work milestone", () => {
+    const working = { metadata, status: "working", taskId: "task-1" } satisfies TaskView;
+    const input = {
+      activityObserver: {
+        sink: {
+          url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+          version: 1 as const,
+        },
+        workIdentity: {
+          id: "work:task",
+          kind: "task" as const,
+          name: "reviewer",
+          rootSessionId: "root",
+          rootTurnId: "turn",
+        },
+      },
+      update: {
+        callId: "call-update",
+        kind: "task-update" as const,
+        message: "Comparing the plan projection with the current renderer",
+        updateEpoch: "epoch-1",
+        updateIndex: 2,
+      },
+      updatedAt: "2026-01-01T00:00:01.000Z",
+      view: working,
+    };
+
+    expect(projectTaskUpdateActivity(input)).toEqual([
+      {
+        eventId: "work:task:updated:epoch-1:2",
+        kind: "work.updated",
+        message: "Comparing the plan projection with the current renderer",
+        updatedAt: "2026-01-01T00:00:01.000Z",
+        workId: "work:task",
+      },
+    ]);
+    expect(
+      projectTaskUpdateActivity({
+        ...input,
+        view: { ...working, lastOutput: { data: "done", type: "result" }, status: "completed" },
+      }),
+    ).toEqual([]);
   });
 
   it("does nothing for nonterminal task views", () => {
