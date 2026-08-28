@@ -10960,7 +10960,14 @@ describe("createToolLoopHarness", () => {
             ? [registeredAuthorIntegration]
             : [registeredOtelIntegration, registeredAuthorIntegration],
       );
-      const runStep = createToolLoopHarness(createTestConfig());
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            hooks: createInstrumentationHooks([]),
+            runInContext: (_operation, execute) => execute(),
+          },
+        }),
+      );
 
       await runStep(createTestSession(), { message: "private" });
 
@@ -11110,7 +11117,14 @@ describe("createToolLoopHarness", () => {
       });
       const tracePolicy = vi.fn(() => true);
       declareTelemetry({ recordInputs: true, recordOutputs: true, tracePolicy });
-      const runStep = createToolLoopHarness(createTestConfig());
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            hooks: createInstrumentationHooks([]),
+            runInContext: (_operation, execute) => execute(),
+          },
+        }),
+      );
       const ctx = new ContextContainer();
       ctx.set(SessionTraceSeedKey, {
         decision: { action: "drop" },
@@ -11140,7 +11154,14 @@ describe("createToolLoopHarness", () => {
       });
       const tracePolicy = vi.fn(() => true);
       declareTelemetry({ recordInputs: true, recordOutputs: true, tracePolicy });
-      const runStep = createToolLoopHarness(createTestConfig());
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            hooks: createInstrumentationHooks([]),
+            runInContext: (_operation, execute) => execute(),
+          },
+        }),
+      );
       const ctx = new ContextContainer();
       ctx.set(SessionTraceSeedKey, {
         spanId: "1".repeat(16),
