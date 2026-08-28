@@ -2,11 +2,14 @@ import { normalizeActivityText } from "#execution/activity-text.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 
 export function projectActivityEvents(input: {
   readonly at: string;
   readonly event: UnstampedMessageStreamEvent;
   readonly lineage: ActivityWorkIdentityV1;
+  /** Durable source event identity when projecting a persisted session event. */
+  readonly sourceEventId?: string;
 }): readonly ActivityEventV1[] {
   const { event, lineage } = input;
   if (event.type === "actions.requested") {
@@ -61,14 +64,24 @@ export function projectActivityEvents(input: {
       ];
     }
     const id = actionId(lineage.id, result.callId);
+    const settled = {
+      actionId: id,
+      eventId: `${id}:settled:${event.data.status}`,
+      kind: "action.settled" as const,
+      outcome: event.data.status,
+      settledAt: input.at,
+    };
+    const taskUpdate = readAcceptedTaskUpdate(result);
+    if (lineage.kind !== "task" || taskUpdate === undefined) return [settled];
     return [
       {
-        actionId: id,
-        eventId: `${id}:settled:${event.data.status}`,
-        kind: "action.settled",
-        outcome: event.data.status,
-        settledAt: input.at,
+        eventId: input.sourceEventId ?? `${lineage.id}:updated:${event.data.sequence}`,
+        kind: "work.updated",
+        message: taskUpdate,
+        updatedAt: input.at,
+        workId: lineage.id,
       },
+      settled,
     ];
   }
   if (event.type === "authorization.required") {
@@ -208,6 +221,31 @@ export function projectActivityEvents(input: {
     ];
   }
   return [];
+}
+
+function readAcceptedTaskUpdate(
+  result: Extract<UnstampedMessageStreamEvent, { type: "action.result" }>["data"]["result"],
+): string | undefined {
+  if (
+    result.kind !== "tool-result" ||
+    result.isError === true ||
+    result.toolName !== TASK_UPDATE_TOOL_NAME
+  ) {
+    return undefined;
+  }
+  const output: unknown = result.output;
+  if (
+    typeof output !== "object" ||
+    output === null ||
+    !("status" in output) ||
+    output.status !== "sent" ||
+    !("message" in output) ||
+    typeof output.message !== "string"
+  ) {
+    return undefined;
+  }
+  const message = normalizeActivityText(output.message);
+  return message === "" ? undefined : message;
 }
 
 function activityLabel(value: string): string | undefined {

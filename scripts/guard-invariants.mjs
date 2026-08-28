@@ -109,6 +109,9 @@
  *             version as current. Wire versions are append-only protocol
  *             history: change the contract by adding a version and migration,
  *             never by updating a historical schema and its snapshot together.
+ *   rule 41 — Only canonical event observers may submit facts to the activity
+ *             collector. Feature code emits durable session or task events;
+ *             their observers alone project and transport the activity view.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -1123,6 +1126,31 @@ const NESTED_EVE_BUILD_RE = /\bpnpm\s+(?:--filter(?:=|\s+)eve|-F\s+eve)\s+(?:run
 /**
  * @returns {Promise<Violation[]>}
  */
+async function checkRule41ActivitySubmissionBoundary() {
+  const executionRoot = join(REPO_ROOT, "packages/eve/src/execution");
+  const allowed = new Set([
+    "packages/eve/src/execution/session-activity-projection.ts",
+    "packages/eve/src/execution/submit-activity.ts",
+    "packages/eve/src/execution/task-activity-projection.ts",
+  ]);
+  /** @type {Violation[]} */
+  const violations = [];
+
+  for await (const { absPath, relPath } of walkFiles(executionRoot)) {
+    if (!relPath.endsWith(".ts") || relPath.includes(".test.") || allowed.has(relPath)) continue;
+    const source = await readFile(absPath, "utf8");
+    if (!source.includes("submitActivity")) continue;
+    violations.push({
+      rule: 41,
+      file: relPath,
+      message:
+        "submits activity outside a canonical event observer. Emit a durable session or task event, then project it from the corresponding activity observer.",
+    });
+  }
+
+  return violations;
+}
+
 async function checkRule38NoNestedEveBuild() {
   /** @type {Violation[]} */
   const violations = [];
@@ -1416,6 +1444,9 @@ async function main() {
 
   // Rule 40
   violations.push(...(await checkRule40WireContracts()));
+
+  // Rule 41
+  violations.push(...(await checkRule41ActivitySubmissionBoundary()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

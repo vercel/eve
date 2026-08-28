@@ -6,12 +6,10 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import { normalizeActivityText } from "#execution/activity-text.js";
-import { submitActivity } from "#execution/submit-activity.js";
+import { observeTaskActivity } from "#execution/task-activity-projection.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { createLogger } from "#internal/logging.js";
-import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
@@ -45,35 +43,11 @@ export async function appendTaskViewStep(input: {
     writer.releaseLock();
   }
 
-  const events = projectTaskActivitySettlement({
+  void observeTaskActivity({
     activityObserver: input.activityObserver,
     settledAt: new Date().toISOString(),
     view: input.view,
   });
-  void submitActivity({ events, sink: input.activityObserver?.sink });
-}
-
-export function projectTaskActivitySettlement(input: {
-  readonly activityObserver: ActivityObserverConfig | undefined;
-  readonly settledAt: string;
-  readonly view: TaskView;
-}): readonly ActivityEventV1[] {
-  const work = input.activityObserver?.workIdentity;
-  const status = input.view.status;
-  if (
-    work === undefined ||
-    (status !== "completed" && status !== "failed" && status !== "cancelled")
-  )
-    return [];
-  return [
-    {
-      eventId: `${work.id}:settled:${status}`,
-      kind: "work.settled",
-      outcome: status,
-      settledAt: input.settledAt,
-      workId: work.id,
-    },
-  ];
 }
 
 /** Re-emits a task-owned child authorization event through the parent channel. */
@@ -156,22 +130,11 @@ export async function wakeTaskParentStep(input: {
 
 /** Forwards a running child's intermediate update to its parent session. */
 export async function wakeTaskUpdateParentStep(input: {
-  readonly activityObserver?: ActivityObserverConfig;
   readonly token: string;
   readonly update: TaskInboundUpdate;
   readonly view: TaskView;
 }): Promise<void> {
   "use step";
-
-  void submitActivity({
-    events: projectTaskUpdateActivity({
-      activityObserver: input.activityObserver,
-      update: input.update,
-      updatedAt: new Date().toISOString(),
-      view: input.view,
-    }),
-    sink: input.activityObserver?.sink,
-  });
 
   const command: SessionCommand = {
     kind: "send",
@@ -186,26 +149,6 @@ export async function wakeTaskUpdateParentStep(input: {
     if (isTaskWorkflowTargetGone(error)) return;
     throw error;
   }
-}
-
-export function projectTaskUpdateActivity(input: {
-  readonly activityObserver: ActivityObserverConfig | undefined;
-  readonly update: TaskInboundUpdate;
-  readonly updatedAt: string;
-  readonly view: TaskView;
-}): readonly ActivityEventV1[] {
-  const work = input.activityObserver?.workIdentity;
-  const message = normalizeActivityText(input.update.message);
-  if (work === undefined || message === "" || isTerminalTaskStatus(input.view.status)) return [];
-  return [
-    {
-      eventId: `${work.id}:updated:${input.update.updateEpoch}:${input.update.updateIndex}`,
-      kind: "work.updated",
-      message,
-      updatedAt: input.updatedAt,
-      workId: work.id,
-    },
-  ];
 }
 
 /** Sends an exact local-task HITL batch to the parent's pre-model router. */

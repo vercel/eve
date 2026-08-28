@@ -132,9 +132,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       if (payload.kind === "task-update") {
         if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
           await wakeTaskUpdateParentStep({
-            ...(input.activityObserver === undefined
-              ? {}
-              : { activityObserver: input.activityObserver }),
             token: input.parentContinuationToken,
             update: payload,
             view,
@@ -164,9 +161,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       if (isReadinessCommand && isTerminalTaskStatus(view.status)) {
         for (const update of pendingUpdates) {
           await wakeTaskUpdateParentStep({
-            ...(input.activityObserver === undefined
-              ? {}
-              : { activityObserver: input.activityObserver }),
             token: input.parentContinuationToken,
             update,
             view,
@@ -195,9 +189,6 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       if (dispatchAcknowledged && pendingUpdates.length > 0 && !isTerminalTaskStatus(view.status)) {
         for (const update of pendingUpdates) {
           await wakeTaskUpdateParentStep({
-            ...(input.activityObserver === undefined
-              ? {}
-              : { activityObserver: input.activityObserver }),
             token: input.parentContinuationToken,
             update,
             view,

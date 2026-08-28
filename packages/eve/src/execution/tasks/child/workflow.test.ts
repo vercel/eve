@@ -114,13 +114,11 @@ describe("taskRunWorkflow", () => {
     });
 
     expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(1, {
-      activityObserver,
       token: "parent-session-token",
       update,
       view,
     });
     expect(wakeTaskUpdateParentStep).toHaveBeenNthCalledWith(2, {
-      activityObserver,
       token: "parent-session-token",
       update: { ...update, callId: "update-call-2" },
       view,
