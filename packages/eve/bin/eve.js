@@ -102,6 +102,7 @@ async function canBuildWorkspaceCli({ exists, packageRoot, postBuildScriptPaths 
       packageRoot,
     }),
     resolve(packageRoot, "src"),
+    vendorCompiledScriptPath({ packageRoot }),
     ...postBuildScriptPaths,
   ]) {
     if (!(await exists(requiredPath))) {
@@ -274,6 +275,13 @@ export async function ensureBuiltCli(overrides = {}, dependencies = {}) {
     );
   }
 
+  await executeCommand(
+    process.execPath,
+    [vendorCompiledScriptPath({ packageRoot: options.packageRoot })],
+    {
+      cwd: options.packageRoot,
+    },
+  );
   await executeCommand(
     process.execPath,
     [resolveTscCliPath({ tscCliPath: options.tscCliPath }), "-p", "tsconfig.json"],

@@ -15,6 +15,7 @@ const bootstrapOptions = {
 const workspaceBuildInputPaths = new Set([
   ...bootstrapOptions.postBuildScriptPaths,
   `${bootstrapOptions.packageRoot}/bin`,
+  `${bootstrapOptions.packageRoot}/scripts/vendor-compiled.mjs`,
   `${bootstrapOptions.packageRoot}/src`,
   `${bootstrapOptions.packageRoot}/tsconfig.json`,
 ]);
@@ -136,7 +137,7 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       1,
       process.execPath,
-      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
+      [`${bootstrapOptions.packageRoot}/scripts/vendor-compiled.mjs`],
       {
         cwd: bootstrapOptions.packageRoot,
       },
@@ -144,7 +145,7 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       2,
       process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[0]],
+      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
       {
         cwd: bootstrapOptions.packageRoot,
       },
@@ -152,13 +153,21 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       3,
       process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[1]],
+      [bootstrapOptions.postBuildScriptPaths[0]],
       {
         cwd: bootstrapOptions.packageRoot,
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
       4,
+      process.execPath,
+      [bootstrapOptions.postBuildScriptPaths[1]],
+      {
+        cwd: bootstrapOptions.packageRoot,
+      },
+    );
+    expect(runCommand).toHaveBeenNthCalledWith(
+      5,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[2]],
       {
@@ -190,7 +199,7 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       1,
       process.execPath,
-      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
+      [`${bootstrapOptions.packageRoot}/scripts/vendor-compiled.mjs`],
       {
         cwd: bootstrapOptions.packageRoot,
       },
@@ -198,7 +207,7 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       2,
       process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[0]],
+      [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
       {
         cwd: bootstrapOptions.packageRoot,
       },
@@ -206,13 +215,21 @@ describe("eve CLI bootstrap", () => {
     expect(runCommand).toHaveBeenNthCalledWith(
       3,
       process.execPath,
-      [bootstrapOptions.postBuildScriptPaths[1]],
+      [bootstrapOptions.postBuildScriptPaths[0]],
       {
         cwd: bootstrapOptions.packageRoot,
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
       4,
+      process.execPath,
+      [bootstrapOptions.postBuildScriptPaths[1]],
+      {
+        cwd: bootstrapOptions.packageRoot,
+      },
+    );
+    expect(runCommand).toHaveBeenNthCalledWith(
+      5,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[2]],
       {
