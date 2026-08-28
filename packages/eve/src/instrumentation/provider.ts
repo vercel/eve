@@ -9,10 +9,7 @@
 // runtime. The event shapes are eve's own vocabulary; deriving the handler map
 // from the union below is what keeps the public contract from drifting away
 // from the bus that feeds it.
-import type {
-  InstrumentationCapture,
-  InstrumentationEvent,
-} from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationCapture, InstrumentationEvent } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 
 export type { JsonValue } from "#shared/json.js";
@@ -65,7 +62,7 @@ export type {
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
   InstrumentationUsage,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 
 /**
  * Marks a value as having come from `defineInstrumentation` or a built-in

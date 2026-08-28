@@ -14,7 +14,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
   createAgentOtelInstrumentation,
   type AgentOtelInstrumentationInput,
@@ -35,7 +35,7 @@ import {
   type InstrumentationParentLineage,
   type InstrumentationTraceContext,
   type InstrumentationUsage,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import {
@@ -45,7 +45,7 @@ import {
   modelCallIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 
 interface TestRuntime {
   readonly exporter: InMemorySpanExporter;

@@ -3,6 +3,7 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 import type { SessionTraceContext } from "#channel/types.js";
 import { contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
+import type { ContextAccessor } from "#context/key.js";
 import { SessionTraceSeedKey, type SessionTraceSeed } from "#context/keys.js";
 import type {
   AgentActionTraceState,
@@ -30,7 +31,15 @@ const AgentTraceContextKey = new ContextKey<AgentTraceContextState>("eve.harness
 export function readCurrentSessionTraceDecision(
   sessionId: string,
 ): InstrumentationDecision | undefined {
-  return contextStorage.getStore()?.get(AgentTraceContextKey)?.sessions[sessionId]?.decision;
+  const context = contextStorage.getStore();
+  return context === undefined ? undefined : readSessionTraceDecision(context, sessionId);
+}
+
+export function readSessionTraceDecision(
+  context: ContextAccessor,
+  sessionId: string,
+): InstrumentationDecision | undefined {
+  return context.get(AgentTraceContextKey)?.sessions[sessionId]?.decision;
 }
 
 /** Keeps only framework trace state from an interrupted step's context changes. */

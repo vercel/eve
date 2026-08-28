@@ -14,7 +14,7 @@ import {
 } from "#execution/workflow-runtime.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -839,7 +839,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
 
   it("allocates a sampled trace seed when the policy is sampled", async () => {
     const idGenerator = new AgentSpanIdGenerator();
-    installAgentOtelRuntime(idGenerator, () => true);
+    const tracePolicy = vi.fn(() => true);
+    installAgentOtelRuntime(idGenerator, tracePolicy);
     mockBundleAndRun();
     startMock.mockResolvedValue({ runId: "driver-run" });
 
@@ -866,6 +867,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceId).toMatch(/^[0-9a-f]{32}$/u);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
+    expect(tracePolicy).toHaveBeenCalledOnce();
   });
 
   it("passes the channel adapter kind as channelType to the policy", async () => {
@@ -926,7 +928,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
   });
 
   it("inherits the parent trace context for delegated subagents", async () => {
-    installAgentOtelRuntime(new AgentSpanIdGenerator(), () => false);
+    const tracePolicy = vi.fn(() => false);
+    installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
     mockBundleAndRun();
 
     const parentTrace = {
@@ -959,6 +962,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed).toEqual(parentTrace);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
+    expect(tracePolicy).not.toHaveBeenCalled();
   });
 
   it("does not allocate a seed when no instrumentation runtime is installed", async () => {

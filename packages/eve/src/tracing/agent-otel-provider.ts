@@ -11,8 +11,8 @@ import {
 
 import { contextStorage } from "#context/container.js";
 import { SessionTraceSeedKey } from "#context/keys.js";
-import { withoutInstrumentationContent } from "#harness/instrumentation/content.js";
-import { instrumentationEventForTraceDecision } from "#harness/instrumentation/content-policy.js";
+import { withoutInstrumentationContent } from "#instrumentation/content.js";
+import { instrumentationEventForTraceDecision } from "#instrumentation/content-policy.js";
 import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import {
   contentAttribute,
@@ -51,8 +51,8 @@ import type {
   InstrumentationSessionTransitionEvent,
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
-} from "#harness/instrumentation/lifecycle.js";
-import { attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 
 interface SpanState {
   readonly context: Context;

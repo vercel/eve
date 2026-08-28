@@ -6,7 +6,7 @@ import {
   type InstrumentationTraceContext,
   type InstrumentationTraceSeed,
   type InstrumentationTurnStartedEvent,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";

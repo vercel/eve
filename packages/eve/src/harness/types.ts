@@ -14,7 +14,7 @@ import type { InternalToolDefinition } from "#tools/definition.js";
 import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
+import type { SessionInstrumentation } from "#instrumentation/runtime.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 
 /**
@@ -310,7 +310,7 @@ export interface ToolLoopHarnessConfig {
    * Internal lifecycle hooks injected into each actual model attempt.
    * Omitted in production until an instrumentation runtime opts in.
    */
-  readonly instrumentation?: HarnessInstrumentation;
+  readonly instrumentation?: SessionInstrumentation;
   /**
    * Execution mode for the current harness.
    *

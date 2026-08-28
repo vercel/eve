@@ -13,15 +13,15 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import { listLocalTraces } from "#tracing/local-trace-reader.js";
-import type { InstrumentationAttemptScope } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentation-runtime.js";
 import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 

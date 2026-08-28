@@ -4,11 +4,11 @@ import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
 import {
   createInstrumentationHooks,
   type InstrumentationProviderDefinition,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import {
   registerInstrumentationRuntime,
   type InstrumentationRuntime,
-} from "#harness/instrumentation/runtime.js";
+} from "#instrumentation/runtime.js";
 import { createLogger, formatError } from "#internal/logging.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";

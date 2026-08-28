@@ -37,12 +37,17 @@ import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
+import type {
+  InstrumentationEvents,
+  InstrumentationStepStartedEventInput,
+} from "#public/instrumentation/index.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
 import {
   getHarnessEmissionState,
@@ -75,7 +80,12 @@ import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harn
 import {
   createInstrumentationHooks,
   type InstrumentationContextRunner,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import {
+  bindInstrumentationRuntime,
+  type InstrumentationRuntime,
+  type SessionInstrumentation,
+} from "#instrumentation/runtime.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
@@ -113,42 +123,99 @@ const {
   registeredOtelIntegration: { onStart: vi.fn() },
 }));
 
-vi.mock("./ai-sdk-hook-bridge.js", () => ({
+vi.mock("#instrumentation/ai-sdk-hook-bridge.js", () => ({
   createAiSdkHookBridge: (...args: unknown[]) => mockCreateAiSdkHookBridge(...args),
 }));
 
-vi.mock("./ai-sdk-telemetry.js", () => ({
+vi.mock("#instrumentation/ai-sdk-telemetry.js", () => ({
   ensureOtelIntegration: vi.fn(),
   getRegisteredTelemetryIntegrations: (options?: { readonly sanitizeEveOtelErrors?: boolean }) =>
     mockGetRegisteredTelemetryIntegrations(options),
 }));
 
-const mockGetInstrumentationConfig = vi.fn().mockReturnValue(undefined);
-vi.mock("./instrumentation/config.js", () => ({
-  getInstrumentationConfig: (...args: unknown[]) => mockGetInstrumentationConfig(...args),
-}));
+let declaredAudience: ChannelAudience = "unknown";
+let declaredDecision: InstrumentationDecision | undefined;
+let declaredInstrumentation: SessionInstrumentation | undefined;
+let declaredRuntime: InstrumentationRuntime | undefined;
 
-const mockGetInstrumentationRuntime = vi.fn().mockReturnValue(undefined);
-vi.mock("./instrumentation/runtime.js", () => ({
-  getInstrumentationRuntime: (...args: unknown[]) => mockGetInstrumentationRuntime(...args),
-}));
+function createInstrumentationContext(
+  decision: InstrumentationDecision | undefined,
+  audience: ChannelAudience,
+): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(ChannelInstrumentationKey, {
+    kind: "channel:test",
+    metadata: { audience },
+  });
+  if (decision !== undefined) {
+    ctx.set(SessionTraceSeedKey, {
+      decision,
+      spanId: "1".repeat(16),
+      traceFlags: decision.action === "record" ? 1 : 0,
+      traceId: "2".repeat(32),
+    });
+  }
+  return ctx;
+}
 
-/**
- * Registering an authored config writes both stores, so the tests toggle
- * telemetry through one call rather than keeping two mocks in step by hand.
- */
-function declareTelemetry(config: Readonly<Record<string, unknown>> | undefined): void {
-  mockGetInstrumentationConfig.mockReturnValue(config);
-  mockGetInstrumentationRuntime.mockReturnValue(
+function declareTelemetry(
+  config:
+    | (Readonly<Record<string, unknown>> & { readonly events?: InstrumentationEvents })
+    | undefined,
+  decision?: InstrumentationDecision,
+  audience: ChannelAudience = "unknown",
+): void {
+  declaredAudience = audience;
+  declaredDecision = decision;
+  declaredRuntime =
     config === undefined
       ? undefined
       : {
+          forceFlush: async () => undefined,
+          hooks: createInstrumentationHooks([]),
           otelSettings: {
             ...config,
             traceChannelRequests: config["traceChannelRequests"] === true,
           },
-        },
-  );
+          runInContext: (_operation, execute) => execute(),
+          shutdown: async () => undefined,
+          stepStartedRuntimeContextResolver: config.events?.["step.started"] ?? (() => undefined),
+        };
+  declaredInstrumentation = bindInstrumentationRuntime(
+    declaredRuntime,
+    createInstrumentationContext(decision, audience),
+    {
+      rootSessionId: "test-session",
+      sessionId: "test-session",
+    },
+  )?.prepareExecution();
+}
+
+function bindHookInstrumentation(
+  hooks: ReturnType<typeof createInstrumentationHooks>,
+  runInContext: InstrumentationContextRunner = (_operation, execute) => execute(),
+  useDeclaredRuntime = false,
+): SessionInstrumentation {
+  return bindInstrumentationRuntime(
+    {
+      forceFlush: async () => undefined,
+      hooks,
+      otelSettings: useDeclaredRuntime ? declaredRuntime?.otelSettings : undefined,
+      runtimeContextResolvers: useDeclaredRuntime
+        ? declaredRuntime?.runtimeContextResolvers
+        : undefined,
+      runInContext,
+      shutdown: async () => undefined,
+      stepStartedRuntimeContextResolver: useDeclaredRuntime
+        ? declaredRuntime?.stepStartedRuntimeContextResolver
+        : undefined,
+    },
+    createInstrumentationContext(
+      useDeclaredRuntime ? declaredDecision : undefined,
+      useDeclaredRuntime ? declaredAudience : "unknown",
+    ),
+    { rootSessionId: "test-session", sessionId: "test-session" },
+  )!.prepareExecution();
 }
 
 vi.mock("./compaction.js", () => ({
@@ -196,6 +263,7 @@ function createTestConfig(
 ): ToolLoopHarnessConfig {
   return {
     handleEvent: emit,
+    instrumentation: declaredInstrumentation,
     mode,
     resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
     tools: new Map([
@@ -4930,11 +4998,15 @@ describe("createToolLoopHarness", () => {
           "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
         },
       }));
-      declareTelemetry({
-        events: {
-          "step.started": resolveRuntimeContext,
+      declareTelemetry(
+        {
+          events: {
+            "step.started": resolveRuntimeContext,
+          },
         },
-      });
+        undefined,
+        "public",
+      );
       const { constructedCalls } = setupRecoveryAgent({
         failure: createGatewayUnsupportedToolError({ unsupportedTypes: ["web_search_20250305"] }),
         successResult: {
@@ -4957,10 +5029,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        instrumentation: {
-          hooks: createInstrumentationHooks([]),
-          runInContext: (_operation, execute) => execute(),
-        },
+        instrumentation: declaredInstrumentation,
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -10986,10 +11055,7 @@ describe("createToolLoopHarness", () => {
       ]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          instrumentation: {
-            hooks: createInstrumentationHooks([]),
-            runInContext: (_operation, execute) => execute(),
-          },
+          instrumentation: declaredInstrumentation,
         }),
       );
 
@@ -11029,11 +11095,14 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({
-        recordInputs: true,
-        recordOutputs: true,
-        tracePolicy: () => false,
-      });
+      declareTelemetry(
+        {
+          recordInputs: true,
+          recordOutputs: true,
+          tracePolicy: () => false,
+        },
+        { action: "drop" },
+      );
       const runStep = createToolLoopHarness(createTestConfig());
 
       await runStep(createTestSession(), { message: "private" });
@@ -11053,7 +11122,7 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({ tracePolicy: () => false });
+      declareTelemetry({ tracePolicy: () => false }, { action: "drop" });
       const attemptCompleted = vi.fn();
       const hooks = createInstrumentationHooks([
         {
@@ -11064,7 +11133,7 @@ describe("createToolLoopHarness", () => {
       ]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          instrumentation: { hooks, runInContext: (_operation, execute) => execute() },
+          instrumentation: bindHookInstrumentation(hooks, undefined, true),
         }),
       );
       const ctx = new ContextContainer();
@@ -11101,7 +11170,7 @@ describe("createToolLoopHarness", () => {
       const hooks = createInstrumentationHooks([{ capture: "content", name: "analytics" }]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          instrumentation: { hooks, runInContext: (_operation, execute) => execute() },
+          instrumentation: bindHookInstrumentation(hooks, undefined, true),
         }),
       );
 
@@ -11130,23 +11199,20 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({
-        recordInputs: true,
-        recordOutputs: true,
-        tracePolicy: () => ({
-          emit: true,
-          recordInputs: inputs,
-          recordOutputs: outputs,
-        }),
-      });
-      const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
-          instrumentation: {
-            hooks: createInstrumentationHooks([]),
-            runInContext: (_operation, execute) => execute(),
-          },
-        }),
+      declareTelemetry(
+        {
+          recordInputs: true,
+          recordOutputs: true,
+          tracePolicy: () => ({
+            emit: true,
+            recordInputs: inputs,
+            recordOutputs: outputs,
+          }),
+        },
+        { action: "record", recordInputs: inputs, recordOutputs: outputs },
+        "public",
       );
+      const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
       ctx.set(ChannelInstrumentationKey, {
         kind: "channel:public",
@@ -11175,15 +11241,19 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({
-        recordInputs: false,
-        recordOutputs: true,
-        tracePolicy: () => ({
-          emit: true,
-          recordInputs: true,
+      declareTelemetry(
+        {
+          recordInputs: false,
           recordOutputs: true,
-        }),
-      });
+          tracePolicy: () => ({
+            emit: true,
+            recordInputs: true,
+            recordOutputs: true,
+          }),
+        },
+        { action: "record", recordInputs: true, recordOutputs: true },
+        "public",
+      );
       const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
       ctx.set(ChannelInstrumentationKey, {
@@ -11205,7 +11275,7 @@ describe("createToolLoopHarness", () => {
       });
     });
 
-    it("reuses the persisted rejected trace decision", async () => {
+    it("uses the injected decision instead of reinterpreting the trace seed", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -11214,54 +11284,14 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
       const tracePolicy = vi.fn(() => true);
-      declareTelemetry({ recordInputs: true, recordOutputs: true, tracePolicy });
-      const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
-          instrumentation: {
-            hooks: createInstrumentationHooks([]),
-            runInContext: (_operation, execute) => execute(),
-          },
-        }),
+      declareTelemetry(
+        { recordInputs: true, recordOutputs: true, tracePolicy },
+        { action: "drop" },
       );
+      const runStep = createToolLoopHarness(createTestConfig());
       const ctx = new ContextContainer();
       ctx.set(SessionTraceSeedKey, {
         decision: { action: "drop" },
-        spanId: "1".repeat(16),
-        traceFlags: 0,
-        traceId: "2".repeat(32),
-      });
-
-      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
-
-      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
-        telemetry?: { integrations?: unknown[] };
-      };
-      expect(agentCall.telemetry?.integrations).toEqual([
-        mockCreateAiSdkHookBridge.mock.results[0]!.value,
-      ]);
-      expect(tracePolicy).not.toHaveBeenCalled();
-    });
-
-    it("supports a persisted legacy seed without a decision", async () => {
-      setupMockAgent({
-        finishReason: "stop",
-        response: { messages: [{ content: "Hello!", role: "assistant" }] },
-        text: "Hello!",
-        toolCalls: [],
-        toolResults: [],
-      });
-      const tracePolicy = vi.fn(() => true);
-      declareTelemetry({ recordInputs: true, recordOutputs: true, tracePolicy });
-      const runStep = createToolLoopHarness(
-        createTestConfig("conversation", undefined, {
-          instrumentation: {
-            hooks: createInstrumentationHooks([]),
-            runInContext: (_operation, execute) => execute(),
-          },
-        }),
-      );
-      const ctx = new ContextContainer();
-      ctx.set(SessionTraceSeedKey, {
         spanId: "1".repeat(16),
         traceFlags: 0,
         traceId: "2".repeat(32),
@@ -11342,7 +11372,9 @@ describe("createToolLoopHarness", () => {
       expect(runtimeContext?.["eve.version"]).not.toBe("");
       expect(runtimeContext?.["eve.session.id"]).toBe("test-session");
       expect(agentCall?.telemetry?.isEnabled).toBe(true);
-      expect(agentCall?.telemetry?.integrations).toEqual([]);
+      expect(agentCall?.telemetry?.integrations).toEqual([
+        mockCreateAiSdkHookBridge.mock.results[0]!.value,
+      ]);
       expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
         sanitizeEveOtelErrors: true,
       });
@@ -11362,7 +11394,7 @@ describe("createToolLoopHarness", () => {
       ]);
       const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
       const config = createTestConfig("conversation", undefined, {
-        instrumentation: { hooks, runInContext },
+        instrumentation: bindHookInstrumentation(hooks, runInContext),
       });
 
       const runStep = createToolLoopHarness(config);
@@ -11438,7 +11470,7 @@ describe("createToolLoopHarness", () => {
       const { emit } = createEventCollector();
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", emit, {
-          instrumentation: { hooks, runInContext: (_operation, execute) => execute() },
+          instrumentation: bindHookInstrumentation(hooks),
           tools: createDelegationToolMap(),
         }),
       );
@@ -11464,19 +11496,15 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({ recordInputs: true, recordOutputs: false });
+      declareTelemetry({ recordInputs: true, recordOutputs: false }, undefined, "public");
       // An authored module can register its own integration alongside eve's.
       mockGetRegisteredTelemetryIntegrations.mockReturnValue([
         registeredOtelIntegration,
         registeredAuthorIntegration,
       ]);
-      const hooks = createInstrumentationHooks([]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          instrumentation: {
-            hooks,
-            runInContext: (_operation, execute) => execute(),
-          },
+          instrumentation: declaredInstrumentation,
         }),
       );
 
@@ -11582,11 +11610,15 @@ describe("createToolLoopHarness", () => {
           },
         };
       });
-      declareTelemetry({
-        events: {
-          "step.started": resolveRuntimeContext,
+      declareTelemetry(
+        {
+          events: {
+            "step.started": resolveRuntimeContext,
+          },
         },
-      });
+        undefined,
+        "public",
+      );
 
       const ctx = new ContextContainer();
       ctx.set(ChannelInstrumentationKey, {

@@ -19,16 +19,9 @@ import type {
   Runtime,
   SessionCommand,
   SessionCommandResult,
-  SessionTraceContext,
 } from "#channel/types.js";
 import { ActivityObserverKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
-import {
-  ChannelInstrumentationKey,
-  OtelTraceEnabledKey,
-  SessionTraceSeedKey,
-  type SessionTraceSeed,
-} from "#context/keys.js";
 import {
   buildSessionAttributes,
   buildSubagentRootAttributes,
@@ -69,13 +62,7 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
-import {
-  isSampledTrace,
-  resolveTracePolicy,
-  resolveTracePolicyDecision,
-} from "#tracing/sampled-trace.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 
 const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
@@ -172,17 +159,11 @@ export function createWorkflowRuntime(config: {
         run: input,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-      const channelInstrumentation = ctx.get(ChannelInstrumentationKey);
-      const traceSeed = allocateSessionTraceSeed({
+      initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
-        audience: normalizeChannelAudience(channelInstrumentation?.metadata.audience),
-        channelType: channelInstrumentation?.channelType,
+        ctx,
         parentTraceContext: input.parentTraceContext,
       });
-      if (traceSeed !== undefined) {
-        ctx.set(SessionTraceSeedKey, traceSeed);
-      }
-      ctx.set(OtelTraceEnabledKey, getInstrumentationRuntime()?.prepareSessionTrace !== undefined);
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       let collectorRunId: string | undefined;
       let activityObserver = input.activityObserver;
@@ -534,38 +515,5 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
 
   return {
     runId,
-  };
-}
-
-function allocateSessionTraceSeed(input: {
-  readonly agentName?: string;
-  readonly audience: ReturnType<typeof normalizeChannelAudience>;
-  readonly channelType?: string;
-  readonly parentTraceContext?: SessionTraceContext;
-}): SessionTraceSeed | undefined {
-  if (input.parentTraceContext !== undefined) {
-    const decision =
-      input.parentTraceContext.decision ??
-      resolveTracePolicyDecision(isSampledTrace(input.parentTraceContext), input.audience);
-    return {
-      decision,
-      spanId: input.parentTraceContext.spanId,
-      traceFlags: input.parentTraceContext.traceFlags,
-      traceId: input.parentTraceContext.traceId,
-    };
-  }
-  const instrumentation = getInstrumentationRuntime();
-  if (instrumentation?.prepareSessionTrace === undefined) return undefined;
-  if (instrumentation.idGenerator === undefined) return undefined;
-  const decision = resolveTracePolicy(instrumentation.otelSettings?.tracePolicy, {
-    agentName: input.agentName,
-    audience: input.audience,
-    channelType: input.channelType,
-  });
-  return {
-    decision,
-    spanId: instrumentation.idGenerator.allocateSpanId(),
-    traceFlags: decision.action === "record" ? 1 : 0,
-    traceId: instrumentation.idGenerator.generateTraceId(),
   };
 }

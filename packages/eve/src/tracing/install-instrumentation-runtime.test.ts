@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { turnIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 

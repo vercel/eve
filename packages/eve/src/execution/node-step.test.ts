@@ -5,6 +5,11 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  bindInstrumentationRuntime,
+  type InstrumentationRuntime,
+} from "#instrumentation/runtime.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -387,6 +392,18 @@ describe("createNodeHarnessTools", () => {
 describe("createExecutionNodeStep", () => {
   it("builds a usable harness step for the root node", async () => {
     setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
+    const forceFlush = vi.fn(async () => undefined);
+    const runtime: InstrumentationRuntime = {
+      forceFlush,
+      hooks: createInstrumentationHooks([]),
+      otelSettings: undefined,
+      runInContext: (_operation, execute) => execute(),
+      shutdown: async () => undefined,
+    };
+    const instrumentation = bindInstrumentationRuntime(runtime, new ContextContainer(), {
+      rootSessionId: "sess-root",
+      sessionId: "sess-root",
+    });
 
     const toolRegistry = await createRuntimeToolRegistry({
       tools: [
@@ -416,6 +433,7 @@ describe("createExecutionNodeStep", () => {
     };
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
+      instrumentation,
       mode: "task",
       modelResolutionScope,
       node: rootNode,
@@ -453,6 +471,7 @@ describe("createExecutionNodeStep", () => {
       rootNode.turnAgent.model,
       modelResolutionScope,
     );
+    expect(forceFlush).toHaveBeenCalledOnce();
   });
 
   it("records visible subagent tools as pending runtime actions", async () => {
@@ -478,6 +497,7 @@ describe("createExecutionNodeStep", () => {
     );
     const step = createExecutionNodeStep({
       createRuntime,
+      instrumentation: undefined,
       mode: "task",
       modelResolutionScope: {
         moduleMap: { nodes: {} },
