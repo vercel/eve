@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
-import { MAX_ACTIVITY_TEXT_LENGTH } from "#execution/activity-text.js";
+import { MAX_ACTIVITY_TEXT_LENGTH } from "#shared/activity-text.js";
 
 const lineage = {
   id: "work:root:turn",
@@ -15,6 +15,7 @@ describe("projectActivityEvents", () => {
   it("projects tools and skills without inputs", () => {
     expect(
       projectActivityEvents({
+        activityLabels: { "tool-1": "Search issues" },
         at: "2026-01-01T00:00:00Z",
         event: {
           data: {
@@ -40,6 +41,7 @@ describe("projectActivityEvents", () => {
         action: expect.objectContaining({
           id: "action:work:root:turn:tool-1",
           kind: "tool",
+          label: "Search issues",
           name: "search",
           stepIndex: 0,
         }),

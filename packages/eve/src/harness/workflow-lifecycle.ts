@@ -2,6 +2,7 @@ import type { ToolSet, TypedToolCall } from "ai";
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
+import { collectActionActivityLabels } from "#harness/action-activity.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import {
@@ -58,13 +59,16 @@ export async function emitWorkflowActionsRequested(input: {
       type: "tool-call",
     } as TypedToolCall<ToolSet>;
 
+    const projection = createRuntimeActionRequestFromToolCall({ toolCall, tools: input.tools });
     await input.emit(
       createActionsRequestedEvent({
-        actions: [createRuntimeActionRequestFromToolCall({ toolCall, tools: input.tools })],
+        actions: [projection.action],
         sequence: input.emissionState.sequence,
         stepIndex: input.emissionState.stepIndex,
         turnId: input.emissionState.turnId,
       }),
+      undefined,
+      collectActionActivityLabels([projection]),
     );
   }
 }

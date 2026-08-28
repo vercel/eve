@@ -1,9 +1,11 @@
-import { normalizeActivityText } from "#execution/activity-text.js";
+import { normalizeActivityText } from "#shared/activity-text.js";
+import type { ActionActivityLabels } from "#harness/action-activity.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 export function projectActivityEvents(input: {
+  readonly activityLabels?: ActionActivityLabels;
   readonly at: string;
   readonly event: UnstampedMessageStreamEvent;
   readonly lineage: ActivityWorkIdentityV1;
@@ -21,6 +23,7 @@ export function projectActivityEvents(input: {
           action: {
             id,
             kind,
+            label: activityLabel(input.activityLabels?.[action.callId]),
             name,
             parentWorkId: lineage.id,
             rootTurnId: lineage.rootTurnId,
@@ -210,7 +213,8 @@ export function projectActivityEvents(input: {
   return [];
 }
 
-function activityLabel(value: string): string | undefined {
+function activityLabel(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
   const normalized = normalizeActivityText(value);
   return normalized === "" ? undefined : normalized;
 }

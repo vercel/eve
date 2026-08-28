@@ -1,6 +1,23 @@
 import type { JsonObject } from "#shared/json.js";
+import { activityLabel } from "#tools/activity-label.js";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
+
+export function resolveWebSearchActivityLabel(input: unknown): string {
+  if (input === null || typeof input !== "object") return "Search";
+  const record = input as Record<string, unknown>;
+  const action = record.action;
+  const providerAction =
+    action !== null && typeof action === "object" ? (action as Record<string, unknown>) : undefined;
+  const queries = providerAction?.queries;
+  const providerDetail = Array.isArray(queries)
+    ? queries.find((query) => typeof query === "string")
+    : (providerAction?.query ?? providerAction?.url ?? providerAction?.pattern);
+  return activityLabel(
+    "Search",
+    record.query ?? record.objective ?? record.search_query ?? record.searchQuery ?? providerDetail,
+  );
+}
 
 /**
  * Output schema for OpenAI's provider-managed `webSearch` tool.

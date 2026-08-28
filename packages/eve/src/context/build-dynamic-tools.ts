@@ -104,13 +104,20 @@ export function replayDynamicTools(
         : lookupDurableDynamicCallback(owner, "approvalKey");
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(owner, "execute");
+    const activityLabelReference = entry.callbacks.activityLabel;
+    const activityLabel =
+      activityLabelReference === undefined
+        ? undefined
+        : lookupDurableDynamicCallback(owner, "activityLabel");
     const toModelOutputReference = entry.callbacks.toModelOutput;
     const toModelOutput =
       toModelOutputReference === undefined
         ? undefined
         : lookupDurableDynamicCallback(owner, "toModelOutput");
 
-    return {
+    const replayed: {
+      -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
+    } = {
       description: entry.description,
       execute:
         entry.execution === "background"
@@ -169,21 +176,24 @@ export function replayDynamicTools(
             },
           }),
       outputSchema: toOutputSchema(entry.outputSchema),
-      ...(toModelOutputReference === undefined
-        ? {}
-        : {
-            toModelOutput: (output: unknown) => {
-              if (toModelOutput === undefined) {
-                throw missingCallbackError(entry, "toModelOutput");
-              }
-              return callDurableDynamicCallback(
-                toModelOutput!,
-                toModelOutputReference.closure,
-                output,
-              );
-            },
-          }),
     };
+    if (activityLabelReference !== undefined) {
+      replayed.activityLabel = (input: unknown) => {
+        if (activityLabel === undefined) throw missingCallbackError(entry, "activityLabel");
+        return callDurableDynamicCallback(
+          activityLabel,
+          activityLabelReference.closure,
+          input,
+        ) as string;
+      };
+    }
+    if (toModelOutputReference !== undefined) {
+      replayed.toModelOutput = (output: unknown) => {
+        if (toModelOutput === undefined) throw missingCallbackError(entry, "toModelOutput");
+        return callDurableDynamicCallback(toModelOutput, toModelOutputReference.closure, output);
+      };
+    }
+    return replayed;
   });
 }
 

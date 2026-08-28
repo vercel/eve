@@ -1,7 +1,9 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
 import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type { RuntimeActionRequestProjection } from "#harness/action-activity.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
+import { normalizeActivityText } from "#shared/activity-text.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
@@ -422,29 +424,35 @@ function readBackgroundTaskReceipt(
 export function createRuntimeActionRequestFromToolCall(input: {
   readonly toolCall: TypedToolCall<ToolSet>;
   readonly tools: HarnessToolMap;
-}): RuntimeActionRequest {
+}): RuntimeActionRequestProjection {
   const definition = input.tools.get(input.toolCall.toolName);
-
-  if (definition?.frameworkAction === "load-skill") {
-    return {
-      callId: input.toolCall.toolCallId,
-      input: resolveToolCallInputObject(input.toolCall.input, {
-        callId: input.toolCall.toolCallId,
-        toolName: input.toolCall.toolName,
-      }),
-      kind: "load-skill",
-    };
-  }
-
-  return {
+  const toolInput = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
-    input: resolveToolCallInputObject(input.toolCall.input, {
-      callId: input.toolCall.toolCallId,
-      toolName: input.toolCall.toolName,
-    }),
-    kind: "tool-call",
     toolName: input.toolCall.toolName,
-  };
+  });
+  const action: RuntimeActionRequest =
+    definition?.frameworkAction === "load-skill"
+      ? { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" }
+      : {
+          callId: input.toolCall.toolCallId,
+          input: toolInput,
+          kind: "tool-call",
+          toolName: input.toolCall.toolName,
+        };
+  return { action, activityLabel: resolveActivityLabel(definition?.activityLabel, toolInput) };
+}
+
+function resolveActivityLabel(
+  label: HarnessToolDefinition["activityLabel"],
+  input: JsonObject,
+): string | undefined {
+  if (label === undefined) return undefined;
+  try {
+    const value = normalizeActivityText(label(parseJsonObject(input)));
+    return value === "" ? undefined : value;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Projects one deferred harness tool call into task/control coordination. */
