@@ -55,6 +55,7 @@ const experimentIds = benchmarks.flatMap((benchmark) =>
   authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
 );
 const stale = staleCells(experimentIds);
+const previousResults = readPreviousResults();
 const results = [];
 
 for (const benchmark of benchmarks) {
@@ -104,6 +105,7 @@ const output = {
     })),
   ),
   results,
+  ...(previousResults.length === 0 ? {} : { previouslyMeasured: previousResults }),
 };
 
 const destination =
@@ -111,6 +113,39 @@ const destination =
 mkdirSync(dirname(destination), { recursive: true });
 writeFileSync(destination, `${JSON.stringify(output, null, 2)}\n`);
 console.log(`Exported ${results.length} benchmark cells to ${destination}`);
+
+function readPreviousResults() {
+  const destination =
+    values.output === undefined ? outputPath : resolve(process.cwd(), values.output);
+  if (!existsSync(destination)) return [];
+
+  const previous = JSON.parse(readFileSync(destination, "utf8"));
+  const currentExperimentIds = new Set(
+    publishedBenchmarkModels.flatMap((benchmark) =>
+      authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
+    ),
+  );
+  const supersededExperiments = (previous.experiments ?? []).filter(
+    (experiment) => !currentExperimentIds.has(experiment.id),
+  );
+  const supersededExperimentIds = new Set(supersededExperiments.map((experiment) => experiment.id));
+  const supersededResults = (previous.results ?? []).filter((result) =>
+    supersededExperimentIds.has(result.experimentId),
+  );
+  const retained = (previous.previouslyMeasured ?? []).filter(
+    (measurement) => Array.isArray(measurement.experiments) && Array.isArray(measurement.results),
+  );
+  if (supersededExperiments.length === 0) return retained;
+
+  return [
+    ...retained,
+    {
+      suite: previous.suite,
+      experiments: supersededExperiments,
+      results: supersededResults,
+    },
+  ];
+}
 
 function selectedBenchmarks(value) {
   if (value === undefined) return publishedBenchmarkModels;

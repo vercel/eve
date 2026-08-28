@@ -26,6 +26,9 @@ export const metadata: Metadata = {
 
 const ModelBenchmarksPage = () => {
   const rows = benchmarkRows(benchmarkResults);
+  const previouslyMeasured = (benchmarkResults.previouslyMeasured ?? []).flatMap((measurement) =>
+    benchmarkRows({ ...benchmarkResults, ...measurement }),
+  );
   const publishedAt = formatDate(benchmarkResults.generatedAt);
   const revision = benchmarkResults.suite.eveRevision;
 
@@ -50,7 +53,27 @@ const ModelBenchmarksPage = () => {
         </div>
       </section>
 
-      <ResultsTable rows={rows} />
+      <section aria-labelledby="current-results">
+        <h2 className="sr-only" id="current-results">
+          Current results
+        </h2>
+        <ResultsTable rows={rows} />
+      </section>
+
+      {previouslyMeasured.length > 0 ? (
+        <section className="mt-20" aria-labelledby="previously-measured">
+          <h2 className="text-heading-36 text-gray-1000" id="previously-measured">
+            Previously measured
+          </h2>
+          <p className="mt-3 text-gray-900 text-lg">
+            Superseded model and harness combinations. These are their last results and are not
+            rerun.
+          </p>
+          <div className="mt-8">
+            <ResultsTable rows={previouslyMeasured} showMeasurementDate />
+          </div>
+        </section>
+      ) : null}
 
       <div className="mt-4 space-y-2 px-4 text-gray-700 text-sm leading-6">
         <p>

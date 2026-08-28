@@ -20,7 +20,13 @@ interface SortState {
   direction: SortDirection;
 }
 
-export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
+export const ResultsTable = ({
+  rows,
+  showMeasurementDate = false,
+}: {
+  rows: BenchmarkRow[];
+  showMeasurementDate?: boolean;
+}) => {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [sort, setSort] = useState<SortState>({
     key: "guidedSuccessRate",
@@ -123,6 +129,11 @@ export const ResultsTable = ({ rows }: { rows: BenchmarkRow[] }) => {
                         />
                       </span>
                       {row.modelDisplayName}
+                      {showMeasurementDate && row.latestMeasuredAt !== null ? (
+                        <span className="font-normal text-gray-700 text-sm">
+                          {formatDate(row.latestMeasuredAt)}
+                        </span>
+                      ) : null}
                     </button>
                   </Cell>
                   <Cell>{row.harness}</Cell>
@@ -252,6 +263,13 @@ function compareNullableNumbers(
   if (left === null) return right === null ? 0 : 1;
   if (right === null) return -1;
   return direction === "ascending" ? left - right : right - left;
+}
+
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("en", {
+    dateStyle: "medium",
+    timeZone: "UTC",
+  }).format(new Date(value));
 }
 
 function formatDuration(value: number | null): React.ReactNode {

@@ -18,7 +18,7 @@ export const benchmarkModels = [
     model: "claude-sonnet-4-6",
     displayName: "Claude Sonnet 4.6",
     harness: "OpenCode",
-    support: "supported",
+    support: "candidate",
   },
   {
     id: "kimi-k3",
@@ -74,7 +74,7 @@ export const benchmarkModels = [
     model: "anthropic/claude-opus-5",
     displayName: "Claude Opus 5",
     harness: "OpenCode",
-    support: "candidate",
+    support: "supported",
   },
   {
     id: "gemini-3-1-pro-preview",
