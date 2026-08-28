@@ -2656,12 +2656,6 @@ async function handleStepResult(input: {
     providerExecutedOutcomeIds,
   });
   const responseMessages = normalizedProviderHistory.messages;
-  const pendingResponseStart = responseMessages.findIndex((message) => message.role !== "tool");
-  const committedResponseMessages =
-    pendingResponseStart === -1
-      ? responseMessages
-      : responseMessages.slice(0, pendingResponseStart);
-  const pendingResponseMessages = responseMessages.slice(committedResponseMessages.length);
 
   const baseSession: HarnessSession = {
     ...session,
@@ -2705,6 +2699,14 @@ async function handleStepResult(input: {
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
   const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
+  // Keep outcomes from resumed work ahead of the synthetic pending-approval
+  // message; only the unresolved assistant response belongs to the parked batch.
+  const pendingResponseStart = responseMessages.findIndex((message) => message.role !== "tool");
+  const committedResponseMessages =
+    pendingResponseStart === -1
+      ? responseMessages
+      : responseMessages.slice(0, pendingResponseStart);
+  const pendingResponseMessages = responseMessages.slice(committedResponseMessages.length);
   const parkedInputHistory: ModelMessage[] = [
     ...promptMessages,
     ...committedResponseMessages,
