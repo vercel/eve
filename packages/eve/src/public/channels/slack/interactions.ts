@@ -47,11 +47,10 @@ import type {
   SlackInteractionUser,
   SlackShortcut,
   SlackShortcutContext,
-  SlackSlashCommand,
-  SlackSlashCommandContext,
 } from "#public/channels/slack/slackChannel.js";
 import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
+import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseInputResponse } from "#shared/input.js";
 
 const log = createLogger("slack.interactions");
@@ -272,7 +271,7 @@ export async function handleInteractionPost(
   }
 
   if (payload.kind === "slash_command") {
-    dispatchSlashCommand(parseSlashCommandPayload(payload), ctx, deps);
+    dispatchSlashCommand(payload, ctx, deps.config);
     return new Response(null, { status: 200 });
   }
 
@@ -372,24 +371,6 @@ export async function handleInteractionPost(
   return ack;
 }
 
-/** Normalizes the chat adapter's Slack slash-command payload. */
-function parseSlashCommandPayload(
-  payload: Extract<ReturnType<typeof parseSlackWebhookBody>, { kind: "slash_command" }>,
-): SlackSlashCommand {
-  return {
-    command: payload.command,
-    text: payload.text,
-    user: { id: payload.userId, username: payload.userName },
-    teamId: payload.teamId,
-    channelId: payload.channelId,
-    channelName: payload.channelName,
-    enterpriseId: payload.enterpriseId,
-    isEnterpriseInstall: payload.isEnterpriseInstall,
-    triggerId: payload.triggerId,
-    responseUrl: payload.responseUrl,
-  };
-}
-
 /** Normalizes Slack's two shortcut payload variants. */
 export function parseShortcutPayload(raw: unknown): SlackShortcut | null {
   if (!isObjectRecord(raw)) return null;
@@ -443,33 +424,6 @@ function readRequiredString(value: unknown): string | null {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function dispatchSlashCommand(
-  command: SlackSlashCommand,
-  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
-  deps: InteractionHandlerDeps,
-): void {
-  const onSlashCommand = deps.config.onSlashCommand;
-  if (onSlashCommand === undefined) {
-    log.warn("Slack slash command ignored because onSlashCommand is not configured", {
-      command: command.command,
-    });
-    return;
-  }
-
-  const commandCtx: SlackSlashCommandContext = {
-    slack: buildSlackWorkspaceHandle({
-      botToken: deps.config.credentials?.botToken,
-      installationTeamId: command.teamId,
-      teamId: command.teamId,
-    }),
-  };
-  dispatchInteractionHook(
-    () => onSlashCommand(command, commandCtx),
-    ctx,
-    "slash command handler failed",
-  );
 }
 
 function dispatchShortcut(
