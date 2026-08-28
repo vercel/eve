@@ -28,6 +28,8 @@ export type {
   ProvidedArgumentValue,
 } from "#public/definitions/connections/tool-call.js";
 export {
+  type ConnectionRequestPreparation,
+  type ConnectionRequestPreparer,
   defineOpenAPIConnection,
   type OpenAPIConnectionDefinition,
   type OpenAPISpecSource,

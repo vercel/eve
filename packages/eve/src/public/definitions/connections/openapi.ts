@@ -17,6 +17,55 @@ import type { ConnectionToolCallDefinition } from "#public/definitions/connectio
 export type OpenAPISpecSource = string | Record<string, unknown>;
 
 /**
+ * The fully-built outgoing HTTP request for one connection tool call,
+ * handed to {@link ConnectionRequestPreparer} immediately before eve
+ * dispatches it.
+ *
+ * `headers` already carries the connection's resolved auth, static
+ * headers, and any header parameters the operation declared. `body` is
+ * the serialized request body exactly as it will be sent, so a preparer
+ * can digest or sign the bytes the server will receive.
+ */
+export interface ConnectionRequestPreparation {
+  /** Uppercase HTTP method (e.g. `"POST"`). */
+  readonly method: string;
+  /** Absolute request URL, including the query string. */
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  /** Serialized request body, absent for requests that send none. */
+  readonly body?: string;
+  /** Replay-stable id of the connection tool call issuing this request. */
+  readonly callId: string;
+  /** Bare operation name published by the connection (e.g. `"create_checkout"`). */
+  readonly toolName: string;
+}
+
+/**
+ * Last-mile hook that derives extra request headers from the fully-built
+ * request.
+ *
+ * Runs once per connection tool call, immediately before dispatch. The
+ * returned headers are merged over the request's own headers. Return
+ * `undefined` to leave the request unchanged.
+ *
+ * This is the only place a connection can observe the serialized body,
+ * so it is where body-dependent schemes belong: HTTP Message Signatures
+ * (RFC 9421), content digests (RFC 9530), and request-signing schemes
+ * such as AWS SigV4. Header values that do not depend on the body should
+ * use `headers` instead, and operation parameters should use
+ * `toolCall.providedArguments`.
+ *
+ * Throwing aborts the tool call; the error surfaces to the model as the
+ * tool's failure.
+ */
+export type ConnectionRequestPreparer = (
+  request: ConnectionRequestPreparation,
+) =>
+  | Readonly<Record<string, string>>
+  | undefined
+  | Promise<Readonly<Record<string, string>> | undefined>;
+
+/**
  * Public definition for an OpenAPI connection authored in
  * `connections/*.ts`.
  *
@@ -100,6 +149,16 @@ export interface OpenAPIConnectionDefinition {
    * resolved values immediately before building the HTTP request.
    */
   toolCall?: ConnectionToolCallDefinition;
+  /**
+   * Hook invoked with the fully-built request immediately before eve
+   * dispatches it; the headers it returns are merged over the request's
+   * own headers.
+   *
+   * Use it for anything that must observe the serialized body — HTTP
+   * Message Signatures, content digests, request-signing schemes. Use
+   * `headers` for body-independent values.
+   */
+  prepareRequest?: ConnectionRequestPreparer;
   /**
    * Operation filter keyed on `operationId`. When set, the model sees
    * only operations whose id passes the filter; `connection_search`

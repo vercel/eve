@@ -74,6 +74,7 @@ export async function resolveConnectionDefinition(
       exportName: typeof definition.exportName;
       headers?: Readonly<HeadersDefinition>;
       logicalPath: string;
+      prepareRequest?: ResolvedConnectionDefinition["prepareRequest"];
       protocol: ResolvedConnectionDefinition["protocol"];
       sourceId: string;
       sourceKind: "module";
@@ -122,8 +123,14 @@ export async function resolveConnectionDefinition(
       result.tools = filter as Readonly<ToolFilterDefinition>;
     }
 
-    if (definition.protocol === "openapi" && resolvedRecord.spec !== undefined) {
-      result.spec = resolvedRecord.spec as ResolvedConnectionDefinition["spec"];
+    if (definition.protocol === "openapi") {
+      if (resolvedRecord.spec !== undefined) {
+        result.spec = resolvedRecord.spec as ResolvedConnectionDefinition["spec"];
+      }
+      if (typeof resolvedRecord.prepareRequest === "function") {
+        result.prepareRequest =
+          resolvedRecord.prepareRequest as ResolvedConnectionDefinition["prepareRequest"];
+      }
     }
 
     if (typeof resolvedRecord.approval === "function") {

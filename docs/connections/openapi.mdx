@@ -92,6 +92,26 @@ eve removes configured keys from every operation's model-facing input schema and
 
 Use `headers` for transport-wide headers that are not operation inputs. Use `providedArguments` when the OpenAPI document declares the value as an operation parameter and it should remain outside model control. Approval policies continue to receive only the model-authored input.
 
+## Sign or digest the outgoing request
+
+`headers` and `providedArguments` are both resolved before the request body exists, so neither can produce a value that depends on the bytes being sent. `prepareRequest` runs after the request is fully built and merges the headers it returns:
+
+```ts title="agent/connections/ledger.ts"
+import { defineOpenAPIConnection } from "eve/connections";
+
+export default defineOpenAPIConnection({
+  spec: "https://api.example.com/openapi.json",
+  description: "Ledger entries and balances.",
+  prepareRequest: async ({ method, url, body }) => ({
+    "X-Signature": await sign(`${method} ${new URL(url).pathname}\n${body ?? ""}`),
+  }),
+});
+```
+
+It receives the uppercase `method`, the absolute `url` including the query string, the `headers` already resolved for the request (auth, static headers, and header parameters), the serialized `body` when there is one, and the replay-stable `callId` plus the bare `toolName`. Return `undefined` to leave the request unchanged. Throwing fails the tool call before anything is sent.
+
+This is where HTTP Message Signatures, content digests, and request-signing schemes such as AWS SigV4 belong. Body-independent values belong in `headers`, and operation parameters in `providedArguments`. For UCP specifically, [`defineUcpConnection`](../protocols/ucp-agent) already wires this up.
+
 ## Operation filters
 
 Most OpenAPI specs describe far more than the model should use. Narrow generated tools with exactly one of `operations.allow` or `operations.block`:

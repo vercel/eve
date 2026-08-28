@@ -1,0 +1,166 @@
+:root {
+  --bg: #0b0b0c;
+  --fg: #ededed;
+  --muted: #9a9a9f;
+  --line: #26262a;
+  --accent: #4a7cff;
+  --error: #ff6b6b;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  margin: 0;
+}
+
+.layout {
+  display: grid;
+  gap: 24px;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 0 auto;
+  max-width: 1080px;
+  min-height: 100dvh;
+  padding: 32px 24px;
+}
+
+@media (min-width: 900px) {
+  .layout:has(.panel) {
+    grid-template-columns: minmax(0, 1fr) 380px;
+  }
+}
+
+.conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.feed {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+}
+
+.row.role-user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  background: #16161a;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  max-width: 46ch;
+  padding: 10px 14px;
+  white-space: pre-wrap;
+}
+
+.row.role-user .bubble {
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+}
+
+.composer input {
+  background: #16161a;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: inherit;
+  flex: 1;
+  font: inherit;
+  padding: 10px 12px;
+}
+
+.composer button,
+.button {
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-block;
+  font: inherit;
+  padding: 10px 16px;
+  text-decoration: none;
+}
+
+.composer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.panel {
+  align-self: start;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+}
+
+.panel h2 {
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  margin: 0;
+}
+
+.panel.variant-error {
+  border-color: var(--error);
+}
+
+.embedded-checkout {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  height: 560px;
+  width: 100%;
+}
+
+.messages {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.message {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.message.type-error {
+  color: var(--error);
+}
+
+a {
+  color: var(--accent);
+}

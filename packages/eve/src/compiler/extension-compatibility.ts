@@ -41,11 +41,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
     },
   },
-  connection: {
-    current: 8,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8],
-    dropped: {},
-  },
+  connection: { current: 9, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9], dropped: {} },
   hook: {
     current: 16,
     supported: [10, 11, 12, 13, 14, 15, 16],

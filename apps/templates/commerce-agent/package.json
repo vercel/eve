@@ -1,0 +1,25 @@
+{
+  "name": "commerce-agent-template",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "dev:eve": "eve dev",
+    "build:eve": "eve build",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "eve": "workspace:*",
+    "next": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "typescript": "6.0.3"
+  }
+}

@@ -933,6 +933,71 @@ describe("OpenApiConnectionClient", () => {
     const [, init] = fetchMock.mock.calls[0]!;
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer secret");
   });
+
+  it("hands prepareRequest the fully-built request and merges the headers it returns", async () => {
+    const fetchMock = vi.fn(
+      async (_url: unknown, _init: RequestInit) => new Response(null, { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const prepareRequest = vi.fn(() => ({
+      Authorization: "Bearer signed",
+      "X-Digest": "computed",
+    }));
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        authorization: { getToken: async () => ({ token: "secret" }), principalType: "app" },
+        prepareRequest,
+      }),
+    );
+
+    await client.executeTool("createProject", { body: { name: "eve" } }, EXECUTE_OPTIONS);
+
+    expect(prepareRequest).toHaveBeenCalledWith({
+      body: '{"name":"eve"}',
+      callId: "call-1",
+      headers: { Authorization: "Bearer secret", "content-type": "application/json" },
+      method: "POST",
+      toolName: "createProject",
+      url: "https://api.example.com/v1/projects",
+    });
+
+    const headers = fetchMock.mock.calls[0]![1].headers as Record<string, string>;
+    expect(headers["X-Digest"]).toBe("computed");
+    expect(headers.Authorization).toBe("Bearer signed");
+  });
+
+  it("leaves the request unchanged when prepareRequest returns nothing", async () => {
+    const fetchMock = vi.fn(
+      async (_url: unknown, _init: RequestInit) => new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(makeConnection({ prepareRequest: () => undefined }));
+    await client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS);
+
+    expect(fetchMock.mock.calls[0]![1].headers).toEqual({});
+  });
+
+  it("fails the tool call when prepareRequest throws", async () => {
+    const fetchMock = vi.fn(
+      async (_url: unknown, _init: RequestInit) => new Response(null, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new OpenApiConnectionClient(
+      makeConnection({
+        prepareRequest: () => {
+          throw new Error("signing key unavailable");
+        },
+      }),
+    );
+
+    await expect(
+      client.executeTool("getProject", { id: "prj_1" }, EXECUTE_OPTIONS),
+    ).rejects.toThrow("signing key unavailable");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 /** Builds a minimal spec whose single operation requires `scheme`. */
