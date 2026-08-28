@@ -105,13 +105,14 @@ export async function dispatchRuntimeActionsStep(
         continue;
       }
 
-      await emitSubagentCalled({
+      nextSession = await emitSubagentCalled({
         adapter: prepared.adapter,
         adapterCtx: prepared.adapterCtx,
         batchEvent: batch.event,
+        ctx: prepared.ctx,
         entry,
         outcome,
-        sessionId: session.sessionId,
+        session: nextSession,
         writer,
       });
     }

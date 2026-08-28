@@ -21,6 +21,7 @@ import {
   SandboxKey,
 } from "#context/keys.js";
 import { type AlsContext, ContextContainer } from "#context/container.js";
+import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import {
   BundleKey,
@@ -70,6 +71,7 @@ import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import { setChannelContext } from "#execution/channel-context.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -145,6 +147,7 @@ export interface PreparedRuntimeActionDispatch {
   readonly bundle: CompiledBundle;
   readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
+  readonly ctx: ContextContainer;
   /**
    * Number of freshly started local subagents in the plan. The parent's
    * remaining token quota is split across these, the children that
@@ -276,6 +279,7 @@ async function prepareActionDispatch(input: {
     bundle,
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
+    ctx,
     fanoutSize:
       input.fanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
@@ -323,57 +327,73 @@ export async function emitSubagentCalled(input: {
   readonly adapter: ChannelAdapter;
   readonly adapterCtx: ChannelAdapterContext;
   readonly batchEvent: { readonly sequence: number; readonly turnId: string };
+  readonly ctx: ContextContainer;
   readonly entry: Extract<DispatchPlanEntry, { readonly kind: "resume" | "start" }>;
   readonly outcome: Extract<DispatchOutcome, { readonly kind: "called" }>;
-  readonly sessionId: string;
+  readonly session: RuntimeSession;
   readonly writer: WritableStreamDefaultWriter<Uint8Array>;
-}): Promise<void> {
+}): Promise<RuntimeSession> {
   const { entry, outcome } = input;
   try {
-    const action = entry.kind === "resume" ? entry.action : entry.target.action;
-    const dynamicRemoteAgent =
-      entry.kind === "resume"
-        ? entry.dynamicRemoteAgent
-        : entry.target.kind === "remote"
-          ? entry.target.dynamicRemoteAgent
-          : undefined;
-    const parentEvent = await callAdapterEventHandler(
-      input.adapter,
-      createSubagentCalledEvent({
-        callId: outcome.callId,
-        childSessionId: outcome.address.sessionId,
-        name: outcome.name,
-        remote:
-          outcome.address.kind === "agent/remote"
-            ? {
-                // The proxy route re-resolves outbound auth from this key via
-                // resolveRemoteAgentStreamHeaders: a node id lands in
-                // subagentRegistry.subagentsByNodeId (static definition), a
-                // credentialsStepId lands in the step registry (dynamic
-                // definition). Both sides of this ternary must stay in sync
-                // with that lookup order.
-                resolverId:
-                  dynamicRemoteAgent === undefined
-                    ? action.nodeId
-                    : dynamicRemoteAgent.credentialsStepId,
-                url: outcome.address.url,
-              }
-            : undefined,
-        sequence: input.batchEvent.sequence,
-        sessionId: input.sessionId,
-        toolName: outcome.toolName,
-        turnId: input.batchEvent.turnId,
-        workflowId: workflowEntryReference.workflowId,
-      }),
-      input.adapterCtx,
-    );
-    await input.writer.write(encodeMessageStreamEvent(stampMessageStreamEvent(parentEvent)));
+    const scoped = await withContextScope(input.ctx, input.session, async (enrichedSession) => {
+      const action = entry.kind === "resume" ? entry.action : entry.target.action;
+      const dynamicRemoteAgent =
+        entry.kind === "resume"
+          ? entry.dynamicRemoteAgent
+          : entry.target.kind === "remote"
+            ? entry.target.dynamicRemoteAgent
+            : undefined;
+      const parentEvent = await callAdapterEventHandler(
+        input.adapter,
+        createSubagentCalledEvent({
+          callId: outcome.callId,
+          childSessionId: outcome.address.sessionId,
+          name: outcome.name,
+          remote:
+            outcome.address.kind === "agent/remote"
+              ? {
+                  // The proxy route re-resolves outbound auth from this key via
+                  // resolveRemoteAgentStreamHeaders: a node id lands in
+                  // subagentRegistry.subagentsByNodeId (static definition), a
+                  // credentialsStepId lands in the step registry (dynamic
+                  // definition). Both sides of this ternary must stay in sync
+                  // with that lookup order.
+                  resolverId:
+                    dynamicRemoteAgent === undefined
+                      ? action.nodeId
+                      : dynamicRemoteAgent.credentialsStepId,
+                  url: outcome.address.url,
+                }
+              : undefined,
+          sequence: input.batchEvent.sequence,
+          sessionId: input.session.sessionId,
+          toolName: outcome.toolName,
+          turnId: input.batchEvent.turnId,
+          workflowId: workflowEntryReference.workflowId,
+        }),
+        input.adapterCtx,
+      );
+      setChannelContext(input.ctx, {
+        ...input.adapter,
+        state: { ...input.adapterCtx.state },
+      });
+      const stamped = stampMessageStreamEvent(parentEvent);
+      await input.writer.write(encodeMessageStreamEvent(stamped));
+      await dispatchStreamEventHooks({
+        ctx: input.ctx,
+        event: stamped,
+        registry: input.ctx.require(BundleKey).hookRegistry,
+      });
+      return { result: undefined, session: enrichedSession };
+    });
+    return scoped.session;
   } catch (error) {
     logError(log, "subagent.called emission failed", error, {
       callId: outcome.callId,
       childSessionId: outcome.address.sessionId,
       toolName: outcome.toolName,
     });
+    return input.session;
   }
 }
 

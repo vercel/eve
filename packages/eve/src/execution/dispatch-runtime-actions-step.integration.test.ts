@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, loadContext } from "#context/container.js";
+import type { HookContext, HookDefinition, HookEventMap } from "#public/definitions/hook.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -24,14 +25,7 @@ import type { HarnessSession } from "#harness/types.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import * as taskRunControl from "#execution/tasks/parent/run-parent.js";
-import {
-  AuthKey,
-  CapabilitiesKey,
-  ChannelInstrumentationKey,
-  InitiatorAuthKey,
-  SessionIdKey,
-  SessionKey,
-} from "#context/keys.js";
+import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type {
@@ -41,6 +35,7 @@ import type {
 import type { RuntimeSandboxRegistry } from "#runtime/sandbox/registry.js";
 import type { ResolvedSandboxDefinition } from "#runtime/types.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
+import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 
 const mocks = vi.hoisted(() => ({
   continueRemoteAgentSession: vi.fn(),
@@ -304,6 +299,82 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       ],
     });
     expect(writes).toHaveLength(1);
+  });
+
+  it.each([
+    ["plain", dispatchRuntimeActionsStep],
+    ["task", dispatchTaskStep],
+  ] as const)(
+    "delivers subagent.called to the parent stream and typed hooks in %s mode",
+    async (_mode, dispatch) => {
+      const session = createStartSession({ kind: "local" });
+      const hookedEvents: HookEventMap["subagent.called"][] = [];
+      installContext(
+        session,
+        undefined,
+        dispatch === dispatchTaskStep,
+        null,
+        async (event, ctx) => {
+          expect(ctx.session.id).toBe("parent-session");
+          hookedEvents.push(event);
+        },
+      );
+      const writes: Uint8Array[] = [];
+      if (dispatch === dispatchTaskStep) {
+        vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({
+          runId: "task-run-1",
+        });
+      }
+
+      const result = await dispatch({
+        parentContinuationToken: "turn-inbox",
+        parentWritable: createWritable(writes),
+        serializedContext: {},
+        sessionState: BASE_STATE,
+      });
+
+      const streamedEvents = writes.map(decodeEvent);
+      expect(streamedEvents).toHaveLength(1);
+      expect(streamedEvents[0]).toMatchObject({ type: "subagent.called" });
+      expect(hookedEvents).toHaveLength(1);
+      expect(hookedEvents[0]).toEqual(streamedEvents[0]);
+      expect(hookedEvents[0]?.meta.id).toBe(streamedEvents[0]?.meta.id);
+      expect(result.sessionState.snapshot?.session.sandboxState).toEqual({
+        initialized: false,
+        session: null,
+      });
+    },
+  );
+
+  it("keeps a started child and its stream event when a subagent.called hook throws", async () => {
+    const session = createStartSession({ kind: "local" });
+    installContext(session, undefined, false, null, async () => {
+      throw new Error("subagent hook failed");
+    });
+    const writes: Uint8Array[] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(writes),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(writes.map(decodeEvent)).toEqual([expect.objectContaining({ type: "subagent.called" })]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("subagent.called emission failed"),
+      expect.objectContaining({ callId: "call-1", childSessionId: CHILD_SESSION_ID }),
+    );
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
+      handles: [
+        expect.objectContaining({
+          address: expect.objectContaining({ sessionId: CHILD_SESSION_ID }),
+          phase: "running",
+        }),
+      ],
+    });
   });
 
   it("opens a shared parent sandbox with session context and durable backend tags", async () => {
@@ -1274,13 +1345,36 @@ function installContext(
   remote?: { readonly definition: unknown; readonly nodeId: string },
   tasks = false,
   auth: SessionAuthContext | null = null,
+  onSubagentCalled?: (event: HookEventMap["subagent.called"], ctx: HookContext) => Promise<void>,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
     subagentsByNodeId.set(remote.nodeId, { definition: remote.definition });
   }
+  const typedHook: HookDefinition<"subagent.called"> = {
+    events: onSubagentCalled === undefined ? {} : { "subagent.called": onSubagentCalled },
+  };
+  const hookRegistry = createRuntimeHookRegistry([
+    {
+      events: typedHook.events as never,
+      exportName: undefined,
+      logicalPath: "hooks/subagent-called.ts",
+      slug: "subagent-called",
+      sourceId: "hooks/subagent-called.ts",
+      sourceKind: "module",
+    },
+  ]);
+  const root = {
+    agent: { config: { name: "test-agent" }, connections: [] },
+    nodeId: "__root__",
+    sandboxRegistry: { sandbox: null },
+    turnAgent: session.agent,
+  };
   const bundle = {
-    compiledArtifactsSource: {},
+    compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    graph: { nodesByNodeId: new Map([["__root__", root]]), root },
+    hookRegistry,
+    nodeId: "__root__",
     resolvedAgent: {
       config: tasks ? { experimental: { tasks: true } } : {},
     },
@@ -1294,21 +1388,13 @@ function installContext(
       workspaceSpec: {},
     },
   };
-  const values = new Map<unknown, unknown>([
-    [AuthKey, auth],
-    [BundleKey, bundle],
-    [CapabilitiesKey, undefined],
-    [ChannelInstrumentationKey, undefined],
-    [InitiatorAuthKey, null],
-    [ChannelKey, ADAPTER],
-  ]);
-  mocks.deserializeContext.mockResolvedValue({
-    get: (key: unknown) => values.get(key),
-    require: (key: unknown) => {
-      if (!values.has(key)) throw new Error("missing context key");
-      return values.get(key);
-    },
-  });
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, auth);
+  ctx.set(BundleKey, bundle as never);
+  ctx.set(InitiatorAuthKey, null);
+  ctx.set(SessionIdKey, session.sessionId);
+  ctx.set(ChannelKey, ADAPTER);
+  mocks.deserializeContext.mockResolvedValue(ctx);
   mocks.readDurableSession.mockResolvedValue(session);
 }
 
@@ -1405,4 +1491,8 @@ function createWritable(writes: Uint8Array[] = []): WritableStream<Uint8Array> {
       writes.push(chunk);
     },
   });
+}
+
+function decodeEvent(chunk: Uint8Array): HookEventMap["subagent.called"] {
+  return JSON.parse(new TextDecoder().decode(chunk).trim()) as HookEventMap["subagent.called"];
 }
