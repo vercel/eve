@@ -4326,6 +4326,45 @@ describe("createToolLoopHarness", () => {
     expect((stepFailed!.data as { details?: { errorId?: string } }).details?.errorId).toBeDefined();
   });
 
+  it.each([
+    {
+      message: "AI Gateway requires a valid credit card on file to service requests.",
+      hint: "Add a valid credit card or credits",
+    },
+    {
+      message: "Model call failed: Free tier users do not have access to this model.",
+      hint: "Switch to a model available on the free tier",
+    },
+    {
+      message: "Model call failed: Free tier requests on this model are rate-limited.",
+      hint: "Wait for the free-tier limit to reset",
+    },
+  ])(
+    "parks the session for the recoverable AI Gateway error: $message",
+    async ({ message, hint }) => {
+      setupMockAgentError(
+        Object.assign(new Error(message), {
+          name: "GatewayInvalidRequestError",
+          statusCode: 403,
+          type: "invalid_request_error",
+        }),
+      );
+
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+      const result = await runStep(createTestSession(), { message: "Hi" });
+
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toEqual({
+        isError: true,
+        output: expect.stringContaining(hint),
+      });
+      expect(events.map((event) => event.type)).toContain("session.waiting");
+      expect(events.map((event) => event.type)).not.toContain("session.failed");
+    },
+  );
+
   it("rethrows a recoverable task-mode model error for durable step retry", async () => {
     setupMockAgentError(new Error("Model blew up"));
 
