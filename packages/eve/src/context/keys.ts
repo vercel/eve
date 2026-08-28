@@ -9,8 +9,9 @@ import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type {
-  ChannelInstrumentationProjection,
+  ActivityObserverConfig,
   ChannelDeliveryMetadata,
+  ChannelInstrumentationProjection,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -118,6 +119,7 @@ export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
  * dispatch so HITL readiness flows through a conversation chain.
  */
 export const CapabilitiesKey = new ContextKey<SessionCapabilities>("eve.capabilities");
+export const ActivityObserverKey = new ContextKey<ActivityObserverConfig>("eve.activityObserver");
 
 /**
  * Optional framework-owned caller callback captured when the session is created.

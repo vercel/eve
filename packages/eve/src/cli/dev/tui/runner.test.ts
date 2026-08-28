@@ -1431,6 +1431,35 @@ describe("EveTUIRunner /traces", () => {
 });
 
 describe("EveTUIRunner initial input", () => {
+  it("uses the startup draft captured after the agent info probe", async () => {
+    const info = createDeferred<typeof AGENT_INFO>();
+    const client = stubClient();
+    vi.spyOn(client, "info").mockReturnValue(info.promise);
+    const startup = {
+      finish: vi.fn(() => "typed while loading"),
+      headerTip: "Use the /help command to see every command.",
+    };
+    const renderer = fakeRenderer();
+    const runner = new EveTUIRunner({
+      session: stubSession(),
+      client,
+      renderer,
+      serverUrl: "http://localhost:3000",
+      startup,
+    });
+
+    const running = runner.run();
+    await settleAsyncWork();
+    expect(startup.finish).not.toHaveBeenCalled();
+    info.resolve(AGENT_INFO);
+    await running;
+
+    expect(startup.finish).toHaveBeenCalledOnce();
+    expect(renderer.readPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "typed while loading" }),
+    );
+  });
+
   it("seeds only the first prompt's editable buffer with --input text", async () => {
     const seenOptions: Array<AgentTUISessionOptions | undefined> = [];
     const prompts: Array<string | undefined> = ["edited and sent", undefined];

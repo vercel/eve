@@ -1,13 +1,14 @@
 import { createLogger, formatError } from "#internal/logging.js";
+import { contextStorage } from "#context/container.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type {
   InstrumentationParentLineage,
-  InstrumentationTraceContext,
+  InstrumentationTraceSeed,
 } from "#harness/instrumentation/lifecycle.js";
 import { sessionIdempotencyKey, turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
 import type { HarnessInstrumentation } from "#harness/instrumentation/runtime.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
-import type { SessionTraceSeed } from "#context/keys.js";
+import { SessionTraceSeedKey, type SessionTraceSeed } from "#context/keys.js";
 
 const log = createLogger("harness.prepare-trace-context");
 
@@ -18,7 +19,7 @@ export async function prepareTurnTraceContext(input: {
   readonly channelType?: string;
   readonly instrumentation?: HarnessInstrumentation;
   readonly parentLineage?: InstrumentationParentLineage;
-  readonly parentTraceContext?: InstrumentationTraceContext;
+  readonly parentTraceContext?: InstrumentationTraceSeed;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;
@@ -27,7 +28,7 @@ export async function prepareTurnTraceContext(input: {
   readonly traceSeed?: SessionTraceSeed;
   readonly turnId: string;
 }): Promise<RuntimeTraceContext | undefined> {
-  let prepared: RuntimeTraceContext | undefined;
+  let prepared: InstrumentationTraceSeed | undefined;
 
   if (!input.sessionStarted && input.instrumentation?.prepareSessionTrace !== undefined) {
     try {
@@ -62,6 +63,10 @@ export async function prepareTurnTraceContext(input: {
     } catch (error) {
       warn("turn.started", error);
     }
+  }
+
+  if (input.traceSeed === undefined && prepared?.decision !== undefined) {
+    contextStorage.getStore()?.set(SessionTraceSeedKey, prepared);
   }
 
   return input.traceContext ?? prepared;

@@ -17,13 +17,17 @@ function joinUserAgentProducts(...products: (string | null | undefined)[]): stri
   return products.filter(Boolean).join(" ");
 }
 
-/** Appends the installed package product without discarding an existing User-Agent. */
-export function appendPackageUserAgent(headers: Headers): Headers {
-  const product = buildPackageUserAgent();
+/** Appends one product token without discarding an existing User-Agent. */
+export function appendUserAgentProduct(headers: Headers, product: string): Headers {
   const existing = headers.get("user-agent");
   if (existing?.split(/\s+/).includes(product)) return headers;
   headers.set("user-agent", joinUserAgentProducts(existing, product));
   return headers;
+}
+
+/** Appends the installed package product without discarding an existing User-Agent. */
+export function appendPackageUserAgent(headers: Headers): Headers {
+  return appendUserAgentProduct(headers, buildPackageUserAgent());
 }
 
 /**

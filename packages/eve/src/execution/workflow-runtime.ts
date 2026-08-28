@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import {
   EntityConflictError,
   HookNotFoundError,
@@ -5,6 +7,7 @@ import {
   WorkflowRunNotFoundError,
 } from "#compiled/@workflow/errors/index.js";
 
+import { getChannelActivityPresentation } from "#channel/activity-renderer.js";
 import type {
   CancelTurnInput,
   CancelTurnResult,
@@ -18,6 +21,7 @@ import type {
   SessionCommandResult,
   SessionTraceContext,
 } from "#channel/types.js";
+import { ActivityObserverKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
   ChannelInstrumentationKey,
@@ -34,8 +38,10 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
+  cancelRun,
   getHookByToken,
   getRun,
+  getWorld,
   start,
   type Run,
   type StartOptionsWithoutDeploymentId,
@@ -52,6 +58,12 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
+import type { ActivityCollectorInput } from "#execution/activity-collector.js";
+import { createEveActivityRoutePath } from "#protocol/routes.js";
+import {
+  createWorkflowCallbackUrl,
+  resolveWorkflowCallbackBaseUrl,
+} from "#execution/workflow-callback-url.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
@@ -69,8 +81,10 @@ const WORKFLOW_ENTRY_NAME = "workflowEntry";
 const TURN_WORKFLOW_NAME = "turnWorkflow";
 const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
 const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
+const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
+const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
@@ -90,6 +104,7 @@ export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
   TURN_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
+  ACTIVITY_COLLECTOR_WORKFLOW_NAME,
 ]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
@@ -131,6 +146,11 @@ export const taskRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TASK_RUN_WORKFLOW_NAME}`,
 };
 
+/** Stable workflow reference for root-session activity collectors. */
+export const activityCollectorWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
+};
+
 /**
  * Creates a workflow-backed runtime whose long-lived driver owns the
  * event stream and dispatches each turn as a child workflow run.
@@ -163,9 +183,50 @@ export function createWorkflowRuntime(config: {
         ctx.set(SessionTraceSeedKey, traceSeed);
       }
       ctx.set(OtelTraceEnabledKey, getInstrumentationRuntime()?.prepareSessionTrace !== undefined);
+      const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
+      let collectorRunId: string | undefined;
+      let activityObserver = input.activityObserver;
+      if (
+        input.parent === undefined &&
+        activityObserver === undefined &&
+        (getChannelActivityPresentation(input.adapter)?.renderers.length ?? 0) > 0
+      ) {
+        const collectorContext = serializeContext(ctx);
+        const token = randomBytes(32).toString("base64url");
+        const collectorInput: ActivityCollectorInput = {
+          expiresAt: new Date(
+            Date.now() +
+              (typeof sessionTimeoutMs === "number"
+                ? sessionTimeoutMs
+                : DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS),
+          ).toISOString(),
+          serializedContext: collectorContext,
+          token,
+        };
+        try {
+          const collector = await startWorkflowPreferLatest(activityCollectorWorkflowReference, [
+            collectorInput,
+          ]);
+          collectorRunId = collector.runId;
+          const fallbackOrigin = process.env.VERCEL_URL
+            ? `https://${process.env.VERCEL_URL}`
+            : "http://localhost:3000";
+          const baseUrl = resolveWorkflowCallbackBaseUrl(fallbackOrigin);
+          activityObserver = {
+            sink: {
+              url: createWorkflowCallbackUrl(baseUrl, createEveActivityRoutePath(token)),
+              version: 1,
+            },
+          };
+          ctx.set(ActivityObserverKey, activityObserver);
+        } catch {
+          await cancelActivityCollector(collectorRunId);
+          collectorRunId = undefined;
+          log.warn("failed to start activity collector");
+        }
+      }
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
-      const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       const workflowInput: {
         -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
       } = {
@@ -204,23 +265,29 @@ export function createWorkflowRuntime(config: {
           attributes: normalizeEveAttributes(attributes),
         });
       } catch (error) {
+        await cancelActivityCollector(collectorRunId);
         logError(log, "failed to start workflow run", error, {
           continuationToken: input.continuationToken,
         });
         throw error;
       }
 
-      if (input.continuationToken) {
-        const owner = await waitForCommandHookOwner(input.continuationToken);
-        if (owner.runId !== run.runId) {
-          throw new RuntimeSessionOwnershipConflictError({
-            continuationToken: input.continuationToken,
-            ownerSessionId: owner.runId,
-            sessionId: run.runId,
-          });
+      try {
+        if (input.continuationToken) {
+          const owner = await waitForCommandHookOwner(input.continuationToken);
+          if (owner.runId !== run.runId) {
+            throw new RuntimeSessionOwnershipConflictError({
+              continuationToken: input.continuationToken,
+              ownerSessionId: owner.runId,
+              sessionId: run.runId,
+            });
+          }
         }
+        await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
+      } catch (error) {
+        await cancelActivityCollector(collectorRunId);
+        throw error;
       }
-      await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
@@ -284,6 +351,17 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+async function cancelActivityCollector(runId: string | undefined): Promise<void> {
+  if (runId === undefined) return;
+  try {
+    await cancelRun(await getWorld(), runId, {
+      cancelReason: "Root session creation did not complete",
+    });
+  } catch {
+    log.warn("failed to cancel unowned activity collector");
+  }
 }
 
 async function dispatchWorkflowCommand<TCommand extends SessionCommand>(

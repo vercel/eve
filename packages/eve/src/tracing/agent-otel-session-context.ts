@@ -4,13 +4,18 @@ import {
   sessionIdempotencyKey,
   type InstrumentationSessionStartedEvent,
   type InstrumentationTraceContext,
+  type InstrumentationTraceSeed,
   type InstrumentationTurnStartedEvent,
 } from "#harness/instrumentation/lifecycle.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
-import { evaluateTracePolicy, isSampledTrace } from "#tracing/sampled-trace.js";
+import {
+  isSampledTrace,
+  resolveTracePolicy,
+  resolveTracePolicyDecision,
+} from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 
 interface AgentOtelSessionContextInput {
@@ -27,10 +32,10 @@ interface AgentOtelSessionContext {
   ) => Promise<AgentSessionTraceState>;
   readonly prepareSessionTrace: (
     event: InstrumentationSessionStartedEvent,
-  ) => Promise<InstrumentationTraceContext>;
+  ) => Promise<InstrumentationTraceSeed>;
   readonly prepareTurnTrace: (
     event: InstrumentationTurnStartedEvent,
-  ) => Promise<InstrumentationTraceContext>;
+  ) => Promise<InstrumentationTraceSeed>;
 }
 
 export function createAgentOtelSessionContext(
@@ -42,6 +47,7 @@ export function createAgentOtelSessionContext(
     readonly channelType?: string;
     readonly rootSessionId: string;
     readonly sessionId: string;
+    readonly traceDecision: ReturnType<typeof resolveTracePolicy>;
     readonly traceSeed?: InstrumentationTraceContext;
   }): SpanContext => {
     if (session.traceSeed !== undefined) {
@@ -73,13 +79,7 @@ export function createAgentOtelSessionContext(
       return span.spanContext();
     }
     // Fallback for already-running workflows that predate the seed.
-    if (
-      !evaluateTracePolicy(input.tracePolicy, {
-        agentName: session.agentName,
-        audience: session.channelAudience,
-        channelType: session.channelType,
-      })
-    ) {
+    if (session.traceDecision.action === "drop") {
       return {
         isRemote: false,
         spanId: input.idGenerator.deriveSpanId(`session:${session.sessionId}`),
@@ -108,18 +108,22 @@ export function createAgentOtelSessionContext(
   ): Promise<AgentSessionTraceState> => {
     let state = await input.stateStore.getSession(event.sessionId);
     if (state === undefined) {
+      const channelAudience = normalizeChannelAudience(event.channelAudience);
+      const decision = resolveSessionTraceDecision(event, channelAudience, input.tracePolicy);
       state = {
         agentName: event.agentName,
-        channelAudience: normalizeChannelAudience(event.channelAudience),
+        channelAudience,
         channelKind: event.channelKind,
+        decision,
         context:
           event.parentTraceContext === undefined
             ? openSessionTrace({
                 agentName: event.agentName,
-                channelAudience: normalizeChannelAudience(event.channelAudience),
+                channelAudience,
                 channelType: event.channelType,
                 rootSessionId: event.rootSessionId,
                 sessionId: event.sessionId,
+                traceDecision: decision,
                 traceSeed: event.traceSeed,
               })
             : adoptedSpanContext(event.parentTraceContext),
@@ -132,16 +136,19 @@ export function createAgentOtelSessionContext(
 
   const prepareSessionTrace = async (
     event: InstrumentationSessionStartedEvent,
-  ): Promise<InstrumentationTraceContext> => {
-    return portableSpanContext((await ensureSessionContext(event)).context);
+  ): Promise<InstrumentationTraceSeed> => {
+    const session = await ensureSessionContext(event);
+    return portableSpanContext(session.context, session.decision);
   };
 
   const prepareTurnTrace = async (
     event: InstrumentationTurnStartedEvent,
-  ): Promise<InstrumentationTraceContext> => {
+  ): Promise<InstrumentationTraceSeed> => {
     const prepared = await input.stateStore.getTurn(event.sessionId, event.turnId);
     if (prepared !== undefined) {
+      const session = await input.stateStore.getSession(event.sessionId);
       return {
+        decision: session?.decision,
         spanId: prepared.parentSpanId,
         traceFlags: prepared.context.traceFlags,
         traceId: prepared.context.traceId,
@@ -176,14 +183,18 @@ export function createAgentOtelSessionContext(
       startTimeMs: Date.now(),
       subagentName: event.parentLineage?.subagentName,
     });
-    return portableSpanContext(session.context);
+    return portableSpanContext(session.context, session.decision);
   };
 
   return { ensureSessionContext, prepareSessionTrace, prepareTurnTrace };
 }
 
-function portableSpanContext(spanContext: SpanContext): InstrumentationTraceContext {
+function portableSpanContext(
+  spanContext: SpanContext,
+  decision?: InstrumentationTraceSeed["decision"],
+): InstrumentationTraceSeed {
   return {
+    decision,
     spanId: spanContext.spanId,
     traceFlags: spanContext.traceFlags,
     traceId: spanContext.traceId,
@@ -197,4 +208,25 @@ function adoptedSpanContext(handed: InstrumentationTraceContext): SpanContext {
     traceFlags: handed.traceFlags,
     traceId: handed.traceId,
   };
+}
+
+function resolveSessionTraceDecision(
+  event: InstrumentationSessionStartedEvent,
+  audience: ChannelAudience,
+  policy: TraceCapturePolicy | undefined,
+): ReturnType<typeof resolveTracePolicy> {
+  if (event.traceSeed?.decision !== undefined) return event.traceSeed.decision;
+  if (event.traceSeed !== undefined) {
+    return resolveTracePolicyDecision(isSampledTrace(event.traceSeed), audience);
+  }
+  if (event.parentTraceContext !== undefined) {
+    return resolveTracePolicyDecision(isSampledTrace(event.parentTraceContext), audience);
+  }
+  // The tool loop can evaluate the same policy before this first-session
+  // preparation path; the persisted decision removes that window on replay.
+  return resolveTracePolicy(policy, {
+    agentName: event.agentName,
+    audience,
+    channelType: event.channelType,
+  });
 }

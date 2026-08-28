@@ -1,5 +1,9 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { getAdapterKind } from "#channel/adapter.js";
+import {
+  copyChannelActivityPresentation,
+  getChannelActivityPresentation,
+} from "#channel/activity-renderer.js";
 import { HTTP_ADAPTER } from "#channel/http.js";
 import { SCHEDULE_ADAPTER } from "#channel/schedule.js";
 import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
@@ -129,10 +133,9 @@ export function deserializeRuntimeAdapter(
     );
   }
 
-  // Merge the serialized state onto the adapter config. The behavior
-  // functions come from the registry entry; the state comes from the
-  // serialized context.
-  return { ...adapterConfig, state: serialized.state };
+  const rehydrated: ChannelAdapter = { ...adapterConfig, state: serialized.state };
+  copyChannelActivityPresentation(adapterConfig, rehydrated);
+  return rehydrated;
 }
 
 function requireAdapterKind(
@@ -157,6 +160,8 @@ function requireAdapterKind(
  * the bare `kind` discriminator (and initial `state`).
  */
 function carriesAdapterBehavior(adapter: ChannelAdapter): boolean {
+  if (getChannelActivityPresentation(adapter) !== undefined) return true;
+
   if (adapter.deliver !== undefined) {
     return true;
   }

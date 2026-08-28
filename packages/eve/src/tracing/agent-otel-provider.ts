@@ -9,6 +9,10 @@ import {
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
 
+import { contextStorage } from "#context/container.js";
+import { SessionTraceSeedKey } from "#context/keys.js";
+import { withoutInstrumentationContent } from "#harness/instrumentation/content.js";
+import { instrumentationEventForTraceDecision } from "#harness/instrumentation/content-policy.js";
 import type { AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import {
   contentAttribute,
@@ -28,10 +32,12 @@ import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentat
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
-import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import type {
+  InstrumentationEvent,
   InstrumentationStepAttemptMetadataEvent,
   InstrumentationAttemptScope,
   InstrumentationStepAttemptStartedEvent,
@@ -41,7 +47,7 @@ import type {
   InstrumentationModelCallStartedEvent,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
-  InstrumentationTraceContext,
+  InstrumentationTraceSeed,
   InstrumentationSessionTransitionEvent,
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
@@ -79,10 +85,10 @@ export interface AgentOtelInstrumentation {
   readonly hook: InstrumentationProviderDefinition;
   readonly prepareSessionTrace: (
     event: InstrumentationSessionStartedEvent,
-  ) => Promise<InstrumentationTraceContext>;
+  ) => Promise<InstrumentationTraceSeed>;
   readonly prepareTurnTrace: (
     event: InstrumentationTurnStartedEvent,
-  ) => Promise<InstrumentationTraceContext>;
+  ) => Promise<InstrumentationTraceSeed>;
   readonly runInContext: InstrumentationContextRunner;
 }
 
@@ -115,8 +121,6 @@ export function createAgentOtelInstrumentation(
     actionContextFor: actions.contextFor,
     frameworkVersion: input.frameworkVersion,
     idGenerator: input.idGenerator,
-    recordInputs,
-    recordOutputs,
     tracer: input.tracer,
   });
   const tools = createAgentToolInstrumentation({
@@ -135,6 +139,36 @@ export function createAgentOtelInstrumentation(
   });
   const { ensureSessionContext, prepareSessionTrace, prepareTurnTrace } =
     createAgentOtelSessionContext(input);
+
+  const projectEvent = async (event: InstrumentationEvent): Promise<InstrumentationEvent> => {
+    const session = await input.stateStore.getSession(sessionIdForEvent(event));
+    const audience = audienceForEvent(event, session?.channelAudience);
+    const eventSeed = "traceSeed" in event ? event.traceSeed : undefined;
+    const contextSeed = contextStorage.getStore()?.get(SessionTraceSeedKey);
+    const decision =
+      eventSeed?.decision ??
+      contextSeed?.decision ??
+      session?.decision ??
+      (eventSeed !== undefined
+        ? resolveTracePolicyDecision(isSampledTrace(eventSeed), audience)
+        : contextSeed !== undefined
+          ? resolveTracePolicyDecision(isSampledTrace(contextSeed), audience)
+          : session !== undefined
+            ? resolveTracePolicyDecision(isSampledTrace(session.context), audience)
+            : undefined);
+    if (decision === undefined) return withoutInstrumentationContent(event);
+    return instrumentationEventForTraceDecision(
+      event,
+      decision.action === "drop"
+        ? decision
+        : {
+            action: "record",
+            recordInputs: recordInputs && decision.recordInputs,
+            recordOutputs: recordOutputs && decision.recordOutputs,
+          },
+      audience,
+    );
+  };
 
   const onSessionStarted = async (event: InstrumentationSessionStartedEvent): Promise<void> => {
     await prepareSessionTrace(event);
@@ -350,7 +384,11 @@ export function createAgentOtelInstrumentation(
       if (attempt !== undefined) setAgentUsage(attempt.step.span, event.usage);
       if (recordOutputs) {
         state.span.setAttribute("ai.response.finish_reason", event.finishReason);
-        const content = event.content ?? [];
+        const content = event.content;
+        if (content === undefined) {
+          state.span.end();
+          return;
+        }
         const outputMessages = genAiOutputMessagesAttribute(content, event.finishReason);
         if (outputMessages !== undefined) {
           state.span.setAttribute("gen_ai.output.messages", outputMessages);
@@ -461,6 +499,7 @@ export function createAgentOtelInstrumentation(
         "turn.started": onTurnStarted,
       },
       name: "eve.otel",
+      projectEvent,
     },
     prepareSessionTrace,
     prepareTurnTrace,
@@ -504,6 +543,24 @@ export function createAgentOtelInstrumentation(
     }
     modelSpans.delete(event.scope);
   }
+}
+
+function sessionIdForEvent(event: InstrumentationEvent): string {
+  return "scope" in event ? event.scope.sessionId : event.sessionId;
+}
+
+function audienceForEvent(
+  event: InstrumentationEvent,
+  sessionAudience: ChannelAudience | undefined,
+): ChannelAudience {
+  if ("delivery" in event) return normalizeChannelAudience(event.delivery.channelAudience);
+  if ("scope" in event && event.scope.channelAudience !== undefined) {
+    return normalizeChannelAudience(event.scope.channelAudience);
+  }
+  if (event.type === "session.started") {
+    return normalizeChannelAudience(event.channelAudience);
+  }
+  return normalizeChannelAudience(sessionAudience);
 }
 
 function getSpanStates<T>(

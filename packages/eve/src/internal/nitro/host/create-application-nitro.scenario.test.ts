@@ -739,6 +739,40 @@ describe("application Nitro creation", () => {
     );
   });
 
+  it("does not register capability transforms in the final host", async () => {
+    const productionNitroStub = createNitroStub();
+    const devNitroStub = createNitroStub({ dev: true });
+    createNitroMock.mockResolvedValueOnce(productionNitroStub.nitro);
+    createNitroMock.mockResolvedValueOnce(devNitroStub.nitro);
+
+    const { createDevelopmentApplicationNitro, createProductionApplicationNitro } =
+      await import("#internal/nitro/host/create-application-nitro.js");
+
+    const productionHost = await createPreparedHost();
+    await createProductionApplicationNitro(productionHost, createProductionOptions(productionHost));
+    await createDevelopmentApplicationNitro(await createPreparedHost());
+
+    const productionConfig = { plugins: [] };
+    for (const hook of productionNitroStub.hookHandlers.get("rollup:before") ?? []) {
+      await hook(productionNitroStub.nitro, productionConfig);
+    }
+    const devConfig = { plugins: [] };
+    for (const hook of devNitroStub.hookHandlers.get("rollup:before") ?? []) {
+      await hook(devNitroStub.nitro, devConfig);
+    }
+
+    expect(productionConfig.plugins).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "eve:dynamic-capability-transform" }),
+      ]),
+    );
+    expect(devConfig.plugins).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "eve:dynamic-capability-transform" }),
+      ]),
+    );
+  });
+
   it("deduplicates defaults when the app also lists them", async () => {
     const nitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(nitroStub.nitro);

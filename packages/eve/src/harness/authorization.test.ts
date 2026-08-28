@@ -9,6 +9,7 @@ import {
   getPendingAuthorization,
   getHookUrl,
   PendingAuthorizationResultKey,
+  resolveActiveAuthorizationChallenges,
   setPendingAuthorization,
 } from "#harness/authorization.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
@@ -149,6 +150,22 @@ describe("pending authorization attempts", () => {
       challenge("github", "github-1"),
       challenge("linear", "linear-2"),
     ]);
+  });
+
+  it("keeps only the latest same-scope challenge from one batch", () => {
+    const userA = { id: "user-a", issuer: "idp", type: "user" } as const;
+    const userB = { id: "user-b", issuer: "idp", type: "user" } as const;
+    const first = challenge("linear", "linear-a-1", userA);
+    const otherPrincipal = challenge("linear", "linear-b", userB);
+    const latest = challenge("linear", "linear-a-2", userA);
+    const active = resolveActiveAuthorizationChallenges([first, otherPrincipal, latest]);
+
+    expect(active).toEqual([otherPrincipal, latest]);
+    expect(
+      getPendingAuthorization(
+        setPendingAuthorization(undefined, { challenges: [first, otherPrincipal, latest] }),
+      )?.challenges,
+    ).toEqual([otherPrincipal, latest]);
   });
 
   it("clears by exact attempt identity", () => {

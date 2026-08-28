@@ -1,4 +1,5 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
@@ -35,12 +36,21 @@ export async function startLocalSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
   const { action, source } = input;
+  const activityObserver = deriveChildActivityObserverConfig({
+    activityObserver: input.activityObserver,
+    callId: action.callId,
+    kind: "subagent",
+    name: action.subagentName,
+    parentSessionId: input.session.sessionId,
+    parentTurnId: input.batchEvent.turnId,
+  });
   const childRuntime = createWorkflowRuntime({
     compiledArtifactsSource: input.bundle.compiledArtifactsSource,
     dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
@@ -57,6 +67,7 @@ export async function startLocalSubagent(input: {
     graph: input.bundle.graph,
     parentContinuationToken: input.parentContinuationToken,
     parentTraceContext: input.parentTraceContext,
+    activityObserver,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,
     source,

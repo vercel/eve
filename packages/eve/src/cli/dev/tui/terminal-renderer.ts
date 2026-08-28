@@ -116,7 +116,7 @@ import { AltScreen } from "#cli/ui/alt-screen.js";
 import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
-import { buildStatusLine } from "./status-line.js";
+import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
@@ -336,6 +336,10 @@ const incompletePasteFlushMs = 1_000;
 // How long the transient Ctrl+L log-mode hint stays in the status line after
 // the last cycle before it clears itself.
 const logLevelHintMs = 5_000;
+// Fast authored-source rebuilds skip their intermediate state to avoid a
+// distracting status-bar flash; genuinely slow builds still show progress.
+const devBuildProgressDelayMs = 250;
+const devBuildLoadedStatusMs = 4_000;
 
 const STATUS = {
   processing: "Working…",
@@ -398,6 +402,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
+  #startupHeader?: { readonly name: string; readonly tip: string };
   #agentHeaderRendered = false;
   /** The last committed header body, to skip re-committing an unchanged banner. */
   #agentHeaderBody?: string;
@@ -519,6 +524,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * an ordinary log block, and the next rebuild line opens a fresh cycle.
    */
   #devRebuild?: { id: string; summary: string };
+  /** Log-filter-independent authored-source state shown in the bottom status bar. */
+  #devBuildStatus?: DevBuildStatus;
+  #devBuildStatusVisible = false;
+  #devBuildStatusTimer?: ReturnType<typeof setTimeout>;
   /** Monotonic id source — committed cycle ids must never be reused. */
   #devRebuildSequence = 0;
   #pendingEchoedPrompt?: string;
@@ -654,6 +663,43 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // paints the input line beneath it. Startup intentionally preserves the
     // user's existing scrollback instead of clearing the terminal.
     this.#live.flush(this.#renderAgentHeaderRows(), []);
+  }
+
+  beginStartupDraft(options: { initialDraft?: string; tip: string; title: string }): void {
+    this.#start({ title: options.title });
+    this.#inputActive = true;
+    this.#promptPlaceholderActive = true;
+    this.#startupHeader = { name: options.title, tip: options.tip };
+    let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
+    this.#syncInput(editor);
+    this.#startCaretBlink();
+    this.#paint();
+
+    const apply = (next: LineState) => {
+      editor = next;
+      this.#showCaret();
+      this.#syncInput(editor);
+      this.#paint();
+    };
+    this.#consumeKey = (key) => {
+      const edited = applyLineEditorKey(editor, key, { multiline: true });
+      if (edited !== undefined) {
+        apply(edited);
+        return;
+      }
+      if (key.type === "ctrl-c") this.#onExitRequest?.();
+    };
+    this.#attachInput();
+  }
+
+  finishStartupDraft(): string {
+    const draft = this.#inputText;
+    this.#detachInput();
+    this.#stopCaretBlink();
+    this.#inputActive = false;
+    this.#startupHeader = undefined;
+    this.#promptPlaceholderActive = false;
+    return draft;
   }
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
@@ -2926,6 +2972,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#logLevelHintTimer = undefined;
     }
     this.#logLevelHintActive = false;
+    this.#clearDevBuildStatus();
 
     if (!this.#isInteractive) return;
 
@@ -3810,7 +3857,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const maxBlockRows = Math.max(1, this.#height() - footer.length);
+    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
+    const maxBlockRows = Math.max(1, this.#height() - startupHeader.length - footer.length);
     const committed: string[] = [];
     let previous = this.#lastCommitted;
 
@@ -3863,6 +3911,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const liveRows = [
+      ...startupHeader,
       ...clipLiveRows(
         flat.map((entry) => entry.row),
         maxBlockRows,
@@ -3972,14 +4021,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #renderAgentHeaderRows(): string[] {
     const header = this.#agentHeader;
-    if (header === undefined) return [];
+    const startup = this.#startupHeader;
+    if (header === undefined && startup === undefined) return [];
     const input: Parameters<typeof buildAgentHeader>[0] = {
-      name: header.name,
+      name: header?.name ?? startup?.name,
       theme: this.#theme,
       width: this.#width(),
     };
-    if (header.info !== undefined) input.info = header.info;
-    if (header.tip !== undefined) input.tip = header.tip;
+    if (header?.info !== undefined) input.info = header.info;
+    const tip = header?.tip ?? startup?.tip;
+    if (tip !== undefined) input.tip = tip;
     return buildAgentHeader(input);
   }
 
@@ -4147,6 +4198,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
+      if (this.#startupHeader !== undefined) {
+        statusRows.push(clip(c.dim(`${this.#theme.glyph.dot} Building your agent…`), width));
+      }
       this.#pushStatusLine(statusRows, width);
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership
@@ -4300,6 +4354,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       theme: this.#theme,
       width: contentWidth,
     };
+    if (this.#devBuildStatusVisible && this.#devBuildStatus !== undefined) {
+      input.devBuild = this.#devBuildStatus;
+    }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const serverUrl = this.#agentHeader?.serverUrl;
     if (serverUrl !== undefined && this.#remoteConnection === undefined) {
@@ -4556,6 +4613,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #handleDevRebuildFailure(body: string): void {
+    this.#clearDevBuildStatus();
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
       this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
@@ -4582,6 +4640,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     if (update.kind === "rebuilding") {
       const summary = summarizeChangedFiles(update.events, update.more);
+      this.#setDevBuildStatus({ phase: "building", summary });
       if (cycle !== undefined) {
         cycle.state.summary = summary;
         cycle.block.body = formatDevRebuildStatus(summary, "rebuilding");
@@ -4600,6 +4659,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
 
+    const summary = cycle?.state.summary ?? this.#devBuildStatus?.summary;
+    if (summary !== undefined) this.#setDevBuildStatus({ phase: "complete", summary });
     if (cycle !== undefined) {
       cycle.block.body = formatDevRebuildStatus(cycle.state.summary, update.kind);
       if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
@@ -4607,6 +4668,31 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
     this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
+  }
+
+  #setDevBuildStatus(status: DevBuildStatus): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = status;
+    this.#devBuildStatusVisible = status.phase === "complete";
+    this.#devBuildStatusTimer = setTimeout(
+      () => {
+        if (status.phase === "building") {
+          this.#devBuildStatusVisible = true;
+          this.#devBuildStatusTimer = undefined;
+        } else {
+          this.#clearDevBuildStatus();
+        }
+        this.#paint();
+      },
+      status.phase === "building" ? devBuildProgressDelayMs : devBuildLoadedStatusMs,
+    );
+  }
+
+  #clearDevBuildStatus(): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = undefined;
+    this.#devBuildStatusVisible = false;
+    this.#devBuildStatusTimer = undefined;
   }
 
   /** The rebuild status block still cycling in place, if any. */

@@ -1,5 +1,47 @@
 # eve
 
+## 0.47.3
+
+### Patch Changes
+
+- 9d28f89: Identify requests from the `eve dev` terminal UI with an `eve-tui/<version>` User-Agent product token while preserving caller-supplied User-Agent values.
+- cace2c5: Add the internal versioned protocol and reducer used by channel activity renderers.
+- 76f1bbd: Show authored-source rebuild and load progress in the `eve dev` status bar, even when server logs are hidden.
+- 44c6af2: Report root, delegated work, action, and blocker lifecycle to activity collectors.
+- b8a635c: Generated Sign in with Vercel Web Chat starters now place the account control at the top-left, opposite the new-chat action, with a smaller profile image.
+- 05b12e3: Instrumentation-provider content delivery now depends only on each provider's `capture` declaration: providers that declare `capture: "content"` receive full event content regardless of channel audience or OpenTelemetry `tracePolicy`. Separately, a `tracePolicy` that drops the eve trace no longer disables AI SDK telemetry: metadata-only AI spans (model, tokens, and timing, without message content) are still emitted into the ambient Workflow trace, and `agent.session` is not emitted.
+- 17d2445: Keep earlier Slack approval cards visibly settled when several approvals share one message and are answered out of order.
+- 55649a5: Preserve normal follow-up messages while an approval with responder authorization remains pending.
+- 3c8f2fe: Collect and render activity independently from the root agent session.
+
+## 0.47.2
+
+### Patch Changes
+
+- c77faa5: Use `openai/gpt-5.6-luna-fast` as the default model for config-less agents, new projects, and the setup model picker.
+- edc6127: Large authored dependency graphs no longer crash `eve dev` or `eve eval` while preparing the final host. Dynamic capabilities are now transformed only while preparing the authored generation.
+
+## 0.47.1
+
+### Patch Changes
+
+- 624d07d: Show the agent card and an editing-only prompt while `eve dev` builds the local agent, and simplify the card to branding, agent name, and a Tip. Text typed during startup is preserved for the initialized terminal UI, while submission remains disabled until startup completes.
+
+## 0.47.0
+
+### Minor Changes
+
+- 52e89ef: Add `delete()` to the runtime sandbox handle for permanently deleting the current session sandbox and reprovisioning it on the next access. Docker handles stay bound to one physical container, and sandbox `onSession` callbacks now receive session metadata through `ctx` while using `use()` for sandbox access.
+
+### Patch Changes
+
+- a3b23c0: Eval contexts and sessions now expose a formatted `transcript` of observed user and assistant messages, which can be passed directly to an LLM judge for multi-turn conversation grading.
+- 56514d9: Models with slug ending in `-thinking` are now resolved to the
+  correct model instead of failing with `does not have known AI Gateway context window metadata` error or silently using the base model's context window.
+- 41c8286: Restore Bash process substitution in Vercel sandboxes by providing the standard `/dev/fd` path whenever eve creates or resumes a sandbox session.
+- bdb3973: Preserve schedule provenance when a handler starts a session with user credentials. Scheduled background-task launches now stay silent instead of sending a launch acknowledgement, and schedule-created workflow runs expose `$eve.schedule` for attribution.
+- fccbf2b: Fix a TypeScript error in the generated Web Chat `tool.tsx` where `trimEnd` was called on `string | number` values returned by the tool output helper.
+
 ## 0.46.1
 
 ### Patch Changes

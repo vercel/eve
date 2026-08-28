@@ -1,183 +1,65 @@
 import { describe, expect, it } from "vitest";
 
-import type {
-  AgentInfoInstructionsEntry,
-  AgentInfoRemoteAgentEntry,
-  AgentInfoResult,
-  AgentInfoScheduleEntry,
-  AgentInfoSkillEntry,
-  AgentInfoToolEntry,
-} from "#client/index.js";
+import type { AgentInfoResult } from "#client/index.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
 import { createTheme } from "./theme.js";
 
-const FRAMEWORK_TOOL: AgentInfoToolEntry = {
-  description: "Run a shell command.",
-  hasAuth: false,
-  hasExecute: true,
-  hasModelOutputProjection: false,
-  hasOutputSchema: true,
-  inputSchema: { type: "object" },
-  logicalPath: "eve:framework/bash",
-  name: "bash",
-  owner: { feature: "test", kind: "framework" },
-  outputSchema: { type: "object" },
-  requiresApproval: false,
-  sourceId: "eve:defaults:tools/bash.ts",
-  sourceKind: "module",
-};
-
-const AUTHORED_TOOL: AgentInfoToolEntry = {
-  description: "Get the weather.",
-  hasAuth: false,
-  hasExecute: true,
-  hasModelOutputProjection: false,
-  hasOutputSchema: false,
-  inputSchema: { type: "object" },
-  logicalPath: "agent/tools/get_weather.ts",
-  name: "get_weather",
-  owner: { kind: "application" },
-  outputSchema: null,
-  requiresApproval: false,
-  sourceId: "tools/get_weather.ts",
-  sourceKind: "module",
-};
-
-const TEST_INFO = createTestAgentInfoResult({
+const INFO = createTestAgentInfoResult({
   agentRoot: "/tmp/weather-agent/agent",
   appRoot: "/tmp/weather-agent",
-  modelId: "anthropic/claude-opus-4.7",
+  modelId: "zai/glm-5.2",
   name: "Weather Agent",
 });
-const INFO: AgentInfoResult = {
-  ...TEST_INFO,
-  tools: { dynamic: [], static: [FRAMEWORK_TOOL, AUTHORED_TOOL] },
-};
 
 describe("buildAgentHeader", () => {
-  const theme = createTheme({ color: false, unicode: false });
-
-  it("renders the startup card", () => {
-    const colorTheme = createTheme({ color: true, unicode: true });
-    const info: AgentInfoResult = {
-      ...INFO,
-      agent: {
-        ...INFO.agent,
-        model: {
-          id: "zai/glm-5.2",
-          routing: { kind: "gateway", target: "zai" },
-          endpoint: { kind: "gateway", connected: true, credential: "api-key" },
-        },
-      },
-    };
-    const lines = buildAgentHeader({ info, theme: colorTheme, width: 120 });
+  it("renders a compact agent card", () => {
+    const theme = createTheme({ color: true, unicode: true });
+    const lines = buildAgentHeader({ info: INFO, theme, width: 120 });
     const plain = lines.map(stripAnsi);
-
     const card = plain.join("\n");
     const titleIndex = plain.findIndex((line) => line.includes("Weather Agent"));
-    const logoIndex = plain.findIndex((line) => line.includes("⣿⣿⣿⣿⣿⣿⣿⣿⣿"));
-    const modelIndex = plain.findIndex((line) => line.includes("model"));
 
     expect(plain[0]).toBe(`╭${"─".repeat(66)}╮`);
     expect(plain[titleIndex]).toMatch(/^│ ☰eve \(v\d+\.\d+\.\d+\) +Weather Agent │$/u);
-    expect(titleIndex).toBeLessThan(logoIndex);
-    expect(logoIndex).toBeLessThan(modelIndex);
-    expect(card).toContain("model         zai/glm-5.2 via ai-gateway(api-key)");
-    expect(card).toContain("instructions  none");
-    expect(card).toContain("agent       get_weather");
-    expect(card).toContain("eve         bash");
-    expect(card).toContain("skills        none");
-    expect(card).toContain("subagents     none");
-    expect(card).toContain("schedules     none");
-    expect(plain.at(-2)).toContain("schedules     none");
-    expect(lines[0]).toBe(colorTheme.colors.dim(plain[0]!));
-    expect(lines[logoIndex]).toContain(colorTheme.colors.cyan("⣿⣿⣿⣿⣿⣿⣿⣿⣿    ⠏⣿⣿⣿⣿⣿⣿⣿⣿⣿"));
-    expect(lines[modelIndex]).toContain(colorTheme.colors.dim("via "));
+    expect(card).not.toContain("model");
+    expect(card).not.toContain("instructions");
+    expect(card).not.toContain("⣿");
+    expect(lines[0]).toBe(theme.colors.dim(plain[0]!));
   });
 
-  it("bounds every collection for large agents", () => {
-    const source = (name: string) => ({
-      logicalPath: `${name}.ts`,
-      owner: { kind: "application" as const },
-      sourceId: `${name}.ts`,
-      sourceKind: "module" as const,
-    });
-    const instructions: AgentInfoInstructionsEntry[] = Array.from({ length: 12 }, (_, index) => ({
-      ...source(`instructions-${index}`),
-      content: "Instructions.",
-      name: `instructions-${index}`,
-      role: "system",
-    }));
-    const skills: AgentInfoSkillEntry[] = Array.from({ length: 12 }, (_, index) => ({
-      ...source(`skill-${index}`),
-      description: "Skill.",
-      markdown: "# Skill",
-      name: `skill-${index}`,
-    }));
-    const schedules: AgentInfoScheduleEntry[] = Array.from({ length: 12 }, (_, index) => ({
-      ...source(`schedule-${index}`),
-      cron: "0 0 * * *",
-      hasRun: true,
-      name: `schedule-${index}`,
-    }));
-    const remoteAgents: AgentInfoRemoteAgentEntry[] = Array.from({ length: 12 }, (_, index) => ({
-      ...source(`subagent-${index}`),
-      description: "Subagent.",
-      name: `subagent-${index}`,
-      nodeId: `remote-${index}`,
-      parentNodeId: "__root__",
-    }));
-    const extensionTools = Array.from({ length: 6 }, (_, index): AgentInfoToolEntry => ({
-      ...AUTHORED_TOOL,
-      logicalPath: `extension-${index}/tool.ts`,
-      name: `extension_tool_${index}`,
-      owner: {
-        kind: "extension",
-        namespace: `extension-${index}`,
-        packageName: `@example/extension-${index}`,
-      },
-      sourceId: `extension-${index}/tool.ts`,
-    }));
-    const info: AgentInfoResult = {
-      ...INFO,
-      instructions: { dynamic: [], static: instructions },
-      remoteAgents: { entries: remoteAgents, total: remoteAgents.length },
-      schedules,
-      skills: { dynamic: [], static: skills },
-      tools: { dynamic: [], static: [AUTHORED_TOOL, ...extensionTools, FRAMEWORK_TOOL] },
-    };
+  it("renders only known fields before agent inspection", () => {
+    const theme = createTheme({ color: false, unicode: true });
+    const card = buildAgentHeader({
+      name: "weather-agent",
+      theme,
+      tip: "Use the /help command to see every command.",
+      width: 120,
+    }).join("\n");
 
-    const card = buildAgentHeader({ info, theme, width: 120 }).join("\n");
-
-    for (const label of ["instructions", "skills", "subagents", "schedules"]) {
-      expect(card.match(new RegExp(`${label}.*\\+\\d+ more`, "u"))).not.toBeNull();
-    }
-    expect(card).toContain("  +4 groups");
-    expect(card).not.toContain("  eve         bash");
+    expect(card).toContain("weather-agent");
+    expect(card).toContain("Tip: Use the /help command to see every command.");
   });
 
   it("renders the /add tip with a blue command", () => {
-    const colorTheme = createTheme({ color: true, unicode: false });
+    const theme = createTheme({ color: true, unicode: false });
     const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
 
     expect(tip).toBe("Use the /add command to install an integration.");
     if (tip === undefined) return;
 
-    const line = buildAgentHeader({
-      info: INFO,
-      theme: colorTheme,
-      width: 120,
-      tip,
-    }).at(-1);
+    const line = buildAgentHeader({ info: INFO, theme, width: 120, tip }).find((candidate) =>
+      candidate.includes("Tip:"),
+    );
 
-    expect(stripAnsi(line ?? "")).toBe(`  Tip: ${tip}`);
-    expect(line).toContain(colorTheme.colors.blue("/add"));
+    expect(stripAnsi(line ?? "")).toContain(`| Tip: ${tip}`);
+    expect(line).toContain(theme.colors.blue("/add"));
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {
+    const theme = createTheme({ color: false, unicode: false });
     const info: AgentInfoResult = {
       ...INFO,
       diagnostics: { discoveryErrors: 1, discoveryWarnings: 2 },

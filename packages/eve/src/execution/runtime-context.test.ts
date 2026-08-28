@@ -6,6 +6,7 @@ import {
   ContinuationTokenKey,
   type Session,
   type SessionAuthContext,
+  ActivityObserverKey,
   SessionIdKey,
   SessionKey,
   ScheduleIdKey,
@@ -241,6 +242,32 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.get(SessionIdKey)).toBeUndefined();
+  });
+
+  it("seeds inherited private activity observer configuration", () => {
+    const sink = {
+      url: "https://root.example.com/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+      version: 1 as const,
+    };
+    const workIdentity = {
+      id: "work:root:turn:call",
+      kind: "subagent" as const,
+      parentId: "work:root:turn",
+      rootSessionId: "root",
+      rootTurnId: "turn",
+    };
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "subagent" },
+        input: { message: "hi" },
+        mode: "task",
+        activityObserver: { sink, workIdentity },
+      },
+    });
+
+    expect(ctx.get(ActivityObserverKey)).toEqual({ sink, workIdentity });
   });
 
   it("grafts parent metadata onto the child's own kind", () => {

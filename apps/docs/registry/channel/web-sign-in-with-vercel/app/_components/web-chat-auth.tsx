@@ -116,14 +116,14 @@ export function AccountControl({
   }
 
   return (
-    <div className="fixed top-3 right-3 z-10">
+    <div className="fixed top-3 left-4 z-30 flex h-8 items-center">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={`Open account menu for ${name}`}
-            className="size-9 cursor-pointer overflow-hidden rounded-full p-0"
-            size="icon"
-            variant="outline"
+            className="relative size-7 cursor-pointer overflow-hidden rounded-full p-0"
+            size="icon-sm"
+            variant="ghost"
           >
             {image && !imageFailed ? (
               <img
@@ -137,9 +137,13 @@ export function AccountControl({
                 {initials}
               </span>
             )}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 rounded-full border border-black/20 dark:border-white/25"
+            />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuContent align="start" className="w-64">
           <div className="min-w-0 px-2 py-1.5 text-sm">
             <span className="block truncate font-medium leading-5" title={name}>
               {name}

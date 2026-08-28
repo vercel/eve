@@ -1,6 +1,9 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
-import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
+import type {
+  ActivityObserverConfig,
+  SubagentAuthorizationEventHookPayload,
+} from "#channel/types.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   appendTaskViewStep,
@@ -28,6 +31,8 @@ import {
 
 /** Input for one durable task run. */
 export interface TaskRunWorkflowInput {
+  /** Activity sink and work identity for best-effort terminal settlement. */
+  readonly activityObserver?: ActivityObserverConfig;
   /** Private task inbox token; a routing credential, never model-visible. */
   readonly taskInboxToken: string;
   /** The creation view, normally `working`. */
@@ -93,7 +98,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
     let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
-    await appendTaskViewStep({ view });
+    await appendTaskViewStep({ activityObserver: input.activityObserver, view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
       const next = await iterator.next();
@@ -171,7 +176,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         !isTerminalTaskStatus(view.status) && isTerminalTaskStatus(result.view.status);
       const becameReady = !isReadyTaskStatus(view.status) && isReadyTaskStatus(result.view.status);
       view = result.view;
-      await appendTaskViewStep({ view });
+      await appendTaskViewStep({ activityObserver: input.activityObserver, view });
       const routableAuthorizationEvents =
         dispatchAcknowledged && !becameTerminal ? pendingAuthorizationEvents : [];
       for (const request of routableAuthorizationEvents) {

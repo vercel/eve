@@ -40,7 +40,6 @@ import type {
 } from "#internal/nitro/host/types.js";
 import { createEveVercelOptions } from "#internal/nitro/host/vercel-build-output-config.js";
 import { applyWorkflowTransform } from "#internal/workflow-bundle/workflow-builders.js";
-import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 
 /**
@@ -519,15 +518,6 @@ function addNitroStepTransformPlugin(
   return clearCachedStepTransformTargets;
 }
 
-function addDynamicCapabilityTransformPlugin(nitro: Nitro): void {
-  nitro.hooks.hook("rollup:before", (_nitro, config) => {
-    if (!Array.isArray(config.plugins)) {
-      return;
-    }
-    config.plugins.unshift(createDynamicCapabilityTransformPlugin());
-  });
-}
-
 /**
  * Marks the authored instrumentation module as side-effectful so Nitro's final
  * Rollup/Rolldown pass preserves its eager evaluation from the generated
@@ -704,8 +694,8 @@ function configureSharedApplicationNitro(
   addWorkflowModuleSideEffectsPlugin(nitro, preparedHost.workflowBuildDir);
   patchWorkflowTransformExcludePath(nitro, preparedHost.workflowBuildDir);
 
-  addDynamicCapabilityTransformPlugin(nitro);
-
+  // Dynamic capabilities are stamped while preparing the authored generation.
+  // Repeating that transform here would parse the entire prebundled module map.
   if (preparedHost.compiledArtifacts.instrumentationSourcePaths !== undefined) {
     addInstrumentationModuleSideEffectsPlugin(
       nitro,

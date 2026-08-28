@@ -50,6 +50,39 @@ const MOCK_MODELS: CatalogModel[] = [
     ],
   },
   {
+    slug: "arcee-ai/trinity-large-thinking",
+    providers: [
+      {
+        provider: "arcee-ai",
+        providerModelId: "trinity-large-thinking",
+        contextWindowTokens: 262_100,
+        maxOutputTokens: 80_000,
+      },
+    ],
+  },
+  {
+    slug: "moonshotai/kimi-k2",
+    providers: [
+      {
+        provider: "moonshotai",
+        providerModelId: "kimi-k2",
+        contextWindowTokens: 131_072,
+        maxOutputTokens: 131_072,
+      },
+    ],
+  },
+  {
+    slug: "moonshotai/kimi-k2-thinking",
+    providers: [
+      {
+        provider: "moonshotai",
+        providerModelId: "kimi-k2-thinking",
+        contextWindowTokens: 216_144,
+        maxOutputTokens: 216_144,
+      },
+    ],
+  },
+  {
     slug: "example/zero-first-provider",
     providers: [
       {
@@ -188,6 +221,20 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
     const limits = await loader.getModelLimits("anthropic/claude-opus-4.7-thinking");
     expect(limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
+  });
+
+  it("resolves a model whose canonical slug ends in -thinking", async () => {
+    mockCatalogFetch();
+    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const limits = await loader.getModelLimits("arcee-ai/trinity-large-thinking");
+    expect(limits).toEqual({ contextWindowTokens: 262_100, maxOutputTokens: 80_000 });
+  });
+
+  it("prefers the exact -thinking slug over its base model", async () => {
+    mockCatalogFetch();
+    const loader = createCompiledRuntimeModelCatalogLoader("/tmp/test-app");
+    const limits = await loader.getModelLimits("moonshotai/kimi-k2-thinking");
+    expect(limits).toEqual({ contextWindowTokens: 216_144, maxOutputTokens: 216_144 });
   });
 
   it("resolves by provider and providerModelId", async () => {

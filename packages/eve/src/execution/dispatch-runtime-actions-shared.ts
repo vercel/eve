@@ -8,12 +8,14 @@
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
+import type { ActivityObserverConfig } from "#channel/types.js";
 import {
   callAdapterEventHandler,
   type ChannelAdapter,
   type ChannelAdapterContext,
 } from "#channel/adapter.js";
 import {
+  ActivityObserverKey,
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
@@ -35,6 +37,7 @@ import {
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
   assertUniqueRuntimeActionCallIds,
@@ -45,6 +48,7 @@ import {
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
+import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
@@ -155,6 +159,9 @@ export interface PreparedRuntimeActionDispatch {
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly activityObserver?: ActivityObserverConfig & {
+    readonly workIdentity: ActivityWorkIdentityV1;
+  };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
@@ -282,9 +289,33 @@ async function prepareActionDispatch(input: {
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
+    activityObserver: resolvePreparedActivity(
+      ctx.get(ActivityObserverKey),
+      session,
+      batch.event.turnId,
+    ),
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+  };
+}
+
+function resolvePreparedActivity(
+  activityObserver: ActivityObserverConfig | undefined,
+  session: RuntimeSession,
+  turnId: string,
+): (ActivityObserverConfig & { readonly workIdentity: ActivityWorkIdentityV1 }) | undefined {
+  if (activityObserver === undefined) return undefined;
+  return {
+    sink: activityObserver.sink,
+    workIdentity: activityObserver.workIdentity ?? {
+      id: deriveRootTurnActivityWorkId({ sessionId: session.sessionId, turnId }),
+      kind: "root-turn",
+      rootSessionId: session.rootSessionId ?? session.sessionId,
+      rootTurnId: turnId,
+      sessionId: session.sessionId,
+      turnId,
+    },
   };
 }
 
@@ -552,6 +583,9 @@ export async function startSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly activityObserver?: ActivityObserverConfig & {
+    readonly workIdentity: ActivityWorkIdentityV1;
+  };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
@@ -581,6 +615,7 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
+        activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,
         source: input.target.source,
@@ -598,6 +633,7 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
+        activityObserver: input.activityObserver,
         session: input.session,
         taskOwned: input.taskOwned,
       });

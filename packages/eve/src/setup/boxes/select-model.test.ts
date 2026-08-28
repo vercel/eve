@@ -55,10 +55,10 @@ const CATALOG: GatewayCatalogModel[] = [
     tags: ["web-search"],
   },
   {
-    id: "zai/glm-5.2",
-    name: "GLM 5.2",
+    id: "openai/gpt-5.6-luna-fast",
+    name: "GPT-5.6 Luna Fast",
     type: "language",
-    owned_by: "zai",
+    owned_by: "openai",
     released: 100,
     tags: ["reasoning"],
   },
@@ -110,14 +110,14 @@ describe("modelOptionsFromCatalog", () => {
     const options = modelOptionsFromCatalog(CATALOG);
 
     expect(options.map((option) => option.value)).toEqual([
-      "zai/glm-5.2",
+      "openai/gpt-5.6-luna-fast",
       "zai/glm-4.6",
       "openai/gpt-5-mini",
     ]);
     expect(options.filter((option) => option.featured).map((o) => o.value)).toEqual([
-      "zai/glm-5.2",
+      "openai/gpt-5.6-luna-fast",
     ]);
-    expect(options[0]?.hint).toBe("Z.AI");
+    expect(options[0]?.hint).toBe("OpenAI");
   });
 
   it("falls back to the static shortlist without a catalog or matches", () => {
@@ -149,7 +149,7 @@ describe("selectModel box", () => {
     let captured: SingleSelectOptions<PrompterValue> | undefined;
     const { prompter } = createSelectPrompter((opts) => {
       captured = opts;
-      return "zai/glm-5.2";
+      return "openai/gpt-5.6-luna-fast";
     });
     const box = selectModel({ asker: interactiveAsker(prompter), deps: catalogDeps() });
 
@@ -157,16 +157,16 @@ describe("selectModel box", () => {
 
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
-    expect(result.state.modelId).toBe("zai/glm-5.2");
+    expect(result.state.modelId).toBe("openai/gpt-5.6-luna-fast");
     expect(captured?.search).toBe(true);
     // The featured default remains first; the rest are newest release first.
     expect(captured?.options.map((option) => option.value)).toEqual([
-      "zai/glm-5.2",
+      "openai/gpt-5.6-luna-fast",
       "zai/glm-4.6",
       "openai/gpt-5-mini",
     ]);
     // Cursor defaults to the top catalog entry when no default is configured.
-    expect(captured?.initialValue).toBe("zai/glm-5.2");
+    expect(captured?.initialValue).toBe("openai/gpt-5.6-luna-fast");
   });
 
   it("orders the curated shortlist first, marks it featured, and pre-selects the default", async () => {
@@ -194,7 +194,7 @@ describe("selectModel box", () => {
     expect(result.kind).toBe("done");
     if (result.kind !== "done") return;
     expect(captured?.options.map((option) => option.value)).toEqual([
-      "zai/glm-5.2",
+      "openai/gpt-5.6-luna-fast",
       "anthropic/claude-opus-4.8",
       "zai/glm-4.6",
       "openai/gpt-5-mini",
@@ -202,7 +202,7 @@ describe("selectModel box", () => {
     // Only the curated entries are featured: the picker's default view shows
     // them alone, and scrolling or search surfaces the rest of the catalog.
     expect(captured?.options.filter((option) => option.featured).map((o) => o.value)).toEqual([
-      "zai/glm-5.2",
+      "openai/gpt-5.6-luna-fast",
       "anthropic/claude-opus-4.8",
     ]);
     expect(captured?.initialValue).toBe(DEFAULT_AGENT_MODEL_ID);

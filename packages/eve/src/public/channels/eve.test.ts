@@ -49,7 +49,14 @@ const OVERRIDE_AUTH: SessionAuthContext = {
 
 type MockSendOptions = Pick<
   RunInput,
-  "auth" | "callback" | "capabilities" | "continuationToken" | "initiatorAuth" | "mode" | "title"
+  | "auth"
+  | "callback"
+  | "capabilities"
+  | "continuationToken"
+  | "activityObserver"
+  | "initiatorAuth"
+  | "mode"
+  | "title"
 >;
 
 function createJsonMessageRequest(body: unknown): Request {
@@ -126,6 +133,7 @@ function createEveCreateHandler(
       callback: runInput.callback,
       capabilities: runInput.capabilities,
       continuationToken: runInput.continuationToken,
+      activityObserver: runInput.activityObserver,
       initiatorAuth: runInput.initiatorAuth,
       mode: runInput.mode,
       title: runInput.title,

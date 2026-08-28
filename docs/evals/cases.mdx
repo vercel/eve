@@ -88,11 +88,17 @@ export default defineEval({
   async test(t) {
     const first = await t.send("My favorite word is marigold.");
 
-    const second = await t.send("Thanks for remembering.");
+    const second = await t.send("What is my favorite word?");
     await t.require(second.sessionId, equals(first.sessionId));
 
     t.succeeded();
-    second.messageIncludes("Thanks for remembering.");
+    second.messageIncludes("marigold");
+
+    t.judge.autoevals
+      .closedQA("The assistant remembers the user's favorite word across turns", {
+        on: t.transcript,
+      })
+      .atLeast(0.8);
   },
 });
 ```
@@ -109,6 +115,9 @@ export default defineEval({
 - `t.respond(responses, options?)` answers specific pending input requests and sends them as the next turn.
 - `t.respondAll(optionId)` answers every pending input request with the same option and sends the responses as the next turn.
 - `t.reply` is the last assistant message (or `null`); `t.sessionId` is the current session id; `t.events` is the full typed event stream captured so far.
+- `t.transcript` formats the primary session's observed user and assistant messages in turn order. Pass it as a judge's `on` value to grade the complete conversation. An independent session returned by `t.newSession()` exposes its own `session.transcript`.
+
+The transcript uses `User:` and `Assistant:` labels separated by blank lines. It excludes reasoning, tool calls, tool results, and messages from other sessions. It updates after each turn settles, so read it after `await t.send(...)`, `await t.respond(...)`, or `await live.result()`.
 
 Each `send` (and `respond`/`respondAll`) resolves to an immutable turn with `.message`, `.data`, `.events`, `.inputRequests`, `.toolCalls`, `.sessionId`, `.status`, and `.expectOk()`. Use `.sessionId` to relate turns or attach follow-up work to the session that produced a specific turn. `expectOk()` throws only when the turn ended failed; a session left open for a next message is the normal end state of a successful turn.
 

@@ -7,6 +7,7 @@ import {
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
 import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import {
   prepareAgentActionDispatch,
   startSubagent,
@@ -218,6 +219,17 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
     entry.kind === "resume"
       ? await dispatchToTaskAgentAddress({
           action: entry.action,
+          activityObserver:
+            prepared.activityObserver === undefined
+              ? undefined
+              : deriveChildActivityObserverConfig({
+                  activityObserver: prepared.activityObserver,
+                  callId: entry.action.callId,
+                  kind: "task",
+                  name: entry.action.name,
+                  parentSessionId: prepared.session.sessionId,
+                  parentTurnId: input.event.turnId,
+                }),
           agentId: entry.agentId,
           auth: prepared.auth,
           bundle: createAgentContinuationBundle({
@@ -240,6 +252,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
           initiatorAuth: prepared.initiatorAuth,
           parentContinuationToken: input.task.taskInboxToken,
           parentTraceContext: prepared.parentTraceContext,
+          activityObserver: prepared.activityObserver,
           sandboxSessionId: prepared.sandboxSessionId,
           serializedContext: prepared.serializedContext,
           session: prepared.session,
