@@ -67,7 +67,9 @@ export interface OtelOptions {
    * an OpenTelemetry capture ceiling: per-delivery audience and destination
    * settings can only narrow it. It never changes what authored instrumentation
    * providers receive. A thrown error rejects trace production without
-   * silencing lifecycle providers.
+   * silencing lifecycle providers. The policy may be invoked more than once
+   * while a new session is being prepared, so it must be deterministic for
+   * consistent results.
    */
   readonly tracePolicy?: TraceCapturePolicy;
   /**

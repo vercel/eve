@@ -1,5 +1,16 @@
+import { OpenTelemetry } from "#compiled/@ai-sdk/otel/index.js";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import type { Telemetry } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const logWarn = vi.hoisted(() => vi.fn());
+vi.mock("#internal/logging.js", () => ({
+  createLogger: () => ({ warn: logWarn }),
+}));
 
 import {
   ensureOtelIntegration,
@@ -12,6 +23,7 @@ describe("getRegisteredTelemetryIntegrations", () => {
 
   afterEach(() => {
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = original;
+    logWarn.mockClear();
   });
 
   it("is empty when nothing has registered", () => {
@@ -27,7 +39,16 @@ describe("getRegisteredTelemetryIntegrations", () => {
     expect(getRegisteredTelemetryIntegrations()).toEqual([first, second]);
   });
 
-  it("replaces only eve's OTel integration in metadata-only mode", () => {
+  it("warns once when eve's integration cannot be identity-matched", () => {
+    const foreign: Telemetry = { onStart() {} };
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [foreign];
+
+    expect(getRegisteredTelemetryIntegrations({ sanitizeEveOtelErrors: true })).toEqual([foreign]);
+    expect(getRegisteredTelemetryIntegrations({ sanitizeEveOtelErrors: true })).toEqual([foreign]);
+    expect(logWarn).toHaveBeenCalledOnce();
+  });
+
+  it("replaces only eve's OTel integration in error-safe mode", () => {
     const authored: Telemetry = { onStart() {} };
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [];
     ensureOtelIntegration();
@@ -74,5 +95,57 @@ describe("telemetryWithoutErrorContent", () => {
         type: "tool-error",
       },
     });
+  });
+
+  it("keeps sentinel errors out of real OpenTelemetry spans", async () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    const telemetry = telemetryWithoutErrorContent(
+      new OpenTelemetry({ tracer: provider.getTracer("test") }),
+    );
+    const callId = "call-1";
+    const error = new Error("SECRET-ERROR-BODY");
+
+    await Reflect.apply(telemetry.onStart!, telemetry, [
+      {
+        callId,
+        messages: [],
+        modelId: "test-model",
+        operationId: "ai.streamText",
+        provider: "test-provider",
+        recordInputs: false,
+        recordOutputs: false,
+      },
+    ]);
+    await Reflect.apply(telemetry.onToolExecutionStart!, telemetry, [
+      {
+        callId,
+        toolCall: { input: {}, toolCallId: "tool-1", toolName: "weather" },
+      },
+    ]);
+    await Reflect.apply(telemetry.onToolExecutionEnd!, telemetry, [
+      {
+        callId,
+        messages: [],
+        toolCall: { input: {}, toolCallId: "tool-1", toolName: "weather" },
+        toolExecutionMs: 1,
+        toolOutput: { error, type: "tool-error" },
+      },
+    ]);
+    await Reflect.apply(telemetry.onError!, telemetry, [{ callId, error }]);
+    await provider.forceFlush();
+
+    const exported = JSON.stringify(
+      exporter.getFinishedSpans().map((span) => ({
+        attributes: span.attributes,
+        events: span.events,
+        status: span.status,
+      })),
+    );
+    expect(exported).not.toContain("SECRET-ERROR-BODY");
+    expect(exported).toContain("AI SDK operation failed");
+    await provider.shutdown();
   });
 });

@@ -222,6 +222,8 @@ function resolveSessionTraceDecision(
   if (event.parentTraceContext !== undefined) {
     return resolveTracePolicyDecision(isSampledTrace(event.parentTraceContext), audience);
   }
+  // The tool loop can evaluate the same policy before this first-session
+  // preparation path; the persisted decision removes that window on replay.
   return resolveTracePolicy(policy, {
     agentName: event.agentName,
     audience,

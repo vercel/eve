@@ -30,6 +30,7 @@ import {
   type InstrumentationActionKind,
   type InstrumentationAttemptScope,
   type InstrumentationContextRunner,
+  type InstrumentationEvent,
   type InstrumentationHooks,
   type InstrumentationParentLineage,
   type InstrumentationTraceContext,
@@ -54,6 +55,9 @@ interface TestRuntime {
     typeof createAgentOtelInstrumentation
   >["prepareSessionTrace"];
   readonly prepareTurnTrace: ReturnType<typeof createAgentOtelInstrumentation>["prepareTurnTrace"];
+  readonly projectEvent: NonNullable<
+    ReturnType<typeof createAgentOtelInstrumentation>["hook"]["projectEvent"]
+  >;
   readonly runInContext: InstrumentationContextRunner;
   readonly tracer: ReturnType<BasicTracerProvider["getTracer"]>;
 }
@@ -91,6 +95,7 @@ function createRuntime(
     hooks,
     prepareSessionTrace: agentOtel.prepareSessionTrace,
     prepareTurnTrace: agentOtel.prepareTurnTrace,
+    projectEvent: agentOtel.hook.projectEvent!,
     provider,
     runInContext: agentOtel.runInContext,
     tracer,
@@ -827,6 +832,61 @@ describe("createAgentOtelInstrumentation", () => {
       expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(1);
     },
   );
+
+  it("uses the stored session decision when no event or context seed exists", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    stateStore.setSession("session-policy", {
+      channelAudience: "public",
+      context: spanContext("1", "2"),
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      rootSessionId: "session-policy",
+    });
+    const runtime = createRuntime(stateStore, null);
+
+    await expect(runtime.projectEvent(modelStartedEvent("session-policy"))).resolves.toMatchObject({
+      input: undefined,
+    });
+  });
+
+  it("reconstructs a sampled public session decision when persisted policy is absent", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    stateStore.setSession("session-sampled", {
+      channelAudience: "public",
+      context: spanContext("1", "2"),
+      rootSessionId: "session-sampled",
+    });
+    const runtime = createRuntime(stateStore, null);
+
+    await expect(runtime.projectEvent(modelStartedEvent("session-sampled"))).resolves.toMatchObject(
+      {
+        input: { instructions: "private prompt" },
+      },
+    );
+  });
+
+  it("reconstructs an unsampled session as content-redacted", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    stateStore.setSession("session-unsampled", {
+      channelAudience: "public",
+      context: { ...spanContext("1", "2"), traceFlags: 0 },
+      rootSessionId: "session-unsampled",
+    });
+    const runtime = createRuntime(stateStore, null);
+
+    await expect(
+      runtime.projectEvent(modelStartedEvent("session-unsampled")),
+    ).resolves.toMatchObject({ input: undefined });
+  });
+
+  it("fails closed when no trace decision source exists", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+
+    await expect(runtime.projectEvent(modelStartedEvent("session-missing"))).resolves.toMatchObject(
+      {
+        input: undefined,
+      },
+    );
+  });
 
   it.each([
     ["legacy false", (): boolean => false],
@@ -1920,6 +1980,29 @@ describe("createAgentOtelInstrumentation", () => {
     expect(byName(spans, "agent.turn")[0]!.status.code).toBe(SpanStatusCode.UNSET);
   });
 });
+
+function spanContext(traceId: string, spanId: string) {
+  return { spanId: spanId.repeat(16), traceFlags: 1, traceId: traceId.repeat(32) };
+}
+
+function modelStartedEvent(
+  sessionId: string,
+): Extract<InstrumentationEvent, { type: "model.call.started" }> {
+  return {
+    idempotencyKey: `model:${sessionId}:turn-1:0:0:0`,
+    input: { instructions: "private prompt", messages: [] },
+    model: { modelId: "test-model", provider: "test-provider" },
+    scope: {
+      attemptId: `${sessionId}:turn-1:0:0`,
+      attemptIndex: 0,
+      channelAudience: "public",
+      sessionId,
+      stepIndex: 0,
+      turnId: "turn-1",
+    },
+    type: "model.call.started",
+  };
+}
 
 describe("AgentSpanIdGenerator.withTraceId", () => {
   it("primes the next generateTraceId call", () => {

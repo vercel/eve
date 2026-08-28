@@ -371,8 +371,9 @@ function enrichTelemetry(
       ? effectiveDecision.recordOutputs
       : shouldCaptureInstrumentationContent(channelAudience)) &&
     (settings?.recordOutputs ?? false);
+  const sanitizeEveOtelErrors = settings !== undefined && !(recordInputs && recordOutputs);
   const registeredIntegrations = () =>
-    getRegisteredTelemetryIntegrations({ sanitizeEveOtelErrors: !recordOutputs });
+    getRegisteredTelemetryIntegrations({ sanitizeEveOtelErrors });
   return {
     functionId: settings?.functionId ?? agentName,
     includeRuntimeContext,
@@ -380,7 +381,7 @@ function enrichTelemetry(
     // bridge has to be composed with them rather than handed over on its own.
     integrations:
       bridgeIntegration === undefined
-        ? !recordOutputs
+        ? sanitizeEveOtelErrors
           ? [...registeredIntegrations()]
           : undefined
         : [bridgeIntegration, ...registeredIntegrations()],
@@ -2076,6 +2077,8 @@ function resolveStepInstrumentationDecision(
   if (traceSeed !== undefined) {
     return resolveTracePolicyDecision(isSampledTrace(traceSeed), audience);
   }
+  // The first step can reach this before OTel session preparation persists its
+  // decision, so that preparation may invoke the policy again.
   return resolveTracePolicy(settings.tracePolicy, {
     agentName,
     audience,

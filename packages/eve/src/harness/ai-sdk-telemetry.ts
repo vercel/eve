@@ -1,9 +1,12 @@
 import { OpenTelemetry } from "#compiled/@ai-sdk/otel/index.js";
 import { registerTelemetry, type Telemetry } from "ai";
+import { createLogger } from "#internal/logging.js";
 
+const log = createLogger("harness.ai-sdk-telemetry");
 let registered = false;
 let eveOtelIntegration: Telemetry | undefined;
 let errorSafeEveOtelIntegration: Telemetry | undefined;
+let warnedMissingEveOtelIntegration = false;
 
 /**
  * Registers the AI SDK OpenTelemetry integration once so that model
@@ -35,13 +38,25 @@ export function getRegisteredTelemetryIntegrations(options?: {
   readonly sanitizeEveOtelErrors?: boolean;
 }): readonly Telemetry[] {
   const integrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
-  return options?.sanitizeEveOtelErrors === true
-    ? integrations.map((integration) =>
-        integration === eveOtelIntegration && errorSafeEveOtelIntegration !== undefined
-          ? errorSafeEveOtelIntegration
-          : integration,
-      )
-    : integrations;
+  if (options?.sanitizeEveOtelErrors !== true) return integrations;
+  let matched = false;
+  const sanitized = integrations.map((integration) => {
+    if (integration !== eveOtelIntegration || errorSafeEveOtelIntegration === undefined) {
+      return integration;
+    }
+    matched = true;
+    return errorSafeEveOtelIntegration;
+  });
+  if (!matched && !warnedMissingEveOtelIntegration) {
+    warnedMissingEveOtelIntegration = true;
+    log.warn("could not sanitize eve's AI SDK OpenTelemetry integration", {
+      reason:
+        eveOtelIntegration === undefined
+          ? "eve OpenTelemetry integration was not registered"
+          : "registered integration identity did not match",
+    });
+  }
+  return sanitized;
 }
 
 /** @internal */

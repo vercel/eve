@@ -11113,7 +11113,14 @@ describe("createToolLoopHarness", () => {
           recordOutputs: outputs,
         }),
       });
-      const runStep = createToolLoopHarness(createTestConfig());
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: {
+            hooks: createInstrumentationHooks([]),
+            runInContext: (_operation, execute) => execute(),
+          },
+        }),
+      );
       const ctx = new ContextContainer();
       ctx.set(ChannelInstrumentationKey, {
         kind: "channel:public",
@@ -11128,6 +11135,9 @@ describe("createToolLoopHarness", () => {
       expect(agentCall.telemetry).toMatchObject({
         recordInputs: inputs,
         recordOutputs: outputs,
+      });
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
+        sanitizeEveOtelErrors: !(inputs && outputs),
       });
     });
 
@@ -11163,6 +11173,9 @@ describe("createToolLoopHarness", () => {
       expect(agentCall.telemetry).toMatchObject({
         recordInputs: false,
         recordOutputs: true,
+      });
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
+        sanitizeEveOtelErrors: true,
       });
     });
 
