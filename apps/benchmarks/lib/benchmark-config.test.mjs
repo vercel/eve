@@ -46,6 +46,6 @@ test("allows candidate probes and rejects unknown models", () => {
   assert.equal(findBenchmarkModel("gpt-5-6-terra").support, "supported");
   assert.equal(findBenchmarkModel("grok-4-6").support, "supported");
   assert.equal(findBenchmarkModel("claude-sonnet-4-6").support, "superseded");
-  assert.equal(findBenchmarkModel("claude-opus-5").support, "candidate");
+  assert.equal(findBenchmarkModel("claude-opus-5").support, "supported");
   assert.throws(() => findBenchmarkModel("unknown"), /Unknown model/u);
 });
