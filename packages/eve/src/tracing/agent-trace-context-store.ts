@@ -182,6 +182,20 @@ export class ContextAgentTraceStateStore implements AgentTraceStateStore {
       turns: { ...state.turns, [turnKey(sessionId, turnId)]: value },
     }));
   }
+
+  updateTurn(
+    sessionId: string,
+    turnId: string,
+    update: (state: AgentTurnTraceState) => AgentTurnTraceState,
+  ): void {
+    updateState((state) => {
+      const key = turnKey(sessionId, turnId);
+      const current = state.turns[key];
+      return current === undefined
+        ? state
+        : { ...state, turns: { ...state.turns, [key]: update(current) } };
+    });
+  }
 }
 
 function updateState(update: (state: AgentTraceContextState) => AgentTraceContextState): void {
@@ -242,6 +256,7 @@ function deserializeState(data: unknown): AgentTraceContextState {
     }
     return {
       context: value.context,
+      modelUsage: deserializeModelUsage(value.modelUsage),
       parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
       parentSpanId: value.parentSpanId,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
@@ -252,6 +267,17 @@ function deserializeState(data: unknown): AgentTraceContextState {
     } satisfies AgentTurnTraceState;
   });
   return { actions, sessions, turns };
+}
+
+function deserializeModelUsage(
+  value: unknown,
+): NonNullable<AgentTurnTraceState["modelUsage"]> | undefined {
+  if (!isRecord(value)) return undefined;
+  const inputTokens = typeof value.inputTokens === "number" ? value.inputTokens : undefined;
+  const outputTokens = typeof value.outputTokens === "number" ? value.outputTokens : undefined;
+  return inputTokens === undefined && outputTokens === undefined
+    ? undefined
+    : { inputTokens, outputTokens };
 }
 
 function deserializeAction(value: unknown): AgentActionTraceState | undefined {

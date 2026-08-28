@@ -20,6 +20,7 @@ export interface AgentSessionTraceState {
 
 export interface AgentTurnTraceState {
   readonly context: SpanContext;
+  readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
   readonly parentIsRemote?: boolean;
   readonly parentSpanId: string;
   readonly rootSessionId: string;
@@ -70,6 +71,12 @@ export interface AgentTraceStateStore {
   setAction(idempotencyKey: string, state: AgentActionTraceState): void | PromiseLike<void>;
   setSession(sessionId: string, state: AgentSessionTraceState): void | PromiseLike<void>;
   setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void | PromiseLike<void>;
+  /** Atomically updates an existing turn and does nothing after that turn is deleted. */
+  updateTurn(
+    sessionId: string,
+    turnId: string,
+    update: (state: AgentTurnTraceState) => AgentTurnTraceState,
+  ): void | PromiseLike<void>;
 }
 
 /** In-memory trace state used by tests and non-durable runtimes. */
@@ -126,6 +133,16 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
 
   setTurn(sessionId: string, turnId: string, state: AgentTurnTraceState): void {
     this.#turns.set(turnKey(sessionId, turnId), state);
+  }
+
+  updateTurn(
+    sessionId: string,
+    turnId: string,
+    update: (state: AgentTurnTraceState) => AgentTurnTraceState,
+  ): void {
+    const key = turnKey(sessionId, turnId);
+    const state = this.#turns.get(key);
+    if (state !== undefined) this.#turns.set(key, update(state));
   }
 }
 

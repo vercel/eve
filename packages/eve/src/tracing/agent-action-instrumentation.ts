@@ -102,7 +102,9 @@ export function createAgentActionInstrumentation(input: {
       } else if (event.output.type === "error") {
         recordError(span, event.output.error);
       } else {
-        if (event.usage !== undefined) setAgentUsage(span, event.usage);
+        if (event.usage !== undefined) {
+          setAgentUsage(span, event.usage, { includeGenAiDetails: false });
+        }
         if (input.recordOutputs) {
           const result = contentAttribute(event.output.output, false);
           if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);

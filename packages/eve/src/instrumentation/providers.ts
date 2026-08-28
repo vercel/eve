@@ -120,6 +120,7 @@ export function finalizeInstrumentationProviders(input: {
   return installInstrumentationRuntime({
     collected,
     frameworkVersion: resolveInstalledPackageInfo().version,
+    instrumentationProviders: true,
     providers: providerDefinitions,
     runtimeContextResolvers: collected.runtimeContextResolvers,
     serviceName: input.serviceName,

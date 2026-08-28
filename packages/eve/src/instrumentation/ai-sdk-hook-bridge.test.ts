@@ -69,6 +69,43 @@ describe("createAiSdkHookBridge", () => {
     ]);
   });
 
+  it("publishes usage once when the SDK repeats a model terminal callback", async () => {
+    let inputTokens = 0;
+    const completed = vi.fn((event: InstrumentationModelCallTerminalEvent) => {
+      if (event.type === "model.call.completed") {
+        inputTokens += event.usage.inputTokens ?? 0;
+      }
+    });
+    const bridge = createAiSdkHookBridge(
+      scope,
+      createInstrumentationHooks([
+        { events: { "model.call.completed": completed }, name: "usage" },
+      ]),
+    );
+    const execute = vi.fn(async () => "result");
+    await Reflect.apply(bridge.onLanguageModelCallStart!, bridge, [
+      { callId: "call-1", messages: [], modelId: "model", provider: "test", tools: undefined },
+    ]);
+    await bridge.executeLanguageModelCall!({ callId: "call-1", execute });
+    const terminal = {
+      callId: "call-1",
+      content: [],
+      finishReason: "stop",
+      performance: { responseTimeMs: 1 },
+      responseId: "response-1",
+      usage: { inputTokens: 10, outputTokens: 5 },
+    };
+
+    await Promise.all([
+      Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [terminal]),
+      Reflect.apply(bridge.onLanguageModelCallEnd!, bridge, [terminal]),
+    ]);
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(completed).toHaveBeenCalledOnce();
+    expect(inputTokens).toBe(10);
+  });
+
   it("uses an eve-owned context runner while executing the model exactly once", async () => {
     const order: string[] = [];
     const hooks = createInstrumentationHooks([]);

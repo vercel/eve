@@ -87,6 +87,7 @@ export declare const propagation: {
 };
 
 export declare const trace: {
+  deleteSpan(context: Context): Context;
   getActiveSpan(): Span | undefined;
   getSpan(context: Context): Span | undefined;
   getTracer(name: string, version?: string): Tracer;

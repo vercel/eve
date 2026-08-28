@@ -13,7 +13,10 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { trace as vendoredTrace } from "#compiled/@opentelemetry/api/index.js";
+import {
+  context as vendoredContext,
+  trace as vendoredTrace,
+} from "#compiled/@opentelemetry/api/index.js";
 
 import {
   CHANNEL_SENTINEL,
@@ -22,10 +25,12 @@ import {
 } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import { registerInstrumentationConfig } from "#instrumentation/config.js";
+import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import {
   dispatchChannelRequest,
   dispatchChannelWebSocketRequest,
@@ -729,13 +734,40 @@ describe("dispatchChannelRequest tracing", () => {
     return exporter.getFinishedSpans();
   }
 
+  it("uses the semantic request name for the experimental provider layout", async () => {
+    const instrumentationRuntime = getInstrumentationRuntime();
+    if (instrumentationRuntime === undefined)
+      throw new Error("Expected an instrumentation runtime.");
+    Object.defineProperty(instrumentationRuntime, "instrumentationProviders", {
+      configurable: true,
+      value: true,
+    });
+    try {
+      mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+        agentName: "test-agent",
+        channels: [slackChannel(async () => new Response("ok"))],
+        runtime,
+      });
+
+      await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
+
+      const [span] = await finishedSpans();
+      expect(span!.name).toBe("agent.channel.request");
+      expect(span!.attributes["http.route"]).toBe("/slack");
+    } finally {
+      Reflect.deleteProperty(instrumentationRuntime, "instrumentationProviders");
+    }
+  });
+
   it("emits one SERVER span named for the route with method, channel, and status attributes", async () => {
+    let agentContextDuringHandler = false;
     let spansDuringHandler = -1;
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
       channels: [
         slackChannel(
           async () => {
+            agentContextDuringHandler = isAgentTraceContext(vendoredContext.active());
             spansDuringHandler = exporter.getFinishedSpans().length;
             return new Response("ok");
           },
@@ -752,6 +784,7 @@ describe("dispatchChannelRequest tracing", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(agentContextDuringHandler).toBe(true);
     // The span had not ended while the handler was still running.
     expect(spansDuringHandler).toBe(0);
 

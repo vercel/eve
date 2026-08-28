@@ -23,6 +23,7 @@ describe("ContextAgentTraceStateStore", () => {
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
+        modelUsage: { inputTokens: 12, outputTokens: 4 },
         parentIsRemote: true,
         parentSpanId: "2".repeat(16),
         rootSessionId: "session-1",
@@ -40,6 +41,7 @@ describe("ContextAgentTraceStateStore", () => {
       expect(store.getSession("session-1")?.context).toEqual(spanContext("1", "2"));
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
       expect(store.getTurn("session-1", "turn-1")).toMatchObject({
+        modelUsage: { inputTokens: 12, outputTokens: 4 },
         parentIsRemote: true,
         parentSpanId: "2".repeat(16),
         startTimeMs: 1_700_000_000_000,
@@ -73,6 +75,39 @@ describe("ContextAgentTraceStateStore", () => {
 
       expect(store.getTurn("session-1", "turn-1")).toBeUndefined();
       expect(store.getSession("session-1")).toBeUndefined();
+    });
+  });
+
+  it("composes atomic turn updates without recreating deleted turns", () => {
+    contextStorage.run(new ContextContainer(), () => {
+      const store = new ContextAgentTraceStateStore();
+      store.setTurn("session-1", "turn-1", {
+        context: spanContext("1", "3"),
+        parentSpanId: "2".repeat(16),
+        rootSessionId: "session-1",
+        sequence: 0,
+        startTimeMs: 1_700_000_000_000,
+      });
+
+      store.updateTurn("session-1", "turn-1", (turn) => ({
+        ...turn,
+        modelUsage: { inputTokens: 12, outputTokens: 4 },
+      }));
+      store.updateTurn("session-1", "turn-1", (turn) => ({
+        ...turn,
+        terminal: { type: "turn.completed" },
+      }));
+
+      expect(store.getTurn("session-1", "turn-1")).toMatchObject({
+        modelUsage: { inputTokens: 12, outputTokens: 4 },
+        terminal: { type: "turn.completed" },
+      });
+      store.deleteTurn("session-1", "turn-1");
+      store.updateTurn("session-1", "turn-1", (turn) => ({
+        ...turn,
+        modelUsage: { inputTokens: 99 },
+      }));
+      expect(store.getTurn("session-1", "turn-1")).toBeUndefined();
     });
   });
 

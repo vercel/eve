@@ -55,7 +55,10 @@ function delivery(
 }
 
 function weatherTurn(): LocalTraceSpan[] {
-  const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, { "agent.turn.id": "turn_0" });
+  const turn = span("a".repeat(16), "invoke_agent weather", 0, 0, undefined, {
+    "agent.turn.id": "turn_0",
+    "gen_ai.operation.name": "invoke_agent",
+  });
   const inbound = delivery("0".repeat(16), 0, "turn_0", "weather in sf?");
   const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
   const messages = JSON.stringify([
@@ -110,7 +113,7 @@ describe("buildConversationItems", () => {
   });
 
   it("renders provider-executed tool results as tool cards after the assistant", () => {
-    // Provider-executed tools (e.g. web_search) never get an ai.toolCall
+    // Provider-executed tools (e.g. web_search) never get an execute_tool
     // span; their outcomes live on the model span's tool_results attribute.
     const spans = weatherTurn().map((s) =>
       s.name === "ai.streamText.doStream"
@@ -147,7 +150,9 @@ describe("buildConversationItems", () => {
   it("finds turns parented to a session span", () => {
     const session = span("0".repeat(16), "agent.session", 0, 0);
     const spans = weatherTurn().map((s) =>
-      s.name === "agent.turn" ? { ...s, parentSpanId: session.spanId } : s,
+      s.attributes["gen_ai.operation.name"] === "invoke_agent"
+        ? { ...s, parentSpanId: session.spanId }
+        : s,
     );
     const items = buildConversationItems(trace([session, ...spans]));
     expect(items.map((item) => item.kind)).toEqual(["user", "assistant", "tool"]);
@@ -161,9 +166,17 @@ describe("buildConversationItems", () => {
       "agent.action.name": "echo-marker",
       "agent.turn.id": "turn_0",
     });
-    const childTurn = span("f".repeat(16), "agent.turn", 6000, 6000, parentAction.spanId, {
-      "agent.turn.id": "turn_child",
-    });
+    const childTurn = span(
+      "f".repeat(16),
+      "invoke_agent echo-marker",
+      6000,
+      6000,
+      parentAction.spanId,
+      {
+        "agent.turn.id": "turn_child",
+        "gen_ai.operation.name": "invoke_agent",
+      },
+    );
     const childDelivery = delivery("3".repeat(16), 6000, "turn_child", "delegated task");
     const childStep = span("1".repeat(16), "agent.step", 6010, 8000, childTurn.spanId, {});
     const childModel = span(

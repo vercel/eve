@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 
+import { context, trace } from "#compiled/@opentelemetry/api/index.js";
 import {
   EntityConflictError,
   HookNotFoundError,
@@ -59,6 +60,7 @@ import {
 } from "#execution/workflow-callback-url.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
+import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -471,23 +473,32 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
   args: TArgs,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  if (!shouldRouteToLatestDeployment()) {
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
-  }
-
-  try {
-    return await start(workflow, args, { ...options, deploymentId: "latest" });
-  } catch (error) {
-    if (!isLatestDeploymentUnsupportedError(error)) {
-      throw error;
+  // Agent parentage is reconstructed from Eve's serialized trace context. Only
+  // remove the ambient span marked by an agent boundary; the marker is not
+  // propagated into Workflow runs, so Workflow-to-Workflow traces stay intact.
+  const activeContext = context.active();
+  const workflowContext = isAgentTraceContext(activeContext)
+    ? trace.deleteSpan(activeContext)
+    : activeContext;
+  return await context.with(workflowContext, async () => {
+    if (!shouldRouteToLatestDeployment()) {
+      return options === undefined
+        ? await start(workflow, args)
+        : await start(workflow, args, options);
     }
 
-    return options === undefined
-      ? await start(workflow, args)
-      : await start(workflow, args, options);
-  }
+    try {
+      return await start(workflow, args, { ...options, deploymentId: "latest" });
+    } catch (error) {
+      if (!isLatestDeploymentUnsupportedError(error)) {
+        throw error;
+      }
+
+      return options === undefined
+        ? await start(workflow, args)
+        : await start(workflow, args, options);
+    }
+  });
 }
 
 /**

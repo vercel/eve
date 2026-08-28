@@ -138,10 +138,11 @@ describe("eve traces", () => {
     await writeSegment(
       root,
       TRACE_ONE,
-      span(turn, "agent.turn", 10, 100, undefined, {
+      span(turn, "invoke_agent weather", 10, 100, undefined, {
         "agent.name": "weather",
         "agent.session.id": "session-one",
         "agent.turn.id": "turn-1",
+        "gen_ai.operation.name": "invoke_agent",
       }),
     );
     await writeSegment(
@@ -170,7 +171,7 @@ describe("eve traces", () => {
 
     await runTraceShowCommand(output.logger, root, "session-one");
 
-    expect(output.out[0]).toContain("agent.turn [turn-1]");
+    expect(output.out[0]).toContain("invoke_agent weather [turn-1]");
     expect(output.out[0]).toContain("└─ agent.step [step 0, attempt 0]");
     expect(output.out[0]).toContain("└─ agent.action [tool-call: weather]");
     expect(output.out[0]).toContain("failed  10ms ERROR");

@@ -146,6 +146,7 @@ export interface InstrumentationRuntime {
   readonly forceFlush: () => Promise<void>;
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
+  readonly instrumentationProviders?: boolean;
   readonly prepareSessionTrace?: (
     event: InstrumentationSessionStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;

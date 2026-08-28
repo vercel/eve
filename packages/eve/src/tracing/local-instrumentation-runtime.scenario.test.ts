@@ -197,14 +197,13 @@ describe("local instrumentation runtime", () => {
     const spans = spanGroups.flat();
     expect(formatTraceTree(spans)).toEqual([
       "agent.session",
-      "  agent.turn",
+      "  invoke_agent weather",
       "    agent.step",
       "      agent.action",
-      "        ai.toolCall",
+      "        execute_tool weather",
       "          user.tool-work",
-      "      ai.streamText",
-      "        chat model-1",
-      "          user.model-work",
+      "      chat model-1",
+      "        user.model-work",
     ]);
     expect(span(spans, "agent.step").links).toEqual([
       expect.objectContaining({

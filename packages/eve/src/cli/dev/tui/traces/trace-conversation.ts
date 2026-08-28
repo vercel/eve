@@ -8,7 +8,7 @@
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { clipVisible, stripTerminalControls, visibleLength } from "#cli/ui/terminal-text.js";
 import type { LocalTrace, LocalTraceSpan } from "#tracing/local-trace-reader.js";
-import { compareLocalTraceSpans } from "#tracing/local-trace-reader.js";
+import { compareLocalTraceSpans, isAgentTurnSpan } from "#tracing/local-trace-reader.js";
 
 import { formatCompactTokenCount } from "../stream-format.js";
 import type { Theme } from "../theme.js";
@@ -61,7 +61,7 @@ export function buildConversationItems(trace: LocalTrace): ConversationItem[] {
   const byId = new Map(trace.spans.map((span) => [span.spanId, span]));
   const subagents = new Map<string, ConversationSubagent>();
   for (const span of trace.spans) {
-    if (span.name !== "agent.turn") continue;
+    if (!isAgentTurnSpan(span)) continue;
     const turnId = stringAttribute(span, "agent.turn.id");
     const subagent = turnSubagent(span, byId);
     if (turnId !== undefined && subagent !== undefined) subagents.set(turnId, subagent);

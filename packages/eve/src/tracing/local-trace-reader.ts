@@ -216,7 +216,7 @@ export function describeLocalTraceSpan(span: LocalTraceSpan): string[] {
   const model =
     stringSpanAttribute(span, "agent.model.id") ??
     stringSpanAttribute(span, "gen_ai.request.model");
-  if (span.name === "agent.turn" && turnId !== undefined) {
+  if (isAgentTurnSpan(span) && turnId !== undefined) {
     details.push(turnId);
   }
   if (span.name === "agent.step" && stepIndex !== undefined) {
@@ -231,6 +231,14 @@ export function describeLocalTraceSpan(span: LocalTraceSpan): string[] {
     details.push(`model ${model}`);
   }
   return details;
+}
+
+export function isAgentTurnSpan(span: LocalTraceSpan): boolean {
+  return (
+    span.name === "agent.turn" ||
+    (stringSpanAttribute(span, "gen_ai.operation.name") === "invoke_agent" &&
+      stringSpanAttribute(span, "agent.turn.id") !== undefined)
+  );
 }
 
 /** Parses one OTLP/JSON segment file into spans belonging to `expectedTraceId`. */

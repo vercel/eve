@@ -32,6 +32,7 @@ const log = createLogger("tracing.install-instrumentation-runtime");
 export function installInstrumentationRuntime(input: {
   readonly collected: CollectedOtel;
   readonly frameworkVersion: string;
+  readonly instrumentationProviders?: boolean;
   readonly providers: readonly InstrumentationProviderDefinition[];
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly serviceName: string;
@@ -83,6 +84,7 @@ export function installInstrumentationRuntime(input: {
       serialBefore,
     }),
     idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
+    instrumentationProviders: input.instrumentationProviders,
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
     prepareSessionTrace,
     prepareTurnTrace,

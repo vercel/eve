@@ -67,7 +67,7 @@ export function createAgentOtelSessionContext(
             "agent.channel.audience": session.channelAudience,
             "agent.name": session.agentName,
             "agent.session.id": session.sessionId,
-            "agent.trace.schema.version": 2,
+            "agent.trace.schema.version": 3,
           },
           root: true,
         });
@@ -94,7 +94,7 @@ export function createAgentOtelSessionContext(
         "agent.channel.audience": session.channelAudience,
         "agent.name": session.agentName,
         "agent.session.id": session.sessionId,
-        "agent.trace.schema.version": 2,
+        "agent.trace.schema.version": 3,
       },
       root: true,
     });
