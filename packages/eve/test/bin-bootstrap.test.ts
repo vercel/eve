@@ -12,6 +12,7 @@ const bootstrapOptions = {
   ],
   tscCliPath: "/workspace/node_modules/typescript/bin/tsc",
 };
+const vendorCompiledScriptPath = `${bootstrapOptions.packageRoot}/scripts/vendor-compiled.mjs`;
 const workspaceBuildInputPaths = new Set([
   ...bootstrapOptions.postBuildScriptPaths,
   `${bootstrapOptions.packageRoot}/bin`,
@@ -133,8 +134,11 @@ describe("eve CLI bootstrap", () => {
       runCommand,
     });
 
+    expect(runCommand).toHaveBeenNthCalledWith(1, process.execPath, [vendorCompiledScriptPath], {
+      cwd: bootstrapOptions.packageRoot,
+    });
     expect(runCommand).toHaveBeenNthCalledWith(
-      1,
+      2,
       process.execPath,
       [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
       {
@@ -142,7 +146,7 @@ describe("eve CLI bootstrap", () => {
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
-      2,
+      3,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[0]],
       {
@@ -150,7 +154,7 @@ describe("eve CLI bootstrap", () => {
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
-      3,
+      4,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[1]],
       {
@@ -158,7 +162,7 @@ describe("eve CLI bootstrap", () => {
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
-      4,
+      5,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[2]],
       {
@@ -187,8 +191,11 @@ describe("eve CLI bootstrap", () => {
       runCommand,
     });
 
+    expect(runCommand).toHaveBeenNthCalledWith(1, process.execPath, [vendorCompiledScriptPath], {
+      cwd: bootstrapOptions.packageRoot,
+    });
     expect(runCommand).toHaveBeenNthCalledWith(
-      1,
+      2,
       process.execPath,
       [bootstrapOptions.tscCliPath, "-p", "tsconfig.json"],
       {
@@ -196,7 +203,7 @@ describe("eve CLI bootstrap", () => {
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
-      2,
+      3,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[0]],
       {
@@ -204,7 +211,7 @@ describe("eve CLI bootstrap", () => {
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
-      3,
+      4,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[1]],
       {
@@ -212,7 +219,7 @@ describe("eve CLI bootstrap", () => {
       },
     );
     expect(runCommand).toHaveBeenNthCalledWith(
-      4,
+      5,
       process.execPath,
       [bootstrapOptions.postBuildScriptPaths[2]],
       {
