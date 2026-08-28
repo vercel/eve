@@ -60,7 +60,11 @@ interface TestRuntime {
 
 function createRuntime(
   stateStore: AgentTraceStateStore = new InMemoryAgentTraceStateStore(),
-  tracePolicy: TraceCapturePolicy | null = () => true,
+  tracePolicy: TraceCapturePolicy | null = () => ({
+    emit: true,
+    recordInputs: true,
+    recordOutputs: true,
+  }),
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
@@ -116,7 +120,7 @@ async function emitAttempt(input: {
   const scope: InstrumentationAttemptScope = {
     attemptId: `${input.sessionId}:${input.turnId}:0:${input.attemptIndex ?? 0}`,
     attemptIndex: input.attemptIndex ?? 0,
-    channelAudience: input.channelAudience,
+    channelAudience: input.channelAudience ?? "public",
     functionId: "weather",
     sessionId: input.sessionId,
     stepIndex: 0,
@@ -298,7 +302,7 @@ async function publishTurnStarted(input: {
   const rootSessionId = input.rootSessionId ?? input.sessionId;
   await input.hooks.publish({
     agentName: "weather",
-    channelAudience: input.channelAudience,
+    channelAudience: input.channelAudience ?? "public",
     channelKind: "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
     parentTraceContext: input.parentTraceContext,
@@ -378,7 +382,11 @@ describe("createAgentOtelInstrumentation", () => {
     const spans = runtime.exporter.getFinishedSpans();
     const session = byName(spans, "agent.session")[0]!;
     const turn = byName(spans, "agent.turn")[0]!;
-    expect(session.spanContext()).toMatchObject(turnTrace);
+    expect(session.spanContext()).toMatchObject({
+      spanId: turnTrace.spanId,
+      traceFlags: turnTrace.traceFlags,
+      traceId: turnTrace.traceId,
+    });
     expect(turn.spanContext().traceId).toBe(turnTrace.traceId);
     expect(turn.parentSpanContext?.spanId).toBe(turnTrace.spanId);
   });
@@ -574,6 +582,7 @@ describe("createAgentOtelInstrumentation", () => {
     const started = {
       agentName: "support",
       delivery: {
+        channelAudience: "public" as const,
         channelKind: "channel:slack",
         channelName: "slack",
         deliveryId: "delivery-1",
@@ -601,6 +610,7 @@ describe("createAgentOtelInstrumentation", () => {
     await contextStorage.run(ctx, async () => {
       await runtime.hooks.publish({
         agentName: "support",
+        channelAudience: "public",
         channelKind: "channel:slack",
         idempotencyKey: sessionIdempotencyKey("session-1"),
         rootSessionId: "session-1",
@@ -977,6 +987,7 @@ describe("createAgentOtelInstrumentation", () => {
     const scope: InstrumentationAttemptScope = {
       attemptId: "session-1:turn-1:0:0",
       attemptIndex: 0,
+      channelAudience: "public",
       sessionId: "session-1",
       stepIndex: 0,
       turnId: "turn-1",
@@ -1397,6 +1408,37 @@ describe("createAgentOtelInstrumentation", () => {
     expect(action.attributes["gen_ai.tool.call.result"]).toContain("temperature");
   });
 
+  it("applies trace content policy only to OTel spans", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), () => ({
+      emit: true,
+      recordInputs: false,
+      recordOutputs: false,
+    }));
+    await emitAttempt({
+      channelAudience: "public",
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-redacted",
+      turnId: "turn-redacted",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.input.messages",
+    );
+    expect(byName(spans, "chat claude-test")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.output.messages",
+    );
+    expect(byName(spans, "ai.toolCall")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.tool.call.arguments",
+    );
+    expect(byName(spans, "ai.toolCall")[0]?.attributes).not.toHaveProperty(
+      "gen_ai.tool.call.result",
+    );
+  });
+
   it("caps full model input while keeping valid message JSON", async () => {
     const runtime = createRuntime();
     const manyMessages = Array.from({ length: 200 }, (_, index) => ({
@@ -1413,6 +1455,7 @@ describe("createAgentOtelInstrumentation", () => {
     };
     await runtime.hooks.publish({
       agentName: "weather",
+      channelAudience: "public",
       channelKind: "http",
       idempotencyKey: sessionIdempotencyKey("session-1"),
       rootSessionId: "session-1",

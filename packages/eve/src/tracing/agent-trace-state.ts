@@ -7,12 +7,14 @@ import type {
   InstrumentationTurnSettledEvent,
 } from "#harness/instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
 export interface AgentSessionTraceState {
   readonly channelAudience?: ChannelAudience;
   readonly agentName?: string;
   readonly channelKind?: string;
   readonly context: SpanContext;
+  readonly decision?: InstrumentationDecision;
   readonly rootSessionId: string;
 }
 

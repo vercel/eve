@@ -12,7 +12,7 @@ import {
 import type { HarnessEmissionState } from "#harness/emission.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeContextResolver } from "#tracing/otel-declaration.js";
-import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import {
   normalizeInstrumentationChannelKind,
   resolveInstrumentationProjection,

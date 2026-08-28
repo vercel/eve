@@ -40,7 +40,7 @@ import {
   ScheduleIdKey,
   type SessionTraceSeed,
 } from "#context/keys.js";
-import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";

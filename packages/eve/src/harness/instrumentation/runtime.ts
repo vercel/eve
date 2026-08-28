@@ -2,7 +2,7 @@ import type {
   InstrumentationContextRunner,
   InstrumentationHooks,
   InstrumentationSessionStartedEvent,
-  InstrumentationTraceContext,
+  InstrumentationTraceSeed,
   InstrumentationTurnStartedEvent,
 } from "#harness/instrumentation/lifecycle.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -17,10 +17,10 @@ export interface InstrumentationRuntime {
   readonly idGenerator?: AgentSpanIdGenerator;
   readonly prepareSessionTrace?: (
     event: InstrumentationSessionStartedEvent,
-  ) => Promise<InstrumentationTraceContext>;
+  ) => Promise<InstrumentationTraceSeed>;
   readonly prepareTurnTrace?: (
     event: InstrumentationTurnStartedEvent,
-  ) => Promise<InstrumentationTraceContext>;
+  ) => Promise<InstrumentationTraceSeed>;
   otelSettings: OtelHarnessSettings | undefined;
   readonly runtimeContextResolvers?: readonly RuntimeContextResolver[];
   readonly runInContext: InstrumentationContextRunner;

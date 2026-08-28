@@ -2,6 +2,8 @@ import { OpenTelemetry } from "#compiled/@ai-sdk/otel/index.js";
 import { registerTelemetry, type Telemetry } from "ai";
 
 let registered = false;
+let eveOtelIntegration: Telemetry | undefined;
+let errorSafeEveOtelIntegration: Telemetry | undefined;
 
 /**
  * Registers the AI SDK OpenTelemetry integration once so that model
@@ -16,7 +18,9 @@ export function ensureOtelIntegration(): void {
     return;
   }
   registered = true;
-  registerTelemetry(new OpenTelemetry({ runtimeContext: true }));
+  eveOtelIntegration = new OpenTelemetry({ runtimeContext: true });
+  errorSafeEveOtelIntegration = telemetryWithoutErrorContent(eveOtelIntegration);
+  registerTelemetry(eveOtelIntegration);
 }
 
 /**
@@ -27,6 +31,42 @@ export function ensureOtelIntegration(): void {
  * adding to them, so anything that passes integrations per call has to carry
  * these forward or they stop receiving events.
  */
-export function getRegisteredTelemetryIntegrations(): readonly Telemetry[] {
-  return globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
+export function getRegisteredTelemetryIntegrations(options?: {
+  readonly sanitizeEveOtelErrors?: boolean;
+}): readonly Telemetry[] {
+  const integrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
+  return options?.sanitizeEveOtelErrors === true
+    ? integrations.map((integration) =>
+        integration === eveOtelIntegration && errorSafeEveOtelIntegration !== undefined
+          ? errorSafeEveOtelIntegration
+          : integration,
+      )
+    : integrations;
+}
+
+/** @internal */
+export function telemetryWithoutErrorContent(integration: Telemetry): Telemetry {
+  const genericError = (): Error => new Error("AI SDK operation failed");
+  return new Proxy(integration, {
+    get(target, property) {
+      if (property === "onError" && target.onError !== undefined) {
+        return (event: unknown) =>
+          target.onError!(
+            typeof event === "object" && event !== null
+              ? { ...event, error: genericError() }
+              : genericError(),
+          );
+      }
+      if (property === "onToolExecutionEnd" && target.onToolExecutionEnd !== undefined) {
+        return (event: Parameters<NonNullable<Telemetry["onToolExecutionEnd"]>>[0]) =>
+          target.onToolExecutionEnd!(
+            event.toolOutput.type === "tool-error"
+              ? { ...event, toolOutput: { ...event.toolOutput, error: genericError() } }
+              : event,
+          );
+      }
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }

@@ -43,8 +43,6 @@ export function createAgentApprovalInstrumentation(input: {
   ) => Promise<AgentActionContext | undefined>;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
-  readonly recordInputs: boolean;
-  readonly recordOutputs: boolean;
   readonly tracer: Tracer;
 }): Pick<
   NonNullable<InstrumentationProviderDefinition["events"]>,
@@ -78,9 +76,7 @@ export function createAgentApprovalInstrumentation(input: {
       stepIndex: event.scope.stepIndex,
       turnId: event.scope.turnId,
     };
-    const requestAttribute = input.recordInputs
-      ? contentAttribute(event.request, false)
-      : undefined;
+    const requestAttribute = contentAttribute(event.request, false);
     if (requestAttribute !== undefined) state["requestAttribute"] = requestAttribute;
     ctx.state.set(state);
   };
@@ -118,7 +114,7 @@ export function createAgentApprovalInstrumentation(input: {
     if (state.requestAttribute !== undefined) {
       span.setAttribute("agent.approval.request", state.requestAttribute);
     }
-    if (input.recordOutputs && event.response !== undefined) {
+    if (event.response !== undefined) {
       const response = contentAttribute(event.response, false);
       if (response !== undefined) span.setAttribute("agent.approval.response", response);
     }

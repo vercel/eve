@@ -84,7 +84,7 @@ describe("channel delivery instrumentation", () => {
     expect(metadata[0]).toMatchObject({ input: undefined });
   });
 
-  it("keeps a private delivery redacted inside a content-enabled session", async () => {
+  it("keeps provider content independent from the OTel audience ceiling", async () => {
     const events: InstrumentationEvent[] = [];
     const hooks = createInstrumentationHooks([
       {
@@ -132,6 +132,6 @@ describe("channel delivery instrumentation", () => {
       }),
     );
 
-    expect(events[0]).toMatchObject({ input: undefined });
+    expect(events[0]).toMatchObject({ input: { message: "secret" } });
   });
 });
