@@ -40,11 +40,11 @@ export function createInstrumentationDispatcher(
 ): InstrumentationHooks {
   const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
   const groups = normalizeDispatchGroups(input);
-  const snapshots = new WeakMap<object, unknown>();
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
   const forTrace = (trace: TraceCaptureContext): InstrumentationHooks => {
+    const snapshots = new WeakMap<object, unknown>();
     const decisions = new Map(
       providers.map((provider) => [
         provider,
@@ -78,6 +78,7 @@ export function createInstrumentationDispatcher(
           recordOutputs: capturesOutputs,
         }),
         snapshots,
+        event,
       );
       const cleanupSession =
         snapshot.type === "session.completed" || snapshot.type === "session.failed";
@@ -161,12 +162,19 @@ export function createInstrumentationDispatcher(
   };
 
   let unboundHooks: InstrumentationHooks | undefined;
+  let loggedUnboundPublish = false;
   return {
     capturesContent: providers.some(
       (provider) => provider.tracePolicy === undefined && provider.capture === "content",
     ),
     forTrace,
     async publish(event) {
+      if (!loggedUnboundPublish) {
+        loggedUnboundPublish = true;
+        log.debug("instrumentation event published without trace binding", {
+          eventType: event.type,
+        });
+      }
       unboundHooks ??= forTrace({ audience: "unknown" });
       await unboundHooks.publish(event);
     },
@@ -176,8 +184,13 @@ export function createInstrumentationDispatcher(
 function snapshotInstrumentationEvent(
   event: InstrumentationEvent,
   snapshots: WeakMap<object, unknown>,
+  source: InstrumentationEvent,
 ): InstrumentationEvent {
-  return snapshotPlainValue(event, snapshots) as InstrumentationEvent;
+  const existing = snapshots.get(source);
+  if (existing !== undefined) return existing as InstrumentationEvent;
+  const snapshot = snapshotPlainValue(event, snapshots) as InstrumentationEvent;
+  snapshots.set(source, snapshot);
+  return snapshot;
 }
 
 function snapshotPlainValue(value: unknown, seen: WeakMap<object, unknown>): unknown {
