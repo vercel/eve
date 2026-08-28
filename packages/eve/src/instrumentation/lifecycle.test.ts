@@ -23,9 +23,9 @@ import {
   rememberInstrumentationActionScope,
 } from "#instrumentation/state.js";
 
-const { logWarn } = vi.hoisted(() => ({ logWarn: vi.fn() }));
+const { logDebug, logWarn } = vi.hoisted(() => ({ logDebug: vi.fn(), logWarn: vi.fn() }));
 vi.mock("#internal/logging.js", () => ({
-  createLogger: () => ({ warn: logWarn }),
+  createLogger: () => ({ debug: logDebug, warn: logWarn }),
   formatError: (error: unknown) => error,
 }));
 
