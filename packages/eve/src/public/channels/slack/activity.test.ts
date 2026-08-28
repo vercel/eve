@@ -6,7 +6,7 @@ import { createActivitySnapshot, reduceActivityBatch } from "#execution/session-
 import {
   buildSlackActivityRenderers,
   selectSlackActivityStatus,
-  slackActivityStatus,
+  experimental_slackActivityStatus,
 } from "#public/channels/slack/activity.js";
 import { slackChannel } from "#public/channels/slack/slackChannel.js";
 
@@ -39,7 +39,7 @@ describe("Slack status activity", () => {
   });
 
   it("installs renderer configuration with a narrow destination", () => {
-    const channel = slackChannel({ activity: { renderers: [slackActivityStatus()] } });
+    const channel = slackChannel({ activity: { renderers: [experimental_slackActivityStatus()] } });
     expect(isCompiledChannel(channel)).toBe(true);
     if (!isCompiledChannel(channel)) return;
     const presentation = getChannelActivityPresentation(channel.adapter);
@@ -51,7 +51,11 @@ describe("Slack status activity", () => {
 
   it("rejects duplicate renderer configuration", () => {
     expect(() =>
-      slackChannel({ activity: { renderers: [slackActivityStatus(), slackActivityStatus()] } }),
+      slackChannel({
+        activity: {
+          renderers: [experimental_slackActivityStatus(), experimental_slackActivityStatus()],
+        },
+      }),
     ).toThrow("Duplicate Slack activity renderer");
   });
 
@@ -157,7 +161,7 @@ describe("Slack status activity", () => {
     );
     const renderer = buildSlackActivityRenderers({
       botToken: tokenContext,
-      renderers: [slackActivityStatus()],
+      renderers: [experimental_slackActivityStatus()],
     })[0]!;
 
     await renderer.render({
@@ -177,7 +181,7 @@ describe("Slack status activity", () => {
     vi.stubGlobal("fetch", fetchMock);
     const renderer = buildSlackActivityRenderers({
       botToken: undefined,
-      renderers: [slackActivityStatus()],
+      renderers: [experimental_slackActivityStatus()],
     })[0]!;
     const active = snapshot([
       { eventId: "root", kind: "work.started", startedAt: "2026-01-01T00:00:00Z", work: root },
@@ -203,7 +207,7 @@ describe("Slack status activity", () => {
     vi.stubGlobal("fetch", fetchMock);
     const renderer = buildSlackActivityRenderers({
       botToken: undefined,
-      renderers: [slackActivityStatus()],
+      renderers: [experimental_slackActivityStatus()],
     })[0]!;
     await renderer.dispose?.({
       destination: { channelId: "C1", threadTs: "T1" },

@@ -21,7 +21,7 @@ interface SlackActivityStatusState {
 }
 
 /** Creates the compact Slack assistant-thread activity renderer. */
-export function slackActivityStatus(): SlackActivityRenderer {
+export function experimental_slackActivityStatus(): SlackActivityRenderer {
   return { [SLACK_ACTIVITY_RENDERER]: true, id: SLACK_ACTIVITY_STATUS_RENDERER_ID };
 }
 
