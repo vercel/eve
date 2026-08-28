@@ -403,14 +403,13 @@ describe("applyCodeModeTool", () => {
     );
   });
 
-  it("uses bounded execution with fetch disabled", () => {
+  it("uses bounded execution", () => {
     expect(CODE_MODE_RUNTIME_OPTIONS).toEqual({
       executionPolicy: {
         maxBridgeRequests: 64,
         maxInFlightBridgeRequests: 8,
         timeoutMs: 300_000,
       },
-      fetchPolicy: false,
     });
   });
 });

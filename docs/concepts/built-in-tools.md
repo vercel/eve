@@ -166,7 +166,7 @@ Code-mode programs are foreground work owned by the current turn. Background and
 
 ### Execution
 
-`code_mode` is an ordinary synchronous AI SDK tool. Its executor creates a fresh QuickJS context, runs the complete program, waits for every nested host-tool call, and returns the program's JSON value before the model continues.
+`code_mode` is an ordinary synchronous AI SDK tool. First-party `@ai-sdk/code-mode` executes each program through its Run-backed isolated QuickJS runtime. Eve waits for every started nested host-tool call and returns the program's JSON value before the model continues.
 
 Code mode follows the same retry semantics as other synchronous tools. If the enclosing Eve step is replayed, the program may run again. Tools with non-idempotent effects should use their normal idempotency and external-state checks; code mode does not add an exactly-once boundary.
 

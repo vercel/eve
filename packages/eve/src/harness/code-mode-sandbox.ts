@@ -189,38 +189,48 @@ function wrapHostToolForCodeMode(input: {
   return {
     ...input.tool,
     execute: async (toolInput: never, options: ToolExecutionOptions<never>) => {
-      await emitNestedToolRequested(input, options.toolCallId, toolInput);
-      const invoke = () => resolveExecuteOutput(execute(toolInput, options));
-      let output: unknown;
-      try {
-        output =
-          input.context === undefined
-            ? await invoke()
-            : await contextStorage.run(input.context, invoke);
-        if (isAuthorizationPendingModelOutput(output)) {
-          throw await codeModeToolError(
-            `Code-mode tool "${input.name}" requires authorization and must be called directly.`,
-          );
-        }
-        output = await validateHostToolOutput(input.name, input.tool, output);
-      } catch (error) {
-        await emitNestedToolResult(
-          input,
-          options.toolCallId,
-          {
-            error:
-              error instanceof OutputValidationError
-                ? "Nested tool output failed schema validation."
-                : "Nested tool execution failed.",
-          },
-          true,
-        );
-        throw error;
-      }
-      await emitNestedToolResult(input, options.toolCallId, normalizeJsonValue(output), false);
-      return output;
+      const execution = executeCodeModeHostTool(input, execute, toolInput, options);
+      return await execution;
     },
   } as ToolSet[string];
+}
+
+async function executeCodeModeHostTool(
+  input: Parameters<typeof wrapHostToolForCodeMode>[0],
+  execute: NonNullable<ToolSet[string]["execute"]>,
+  toolInput: never,
+  options: ToolExecutionOptions<never>,
+): Promise<unknown> {
+  await emitNestedToolRequested(input, options.toolCallId, toolInput);
+  const invoke = () => resolveExecuteOutput(execute(toolInput, options));
+  let output: unknown;
+  try {
+    output =
+      input.context === undefined
+        ? await invoke()
+        : await contextStorage.run(input.context, invoke);
+    if (isAuthorizationPendingModelOutput(output)) {
+      throw await codeModeToolError(
+        `Code-mode tool "${input.name}" requires authorization and must be called directly.`,
+      );
+    }
+    output = await validateHostToolOutput(input.name, input.tool, output);
+  } catch (error) {
+    await emitNestedToolResult(
+      input,
+      options.toolCallId,
+      {
+        error:
+          error instanceof OutputValidationError
+            ? "Nested tool output failed schema validation."
+            : "Nested tool execution failed.",
+      },
+      true,
+    );
+    throw error;
+  }
+  await emitNestedToolResult(input, options.toolCallId, normalizeJsonValue(output), false);
+  return output;
 }
 
 async function validateHostToolOutput(

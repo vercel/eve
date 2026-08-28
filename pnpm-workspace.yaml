@@ -25,6 +25,7 @@ ignoredOptionalDependencies:
   - node-liblzma
 
 catalog:
+  "@ai-sdk/code-mode": "1.0.23"
   "@ai-sdk/anthropic": "^4.0.36"
   "@ai-sdk/google": "^4.0.39"
   "@ai-sdk/mcp": "^2.0.29"
@@ -44,7 +45,7 @@ catalog:
   "@vercel/sandbox-delete": "npm:@vercel/sandbox@3.2.0"
   "@vercel/sandbox-drives": "npm:@vercel/sandbox@2.10.0-beta.0"
   "@workflow/world-postgres": "5.0.0-beta.35"
-  ai: "^7.0.58"
+  ai: "^7.0.66"
   better-auth: "1.6.26"
   marked: "17.0.6"
   next: "16.3.0-preview.6"
@@ -70,6 +71,3 @@ minimumReleaseAgeExclude:
   - "@workflow/*"
   - nitro
   - workflow
-
-patchedDependencies:
-  experimental-ai-sdk-code-mode@1.0.16: patches/experimental-ai-sdk-code-mode@1.0.16.patch

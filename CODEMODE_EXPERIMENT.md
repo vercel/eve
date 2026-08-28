@@ -49,6 +49,7 @@ return await tools[key](input);
 
 ## Runtime boundary
 
+- First-party `@ai-sdk/code-mode` executes through its bundled Run runtime.
 - 64 total bridge requests per program.
 - 8 simultaneous bridge requests.
 - 300-second outer timeout.

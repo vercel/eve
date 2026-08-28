@@ -5,6 +5,7 @@
  */
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
+import codeMode from "./@ai-sdk/code-mode.mjs";
 import google from "./@ai-sdk/google.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
 import openai from "./@ai-sdk/openai.mjs";
@@ -39,7 +40,6 @@ import workflowWorldVercel from "./@workflow/world-vercel.mjs";
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
-import experimentalAiSdkCodeMode from "./experimental-ai-sdk-code-mode.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
 import grayMatter from "./gray-matter.mjs";
@@ -57,13 +57,13 @@ import zodValidationError from "./zod-validation-error.mjs";
 export const MODULES = [
   acpSdk,
   anthropic,
+  codeMode,
   chat,
   chatAdapterSlack,
   chatAdapterStateMemory,
   chatAdapterTwilio,
   chokidar,
   commander,
-  experimentalAiSdkCodeMode,
   eventsourceParserStream,
   envRunner,
   google,
