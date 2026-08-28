@@ -5,6 +5,9 @@ packages:
   - packages/*
 
 allowBuilds:
+  "@datadog/native-appsec": false # The reporter does not use AppSec native bindings.
+  "@datadog/native-iast-taint-tracking": false # The reporter does not use IAST native bindings.
+  "@datadog/native-metrics": false # The reporter does not use native runtime metrics.
   "@google/genai": false # No-op preinstall.
   "@parcel/watcher": false # Builds from source only when explicitly requested.
   braintrust: false # Installs an optional CLI binary; the SDK does not need it.

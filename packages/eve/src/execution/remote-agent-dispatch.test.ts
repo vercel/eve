@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { EvalExecutionIdentityKey } from "#context/keys.js";
 import {
   cancelRemoteAgentTurn,
   continueRemoteAgentSession,
@@ -213,34 +215,41 @@ describe("startRemoteAgentSession", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    const childSessionId = await startRemoteAgentSession({
-      action: createAction(),
-      callbackBaseUrl: "https://caller.example.com",
-      parentTraceContext: {
-        spanId: "2".repeat(16),
-        traceFlags: 1,
-        traceId: "1".repeat(32),
-      },
-      remote: {
-        ...createRemoteAgent(),
-        headers: { Traceparent: "00-authored", "x-static": "yes" },
-      },
-      session: {
-        agent: {
-          modelReference: { id: "mock/test" },
-          system: "",
-          tools: [],
-        },
-        compaction: {
-          recentWindowSize: 10,
-          threshold: 100000,
-        },
-        continuationToken: "eve:parent-token",
-        history: [],
-        sessionId: "parent-session",
-        state: {},
-      },
+    const ctx = new ContextContainer();
+    ctx.set(EvalExecutionIdentityKey, {
+      evalId: "case-1",
+      runId: "eval-run-1",
     });
+    const childSessionId = await contextStorage.run(ctx, () =>
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        parentTraceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+        remote: {
+          ...createRemoteAgent(),
+          headers: { Traceparent: "00-authored", "x-static": "yes" },
+        },
+        session: {
+          agent: {
+            modelReference: { id: "mock/test" },
+            system: "",
+            tools: [],
+          },
+          compaction: {
+            recentWindowSize: 10,
+            threshold: 100000,
+          },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+      }),
+    );
 
     expect(childSessionId).toEqual({ sessionId: "remote-session" });
     expect(fetchMock).toHaveBeenCalledWith("https://remote.example.com/eve/v1/session", {
@@ -249,6 +258,8 @@ describe("startRemoteAgentSession", () => {
         authorization: "Bearer remote-token",
         "content-type": "application/json",
         traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        "x-eve-eval-id": "case-1",
+        "x-eve-eval-run-id": "eval-run-1",
         "x-static": "yes",
       },
       method: "POST",

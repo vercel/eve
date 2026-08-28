@@ -29,13 +29,18 @@ describe("eval artifacts", () => {
       },
     ];
     expect(writtenJson("/tmp/eve-evals/summary.json")).toMatchObject({
-      evals: [{ traceContexts: expected }],
+      evals: [{ caseId: "case-1", traceContexts: expected }],
+      runId: "run-1",
     });
     expect(writtenJson("/tmp/eve-evals/results.jsonl")).toMatchObject({
+      caseId: "case-1",
+      runId: "run-1",
       traceContexts: expected,
     });
     expect(writtenJson("/tmp/eve-evals/evals/quality/source.json")).toMatchObject({
+      caseId: "case-1",
       result: { traceContexts: expected },
+      runId: "run-1",
     });
   });
 
@@ -99,7 +104,9 @@ function writtenJson(path: string): Record<string, unknown> {
 
 function skippedSummary(): EveEvalRunSummary {
   const result: EveEvalResult = {
+    caseId: "case-1",
     id: "runtime/skipped",
+    runId: "run-1",
     assertions: [],
     result: {
       derived: createEmptyDerivedFacts(),
@@ -115,6 +122,7 @@ function skippedSummary(): EveEvalRunSummary {
     completedAt: "2026-01-01T00:00:01.000Z",
   };
   return {
+    runId: "run-1",
     target: { capabilities: { devRoutes: true }, kind: "local", url: "http://localhost:3000" },
     results: [result],
     startedAt: result.startedAt,
@@ -129,7 +137,9 @@ function skippedSummary(): EveEvalRunSummary {
 
 function judgedSummary(): EveEvalRunSummary {
   const result: EveEvalResult = {
+    caseId: "case-1",
     id: "quality/source",
+    runId: "run-1",
     assertions: [
       {
         name: "judge.autoevals.closedQA",
@@ -166,6 +176,7 @@ function judgedSummary(): EveEvalRunSummary {
     completedAt: "2026-01-01T00:00:01.000Z",
   };
   return {
+    runId: "run-1",
     target: { capabilities: { devRoutes: true }, kind: "local", url: "http://localhost:3000" },
     results: [result],
     startedAt: result.startedAt,

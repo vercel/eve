@@ -20,6 +20,7 @@ export async function prepareTurnTraceContext(input: {
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sequence: number;
   readonly sessionId: string;
   readonly sessionStarted: boolean;
@@ -38,6 +39,7 @@ export async function prepareTurnTraceContext(input: {
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,
+        runtimeContext: input.runtimeContext,
         sessionId: input.sessionId,
         traceSeed: input.traceSeed,
         type: "session.started",
@@ -54,6 +56,7 @@ export async function prepareTurnTraceContext(input: {
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,
+        runtimeContext: input.runtimeContext,
         sequence: input.sequence,
         sessionId: input.sessionId,
         turnId: input.turnId,

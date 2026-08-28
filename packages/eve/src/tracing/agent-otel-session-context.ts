@@ -12,6 +12,10 @@ import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { evaluateTracePolicy, isSampledTrace } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import {
+  buildEvalCorrelationContext,
+  evalCorrelationSpanAttributes,
+} from "#harness/instrumentation/eval-correlation.js";
 
 interface AgentOtelSessionContextInput {
   readonly frameworkVersion: string;
@@ -41,6 +45,7 @@ export function createAgentOtelSessionContext(
     readonly channelAudience: ChannelAudience;
     readonly channelType?: string;
     readonly rootSessionId: string;
+    readonly runtimeContext?: Readonly<Record<string, unknown>>;
     readonly sessionId: string;
     readonly traceSeed?: InstrumentationTraceContext;
   }): SpanContext => {
@@ -62,6 +67,7 @@ export function createAgentOtelSessionContext(
             "agent.name": session.agentName,
             "agent.session.id": session.sessionId,
             "agent.trace.schema.version": 2,
+            ...evalCorrelationSpanAttributes(session.runtimeContext),
           },
           root: true,
         });
@@ -95,6 +101,7 @@ export function createAgentOtelSessionContext(
         "agent.name": session.agentName,
         "agent.session.id": session.sessionId,
         "agent.trace.schema.version": 2,
+        ...evalCorrelationSpanAttributes(session.runtimeContext),
       },
       root: true,
     });
@@ -108,6 +115,7 @@ export function createAgentOtelSessionContext(
   ): Promise<AgentSessionTraceState> => {
     let state = await input.stateStore.getSession(event.sessionId);
     if (state === undefined) {
+      const runtimeContext = event.runtimeContext ?? buildEvalCorrelationContext(event.sessionId);
       state = {
         agentName: event.agentName,
         channelAudience: normalizeChannelAudience(event.channelAudience),
@@ -119,11 +127,13 @@ export function createAgentOtelSessionContext(
                 channelAudience: normalizeChannelAudience(event.channelAudience),
                 channelType: event.channelType,
                 rootSessionId: event.rootSessionId,
+                runtimeContext,
                 sessionId: event.sessionId,
                 traceSeed: event.traceSeed,
               })
             : adoptedSpanContext(event.parentTraceContext),
         rootSessionId: event.rootSessionId,
+        runtimeContext,
       };
       await input.stateStore.setSession(event.sessionId, state);
     }
@@ -155,6 +165,7 @@ export function createAgentOtelSessionContext(
       idempotencyKey: sessionIdempotencyKey(event.sessionId),
       parentTraceContext: event.parentTraceContext,
       rootSessionId: event.rootSessionId,
+      runtimeContext: event.runtimeContext,
       sessionId: event.sessionId,
       type: "session.started",
     });
@@ -172,6 +183,7 @@ export function createAgentOtelSessionContext(
       parentIsRemote: session.context.isRemote,
       parentSpanId: session.context.spanId,
       rootSessionId: event.rootSessionId,
+      runtimeContext: event.runtimeContext ?? session.runtimeContext,
       sequence: event.sequence,
       startTimeMs: Date.now(),
       subagentName: event.parentLineage?.subagentName,

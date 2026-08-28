@@ -561,7 +561,11 @@ export type EveEvalVerdict = "passed" | "failed" | "scored" | "skipped";
  * (e.g. `evals/weather.eval.ts` → `"weather"`).
  */
 export interface EveEvalResult {
+  /** Unique identity for this execution of the eval case. */
+  readonly caseId: string;
   readonly id: string;
+  /** Identity of the `eve eval` invocation that produced this result. */
+  readonly runId: string;
   readonly result: EveEvalTaskResult;
   /** Every assertion recorded by the eval's `test(t)`, in record order. */
   readonly assertions: readonly AssertionResult[];
@@ -578,6 +582,8 @@ export interface EveEvalResult {
  * Aggregated outcome of one `eve eval` run across every executed eval.
  */
 export interface EveEvalRunSummary {
+  /** Unique identity generated for this `eve eval` invocation. */
+  readonly runId: string;
   readonly target: EveEvalTarget;
   readonly results: readonly EveEvalResult[];
   readonly startedAt: string;

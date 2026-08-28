@@ -64,6 +64,7 @@ describe("JUnit", () => {
 
 function makeSummary(): EveEvalRunSummary {
   return {
+    runId: "run-1",
     results: [
       makeEvalResult({ id: "runtime/passes", verdict: "passed" }),
       makeEvalResult({
@@ -94,6 +95,7 @@ function makeSummary(): EveEvalRunSummary {
 function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
   return {
     id: "eval-1",
+    runId: "run-1",
     assertions: [
       {
         message: "Successful assertion details",
@@ -116,6 +118,7 @@ function makeEvalResult(overrides: Partial<EveEvalResult> = {}): EveEvalResult {
     startedAt: "2026-01-01T00:00:00.000Z",
     completedAt: "2026-01-01T00:00:01.000Z",
     ...overrides,
+    caseId: overrides.caseId ?? "case-1",
   };
 }
 

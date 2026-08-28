@@ -1,6 +1,6 @@
 ---
 title: "Reporters"
-description: "Ship eval results to Braintrust experiments or JUnit XML. eve runs and scores everything itself."
+description: "Ship eval results to Datadog or Braintrust experiments, or write JUnit XML. eve runs and scores everything itself."
 ---
 
 eve runs and grades everything itself; reporters ship the results out. The CLI prints a console summary by default (one line per eval, with failed assertions and their messages), and reporters from `eve/evals/reporters` add destinations on top.
@@ -38,11 +38,46 @@ export default defineEval({
 });
 ```
 
-The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Repeated names use `#2`, `#3`, and later suffixes; use `.label(name)` to give them meaningful names. Failed assertion details are stored in the Braintrust metadata under `eveFailedAssertions`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`.
+The reporter config takes an optional `projectName` and `experimentName`, plus a base experiment (by name or id) to diff against. Gate assertions log as binary scores under a `gate:` prefix so experiments diff gate regressions the same way they diff soft-score regressions. Repeated names use `#2`, `#3`, and later suffixes; use `.label(name)` to give them meaningful names. Failed assertion details are stored in the Braintrust metadata under `eveFailedAssertions`; correlation identity is stored under `eveEvalRunId`, `eveEvalId`, and `eveEvalName`; observed traces are stored under `eveTraceIds` and `eveTraceContexts`.
 
 A reporter instance observes the evals that reference it. Share one instance across several evals (the config, a `shared.ts` export, or every entry of a dataset array) and their results land in a single experiment. Listing the same config reporter on an eval too does not double-report it.
 
 Braintrust needs its SDK installed in the app and credentials in the environment: install the `braintrust` package (`npm install braintrust`) and set `BRAINTRUST_API_KEY`. Pass `--skip-report` to run the eval without shipping results, which also suppresses config reporters and is useful locally when iterating.
+
+## Datadog
+
+`Datadog(...)` creates one external Datadog experiment for the run, submits one row per eval, and attaches each assertion as an evaluation metric:
+
+```ts title="evals/evals.config.ts"
+import { defineEvalConfig } from "eve/evals";
+import { Datadog } from "eve/evals/reporters";
+
+export default defineEvalConfig({
+  reporters: [
+    Datadog({
+      projectName: "weather-agent",
+      tags: { team: "agents" },
+    }),
+  ],
+});
+```
+
+Install `dd-trace` 6.12 or newer and set both `DD_API_KEY` and `DD_APP_KEY`. `projectName`, `experimentName`, `description`, `dataset`, `experimentConfig`, `metadata`, and `tags` configure the external experiment. Without an existing `dataset.id`, Datadog creates the placeholder dataset required by its external experiment API.
+
+The reporter does not require runtime tracing. Every experiment row carries `eve.eval.run_id`, the generated case-execution id under `eve.eval.id`, the path-derived case name under `eve.eval.name`, and, when a session started, `eve.session.id`. If the target emits traces, eve also puts the run, case, and session identifiers on its runtime spans, propagates them through follow-up turns and subagents, and records the observed trace contexts using the same `eveTraceIds` and `eveTraceContexts` metadata convention as the Braintrust reporter.
+
+For example, an agent can export its runtime spans through OpenTelemetry independently of the reporter:
+
+```ts title="agent/instrumentation.ts"
+import { registerOTel } from "@vercel/otel";
+import { defineInstrumentation } from "eve/instrumentation";
+
+export default defineInstrumentation({
+  setup: ({ agentName }) => registerOTel({ serviceName: agentName }),
+});
+```
+
+Datadog's current external experiment API still creates a new span identity in `submitSpan()`. The shared eve identifiers and captured trace contexts make the experiment row and runtime trace queryable together, but the row is not yet the existing runtime span. A native Datadog association requires an API that accepts the runtime `traceId` and `spanId` when starting or attaching an experiment case.
 
 ## JUnit
 
@@ -60,7 +95,11 @@ A reporter implements the `EvalReporter` interface from `eve/evals/reporters` an
 
 ```ts
 interface EvalReporter {
-  onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): void | Promise<void>;
+  onRunStart(
+    evaluations: readonly EveEval[],
+    target: EveEvalTarget,
+    context?: EveEvalRunStartContext,
+  ): void | Promise<void>;
   onEvalStart?(event: EveEvalStartEvent): void | Promise<void>;
   onSessionStart?(event: EveEvalSessionStartEvent): void | Promise<void>;
   onEvalComplete(result: EveEvalResult, context?: EveEvalCompleteContext): void | Promise<void>;
@@ -68,11 +107,11 @@ interface EvalReporter {
 }
 ```
 
-`onRunStart` fires once before any eval runs, and `onRunComplete` fires once with the aggregated summary. Within that run:
+`onRunStart` fires once before any eval runs and includes the generated `runId`; `onRunComplete` fires once with the aggregated summary and the same id. Within that run:
 
-- `onEvalStart` fires when an eval is scheduled. It includes the eval definition, target, and start time.
+- `onEvalStart` fires when an eval is scheduled. It includes the eval definition, generated `caseId`, run id, target, and start time.
 - `onSessionStart` fires once for each session after eve receives its first trace context. It includes `sessionId`, `primary`, and `traceContext` with `traceId`, `spanId`, and `traceFlags`.
-- `onEvalComplete` fires with the checks, scores, and verdict. The runner also supplies `context`, including every distinct trace context collected across the eval's sessions. The same list is available as `result.result.traceContexts`.
+- `onEvalComplete` fires with the checks, scores, verdict, `caseId`, and run id. The runner also supplies `context`, including every distinct trace context collected across the eval's sessions. The same list is available as `result.result.traceContexts`.
 
 An eval can create several sessions, and a long session can produce several traces, so completion exposes a list instead of a single trace id. `onEvalStart` does not include a trace because the agent session has not started yet. If the target has no tracing configured, `onSessionStart` does not fire and the completed trace list is empty.
 

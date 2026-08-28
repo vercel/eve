@@ -9,7 +9,10 @@ import type {
 
 /** Context delivered when one eval is scheduled for execution. */
 export interface EveEvalStartEvent {
+  /** Unique identity for this execution of the eval case. */
+  readonly caseId: string;
   readonly evaluation: EveEval;
+  readonly runId: string;
   readonly startedAt: string;
   readonly target: EveEvalTarget;
 }
@@ -23,9 +26,17 @@ export interface EveEvalSessionStartEvent extends EveEvalStartEvent {
 
 /** Additional run context delivered with a completed eval result. */
 export interface EveEvalCompleteContext {
+  readonly caseId: string;
   readonly evaluation: EveEval;
+  readonly runId: string;
   readonly target: EveEvalTarget;
   readonly traceContexts: readonly EveEvalTraceContext[];
+}
+
+/** Context delivered when one eval run begins. */
+export interface EveEvalRunStartContext {
+  readonly runId: string;
+  readonly startedAt: string;
 }
 
 /**
@@ -41,7 +52,11 @@ export interface EvalReporter {
    * The runner calls this once before any eval executes, with the evals
    * this reporter observes.
    */
-  onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): void | Promise<void>;
+  onRunStart(
+    evaluations: readonly EveEval[],
+    target: EveEvalTarget,
+    context?: EveEvalRunStartContext,
+  ): void | Promise<void>;
 
   /** The runner calls this when an observed eval is scheduled. */
   onEvalStart?(event: EveEvalStartEvent): void | Promise<void>;

@@ -27,6 +27,9 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
+import { contextStorage } from "#context/container.js";
+import { EvalExecutionIdentityKey } from "#context/keys.js";
+import { withEvalExecutionIdentity } from "#protocol/eval-identity.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -116,7 +119,11 @@ export async function startRemoteAgentSession(input: {
     requestBody.operationId = input.operationId;
   }
 
-  const headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  let headers = await resolveRemoteAgentRequestHeaders(input.remote);
+  const evalIdentity = contextStorage.getStore()?.get(EvalExecutionIdentityKey);
+  if (evalIdentity !== undefined) {
+    headers = { ...withEvalExecutionIdentity(headers, evalIdentity) };
+  }
   const traceparent = formatTraceparent(input.parentTraceContext);
   if (traceparent !== undefined) {
     for (const key of Object.keys(headers)) {

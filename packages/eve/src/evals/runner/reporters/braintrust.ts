@@ -1,6 +1,7 @@
 import type { EveEval, EveEvalResult, EveEvalRunSummary, EveEvalTarget } from "#evals/types.js";
 import { resolveLocalGitMetadata } from "#evals/runner/resolve-git-metadata.js";
 import type { EvalReporter } from "#evals/runner/reporters/types.js";
+import { buildEvalTraceMetadata } from "#evals/runner/reporters/trace-metadata.js";
 
 /**
  * Configuration for the Braintrust reporter. Every field is optional and maps
@@ -148,6 +149,9 @@ class BraintrustReporter implements EvalReporter {
 
     const metadata: Record<string, unknown> = {
       ...evaluation?.metadata,
+      eveEvalId: result.caseId,
+      eveEvalName: result.id,
+      eveEvalRunId: result.runId,
       eveSessionId: result.result.sessionId,
       eveStatus: result.result.status,
       eveVerdict: result.verdict,
@@ -155,14 +159,8 @@ class BraintrustReporter implements EvalReporter {
       eveToolCalls: result.result.derived.toolCalls.map((call) => call.name),
       eveSubagentCalls: result.result.derived.subagentCalls.map((call) => call.name),
       eveParked: result.result.derived.parked,
+      ...buildEvalTraceMetadata(result.result.traceContexts),
     };
-
-    if (result.result.traceContexts.length > 0) {
-      metadata.eveTraceIds = [
-        ...new Set(result.result.traceContexts.map((traceContext) => traceContext.traceId)),
-      ];
-      metadata.eveTraceContexts = result.result.traceContexts;
-    }
 
     if (failedAssertions.length > 0) {
       metadata.eveFailedAssertions = failedAssertions;

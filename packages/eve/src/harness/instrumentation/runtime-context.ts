@@ -26,6 +26,7 @@ import type {
 } from "#public/instrumentation/index.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { parseJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "#shared/json.js";
+import { buildEvalCorrelationContext } from "#harness/instrumentation/eval-correlation.js";
 
 const log = createLogger("harness.instrumentation-runtime-context");
 
@@ -55,7 +56,9 @@ export function buildTelemetryRuntimeContext(
   const hasAuthored = input.authored !== undefined;
   const hasProviderResolvers =
     input.providerResolvers !== undefined && input.providerResolvers.length > 0;
-  if (!hasAuthored && !hasProviderResolvers) {
+  const evalCorrelationContext = buildEvalCorrelationContext(input.session.sessionId);
+  const hasEvalIdentity = evalCorrelationContext["eve.eval.id"] !== undefined;
+  if (!hasAuthored && !hasProviderResolvers && !hasEvalIdentity) {
     return undefined;
   }
 
@@ -67,9 +70,9 @@ export function buildTelemetryRuntimeContext(
   return {
     ...authoredRuntimeContext,
     ...providerRuntimeContext,
+    ...evalCorrelationContext,
     "eve.channel.kind": normalizeInstrumentationChannelKind(projection?.kind),
     "eve.environment": input.environment,
-    "eve.session.id": input.session.sessionId,
     "eve.step.index": String(input.emissionState.stepIndex),
     "eve.turn.id": input.emissionState.turnId,
     "eve.turn.sequence": String(input.emissionState.sequence),

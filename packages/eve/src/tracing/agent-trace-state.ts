@@ -14,6 +14,7 @@ export interface AgentSessionTraceState {
   readonly channelKind?: string;
   readonly context: SpanContext;
   readonly rootSessionId: string;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
 }
 
 export interface AgentTurnTraceState {
@@ -21,6 +22,7 @@ export interface AgentTurnTraceState {
   readonly parentIsRemote?: boolean;
   readonly parentSpanId: string;
   readonly rootSessionId: string;
+  readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sequence: number;
   readonly startTimeMs: number;
   readonly subagentName?: string;

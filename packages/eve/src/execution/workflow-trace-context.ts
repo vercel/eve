@@ -13,6 +13,7 @@ import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeIdentity, RuntimeTraceContext } from "#protocol/message.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { buildEvalCorrelationContext } from "#harness/instrumentation/eval-correlation.js";
 
 /** Prepares native tracing for workflow-owned preambles emitted outside the tool loop. */
 export async function prepareWorkflowPreambleTrace(input: {
@@ -28,6 +29,7 @@ export async function prepareWorkflowPreambleTrace(input: {
     channelAudience: normalizeChannelAudience(channel?.metadata.audience),
     channelType: channel?.channelType,
     instrumentation: getInstrumentationRuntime(),
+    runtimeContext: buildEvalCorrelationContext(input.session.sessionId, input.ctx),
     parentLineage: resolveParentLineage(parent, input.ctx.get(ChannelKey)),
     parentTraceContext: input.ctx.get(ParentTraceContextKey),
     rootSessionId: parent?.rootSessionId ?? input.session.rootSessionId ?? input.session.sessionId,

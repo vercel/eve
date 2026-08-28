@@ -4,6 +4,7 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
+  EvalExecutionIdentityKey,
   type Session,
   type SessionAuthContext,
   SessionIdKey,
@@ -148,6 +149,22 @@ function createMinimalBundle(): Parameters<typeof buildRunContext>[0]["bundle"] 
 }
 
 describe("buildRunContext", () => {
+  it("seeds eval execution identity from the run input", () => {
+    const evalIdentity = { evalId: "case-1", runId: "eval-run-1" };
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "http" },
+        evalIdentity,
+        input: { message: "hi" },
+        mode: "conversation",
+      },
+    });
+
+    expect(ctx.require(EvalExecutionIdentityKey)).toEqual(evalIdentity);
+  });
+
   it("seeds auth from the run input", () => {
     const ctx = buildRunContext({
       bundle: createMinimalBundle(),

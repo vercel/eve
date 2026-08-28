@@ -44,6 +44,7 @@ import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
+import { readEvalExecutionIdentity } from "#protocol/eval-identity.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, GET, HEAD, POST } from "#public/definitions/channel.js";
@@ -196,6 +197,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
             continuationToken: operationToken,
+            evalIdentity: readEvalExecutionIdentity(req.headers),
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: {
               message: body.message,

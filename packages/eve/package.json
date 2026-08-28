@@ -444,6 +444,7 @@
     "chat": "4.34.0",
     "chokidar": "5.0.0",
     "commander": "14.0.3",
+    "dd-trace": "6.12.0",
     "emulate": "0.6.0",
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
@@ -473,6 +474,7 @@
     "@opentelemetry/api": "^1.0.0",
     "ai": "catalog:",
     "braintrust": "^3.0.0",
+    "dd-trace": "^6.12.0",
     "just-bash": "^3.1.0",
     "microsandbox": "^0.5.0"
   },
@@ -481,6 +483,9 @@
       "optional": true
     },
     "braintrust": {
+      "optional": true
+    },
+    "dd-trace": {
       "optional": true
     },
     "just-bash": {

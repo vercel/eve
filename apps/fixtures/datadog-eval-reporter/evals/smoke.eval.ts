@@ -4,7 +4,8 @@ export default defineEval({
   description: "Datadog reporter smoke eval.",
 
   async test(t) {
-    await t.send("Say hello.");
+    const turn = await t.send("Say hello.");
+    turn.messageIncludes("Hello from the Datadog fixture.");
     t.succeeded();
   },
 });

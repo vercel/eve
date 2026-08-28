@@ -51,6 +51,7 @@ export async function writeArtifacts(
 
 function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknown> {
   return {
+    runId: summary.runId,
     target: summary.target,
     startedAt: summary.startedAt,
     completedAt: summary.completedAt,
@@ -61,6 +62,7 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
     errored: summary.errored,
     totalEvals: summary.results.length,
     evals: summary.results.map((result) => ({
+      caseId: result.caseId,
       id: result.id,
       verdict: result.verdict,
       status: result.result.status,
@@ -82,7 +84,9 @@ function buildSummaryArtifact(summary: EveEvalRunSummary): Record<string, unknow
 
 function buildResultLine(result: EveEvalResult): Record<string, unknown> {
   return {
+    caseId: result.caseId,
     id: result.id,
+    runId: result.runId,
     verdict: result.verdict,
     status: result.result.status,
     output: result.result.output,
@@ -95,7 +99,9 @@ function buildResultLine(result: EveEvalResult): Record<string, unknown> {
 
 function buildEvalArtifact(result: EveEvalResult): Record<string, unknown> {
   return {
+    caseId: result.caseId,
     id: result.id,
+    runId: result.runId,
     result: {
       output: result.result.output,
       finalMessage: result.result.finalMessage,
