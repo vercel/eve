@@ -1,11 +1,40 @@
+import { readFile } from "node:fs/promises";
+
 import { describe, expect, it } from "vitest";
 
 import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
+import { DURABLE_WORKFLOW_CONTRACTS } from "#internal/durable-contract-registry.js";
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
 
 describe("applyWorkflowTransform", () => {
+  const stableWorkflowSources = {
+    sessionTimeoutWorkflow: "src/execution/session-timeout-workflow.ts",
+    taskRunWorkflow: "src/execution/tasks/child/workflow.ts",
+    turnWorkflow: "src/execution/turn-workflow.ts",
+    workflowEntry: "src/execution/workflow-entry.ts",
+  } as const satisfies Record<keyof typeof DURABLE_WORKFLOW_CONTRACTS, string>;
+
+  it.each(Object.entries(stableWorkflowSources))(
+    "emits the registered id for %s",
+    async (workflowName, filename) => {
+      const transformed = await applyWorkflowTransform(
+        filename,
+        await readFile(resolvePackageSourceFilePath(filename), "utf8"),
+        "workflow",
+        resolvePackageSourceFilePath(filename),
+        resolvePackageRoot(),
+      );
+
+      expect(transformed.workflowManifest.workflows?.[filename]?.[workflowName]).toEqual({
+        workflowId:
+          DURABLE_WORKFLOW_CONTRACTS[workflowName as keyof typeof DURABLE_WORKFLOW_CONTRACTS]
+            .workflowId,
+      });
+    },
+  );
+
   it("keeps eve workflow references stable when eve is the project root", async () => {
     const filename = "src/execution/turn-workflow.ts";
     const transformed = await applyWorkflowTransform(
