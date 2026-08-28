@@ -102,7 +102,7 @@ describe("instrumentation content policy", () => {
     );
   });
 
-  it("keeps lifecycle delivery when the trace decision drops", async () => {
+  it("does not apply a dropped OTel trace decision to lifecycle content", async () => {
     const publish = vi.fn();
     const hooks: InstrumentationHooks = { capturesContent: true, publish };
     const restricted = instrumentationHooksForDecision(hooks, { action: "drop" }, "private");
@@ -123,7 +123,7 @@ describe("instrumentation content policy", () => {
       type: "action.started",
     });
 
-    expect(restricted).toBeDefined();
-    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ input: undefined }));
+    expect(restricted).toBe(hooks);
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ input: { secret: "value" } }));
   });
 });

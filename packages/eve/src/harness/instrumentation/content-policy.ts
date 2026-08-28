@@ -16,7 +16,7 @@ export function instrumentationHooksForDecision(
   decision: InstrumentationDecision,
   audience: ChannelAudience,
 ): InstrumentationHooks | undefined {
-  if (decision.action === "drop") return instrumentationHooksForAudience(hooks, audience);
+  if (decision.action === "drop") return hooks;
   const effective = applyAudienceCeiling(decision, audience);
   if (
     effective.action === "drop" ||

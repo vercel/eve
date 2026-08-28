@@ -1,7 +1,10 @@
 import type { Telemetry } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getRegisteredTelemetryIntegrations } from "#harness/ai-sdk-telemetry.js";
+import {
+  ensureOtelIntegration,
+  getRegisteredTelemetryIntegrations,
+} from "#harness/ai-sdk-telemetry.js";
 
 describe("getRegisteredTelemetryIntegrations", () => {
   const original = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS;
@@ -21,5 +24,15 @@ describe("getRegisteredTelemetryIntegrations", () => {
     globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [first, second];
 
     expect(getRegisteredTelemetryIntegrations()).toEqual([first, second]);
+  });
+
+  it("can exclude only eve's OpenTelemetry integration", () => {
+    const authored: Telemetry = { onStart() {} };
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [];
+    ensureOtelIntegration();
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS.push(authored);
+
+    expect(getRegisteredTelemetryIntegrations()).toHaveLength(2);
+    expect(getRegisteredTelemetryIntegrations({ includeEveOtel: false })).toEqual([authored]);
   });
 });

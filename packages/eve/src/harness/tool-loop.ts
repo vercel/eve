@@ -346,7 +346,8 @@ function enrichTelemetry(
   runtimeContext?: Readonly<Record<string, unknown>>,
   bridgeIntegration?: Telemetry,
 ): TelemetryOptions | undefined {
-  if (decision?.action === "drop") {
+  const dropsTrace = decision?.action === "drop";
+  if (dropsTrace && bridgeIntegration === undefined) {
     return undefined;
   }
   if (settings === undefined && bridgeIntegration === undefined) {
@@ -366,11 +367,16 @@ function enrichTelemetry(
     functionId: settings?.functionId ?? agentName,
     includeRuntimeContext,
     // Passing integrations replaces the registered ones for this call, so the
-    // bridge has to be composed with them rather than handed over on its own.
+    // bridge has to be composed with them unless trace emission was rejected.
+    // In that case eve's OTel integration must be omitted: its spans could
+    // attach to an unrelated active Workflow trace.
     integrations:
       bridgeIntegration === undefined
         ? undefined
-        : [bridgeIntegration, ...getRegisteredTelemetryIntegrations()],
+        : [
+            bridgeIntegration,
+            ...getRegisteredTelemetryIntegrations({ includeEveOtel: !dropsTrace }),
+          ],
     isEnabled: true,
     recordInputs:
       (effectiveDecision?.action === "record"
@@ -1570,9 +1576,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             };
       activeAttemptScope = attemptScope;
       const bridgeIntegration =
-        instrumentationDecision?.action === "drop" ||
-        attemptScope === undefined ||
-        instrumentationHooks === undefined
+        attemptScope === undefined || instrumentationHooks === undefined
           ? undefined
           : createAiSdkHookBridge(
               attemptScope,

@@ -106,7 +106,9 @@ const {
   registeredOtelIntegration,
 } = vi.hoisted(() => ({
   mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
-  mockGetRegisteredTelemetryIntegrations: vi.fn((): unknown[] => []),
+  mockGetRegisteredTelemetryIntegrations: vi.fn(
+    (_options?: { readonly includeEveOtel?: boolean }): unknown[] => [],
+  ),
   registeredAuthorIntegration: { onStart: vi.fn() },
   registeredOtelIntegration: { onStart: vi.fn() },
 }));
@@ -117,7 +119,8 @@ vi.mock("./ai-sdk-hook-bridge.js", () => ({
 
 vi.mock("./ai-sdk-telemetry.js", () => ({
   ensureOtelIntegration: vi.fn(),
-  getRegisteredTelemetryIntegrations: () => mockGetRegisteredTelemetryIntegrations(),
+  getRegisteredTelemetryIntegrations: (options?: { readonly includeEveOtel?: boolean }) =>
+    mockGetRegisteredTelemetryIntegrations(options),
 }));
 
 const mockGetInstrumentationConfig = vi.fn().mockReturnValue(undefined);
@@ -10938,7 +10941,7 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("telemetry metadata", () => {
-    it("does not enable AI SDK telemetry when the trace policy rejects the trace", async () => {
+    it("excludes eve OTel while keeping authored integrations on a rejected trace", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -10951,18 +10954,38 @@ describe("createToolLoopHarness", () => {
         recordOutputs: true,
         tracePolicy: () => false,
       });
+      mockGetRegisteredTelemetryIntegrations.mockImplementation(
+        (options?: { readonly includeEveOtel?: boolean }) =>
+          options?.includeEveOtel === false
+            ? [registeredAuthorIntegration]
+            : [registeredOtelIntegration, registeredAuthorIntegration],
+      );
       const runStep = createToolLoopHarness(createTestConfig());
 
       await runStep(createTestSession(), { message: "private" });
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
-        telemetry?: unknown;
+        telemetry?: {
+          integrations?: unknown[];
+          recordInputs?: boolean;
+          recordOutputs?: boolean;
+        };
       };
-      expect(agentCall.telemetry).toBeUndefined();
-      expect(mockCreateAiSdkHookBridge).not.toHaveBeenCalled();
+      expect(agentCall.telemetry).toMatchObject({
+        integrations: [
+          mockCreateAiSdkHookBridge.mock.results[0]!.value,
+          registeredAuthorIntegration,
+        ],
+        recordInputs: false,
+        recordOutputs: false,
+      });
+      expect(agentCall.telemetry?.integrations).not.toContain(registeredOtelIntegration);
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
+        includeEveOtel: false,
+      });
     });
 
-    it("keeps lifecycle providers active when the trace policy rejects the trace", async () => {
+    it("keeps the content-capable lifecycle bridge active on a rejected trace", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -10973,21 +10996,33 @@ describe("createToolLoopHarness", () => {
       declareTelemetry({ tracePolicy: () => false });
       const attemptCompleted = vi.fn();
       const hooks = createInstrumentationHooks([
-        { events: { "step.attempt.completed": attemptCompleted }, name: "analytics" },
+        {
+          capture: "content",
+          events: { "step.attempt.completed": attemptCompleted },
+          name: "analytics",
+        },
       ]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
           instrumentation: { hooks, runInContext: (_operation, execute) => execute() },
         }),
       );
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:private",
+        metadata: { audience: "private" },
+      });
 
-      await runStep(createTestSession(), { message: "private" });
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
 
       expect(attemptCompleted).toHaveBeenCalledOnce();
+      expect(mockCreateAiSdkHookBridge.mock.calls[0]?.[1]).toBe(hooks);
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
-        telemetry?: unknown;
+        telemetry?: { integrations?: unknown[] };
       };
-      expect(agentCall.telemetry).toBeUndefined();
+      expect(agentCall.telemetry?.integrations).toEqual([
+        mockCreateAiSdkHookBridge.mock.results[0]!.value,
+      ]);
     });
 
     it.each([
@@ -11087,9 +11122,11 @@ describe("createToolLoopHarness", () => {
       await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
-        telemetry?: unknown;
+        telemetry?: { integrations?: unknown[] };
       };
-      expect(agentCall.telemetry).toBeUndefined();
+      expect(agentCall.telemetry?.integrations).toEqual([
+        mockCreateAiSdkHookBridge.mock.results[0]!.value,
+      ]);
       expect(tracePolicy).not.toHaveBeenCalled();
     });
 
@@ -11114,9 +11151,11 @@ describe("createToolLoopHarness", () => {
       await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
-        telemetry?: unknown;
+        telemetry?: { integrations?: unknown[] };
       };
-      expect(agentCall.telemetry).toBeUndefined();
+      expect(agentCall.telemetry?.integrations).toEqual([
+        mockCreateAiSdkHookBridge.mock.results[0]!.value,
+      ]);
       expect(tracePolicy).not.toHaveBeenCalled();
     });
 
