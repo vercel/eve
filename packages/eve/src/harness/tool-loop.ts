@@ -367,23 +367,20 @@ function enrichTelemetry(
     functionId: settings?.functionId ?? agentName,
     includeRuntimeContext,
     // Passing integrations replaces the registered ones for this call, so the
-    // bridge has to be composed with them unless trace emission was rejected.
-    // In that case eve's OTel integration must be omitted: its spans could
-    // attach to an unrelated active Workflow trace.
+    // bridge has to be composed with them rather than handed over on its own.
     integrations:
       bridgeIntegration === undefined
         ? undefined
-        : [
-            bridgeIntegration,
-            ...getRegisteredTelemetryIntegrations({ includeEveOtel: !dropsTrace }),
-          ],
+        : [bridgeIntegration, ...getRegisteredTelemetryIntegrations()],
     isEnabled: true,
     recordInputs:
+      !dropsTrace &&
       (effectiveDecision?.action === "record"
         ? effectiveDecision.recordInputs
         : shouldCaptureInstrumentationContent(channelAudience)) &&
       (settings?.recordInputs ?? false),
     recordOutputs:
+      !dropsTrace &&
       (effectiveDecision?.action === "record"
         ? effectiveDecision.recordOutputs
         : shouldCaptureInstrumentationContent(channelAudience)) &&

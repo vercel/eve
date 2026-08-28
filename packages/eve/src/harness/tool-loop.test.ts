@@ -106,9 +106,7 @@ const {
   registeredOtelIntegration,
 } = vi.hoisted(() => ({
   mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
-  mockGetRegisteredTelemetryIntegrations: vi.fn(
-    (_options?: { readonly includeEveOtel?: boolean }): unknown[] => [],
-  ),
+  mockGetRegisteredTelemetryIntegrations: vi.fn((): unknown[] => []),
   registeredAuthorIntegration: { onStart: vi.fn() },
   registeredOtelIntegration: { onStart: vi.fn() },
 }));
@@ -119,8 +117,7 @@ vi.mock("./ai-sdk-hook-bridge.js", () => ({
 
 vi.mock("./ai-sdk-telemetry.js", () => ({
   ensureOtelIntegration: vi.fn(),
-  getRegisteredTelemetryIntegrations: (options?: { readonly includeEveOtel?: boolean }) =>
-    mockGetRegisteredTelemetryIntegrations(options),
+  getRegisteredTelemetryIntegrations: () => mockGetRegisteredTelemetryIntegrations(),
 }));
 
 const mockGetInstrumentationConfig = vi.fn().mockReturnValue(undefined);
@@ -10941,7 +10938,7 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("telemetry metadata", () => {
-    it("excludes eve OTel while keeping authored integrations on a rejected trace", async () => {
+    it("keeps integrations metadata-only on a rejected trace", async () => {
       setupMockAgent({
         finishReason: "stop",
         response: { messages: [{ content: "Hello!", role: "assistant" }] },
@@ -10954,12 +10951,10 @@ describe("createToolLoopHarness", () => {
         recordOutputs: true,
         tracePolicy: () => false,
       });
-      mockGetRegisteredTelemetryIntegrations.mockImplementation(
-        (options?: { readonly includeEveOtel?: boolean }) =>
-          options?.includeEveOtel === false
-            ? [registeredAuthorIntegration]
-            : [registeredOtelIntegration, registeredAuthorIntegration],
-      );
+      mockGetRegisteredTelemetryIntegrations.mockReturnValue([
+        registeredOtelIntegration,
+        registeredAuthorIntegration,
+      ]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
           instrumentation: {
@@ -10981,15 +10976,13 @@ describe("createToolLoopHarness", () => {
       expect(agentCall.telemetry).toMatchObject({
         integrations: [
           mockCreateAiSdkHookBridge.mock.results[0]!.value,
+          registeredOtelIntegration,
           registeredAuthorIntegration,
         ],
         recordInputs: false,
         recordOutputs: false,
       });
-      expect(agentCall.telemetry?.integrations).not.toContain(registeredOtelIntegration);
-      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
-        includeEveOtel: false,
-      });
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledOnce();
     });
 
     it("keeps the content-capable lifecycle bridge active on a rejected trace", async () => {

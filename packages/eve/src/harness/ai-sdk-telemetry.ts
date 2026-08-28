@@ -2,7 +2,6 @@ import { OpenTelemetry } from "#compiled/@ai-sdk/otel/index.js";
 import { registerTelemetry, type Telemetry } from "ai";
 
 let registered = false;
-let eveOtelIntegration: Telemetry | undefined;
 
 /**
  * Registers the AI SDK OpenTelemetry integration once so that model
@@ -17,8 +16,7 @@ export function ensureOtelIntegration(): void {
     return;
   }
   registered = true;
-  eveOtelIntegration = new OpenTelemetry({ runtimeContext: true });
-  registerTelemetry(eveOtelIntegration);
+  registerTelemetry(new OpenTelemetry({ runtimeContext: true }));
 }
 
 /**
@@ -29,11 +27,6 @@ export function ensureOtelIntegration(): void {
  * adding to them, so anything that passes integrations per call has to carry
  * these forward or they stop receiving events.
  */
-export function getRegisteredTelemetryIntegrations(options?: {
-  readonly includeEveOtel?: boolean;
-}): readonly Telemetry[] {
-  const integrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
-  return options?.includeEveOtel === false
-    ? integrations.filter((integration) => integration !== eveOtelIntegration)
-    : integrations;
+export function getRegisteredTelemetryIntegrations(): readonly Telemetry[] {
+  return globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
 }
