@@ -102,6 +102,7 @@ async function canBuildWorkspaceCli({ exists, packageRoot, postBuildScriptPaths 
       packageRoot,
     }),
     resolve(packageRoot, "src"),
+    vendorCompiledScriptPath({ packageRoot }),
     ...postBuildScriptPaths,
   ]) {
     if (!(await exists(requiredPath))) {
