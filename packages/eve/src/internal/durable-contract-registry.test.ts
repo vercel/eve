@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { DURABLE_SESSION_VERSION } from "#execution/durable-session-store.js";
+import { SESSION_TIMEOUT_WORKFLOW_INPUT_VERSION } from "#execution/durable-session-migrations/session-timeout-workflow.js";
+import { TASK_RUN_WORKFLOW_INPUT_VERSION } from "#execution/durable-session-migrations/task-run-workflow.js";
 import { TURN_WORKFLOW_INPUT_VERSION } from "#execution/durable-session-migrations/turn-workflow.js";
+import { WORKFLOW_ENTRY_INPUT_VERSION } from "#execution/durable-session-migrations/workflow-entry.js";
 import {
   sessionTimeoutWorkflowReference,
   taskRunWorkflowReference,
@@ -41,10 +44,10 @@ describe("durable contract registry", () => {
 
   it("matches the explicit versions owned by existing durable contracts", () => {
     expect(DURABLE_WORKFLOW_CONTRACTS).toMatchObject({
-      sessionTimeoutWorkflow: { inputVersion: null },
-      taskRunWorkflow: { inputVersion: null },
+      sessionTimeoutWorkflow: { inputVersion: SESSION_TIMEOUT_WORKFLOW_INPUT_VERSION },
+      taskRunWorkflow: { inputVersion: TASK_RUN_WORKFLOW_INPUT_VERSION },
       turnWorkflow: { inputVersion: TURN_WORKFLOW_INPUT_VERSION },
-      workflowEntry: { inputVersion: null },
+      workflowEntry: { inputVersion: WORKFLOW_ENTRY_INPUT_VERSION },
     });
     expect(DURABLE_DATA_CONTRACTS).toEqual({
       attachmentRef: {
@@ -112,12 +115,12 @@ describe("durable contract registry", () => {
   "kind": "eve-durable-contracts",
   "workflows": [
     {
-      "inputVersion": null,
+      "inputVersion": 1,
       "name": "sessionTimeoutWorkflow",
       "workflowId": "workflow//eve//sessionTimeoutWorkflow"
     },
     {
-      "inputVersion": null,
+      "inputVersion": 1,
       "name": "taskRunWorkflow",
       "workflowId": "workflow//eve//taskRunWorkflow"
     },
@@ -127,7 +130,7 @@ describe("durable contract registry", () => {
       "workflowId": "workflow//eve//turnWorkflow"
     },
     {
-      "inputVersion": null,
+      "inputVersion": 1,
       "name": "workflowEntry",
       "workflowId": "workflow//eve//workflowEntry"
     }

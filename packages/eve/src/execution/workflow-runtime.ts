@@ -50,7 +50,10 @@ import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
-import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
+import {
+  createWorkflowEntryInput,
+  type WorkflowEntryDispatchInput,
+} from "#execution/durable-session-migrations/workflow-entry.js";
 import { walkCauseChain } from "#shared/errors.js";
 import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
@@ -144,16 +147,17 @@ export function createWorkflowRuntime(config: {
       const serializedContext = serializeContext(ctx);
       const parentLineage = readParentLineage(serializedContext);
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
-      const workflowInput: {
-        -readonly [K in keyof WorkflowEntryInput]: WorkflowEntryInput[K];
+      const workflowDispatchInput: {
+        -readonly [K in keyof WorkflowEntryDispatchInput]: WorkflowEntryDispatchInput[K];
       } = {
         input: input.input,
         limits: input.limits,
         serializedContext,
       };
       if (sessionTimeoutMs !== undefined) {
-        workflowInput.sessionTimeoutMs = sessionTimeoutMs;
+        workflowDispatchInput.sessionTimeoutMs = sessionTimeoutMs;
       }
+      const workflowInput = createWorkflowEntryInput(workflowDispatchInput);
       const sessionAttributes =
         parentLineage.sessionId === undefined
           ? buildSessionAttributes({

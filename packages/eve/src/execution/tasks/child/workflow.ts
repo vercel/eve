@@ -1,6 +1,8 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
+import { migrateTaskRunWorkflowInput } from "#execution/durable-session-migrations/task-run-workflow.js";
+export type { TaskRunWorkflowInput } from "#execution/durable-session-migrations/task-run-workflow.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   appendTaskViewStep,
@@ -25,16 +27,6 @@ import {
   type TaskRunInboundPayload,
   type TaskView,
 } from "#tasks/types.js";
-
-/** Input for one durable task run. */
-export interface TaskRunWorkflowInput {
-  /** Private task inbox token; a routing credential, never model-visible. */
-  readonly taskInboxToken: string;
-  /** The creation view, normally `working`. */
-  readonly initialView: TaskView;
-  /** Parent session delivery token used to wake the task's owning parent. */
-  readonly parentContinuationToken: string;
-}
 
 type TaskRunHookPayload = TaskRunInboundPayload | SubagentAuthorizationEventHookPayload;
 
@@ -66,9 +58,10 @@ function isTaskRunFinished(view: TaskView, dispatchAcknowledged: boolean): boole
  * disposed hook makes any later command fail loudly instead of queueing
  * against a finished task.
  */
-export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void> {
+export async function taskRunWorkflow(value: unknown): Promise<void> {
   "use workflow";
 
+  const input = migrateTaskRunWorkflowInput(value);
   const commands = createHook<TaskRunHookPayload>({ token: input.taskInboxToken });
   // The iterator shares the hook's durable cursor; create it before
   // claiming so conflict replay is consumed by getConflict(), not a

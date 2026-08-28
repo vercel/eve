@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { ChannelRequestIdKey } from "#context/keys.js";
+import { WORKFLOW_ENTRY_INPUT_VERSION } from "#execution/durable-session-migrations/workflow-entry.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
@@ -358,6 +359,7 @@ describe("createWorkflowRuntime#createSession", () => {
             "eve.mode": "task",
             "eve.otelTraceEnabled": false,
           }),
+          version: WORKFLOW_ENTRY_INPUT_VERSION,
         },
       ],
       {
@@ -469,6 +471,7 @@ describe("createWorkflowRuntime#createSession", () => {
           serializedContext: expect.objectContaining({
             [ChannelRequestIdKey.name]: "req_run",
           }),
+          version: WORKFLOW_ENTRY_INPUT_VERSION,
         },
       ],
       {

@@ -24,6 +24,8 @@ import {
   createDelegatedSubagentSuccessResult,
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { migrateWorkflowEntryInput } from "#execution/durable-session-migrations/workflow-entry.js";
+export type { WorkflowEntryInput } from "#execution/durable-session-migrations/workflow-entry.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
@@ -54,18 +56,6 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
 // Error logging happens inside `emitTerminalSessionFailureStep`.
-
-/**
- * Serializable workflow-entry input. All runtime state travels via
- * `serializedContext`, which is produced by `serializeContext(ctx)`
- * and deserialized at each `"use step"` boundary.
- */
-export interface WorkflowEntryInput {
-  readonly input: RunInput["input"];
-  readonly limits?: RunInput["limits"];
-  readonly sessionTimeoutMs?: number | false;
-  readonly serializedContext: Record<string, unknown>;
-}
 
 export interface WorkflowEntryResult {
   readonly output: unknown;
@@ -131,9 +121,10 @@ interface CrashCleanupState {
  * `hasProxyInputRequests`, the documented short-circuit for hook-payload
  * routing to any descendant still active when the parent parks.
  */
-export async function workflowEntry(input: WorkflowEntryInput): Promise<WorkflowEntryResult> {
+export async function workflowEntry(value: unknown): Promise<WorkflowEntryResult> {
   "use workflow";
 
+  const input = migrateWorkflowEntryInput(value);
   const { workflowRunId: sessionId, workflowStartedAt } = getWorkflowMetadata();
   const continuationToken = (input.serializedContext["eve.continuationToken"] as string) || "";
   const mode = input.serializedContext["eve.mode"] as RunMode;

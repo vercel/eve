@@ -33,10 +33,10 @@ function stableWorkflowContract<TName extends string>(
 
 /** Cross-deployment workflow entrypoints and their existing input versions. */
 export const DURABLE_WORKFLOW_CONTRACTS = {
-  sessionTimeoutWorkflow: stableWorkflowContract("sessionTimeoutWorkflow", null),
-  taskRunWorkflow: stableWorkflowContract("taskRunWorkflow", null),
+  sessionTimeoutWorkflow: stableWorkflowContract("sessionTimeoutWorkflow", 1),
+  taskRunWorkflow: stableWorkflowContract("taskRunWorkflow", 1),
   turnWorkflow: stableWorkflowContract("turnWorkflow", 1),
-  workflowEntry: stableWorkflowContract("workflowEntry", null),
+  workflowEntry: stableWorkflowContract("workflowEntry", 1),
 } as const satisfies Record<string, DurableWorkflowContract>;
 
 /** Existing explicitly versioned values that cross durable boundaries. */
