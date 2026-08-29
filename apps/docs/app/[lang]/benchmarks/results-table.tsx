@@ -82,7 +82,7 @@ export const ResultsTable = ({
               onSort={() => toggleSort("averageDurationMs")}
               sortDirection={sort.key === "averageDurationMs" ? sort.direction : undefined}
             >
-              Avg Duration
+              Duration
             </HeaderCell>
             <HeaderCell
               align="right"
@@ -91,7 +91,7 @@ export const ResultsTable = ({
                 sort.key === "averageEstimatedListCostUsd" ? sort.direction : undefined
               }
             >
-              Avg List Cost
+              Cost
             </HeaderCell>
             <HeaderCell
               align="right"
@@ -144,15 +144,15 @@ export const ResultsTable = ({
                 </tr>
                 {isExpanded ? (
                   <tr className="border-t border-gray-400">
-                    <td className="p-4" colSpan={6}>
-                      <div className="overflow-hidden rounded-lg border border-gray-400">
-                        <table className="w-full border-collapse text-left">
-                          <thead className="bg-gray-100 text-gray-800">
+                    <td className="px-4 pb-4" colSpan={6}>
+                      <div>
+                        <table className="w-full border-collapse text-left text-sm">
+                          <thead className="text-gray-800">
                             <tr>
                               <HeaderCell>Evaluation</HeaderCell>
-                              <HeaderCell align="right">Avg Duration</HeaderCell>
-                              <HeaderCell align="right">Avg Tokens</HeaderCell>
-                              <HeaderCell align="right">Avg Tool Calls</HeaderCell>
+                              <HeaderCell align="right">Duration</HeaderCell>
+                              <HeaderCell align="right">Tokens</HeaderCell>
+                              <HeaderCell align="right">Tool Calls</HeaderCell>
                               <HeaderCell align="right">Success Rate</HeaderCell>
                               <HeaderCell align="right">Success Rate with AGENTS.md</HeaderCell>
                             </tr>
