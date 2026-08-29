@@ -442,6 +442,7 @@ async function runTurn(input: {
         turnLooksDone = !stepCalledTool;
         stepCalledTool = false;
       } else if (part.type === "finish") {
+        replaceUsage(usage, (part as { totalUsage?: unknown }).totalUsage);
         turnLooksDone = true;
       }
     }
@@ -523,6 +524,16 @@ export function addUsage(total: MutableAuthoringTokenUsage, value: unknown): voi
   total.reasoningTokens += usageNumber(usage.reasoningTokens);
   total.cachedInputTokens += usageNumber(usage.cachedInputTokens);
   total.cacheWriteTokens += usageNumber(usage.cacheWriteTokens);
+}
+
+function replaceUsage(total: MutableAuthoringTokenUsage, value: unknown): void {
+  if (typeof value !== "object" || value === null) return;
+  total.inputTokens = 0;
+  total.outputTokens = 0;
+  total.reasoningTokens = 0;
+  total.cachedInputTokens = 0;
+  total.cacheWriteTokens = 0;
+  addUsage(total, value);
 }
 
 function usageNumber(value: unknown): number {
