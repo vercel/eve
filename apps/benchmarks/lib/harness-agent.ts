@@ -45,8 +45,6 @@ const TURN_STALL_SECONDS = Number(process.env.EVE_BENCHMARK_TURN_STALL ?? 120);
 const CLOSING_IDLE_MILLIS = 45_000;
 // How long to let an aborted turn settle before starting the next one.
 const TURN_SETTLE_MILLIS = 15_000;
-const INITIAL_PROMPT =
-  "You are working on an eve project task. First inspect `AGENTS.md` when it exists; it describes the project layout and points to relevant local documentation. Use the installed `eve` CLI and the project's local files to understand the project instead of assuming another framework. If the workspace is empty and the task requires a new project, initialize an eve project in the appropriate directory before implementing the request.";
 
 // The coding agent's own question tool is the one place it can ask the user
 // mid-turn. Left unanswered it waits for a human and the runtime stops driving
@@ -188,14 +186,13 @@ export function createAuthoringAgent(subject: {
           transcript,
           send: async (prompt) => {
             const turn = transcript.filter((entry) => entry.role === "user").length + 1;
-            const message = turn === 1 ? `${INITIAL_PROMPT}\n\n${prompt}` : prompt;
-            transcript.push({ role: "user", content: message });
-            if (verbose) console.log(`[user] ${message}`);
+            transcript.push({ role: "user", content: prompt });
+            if (verbose) console.log(`[user] ${prompt}`);
             const result = await timings.measure(`agent.turn.${turn}`, () =>
               runTurn({
                 agent,
                 session: session!,
-                prompt: message,
+                prompt,
                 timeout: options.timeout,
                 verbose,
                 abortSignal: options.signal,
