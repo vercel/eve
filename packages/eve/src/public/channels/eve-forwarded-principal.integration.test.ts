@@ -12,7 +12,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
+import {
+  AuthKey,
+  ChannelInstrumentationKey,
+  InitiatorAuthKey,
+  ParentTraceContextKey,
+} from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
@@ -102,17 +107,34 @@ describe("eveChannel forwarded principal → runtime principal", () => {
   it("seeds the forwarded principal into the run context and resolves a user Connect principal", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: (caller) => caller.principalId === ROUTER_CALLER.principalId,
+      trustedTraceForwarders: (caller) => caller.principalId === ROUTER_CALLER.principalId,
       auth: () => ROUTER_CALLER,
     });
 
     const response = await handler.fetch(
       new Request("https://receiver.example.com/eve/v1/session", {
         body: JSON.stringify({
-          forwardedPrincipal: { current: FORWARDED_CURRENT, initiator: FORWARDED_INITIATOR },
+          forwardedPrincipal: {
+            current: FORWARDED_CURRENT,
+            initiator: FORWARDED_INITIATOR,
+          },
+          forwardedTracePolicy: {
+            audience: "public",
+            decision: { action: "record", recordInputs: true, recordOutputs: false },
+          },
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
           message: "check my dashboards",
           mode: "task",
         }),
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
         method: "POST",
       }),
     );
@@ -133,6 +155,17 @@ describe("eveChannel forwarded principal → runtime principal", () => {
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("public");
+    expect(options.forwardedTracePolicy).toEqual({
+      audience: "public",
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+    });
+    expect(ctx.get(ParentTraceContextKey)).toEqual({
+      isRemote: true,
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    });
     expect(current).toMatchObject({
       attributes: { "eve:forwarded-by": ROUTER_CALLER.principalId, user_id: "U123" },
       principalId: "slack:U123",
@@ -164,6 +197,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,
+      trustedTraceForwarders: () => true,
       auth: () => ROUTER_CALLER,
     });
 
@@ -205,5 +239,40 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     })();
     expect(isConnectionAuthorizationFailedError(failure)).toBe(true);
     expect(failure).toMatchObject({ reason: "principal_required" });
+  });
+
+  it("ignores forwarded instrumentation without a delegated trace parent", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          forwardedPrincipal: {
+            current: FORWARDED_CURRENT,
+          },
+          forwardedTracePolicy: {
+            audience: "public",
+            decision: { action: "record", recordInputs: true, recordOutputs: true },
+          },
+          message: "check my dashboards",
+          mode: "task",
+        }),
+        headers: {
+          "content-type": "application/json",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+    );
+
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
+    expect(options.channelMetadata).toBeUndefined();
+    expect(options.parentTraceContext).toBeUndefined();
   });
 });

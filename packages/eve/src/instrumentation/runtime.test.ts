@@ -4,8 +4,10 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
   OtelTraceEnabledKey,
+  ParentTraceContextKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
+import type { ForwardedTracePolicy } from "#channel/types.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
@@ -67,6 +69,72 @@ async function readTelemetry(instrumentation: ExecutionInstrumentation | undefin
 
 beforeEach(() => {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+});
+
+function initializeRemoteSession(
+  tracePolicy: TraceCapturePolicy,
+  forwardedTracePolicy: ForwardedTracePolicy,
+): ContextContainer {
+  const ctx = createContext("public");
+  registerInstrumentationRuntime({
+    ...createRuntime({ capturesContent: true, publish: vi.fn() }, tracePolicy),
+    idGenerator: new AgentSpanIdGenerator(),
+    prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
+  });
+  initializeSessionInstrumentation({
+    agentName: "remote-agent",
+    ctx,
+    forwardedTracePolicy,
+    parentTraceContext: {
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
+    },
+  });
+  return ctx;
+}
+
+describe("initializeSessionInstrumentation", () => {
+  it("intersects a forwarded remote decision with the receiver trace policy", () => {
+    const ctx = initializeRemoteSession(
+      () => ({ emit: true, recordInputs: false, recordOutputs: true }),
+      {
+        audience: "public",
+        decision: { action: "record", recordInputs: true, recordOutputs: true },
+      },
+    );
+
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      traceFlags: 1,
+    });
+  });
+
+  it("retains full capture for a sampled public remote trace", () => {
+    const ctx = initializeRemoteSession(() => true, { audience: "public" });
+
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      traceFlags: 1,
+    });
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
+  });
+
+  it("does not let a forwarded policy override a receiver drop decision", () => {
+    const ctx = initializeRemoteSession(() => false, {
+      audience: "public",
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+    });
+
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "drop" },
+      traceFlags: 0,
+    });
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({
+      decision: { action: "drop" },
+      traceFlags: 0,
+    });
+  });
 });
 
 describe("bindInstrumentationRuntime", () => {

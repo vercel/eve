@@ -114,6 +114,12 @@ export interface EveChannelInput {
    */
   readonly trustedForwarders?: TrustedForwarders;
   /**
+   * Transport-authenticated callers whose remote trace policy may be inherited.
+   * The inherited policy is accepted only on callback-bound requests with a
+   * valid `traceparent` and is intersected with this deployment's trace policy.
+   */
+  readonly trustedTraceForwarders?: TrustedForwarders;
+  /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).
    */

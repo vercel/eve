@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: proposed
-last_updated: "2026-08-28"
+last_updated: "2026-08-31"
 ---
 
 # Audience-aware trace content policy
@@ -22,7 +22,7 @@ type ChannelAudience = "public" | "private" | "unknown";
 
 The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
 
-The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. Remote agents classify their receiving channel independently rather than trusting opaque metadata across deployment boundaries.
+The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. Remote agents propagate audience and trace-capture decisions in an additive wire field, but inherit them only when the receiver accepts the authenticated transport principal through `trustedTraceForwarders`. The inherited decision is intersected with the receiver's local policy; otherwise the remote classifies its receiving channel independently.
 
 ## Public tracing API
 

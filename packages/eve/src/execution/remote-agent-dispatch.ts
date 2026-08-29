@@ -11,9 +11,11 @@ import {
 import type {
   ActivityObserverConfig,
   CancelTurnResult,
+  ForwardedTracePolicy,
   SessionAuthContext,
   SessionTraceContext,
 } from "#channel/types.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -59,6 +61,7 @@ export async function startRemoteAgentSession(input: {
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly callbackToken?: string;
+  readonly channelAudience?: ChannelAudience;
   readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
@@ -81,6 +84,7 @@ export async function startRemoteAgentSession(input: {
   }
 
   const forwardedPrincipal = buildForwardedPrincipalField(input);
+  const forwardedTracePolicy = buildForwardedTracePolicy(input);
   const requestBody: {
     capabilities: {};
     callback: {
@@ -92,6 +96,7 @@ export async function startRemoteAgentSession(input: {
     };
     activityObserver?: ActivityObserverConfig;
     forwardedPrincipal?: ForwardedPrincipal;
+    forwardedTracePolicy?: ForwardedTracePolicy;
     message: string;
     mode: "conversation" | "task";
     operationId?: string;
@@ -119,6 +124,9 @@ export async function startRemoteAgentSession(input: {
   if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
+  }
+  if (forwardedTracePolicy !== undefined) {
+    requestBody.forwardedTracePolicy = forwardedTracePolicy;
   }
   if (input.operationId !== undefined) {
     requestBody.operationId = input.operationId;
@@ -305,6 +313,20 @@ function buildForwardedPrincipalField(input: {
     field.initiator = input.initiatorAuth;
   }
   return field;
+}
+
+function buildForwardedTracePolicy(input: {
+  readonly channelAudience?: ChannelAudience;
+  readonly parentTraceContext?: SessionTraceContext;
+}): ForwardedTracePolicy | undefined {
+  if (input.channelAudience === undefined || input.parentTraceContext === undefined)
+    return undefined;
+  return {
+    audience: input.channelAudience,
+    ...(input.parentTraceContext.decision === undefined
+      ? {}
+      : { decision: input.parentTraceContext.decision }),
+  };
 }
 
 export async function cancelRemoteAgentTurn(input: {

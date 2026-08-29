@@ -79,6 +79,7 @@ import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -652,6 +653,7 @@ export async function startSubagent(input: {
         batchEvent: input.batchEvent,
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
+        channelAudience: normalizeChannelAudience(input.channelMetadata?.metadata.audience),
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,

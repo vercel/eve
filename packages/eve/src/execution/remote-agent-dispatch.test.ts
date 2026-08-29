@@ -576,7 +576,14 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
+        channelAudience: "public",
         initiatorAuth: INITIATOR_AUTH,
+        parentTraceContext: {
+          decision: { action: "record", recordInputs: true, recordOutputs: false },
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
         remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
       }),
@@ -585,6 +592,10 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
       current: CURRENT_AUTH,
       initiator: INITIATOR_AUTH,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedTracePolicy).toEqual({
+      audience: "public",
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
     });
   });
 

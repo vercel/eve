@@ -143,6 +143,23 @@ Forwarding is explicit on both sides. The receiver names which forwarders it tru
 
 A receiver on an eve version that predates all principal forwarding may instead drop the unknown field and run the session as your app's service identity; per-user connections there fail with `principal_required`. On remote requests where the dispatching turn has no auth, the field is omitted and the call proceeds on transport trust alone.
 
+## Preserving trace content
+
+Remote dispatch always propagates W3C `traceparent` plus the parent channel audience and trace-capture decision. The receiver ignores the asserted policy by default. To preserve public trace content across a trusted remote hop, allowlist the transport-authenticated caller separately with `trustedTraceForwarders`:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  trustedTraceForwarders: (forwarder) =>
+    forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
+});
+```
+
+The policy is accepted only on callback-bound requests with a valid `traceparent`. eve intersects it with the receiving deployment's own trace policy and channel audience ceiling, so the parent can preserve or narrow capture but cannot enable content that the receiver forbids. Direct sessions and untrusted remote calls continue to classify the receiving HTTP channel independently. The field is top-level and additive, so older receivers ignore it and retain their existing metadata-only behavior.
+
 ## How remote dispatch and callbacks work
 
 A local subagent runs inline. A remote one runs in its own deployment, so dispatch is asynchronous:

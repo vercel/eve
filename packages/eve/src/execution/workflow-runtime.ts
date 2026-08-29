@@ -164,6 +164,7 @@ export function createWorkflowRuntime(config: {
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
         ctx,
+        forwardedTracePolicy: input.forwardedTracePolicy,
         parentTraceContext: input.parentTraceContext,
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;

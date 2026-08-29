@@ -1,6 +1,7 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
+import { resolveForwardedTracePolicy } from "#channel/forwarded-trace-policy.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import {
   handleConnectionCallbackRequest,
@@ -139,10 +140,18 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         // Top-level sessions own their trace. Callback sessions are delegated
         // remote agents and intentionally continue the dispatching agent trace.
-        const parentTraceContext =
+        const parsedParentTraceContext =
           body.callback === undefined
             ? undefined
             : parseTraceparent(req.headers.get("traceparent"));
+        const forwardedTracePolicy =
+          parsedParentTraceContext === undefined
+            ? undefined
+            : await resolveForwardedTracePolicy({
+                forwarder: authResult,
+                payload,
+                trustedTraceForwarders: input.trustedTraceForwarders,
+              });
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -199,6 +208,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
+            channelMetadata:
+              forwardedTracePolicy === undefined
+                ? undefined
+                : { kind: "eve", metadata: { audience: forwardedTracePolicy.audience } },
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(
@@ -210,7 +223,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               body.context,
             ),
             mode: body.mode ?? "conversation",
-            parentTraceContext,
+            forwardedTracePolicy,
+            parentTraceContext: parsedParentTraceContext,
             title: messageResult.title,
           });
         } catch (error) {

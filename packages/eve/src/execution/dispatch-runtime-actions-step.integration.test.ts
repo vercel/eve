@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
@@ -646,10 +647,17 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     const session = createStartSession({ kind: "remote" });
     const traceId = "4".repeat(32);
     const actionSpanId = "5".repeat(16);
-    installContext(session, {
-      definition: REMOTE_REGISTRY_DEFINITION,
-      nodeId: "remote/research",
-    });
+    installContext(
+      session,
+      {
+        definition: REMOTE_REGISTRY_DEFINITION,
+        nodeId: "remote/research",
+      },
+      false,
+      null,
+      undefined,
+      "public",
+    );
 
     const result = await dispatchRuntimeActionsStep({
       callbackBaseUrl: "https://caller.example.com",
@@ -682,6 +690,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(result.results).toEqual([]);
     expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
+        channelAudience: "public",
         parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
       }),
     );
@@ -1335,6 +1344,7 @@ function installContext(
   tasks = false,
   auth: SessionAuthContext | null = null,
   localDevRequest?: LocalDevRequestProvenance,
+  channelAudience?: ChannelAudience,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1359,7 +1369,12 @@ function installContext(
     [AuthKey, auth],
     [BundleKey, bundle],
     [CapabilitiesKey, undefined],
-    [ChannelInstrumentationKey, undefined],
+    [
+      ChannelInstrumentationKey,
+      channelAudience === undefined
+        ? undefined
+        : { kind: "slack", metadata: { audience: channelAudience } },
+    ],
     [InitiatorAuthKey, null],
     [ChannelKey, ADAPTER],
   ]);
