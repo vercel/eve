@@ -4,7 +4,7 @@ FROM ubuntu:26.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=24
-ARG PNPM_VERSION=11.5.2
+ARG PNPM_VERSION=12.1.0
 
 LABEL org.opencontainers.image.description="Sandbox base image for eve agents."
 LABEL org.opencontainers.image.source="https://github.com/vercel/eve"

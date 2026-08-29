@@ -32,15 +32,17 @@ pnpm install
 pnpm build
 ```
 
-The repo is a pnpm workspace orchestrated with [Turborepo](https://turborepo.com):
+The repo is a pnpm workspace. Workspace task dependencies and concurrency are defined in [`pnpm-workspace.yaml`](./pnpm-workspace.yaml):
 
 - [`packages/eve`](./packages/eve) — the framework and `eve` CLI
-- [`packages/eve-scaffold`](./packages/eve-scaffold) / [`packages/eve-catalog`](./packages/eve-catalog) — internal (unpublished) scaffolding libraries
+- [`packages/eve-catalog`](./packages/eve-catalog) — internal, unpublished integration catalog
 - [`apps/fixtures`](./apps/fixtures) — shared agent fixtures used by e2e tests, TUI smoke tests, local dev, and bundle analysis
 - [`apps/frameworks`](./apps/frameworks) — framework integration apps for Next.js, Nuxt, and SvelteKit
 - [`apps/templates`](./apps/templates) — source apps for generated templates
 - [`docs`](./docs) — the published documentation content
 - [`e2e/`](./e2e) — fixture-owned `eve eval` end-to-end tests
+
+`pnpm install` links dependencies without building workspace packages. `pnpm build` vendors eve's compiled dependencies, then builds the packages under `packages/` in dependency order. `pnpm typecheck` and `pnpm test:unit` build their upstream workspace dependencies before running.
 
 ## Development
 

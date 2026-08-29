@@ -1,8 +1,0 @@
-{
-  "extends": ["//"],
-  "tasks": {
-    "typecheck": {
-      "dependsOn": ["$TURBO_EXTENDS$", "eve#build"]
-    }
-  }
-}

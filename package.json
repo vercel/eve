@@ -7,6 +7,7 @@
   "workspaces": [
     "apps/*",
     "apps/*/*",
+    "!apps/*/.*",
     "e2e/fixtures/*",
     "packages/*"
   ],
@@ -14,7 +15,7 @@
   "scripts": {
     "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",
     "benchmark:publish": "node apps/benchmarks/publish.mjs",
-    "build": "turbo run build --filter='./packages/*'",
+    "build": "pnpm --filter='./packages/*' --recursive run build",
     "changeset": "changeset",
     "check:deps": "syncpack lint",
     "dev": "node ./scripts/dev.mjs",
@@ -26,11 +27,11 @@
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
     "test": "pnpm test:unit && pnpm test:integration",
-    "test:e2e": "turbo run test:e2e --concurrency=1",
-    "test:integration": "turbo run test:integration",
-    "test:scenario": "turbo run test:scenario",
-    "test:unit": "turbo run test:unit",
-    "typecheck": "turbo run typecheck",
+    "test:e2e": "pnpm --recursive run test:e2e",
+    "test:integration": "pnpm --recursive run test:integration",
+    "test:scenario": "pnpm --recursive run test:scenario",
+    "test:unit": "pnpm --recursive run test:unit",
+    "typecheck": "pnpm --recursive run typecheck",
     "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs",
     "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "test:tui": "pnpm --filter eve run test:tui",
@@ -44,12 +45,11 @@
     "oxfmt": "0.63.0",
     "oxlint": "1.78.0",
     "syncpack": "15.3.2",
-    "turbo": "2.9.18",
     "typescript": "catalog:",
     "vercel": "59.5.0"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@11.21.0"
+  "packageManager": "pnpm@12.1.0"
 }

@@ -17,7 +17,7 @@ import {
   type ConnectionProtocol,
   connectionEntries,
   connectionProtocols,
-} from "@eve/catalog";
+} from "#compiled/@eve/catalog/index.js";
 
 /** Wire protocol a connection speaks at runtime. */
 export type { ConnectionProtocol };

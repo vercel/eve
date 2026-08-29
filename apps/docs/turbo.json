@@ -1,9 +1,0 @@
-{
-  "$schema": "https://turborepo.com/schema.json",
-  "extends": ["//"],
-  "tasks": {
-    "build": {
-      "outputs": [".next/**", ".source/**", "!.next/cache/**"]
-    }
-  }
-}

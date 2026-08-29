@@ -1,5 +1,5 @@
 import { ChildProcess, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -21,10 +21,14 @@ vi.mock("node:child_process", async (importOriginal) => ({
 vi.mock("node:fs", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:fs")>()),
   existsSync: vi.fn(() => false),
+  rmSync: vi.fn(),
+  writeFileSync: vi.fn(),
 }));
 
 const mockedSpawn = vi.mocked(spawn);
 const mockedExistsSync = vi.mocked(existsSync);
+const mockedRmSync = vi.mocked(rmSync);
+const mockedWriteFileSync = vi.mocked(writeFileSync);
 
 function createMockChildProcess() {
   return Object.assign(new ChildProcess(), {
@@ -99,9 +103,17 @@ describe("runPnpmInstall", () => {
     expect(mockedSpawn).toHaveBeenCalledTimes(2);
     expect(mockedSpawn).toHaveBeenLastCalledWith(
       "pnpm",
-      ["--dir", "/tmp/eve-agent", "install", "--no-frozen-lockfile", "--ignore-workspace"],
+      ["--dir", "/tmp/eve-agent", "install", "--no-frozen-lockfile"],
       expect.objectContaining({ cwd: "/tmp/eve-agent", stdio: "inherit" }),
     );
+    expect(mockedWriteFileSync).toHaveBeenCalledWith(
+      expect.stringMatching(/pnpm-workspace\.yaml$/),
+      "packages: []\n",
+      { encoding: "utf8", flag: "wx" },
+    );
+    expect(mockedRmSync).toHaveBeenCalledWith(expect.stringMatching(/pnpm-workspace\.yaml$/), {
+      force: true,
+    });
   });
 
   test("streams install output when setup supplies an output handler", async () => {

@@ -1,8 +1,26 @@
 packages:
   - apps/*
   - apps/*/*
+  - "!apps/*/.*"
   - e2e/fixtures/*
   - packages/*
+
+tasks:
+  build:
+    dependsOn: ["^build"]
+  test:e2e:
+    dependsOn: []
+    concurrency: 1
+  test:integration:
+    dependsOn: []
+  test:scenario:
+    dependsOn: []
+  test:unit:
+    dependsOn: ["^build"]
+  typecheck:
+    dependsOn: ["^build"]
+
+pmOnFail: ignore
 
 allowBuilds:
   "@google/genai": false # No-op preinstall.

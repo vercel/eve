@@ -50,8 +50,8 @@
  *             return shapes must carry only what the harness consumes;
  *             durable state belongs on `ctx.eve`.
  *   rule 28 — Imports under `packages/eve/src/setup/scaffold/**` stay within
- *             their layer: node:* builtins, relative siblings, and the shared
- *             `@eve/catalog` data package. The scaffold stays free of
+ *             their layer: node:* builtins, relative siblings, and eve's
+ *             vendored integration catalog. The scaffold stays free of
  *             framework runtime, compiler, terminal UI, and provider SDK
  *             dependencies.
  *   rule 29 — Changeset package keys must match workspace package names.
@@ -98,9 +98,9 @@
  *             them from the model SDK's callback types would make an SDK
  *             upgrade a breaking change for every provider. Map at the bridge.
  *   rule 38 — Workspace build scripts must not launch a nested
- *             `pnpm --filter eve build`. Turbo owns workspace dependency
- *             ordering; nested builds race on eve's clean-and-publish dist
- *             directory and let consumers observe a partial package.
+ *             `pnpm --filter eve build`. The pnpm workspace task graph owns
+ *             dependency ordering; nested builds race on eve's clean-and-publish
+ *             dist directory and let consumers observe a partial package.
  *   rule 40 — Every shipped wire-version module
  *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
  *             `*-wire.vN.test.ts`. Version modules, tests, and snapshots already
@@ -741,15 +741,14 @@ function checkRule27(posix, lines, violations) {
 
 const SCAFFOLD_PREFIX = "packages/eve/src/setup/scaffold/";
 
-// The curated connection and channel catalogs (and any future surface
-// overlays) read canonical identity from `@eve/catalog`, a
-// dependency-free data package shared across the scaffolder and docs. It
-// carries no runtime, compiler, or provider-SDK weight, so the entire scaffold
-// layer may import it. The terminal UI adapters (which carry @clack/core and
-// picocolors) live outside the scaffold, in `packages/eve/src/setup/cli/`.
-const SCAFFOLD_ALLOWED_PACKAGES = new Set(["@eve/catalog"]);
+// The curated connection and channel catalogs read canonical identity from
+// the private `@eve/catalog` workspace package through eve's vendored copy.
+// This keeps the published package self-contained without allowing the
+// scaffold layer to reach into runtime, compiler, or provider SDK modules.
+// Terminal UI adapters live outside the scaffold in `packages/eve/src/setup/cli/`.
+const SCAFFOLD_ALLOWED_PACKAGES = new Set([]);
 
-const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set([]);
+const SCAFFOLD_ALLOWED_INTERNAL_IMPORTS = new Set(["#compiled/@eve/catalog/index.js"]);
 
 // Only match top-of-line `import` statements, not strings nested inside
 // template literals (e.g. the channel templates embed `from "react"` as
@@ -788,7 +787,7 @@ function checkRule28(posix, lines, violations) {
             rule: 28,
             file: posix,
             line: idx + 1,
-            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and @eve/catalog. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
+            message: `import from "${spec}" not allowed in the packages/eve/src/setup/scaffold source layer. Scaffold modules allow only node:* builtins, relative files, and #compiled/@eve/catalog/index.js. Keep runtime, compiler, terminal UI, and provider SDK dependencies in their owning package.`,
           });
         }
       }
@@ -1135,7 +1134,7 @@ async function checkRule38NoNestedEveBuild() {
       violations.push({
         rule: 38,
         file: `${dir}/package.json`,
-        message: `script "${scriptName}" launches a nested eve package build. Declare eve as a workspace dependency and let Turbo's ^build edge produce it once; rebuilding eve inside a consumer races its destructive dist clean against other consumers.`,
+        message: `script "${scriptName}" launches a nested eve package build. Declare eve as a workspace dependency and let pnpm's ^build task edge produce it once; rebuilding eve inside a consumer races its destructive dist clean against other consumers.`,
       });
     }
   }

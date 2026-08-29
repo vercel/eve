@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import type { PackageManagerKind } from "../../package-manager.js";
 import { armProcessAbort } from "../process-abort.js";
@@ -13,6 +15,7 @@ import {
 import {
   hasAncestorPnpmWorkspace,
   PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS,
+  PNPM_WORKSPACE_PATH,
   pnpmWorkspaceClaimsProject,
 } from "./pnpm.js";
 import type { PackageManagerInstallOptions } from "./types.js";
@@ -121,6 +124,36 @@ export function spawnPackageManager(
 
 export interface RunInstallOptions extends RunPackageManagerOptions, PackageManagerInstallOptions {}
 
+// A local workspace manifest makes standalone ownership unambiguous across pnpm
+// versions; `--ignore-workspace` alone can still materialize against an ancestor.
+function createStandalonePnpmWorkspace(projectRoot: string): () => void {
+  const workspacePath = join(projectRoot, PNPM_WORKSPACE_PATH);
+  try {
+    writeFileSync(workspacePath, "packages: []\n", { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return () => {};
+    throw error;
+  }
+  return () => rmSync(workspacePath, { force: true });
+}
+
+async function runStandalonePnpmInstall(
+  projectRoot: string,
+  options: RunInstallOptions,
+): Promise<PackageManagerProcessResult> {
+  const cleanup = createStandalonePnpmWorkspace(projectRoot);
+  try {
+    return await spawnPackageManager(
+      "pnpm",
+      projectRoot,
+      getPackageManagerStrategy("pnpm").installArguments(options),
+      options,
+    );
+  } finally {
+    cleanup();
+  }
+}
+
 export type PackageManagerInstallResult =
   | { kind: "installed"; result: PackageManagerProcessResult }
   | { kind: "workspace-probe-failed"; result: PackageManagerProcessResult }
@@ -152,12 +185,13 @@ export async function runPackageManagerInstall(
   options: RunInstallOptions = {},
 ): Promise<PackageManagerInstallResult> {
   const strategy = getPackageManagerStrategy(kind);
-  let installOptions = options;
-  if (
-    kind === "pnpm" &&
-    options.ignoreWorkspace !== true &&
-    hasAncestorPnpmWorkspace(projectRoot)
-  ) {
+  if (kind === "pnpm" && options.ignoreWorkspace === true) {
+    return {
+      kind: "installed",
+      result: await runStandalonePnpmInstall(projectRoot, options),
+    };
+  }
+  if (kind === "pnpm" && hasAncestorPnpmWorkspace(projectRoot)) {
     const probe = await spawnPackageManager(
       kind,
       projectRoot,
@@ -167,14 +201,19 @@ export async function runPackageManagerInstall(
     if (!resultSucceeded(probe)) return { kind: "workspace-probe-failed", result: probe };
     const claimed = pnpmWorkspaceClaimsProject(probe.stdout, projectRoot);
     if (claimed === undefined) return { kind: "workspace-probe-unrecognized", result: probe };
-    if (!claimed) installOptions = { ...options, ignoreWorkspace: true };
+    if (!claimed) {
+      return {
+        kind: "installed",
+        result: await runStandalonePnpmInstall(projectRoot, options),
+      };
+    }
   }
   return {
     kind: "installed",
     result: await spawnPackageManager(
       kind,
       projectRoot,
-      strategy.installArguments(installOptions),
+      strategy.installArguments(options),
       options,
     ),
   };

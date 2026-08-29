@@ -34,6 +34,7 @@
  *   banner?: string,               // standalone bundle prelude
  *   chunkGroup?: string,                  // default "node"
  *   typeOnly?: boolean,                   // skips JS bundling entirely
+ *   fingerprintFiles?: string[],          // package-relative files included in the stamp
  * }
  * ```
  */
@@ -824,7 +825,7 @@ async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
  * resolved package versions plus the content of every file in `scriptFiles`.
  * When the fingerprint matches the previously recorded stamp the work is
  * a no-op, which makes `build:compiled` safe to invoke concurrently from
- * sibling Turbo tasks without racing on shared destination directories.
+ * sibling workspace tasks without racing on shared destination directories.
  */
 async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions }) {
   const scriptHash = createHash("sha256");
@@ -838,17 +839,31 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     scriptHash.update("\0");
   }
 
+  const moduleFingerprints = {};
   const moduleVersions = {};
   for (const module of modules) {
-    const { packageJson } = await findPackageJson(
+    const packageInfo = await findPackageJson(
       module.packageName,
       packageRoot,
       module.packageJsonName,
     );
-    moduleVersions[module.packageName] = packageJson.version ?? "0.0.0";
+    moduleVersions[module.packageName] = packageInfo.packageJson.version ?? "0.0.0";
+
+    if (module.fingerprintFiles !== undefined) {
+      const moduleHash = createHash("sha256");
+      for (const file of [...module.fingerprintFiles].sort()) {
+        const content = await readFile(join(packageInfo.packageRoot, file), "utf8");
+        moduleHash.update(file);
+        moduleHash.update("\0");
+        moduleHash.update(content);
+        moduleHash.update("\0");
+      }
+      moduleFingerprints[module.packageName] = moduleHash.digest("hex");
+    }
   }
 
   return {
+    moduleFingerprints,
     moduleVersions,
     scriptHash: scriptHash.digest("hex"),
     toolVersions: Object.fromEntries(

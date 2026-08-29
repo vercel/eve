@@ -15,6 +15,7 @@ import providerUtils from "./@ai-sdk/provider-utils.mjs";
 import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
+import eveCatalog from "./@eve/catalog.mjs";
 import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
 import linqChatSdkAdapter from "./@linqapp/chat-sdk-adapter.mjs";
 
@@ -66,6 +67,7 @@ export const MODULES = [
   experimentalAiSdkCodeMode,
   eventsourceParserStream,
   envRunner,
+  eveCatalog,
   google,
   grayMatter,
   jose,

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -8,6 +9,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const EVE_CATALOG_ROOT = join(EVE_PACKAGE_ROOT, "..", "eve-catalog");
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
 const execFileAsync = promisify(execFile);
@@ -70,6 +72,22 @@ describe("compiled vendor assets", () => {
     const rolldownPackage = nitroRequire("rolldown/package.json") as { version: string };
 
     expect(stamp.toolVersions?.rolldown).toBe(rolldownPackage.version);
+  });
+
+  it("stamps workspace package sources that drive vendored output", async () => {
+    const fingerprintFiles = ["package.json", "src/index.ts"];
+    const sourceHash = createHash("sha256");
+    for (const file of fingerprintFiles) {
+      sourceHash.update(file);
+      sourceHash.update("\0");
+      sourceHash.update(await readFile(join(EVE_CATALOG_ROOT, file), "utf8"));
+      sourceHash.update("\0");
+    }
+
+    const stamp = JSON.parse(
+      await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
+    ) as { moduleFingerprints?: Record<string, string> };
+    expect(stamp.moduleFingerprints?.["@eve/catalog"]).toBe(sourceHash.digest("hex"));
   });
 
   it("shares the OpenTelemetry provider registered through @vercel/otel", async () => {

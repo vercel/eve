@@ -239,11 +239,7 @@ export const pnpmPackageManager = {
       : { filesSkipped: [filePath], filesWritten: [] };
   },
   devArguments: () => ["exec", "eve", "dev"],
-  installArguments: (options) => [
-    "install",
-    "--no-frozen-lockfile",
-    ...(options.ignoreWorkspace === true ? ["--ignore-workspace"] : []),
-  ],
+  installArguments: () => ["install", "--no-frozen-lockfile"],
   prepareArguments: (projectRoot, args) => ["--dir", projectRoot, ...args],
   resolveInvocation(args) {
     const npmExecPath = process.env.npm_execpath;
