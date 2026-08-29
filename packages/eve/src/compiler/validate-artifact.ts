@@ -167,6 +167,13 @@ export function validateCompiledAgentResources(
     "connection name",
   );
   validateUniqueIdentities(
+    node.dynamicConnections.map((entry) => ({
+      identity: entry.slug,
+      kind: "dynamic connection",
+    })),
+    "dynamic connection slug",
+  );
+  validateUniqueIdentities(
     node.hooks.map((entry) => ({ identity: entry.slug, kind: "hook" })),
     "hook slug",
   );
@@ -330,6 +337,7 @@ function collectReferencedModuleSources(
     if (route.source.backing.kind !== "resource") add(route.source);
   }
   for (const value of node.connections) add(value);
+  for (const value of node.dynamicConnections) add(value);
   for (const value of node.tools) add(value);
   for (const value of node.dynamicInstructions) add(value);
   for (const value of node.dynamicSkills) add(value);

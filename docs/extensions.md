@@ -39,7 +39,7 @@ An extension uses the same file conventions as an agent for its contributions:
     lib/http.ts
 ```
 
-Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/tools/` can contain `defineDynamic(...)`.
+Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, connections, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/connections/` can contain `defineDynamic(...)`.
 
 Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
@@ -342,7 +342,7 @@ At build time, eve checks the extension's generated capability metadata. If the 
 
 - [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
 - [Tools](/docs/tools): static tools, approval, and tool output
-- [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic tools, skills, and instructions
+- [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic connections, tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions
 - [Skills](/docs/skills): package procedures and supporting files
 - [Connections](/docs/connections): integrate external services

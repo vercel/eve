@@ -3,6 +3,11 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
 import {
+  normalizeMcpClientConnectionDefinition,
+  normalizeOpenApiConnectionDefinition,
+} from "#internal/authored-definition/connection.js";
+import { readStampedConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import {
   registerDefinitionSource,
   stampDefinitionKey,
 } from "#internal/authored-definition/source-identity.js";
@@ -15,6 +20,7 @@ import type {
 import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
+import type { ModuleSourceRef } from "#shared/source-ref.js";
 
 /**
  * Resolves one compiled connection entry into a runtime-owned definition
@@ -143,4 +149,68 @@ export async function resolveConnectionDefinition(
       },
     );
   }
+}
+
+/** Resolves one branded connection returned by a dynamic connection handler. */
+export function resolveDynamicConnectionValue(
+  value: unknown,
+  source: Readonly<ModuleSourceRef & { readonly connectionName: string }>,
+): ResolvedConnectionDefinition {
+  const protocol = readStampedConnectionProtocol(value);
+  const message =
+    `Dynamic connection "${source.connectionName}" from "${source.logicalPath}" must be created by ` +
+    "defineMcpClientConnection() or defineOpenAPIConnection().";
+  if (protocol === undefined) {
+    throw new Error(message);
+  }
+
+  const sourceEntry = {
+    kind: "connection",
+    logicalPath: source.logicalPath,
+    name: source.connectionName,
+  } as const;
+  const sourceKey = `dynamic-connection-source:${source.sourceId}:${source.connectionName}`;
+  stampDefinitionKey(value as object, sourceKey);
+  registerDefinitionSource(sourceKey, sourceEntry);
+
+  if (protocol === "openapi") {
+    const normalized = normalizeOpenApiConnectionDefinition(value, message);
+    return omitUndefined({
+      approval: normalized.approval,
+      authorization: normalized.auth as ResolvedConnectionDefinition["authorization"],
+      connectionName: source.connectionName,
+      description: normalized.description,
+      exportName: source.exportName,
+      headers: normalized.headers,
+      logicalPath: source.logicalPath,
+      protocol,
+      sourceId: source.sourceId,
+      sourceKind: "module" as const,
+      spec: normalized.spec,
+      toolCall: normalized.toolCall,
+      tools: normalized.operations,
+      url: normalized.baseUrl ?? "",
+    });
+  }
+
+  const normalized = normalizeMcpClientConnectionDefinition(value, message);
+  return omitUndefined({
+    approval: normalized.approval,
+    authorization: normalized.auth as ResolvedConnectionDefinition["authorization"],
+    connectionName: source.connectionName,
+    description: normalized.description,
+    exportName: source.exportName,
+    headers: normalized.headers,
+    logicalPath: source.logicalPath,
+    protocol,
+    sourceId: source.sourceId,
+    sourceKind: "module" as const,
+    toolCall: normalized.toolCall,
+    tools: normalized.tools,
+    url: normalized.url,
+  });
+}
+
+function omitUndefined<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }

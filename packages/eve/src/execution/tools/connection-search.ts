@@ -479,7 +479,10 @@ export async function resolveConnectionSearchDynamicTools() {
 
   const connections = registry.getConnections();
   const connectionNames = connections.map((c) => c.connectionName);
-  const discovered = loadContext().get(ConnectionSearchResultsKey) ?? [];
+  const activeConnectionNames = new Set(connectionNames);
+  const discovered = (loadContext().get(ConnectionSearchResultsKey) ?? []).filter((result) =>
+    activeConnectionNames.has(result.connection),
+  );
 
   const tools: Record<string, object> = {};
 

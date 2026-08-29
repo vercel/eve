@@ -3,12 +3,28 @@ import {
   normalizeMcpClientConnectionDefinition,
   normalizeOpenApiConnectionDefinition,
 } from "#internal/authored-definition/connection.js";
-import type { CompiledConnectionDefinition } from "#compiler/manifest.js";
+import type {
+  CompiledConnectionDefinition,
+  CompiledDynamicConnectionDefinition,
+} from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
 import { readConnectionProtocol } from "#public/definitions/connections/protocol.js";
+import {
+  ALLOWED_DYNAMIC_CONNECTION_EVENTS,
+  assertResolverOnlyDynamicSentinel,
+  isDynamicSentinel,
+  type DynamicToolEventName,
+} from "#dynamic/definition.js";
+
+export type CompiledConnectionEntry =
+  | { readonly kind: "connection"; readonly definition: CompiledConnectionDefinition }
+  | {
+      readonly kind: "dynamic-connection";
+      readonly definition: CompiledDynamicConnectionDefinition;
+    };
 
 /**
  * Compiles one authored connection module into the serializable metadata
@@ -32,15 +48,40 @@ export async function compileConnectionDefinition(
   _agentRoot: string,
   source: ConnectionSourceRef,
   options: ModuleBackedDefinitionLoadOptions,
-): Promise<CompiledConnectionDefinition> {
+): Promise<CompiledConnectionEntry> {
   const loaded = await loadModuleBackedDefinition({
     binding: options.binding,
     kind: "connection",
     loadNamespace: options.loadNamespace,
     source,
   });
-  const protocol = readConnectionProtocol(loaded);
   const message = `Expected the connection export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`;
+
+  if (isDynamicSentinel(loaded)) {
+    assertResolverOnlyDynamicSentinel(loaded, message);
+    const eventNames = Object.keys(loaded.events);
+    const unsupportedEvent = eventNames.find(
+      (eventName) => !ALLOWED_DYNAMIC_CONNECTION_EVENTS.has(eventName),
+    );
+    if (unsupportedEvent !== undefined) {
+      throw new Error(
+        `${message} Dynamic connections support only "session.started" and "turn.started" handlers. Unsupported event: "${unsupportedEvent}".`,
+      );
+    }
+    return {
+      kind: "dynamic-connection",
+      definition: {
+        eventNames: eventNames as DynamicToolEventName[],
+        exportName: source.exportName,
+        logicalPath: source.logicalPath,
+        slug: source.connectionName,
+        sourceId: source.sourceId,
+        sourceKind: "module",
+      },
+    };
+  }
+
+  const protocol = readConnectionProtocol(loaded);
 
   const shared = {
     connectionName: source.connectionName,
@@ -78,7 +119,7 @@ export async function compileConnectionDefinition(
     compiled.vercelConnect = vercelConnect;
   }
 
-  return compiled;
+  return { definition: compiled, kind: "connection" };
 }
 
 /**
