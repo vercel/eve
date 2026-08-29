@@ -18,12 +18,12 @@ export function projectActivityEvents(input: {
       const rawName = action.kind === "load-skill" ? "load_skill" : action.toolName;
       const name = normalizeActivityText(rawName) || (kind === "skill" ? "Skill" : "Tool");
       const id = actionId(lineage.id, action.callId);
+      const label = activityLabel(input.activityLabels?.[action.callId]);
       return [
         {
           action: {
             id,
             kind,
-            label: activityLabel(input.activityLabels?.[action.callId]),
             name,
             parentWorkId: lineage.id,
             rootTurnId: lineage.rootTurnId,
@@ -33,6 +33,16 @@ export function projectActivityEvents(input: {
           kind: "action.started" as const,
           startedAt: input.at,
         },
+        ...(label === undefined
+          ? []
+          : [
+              {
+                actionId: id,
+                eventId: `${id}:label`,
+                kind: "action.label.updated" as const,
+                label,
+              },
+            ]),
       ];
     });
   }

@@ -102,6 +102,42 @@ describe("createRuntimeActionRequestFromToolCall", () => {
     });
   });
 
+  it("does not let the activity label callback mutate the action input", () => {
+    const result = createRuntimeActionRequestFromToolCall({
+      toolCall: {
+        input: { nested: { value: "original" } },
+        toolCallId: "call-mutate",
+        toolName: "mutate",
+        type: "tool-call",
+      },
+      tools: new Map([
+        [
+          "mutate",
+          {
+            activityLabel: (input) => {
+              const mutable = input as { nested: { value: string }; self?: unknown };
+              mutable.nested.value = "changed";
+              mutable.self = mutable;
+              throw new Error("presentation failed");
+            },
+            description: "Mutate.",
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "mutate",
+          },
+        ],
+      ]),
+    });
+
+    expect(result).toEqual({
+      action: {
+        callId: "call-mutate",
+        input: { nested: { value: "original" } },
+        kind: "tool-call",
+        toolName: "mutate",
+      },
+    });
+  });
+
   it("ignores an activity label callback that fails", () => {
     expect(
       createRuntimeActionRequestFromToolCall({

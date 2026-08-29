@@ -40,6 +40,11 @@ interface ToolDefinitionBase {
   readonly execution?: ToolExecution;
 }
 
+export interface ToolActivityDefinition<TInput = unknown> {
+  /** Returns the presentation-safe label for one action invocation. */
+  label(input: Readonly<TInput>): string;
+}
+
 /**
  * Internal/compiled tool definition shape. Carries `name` because the
  * compiler stamps a path-derived identifier onto every tool entry.
