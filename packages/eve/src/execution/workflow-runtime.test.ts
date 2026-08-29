@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { ChannelRequestIdKey } from "#context/keys.js";
+import { attachChannelActivityPresentation } from "#channel/activity-renderer.js";
+import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
+  activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
+import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -37,7 +40,9 @@ vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
 }));
 
 beforeEach(() => {
+  cancelRunMock.mockResolvedValue(undefined);
   getHookByTokenMock.mockImplementation(async (token: string) => currentSessionHook(token));
+  getWorldMock.mockResolvedValue("world");
 });
 
 afterEach(() => {
@@ -70,6 +75,9 @@ describe("workflowEntryReference", () => {
     );
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("/src/execution/");
     expect(sessionTimeoutWorkflowReference.workflowId).not.toContain("@");
+    expect(activityCollectorWorkflowReference.workflowId).toBe(
+      `workflow//${packageInfo.name}//activityCollectorWorkflow`,
+    );
   });
 });
 
@@ -310,6 +318,15 @@ describe("createWorkflowRuntime#createSession", () => {
     return createWorkflowRuntime({ compiledArtifactsSource });
   }
 
+  function activityAdapter(): ChannelAdapter {
+    const adapter: ChannelAdapter = { kind: "slack" };
+    attachChannelActivityPresentation(adapter, {
+      destination: () => ({}),
+      renderers: [{ id: "status", render: vi.fn() }],
+    });
+    return adapter;
+  }
+
   function mockBundleAndRun(
     compiledArtifactsSource: RuntimeCompiledArtifactsSource,
     sessionTimeoutMs?: number | false,
@@ -411,6 +428,125 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(workflowInput).toMatchObject({
       input: { message: "hello" },
       sessionTimeoutMs: 86_400_000,
+    });
+  });
+
+  it("starts one collector and injects its opaque sink for a root channel with renderers", async () => {
+    vi.stubEnv("VERCEL_URL", "agent.example.com");
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource, 60_000);
+    startMock
+      .mockResolvedValueOnce({ runId: "collector-run" })
+      .mockResolvedValueOnce({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter: activityAdapter(),
+      auth: null,
+      input: { message: "hello" },
+      mode: "conversation",
+    });
+
+    expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
+    const collectorInput = startMock.mock.calls[0]?.[1][0];
+    expect(collectorInput).toMatchObject({
+      serializedContext: expect.any(Object),
+      token: expect.any(String),
+    });
+    expect(collectorInput.token).toHaveLength(43);
+    const workflowInput = startMock.mock.calls[1]?.[1][0];
+    expect(workflowInput.serializedContext[ActivityObserverKey.name]).toEqual({
+      sink: {
+        url: `https://agent.example.com/eve/v1/activity/${collectorInput.token}`,
+        version: 1,
+      },
+    });
+  });
+
+  it("uses independent collector retention when session timeout is disabled", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+      mockBundleAndRun(compiledArtifactsSource, false);
+      startMock
+        .mockResolvedValueOnce({ runId: "collector-run" })
+        .mockResolvedValueOnce({ runId: "driver-run" });
+
+      await buildRuntime(compiledArtifactsSource).createSession({
+        adapter: activityAdapter(),
+        auth: null,
+        input: { message: "hello" },
+        mode: "conversation",
+      });
+
+      expect(startMock.mock.calls[0]?.[0]).toBe(activityCollectorWorkflowReference);
+      expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
+        expiresAt: "2026-01-02T00:00:00.000Z",
+      });
+      expect(startMock.mock.calls[1]?.[1][0]).toMatchObject({ sessionTimeoutMs: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts the root without activity when collector launch fails", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock
+      .mockRejectedValueOnce(new Error("collector failed"))
+      .mockResolvedValueOnce({ runId: "driver-run" });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter: activityAdapter(),
+      auth: null,
+      input: { message: "hello" },
+      mode: "conversation",
+    });
+
+    const workflowInput = startMock.mock.calls[1]?.[1][0];
+    expect(workflowInput.serializedContext[ActivityObserverKey.name]).toBeUndefined();
+  });
+
+  it("cancels the collector when root workflow startup fails", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    const failure = new Error("root start failed");
+    startMock.mockResolvedValueOnce({ runId: "collector-run" }).mockRejectedValueOnce(failure);
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter: activityAdapter(),
+        auth: null,
+        input: { message: "hello" },
+        mode: "conversation",
+      }),
+    ).rejects.toBe(failure);
+
+    expect(cancelRunMock).toHaveBeenCalledWith("world", "collector-run", {
+      cancelReason: "Root session creation did not complete",
+    });
+  });
+
+  it("cancels the collector when continuation ownership rejects the root candidate", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock
+      .mockResolvedValueOnce({ runId: "collector-run" })
+      .mockResolvedValueOnce({ runId: "driver-run" });
+    getHookByTokenMock.mockResolvedValue({ runId: "other-run" });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter: activityAdapter(),
+        auth: null,
+        continuationToken: "slack:thread",
+        input: { message: "hello" },
+        mode: "conversation",
+      }),
+    ).rejects.toBeInstanceOf(RuntimeSessionOwnershipConflictError);
+
+    expect(cancelRunMock).toHaveBeenCalledWith("world", "collector-run", {
+      cancelReason: "Root session creation did not complete",
     });
   });
 

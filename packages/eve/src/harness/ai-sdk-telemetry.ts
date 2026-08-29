@@ -1,7 +1,12 @@
 import { OpenTelemetry } from "#compiled/@ai-sdk/otel/index.js";
 import { registerTelemetry, type Telemetry } from "ai";
+import { createLogger } from "#internal/logging.js";
 
+const log = createLogger("harness.ai-sdk-telemetry");
 let registered = false;
+let eveOtelIntegration: Telemetry | undefined;
+let errorSafeEveOtelIntegration: Telemetry | undefined;
+let warnedMissingEveOtelIntegration = false;
 
 /**
  * Registers the AI SDK OpenTelemetry integration once so that model
@@ -16,7 +21,9 @@ export function ensureOtelIntegration(): void {
     return;
   }
   registered = true;
-  registerTelemetry(new OpenTelemetry({ runtimeContext: true }));
+  eveOtelIntegration = new OpenTelemetry({ runtimeContext: true });
+  errorSafeEveOtelIntegration = telemetryWithoutErrorContent(eveOtelIntegration);
+  registerTelemetry(eveOtelIntegration);
 }
 
 /**
@@ -27,6 +34,54 @@ export function ensureOtelIntegration(): void {
  * adding to them, so anything that passes integrations per call has to carry
  * these forward or they stop receiving events.
  */
-export function getRegisteredTelemetryIntegrations(): readonly Telemetry[] {
-  return globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
+export function getRegisteredTelemetryIntegrations(options?: {
+  readonly sanitizeEveOtelErrors?: boolean;
+}): readonly Telemetry[] {
+  const integrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS ?? [];
+  if (options?.sanitizeEveOtelErrors !== true) return integrations;
+  let matched = false;
+  const sanitized = integrations.map((integration) => {
+    if (integration !== eveOtelIntegration || errorSafeEveOtelIntegration === undefined) {
+      return integration;
+    }
+    matched = true;
+    return errorSafeEveOtelIntegration;
+  });
+  if (!matched && !warnedMissingEveOtelIntegration) {
+    warnedMissingEveOtelIntegration = true;
+    log.warn("could not sanitize eve's AI SDK OpenTelemetry integration", {
+      reason:
+        eveOtelIntegration === undefined
+          ? "eve OpenTelemetry integration was not registered"
+          : "registered integration identity did not match",
+    });
+  }
+  return sanitized;
+}
+
+/** @internal */
+export function telemetryWithoutErrorContent(integration: Telemetry): Telemetry {
+  const genericError = (): Error => new Error("AI SDK operation failed");
+  return new Proxy(integration, {
+    get(target, property) {
+      if (property === "onError" && target.onError !== undefined) {
+        return (event: unknown) =>
+          target.onError!(
+            typeof event === "object" && event !== null
+              ? { ...event, error: genericError() }
+              : genericError(),
+          );
+      }
+      if (property === "onToolExecutionEnd" && target.onToolExecutionEnd !== undefined) {
+        return (event: Parameters<NonNullable<Telemetry["onToolExecutionEnd"]>>[0]) =>
+          target.onToolExecutionEnd!(
+            event.toolOutput.type === "tool-error"
+              ? { ...event, toolOutput: { ...event.toolOutput, error: genericError() } }
+              : event,
+          );
+      }
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }

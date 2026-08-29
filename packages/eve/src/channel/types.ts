@@ -138,6 +138,7 @@ export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
 
 /** Framework-internal caller waiting for one delegated conversation turn. */
 export interface TurnCaller {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly callId: string;
   readonly subagentName: string;
   /** Present when this turn is the executor for a durable background task. */
@@ -373,6 +374,16 @@ export type HookPayload =
  * terminal session result. Conversation sessions use this as their first turn's
  * caller; each continuation supplies the caller for that turn.
  */
+export interface ActivitySinkV1 {
+  readonly url: string;
+  readonly version: 1;
+}
+
+export interface ActivityObserverConfig {
+  readonly sink: ActivitySinkV1;
+  readonly workIdentity?: import("#protocol/activity.js").ActivityWorkIdentityV1;
+}
+
 export interface SessionCallback {
   readonly callId: string;
   readonly subagentName: string;
@@ -456,6 +467,8 @@ export interface RunInput {
    * the caller for their own turn.
    */
   readonly callback?: SessionCallback;
+  /** Private collector capability and current work lineage. */
+  readonly activityObserver?: ActivityObserverConfig;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * re-key the session during the first turn via

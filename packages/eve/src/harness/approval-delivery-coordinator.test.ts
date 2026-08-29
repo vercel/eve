@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import { settleDirectApprovalResponse } from "#harness/approval-candidates.js";
 import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
-import { appendPendingInputBatch } from "#harness/pending-input-batches.js";
+import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -81,5 +81,28 @@ describe("coordinateApprovalDelivery", () => {
     expect(result.stepInput?.inputResponses).toEqual([
       { optionId: "cancel", requestId: request.requestId },
     ]);
+  });
+
+  it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
+    const messageAuth: SessionAuthContext = { ...responder, principalId: "user-2" };
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedSession(),
+      stepInput: {
+        message: "What else can you help with?",
+        messageAuth,
+      },
+      tools: new Map(),
+    });
+
+    expect(result.kind).toBe("continue");
+    expect(result.feedback).toEqual([]);
+    expect(result.stepInput?.message).toBe("What else can you help with?");
+    expect(result.stepInput?.messageAuth).toEqual(messageAuth);
+    expect(
+      getPendingInputBatches(result.session.state).flatMap((batch) =>
+        batch.requests.map((pending) => pending.requestId),
+      ),
+    ).toEqual([request.requestId]);
   });
 });

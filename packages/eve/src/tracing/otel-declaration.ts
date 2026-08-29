@@ -63,9 +63,13 @@ export interface OtelOptions {
    * Process-wide trace and content decision. Boolean returns preserve the
    * existing audience-aware behavior; explicit decisions can disable emission
    * or select input and output capture independently. Defaults to emitting
-   * every audience, with content only for public conversations. The result is a capture ceiling:
-   * per-delivery audience and destination settings can only narrow it. A thrown
-   * error rejects trace production without silencing lifecycle providers.
+   * every audience, with content only for public conversations. The result is
+   * an OpenTelemetry capture ceiling: per-delivery audience and destination
+   * settings can only narrow it. It never changes what authored instrumentation
+   * providers receive. A thrown error rejects trace production without
+   * silencing lifecycle providers. The policy may be invoked more than once
+   * while a new session is being prepared, so it must be deterministic for
+   * consistent results.
    */
   readonly tracePolicy?: TraceCapturePolicy;
   /**

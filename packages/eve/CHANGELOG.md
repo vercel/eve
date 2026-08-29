@@ -1,5 +1,19 @@
 # eve
 
+## 0.47.3
+
+### Patch Changes
+
+- 9d28f89: Identify requests from the `eve dev` terminal UI with an `eve-tui/<version>` User-Agent product token while preserving caller-supplied User-Agent values.
+- cace2c5: Add the internal versioned protocol and reducer used by channel activity renderers.
+- 76f1bbd: Show authored-source rebuild and load progress in the `eve dev` status bar, even when server logs are hidden.
+- 44c6af2: Report root, delegated work, action, and blocker lifecycle to activity collectors.
+- b8a635c: Generated Sign in with Vercel Web Chat starters now place the account control at the top-left, opposite the new-chat action, with a smaller profile image.
+- 05b12e3: Instrumentation-provider content delivery now depends only on each provider's `capture` declaration: providers that declare `capture: "content"` receive full event content regardless of channel audience or OpenTelemetry `tracePolicy`. Separately, a `tracePolicy` that drops the eve trace no longer disables AI SDK telemetry: metadata-only AI spans (model, tokens, and timing, without message content) are still emitted into the ambient Workflow trace, and `agent.session` is not emitted.
+- 17d2445: Keep earlier Slack approval cards visibly settled when several approvals share one message and are answered out of order.
+- 55649a5: Preserve normal follow-up messages while an approval with responder authorization remains pending.
+- 3c8f2fe: Collect and render activity independently from the root agent session.
+
 ## 0.47.2
 
 ### Patch Changes

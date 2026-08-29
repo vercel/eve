@@ -1,5 +1,7 @@
 import { Client } from "#client/index.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { appendUserAgentProduct } from "#internal/user-agent.js";
 import type { CommandLifecycle } from "#cli/shutdown.js";
 import {
   resolveLocalDevelopmentClientOptions,
@@ -117,6 +119,14 @@ function prepareDevelopmentTarget(target: DevelopmentTuiTarget): PreparedDevelop
     : { kind: "remote", target, remote: prepareRemoteTarget(target) };
 }
 
+function withTuiUserAgent(
+  headers: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> {
+  const resolved = new Headers(headers);
+  appendUserAgentProduct(resolved, `eve-tui/${resolveInstalledPackageInfo().version}`);
+  return Object.fromEntries(resolved.entries());
+}
+
 /**
  * Runs the `eve dev` terminal UI against the given server URL until the
  * user exits.
@@ -139,7 +149,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
   } = input;
   const prepared = prepareDevelopmentTarget(target);
   const { serverUrl } = target;
-  const headerOptions = headers === undefined ? {} : { headers };
+  const headerOptions = { headers: withTuiUserAgent(headers) };
 
   const client = new Client(
     prepared.kind === "local"

@@ -13,10 +13,6 @@ import type {
   InstrumentationHooks,
 } from "#harness/instrumentation/lifecycle.js";
 import { channelDeliveryIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
-import {
-  instrumentationHooksForAudience,
-  instrumentationHooksForDecision,
-} from "#harness/instrumentation/content-policy.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 
 interface ChannelDeliveryStartInstrumentation {
@@ -54,12 +50,7 @@ export async function instrumentChannelDelivery(
     const type =
       `channel.delivery.${input.outcome}` as InstrumentationChannelDeliveryTerminalEvent["type"];
     for (const item of active) {
-      const hooks = hooksForContext(
-        input.ctx,
-        input.hooks,
-        normalizeChannelAudience(item.delivery.channelAudience),
-      );
-      await hooks?.publish({
+      await input.hooks.publish({
         agentName: item.agentName,
         delivery: item.delivery,
         error: input.error,
@@ -83,7 +74,7 @@ export async function instrumentChannelDelivery(
   const channelAudience = normalizeChannelAudience(
     input.ctx.get(ChannelInstrumentationKey)?.metadata.audience,
   );
-  const hooks = hooksForContext(input.ctx, input.hooks, channelAudience);
+  const hooks = input.hooks;
   for (const metadata of input.delivery.deliveryMetadata) {
     const payload = input.delivery.payloads[metadata.payloadIndex];
     const delivery = {
@@ -118,17 +109,6 @@ export async function instrumentChannelDelivery(
     });
   }
   if (active.length > 0) input.ctx.set(ActiveChannelDeliveriesKey, active);
-}
-
-function hooksForContext(
-  ctx: AlsContext,
-  hooks: InstrumentationHooks,
-  audience: ReturnType<typeof normalizeChannelAudience>,
-): InstrumentationHooks | undefined {
-  const decision = ctx.get(SessionTraceSeedKey)?.decision;
-  return decision === undefined
-    ? instrumentationHooksForAudience(hooks, audience)
-    : instrumentationHooksForDecision(hooks, decision, audience);
 }
 
 function projectDeliveryInput(payload: DeliverPayload) {

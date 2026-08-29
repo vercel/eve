@@ -2,6 +2,7 @@ import { createInstrumentationDispatcher } from "#harness/instrumentation/dispat
 import type { InstrumentationStateSlot } from "#harness/instrumentation/state.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 
 /**
  * Stable eve identity for one actual model attempt.
@@ -113,8 +114,8 @@ export type InstrumentationActionOutput =
  * some provider asked for it, and a provider that did not ask never receives
  * it — which is the same guarantee a destination that declines content gets,
  * one layer lower and without an OpenTelemetry pipeline to route it through.
- * Runtime audience policy can still lower hosted private or unknown events to
- * metadata before this provider-level projection.
+ * OpenTelemetry trace policy is applied only inside the OTel provider and does
+ * not narrow this provider-level projection.
  */
 export type InstrumentationCapture = "content" | "metadata";
 
@@ -187,7 +188,7 @@ interface InstrumentationChannelDeliveryScope {
   readonly rootSessionId: string;
   readonly sequence?: number;
   readonly sessionId: string;
-  readonly traceSeed?: InstrumentationTraceContext;
+  readonly traceSeed?: InstrumentationTraceSeed;
   readonly turnId?: string;
 }
 
@@ -293,10 +294,13 @@ export interface InstrumentationSessionStartedEvent {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sessionId: string;
-  readonly traceSeed?: InstrumentationTraceContext;
+  readonly traceSeed?: InstrumentationTraceSeed;
 }
 
 export type InstrumentationTraceContext = RuntimeTraceContext;
+export interface InstrumentationTraceSeed extends InstrumentationTraceContext {
+  readonly decision?: InstrumentationDecision;
+}
 
 /**
  * Which tool call dispatched a subagent child. The trace structure alone
@@ -536,6 +540,10 @@ export interface InstrumentationProviderDefinition {
   readonly name: string;
   /** Durable state identity, separate from the human-readable log name. */
   readonly stateNamespace?: string;
+  /** Internal provider-specific projection applied after capture filtering. */
+  readonly projectEvent?: (
+    event: InstrumentationEvent,
+  ) => InstrumentationEvent | PromiseLike<InstrumentationEvent>;
   /** Defaults to `"metadata"`. See {@link InstrumentationCapture}. */
   readonly capture?: InstrumentationCapture;
   readonly events?: {

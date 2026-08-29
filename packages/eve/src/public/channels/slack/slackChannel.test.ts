@@ -192,6 +192,27 @@ function buildSignedInteractionRequest(payload: Record<string, unknown>): Reques
   });
 }
 
+function buildSignedSlashCommandRequest(overrides: Record<string, string> = {}): Request {
+  const body = new URLSearchParams({
+    command: "/ask",
+    text: "summarize this channel",
+    user_id: "U01",
+    user_name: "ada",
+    team_id: "T01",
+    channel_id: "C01",
+    channel_name: "general",
+    enterprise_id: "E01",
+    is_enterprise_install: "true",
+    trigger_id: "trigger-123",
+    response_url: "https://hooks.slack.com/commands/example",
+    ...overrides,
+  }).toString();
+  return buildSignedRequest({
+    body,
+    contentType: "application/x-www-form-urlencoded",
+  });
+}
+
 let mentionCounter = 0;
 
 function buildMentionBody(overrides?: {
@@ -1016,7 +1037,90 @@ describe("slackChannel() default event handlers", () => {
     expect(statuses).toEqual(["Need to inspect the repo.", "Working...", "Fresh turn reasoning."]);
   });
 
-  it("session.failed posts a terminal markdown message with error hint and id", async () => {
+  it("turn.failed posts a semantic error's remediation hint", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    const message =
+      "AI Gateway requires a valid credit card on file to service requests. Please visit https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%3Fmodal%3Dadd-credit-card to continue.";
+    await callEvent(
+      adapter,
+      makeEvent("turn.failed", {
+        code: "MODEL_CALL_FAILED",
+        details: {
+          errorId: "abc-123",
+          hint: "Add a valid credit card or credits in the Vercel dashboard, then retry in the same thread.",
+          message,
+          name: "AI Gateway billing setup required",
+          semanticErrorId: "gateway-billing-required",
+        },
+        message,
+        sequence: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.markdown_text).toBe(
+      [
+        "I hit an error while handling your request.",
+        "",
+        "> ### AI Gateway billing setup required",
+        "> ",
+        `> ${message}`,
+        "> ",
+        "> **How to fix**",
+        "> Add a valid credit card or credits in the Vercel dashboard, then retry in the same thread.",
+        "> ",
+        "> **Error id:**",
+        "> `abc-123`",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps fallback remediation outside a semantic error block without a hint", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("turn.failed", {
+        code: "MODEL_CALL_FAILED",
+        details: {
+          message: "The model did not respond.",
+          name: "Model request failed",
+          semanticErrorId: "model-request-failed",
+        },
+        message: "The model did not respond.",
+        sequence: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.markdown_text).toBe(
+      [
+        "I hit an error while handling your request.",
+        "",
+        "> ### Model request failed",
+        "> ",
+        "> The model did not respond.",
+        "",
+        "Please try again, rephrase, or reach out if it keeps failing.",
+      ].join("\n"),
+    );
+  });
+
+  it("session.failed posts a terminal markdown message with remediation and id", async () => {
     const adapter = withState(
       getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
       THREAD_STATE,
@@ -1027,7 +1131,13 @@ describe("slackChannel() default event handlers", () => {
       adapter,
       makeEvent("session.failed", {
         code: "internal",
-        details: { errorId: "abc-123", name: "WorkflowExecutionFailed" },
+        details: {
+          errorId: "abc-123",
+          hint: "Resolve the configuration issue before trying again.",
+          message: "boom",
+          name: "Workflow execution failed",
+          semanticErrorId: "workflow-execution-failed",
+        },
         message: "boom",
         sessionId: "s1",
       }),
@@ -1036,10 +1146,63 @@ describe("slackChannel() default event handlers", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
-    expect(body.markdown_text).toContain("couldn't recover");
-    expect(body.markdown_text).toContain("Start a new thread");
-    expect(body.markdown_text).toContain("WorkflowExecutionFailed");
-    expect(body.markdown_text).toContain("abc-123");
+    expect(body.markdown_text).toBe(
+      [
+        "This session couldn't recover from an error.",
+        "",
+        "> ### Workflow execution failed",
+        "> ",
+        "> boom",
+        "> ",
+        "> **How to fix**",
+        "> Resolve the configuration issue before trying again.",
+        "> ",
+        "> **Error id:**",
+        "> `abc-123`",
+        "",
+        "Start a new thread to continue — I can't pick this one back up.",
+      ].join("\n"),
+    );
+  });
+
+  it("session.failed does not repeat its fallback remediation without a hint", async () => {
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await callEvent(
+      adapter,
+      makeEvent("session.failed", {
+        code: "internal",
+        details: {
+          errorId: "abc-123",
+          message: "boom",
+          name: "Workflow execution failed",
+          semanticErrorId: "workflow-execution-failed",
+        },
+        message: "boom",
+        sessionId: "s1",
+      }),
+      ctx,
+    );
+
+    const body = parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit);
+    expect(body.markdown_text).toBe(
+      [
+        "This session couldn't recover from an error.",
+        "",
+        "> ### Workflow execution failed",
+        "> ",
+        "> boom",
+        "> ",
+        "> **Error id:**",
+        "> `abc-123`",
+        "",
+        "Resolve the issue, then start a new thread — I can't pick this one back up.",
+      ].join("\n"),
+    );
   });
 
   it("actions.requested typing indicator is truncated to Slack's length cap", async () => {
@@ -2620,6 +2783,123 @@ describe("slackChannel() HITL interaction pipeline", () => {
     } else {
       process.env.SLACK_BOT_TOKEN = ORIGINAL_BOT_TOKEN;
     }
+  });
+
+  it("delivers slash commands with workspace-scoped Slack API access", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const onSlashCommand = vi.fn(async (command, ctx) => {
+      expect(command).toEqual({
+        command: "/ask",
+        text: "summarize this channel",
+        user: { id: "U01", username: "ada" },
+        teamId: "T01",
+        channelId: "C01",
+        channelName: "general",
+        enterpriseId: "E01",
+        isEnterpriseInstall: true,
+        triggerId: "trigger-123",
+        responseUrl: "https://hooks.slack.com/commands/example",
+      });
+      expect(ctx.slack.teamId).toBe("T01");
+      await ctx.slack.request("auth.test", {});
+    });
+    const channel = slackChannel({ credentials: { botToken }, onSlashCommand });
+
+    const { response, waitUntil } = await firePost(channel, buildSignedSlashCommandRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(onSlashCommand).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T01" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://slack.com/api/auth.test");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe("POST");
+  });
+
+  it("acknowledges slash commands without a configured handler", async () => {
+    const channel = slackChannel({});
+
+    const { response, waitUntil } = await firePost(channel, buildSignedSlashCommandRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(waitUntil).not.toHaveBeenCalled();
+  });
+
+  it("delivers message shortcuts with workspace-scoped Slack API access", async () => {
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const onShortcut = vi.fn(async (shortcut, ctx) => {
+      expect(shortcut).toMatchObject({
+        type: "message_action",
+        callbackId: "summarize_message",
+        triggerId: "trigger-123",
+        channelId: "C01",
+        message: {
+          text: "Please summarize this",
+          ts: "1700000000.000010",
+          threadTs: "1700000000.000001",
+          userId: "U02",
+        },
+        user: { id: "U01", username: "ada" },
+        teamId: "T_ACTOR",
+      });
+      expect(ctx.slack.teamId).toBe("T_ACTOR");
+      await ctx.slack.request("auth.test", {});
+    });
+    const channel = slackChannel({ credentials: { botToken }, onShortcut });
+
+    const { response, waitUntil } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "message_action",
+        callback_id: "summarize_message",
+        trigger_id: "trigger-123",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+        channel: { id: "C01" },
+        message: {
+          text: "Please summarize this",
+          ts: "1700000000.000010",
+          thread_ts: "1700000000.000001",
+          user: "U02",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(onShortcut).toHaveBeenCalledTimes(1);
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://slack.com/api/auth.test");
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe("POST");
+  });
+
+  it("delivers global shortcuts without channel or message fields", async () => {
+    const onShortcut = vi.fn();
+    const channel = slackChannel({ onShortcut });
+
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "shortcut",
+        callback_id: "new_request",
+        trigger_id: "trigger-456",
+        team: { id: "T01" },
+        user: { id: "U01", name: "ada" },
+      }),
+    );
+
+    expect(onShortcut).toHaveBeenCalledWith(
+      {
+        type: "shortcut",
+        callbackId: "new_request",
+        triggerId: "trigger-456",
+        teamId: "T01",
+        user: { id: "U01", username: undefined, name: "ada" },
+      },
+      expect.objectContaining({ slack: expect.any(Object) }),
+    );
   });
 
   it("cancels the interaction's Slack thread from onInteraction", async () => {

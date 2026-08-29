@@ -1,4 +1,5 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import {
@@ -31,10 +32,19 @@ export async function startRemoteSubagent(input: {
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
+  readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
   const { action } = input;
+  const activityObserver = deriveChildActivityObserverConfig({
+    activityObserver: input.activityObserver,
+    callId: action.callId,
+    kind: "remote-agent",
+    name: action.remoteAgentName,
+    parentSessionId: input.session.sessionId,
+    parentTurnId: input.batchEvent.turnId,
+  });
 
   // Preflight resolution failures happen before ownership exists, so they
   // reject without touching the handle store.
@@ -92,6 +102,7 @@ export async function startRemoteSubagent(input: {
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
+      activityObserver,
       remote: resolvedRemote,
       session: input.session,
     });

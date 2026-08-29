@@ -396,6 +396,18 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
 /** Interaction-scoped context handed to `slackChannel({ onInteraction })`. */
 export interface SlackInteractionContext extends SlackContext, SlackSessionOperations {}
 
+/** Workspace-scoped context handed to `slackChannel({ onShortcut })`. */
+export interface SlackShortcutContext {
+  /** Slack workspace identity and raw Web API escape hatch. */
+  readonly slack: SlackWorkspaceHandle;
+}
+
+/** Workspace-scoped context handed to `slackChannel({ onSlashCommand })`. */
+export interface SlackSlashCommandContext {
+  /** Slack workspace identity and raw Web API escape hatch. */
+  readonly slack: SlackWorkspaceHandle;
+}
+
 /** Context handed to `slackChannel({ onInputResponse })` before eve resumes HITL. */
 export interface SlackInputResponseContext extends SlackContext {
   /** Auth derived from the Slack user who submitted the signed interaction. */
@@ -433,7 +445,7 @@ export interface SlackInteractionAction {
   readonly user: SlackInteractionUser;
 }
 
-/** Slack actor on {@link SlackInteractionAction.user}, mirroring `body.user`. */
+/** Slack actor on an interactive payload, mirroring `body.user`. */
 export interface SlackInteractionUser {
   readonly id: string;
   /** Modern canonical display handle. */
@@ -441,6 +453,49 @@ export interface SlackInteractionUser {
   /** Legacy display handle, kept for older workspaces. */
   readonly name?: string;
 }
+
+/** Decoded Slack slash command invocation. */
+export interface SlackSlashCommand {
+  /** Configured command name, including its leading slash. */
+  readonly command: string;
+  readonly text: string;
+  readonly user: SlackInteractionUser;
+  readonly teamId?: string;
+  readonly channelId: string;
+  readonly channelName?: string;
+  readonly enterpriseId?: string;
+  readonly isEnterpriseInstall: boolean;
+  readonly triggerId?: string;
+  readonly responseUrl?: string;
+}
+
+/** Message selected through a Slack message shortcut. */
+export interface SlackShortcutMessage {
+  readonly text: string;
+  readonly ts: string;
+  readonly threadTs?: string;
+  readonly userId?: string;
+}
+
+/** Decoded Slack message shortcut or global shortcut. */
+export type SlackShortcut =
+  | {
+      readonly type: "message_action";
+      readonly callbackId: string;
+      readonly triggerId: string;
+      readonly user: SlackInteractionUser;
+      readonly teamId?: string;
+      readonly channelId: string;
+      readonly message: SlackShortcutMessage;
+      readonly responseUrl?: string;
+    }
+  | {
+      readonly type: "shortcut";
+      readonly callbackId: string;
+      readonly triggerId: string;
+      readonly user: SlackInteractionUser;
+      readonly teamId?: string;
+    };
 
 /** Decoded eve-owned HITL response submitted through Slack interactivity. */
 export type SlackInputResponseSubmission =
@@ -650,6 +705,25 @@ export interface SlackChannelConfig {
     action: SlackInteractionAction,
     ctx: SlackInteractionContext,
   ): void | Promise<void>;
+
+  /**
+   * Handles Slack message shortcuts (`message_action`) and global shortcuts
+   * (`shortcut`) with workspace-scoped Slack Web API access.
+   *
+   * eve returns `200 OK` immediately and keeps the handler alive through
+   * `waitUntil()`. Errors are caught and logged.
+   */
+  onShortcut?(shortcut: SlackShortcut, ctx: SlackShortcutContext): void | Promise<void>;
+
+  /**
+   * Handles Slack slash commands configured with this channel's webhook route.
+   * The command includes the configured command name, arguments, invoking user,
+   * channel, workspace, trigger ID, and response URL.
+   *
+   * eve returns an empty `200 OK` immediately and keeps the handler alive
+   * through `waitUntil()`. Errors are caught and logged.
+   */
+  onSlashCommand?(command: SlackSlashCommand, ctx: SlackSlashCommandContext): void | Promise<void>;
 
   /**
    * Authorizes an eve-owned HITL answer before the pending input resolves.

@@ -1,6 +1,7 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type {
+  ActivityObserverConfig,
   SessionAuthContext,
   SessionCallback,
   SessionCapabilities,
@@ -8,6 +9,10 @@ import type {
 } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
+import {
+  parseActivityObserverField,
+  validateActivityObserverBinding,
+} from "#eve-channel/activity-observer-request.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
 import {
   EVE_MESSAGE_STREAM_CONTENT_TYPE,
@@ -28,6 +33,7 @@ import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 interface ParsedCreateBody {
+  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
   message: string | UserContent;
@@ -76,6 +82,13 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const capabilities = parseCapabilitiesField(payload.capabilities);
   if (capabilities instanceof Response) return capabilities;
 
+  const activityObserver = parseActivityObserverField(payload.activityObserver);
+  if (activityObserver instanceof Response) return activityObserver;
+  if (activityObserver !== undefined) {
+    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
+    if (observerRejection !== undefined) return observerRejection;
+  }
+
   const mode = parseModeField(payload.mode);
   if (mode instanceof Response) return mode;
 
@@ -98,6 +111,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   }
 
   const result: ParsedCreateBody = {
+    activityObserver,
     callback,
     capabilities,
     message,
@@ -110,6 +124,7 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 }
 
 interface ParsedSessionMessageBody {
+  activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   message?: string | UserContent;
   inputResponses?: readonly ValidatedInputResponse[];
@@ -128,6 +143,12 @@ export function parseSessionMessageBody(
   if (message instanceof Response) return message;
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
+  const activityObserver = parseActivityObserverField(payload.activityObserver);
+  if (activityObserver instanceof Response) return activityObserver;
+  if (activityObserver !== undefined) {
+    const observerRejection = validateActivityObserverBinding(activityObserver, callback);
+    if (observerRejection !== undefined) return observerRejection;
+  }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
   const context = parseClientContextField(payload.clientContext);
@@ -154,7 +175,15 @@ export function parseSessionMessageBody(
     );
   }
 
-  return { callback, message, inputResponses, context, outputSchema, turnPolicy };
+  return {
+    activityObserver,
+    callback,
+    message,
+    inputResponses,
+    context,
+    outputSchema,
+    turnPolicy,
+  };
 }
 
 interface ParsedCancelTurnBody {

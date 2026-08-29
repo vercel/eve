@@ -15,6 +15,7 @@ import {
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,
   deriveAgentId,
@@ -25,7 +26,13 @@ import type { HarnessSession } from "#harness/types.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import * as taskRunControl from "#execution/tasks/parent/run-parent.js";
-import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import {
+  ActivityObserverKey,
+  AuthKey,
+  InitiatorAuthKey,
+  SessionIdKey,
+  SessionKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type {
@@ -182,6 +189,12 @@ describe("dispatchRuntimeActionsStep child starts", () => {
   it("plans an in-step agent call from the live context", async () => {
     const session = createBaseSession();
     const ctx = new ContextContainer();
+    ctx.set(ActivityObserverKey, {
+      sink: {
+        url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+        version: 1,
+      },
+    });
     ctx.set(AuthKey, null);
     ctx.set(ChannelKey, ADAPTER);
     ctx.set(BundleKey, {
@@ -228,6 +241,11 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         target: expect.objectContaining({ kind: "remote" }),
       }),
     ]);
+    expect(prepared.activityObserver?.workIdentity).toMatchObject({
+      id: deriveRootTurnActivityWorkId({ sessionId: session.sessionId, turnId: "turn-1" }),
+      sessionId: session.sessionId,
+      turnId: "turn-1",
+    });
     expect(mocks.deserializeContext).not.toHaveBeenCalled();
   });
 

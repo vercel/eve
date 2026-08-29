@@ -182,8 +182,15 @@ async function dispatchToProvider(
   const state = instrumentationStateSlot(stateNamespace, event.idempotencyKey, owner);
   try {
     const settled = await withTimeout(
-      () =>
-        (handler as InstrumentationEventHandler<InstrumentationEvent>)(visibleEvent(), { state }),
+      async () => {
+        const eventForProvider = visibleEvent();
+        await (handler as InstrumentationEventHandler<InstrumentationEvent>)(
+          provider.projectEvent === undefined
+            ? eventForProvider
+            : await provider.projectEvent(eventForProvider),
+          { state },
+        );
+      },
       handlerTimeoutMs,
       () => {
         state.revoke();

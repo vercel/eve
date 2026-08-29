@@ -287,17 +287,31 @@ export function setPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
+  const active = resolveActiveAuthorizationChallenges(value.challenges);
   const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
-  const superseded = getSupersededAuthorizationChallenges(sessionState, value.challenges);
+  const superseded = getSupersededAuthorizationChallenges(sessionState, active);
   return {
     ...sessionState,
     [PENDING_AUTHORIZATION_KEY]: {
-      challenges: [
-        ...previous.filter((challenge) => !superseded.includes(challenge)),
-        ...value.challenges,
-      ],
+      challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
     },
   };
+}
+
+/** Keeps the last challenge for each authorization name and principal scope. */
+export function resolveActiveAuthorizationChallenges(
+  challenges: readonly AuthorizationChallenge[],
+): readonly AuthorizationChallenge[] {
+  return challenges.filter(
+    (candidate, index) =>
+      !challenges
+        .slice(index + 1)
+        .some(
+          (replacement) =>
+            candidate.name === replacement.name &&
+            samePrincipal(candidate.principal, replacement.principal),
+        ),
+  );
 }
 
 /** Existing same-scope attempts replaced by newer attempts for the same principal. */

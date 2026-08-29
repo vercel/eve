@@ -1,10 +1,10 @@
 ---
 title: "Slack"
-description: "Reach your agent from Slack app mentions and DMs with Vercel Connect-managed credentials, threaded replies, and interactive buttons."
+description: "Reach your agent from Slack app mentions, DMs, slash commands, and interactive callbacks."
 type: integration
 ---
 
-The Slack channel puts your agent inside a workspace. It answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns human-in-the-loop (HITL) prompts into buttons. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview) for the contract this builds on.
+The Slack channel puts your agent inside a workspace. It handles `@mentions`, DMs, slash commands, shortcuts, and interactive callbacks; replies in threads; shows typing indicators; and turns human-in-the-loop (HITL) prompts into buttons. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -57,7 +57,8 @@ This option does not create or install the Slack app. Configure it in [Slack app
 2. Install or reinstall the app, copy its Bot User OAuth Token to `SLACK_BOT_TOKEN`, and copy the signing secret from **Basic Information** to `SLACK_SIGNING_SECRET`.
 3. Set both values in `.env.local` for local development or in the target runtime's environment, then start or deploy the agent at a public URL.
 4. Under **Event Subscriptions**, set the Request URL to `https://your-agent.example/eve/v1/slack`. Subscribe to `app_mention`, plus `message.im` for DMs.
-5. Under **Interactivity & Shortcuts**, use the same Request URL when the agent uses buttons or HITL prompts.
+5. Under **Interactivity & Shortcuts**, use the same Request URL when the agent uses buttons, shortcuts, or HITL prompts.
+6. Under **Slash Commands**, create each command your app handles and use the same Request URL.
 
 Add the matching message events and history scopes if you also want unmentioned thread replies, as described in [Continue conversations without repeated mentions](#continue-conversations-without-repeated-mentions).
 
@@ -155,6 +156,25 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
 
 `onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+
+Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
+
+Use `onSlashCommand(command, ctx)` for commands configured under **Slash Commands** in your Slack app. The handler receives the command name, argument text, invoking user, channel, workspace, trigger ID, and response URL. It also receives workspace-scoped Slack API access. eve acknowledges slash commands immediately with an empty `200 OK` response and keeps the handler alive in the background:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onSlashCommand(command, ctx) {
+    if (command.command !== "/ask") return;
+    await ctx.slack.request("chat.postEphemeral", {
+      channel: command.channelId,
+      user: command.user.id,
+      text: `Received: ${command.text}`,
+    });
+  },
+});
+```
 
 The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
@@ -360,11 +380,11 @@ const session = await ctx.resolveSession({ target });
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
-`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration; eve can only handle events Slack sends.
+`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`; add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration so other callbacks reach their handlers.
 
 ### Slack API calls outside a handler
 
-Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside an `events` handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
+Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, `onSlashCommand`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside an `events` handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
 messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 

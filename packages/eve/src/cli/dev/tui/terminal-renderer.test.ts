@@ -3087,6 +3087,51 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("shows delayed build progress and immediate completion when logs are hidden", () => {
+    vi.useFakeTimers();
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      unicode: true,
+    });
+    try {
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+      process.stdout.write(
+        `${formatChangeDetectedLogLine("/app", [
+          { event: "change", path: "/app/agent/instructions.md" },
+        ])}\n`,
+      );
+      expect(renderer.logDisplayMode()).toBe("none");
+      expect(screen.snapshot()).not.toContain("agent/instructions.md changed");
+      expect(screen.snapshot()).not.toContain("○ stdout");
+
+      vi.advanceTimersByTime(250);
+      expect(screen.snapshot()).toContain("▪ agent/instructions.md updating…");
+
+      process.stdout.write(`${AUTHORED_ARTIFACTS_UPDATED_LOG_LINE}\n`);
+      expect(screen.snapshot()).toContain("✓ agent/instructions.md updated");
+
+      vi.advanceTimersByTime(4_000);
+      expect(screen.snapshot()).not.toContain("✓ agent/instructions.md updated");
+
+      process.stdout.write(
+        `${formatChangeDetectedLogLine("/app", [
+          { event: "change", path: "/app/agent/agent.ts" },
+        ])}\n`,
+      );
+      process.stdout.write(`${AUTHORED_ARTIFACTS_UPDATED_LOG_LINE}\n`);
+      expect(screen.snapshot()).toContain("✓ agent/agent.ts updated");
+      expect(screen.snapshot()).not.toContain("agent/agent.ts updating");
+    } finally {
+      renderer.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   it("hides logs by default, then reveals buffered lines at their original positions", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();

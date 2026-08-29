@@ -7,6 +7,7 @@ import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
   readActionTraceContext,
+  readCurrentSessionTraceDecision,
   readSessionTraceContext,
 } from "#tracing/agent-trace-context-store.js";
 
@@ -116,6 +117,37 @@ describe("readSessionTraceContext", () => {
     expect(readSessionTraceContext(serialized, "session-2")).toBeUndefined();
     expect(readSessionTraceContext({}, "session-1")).toBeUndefined();
   });
+
+  it("preserves a stored decision when the legacy context has no trace seed", async () => {
+    const context = new ContextContainer();
+    await contextStorage.run(context, () => {
+      new ContextAgentTraceStateStore().setSession("session-1", {
+        context: spanContext("1", "2"),
+        decision: { action: "record", recordInputs: false, recordOutputs: true },
+        rootSessionId: "session-1",
+      });
+    });
+
+    expect(readSessionTraceContext(await serializeContext(context), "session-1")).toEqual({
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+    });
+  });
+});
+
+describe("readCurrentSessionTraceDecision", () => {
+  it("reads the decision bound in the current worker context", async () => {
+    const context = new ContextContainer();
+    const decision = { action: "record", recordInputs: false, recordOutputs: true } as const;
+    await contextStorage.run(context, () => {
+      new ContextAgentTraceStateStore().setSession("session-1", {
+        context: spanContext("1", "2"),
+        decision,
+        rootSessionId: "session-1",
+      });
+      expect(readCurrentSessionTraceDecision("session-1")).toEqual(decision);
+    });
+  });
 });
 
 describe("readActionTraceContext", () => {
@@ -152,6 +184,37 @@ describe("readActionTraceContext", () => {
       traceId: "1".repeat(32),
     });
     expect(readActionTraceContext(serialized, "session-1", "turn-1", "missing")).toBeUndefined();
+  });
+
+  it("propagates the stored session decision through an action context", async () => {
+    const context = new ContextContainer();
+    await contextStorage.run(context, () => {
+      const store = new ContextAgentTraceStateStore();
+      store.setSession("session-1", {
+        context: spanContext("1", "2"),
+        decision: { action: "record", recordInputs: true, recordOutputs: false },
+        rootSessionId: "session-1",
+      });
+      store.setAction("action-1", {
+        attemptIndex: 0,
+        callId: "call-1",
+        kind: "subagent-call",
+        name: "researcher",
+        parent: spanContext("1", "2"),
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        spanId: "3".repeat(16),
+        startTimeMs: 1_700_000_000_000,
+        stepIndex: 0,
+        turnId: "turn-1",
+      });
+    });
+
+    expect(
+      readActionTraceContext(await serializeContext(context), "session-1", "turn-1", "call-1"),
+    ).toMatchObject({
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+    });
   });
 });
 

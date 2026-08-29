@@ -33,6 +33,80 @@ const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
 const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
 
+interface SlackSemanticErrorSummary {
+  readonly hint?: string;
+  readonly message: string;
+  readonly name: string;
+}
+
+function extractSemanticErrorSummary(event: {
+  readonly details?: unknown;
+  readonly message?: string;
+}): SlackSemanticErrorSummary | null {
+  if (typeof event.details !== "object" || event.details === null) return null;
+  const details = event.details as {
+    readonly hint?: unknown;
+    readonly message?: unknown;
+    readonly name?: unknown;
+    readonly semanticErrorId?: unknown;
+  };
+  if (
+    typeof details.semanticErrorId !== "string" ||
+    details.semanticErrorId.length === 0 ||
+    typeof details.name !== "string" ||
+    details.name.length === 0
+  ) {
+    return null;
+  }
+
+  const message =
+    typeof details.message === "string" && details.message.trim().length > 0
+      ? details.message.trim()
+      : event.message?.trim();
+  if (!message) return null;
+
+  const hint =
+    typeof details.hint === "string" && details.hint.trim().length > 0
+      ? details.hint.trim()
+      : undefined;
+  return hint === undefined
+    ? { message, name: details.name }
+    : { hint, message, name: details.name };
+}
+
+function formatSemanticErrorBlock(
+  summary: SlackSemanticErrorSummary,
+  errorId: string | undefined,
+): string {
+  const lines = [
+    `### ${summary.name}`,
+    "",
+    summary.message,
+    ...(summary.hint ? ["", "**How to fix**", summary.hint] : []),
+    ...(errorId ? ["", "**Error id:**", `\`${errorId}\``] : []),
+  ];
+  return lines
+    .flatMap((line) => line.split("\n"))
+    .map((line) => (line.length > 0 ? `> ${line}` : "> "))
+    .join("\n");
+}
+
+function formatSemanticErrorReply(input: {
+  readonly errorId: string | undefined;
+  readonly followUp?: string;
+  readonly introduction: string;
+  readonly nextStep: string;
+  readonly summary: SlackSemanticErrorSummary;
+}): string {
+  return [
+    `${input.introduction}.`,
+    "",
+    formatSemanticErrorBlock(input.summary, input.errorId),
+    ...(!input.summary.hint ? ["", input.nextStep] : []),
+    ...(input.summary.hint && input.followUp ? ["", input.followUp] : []),
+  ].join("\n");
+}
+
 function blockContainsRequestAction(block: unknown, requestId: string): boolean {
   if (typeof block !== "object" || block === null) return false;
   const candidate = block as { actions?: unknown; elements?: unknown };
@@ -235,6 +309,11 @@ export const defaultEvents: SlackChannelInternalEvents = {
     });
     const next = { ...cards };
     delete next[event.requestId];
+    for (const [requestId, pendingCard] of Object.entries(next)) {
+      if (pendingCard.messageTs === card.messageTs) {
+        next[requestId] = { ...pendingCard, messageBlocks: blocks };
+      }
+    }
     channel.state.pendingApprovalCards = next;
   },
 
@@ -294,11 +373,24 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "turn.failed"(event, channel, _ctx) {
-    const hint = formatErrorHint(event);
     const errorId = extractErrorId(event.details);
+    const semanticSummary = extractSemanticErrorSummary(event);
+    if (semanticSummary !== null) {
+      await channel.thread.post(
+        formatSemanticErrorReply({
+          errorId,
+          introduction: "I hit an error while handling your request",
+          nextStep: "Please try again, rephrase, or reach out if it keeps failing.",
+          summary: semanticSummary,
+        }),
+      );
+      return;
+    }
+
+    const summary = formatErrorHint(event);
     await channel.thread.post(
       [
-        `I hit an error while handling your request${hint}.`,
+        `I hit an error while handling your request${summary}.`,
         "",
         "Please try again, rephrase, or reach out if it keeps failing.",
         ...(errorId ? ["", `_Error id: \`${errorId}\`_`] : []),
@@ -307,11 +399,25 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "session.failed"(event, channel) {
-    const hint = formatErrorHint(event);
     const errorId = extractErrorId(event.details);
+    const semanticSummary = extractSemanticErrorSummary(event);
+    if (semanticSummary !== null) {
+      await channel.thread.post(
+        formatSemanticErrorReply({
+          errorId,
+          followUp: "Start a new thread to continue — I can't pick this one back up.",
+          introduction: "This session couldn't recover from an error",
+          nextStep: "Resolve the issue, then start a new thread — I can't pick this one back up.",
+          summary: semanticSummary,
+        }),
+      );
+      return;
+    }
+
+    const summary = formatErrorHint(event);
     await channel.thread.post(
       [
-        `This session couldn't recover from an error${hint}.`,
+        `This session couldn't recover from an error${summary}.`,
         "",
         "Start a new thread to continue — I can't pick this one back up.",
         ...(errorId ? ["", `_Error id: \`${errorId}\`_`] : []),
