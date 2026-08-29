@@ -4,6 +4,12 @@ import { defineAgent } from "eve";
 export default defineAgent({
   ...e2eAgentConfig({
     mock: ({ lastUserMessage, toolResults, tools }) => {
+      if (lastUserMessage?.includes("DYNAMIC_MCP_CONNECTION_E2E")) {
+        const search = tools.find((tool) => tool.name === "connection_search");
+        return search?.description?.includes("dynamic-mcp")
+          ? "DYNAMIC_MCP_CONNECTION_FOUND"
+          : "DYNAMIC_MCP_CONNECTION_MISSING";
+      }
       if (!lastUserMessage?.includes("DYNAMIC_CONNECTION_E2E")) {
         return `Mock reply: ${lastUserMessage ?? ""}`;
       }

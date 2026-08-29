@@ -6,7 +6,7 @@ import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { ConnectionRegistryImpl } from "#runtime/connections/registry.js";
-import type { ResolvedAgent, ResolvedDynamicConnectionResolver } from "#runtime/types.js";
+import type { ResolvedDynamicConnectionResolver } from "#runtime/types.js";
 
 describe("bindDynamicConnections", () => {
   it("rehydrates the active session and turn before a resumed step", async () => {
@@ -64,14 +64,24 @@ describe("bindDynamicConnections", () => {
   });
 });
 
-function createLifecycle(resolver: ResolvedDynamicConnectionResolver) {
+function createLifecycle(
+  resolver: Pick<ResolvedDynamicConnectionResolver, "eventNames" | "events">,
+) {
   const ctx = new ContextContainer();
   ctx.set(SessionIdKey, "session-1");
   const registry = new ConnectionRegistryImpl([]);
   ctx.set(ConnectionRegistryKey, registry);
   const lifecycle = bindDynamicConnections(ctx, {
-    dynamicConnectionResolvers: [resolver],
-  } as ResolvedAgent);
+    dynamicConnectionResolvers: [
+      {
+        ...resolver,
+        logicalPath: "connections/accounts.ts",
+        slug: "accounts",
+        sourceId: "connections/accounts",
+        sourceKind: "module",
+      },
+    ],
+  });
   return { lifecycle, registry };
 }
 

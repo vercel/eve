@@ -13,7 +13,10 @@ import {
 import type { ResolvedAgent } from "#runtime/types.js";
 
 /** Binds dynamic connection lifecycle dispatch to one execution context. */
-export function bindDynamicConnections(ctx: ContextContainer, agent: ResolvedAgent) {
+export function bindDynamicConnections(
+  ctx: ContextContainer,
+  agent: Pick<ResolvedAgent, "dynamicConnectionResolvers">,
+) {
   const resolvers = agent.dynamicConnectionResolvers ?? [];
   const dispatch = (
     event: UnstampedMessageStreamEvent,
