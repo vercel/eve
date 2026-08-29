@@ -21,6 +21,7 @@ import {
   publishedBenchmark,
   publishedBenchmarkModels,
   publishedExperimentId,
+  harnessId,
 } from "../lib/benchmark-config.ts";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -80,7 +81,7 @@ for (const benchmark of benchmarks) {
         caseId,
         status: status ?? "current",
         ...result,
-        ...meanRunMetrics(summaryPath, benchmark.model),
+        ...meanRunMetrics(summaryPath, benchmark.model, experimentId, caseId),
       });
     }
   }
@@ -98,7 +99,7 @@ const output = {
   experiments: benchmarks.flatMap((benchmark) =>
     authoringTreatments.map((treatment) => ({
       id: publishedExperimentId(benchmark, treatment),
-      groupId: `${benchmark.id}-opencode`,
+      groupId: `${benchmark.id}-${harnessId(benchmark.harness)}`,
       model: benchmark.model,
       modelDisplayName: benchmark.displayName,
       harness: benchmark.harness,
@@ -131,12 +132,26 @@ function readPreviousResults() {
   const supersededExperiments = (previous.experiments ?? []).filter((experiment) =>
     supersededExperimentIds.has(experiment.id),
   );
+  const archivedExperimentIds = new Set(supersededExperiments.map((experiment) => experiment.id));
   const supersededResults = (previous.results ?? []).filter((result) =>
-    supersededExperimentIds.has(result.experimentId),
+    archivedExperimentIds.has(result.experimentId),
   );
-  const retained = (previous.previouslyMeasured ?? []).filter(
-    (measurement) => Array.isArray(measurement.experiments) && Array.isArray(measurement.results),
-  );
+  const retained = (previous.previouslyMeasured ?? [])
+    .filter(
+      (measurement) => Array.isArray(measurement.experiments) && Array.isArray(measurement.results),
+    )
+    .map((measurement) => {
+      const experiments = measurement.experiments.filter((experiment) =>
+        supersededExperimentIds.has(experiment.id),
+      );
+      const experimentIds = new Set(experiments.map((experiment) => experiment.id));
+      return {
+        ...measurement,
+        experiments,
+        results: measurement.results.filter((result) => experimentIds.has(result.experimentId)),
+      };
+    })
+    .filter((measurement) => measurement.experiments.length > 0);
   if (supersededExperiments.length === 0) return retained;
 
   return [
@@ -212,8 +227,33 @@ function latestValidResult(experimentId, caseId) {
   return undefined;
 }
 
-function meanRunMetrics(summaryPath, model) {
-  const runs = readdirSync(dirname(summaryPath), { withFileTypes: true })
+function meanRunMetrics(summaryPath, model, experimentId, caseId) {
+  const performanceRuns = runMetrics(summaryPath);
+  const costSamplePath = latestValidResult(`${experimentId}-cost-sample`, caseId)?.summaryPath;
+  const costSampleRuns = costSamplePath === undefined ? [] : runMetrics(costSamplePath);
+  const costSampleUsage = costSampleRuns.flatMap((run) => (run.usage === null ? [] : [run.usage]));
+  const performanceUsage = performanceRuns.flatMap((run) =>
+    run.usage === null ? [] : [run.usage],
+  );
+  const result = {};
+  const pricing = modelPricing[model];
+  if (pricing !== undefined && costSampleUsage.length > 0) {
+    result.meanEstimatedListCostUsd = mean(
+      costSampleUsage.map((value) => priceUsage(value, pricing)),
+    );
+    result.costSampleRuns = costSampleUsage.length;
+  }
+  if (performanceUsage.length > 0) {
+    result.meanTokenConsumption = mean(performanceUsage.map(tokenConsumption));
+  }
+  if (performanceRuns.length > 0) {
+    result.meanToolInvocationCount = mean(performanceRuns.map((run) => run.toolInvocations));
+  }
+  return result;
+}
+
+function runMetrics(summaryPath) {
+  return readdirSync(dirname(summaryPath), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^run-\d+$/u.test(entry.name))
     .flatMap((entry) => {
       const transcriptPath = join(dirname(summaryPath), entry.name, "transcript-raw.jsonl");
@@ -221,19 +261,6 @@ function meanRunMetrics(summaryPath, model) {
       const raw = readFileSync(transcriptPath, "utf8");
       return [{ usage: extractRunUsage(raw), toolInvocations: countToolInvocations(raw) }];
     });
-  const usage = runs.flatMap((run) => (run.usage === null ? [] : [run.usage]));
-  const result = {};
-  const pricing = modelPricing[model];
-  if (pricing !== undefined && usage.length > 0) {
-    result.meanEstimatedListCostUsd = mean(usage.map((value) => priceUsage(value, pricing)));
-  }
-  if (usage.length > 0) {
-    result.meanTokenConsumption = mean(usage.map(tokenConsumption));
-  }
-  if (runs.length > 0) {
-    result.meanToolInvocationCount = mean(runs.map((run) => run.toolInvocations));
-  }
-  return result;
 }
 
 function mean(values) {

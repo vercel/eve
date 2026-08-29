@@ -498,13 +498,35 @@ async function withDeadline<T>(promise: Promise<T>, millis: number): Promise<T |
   }
 }
 
-function addUsage(total: Record<string, number>, value: unknown): void {
+type MutableAuthoringTokenUsage = {
+  -readonly [Key in keyof AuthoringTokenUsage]: AuthoringTokenUsage[Key];
+};
+
+export function addUsage(total: MutableAuthoringTokenUsage, value: unknown): void {
   if (typeof value !== "object" || value === null) return;
-  for (const [field, amount] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof amount === "number" && Number.isFinite(amount) && total[field] !== undefined) {
-      total[field] += amount;
-    }
+  const usage = value as Record<string, unknown>;
+  const input = usage.inputTokens;
+  const output = usage.outputTokens;
+  if (typeof input === "object" && input !== null) {
+    const tokens = input as Record<string, unknown>;
+    total.inputTokens += usageNumber(tokens.noCache ?? tokens.total);
+    total.cachedInputTokens += usageNumber(tokens.cacheRead);
+    total.cacheWriteTokens += usageNumber(tokens.cacheWrite);
+  } else {
+    total.inputTokens += usageNumber(input);
   }
+  if (typeof output === "object" && output !== null) {
+    total.outputTokens += usageNumber((output as Record<string, unknown>).total);
+  } else {
+    total.outputTokens += usageNumber(output);
+  }
+  total.reasoningTokens += usageNumber(usage.reasoningTokens);
+  total.cachedInputTokens += usageNumber(usage.cachedInputTokens);
+  total.cacheWriteTokens += usageNumber(usage.cacheWriteTokens);
+}
+
+function usageNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function createHarness(harness: AuthoringBenchmarkModel["harness"], model: string): HarnessV1 {

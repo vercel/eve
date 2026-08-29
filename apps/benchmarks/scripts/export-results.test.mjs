@@ -40,7 +40,7 @@ test("exports missing cells without publishing private artifacts", () => {
     assert.equal(output.schemaVersion, 1);
     assert.equal(output.suite.caseCount, 7);
     assert.match(output.suite.caseFingerprint, /^[0-9a-f]{64}$/u);
-    assert.equal(output.experiments.length, 16);
+    assert.equal(output.experiments.length, 18);
     assert.deepEqual(
       [...new Set(output.experiments.map((experiment) => experiment.modelDisplayName))],
       [
@@ -51,10 +51,11 @@ test("exports missing cells without publishing private artifacts", () => {
         "GPT-5.6 Terra",
         "Claude Sonnet 5",
         "GLM 5.2",
+        "Claude Opus 5",
         "Gemini 3.1 Pro Preview",
       ],
     );
-    assert.equal(output.results.length, 112);
+    assert.equal(output.results.length, 126);
     assert.ok(output.results.every((result) => result.status === "missing"));
     for (const privateField of ["transcript", "commands", "worldEvents", "files"]) {
       assert.equal(raw.includes(`"${privateField}"`), false);
@@ -175,6 +176,22 @@ test("exports mean cost, token consumption, and tool invocations", () => {
       join(dirname(runPath), "summary.json"),
       JSON.stringify({ totalRuns: 1, passedRuns: 1, meanDuration: 1 }),
     );
+    const sampleRunPath = join(
+      resultsPath,
+      "kimi-k3-opencode--baseline-cost-sample",
+      "run",
+      "author-001-weather-tool",
+      "run-1",
+    );
+    mkdirSync(sampleRunPath, { recursive: true });
+    writeFileSync(
+      join(sampleRunPath, "transcript-raw.jsonl"),
+      readFileSync(join(runPath, "transcript-raw.jsonl")),
+    );
+    writeFileSync(
+      join(dirname(sampleRunPath), "summary.json"),
+      JSON.stringify({ totalRuns: 1, passedRuns: 1, meanDuration: 1 }),
+    );
     execFileSync(
       process.execPath,
       [
@@ -195,6 +212,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
         entry.caseId === "author-001-weather-tool",
     );
     assert.equal(result.meanEstimatedListCostUsd, 4.5);
+    assert.equal(result.costSampleRuns, 1);
     assert.equal(result.meanTokenConsumption, 1_100_000);
     assert.equal(result.meanToolInvocationCount, 2);
   } finally {
