@@ -41,6 +41,7 @@ export default defineDynamic({
           defineMcpClientConnection({
             url: account.mcpUrl,
             description: account.description,
+            instanceKey: account.id,
             auth: account.auth,
           }),
         ]),
@@ -52,9 +53,10 @@ export default defineDynamic({
 
 For a single returned definition, the filename supplies the connection name.
 For a map, each bare map key becomes a connection name. Every entry must use
-`defineMcpClientConnection` or `defineOpenAPIConnection`. See [Dynamic
-capabilities](/docs/guides/dynamic-capabilities#dynamic-connections) for event
-scope, naming, conflicts, and durable recovery behavior.
+`defineMcpClientConnection` or `defineOpenAPIConnection`. Authenticated entries
+must also set `instanceKey` to a stable, non-secret account or tenant identifier.
+See [Dynamic capabilities](/docs/guides/dynamic-capabilities#dynamic-connections)
+for event scope, naming, conflicts, and durable recovery behavior.
 
 ## Static-token auth
 
@@ -281,7 +283,13 @@ export default defineMcpClientConnection({
 
 Drop `resume` when the provider keeps flow state server-side, so nothing has to cross the step boundary.
 
-`displayName` is presentation-only. The connection's path-derived name still keys the authorization flow, token cache, and callback URL. You can also set `displayName` on the `auth` definition itself (e.g. `auth: { ...connect("salesforce/myagent"), displayName: "Salesforce" }`); that definition-level value wins over one the strategy stamps on the challenge, and channels fall back to title-casing the connection name when neither is set.
+`displayName` is presentation-only. The connection's resolved name still keys
+the callback URL, while eve scopes token caching and authorization completion
+to the opaque resolved instance identity. You can also set `displayName` on the
+`auth` definition itself (e.g.
+`auth: { ...connect("salesforce/myagent"), displayName: "Salesforce" }`); that
+definition-level value wins over one the strategy stamps on the challenge, and
+channels fall back to title-casing the connection name when neither is set.
 
 ### Signaling authorization state
 

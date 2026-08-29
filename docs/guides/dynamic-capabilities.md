@@ -138,7 +138,11 @@ Use a dynamic connection when the available MCP servers or OpenAPI services
 depend on the authenticated caller. A handler returns one
 `defineMcpClientConnection(...)` or `defineOpenAPIConnection(...)`, a map of
 connection definitions, or `null`. Wrap every returned connection in its
-protocol helper.
+protocol helper. Connection resolvers receive `ctx.session` and
+`ctx.channel.kind`; they do not receive conversation messages, delivery
+payloads, tool inputs, model outputs, continuation tokens, or free-form channel
+metadata. Select accounts and endpoints from authenticated session identity or
+application-owned data.
 
 This example exposes one MCP connection for each cloud account enabled for the
 current user:
@@ -160,6 +164,7 @@ export default defineDynamic({
           defineMcpClientConnection({
             url: "https://mcp.cloud.example.com",
             description: `${account.label} (${account.accountId})`,
+            instanceKey: account.accountId,
             auth: {
               principalType: "user",
               getToken: ({ principal }) => mintAccountToken(principal, account),
@@ -178,6 +183,13 @@ arguments, and approval options as static [MCP](../connections/mcp) and
 the per-step connection registry, appears in `connection_search`, and exposes
 discovered tools as `<connection>__<tool>`.
 
+Set `instanceKey` on every authenticated dynamic connection. Use a stable,
+non-secret account or tenant identifier, and change it whenever the endpoint,
+account, or auth provider changes. eve hashes the value before storing the
+resolved instance identity in durable authorization state. If a parked sign-in
+callback resumes after the resolver selects a different instance, eve rejects
+the callback instead of passing it to the new connection or reusing its token.
+
 ### Naming and conflicts
 
 | Return shape                  | File                            | Connection name(s)      |
@@ -195,8 +207,9 @@ same name; namespace one map key to remove the ambiguity.
 
 Dynamic connections support `session.started` and `turn.started`. A turn result
 replaces that file's session result for the turn, including when the turn
-handler returns `null`. A throwing or invalid handler is logged and contributes
-no connections.
+handler returns `null`. A throwing or invalid handler fails the lifecycle
+without rebuilding the registry, so a static connection shadowed by the
+dynamic result cannot reappear as a fallback.
 
 eve may run the active session and turn handlers again when a parked turn
 resumes or a durable step retries. This rebuilds live auth, header, approval,

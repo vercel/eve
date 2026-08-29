@@ -40,7 +40,15 @@ session result, including `null`.
 
 Dynamic connections override same-named static connections. Two effective
 dynamic resolvers emitting the same name fail as ambiguous. Invalid or throwing
-resolvers fail closed and contribute no connections.
+resolvers fail the lifecycle without rebuilding the registry.
+
+Connection resolvers receive authenticated session identity and channel kind,
+but no conversation history, delivery payload, tool input, model output,
+continuation token, or free-form channel metadata. Authenticated dynamic
+definitions provide a stable, non-secret `instanceKey`. eve hashes that key
+with the path-derived connection identity and endpoint, then uses the result to
+pin parked authorization callbacks and token cache entries to the reconstructed
+instance.
 
 ## Runtime boundary
 

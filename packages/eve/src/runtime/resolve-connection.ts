@@ -21,6 +21,7 @@ import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { loadResolvedModuleExport, ResolveAgentError } from "#runtime/resolve-helpers.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
+import { createConnectionInstanceId } from "#runtime/connections/instance-identity.js";
 
 /**
  * Resolves one compiled connection entry into a runtime-owned definition
@@ -79,6 +80,7 @@ export async function resolveConnectionDefinition(
       description: string;
       exportName: typeof definition.exportName;
       headers?: Readonly<HeadersDefinition>;
+      instanceId: string;
       logicalPath: string;
       protocol: ResolvedConnectionDefinition["protocol"];
       sourceId: string;
@@ -92,6 +94,14 @@ export async function resolveConnectionDefinition(
       description: definition.description,
       exportName: definition.exportName,
       logicalPath: definition.logicalPath,
+      instanceId: createConnectionInstanceId({
+        connectionName: definition.connectionName,
+        instanceKey:
+          typeof resolvedRecord.instanceKey === "string" ? resolvedRecord.instanceKey : undefined,
+        protocol: definition.protocol,
+        sourceId: definition.sourceId,
+        url: definition.url,
+      }),
       protocol: definition.protocol,
       sourceId: definition.sourceId,
       sourceKind: "module",
@@ -175,6 +185,7 @@ export function resolveDynamicConnectionValue(
 
   if (protocol === "openapi") {
     const normalized = normalizeOpenApiConnectionDefinition(value, message);
+    assertAuthenticatedDynamicInstanceKey(normalized.auth, normalized.instanceKey, message);
     return omitUndefined({
       approval: normalized.approval,
       authorization: normalized.auth as ResolvedConnectionDefinition["authorization"],
@@ -182,6 +193,13 @@ export function resolveDynamicConnectionValue(
       description: normalized.description,
       exportName: source.exportName,
       headers: normalized.headers,
+      instanceId: createConnectionInstanceId({
+        connectionName: source.connectionName,
+        instanceKey: normalized.instanceKey,
+        protocol,
+        sourceId: source.sourceId,
+        url: normalized.baseUrl ?? "",
+      }),
       logicalPath: source.logicalPath,
       protocol,
       sourceId: source.sourceId,
@@ -194,6 +212,7 @@ export function resolveDynamicConnectionValue(
   }
 
   const normalized = normalizeMcpClientConnectionDefinition(value, message);
+  assertAuthenticatedDynamicInstanceKey(normalized.auth, normalized.instanceKey, message);
   return omitUndefined({
     approval: normalized.approval,
     authorization: normalized.auth as ResolvedConnectionDefinition["authorization"],
@@ -201,6 +220,13 @@ export function resolveDynamicConnectionValue(
     description: normalized.description,
     exportName: source.exportName,
     headers: normalized.headers,
+    instanceId: createConnectionInstanceId({
+      connectionName: source.connectionName,
+      instanceKey: normalized.instanceKey,
+      protocol,
+      sourceId: source.sourceId,
+      url: normalized.url,
+    }),
     logicalPath: source.logicalPath,
     protocol,
     sourceId: source.sourceId,
@@ -209,6 +235,17 @@ export function resolveDynamicConnectionValue(
     tools: normalized.tools,
     url: normalized.url,
   });
+}
+
+function assertAuthenticatedDynamicInstanceKey(
+  authorization: unknown,
+  instanceKey: string | undefined,
+  message: string,
+): void {
+  if (authorization === undefined || instanceKey !== undefined) return;
+  throw new Error(
+    `${message} Authenticated dynamic connections must set "instanceKey" to a stable, non-secret account or tenant identifier.`,
+  );
 }
 
 function omitUndefined<T extends Record<string, unknown>>(value: T): T {

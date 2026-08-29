@@ -61,7 +61,12 @@ Tool-wide authoring helpers such as `defineTool`, `defineDynamic`, and `disableT
 
 The `eve/connections` version of `defineDynamic` accepts `session.started` and
 `turn.started` handlers returning one MCP or OpenAPI connection definition, a
-map of connection definitions, or `null`.
+map of connection definitions, or `null`. Its resolver context exposes
+authenticated session identity and `channel.kind`, but not conversation history,
+delivery payloads, tool inputs, model outputs, or free-form channel metadata. An
+authenticated returned definition must set `instanceKey` to a stable,
+non-secret account or tenant identifier so durable authorization resumes cannot
+cross resolved instances.
 
 ## Authored module lifecycle
 

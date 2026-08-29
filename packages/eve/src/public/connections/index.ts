@@ -21,6 +21,7 @@ export {
   defineDynamic,
   type DynamicConnectionDefinition,
   type DynamicConnectionEvents,
+  type DynamicConnectionResolveContext,
   type DynamicConnectionResult,
   type DynamicConnectionSet,
 } from "#public/definitions/connections/dynamic.js";

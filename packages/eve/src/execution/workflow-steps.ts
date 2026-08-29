@@ -415,7 +415,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         },
       });
     }
-    await dynamicConnections.dispatch(emitted, lifecycleMessages);
+    await dynamicConnections.dispatch(emitted);
     await dispatchDynamicSubagentEvent({
       ctx,
       resolvers: dynamicSubagentResolvers,
@@ -461,7 +461,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       await dynamicConnections.rehydrate(
         initialEmissionState,
         runtimeIdentity,
-        history.messages(schemaSession),
         isHarnessBetweenTurns(schemaSession),
       );
       if (completedAuths) {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { dispatchDynamicConnectionEvent } from "#context/dynamic-connection-lifecycle.js";
-import { SessionIdKey } from "#context/keys.js";
+import { AuthKey, SessionIdKey } from "#context/keys.js";
 import { ConnectionRegistryKey } from "#context/providers/connection-key.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineOpenAPIConnection } from "#public/definitions/connections/openapi.js";
@@ -33,7 +33,6 @@ describe("dynamic connection lifecycle", () => {
     await dispatchDynamicConnectionEvent({
       ctx,
       event: createSessionStartedEvent(),
-      messages: [],
       resolvers: [resolver],
     });
 
@@ -67,7 +66,6 @@ describe("dynamic connection lifecycle", () => {
     await dispatchDynamicConnectionEvent({
       ctx,
       event: createSessionStartedEvent(),
-      messages: [],
       resolvers: [resolver],
     });
 
@@ -92,7 +90,6 @@ describe("dynamic connection lifecycle", () => {
     await dispatchDynamicConnectionEvent({
       ctx,
       event: createSessionStartedEvent(),
-      messages: [],
       resolvers: [resolver],
     });
     expect(registry.getConnectionNames()).toEqual(["primary"]);
@@ -100,7 +97,6 @@ describe("dynamic connection lifecycle", () => {
     await dispatchDynamicConnectionEvent({
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
-      messages: [],
       resolvers: [resolver],
     });
     expect(registry.getConnectionNames()).toEqual([]);
@@ -121,13 +117,152 @@ describe("dynamic connection lifecycle", () => {
     await dispatchDynamicConnectionEvent({
       ctx,
       event: createSessionStartedEvent(),
-      messages: [],
       resolvers: [resolver],
     });
 
     expect(registry.getConnections()).toMatchObject([
       { connectionName: "production", description: "Caller production account." },
     ]);
+  });
+
+  it("does not reveal a shadowed static connection when its resolver fails", async () => {
+    const { ctx, registry } = createContext([createStaticConnection("production")]);
+    const resolver = createResolver({
+      eventNames: ["session.started", "turn.started"],
+      events: {
+        "session.started": () => ({
+          production: defineMcpClientConnection({
+            description: "Caller production account.",
+            url: "https://dynamic.example.com/mcp",
+          }),
+        }),
+        "turn.started": () => {
+          throw new Error("account lookup failed");
+        },
+      },
+    });
+
+    await dispatchDynamicConnectionEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      resolvers: [resolver],
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Dynamic connection resolver "connections/accounts.ts" failed during "turn.started".',
+    );
+    expect(registry.getConnections()).toMatchObject([
+      { connectionName: "production", description: "Caller production account." },
+    ]);
+  });
+
+  it("requires an instance key for authenticated dynamic connections", async () => {
+    const { ctx } = createContext();
+    const resolver = createResolver({
+      handler: () =>
+        defineMcpClientConnection({
+          auth: { getToken: async () => ({ token: "token" }) },
+          description: "Current account.",
+          url: "https://mcp.example.com/current",
+        }),
+    });
+
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Dynamic connection resolver "connections/accounts.ts" failed during "session.started".',
+    );
+  });
+
+  it("derives an opaque identity for authenticated dynamic connections", async () => {
+    const { ctx, registry } = createContext();
+    let instanceKey = "account-123";
+    const resolver = createResolver({
+      eventNames: ["session.started", "turn.started"],
+      events: {
+        "session.started": () =>
+          defineMcpClientConnection({
+            auth: { getToken: async () => ({ token: "token" }) },
+            description: "Current account.",
+            instanceKey,
+            url: "https://mcp.example.com/current",
+          }),
+        "turn.started": () =>
+          defineMcpClientConnection({
+            auth: { getToken: async () => ({ token: "token" }) },
+            description: "Current account.",
+            instanceKey,
+            url: "https://mcp.example.com/current",
+          }),
+      },
+    });
+
+    await dispatchDynamicConnectionEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      resolvers: [resolver],
+    });
+
+    const firstInstanceId = registry.getConnections()[0]?.instanceId;
+    expect(firstInstanceId).toMatch(/^connection:/);
+    expect(firstInstanceId).not.toContain("account-123");
+
+    instanceKey = "account-456";
+    await dispatchDynamicConnectionEvent({
+      ctx,
+      event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+      resolvers: [resolver],
+    });
+
+    expect(registry.getConnections()[0]?.instanceId).not.toBe(firstInstanceId);
+  });
+
+  it("passes connection resolvers only trusted identity and channel kind", async () => {
+    const { ctx } = createContext();
+    ctx.set(AuthKey, {
+      attributes: {},
+      authenticator: "test",
+      issuer: "https://idp.example.com",
+      principalId: "user-1",
+      principalType: "user",
+    });
+    let received: unknown;
+    const resolver = createResolver({
+      events: {
+        "session.started": (_event, resolveCtx) => {
+          received = resolveCtx;
+          return null;
+        },
+      },
+    });
+
+    await dispatchDynamicConnectionEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      resolvers: [resolver],
+    });
+
+    expect(received).toEqual({
+      channel: { kind: undefined },
+      session: {
+        auth: {
+          current: expect.objectContaining({ principalId: "user-1" }),
+          initiator: null,
+        },
+        id: "session-1",
+      },
+    });
+    expect(received).not.toHaveProperty("messages");
   });
 
   it("rejects collisions between effective dynamic resolvers", async () => {
@@ -143,7 +278,6 @@ describe("dynamic connection lifecycle", () => {
       dispatchDynamicConnectionEvent({
         ctx,
         event: createSessionStartedEvent(),
-        messages: [],
         resolvers: [
           createResolver({ handler: connection, slug: "first" }),
           createResolver({ handler: connection, slug: "second" }),
@@ -165,12 +299,15 @@ describe("dynamic connection lifecycle", () => {
       }),
     });
 
-    await dispatchDynamicConnectionEvent({
-      ctx,
-      event: createSessionStartedEvent(),
-      messages: [],
-      resolvers: [resolver],
-    });
+    await expect(
+      dispatchDynamicConnectionEvent({
+        ctx,
+        event: createSessionStartedEvent(),
+        resolvers: [resolver],
+      }),
+    ).rejects.toThrow(
+      'Dynamic connection resolver "connections/accounts.ts" failed during "session.started".',
+    );
 
     expect(registry.getConnections()).toEqual([]);
   });
@@ -190,7 +327,6 @@ describe("dynamic connection lifecycle", () => {
     await dispatchDynamicConnectionEvent({
       ctx,
       event: createSessionStartedEvent(),
-      messages: [],
       resolvers: [resolver],
     });
 

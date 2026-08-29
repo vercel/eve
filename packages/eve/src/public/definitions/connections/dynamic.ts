@@ -19,11 +19,17 @@ export type DynamicConnectionSet = Readonly<Record<string, DynamicConnectionDefi
 /** Supported return value for a dynamic connection resolver. */
 export type DynamicConnectionResult = DynamicConnectionDefinition | DynamicConnectionSet | null;
 
+/** Trusted session identity and minimal channel metadata available to connection resolvers. */
+export interface DynamicConnectionResolveContext {
+  readonly session: DynamicResolveContext["session"];
+  readonly channel: Pick<DynamicResolveContext["channel"], "kind">;
+}
+
 /** Session and turn handlers supported by dynamic connections. */
 export type DynamicConnectionEvents = {
   readonly [K in "session.started" | "turn.started"]?: (
     event: unknown,
-    ctx: DynamicResolveContext,
+    ctx: DynamicConnectionResolveContext,
   ) => DynamicConnectionResult | Promise<DynamicConnectionResult>;
 };
 

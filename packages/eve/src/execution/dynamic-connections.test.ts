@@ -28,7 +28,6 @@ describe("bindDynamicConnections", () => {
     await lifecycle.rehydrate(
       { sequence: 3, sessionStarted: true, stepIndex: 1, turnId: "turn_3" },
       { agentId: "agent", eveVersion: "test" },
-      [],
       false,
     );
 
@@ -55,7 +54,6 @@ describe("bindDynamicConnections", () => {
     await lifecycle.rehydrate(
       { sequence: 4, sessionStarted: true, stepIndex: 0, turnId: "" },
       { agentId: "agent", eveVersion: "test" },
-      [],
       true,
     );
 

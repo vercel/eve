@@ -106,6 +106,8 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly connectionName: string;
   readonly description: string;
   readonly headers?: Readonly<HeadersDefinition>;
+  /** Opaque identity used to pin authorization and credential state to this resolved instance. */
+  readonly instanceId?: string;
   readonly toolCall?: Readonly<ConnectionToolCallDefinition>;
   /**
    * Wire protocol. Selects the runtime client implementation. `tools`
