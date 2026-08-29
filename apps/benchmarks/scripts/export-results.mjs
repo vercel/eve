@@ -81,7 +81,7 @@ for (const benchmark of benchmarks) {
         caseId,
         status: status ?? "current",
         ...result,
-        ...meanRunMetrics(summaryPath, benchmark.model, experimentId, caseId),
+        ...meanRunMetrics(summaryPath, benchmark.model),
       });
     }
   }
@@ -227,21 +227,17 @@ function latestValidResult(experimentId, caseId) {
   return undefined;
 }
 
-function meanRunMetrics(summaryPath, model, experimentId, caseId) {
+function meanRunMetrics(summaryPath, model) {
   const performanceRuns = runMetrics(summaryPath);
-  const costSamplePath = latestValidResult(`${experimentId}-cost-sample`, caseId)?.summaryPath;
-  const costSampleRuns = costSamplePath === undefined ? [] : runMetrics(costSamplePath);
-  const costSampleUsage = costSampleRuns.flatMap((run) => (run.usage === null ? [] : [run.usage]));
   const performanceUsage = performanceRuns.flatMap((run) =>
     run.usage === null ? [] : [run.usage],
   );
   const result = {};
   const pricing = modelPricing[model];
-  if (pricing !== undefined && costSampleUsage.length > 0) {
+  if (pricing !== undefined && performanceUsage.length > 0) {
     result.meanEstimatedListCostUsd = mean(
-      costSampleUsage.map((value) => priceUsage(value, pricing)),
+      performanceUsage.map((value) => priceUsage(value, pricing)),
     );
-    result.costSampleRuns = costSampleUsage.length;
   }
   if (performanceUsage.length > 0) {
     result.meanTokenConsumption = mean(performanceUsage.map(tokenConsumption));
