@@ -105,7 +105,7 @@ export const ResultsTable = ({
               onSort={() => toggleSort("guidedSuccessRate")}
               sortDirection={sort.key === "guidedSuccessRate" ? sort.direction : undefined}
             >
-              Success Rate with AGENTS.md *
+              Success Rate with AGENTS.md
             </HeaderCell>
           </tr>
         </thead>
