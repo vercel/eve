@@ -81,6 +81,7 @@ async function getAdvertisedModelTools(
     const applied = await applyCodeModeTool({
       emissionState: getHarnessEmissionState(session.state),
       harnessTools: tools,
+      session,
       tools: modelTools,
     });
     modelTools = applied.modelTools;

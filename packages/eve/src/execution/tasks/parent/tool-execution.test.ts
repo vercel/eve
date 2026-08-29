@@ -9,17 +9,24 @@ import { runStep } from "#context/run-step.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { backgroundToolExecutionProvider } from "#execution/tasks/parent/tool-execution.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
+import {
+  BackgroundToolExecutorKey,
+  registerSubagentTaskLauncher,
+} from "#harness/background-tools.js";
 import { isAuthorizationPendingModelOutput, requestAuthorization } from "#harness/authorization.js";
+import { applyCodeModeTool, CODE_MODE_TOOL_NAME } from "#harness/code-mode-sandbox.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolSet } from "#harness/tools.js";
 import type { HarnessSession } from "#harness/types.js";
+import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
   getAgentHandleStore,
   type AgentAddress,
   type AgentIdentity,
 } from "#harness/handles/store.js";
 import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
-import { toInputSchema } from "#tools/schema.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
+import { toInputSchema, toOutputSchema } from "#tools/schema.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { createSubagentExecutorBinding } from "#tasks/types.js";
 
@@ -75,12 +82,15 @@ function createParentSession(): HarnessSession {
   );
 }
 
-function createSubagentTool(): HarnessToolDefinition {
+function createSubagentTool(observedBatchSizes?: number[]): HarnessToolDefinition {
   const definition = defineTool({
     description: "Spawn a research subagent.",
     execution: "background",
-    inputSchema: z.strictObject({}),
-    execute(_input: Record<string, never>, _ctx: ToolContext, background: TaskExec) {
+    inputSchema: z.strictObject({ fail: z.boolean().optional() }),
+    outputSchema: SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA,
+    execute(input: { readonly fail?: boolean }, _ctx: ToolContext, background: TaskExec) {
+      observedBatchSizes?.push(background.batch.length);
+      if (input.fail === true) throw new Error("staged launch failed");
       return background.delegated({
         executor: createSubagentExecutorBinding({
           address: childAddress,
@@ -90,16 +100,26 @@ function createSubagentTool(): HarnessToolDefinition {
       });
     },
   });
+  const execute = createToolExecuteWithAuth({
+    execute: definition.execute,
+    execution: definition.execution,
+    scope: "research",
+  });
+  registerSubagentTaskLauncher(execute, {
+    mode: "local",
+    preview: ({ callId }) => ({
+      agentId: childIdentity.id,
+      status: "working",
+      taskId: `task-${callId}`,
+    }),
+  });
   return {
     description: definition.description,
-    execute: createToolExecuteWithAuth({
-      execute: definition.execute,
-      execution: definition.execution,
-      scope: "research",
-    }),
+    execute,
     execution: definition.execution,
     inputSchema: toInputSchema(definition.inputSchema),
     name: "research",
+    outputSchema: toOutputSchema(definition.outputSchema),
   };
 }
 
@@ -524,6 +544,275 @@ describe("background tool execution", () => {
     ]);
     expect(mocks.rejectDelegatedDispatch).not.toHaveBeenCalled();
     expect(mocks.propagateSubagentExecutorCancel).not.toHaveBeenCalled();
+  });
+
+  it("stages code-mode launches before committing their complete task batch", async () => {
+    mocks.beginBackgroundTask.mockImplementation(
+      async ({ callId }: { readonly callId: string }) => ({
+        createdByStepIndex: 0,
+        createdByTurnId: "turn-1",
+        metadata: { kind: "tool", name: "research" },
+        taskId: `task-${callId}`,
+        taskInboxToken: `inbox-${callId}`,
+        taskRunId: `run-${callId}`,
+      }),
+    );
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    const batchSizes: number[] = [];
+    const tool = createSubagentTool(batchSizes);
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+    let output: unknown;
+
+    const result = await runStep(
+      ctx,
+      session,
+      async (current) => {
+        const harnessTools = new Map([[tool.name, tool]]);
+        const advertised = await applyCodeModeTool({
+          emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
+          harnessTools,
+          session: current,
+          tools: buildToolSet({ tools: harnessTools }),
+        });
+        const execute = advertised.modelTools[CODE_MODE_TOOL_NAME]?.execute;
+        if (execute === undefined) throw new Error("code_mode has no executor");
+        output = await execute(
+          { js: "return await Promise.all([tools.research({}), tools.research({})]);" },
+          { messages: [], toolCallId: "code-mode-stage" } as never,
+        );
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(output).toEqual([
+      { agentId: childIdentity.id, status: "working", taskId: "task-code-mode-stage:tool-1" },
+      { agentId: childIdentity.id, status: "working", taskId: "task-code-mode-stage:tool-2" },
+    ]);
+    expect(batchSizes).toEqual([2, 2]);
+    expect(result.backgroundTasks).toHaveLength(2);
+    expect(getSessionTaskIndex(result.session.state)).toHaveLength(2);
+  });
+
+  it("creates no tasks when a staged code-mode program fails", async () => {
+    const tool = createSubagentTool();
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    const result = await runStep(
+      ctx,
+      session,
+      async (current) => {
+        const harnessTools = new Map([[tool.name, tool]]);
+        const advertised = await applyCodeModeTool({
+          emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
+          harnessTools,
+          session: current,
+          tools: buildToolSet({ tools: harnessTools }),
+        });
+        const execute = advertised.modelTools[CODE_MODE_TOOL_NAME]?.execute;
+        if (execute === undefined) throw new Error("code_mode has no executor");
+        await expect(
+          execute({ js: "await tools.research({}); throw new Error('program failed');" }, {
+            messages: [],
+            toolCallId: "code-mode-failed",
+          } as never),
+        ).rejects.toThrow("program failed");
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(mocks.beginBackgroundTask).not.toHaveBeenCalled();
+    expect(result.backgroundTasks).toBeUndefined();
+  });
+
+  it("compensates every staged sibling when a post-program launch fails", async () => {
+    mocks.beginBackgroundTask.mockImplementation(
+      async ({ callId }: { readonly callId: string }) => ({
+        createdByStepIndex: 0,
+        createdByTurnId: "turn-1",
+        metadata: { kind: "tool", name: "research" },
+        taskId: `task-${callId}`,
+        taskInboxToken: `inbox-${callId}`,
+        taskRunId: `run-${callId}`,
+      }),
+    );
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    mocks.rejectDelegatedDispatch.mockResolvedValue(undefined);
+    const tool = createSubagentTool();
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    const result = await runStep(
+      ctx,
+      session,
+      async (current) => {
+        const harnessTools = new Map([[tool.name, tool]]);
+        const advertised = await applyCodeModeTool({
+          emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
+          harnessTools,
+          session: current,
+          tools: buildToolSet({ tools: harnessTools }),
+        });
+        const execute = advertised.modelTools[CODE_MODE_TOOL_NAME]?.execute;
+        if (execute === undefined) throw new Error("code_mode has no executor");
+        await expect(
+          execute(
+            {
+              js: "return await Promise.all([tools.research({}), tools.research({ fail: true })]);",
+            },
+            { messages: [], toolCallId: "code-mode-launch-failure" } as never,
+          ),
+        ).rejects.toThrow("staged launch failed");
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(mocks.beginBackgroundTask).toHaveBeenCalledTimes(2);
+    expect(mocks.rejectDelegatedDispatch).toHaveBeenCalledTimes(2);
+    expect(result.backgroundTasks).toBeUndefined();
+    expect(getSessionTaskIndex(result.session.state)).toEqual([]);
+  });
+
+  it("cancels a dispatched child when task bind delivery fails", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-code-mode-bind:tool-1",
+      taskInboxToken: "inbox-code-mode-bind:tool-1",
+      taskRunId: "run-code-mode-bind:tool-1",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("unreachable");
+    mocks.rejectDelegatedDispatch.mockResolvedValue(undefined);
+    const tool = createSubagentTool();
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    await expect(
+      runStep(
+        ctx,
+        session,
+        async (current) => {
+          const harnessTools = new Map([[tool.name, tool]]);
+          const advertised = await applyCodeModeTool({
+            emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
+            harnessTools,
+            session: current,
+            tools: buildToolSet({ tools: harnessTools }),
+          });
+          await advertised.modelTools[CODE_MODE_TOOL_NAME]!.execute!(
+            { js: "return await tools.research({});" },
+            { messages: [], toolCallId: "code-mode-bind" } as never,
+          );
+          return { next: null, session: current };
+        },
+        [backgroundToolExecutionProvider],
+      ),
+    ).rejects.toThrow('did not accept "bind"');
+
+    expect(mocks.propagateSubagentExecutorCancel).toHaveBeenCalledWith({
+      bundle: undefined,
+      executor: { address: childAddress, identity: childIdentity },
+      taskId: task.taskId,
+    });
+  });
+
+  it("does not compensate the same staged call twice", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-repeat",
+      taskInboxToken: "inbox-repeat",
+      taskRunId: "run-repeat",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    mocks.rejectDelegatedDispatch.mockResolvedValue(undefined);
+    const tool = createSubagentTool();
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    const result = await runStep(
+      ctx,
+      session,
+      async (current) => {
+        const tools = buildToolSet({ tools: new Map([[tool.name, tool]]) });
+        await tools.research!.onInputAvailable!({
+          context: undefined,
+          input: {},
+          messages: [],
+          toolCallId: "repeat",
+        });
+        await tools.research!.execute!({}, { messages: [], toolCallId: "repeat" } as never);
+        const executor = ctx.require(BackgroundToolExecutorKey);
+        await executor.rollbackCalls!({ callIds: new Set(["repeat"]), cause: new Error("failed") });
+        await executor.rollbackCalls!({ callIds: new Set(["repeat"]), cause: new Error("failed") });
+        return { next: null, session: current };
+      },
+      [backgroundToolExecutionProvider],
+    );
+
+    expect(mocks.rejectDelegatedDispatch).toHaveBeenCalledOnce();
+    expect(mocks.propagateSubagentExecutorCancel).toHaveBeenCalledOnce();
+    expect(result.backgroundTasks).toBeUndefined();
+  });
+
+  it("retains staged launches when the parent turn is cancelled afterward", async () => {
+    const task = {
+      createdByStepIndex: 0,
+      createdByTurnId: "turn-1",
+      metadata: { kind: "tool", name: "research" },
+      taskId: "task-code-mode-cancel:tool-1",
+      taskInboxToken: "inbox-code-mode-cancel:tool-1",
+      taskRunId: "run-code-mode-cancel:tool-1",
+    } as const;
+    mocks.beginBackgroundTask.mockResolvedValue(task);
+    mocks.sendTaskCommand.mockResolvedValue("delivered");
+    const tool = createSubagentTool();
+    const session = createParentSession();
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(SessionIdKey, session.sessionId);
+
+    await expect(
+      runStep(
+        ctx,
+        session,
+        async (current) => {
+          const harnessTools = new Map([[tool.name, tool]]);
+          const advertised = await applyCodeModeTool({
+            emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-1" },
+            harnessTools,
+            session: current,
+            tools: buildToolSet({ tools: harnessTools }),
+          });
+          await advertised.modelTools[CODE_MODE_TOOL_NAME]!.execute!(
+            { js: "return await tools.research({});" },
+            { messages: [], toolCallId: "code-mode-cancel" } as never,
+          );
+          throw new TurnCancelledError();
+        },
+        [backgroundToolExecutionProvider],
+      ),
+    ).rejects.toThrow(TurnCancelledError);
+
+    expect(mocks.rejectDelegatedDispatch).not.toHaveBeenCalled();
   });
 
   it("rejects the task first and then cancels the dispatched subagent child when the parent step fails", async () => {

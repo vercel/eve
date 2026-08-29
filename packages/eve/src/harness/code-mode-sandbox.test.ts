@@ -5,7 +5,15 @@ import { z } from "zod";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { HandleEventKey } from "#context/keys.js";
+import {
+  BackgroundToolExecutorKey,
+  registerSubagentTaskLauncher,
+} from "#harness/background-tools.js";
 import { authorizationPendingAsJsonObject } from "#harness/authorization.js";
+import {
+  countLocalSubagentCalls,
+  registerLocalSubagentExecutor,
+} from "#execution/tools/subagent/local.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { applyCodeModeTool, CODE_MODE_TOOL_NAME } from "#harness/code-mode-sandbox.js";
 import { buildToolSet } from "#harness/tools.js";
@@ -13,12 +21,16 @@ import type { HarnessToolMap } from "#harness/types.js";
 import { CODE_MODE_RUNTIME_OPTIONS } from "#shared/code-mode-runtime.js";
 import { never } from "#tools/approval/policies.js";
 
-async function runCodeMode(modelTools: ToolSet, js: string): Promise<unknown> {
+async function runCodeMode(
+  modelTools: ToolSet,
+  js: string,
+  toolCallId = "code-mode-1",
+): Promise<unknown> {
   const execute = modelTools[CODE_MODE_TOOL_NAME]?.execute as
     | ((input: { readonly js: string }, options: any) => unknown)
     | undefined;
   if (execute === undefined) throw new Error("code_mode has no executor");
-  return await execute({ js }, { messages: [], toolCallId: "code-mode-1" });
+  return await execute({ js }, { messages: [], toolCallId });
 }
 
 function sampleTools(): HarnessToolMap {
@@ -160,6 +172,178 @@ describe("applyCodeModeTool", () => {
     expect(modelTools.connection_search).toBeDefined();
     expect(modelTools.provider_search).toBeDefined();
     expect(result).toMatchObject({ items: [{ path: "tools.get_weather" }], remaining: 0 });
+  });
+
+  it("admits tasks-enabled subagent launchers but not arbitrary background tools", async () => {
+    const launched: Array<{
+      batchSize: number;
+      callId: string;
+      fanoutSize: number;
+      name: string;
+    }> = [];
+    const ctx = new ContextContainer();
+    ctx.set(BackgroundToolExecutorKey, {
+      async execute({ batch, definition, options }) {
+        launched.push({
+          batchSize: batch.calls.length,
+          callId: options.toolCallId,
+          fanoutSize: countLocalSubagentCalls(batch.calls),
+          name: definition.name,
+        });
+        return {
+          agentId: definition.name,
+          status: "working",
+          taskId: `task-${options.toolCallId}`,
+        };
+      },
+      async rollbackCalls() {},
+    });
+    const executeTaskLauncher = async () => null;
+    registerLocalSubagentExecutor(executeTaskLauncher);
+    registerSubagentTaskLauncher(executeTaskLauncher, {
+      mode: "local",
+      preview: ({ callId }) => ({
+        agentId: "researcher_task",
+        status: "working",
+        taskId: `task-${callId}`,
+      }),
+    });
+    const taskLauncher: HarnessToolDefinition = {
+      description: "Launch a researcher.",
+      execute: executeTaskLauncher,
+      execution: "background",
+      inputSchema: z.object({ message: z.string() }),
+      name: "researcher_task",
+      outputSchema: z.object({
+        agentId: z.string(),
+        status: z.literal("working"),
+        taskId: z.string(),
+      }),
+    };
+    const executeRemoteTaskLauncher = async () => null;
+    registerSubagentTaskLauncher(executeRemoteTaskLauncher, {
+      mode: "remote",
+      preview: ({ callId }) => ({
+        agentId: "reviewer_task",
+        status: "working",
+        taskId: `task-${callId}`,
+      }),
+    });
+    const remoteTaskLauncher: HarnessToolDefinition = {
+      ...taskLauncher,
+      description: "Launch a remote reviewer.",
+      execute: executeRemoteTaskLauncher,
+      name: "reviewer_task",
+    };
+    const backgroundWork = sampleTools().get("background_work")!;
+    const launchCount: HarnessToolDefinition = {
+      description: "Report how many staged launches have executed.",
+      execute: async () => launched.length,
+      inputSchema: z.object({}),
+      name: "get_launch_count",
+      outputSchema: z.number(),
+    };
+    const harnessTools = new Map<string, HarnessToolDefinition>([
+      [taskLauncher.name, taskLauncher],
+      [remoteTaskLauncher.name, remoteTaskLauncher],
+      [backgroundWork.name, backgroundWork],
+      [launchCount.name, launchCount],
+    ]);
+    const modelTools = buildToolSet({ tools: harnessTools });
+    const emissionState = {
+      sequence: 1,
+      sessionStarted: true,
+      stepIndex: 0,
+      turnId: "turn-1",
+    } as const;
+    const session: import("#harness/types.js").HarnessSession = {
+      agent: { modelReference: { id: "mock" }, system: "", tools: [] },
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent-session",
+    };
+    const applied = await contextStorage.run(ctx, () =>
+      applyCodeModeTool({ emissionState, harnessTools, session, tools: modelTools }),
+    );
+    await modelTools.researcher_task!.onInputAvailable!({
+      context: undefined,
+      input: { message: "direct launch" },
+      messages: [],
+      toolCallId: "direct-task",
+    });
+    await modelTools.background_work!.onInputAvailable!({
+      context: undefined,
+      input: {},
+      messages: [],
+      toolCallId: "direct-background-work",
+    });
+
+    const result = await runCodeMode(
+      applied.modelTools,
+      `const receipts = await Promise.all([
+        tools.researcher_task({ message: "investigate" }),
+        tools.researcher_task({ message: "verify" }),
+        tools.reviewer_task({ message: "review" }),
+      ]);
+      return { launchesInsideProgram: await tools.get_launch_count({}), receipts };`,
+    );
+    const secondResult = await runCodeMode(
+      applied.modelTools,
+      'return await tools.researcher_task({ message: "verify" });',
+      "code-mode-2",
+    );
+
+    expect(result).toEqual({
+      launchesInsideProgram: 0,
+      receipts: [
+        expect.objectContaining({ agentId: "researcher_task", status: "working" }),
+        expect.objectContaining({ agentId: "researcher_task", status: "working" }),
+        expect.objectContaining({ agentId: "reviewer_task", status: "working" }),
+      ],
+    });
+    expect(secondResult).toMatchObject({ agentId: "researcher_task", status: "working" });
+    expect(launched.slice(0, 3)).toEqual(
+      expect.arrayContaining([
+        { batchSize: 5, callId: "code-mode-1:tool-1", fanoutSize: 3, name: "researcher_task" },
+        { batchSize: 5, callId: "code-mode-1:tool-2", fanoutSize: 3, name: "researcher_task" },
+        { batchSize: 5, callId: "code-mode-1:tool-3", fanoutSize: 3, name: "reviewer_task" },
+      ]),
+    );
+    expect(launched[3]).toEqual({
+      batchSize: 6,
+      callId: "code-mode-2:tool-1",
+      fanoutSize: 4,
+      name: "researcher_task",
+    });
+    expect(
+      await runCodeMode(
+        applied.modelTools,
+        'return await search({ query: "reviewer" });',
+        "code-mode-search",
+      ),
+    ).toMatchObject({
+      items: [expect.objectContaining({ path: "tools.reviewer_task" })],
+      remaining: 0,
+    });
+
+    await expect(
+      runCodeMode(
+        applied.modelTools,
+        'await tools.researcher_task({ message: "discard" }); throw new Error("failed");',
+        "code-mode-failed",
+      ),
+    ).rejects.toThrow("failed");
+    expect(launched).toHaveLength(4);
+    await runCodeMode(
+      applied.modelTools,
+      'return await tools.researcher_task({ message: "recover" });',
+      "code-mode-recovery",
+    );
+    expect(launched.at(-1)).toMatchObject({
+      callId: "code-mode-recovery:tool-1",
+      fanoutSize: 5,
+    });
   });
 
   it("searches the complete catalog and invokes an omitted result in the same program", async () => {

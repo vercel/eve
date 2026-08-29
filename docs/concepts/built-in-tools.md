@@ -158,7 +158,7 @@ return details;
 
 ### Admitted tools
 
-Code mode automatically admits request-visible tools when they have an inline executor and executable input/output schemas. The rule applies after dynamic tool resolution, so request gates remain authoritative. Tools with approval policies, background tools, provider-managed tools, subagent/remote-agent calls, `load_skill`, and `final_output` stay direct only. A nested tool that unexpectedly requires authorization exits with guidance to call it directly.
+Code mode automatically admits request-visible tools when they have an inline executor and executable input/output schemas. The rule applies after dynamic tool resolution, so request gates remain authoritative. With `experimental.tasks: true`, subagent and remote-agent tools may launch background tasks and return `{ taskId, status: "working" }` receipts; generated code cannot wait for their final results, and one program may launch at most eight. Eve stages those launches while the program runs and dispatches them only after it succeeds, so a failed, cancelled, or timed-out program starts no staged work. Foreground subagent calls, other background tools, tools with approval policies, provider-managed tools, `load_skill`, and `final_output` stay direct only. A nested tool that unexpectedly requires authorization exits with guidance to call it directly.
 
 Generated programs receive the full value validated by `outputSchema`; direct calls continue to use any authored `toModelOutput` projection. Enable code mode only when those validated outputs are appropriate as model-authored program intermediates.
 

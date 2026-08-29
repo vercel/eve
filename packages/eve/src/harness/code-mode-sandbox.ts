@@ -4,17 +4,25 @@ import { z } from "#compiled/zod/index.js";
 import { contextStorage } from "#context/container.js";
 import { HandleEventKey } from "#context/keys.js";
 import { isAuthorizationPendingModelOutput } from "#harness/authorization.js";
+import { readSubagentTaskLauncher } from "#harness/background-tools.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import { FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
-import type { HandleEventFn, HarnessToolMap } from "#harness/types.js";
+import type { HandleEventFn, HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import type { JsonValue } from "#shared/json.js";
 import {
+  CODE_MODE_TASK_LAUNCH_LIMIT,
+  type CodeModeTaskLauncher,
   codeModeToolError,
   createCodeModeRuntimeTool,
   renderCodeModeToolSignature,
 } from "#shared/code-mode-runtime.js";
+import {
+  prepareNestedBackgroundToolCall,
+  reserveNestedLocalSubagentFanout,
+  rollbackNestedBackgroundToolCalls,
+} from "#harness/tools.js";
 import { isValidationFreeToolSchema, toInputSchema, toOutputSchema } from "#tools/schema.js";
 
 /** Model-facing tool name for the experimental code-mode sandbox. */
@@ -66,9 +74,11 @@ class OutputValidationError extends Error {}
 export async function applyCodeModeTool(input: {
   readonly emissionState?: HarnessEmissionState;
   readonly harnessTools: HarnessToolMap;
+  readonly session?: HarnessSession;
   readonly tools: ToolSet;
 }): Promise<CodeModeToolSet> {
   const hostTools: Record<string, ToolSet[string]> = Object.create(null);
+  const taskLaunchers = new Map<string, CodeModeTaskLauncher>();
   const modelTools: Record<string, ToolSet[string]> = { ...input.tools };
   const context = contextStorage.getStore();
   const handleEvent = context?.get(HandleEventKey);
@@ -77,6 +87,63 @@ export async function applyCodeModeTool(input: {
     if (!claimsForCodeMode(name, tool, input.harnessTools)) continue;
     const validatedTool = await validatedCodeModeTool(tool);
     if (validatedTool === null) continue;
+    const harnessTool = input.harnessTools.get(name);
+    const taskLauncher = readSubagentTaskLauncher(harnessTool?.execute);
+    if (taskLauncher !== undefined) {
+      const session = input.session;
+      const turnId = input.emissionState?.turnId;
+      if (session === undefined || turnId === undefined) {
+        throw new Error("Task-enabled code mode requires an active Eve session.");
+      }
+      const wrapped = wrapHostToolForCodeMode({
+        context,
+        emissionState: input.emissionState,
+        handleEvent,
+        name,
+        tool: validatedTool,
+      });
+      const execute = wrapped.execute;
+      if (execute === undefined) throw new Error(`Task launcher "${name}" has no executor.`);
+      taskLaunchers.set(name, {
+        mode: taskLauncher.mode,
+        async execute(toolInput, options) {
+          return await resolveExecuteOutput(execute(toolInput as never, options as never));
+        },
+        async prepare(toolInput, options) {
+          await prepareNestedBackgroundToolCall({
+            input: toolInput,
+            options,
+            tool,
+          });
+        },
+        preview(toolInput, options) {
+          return taskLauncher.preview({
+            callId: options.toolCallId,
+            session,
+            toolInput,
+            turnId,
+          });
+        },
+        reserve(programCallId, size) {
+          reserveNestedLocalSubagentFanout({
+            reservationId: programCallId,
+            size,
+            tool,
+          });
+        },
+        rollback(cause, options) {
+          const rollback = () =>
+            rollbackNestedBackgroundToolCalls({
+              callIds: new Set([options.toolCallId]),
+              cause,
+              tools: [tool],
+            });
+          return context === undefined ? rollback() : contextStorage.run(context, rollback);
+        },
+      });
+      hostTools[name] = wrapped;
+      continue;
+    }
     hostTools[name] = wrapHostToolForCodeMode({
       context,
       emissionState: input.emissionState,
@@ -96,10 +163,29 @@ export async function applyCodeModeTool(input: {
   const codeModeTool = await createCodeModeRuntimeTool({
     hostTools: hostTools as ToolSet,
     sourcePrefix: `const search = (input = {}) => tools[${JSON.stringify(HIDDEN_SEARCH_TOOL_NAME)}](input);`,
+    taskLaunchers,
   });
+  const onInputAvailable = codeModeTool.onInputAvailable;
+  const hasLocalTaskLauncher = [...taskLaunchers.values()].some(
+    (launcher) => launcher.mode === "local",
+  );
   modelTools[CODE_MODE_TOOL_NAME] = {
     ...codeModeTool,
-    description: progressiveCodeModeDescription(catalog),
+    description: progressiveCodeModeDescription(catalog, taskLaunchers.size > 0),
+    ...(hasLocalTaskLauncher
+      ? {
+          onInputAvailable: async (
+            options: ToolExecutionOptions<never> & { readonly input: unknown },
+          ) => {
+            await onInputAvailable?.(options);
+            for (const launcher of new Set(taskLaunchers.values())) {
+              if (launcher.mode === "local") {
+                launcher.reserve(options.toolCallId, CODE_MODE_TASK_LAUNCH_LIMIT);
+              }
+            }
+          },
+        }
+      : {}),
   } as ToolSet[string];
 
   return { modelTools: modelTools as ToolSet };
@@ -173,7 +259,11 @@ function claimsForCodeMode(
   const harnessTool = harnessTools.get(name);
   if (harnessTool === undefined || harnessTool.runtimeAction !== undefined) return false;
   if (harnessTool.approval !== undefined) return false;
-  return harnessTool.execution !== "background" && tool.outputSchema !== undefined;
+  return (
+    (harnessTool.execution !== "background" ||
+      readSubagentTaskLauncher(harnessTool.execute) !== undefined) &&
+    tool.outputSchema !== undefined
+  );
 }
 
 function wrapHostToolForCodeMode(input: {
@@ -448,12 +538,19 @@ function searchableInputSchemaText(value: unknown): string {
   return parts.join(" ");
 }
 
-function progressiveCodeModeDescription(entries: readonly CatalogEntry[]): string {
+function progressiveCodeModeDescription(
+  entries: readonly CatalogEntry[],
+  includesTaskLaunchers: boolean,
+): string {
   const selected: CatalogEntry[] = [];
 
   for (const entry of [...entries].sort(compareCatalogEntryLength)) {
     const candidate = [...selected, entry];
-    const description = renderProgressiveDescription(entries.length, candidate);
+    const description = renderProgressiveDescription(
+      entries.length,
+      candidate,
+      includesTaskLaunchers,
+    );
     if (description.length <= CATALOG_DESCRIPTION_CHARACTER_LIMIT) {
       selected.push(entry);
       continue;
@@ -461,12 +558,13 @@ function progressiveCodeModeDescription(entries: readonly CatalogEntry[]): strin
     break;
   }
 
-  return renderProgressiveDescription(entries.length, selected);
+  return renderProgressiveDescription(entries.length, selected, includesTaskLaunchers);
 }
 
 function renderProgressiveDescription(
   totalEntries: number,
   selected: readonly CatalogEntry[],
+  includesTaskLaunchers: boolean,
 ): string {
   const signatures =
     selected.length === 0
@@ -492,6 +590,11 @@ function renderProgressiveDescription(
     "`JSON.parse` and `JSON.stringify` are available. Imports, timers, direct filesystem access, and `fetch` are unavailable.",
     "A program may make at most 64 host calls in total, including catalog searches.",
     "At most 8 host calls may be in flight; split larger fan-outs into bounded parallel batches.",
+    ...(includesTaskLaunchers
+      ? [
+          `Task-enabled subagent tools launch background work and return { taskId, status: "working" } receipts; they do not return the subagent's final result. Launch at most ${CODE_MODE_TASK_LAUNCH_LIMIT} tasks in one program. Final results arrive in later turns; manage active tasks with the direct task tools.`,
+        ]
+      : []),
     "",
     `Progressive catalog: ${totalEntries} tools (${selected.length} shortest signatures listed).`,
     "To discover omitted or related tools, call the in-program lexical `await search({ query?, limit?, offset? })`. Search returns `{ items: [{ path, description, signature }], remaining, next }`; pass `next.offset` as `offset` to continue.",

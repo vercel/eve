@@ -56,9 +56,13 @@ return await tools[key](input);
 - No sandbox fetch, imports, timers, process, environment, or host filesystem.
 - Nested output is schema-validated before generated code receives it.
 - Code receives typed raw output; direct calls still use `toModelOutput`.
+- With `experimental.tasks: true`, code may launch up to eight subagent tasks;
+  launches return working receipts, not final child results.
+- Subagent launches are staged while the program runs and dispatched only after
+  it succeeds. A failed, cancelled, or timed-out program starts no staged work.
 - Nested leaf calls emit ordinary `actions.requested` and `action.result`
   events; internal catalog searches do not appear as domain tool calls.
-- Approval, authorization, background work, delegation, and control-plane tools
-  remain direct.
+- Approval, authorization, foreground delegation, arbitrary background work,
+  and control-plane tools remain direct.
 - The outer call has ordinary Eve tool retry and replay semantics.
 - Host calls must honor their own timeout and abort behavior.

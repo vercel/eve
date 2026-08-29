@@ -196,9 +196,11 @@ export interface AgentExperimentalDefinition {
    * while keeping ordinary tools directly callable. Generated
    * TypeScript calls them as `tools.name(input)` inside isolated QuickJS. The
    * description includes a capped progressive catalog and generated code can
-   * search the complete request-scoped catalog at runtime. Delegations,
-   * approval-gated tools, background tools, provider-managed tools, and
-   * control-plane tools remain direct only.
+   * search the complete request-scoped catalog at runtime. With
+   * `experimental.tasks: true`, subagent tools may launch background tasks and
+   * return working receipts. Foreground delegations, other background tools,
+   * approval-gated tools, provider-managed tools, and control-plane tools remain
+   * direct only.
    *
    * Omit this setting or set it to `false` to disable code mode.
    */

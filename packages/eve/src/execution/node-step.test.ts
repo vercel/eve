@@ -14,6 +14,7 @@ import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
 import { countLocalSubagentCalls } from "#execution/tools/subagent/local.js";
+import { readSubagentTaskLauncher } from "#harness/background-tools.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
 import { toInputSchema } from "#tools/schema.js";
@@ -348,6 +349,8 @@ describe("createNodeHarnessTools", () => {
     });
     expect(legacy.get("research")?.runtimeAction?.kind).toBe("subagent-call");
     expect(legacy.get("reviewer")?.runtimeAction?.kind).toBe("remote-agent-call");
+    expect(readSubagentTaskLauncher(legacy.get("research")?.execute)).toBeUndefined();
+    expect(readSubagentTaskLauncher(legacy.get("reviewer")?.execute)).toBeUndefined();
     expect(legacy.get("research")?.execution).toBeUndefined();
     expect(legacy.get("reviewer")?.execution).toBeUndefined();
 
@@ -359,6 +362,9 @@ describe("createNodeHarnessTools", () => {
       }),
     });
     for (const name of ["agent", "research", "reviewer"]) {
+      expect(readSubagentTaskLauncher(background.get(name)?.execute)?.mode).toBe(
+        name === "reviewer" ? "remote" : "local",
+      );
       expect(background.get(name)?.execution).toBe("background");
       expect(background.get(name)?.execute).toBeDefined();
       expect(background.get(name)?.runtimeAction).toBeUndefined();
@@ -372,6 +378,22 @@ describe("createNodeHarnessTools", () => {
         }),
       ),
     ).toBe(2);
+    const researchLauncher = readSubagentTaskLauncher(background.get("research")?.execute);
+    const session = {
+      agent: { modelReference: { id: "mock" }, system: "", tools: [] },
+      compaction: { recentWindowSize: 10, threshold: 100_000 },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent-session",
+    };
+    const preview = researchLauncher?.preview({
+      callId: "call-whitespace",
+      session,
+      toolInput: { agentId: " existing-agent ", message: "continue" },
+      turnId: "turn-1",
+    });
+    expect(preview?.agentId).not.toBe("existing-agent");
+    expect(preview?.agentId).not.toBe(" existing-agent ");
   });
 
   it("does not recreate task tools absent from the compiled graph", async () => {
