@@ -66,6 +66,8 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return startAction(snapshot, event);
     case "action.settled":
       return settleAction(snapshot, event);
+    case "action.label.updated":
+      return updateActionLabel(snapshot, event);
     case "blocker.started":
       return startBlocker(snapshot, event);
     case "blocker.settled":
@@ -137,8 +139,6 @@ function startAction(
     ...snapshot,
     actions: replaceBounded(snapshot.actions, event.action.id, {
       ...event.action,
-      label:
-        event.action.label === undefined ? undefined : normalizeActivityText(event.action.label),
       name: normalizeActivityText(event.action.name),
       phase: phase as ActivityActionPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
@@ -148,6 +148,20 @@ function startAction(
       snapshot.pendingSettlements,
       pendingKey("action", event.action.id),
     ),
+  };
+}
+
+function updateActionLabel(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "action.label.updated" }>,
+): ActivitySnapshotV1 {
+  const current = snapshot.actions[event.actionId];
+  if (current === undefined) return snapshot;
+  const label = normalizeActivityText(event.label);
+  if (current.label === label) return snapshot;
+  return {
+    ...snapshot,
+    actions: replaceBounded(snapshot.actions, event.actionId, { ...current, label }),
   };
 }
 

@@ -41,11 +41,15 @@ describe("projectActivityEvents", () => {
         action: expect.objectContaining({
           id: "action:work:root:turn:tool-1",
           kind: "tool",
-          label: "Search issues",
           name: "search",
           stepIndex: 0,
         }),
         kind: "action.started",
+      }),
+      expect.objectContaining({
+        actionId: "action:work:root:turn:tool-1",
+        kind: "action.label.updated",
+        label: "Search issues",
       }),
       expect.objectContaining({
         action: expect.objectContaining({

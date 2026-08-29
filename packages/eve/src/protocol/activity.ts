@@ -35,7 +35,6 @@ export interface ActivityWorkStateV1 extends ActivityWorkIdentityV1 {
 export interface ActivityActionIdentityV1 {
   readonly id: string;
   readonly kind: ActivityActionKind;
-  readonly label?: string;
   readonly name: string;
   readonly parentWorkId: string;
   readonly rootTurnId: string;
@@ -43,6 +42,7 @@ export interface ActivityActionIdentityV1 {
 }
 
 export interface ActivityActionStateV1 extends ActivityActionIdentityV1 {
+  readonly label?: string;
   readonly phase: ActivityActionPhase;
   readonly settledAt?: string;
   readonly startedAt: string;
@@ -89,6 +89,12 @@ export type ActivityEventV1 =
       readonly kind: "action.settled";
       readonly outcome: Exclude<ActivityActionPhase, "running">;
       readonly settledAt: string;
+    }
+  | {
+      readonly actionId: string;
+      readonly eventId: string;
+      readonly kind: "action.label.updated";
+      readonly label: string;
     }
   | {
       readonly blocker: ActivityBlockerIdentityV1;
@@ -235,6 +241,21 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
         settledAt: value.settledAt,
       };
     }
+    case "action.label.updated": {
+      if (!hasOnlyKeys(value, ["actionId", "eventId", "kind", "label"])) return undefined;
+      if (
+        !isIdentity(value.actionId) ||
+        !isIdentity(value.eventId) ||
+        !isBoundedString(value.label)
+      )
+        return undefined;
+      return {
+        actionId: value.actionId,
+        eventId: value.eventId,
+        kind: "action.label.updated",
+        label: value.label,
+      };
+    }
     case "blocker.started": {
       if (!hasOnlyKeys(value, ["blocker", "eventId", "kind", "startedAt"])) return undefined;
       const blocker = parseBlockerIdentity(value.blocker);
@@ -273,13 +294,12 @@ function parseKnownEvent(value: Record<string, unknown>): ActivityEventV1 | null
 function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefined {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["id", "kind", "label", "name", "parentWorkId", "rootTurnId", "stepIndex"])
+    !hasOnlyKeys(value, ["id", "kind", "name", "parentWorkId", "rootTurnId", "stepIndex"])
   )
     return undefined;
   if (
     !isIdentity(value.id) ||
     !isOneOf(value.kind, ["tool", "skill"] as const) ||
-    !isOptionalBoundedString(value.label) ||
     !isBoundedString(value.name) ||
     !isIdentity(value.parentWorkId) ||
     !isIdentity(value.rootTurnId) ||
@@ -290,7 +310,6 @@ function parseActionIdentity(value: unknown): ActivityActionIdentityV1 | undefin
   return {
     id: value.id,
     kind: value.kind,
-    label: value.label,
     name: value.name,
     parentWorkId: value.parentWorkId,
     rootTurnId: value.rootTurnId,
