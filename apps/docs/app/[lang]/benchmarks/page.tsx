@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { canonicalAlternates, canonicalRoutes } from "@/lib/geistdocs/canonical";
 import { pageTitleMetadata } from "@/lib/geistdocs/metadata-title";
 import { benchmarkResults, benchmarkRows } from "@/lib/evals/results";
+import { PreviouslyMeasuredResults } from "./previously-measured-results";
 import { ResultsTable } from "./results-table";
 
 const title = "Model Benchmarks - eve";
@@ -61,17 +62,7 @@ const ModelBenchmarksPage = () => {
       </section>
 
       {previouslyMeasured.length > 0 ? (
-        <section className="mt-20" aria-labelledby="previously-measured">
-          <h2 className="text-heading-40 text-gray-1000" id="previously-measured">
-            Previously measured
-          </h2>
-          <p className="mt-3 text-gray-700 text-lg">
-            Final benchmark results for superseded model and harness combinations.
-          </p>
-          <div className="mt-8">
-            <ResultsTable rows={previouslyMeasured} showMeasurementDate />
-          </div>
-        </section>
+        <PreviouslyMeasuredResults rows={previouslyMeasured} />
       ) : null}
 
       <div className="mt-4 space-y-2 px-4 text-gray-700 text-sm leading-6">
