@@ -474,8 +474,21 @@ export class OpenApiConnectionClient implements ConnectionClient {
       headers["content-type"] = operation.requestBody.contentType;
     }
 
+    const method = operation.method.toUpperCase();
+    const prepared = await this.#connection.prepareRequest?.({
+      body,
+      callId: options.callId,
+      headers: { ...headers },
+      method,
+      toolName: operation.toolName,
+      url: url.toString(),
+    });
+    if (prepared !== undefined) {
+      Object.assign(headers, prepared);
+    }
+
     const response = await fetch(url, {
-      method: operation.method.toUpperCase(),
+      method,
       headers,
       body,
       signal: options?.abortSignal,

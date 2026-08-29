@@ -1,0 +1,261 @@
+---
+title: "UCP Commerce Agents"
+description: "Connect an eve agent to a merchant's UCP shopping service, and resolve what happens after each checkout response."
+---
+
+The [Universal Commerce Protocol](https://ucp.dev/) (UCP) has two sides. A
+business publishes a profile and serves commerce endpoints — see
+[Universal Commerce Protocol (UCP)](./ucp) for that. This page is the other
+side: your agent as the **platform**, calling a merchant that already speaks
+UCP.
+
+Two pieces cover it:
+
+- `defineUcpConnection` — a connection preset that owns identity, retry-safe
+  request ids, and request signing, so the model never sees them.
+- `resolveUcpCheckoutHandoff` — turns a checkout response into one typed
+  answer: keep going in the conversation, hand the buyer off to the merchant's
+  site, or embed the merchant's checkout.
+
+## Connect to a merchant
+
+Take the merchant's REST endpoint from their profile at
+`https://<merchant>/.well-known/ucp`, under
+`services["dev.ucp.shopping"]` where `transport` is `"rest"`:
+
+```ts title="agent/connections/acme.ts"
+import { defineUcpConnection } from "eve/commerce/ucp";
+
+export default defineUcpConnection({
+  endpoint: "https://acme.example.com/ucp/v1",
+  description: "Acme storefront: catalog search and checkout.",
+  agent: { profile: "https://my-agent.example.com/.well-known/ucp" },
+  auth: { getToken: async () => ({ token: process.env.ACME_TOKEN! }) },
+});
+```
+
+The connection name comes from the filename, so this registers as `acme` and
+its operations become `acme__create_checkout`, `acme__update_checkout`, and so
+on. `endpoint` is required: the canonical contract declares its server as a
+template variable with a placeholder default, so there is nothing safe to fall
+back to.
+
+By default the preset loads the canonical UCP shopping REST contract for the
+version in `UCP_VERSION`. Pass `version` for a merchant on an older version, or
+`spec` to use a contract the merchant publishes themselves.
+
+### What the preset takes off the model's plate
+
+The published UCP contract types `UCP-Agent`, `Idempotency-Key`, `Request-Id`,
+`Authorization`, `Signature`, `Signature-Input`, and `Content-Digest` as
+ordinary header parameters — and marks the first three **required**. Wired up as
+a plain [OpenAPI connection](../connections/openapi), all of them land in the
+model-facing input schema, and the model is asked to invent your identity, your
+credentials, and your signatures.
+
+The preset makes them application-owned instead. `acme__create_checkout` is
+left with `body`; `acme__get_checkout` with `id`. A value the model does try to
+pass for one of those headers is discarded, so a prompt-injected
+`Authorization` cannot displace the connection's own credential.
+
+`Accept`, `Accept-Encoding`, `Accept-Language`, `Content-Type`, and
+`User-Agent` are hidden too. To send one anyway, name it in
+`providedArguments`, which is applied last:
+
+```ts
+export default defineUcpConnection({
+  // ...
+  providedArguments: { "Accept-Language": ({ session }) => localeFor(session) },
+});
+```
+
+### Agent profile metadata
+
+`agent.profile` is the URL the merchant fetches to find out who is calling.
+UCP has no registration step, so this document is your identity: it declares
+your capabilities and publishes the `signing_keys` a merchant uses to verify
+your signatures. The preset serializes it into
+`UCP-Agent: profile="..."` on every request.
+
+It must be an absolute `https` URL reachable from the merchant's network —
+`defineUcpConnection` throws otherwise. That rules out `localhost`, so during
+local development either expose the route through a tunnel or use an example
+agent profile the merchant publishes for testing.
+
+Serve your own profile from a [custom channel](../channels/custom):
+
+```ts title="agent/channels/ucp.ts"
+import { defineChannel, GET } from "eve/channels";
+import { profile } from "../ucp-profile";
+
+export default defineChannel({
+  cors: true,
+  routes: [
+    GET(
+      "/.well-known/ucp",
+      async () =>
+        new Response(JSON.stringify(profile), {
+          headers: {
+            "content-type": "application/json",
+            "cache-control": "public, max-age=300",
+          },
+        }),
+    ),
+  ],
+});
+```
+
+### Retry-safe request ids
+
+UCP handles replay protection at the business layer: a repeated
+`Idempotency-Key` returns the cached response instead of re-executing, which is
+what stops a retried Complete Checkout from placing a second order.
+
+The preset derives both `Idempotency-Key` and `Request-Id` from eve's
+replay-stable `callId`, so a durable turn that resumes and re-issues the same
+tool call sends the same key and the merchant recognizes it as a retry.
+`Idempotency-Key` is sent on `POST`, `PUT`, `PATCH`, and `DELETE`; reads get a
+`Request-Id` only.
+
+Two different tool calls always get different keys, so the model retrying an
+operation with corrected inputs is a new request, not a replay.
+
+### Signing
+
+Signing is optional in UCP: a platform may authenticate with an API key,
+OAuth, or mTLS instead. When you do sign, pass the key:
+
+```ts
+export default defineUcpConnection({
+  // ...
+  signing: {
+    keyId: "platform-2026",
+    privateKey: process.env.UCP_SIGNING_KEY!, // PKCS#8 PEM or a JWK
+  },
+});
+```
+
+Every request is then signed per [RFC 9421](https://www.rfc-editor.org/rfc/rfc9421),
+with a [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530) `Content-Digest` over
+the exact bytes sent. `keyId` must match a `kid` in your profile's
+`signing_keys` — that is how the merchant finds the key to verify with.
+
+Merchants that require signatures reject unsigned requests with
+`signature_missing`. If one reports `signature_invalid`, print the base the
+signer covered and compare it to what the verifier reconstructed:
+
+```ts
+import { ucpSignatureBase } from "eve/commerce/ucp";
+
+const { base } = ucpSignatureBase(
+  { method: "POST", url, headers, body },
+  { keyId: "platform-2026" },
+);
+```
+
+`ES256` (P-256) is the default and is the curve every UCP verifier must
+support; `ES384` is optional. eve signs through WebCrypto, whose ECDSA output
+is already the fixed-width `r||s` encoding the RFC requires — the DER encoding
+that most server-side crypto libraries emit by default would fail verification.
+
+## Resolve the checkout handoff
+
+A checkout response spreads "what now" across four fields: `status`,
+`messages[].severity`, `continue_url`, and the embedded service binding.
+`resolveUcpCheckoutHandoff` reads all four and returns one discriminated union:
+
+```ts title="app/api/checkout/[id]/route.ts"
+import { resolveUcpCheckoutHandoff } from "eve/commerce/ucp";
+
+const handoff = resolveUcpCheckoutHandoff(checkoutResponse, {
+  embedded: { delegate: ["payment.credential"], colorScheme: "dark" },
+});
+
+switch (handoff.kind) {
+  case "conversational":
+    // handoff.next is "update", "complete", or "poll".
+    // handoff.blockers holds the errors to clear first.
+    break;
+  case "embedded":
+    // handoff.url is continue_url plus the negotiated `ec_*` parameters.
+    break;
+  case "continue_url":
+    // Send the buyer to handoff.url.
+    break;
+  case "completed":
+    // handoff.order carries the placed order.
+    break;
+  case "canceled":
+    break;
+  case "failed":
+    // handoff.reason says why nothing can continue.
+    break;
+}
+```
+
+It accepts either a raw checkout body or an eve OpenAPI connection tool result
+(`{ status, statusText, body }`), so you can pass a connection tool's output
+straight in.
+
+### How the outcome is chosen
+
+The buyer takes over when the merchant sets `status: requires_escalation`, or
+when any message carries `requires_buyer_input` or `requires_buyer_review` —
+those two severities mean the buyer must act whatever the status says. An
+`unrecoverable` error on its own stays conversational, because the spec allows
+retrying with different inputs.
+
+Between the two buyer-facing outcomes: `embedded` is chosen only when the
+merchant included an embedded service binding with `config.delegate` in _this
+checkout response_. Service-level support in the profile is not enough — the
+merchant decides per session. Everything else resolves to `continue_url`. Pass
+`embedded: false` to always redirect.
+
+The requested `delegate` list is intersected with what the merchant accepted,
+and the result is both returned as `handoff.delegate` and encoded into
+`handoff.url` as `ec_delegate`, alongside `ec_version` and any `ec_auth` or
+`ec_color_scheme` you passed.
+
+`failed` means neither continuing nor handing off is possible: a `ucp.status:
+"error"` envelope (`protocol_error`), an escalation with no `continue_url`
+(`handoff_unavailable`), a non-2xx response with no usable payload
+(`http_error`), or a body that is not a checkout (`unrecognized_response`).
+When the merchant offered a URL anyway, it is on `handoff.continueUrl`.
+
+### The agent does not place the order
+
+UCP requires the buyer to review and authorize a checkout in a trusted,
+deterministic UI before the order is placed. Keep that in your instructions —
+the handoff contract tells your application what to render, not the model what
+it is allowed to do:
+
+```md title="agent/instructions.md"
+Never call complete_checkout on your own initiative. Prepare the checkout and
+tell the buyer it is ready; they review and authorize it.
+```
+
+## Verify
+
+Confirm your agent profile is reachable and correctly cached:
+
+```sh
+curl -i https://my-agent.example.com/.well-known/ucp
+```
+
+Then check what the connection exposes to the model — `connection_search` for
+`acme` should list operations whose inputs are `id` and `body`, with no
+protocol headers.
+
+## What's not covered
+
+Cart, catalog, and order semantics beyond transport; payment-handler
+execution; webhook signature verification; and the Embedded Checkout message
+channel itself. `resolveUcpCheckoutHandoff` gets you to the embedded URL; the
+`ec.*` JSON-RPC conversation inside the frame is yours.
+
+## Read next
+
+- [Universal Commerce Protocol (UCP)](./ucp): the business side — publishing a
+  profile and serving commerce endpoints.
+- [OpenAPI connections](../connections/openapi): the connection type this
+  preset builds on, including `prepareRequest`.

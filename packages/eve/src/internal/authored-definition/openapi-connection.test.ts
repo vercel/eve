@@ -67,6 +67,18 @@ describe("normalizeOpenApiConnectionDefinition", () => {
       expect(result.auth).toBe(auth);
       expect(calls).toBe(0);
     });
+
+    it("preserves a prepareRequest hook without invoking it at build time", () => {
+      let calls = 0;
+      const prepareRequest = () => {
+        calls += 1;
+        return {};
+      };
+      const result = normalizeOpenApiConnectionDefinition(validInput({ prepareRequest }), MSG);
+
+      expect(result.prepareRequest).toBe(prepareRequest);
+      expect(calls).toBe(0);
+    });
   });
 
   describe("validation", () => {
@@ -92,6 +104,12 @@ describe("normalizeOpenApiConnectionDefinition", () => {
       expect(() =>
         normalizeOpenApiConnectionDefinition(validInput({ url: "https://x.com" }), MSG),
       ).toThrow();
+    });
+
+    it("rejects a non-function prepareRequest", () => {
+      expect(() =>
+        normalizeOpenApiConnectionDefinition(validInput({ prepareRequest: {} }), MSG),
+      ).toThrow(/prepareRequest/);
     });
 
     it("rejects operations specifying both allow and block", () => {

@@ -1,6 +1,9 @@
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
 import type { McpClientConnectionDefinition } from "#public/definitions/connections/mcp.js";
-import type { OpenAPIConnectionDefinition } from "#public/definitions/connections/openapi.js";
+import type {
+  ConnectionRequestPreparer,
+  OpenAPIConnectionDefinition,
+} from "#public/definitions/connections/openapi.js";
 import type {
   ConnectionToolCallDefinition,
   ProvidedArgumentsDefinition,
@@ -30,6 +33,7 @@ const KNOWN_OPENAPI_TOP_LEVEL_KEYS = [
   "description",
   "headers",
   "operations",
+  "prepareRequest",
   "spec",
   "toolCall",
 ] as const;
@@ -208,6 +212,12 @@ export function normalizeOpenApiConnectionDefinition(
   }
   if (operations !== undefined) {
     result.operations = operations;
+  }
+  if (record.prepareRequest !== undefined) {
+    if (typeof record.prepareRequest !== "function") {
+      throw new Error(`${message} The "prepareRequest" field must be a function.`);
+    }
+    result.prepareRequest = record.prepareRequest as ConnectionRequestPreparer;
   }
 
   if (record.approval !== undefined) {

@@ -191,6 +191,11 @@
       "import": "./dist/src/public/connections/index.js",
       "default": "./dist/src/public/connections/index.js"
     },
+    "./commerce/ucp": {
+      "types": "./dist/src/public/commerce/ucp/index.d.ts",
+      "import": "./dist/src/public/commerce/ucp/index.js",
+      "default": "./dist/src/public/commerce/ucp/index.js"
+    },
     "./agents/auth": {
       "types": "./dist/src/public/agents/auth.d.ts",
       "import": "./dist/src/public/agents/auth.js",

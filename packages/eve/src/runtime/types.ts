@@ -18,7 +18,10 @@ import type {
   HeadersDefinition,
   ToolFilterDefinition,
 } from "#shared/connection-types.js";
-import type { OpenAPISpecSource } from "#public/definitions/connections/openapi.js";
+import type {
+  ConnectionRequestPreparer,
+  OpenAPISpecSource,
+} from "#public/definitions/connections/openapi.js";
 import type { CompiledWorkspaceResourceRoot } from "#compiler/manifest.js";
 import type { WorkspaceRuntimeSpec } from "#runtime/workspace/types.js";
 import type { JsonObject } from "#shared/json.js";
@@ -114,6 +117,12 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
    * OpenAPI connections).
    */
   readonly protocol: ConnectionProtocol;
+  /**
+   * Last-mile request hook. Present only for `protocol: "openapi"`
+   * connections; the OpenAPI client calls it with the fully-built
+   * request and merges the headers it returns.
+   */
+  readonly prepareRequest?: ConnectionRequestPreparer;
   /**
    * OpenAPI document source (URL or inline object). Present only for
    * `protocol: "openapi"` connections; the OpenAPI client fetches and
