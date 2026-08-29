@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -8,6 +9,14 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const EVE_CATALOG_ROOT = join(EVE_PACKAGE_ROOT, "..", "eve-catalog");
+const EVE_CATALOG_FINGERPRINT_FILES = [
+  "../../tsconfig.json",
+  "package.json",
+  "src/index.ts",
+  "tsconfig.build.json",
+  "tsconfig.json",
+] as const;
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
 const execFileAsync = promisify(execFile);
@@ -78,14 +87,39 @@ describe("compiled vendor assets", () => {
     expect(schema._zod.bag.validator).toBeTypeOf("function");
   });
 
-  it("stamps the Nitro-resolved Rolldown version", async () => {
+  it("stamps the compiler versions that drive vendored output", async () => {
     const stamp = JSON.parse(
       await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
-    ) as { toolVersions?: { rolldown?: string } };
+    ) as { toolVersions?: { rolldown?: string; typescript?: string } };
     const nitroRequire = createRequire(require.resolve("nitro/package.json"));
     const rolldownPackage = nitroRequire("rolldown/package.json") as { version: string };
+    const typescriptPackage = require("typescript/package.json") as { version: string };
 
     expect(stamp.toolVersions?.rolldown).toBe(rolldownPackage.version);
+    expect(stamp.toolVersions?.typescript).toBe(typescriptPackage.version);
+  });
+
+  it("copies generated catalog declarations and fingerprints their sources", async () => {
+    const sourceHash = createHash("sha256");
+    for (const file of EVE_CATALOG_FINGERPRINT_FILES) {
+      sourceHash.update(file);
+      sourceHash.update("\0");
+      sourceHash.update(await readFile(join(EVE_CATALOG_ROOT, file), "utf8"));
+      sourceHash.update("\0");
+    }
+
+    const stamp = JSON.parse(
+      await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
+    ) as { moduleFingerprints?: Record<string, string> };
+    const [catalogDeclaration, vendoredDeclaration] = await Promise.all([
+      readFile(join(EVE_CATALOG_ROOT, "dist", "src", "index.d.ts"), "utf8"),
+      readFile(join(COMPILED_VENDOR_ROOT, "@eve", "catalog", "index.d.ts"), "utf8"),
+    ]);
+
+    expect(stamp.moduleFingerprints?.["@eve/catalog"]).toBe(sourceHash.digest("hex"));
+    expect(vendoredDeclaration.trimEnd()).toBe(
+      catalogDeclaration.replace(/\n?\/\/# sourceMappingURL=.*$/u, "").trimEnd(),
+    );
   });
 
   it("shares the OpenTelemetry provider registered through @vercel/otel", async () => {
