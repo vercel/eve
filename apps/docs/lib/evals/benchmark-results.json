@@ -331,7 +331,8 @@
       "meanDurationMs": 127045,
       "measuredAt": "2026-08-28T22:06:23.308Z",
       "meanEstimatedListCostUsd": 6.18823,
-      "meanToolInvocationCount": 17.666666666666668
+      "meanToolInvocationCount": 17.666666666666668,
+      "meanTokenConsumption": 598539
     },
     {
       "experimentId": "claude-fable-5-claude-code--baseline",
@@ -342,7 +343,8 @@
       "meanDurationMs": 169780,
       "measuredAt": "2026-08-28T22:06:23.319Z",
       "meanEstimatedListCostUsd": 3.83675,
-      "meanToolInvocationCount": 8.666666666666666
+      "meanToolInvocationCount": 8.666666666666666,
+      "meanTokenConsumption": 375135
     },
     {
       "experimentId": "claude-fable-5-claude-code--baseline",
@@ -353,7 +355,8 @@
       "meanDurationMs": 258551,
       "measuredAt": "2026-08-28T22:06:23.327Z",
       "meanEstimatedListCostUsd": 5.43717,
-      "meanToolInvocationCount": 12.666666666666666
+      "meanToolInvocationCount": 12.666666666666666,
+      "meanTokenConsumption": 528873
     },
     {
       "experimentId": "claude-fable-5-claude-code--baseline",
@@ -364,7 +367,8 @@
       "meanDurationMs": 89365,
       "measuredAt": "2026-08-28T22:06:23.334Z",
       "meanEstimatedListCostUsd": 3.97663,
-      "meanToolInvocationCount": 11.666666666666666
+      "meanToolInvocationCount": 11.666666666666666,
+      "meanTokenConsumption": 383479
     },
     {
       "experimentId": "claude-fable-5-claude-code--baseline",
@@ -375,7 +379,8 @@
       "meanDurationMs": 123612,
       "measuredAt": "2026-08-28T22:06:23.339Z",
       "meanEstimatedListCostUsd": 5.19217,
-      "meanToolInvocationCount": 17.666666666666668
+      "meanToolInvocationCount": 17.666666666666668,
+      "meanTokenConsumption": 507153
     },
     {
       "experimentId": "claude-fable-5-claude-code--baseline",
@@ -386,7 +391,8 @@
       "meanDurationMs": 104483,
       "measuredAt": "2026-08-28T22:06:23.346Z",
       "meanEstimatedListCostUsd": 7.76357,
-      "meanToolInvocationCount": 15.666666666666666
+      "meanToolInvocationCount": 15.666666666666666,
+      "meanTokenConsumption": 761257
     },
     {
       "experimentId": "claude-fable-5-claude-code--baseline",
@@ -397,7 +403,8 @@
       "meanDurationMs": 156463,
       "measuredAt": "2026-08-28T22:06:23.352Z",
       "meanEstimatedListCostUsd": 3.47642,
-      "meanToolInvocationCount": 23.666666666666668
+      "meanToolInvocationCount": 23.666666666666668,
+      "meanTokenConsumption": 339290
     },
     {
       "experimentId": "claude-fable-5-claude-code--guided",
@@ -408,7 +415,8 @@
       "meanDurationMs": 80508,
       "measuredAt": "2026-08-28T22:36:19.362Z",
       "meanEstimatedListCostUsd": 3.87527,
-      "meanToolInvocationCount": 7.666666666666667
+      "meanToolInvocationCount": 7.666666666666667,
+      "meanTokenConsumption": 375115
     },
     {
       "experimentId": "claude-fable-5-claude-code--guided",
@@ -419,7 +427,8 @@
       "meanDurationMs": 80206,
       "measuredAt": "2026-08-28T22:36:19.376Z",
       "meanEstimatedListCostUsd": 3.40311,
-      "meanToolInvocationCount": 9
+      "meanToolInvocationCount": 9,
+      "meanTokenConsumption": 332259
     },
     {
       "experimentId": "claude-fable-5-claude-code--guided",
@@ -430,7 +439,8 @@
       "meanDurationMs": 71462,
       "measuredAt": "2026-08-28T22:36:19.386Z",
       "meanEstimatedListCostUsd": 3.58212,
-      "meanToolInvocationCount": 8.666666666666666
+      "meanToolInvocationCount": 8.666666666666666,
+      "meanTokenConsumption": 350688
     },
     {
       "experimentId": "claude-fable-5-claude-code--guided",
@@ -441,7 +451,8 @@
       "meanDurationMs": 87034,
       "measuredAt": "2026-08-28T22:36:19.391Z",
       "meanEstimatedListCostUsd": 4.10959,
-      "meanToolInvocationCount": 7.666666666666667
+      "meanToolInvocationCount": 7.666666666666667,
+      "meanTokenConsumption": 397447
     },
     {
       "experimentId": "claude-fable-5-claude-code--guided",
@@ -452,7 +463,8 @@
       "meanDurationMs": 59604,
       "measuredAt": "2026-08-28T22:36:19.396Z",
       "meanEstimatedListCostUsd": 3.38543,
-      "meanToolInvocationCount": 7
+      "meanToolInvocationCount": 7,
+      "meanTokenConsumption": 331919
     },
     {
       "experimentId": "claude-fable-5-claude-code--guided",
@@ -463,7 +475,8 @@
       "meanDurationMs": 64829,
       "measuredAt": "2026-08-28T22:36:19.402Z",
       "meanEstimatedListCostUsd": 3.81826,
-      "meanToolInvocationCount": 7
+      "meanToolInvocationCount": 7,
+      "meanTokenConsumption": 374610
     },
     {
       "experimentId": "claude-fable-5-claude-code--guided",
@@ -474,7 +487,8 @@
       "meanDurationMs": 71055,
       "measuredAt": "2026-08-28T22:36:19.407Z",
       "meanEstimatedListCostUsd": 3.07521,
-      "meanToolInvocationCount": 7
+      "meanToolInvocationCount": 7,
+      "meanTokenConsumption": 299897
     },
     {
       "experimentId": "grok-4-6-opencode--baseline",
@@ -989,7 +1003,8 @@
       "meanDurationMs": 105859,
       "measuredAt": "2026-08-28T22:44:03.383Z",
       "meanEstimatedListCostUsd": 1.735734,
-      "meanToolInvocationCount": 18
+      "meanToolInvocationCount": 18,
+      "meanTokenConsumption": 851675
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--baseline",
@@ -1000,7 +1015,8 @@
       "meanDurationMs": 73537,
       "measuredAt": "2026-08-28T22:44:03.395Z",
       "meanEstimatedListCostUsd": 1.07418,
-      "meanToolInvocationCount": 11
+      "meanToolInvocationCount": 11,
+      "meanTokenConsumption": 530522
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--baseline",
@@ -1011,7 +1027,8 @@
       "meanDurationMs": 78931,
       "measuredAt": "2026-08-28T22:44:03.405Z",
       "meanEstimatedListCostUsd": 1.59483,
-      "meanToolInvocationCount": 18
+      "meanToolInvocationCount": 18,
+      "meanTokenConsumption": 789511
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--baseline",
@@ -1022,7 +1039,8 @@
       "meanDurationMs": 71745,
       "measuredAt": "2026-08-28T22:44:03.411Z",
       "meanEstimatedListCostUsd": 1.021194,
-      "meanToolInvocationCount": 11
+      "meanToolInvocationCount": 11,
+      "meanTokenConsumption": 499669
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--baseline",
@@ -1033,7 +1051,8 @@
       "meanDurationMs": 93642,
       "measuredAt": "2026-08-28T22:44:03.416Z",
       "meanEstimatedListCostUsd": 1.82048,
-      "meanToolInvocationCount": 17.666666666666668
+      "meanToolInvocationCount": 17.666666666666668,
+      "meanTokenConsumption": 901060
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--baseline",
@@ -1044,7 +1063,8 @@
       "meanDurationMs": 91912,
       "measuredAt": "2026-08-28T22:44:03.422Z",
       "meanEstimatedListCostUsd": 1.172788,
-      "meanToolInvocationCount": 17.333333333333332
+      "meanToolInvocationCount": 17.333333333333332,
+      "meanTokenConsumption": 578826
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--baseline",
@@ -1055,7 +1075,8 @@
       "meanDurationMs": 84747,
       "measuredAt": "2026-08-28T22:44:03.428Z",
       "meanEstimatedListCostUsd": 1.011918,
-      "meanToolInvocationCount": 13.333333333333334
+      "meanToolInvocationCount": 13.333333333333334,
+      "meanTokenConsumption": 498895
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--guided",
@@ -1066,7 +1087,8 @@
       "meanDurationMs": 69779,
       "measuredAt": "2026-08-28T23:16:01.692Z",
       "meanEstimatedListCostUsd": 1.629858,
-      "meanToolInvocationCount": 12
+      "meanToolInvocationCount": 12,
+      "meanTokenConsumption": 801201
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--guided",
@@ -1077,7 +1099,8 @@
       "meanDurationMs": 56970,
       "measuredAt": "2026-08-28T23:16:01.703Z",
       "meanEstimatedListCostUsd": 0.965568,
-      "meanToolInvocationCount": 7.666666666666667
+      "meanToolInvocationCount": 7.666666666666667,
+      "meanTokenConsumption": 476704
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--guided",
@@ -1088,7 +1111,8 @@
       "meanDurationMs": 42652,
       "measuredAt": "2026-08-28T23:16:01.711Z",
       "meanEstimatedListCostUsd": 0.82867,
-      "meanToolInvocationCount": 8.333333333333334
+      "meanToolInvocationCount": 8.333333333333334,
+      "meanTokenConsumption": 410267
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--guided",
@@ -1099,7 +1123,8 @@
       "meanDurationMs": 45265,
       "measuredAt": "2026-08-28T23:16:01.717Z",
       "meanEstimatedListCostUsd": 0.67903,
-      "meanToolInvocationCount": 5
+      "meanToolInvocationCount": 5,
+      "meanTokenConsumption": 332683
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--guided",
@@ -1110,7 +1135,8 @@
       "meanDurationMs": 39690,
       "measuredAt": "2026-08-28T23:16:01.722Z",
       "meanEstimatedListCostUsd": 0.972688,
-      "meanToolInvocationCount": 7
+      "meanToolInvocationCount": 7,
+      "meanTokenConsumption": 480972
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--guided",
@@ -1121,7 +1147,8 @@
       "meanDurationMs": 38868,
       "measuredAt": "2026-08-28T23:16:01.727Z",
       "meanEstimatedListCostUsd": 1.219158,
-      "meanToolInvocationCount": 7.333333333333333
+      "meanToolInvocationCount": 7.333333333333333,
+      "meanTokenConsumption": 604483
     },
     {
       "experimentId": "claude-sonnet-5-claude-code--guided",
@@ -1132,7 +1159,8 @@
       "meanDurationMs": 68924,
       "measuredAt": "2026-08-28T23:16:01.731Z",
       "meanEstimatedListCostUsd": 1.053378,
-      "meanToolInvocationCount": 15
+      "meanToolInvocationCount": 15,
+      "meanTokenConsumption": 521965
     },
     {
       "experimentId": "glm-5-2-opencode--baseline",
@@ -1311,7 +1339,8 @@
       "meanDurationMs": 135534,
       "measuredAt": "2026-08-29T00:05:25.109Z",
       "meanEstimatedListCostUsd": 4.933595,
-      "meanToolInvocationCount": 22.666666666666668
+      "meanToolInvocationCount": 22.666666666666668,
+      "meanTokenConsumption": 947443
     },
     {
       "experimentId": "claude-opus-5-claude-code--baseline",
@@ -1322,7 +1351,8 @@
       "meanDurationMs": 92582,
       "measuredAt": "2026-08-29T00:05:25.121Z",
       "meanEstimatedListCostUsd": 2.50535,
-      "meanToolInvocationCount": 13.333333333333334
+      "meanToolInvocationCount": 13.333333333333334,
+      "meanTokenConsumption": 488330
     },
     {
       "experimentId": "claude-opus-5-claude-code--baseline",
@@ -1333,7 +1363,8 @@
       "meanDurationMs": 191566,
       "measuredAt": "2026-08-29T00:05:25.129Z",
       "meanEstimatedListCostUsd": 14.008915,
-      "meanToolInvocationCount": 36.333333333333336
+      "meanToolInvocationCount": 36.333333333333336,
+      "meanTokenConsumption": 2751467
     },
     {
       "experimentId": "claude-opus-5-claude-code--baseline",
@@ -1344,7 +1375,8 @@
       "meanDurationMs": 125522,
       "measuredAt": "2026-08-29T00:05:25.138Z",
       "meanEstimatedListCostUsd": 3.74517,
-      "meanToolInvocationCount": 16
+      "meanToolInvocationCount": 16,
+      "meanTokenConsumption": 722970
     },
     {
       "experimentId": "claude-opus-5-claude-code--baseline",
@@ -1355,7 +1387,8 @@
       "meanDurationMs": 135687,
       "measuredAt": "2026-08-29T00:05:25.146Z",
       "meanEstimatedListCostUsd": 4.87658,
-      "meanToolInvocationCount": 26.666666666666668
+      "meanToolInvocationCount": 26.666666666666668,
+      "meanTokenConsumption": 952132
     },
     {
       "experimentId": "claude-opus-5-claude-code--baseline",
@@ -1365,7 +1398,9 @@
       "validRuns": 3,
       "meanDurationMs": 202636,
       "measuredAt": "2026-08-29T00:05:25.152Z",
-      "meanToolInvocationCount": 26.333333333333332
+      "meanToolInvocationCount": 26.333333333333332,
+      "meanTokenConsumption": 1822465,
+      "meanEstimatedListCostUsd": 9.304045
     },
     {
       "experimentId": "claude-opus-5-claude-code--baseline",
@@ -1376,7 +1411,8 @@
       "meanDurationMs": 163050,
       "measuredAt": "2026-08-29T00:05:25.160Z",
       "meanEstimatedListCostUsd": 5.362835,
-      "meanToolInvocationCount": 26
+      "meanToolInvocationCount": 26,
+      "meanTokenConsumption": 1044543
     },
     {
       "experimentId": "claude-opus-5-claude-code--guided",
@@ -1387,7 +1423,8 @@
       "meanDurationMs": 106811,
       "measuredAt": "2026-08-29T00:13:01.331Z",
       "meanEstimatedListCostUsd": 11.438505,
-      "meanToolInvocationCount": 14.666666666666666
+      "meanToolInvocationCount": 14.666666666666666,
+      "meanTokenConsumption": 2234333
     },
     {
       "experimentId": "claude-opus-5-claude-code--guided",
@@ -1398,7 +1435,8 @@
       "meanDurationMs": 91787,
       "measuredAt": "2026-08-29T00:13:01.344Z",
       "meanEstimatedListCostUsd": 2.4951,
-      "meanToolInvocationCount": 16
+      "meanToolInvocationCount": 16,
+      "meanTokenConsumption": 486252
     },
     {
       "experimentId": "claude-opus-5-claude-code--guided",
@@ -1409,7 +1447,8 @@
       "meanDurationMs": 114352,
       "measuredAt": "2026-08-29T00:13:01.356Z",
       "meanEstimatedListCostUsd": 2.90723,
-      "meanToolInvocationCount": 20.666666666666668
+      "meanToolInvocationCount": 20.666666666666668,
+      "meanTokenConsumption": 568682
     },
     {
       "experimentId": "claude-opus-5-claude-code--guided",
@@ -1420,7 +1459,8 @@
       "meanDurationMs": 77606,
       "measuredAt": "2026-08-29T00:13:01.363Z",
       "meanEstimatedListCostUsd": 2.328845,
-      "meanToolInvocationCount": 10
+      "meanToolInvocationCount": 10,
+      "meanTokenConsumption": 446685
     },
     {
       "experimentId": "claude-opus-5-claude-code--guided",
@@ -1431,7 +1471,8 @@
       "meanDurationMs": 104699,
       "measuredAt": "2026-08-29T00:13:01.370Z",
       "meanEstimatedListCostUsd": 4.55151,
-      "meanToolInvocationCount": 19
+      "meanToolInvocationCount": 19,
+      "meanTokenConsumption": 888618
     },
     {
       "experimentId": "claude-opus-5-claude-code--guided",
@@ -1442,7 +1483,8 @@
       "meanDurationMs": 162364,
       "measuredAt": "2026-08-29T00:13:01.377Z",
       "meanEstimatedListCostUsd": 6.511585,
-      "meanToolInvocationCount": 16.333333333333332
+      "meanToolInvocationCount": 16.333333333333332,
+      "meanTokenConsumption": 1266737
     },
     {
       "experimentId": "claude-opus-5-claude-code--guided",
@@ -1453,7 +1495,8 @@
       "meanDurationMs": 89702,
       "measuredAt": "2026-08-29T00:13:01.384Z",
       "meanEstimatedListCostUsd": 3.44083,
-      "meanToolInvocationCount": 16.333333333333332
+      "meanToolInvocationCount": 16.333333333333332,
+      "meanTokenConsumption": 674858
     },
     {
       "experimentId": "gemini-3-1-pro-preview-opencode--baseline",
