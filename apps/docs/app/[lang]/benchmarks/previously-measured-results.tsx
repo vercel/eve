@@ -17,7 +17,7 @@ export const PreviouslyMeasuredResults = ({ rows }: { rows: BenchmarkRow[] }) =>
         onClick={() => setExpanded((current) => !current)}
         type="button"
       >
-        Superseded models [{expanded ? "−" : "+"}]
+        Historical Results [{expanded ? "−" : "+"}]
       </button>
       {expanded ? (
         <div className="mt-4">
