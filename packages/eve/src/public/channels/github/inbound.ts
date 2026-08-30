@@ -94,13 +94,20 @@ export function extractGitHubCommentTrigger(input: {
 }): GitHubCommentTrigger | null {
   const botName = input.botName?.trim();
   if (!botName) return null;
-  const mention = new RegExp(`@${escapeRegExp(botName)}(?=$|[^A-Za-z0-9_-])`, "iu").exec(
-    input.body,
+  const mentionPattern = new RegExp(`@${escapeRegExp(botName)}(?=$|[^A-Za-z0-9_-])`, "iu");
+  const lines = input.body.split("\n");
+  const mentionLineIndex = lines.findIndex(
+    (line) => !line.trimStart().startsWith(">") && mentionPattern.test(line),
   );
+  if (mentionLineIndex === -1) return null;
+  const body = lines
+    .filter((line, index) => index >= mentionLineIndex || !line.trimStart().startsWith(">"))
+    .join("\n");
+  const mention = mentionPattern.exec(body);
   if (mention === null) return null;
   const start = mention.index;
   const end = start + mention[0].length;
-  const message = `${input.body.slice(0, start)}${input.body.slice(end)}`.trim();
+  const message = `${body.slice(0, start)}${body.slice(end)}`.trim();
   return { kind: "mention", message, token: mention[0] };
 }
 
