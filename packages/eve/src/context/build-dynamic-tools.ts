@@ -17,6 +17,7 @@ import type {
 } from "#approval/definition.js";
 import {
   callDurableDynamicCallback,
+  isReplayableDurableDynamicToolMetadata,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
 } from "#tools/durable-callbacks.js";
@@ -32,6 +33,13 @@ function missingCallbackError(
     `Dynamic tool "${metadata.name}" cannot replay its ${phase} callback because it is not ` +
       "registered in this process. The tool was removed or renamed since this call was parked, " +
       "or its resolver did not run. Restore the tool definition or start a new session.",
+  );
+}
+
+function legacyMetadataError(metadata: DurableDynamicToolMetadata): Error {
+  return new Error(
+    `Dynamic tool "${metadata.name}" was persisted by an older eve version whose callback ` +
+      "metadata cannot be replayed. Start a new turn or session to re-resolve it.",
   );
 }
 
@@ -85,6 +93,20 @@ export function replayDynamicTools(
   metadata: readonly DurableDynamicToolMetadata[],
 ): HarnessToolDefinition[] {
   return metadata.map((entry) => {
+    if (!isReplayableDurableDynamicToolMetadata(entry)) {
+      return {
+        description: entry.description,
+        execute: createToolExecuteWithAuth({
+          scope: entry.name,
+          execute: () => {
+            throw legacyMetadataError(entry);
+          },
+        }),
+        inputSchema: toInputSchema(entry.inputSchema),
+        name: entry.name,
+        outputSchema: toOutputSchema(entry.outputSchema),
+      };
+    }
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
     const toModelOutputReference = entry.callbacks.toModelOutput;

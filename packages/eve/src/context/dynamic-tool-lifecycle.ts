@@ -18,6 +18,7 @@ import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
 import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
 import {
   hasUnregisteredDurableDynamicCallbacks,
+  isReplayableDurableDynamicToolMetadata,
   type DurableDynamicCallbackPhase,
   type DurableDynamicCallbackReference,
   type DurableDynamicToolCallbacks,
@@ -361,11 +362,10 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   readonly messages: readonly ModelMessage[];
   readonly runtimeRevision: string;
 }): Promise<void> {
+  const persisted = input.ctx.get(SessionDynamicToolMetadataKey) ?? [];
   const revisionChanged =
     input.ctx.get(SessionDynamicToolRuntimeRevisionKey) !== input.runtimeRevision;
-  const needsRebind = hasUnregisteredDurableDynamicCallbacks(
-    input.ctx.get(SessionDynamicToolMetadataKey) ?? [],
-  );
+  const needsRebind = hasUnregisteredDurableDynamicCallbacks(persisted);
   if (!revisionChanged && !needsRebind) return;
   const matching = input.resolvers.filter((resolver) =>
     resolver.eventNames.includes("session.started"),
@@ -374,7 +374,22 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
     matching.length === 0
       ? { metadata: [] }
       : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
-  input.ctx.set(SessionDynamicToolMetadataKey, metadata);
+  if (revisionChanged) {
+    input.ctx.set(SessionDynamicToolMetadataKey, metadata);
+  } else {
+    const persistedByIdentity = new Map(
+      persisted.map((entry) => [`${entry.resolverSlug}\0${entry.name}`, entry] as const),
+    );
+    input.ctx.set(
+      SessionDynamicToolMetadataKey,
+      metadata.map((entry) => {
+        const previous = persistedByIdentity.get(`${entry.resolverSlug}\0${entry.name}`);
+        return previous !== undefined && isReplayableDurableDynamicToolMetadata(previous)
+          ? previous
+          : entry;
+      }),
+    );
+  }
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }
 
@@ -394,11 +409,26 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   );
   if (matching.length === 0) return;
 
-  await contextStorage.run(
+  const resolved: ResolvedDynamicToolEvent = await contextStorage.run(
     input.ctx,
     async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
   );
-  const unresolved = missing.filter((entry) => hasUnregisteredDurableDynamicCallbacks([entry]));
+  const rebound = resolved.metadata;
+  const reboundByIdentity = new Map(
+    rebound.map((entry) => [`${entry.resolverSlug}\0${entry.name}`, entry] as const),
+  );
+  const updated = persisted.map((entry) => {
+    if (isReplayableDurableDynamicToolMetadata(entry)) return entry;
+    return reboundByIdentity.get(`${entry.resolverSlug}\0${entry.name}`) ?? entry;
+  });
+  input.ctx.set(TurnDynamicToolMetadataKey, updated);
+
+  const missingIdentities = new Set(missing.map((entry) => `${entry.resolverSlug}\0${entry.name}`));
+  const unresolved = updated.filter(
+    (entry) =>
+      missingIdentities.has(`${entry.resolverSlug}\0${entry.name}`) &&
+      hasUnregisteredDurableDynamicCallbacks([entry]),
+  );
   if (unresolved.length > 0) {
     throw new Error(
       `Dynamic tool callback rebind did not restore: ${unresolved.map((entry) => entry.name).join(", ")}. The tool may have been renamed or removed.`,

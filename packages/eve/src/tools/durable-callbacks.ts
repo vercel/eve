@@ -81,6 +81,37 @@ export function lookupDurableDynamicCallback(
   return getRegistry().get(toolName)?.get(phase);
 }
 
+function isDurableDynamicCallbackReference(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  if (Object.keys(value).some((key) => key !== "closure")) return false;
+  const closure = Reflect.get(value, "closure");
+  return typeof closure === "object" && closure !== null && !Array.isArray(closure);
+}
+
+/** True when persisted metadata uses the current callback-reference format. */
+export function isReplayableDurableDynamicToolMetadata(metadata: {
+  readonly callbacks?: unknown;
+}): boolean {
+  if (typeof metadata.callbacks !== "object" || metadata.callbacks === null) return false;
+  if (
+    Object.keys(metadata.callbacks).some(
+      (key) =>
+        key !== "execute" &&
+        key !== "approvalRequest" &&
+        key !== "approvalResponse" &&
+        key !== "toModelOutput",
+    )
+  ) {
+    return false;
+  }
+  if (!isDurableDynamicCallbackReference(Reflect.get(metadata.callbacks, "execute"))) return false;
+  for (const phase of ["approvalRequest", "approvalResponse", "toModelOutput"] as const) {
+    const reference = Reflect.get(metadata.callbacks, phase);
+    if (reference !== undefined && !isDurableDynamicCallbackReference(reference)) return false;
+  }
+  return true;
+}
+
 /** Invokes a registered callback with its snapshotted closure and live arguments. */
 export function callDurableDynamicCallback(
   callback: DurableDynamicCallbackFn,
@@ -92,13 +123,15 @@ export function callDurableDynamicCallback(
 
 /** True when any persisted callback of these tools has no registered binding. */
 export function hasUnregisteredDurableDynamicCallbacks(
-  metadata: readonly { callbacks: DurableDynamicToolCallbacks; name: string }[],
+  metadata: readonly { callbacks?: unknown; name: string }[],
 ): boolean {
-  return metadata.some((entry) =>
-    (Object.keys(entry.callbacks) as DurableDynamicCallbackPhase[]).some(
+  return metadata.some((entry) => {
+    if (!isReplayableDurableDynamicToolMetadata(entry)) return true;
+    const callbacks = entry.callbacks as DurableDynamicToolCallbacks;
+    return (Object.keys(callbacks) as DurableDynamicCallbackPhase[]).some(
       (phase) => lookupDurableDynamicCallback(entry.name, phase) === undefined,
-    ),
-  );
+    );
+  });
 }
 
 /** Marks a live callback with the descriptor needed to register it at resolve time. */
