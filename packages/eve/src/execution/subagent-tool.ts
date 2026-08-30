@@ -1,7 +1,7 @@
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import {
   formatSubagentInput,
-  normalizeRequestedOutputSchema,
+  resolveSubagentOutputSchema,
 } from "#execution/subagent-invocation.js";
 import type {
   ActivityObserverConfig,
@@ -130,7 +130,10 @@ export function buildSubagentRunInput(input: {
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
-  const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
+  const outputSchema = resolveSubagentOutputSchema({
+    declared: source.outputSchema,
+    requested: action.input.outputSchema,
+  });
   const adapterState: Record<string, unknown> = {
     callId: action.callId,
     parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
@@ -164,7 +167,7 @@ export function buildSubagentRunInput(input: {
         action,
         source,
       }),
-      outputSchema: requestedOutputSchema ?? source.outputSchema,
+      outputSchema,
     },
     limits: inheritedLimits,
     mode: "conversation",

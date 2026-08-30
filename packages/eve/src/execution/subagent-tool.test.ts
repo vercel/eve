@@ -233,9 +233,37 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.mode).toBe("conversation");
   });
 
-  it("lets a per-call outputSchema override the local child's declared schema", () => {
-    const declared = { properties: { declared: { type: "string" } }, type: "object" };
-    const requested = { properties: { requested: { type: "number" } }, type: "object" };
+  it("narrows the local child's declared outputSchema with per-call constraints", () => {
+    const declared = {
+      additionalProperties: false,
+      properties: {
+        artifacts: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              digest: { maxLength: 2000, type: "string" },
+              id: { type: "string" },
+              status: { enum: ["ok", "error"], type: "string" },
+            },
+            required: ["id", "status", "digest"],
+            type: "object",
+          },
+          minItems: 1,
+          type: "array",
+        },
+      },
+      required: ["artifacts"],
+      type: "object",
+    };
+    const requested = {
+      properties: {
+        artifacts: {
+          items: { properties: { id: { enum: ["manifest-a", "manifest-b"] } } },
+          maxItems: 2,
+          minItems: 2,
+        },
+      },
+    };
     const { runInput } = buildSubagentRunInput({
       action: { ...makeAction(), input: { message: "do something", outputSchema: requested } },
       auth: null,
@@ -245,7 +273,50 @@ describe("buildSubagentRunInput", () => {
       source: { description: "Research the request.", outputSchema: declared, type: "local" },
     });
 
-    expect(runInput.input.outputSchema).toEqual(requested);
+    expect(runInput.input.outputSchema).toEqual({
+      additionalProperties: false,
+      properties: {
+        artifacts: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              digest: { maxLength: 2000, type: "string" },
+              id: { enum: ["manifest-a", "manifest-b"], type: "string" },
+              status: { enum: ["ok", "error"], type: "string" },
+            },
+            required: ["id", "status", "digest"],
+            type: "object",
+          },
+          maxItems: 2,
+          minItems: 2,
+          type: "array",
+        },
+      },
+      required: ["artifacts"],
+      type: "object",
+    });
+  });
+
+  it("does not let a loose per-call outputSchema weaken the local child's declaration", () => {
+    const declared = {
+      additionalProperties: false,
+      properties: { result: { type: "string" } },
+      required: ["result"],
+      type: "object",
+    };
+    const { runInput } = buildSubagentRunInput({
+      action: {
+        ...makeAction(),
+        input: { message: "do something", outputSchema: { type: "object" } },
+      },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: { description: "Research the request.", outputSchema: declared, type: "local" },
+    });
+
+    expect(runInput.input.outputSchema).toEqual(declared);
   });
 
   it("hands the parent's trace window down to the child, and omits it when absent", () => {

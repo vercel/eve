@@ -149,6 +149,8 @@ The root built-in `agent` tool is the exception. Its children share the root's s
 
 eve lowers every subagent visible to the current agent (the root built-in copy, declared, or [remote](./guides/remote-agents)) into a model-visible tool with the same `{ message, agentId?, outputSchema? }` shape. The parent packs `message` with everything the child needs, since the child never sees the parent's history. Set `outputSchema` to require structured output for that turn; the child remains available for follow-up messages afterward.
 
+On a fresh delegation to an agent that declares its own `outputSchema`, a non-empty per-call schema narrows the declaration instead of replacing it. eve flattens compatible object, array, type, enum, required-field, and bound constraints into one effective schema. Omitting the per-call schema, or passing an empty object, leaves the declaration in force. A per-call schema that conflicts with the declaration or uses composition that cannot be flattened fails the dispatch instead of weakening the declared contract.
+
 Declared subagents can call nested subagents defined under their own directories. eve does not apply a separate depth limit; nesting ends where the authored directory tree ends. The built-in `agent` follows the stricter root-only rule above, so `limits.maxSubagentDepth` no longer exists.
 
 `Workflow` is also root-only. Child sessions can still call their own declared or remote subagents, but they receive neither `Workflow` nor the built-in `agent`. The Workflow tool's `maxSubagents` option caps the number of calls made by one program (default 100); see [Workflow tool](./concepts/built-in-tools#workflow-tool).

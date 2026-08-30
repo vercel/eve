@@ -1,10 +1,10 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
+import { createLocalSubagentStartFailureResult } from "#execution/dispatch-action-failures.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { SUBAGENT_START_FAILED } from "#harness/agent-handle-errors.js";
 import {
   confirmAgentStarted,
   confirmTaskAgentAddress,
@@ -14,7 +14,6 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import { toErrorMessage } from "#shared/errors.js";
 
 const log = createLogger("execution.subagent-start-local");
 
@@ -56,22 +55,37 @@ export async function startLocalSubagent(input: {
     dynamicSubagentAgentConfig: input.dynamicSubagentAgentConfig,
     nodeId: action.nodeId,
   });
-  const { childContinuationToken, runInput } = buildSubagentRunInput({
-    action,
-    auth: input.auth,
-    batchEvent: input.batchEvent,
-    capabilities: input.capabilities,
-    channelMetadata: input.channelMetadata,
-    fanoutSize: input.fanoutSize,
-    initiatorAuth: input.initiatorAuth,
-    graph: input.bundle.graph,
-    parentContinuationToken: input.parentContinuationToken,
-    parentTraceContext: input.parentTraceContext,
-    activityObserver,
-    sandboxSessionId: input.sandboxSessionId,
-    session: input.session,
-    source,
-  });
+  let built: ReturnType<typeof buildSubagentRunInput>;
+  try {
+    built = buildSubagentRunInput({
+      action,
+      auth: input.auth,
+      batchEvent: input.batchEvent,
+      capabilities: input.capabilities,
+      channelMetadata: input.channelMetadata,
+      fanoutSize: input.fanoutSize,
+      initiatorAuth: input.initiatorAuth,
+      graph: input.bundle.graph,
+      parentContinuationToken: input.parentContinuationToken,
+      parentTraceContext: input.parentTraceContext,
+      activityObserver,
+      sandboxSessionId: input.sandboxSessionId,
+      session: input.session,
+      source,
+    });
+  } catch (error) {
+    logError(log, "local subagent start failed", error, {
+      callId: action.callId,
+      nodeId: action.nodeId,
+      subagentName: action.subagentName,
+    });
+    return {
+      kind: "error",
+      result: createLocalSubagentStartFailureResult({ action, error }),
+      session: input.currentSession,
+    };
+  }
+  const { childContinuationToken, runInput } = built;
 
   const targetKind = source.type === "runtime" ? ("agent/self" as const) : ("agent/local" as const);
   const { identity, operation } = mintStartOperation({
@@ -105,17 +119,7 @@ export async function startLocalSubagent(input: {
       });
       return {
         kind: "error",
-        result: {
-          callId: action.callId,
-          isError: true,
-          kind: "subagent-result",
-          origin: "dispatch",
-          output: {
-            code: SUBAGENT_START_FAILED,
-            message: toErrorMessage(error),
-          },
-          subagentName: action.subagentName,
-        },
+        result: createLocalSubagentStartFailureResult({ action, error }),
         session: rejectAgentEffect(preparedSession, {
           disposition: "dead",
           operationId: operation.id,

@@ -1,4 +1,4 @@
-import { REMOTE_AGENT_START_FAILED } from "#harness/agent-handle-errors.js";
+import { REMOTE_AGENT_START_FAILED, SUBAGENT_START_FAILED } from "#harness/agent-handle-errors.js";
 import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
@@ -43,6 +43,23 @@ export function createRemoteAgentStartFailureResult(input: {
       message: toErrorMessage(input.error),
     },
     subagentName: input.action.remoteAgentName,
+  };
+}
+
+export function createLocalSubagentStartFailureResult(input: {
+  readonly action: RuntimeSubagentCallActionRequest;
+  readonly error: unknown;
+}): RuntimeSubagentDispatchFailure {
+  return {
+    callId: input.action.callId,
+    isError: true,
+    kind: "subagent-result",
+    origin: "dispatch",
+    output: {
+      code: SUBAGENT_START_FAILED,
+      message: toErrorMessage(input.error),
+    },
+    subagentName: input.action.subagentName,
   };
 }
 

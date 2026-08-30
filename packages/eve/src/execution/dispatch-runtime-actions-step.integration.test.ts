@@ -22,6 +22,7 @@ import {
   type AgentHandle,
 } from "#harness/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
+import type { JsonObject } from "#shared/json.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import * as taskRunControl from "#execution/tasks/parent/run-parent.js";
@@ -572,6 +573,40 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
       handles: [],
     });
+  });
+
+  it("returns a per-call failure when a local output schema cannot be narrowed", async () => {
+    const session = createStartSession({
+      kind: "local",
+      outputSchema: { allOf: [{ type: "object" }] },
+    });
+    installContext(
+      session,
+      {
+        definition: { description: "Research", kind: "subagent" },
+        nodeId: "subagents/research",
+      },
+      false,
+      null,
+      { properties: { result: { type: "string" } }, type: "object" },
+    );
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(result.results[0]).toMatchObject({
+      isError: true,
+      output: {
+        code: "SUBAGENT_START_FAILED",
+        message: expect.stringContaining('cannot flatten the composition keyword "allOf"'),
+      },
+    });
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(getAgentHandleStore(readResultSessionState(result, session))).toBeUndefined();
   });
 
   it("adopts the child a replayed start already created instead of failing it", async () => {
@@ -1208,14 +1243,20 @@ function createStartSession(input: {
     readonly turnId: string;
   };
   readonly kind: "local" | "remote";
+  readonly outputSchema?: JsonObject;
 }): HarnessSession {
+  const actionInput: { message: string; outputSchema?: JsonObject } = {
+    message: "research this",
+  };
+  if (input.outputSchema !== undefined) actionInput.outputSchema = input.outputSchema;
+
   return setPendingRuntimeActionBatch({
     actions: [
       input.kind === "local"
         ? {
             callId: "call-1",
             description: "Research",
-            input: { message: "research this" },
+            input: actionInput,
             kind: "subagent-call",
             name: "research",
             nodeId: "subagents/research",
@@ -1287,6 +1328,7 @@ function installContext(
   remote?: { readonly definition: unknown; readonly nodeId: string },
   tasks = false,
   auth: SessionAuthContext | null = null,
+  localOutputSchema?: JsonObject,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1298,6 +1340,21 @@ function installContext(
       config: tasks ? { experimental: { tasks: true } } : {},
     },
     subagentRegistry: { subagentsByNodeId },
+    ...(localOutputSchema === undefined
+      ? {}
+      : {
+          graph: {
+            nodesByNodeId: new Map([
+              [
+                "subagents/research",
+                {
+                  sandboxRegistry: { sandbox: { definition: {} } },
+                  turnAgent: { outputSchema: localOutputSchema },
+                },
+              ],
+            ]),
+          },
+        }),
     turnAgent: {
       id: "test-agent",
       instructions: [],

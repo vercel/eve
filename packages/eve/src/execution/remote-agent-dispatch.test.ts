@@ -403,6 +403,90 @@ describe("startRemoteAgentSession", () => {
     expect(body.capabilities).toEqual({});
   });
 
+  it("narrows a remote agent's declared outputSchema with per-call constraints", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          sessionId: "remote-session",
+          status: "accepted",
+        }),
+        { status: 202 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const action = createAction();
+    await startRemoteAgentSession({
+      action: {
+        ...action,
+        input: {
+          ...action.input,
+          outputSchema: {
+            properties: {
+              artifacts: {
+                items: { properties: { id: { enum: ["manifest-a", "manifest-b"] } } },
+                maxItems: 2,
+                minItems: 2,
+              },
+            },
+          },
+        },
+      },
+      callbackBaseUrl: "https://caller.example.com",
+      remote: {
+        ...createRemoteAgent(),
+        outputSchema: {
+          additionalProperties: false,
+          properties: {
+            artifacts: {
+              items: {
+                additionalProperties: false,
+                properties: { id: { type: "string" } },
+                required: ["id"],
+                type: "object",
+              },
+              minItems: 1,
+              type: "array",
+            },
+          },
+          required: ["artifacts"],
+          type: "object",
+        },
+      },
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
+    expect(body.outputSchema).toEqual({
+      additionalProperties: false,
+      properties: {
+        artifacts: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              id: { enum: ["manifest-a", "manifest-b"], type: "string" },
+            },
+            required: ["id"],
+            type: "object",
+          },
+          maxItems: 2,
+          minItems: 2,
+          type: "array",
+        },
+      },
+      required: ["artifacts"],
+      type: "object",
+    });
+  });
+
   it("ignores an empty model-passed outputSchema instead of forwarding it", async () => {
     // Models routinely pass `outputSchema: {}` despite the tool schema saying
     // to omit it. An empty schema constrains nothing, but forwarding it flips

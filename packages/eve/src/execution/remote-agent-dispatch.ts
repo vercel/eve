@@ -21,7 +21,7 @@ import { createRemoteAgentRouteUrl } from "#execution/remote-agent-route-url.js"
 import { formatTraceparent } from "#protocol/traceparent.js";
 import {
   formatSubagentInput,
-  normalizeRequestedOutputSchema,
+  resolveSubagentOutputSchema,
 } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeRemoteAgentCallActionRequest } from "#shared/action-types.js";
@@ -113,8 +113,10 @@ export async function startRemoteAgentSession(input: {
       remote: input.remote,
     }),
     mode: "conversation",
-    outputSchema:
-      normalizeRequestedOutputSchema(input.action.input.outputSchema) ?? input.remote.outputSchema,
+    outputSchema: resolveSubagentOutputSchema({
+      declared: input.remote.outputSchema,
+      requested: input.action.input.outputSchema,
+    }),
   };
   if (input.activityObserver !== undefined) requestBody.activityObserver = input.activityObserver;
   if (forwardedPrincipal !== undefined) {
