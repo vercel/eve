@@ -124,6 +124,7 @@ import template from "../../prompts/template.txt?raw";
 | `eve/sandbox`                                                               | `defineSandbox`, backends                                                 |
 | `eve/instrumentation`                                                       | `defineInstrumentation`, `isChannel`                                      |
 | `eve/models/openai`                                                         | `chatgpt`, deprecated `experimental_chatgpt`                              |
+| `eve/models/orcarouter`                                                     | `orcarouter`                                                              |
 | `eve/evals`                                                                 | `defineEval`, `defineEvalConfig`, `mockModel`, eval types                 |
 | `eve/evals/expect`                                                          | `includes`, `equals`, `matches`, `similarity`                             |
 | `eve/evals/reporters`                                                       | `Braintrust`, `JUnit`, `EvalReporter`                                     |
@@ -163,6 +164,35 @@ Troubleshooting:
 - **`chatgpt-sub unavailable`**: ensure `codex` is installed, current, and available on `PATH`; then restart the command.
 - **Model rejected by the backend**: model availability depends on the signed-in ChatGPT account. Pick another supported OpenAI model.
 - **SSH/headless login**: run `codex login --device-auth` in another terminal, then return to the still-running `eve dev` session.
+
+## OrcaRouter models
+
+`orcarouter()` from `eve/models/orcarouter` serves a model through the
+[OrcaRouter](https://www.orcarouter.ai) AI gateway, an OpenAI-compatible
+endpoint that routes across many models behind one API key. With no argument,
+it selects the `orcarouter/auto` router model, which picks a live model
+automatically:
+
+```ts title="agent/agent.ts"
+import { defineAgent } from "eve";
+import { orcarouter } from "eve/models/orcarouter";
+
+export default defineAgent({
+  model: orcarouter(),
+});
+```
+
+Pass any gateway model id in OrcaRouter's `vendor/model` namespace to pin a
+specific model:
+
+```ts title="agent/agent.ts"
+export default defineAgent({
+  model: orcarouter({ model: "anthropic/claude-sonnet-5" }),
+});
+```
+
+Credentials come from the `ORCAROUTER_API_KEY` environment variable unless you
+pass `apiKey` explicitly.
 
 ## What to read next
 
