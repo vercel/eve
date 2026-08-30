@@ -79,6 +79,55 @@ describe("Codex model", () => {
     );
   });
 
+  it("replays every summary from one stateless reasoning item", async () => {
+    const requests: RecordedRequest[] = [];
+    const model = createCodexSubscriptionModel(
+      { model: "gpt-5.6-luna" },
+      {
+        broker: fakeBroker(),
+        codexApiEndpoint: CODEX_ENDPOINT,
+        fetch: createRecordingFetch(requests),
+      },
+    );
+
+    const result = await model.doGenerate({
+      prompt: [
+        { role: "user", content: [{ type: "text", text: "check the invoice" }] },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "reasoning",
+              text: "Verifying invoice field roles and labels",
+              providerOptions: { openai: { itemId: "rs_1" } },
+            },
+            {
+              type: "reasoning",
+              text: "Planning form filling and file upload sequence",
+              providerOptions: {
+                openai: {
+                  itemId: "rs_1",
+                  reasoningEncryptedContent: "encrypted-reasoning",
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(result.warnings).toEqual([]);
+    const body = JSON.parse(requests[0]?.body ?? "{}");
+    expect(body.input).toContainEqual({
+      type: "reasoning",
+      encrypted_content: "encrypted-reasoning",
+      summary: [
+        { type: "summary_text", text: "Verifying invoice field roles and labels" },
+        { type: "summary_text", text: "Planning form filling and file upload sequence" },
+      ],
+    });
+  });
+
   it("shapes the request the way the Codex backend accepts", async () => {
     const requests: RecordedRequest[] = [];
     const model = createCodexSubscriptionModel(
