@@ -23,14 +23,42 @@ describe("formatRegistrySessionResult", () => {
       }),
     ).toBe(
       "Added Web Chat and Photon iMessage\n\n" +
-        "Web Chat\n" +
+        "✓ Web Chat\n" +
         "  Installed.\n\n" +
-        "Photon iMessage\n" +
+        "✓ Photon iMessage\n" +
         "  Agent phone number  +15551234567\n" +
         "  Configured MCP connection.\n\n" +
-        "Couldn't add Slack\n" +
+        "⨯ Slack\n" +
         "  Vercel CLI is not authenticated.\n" +
         "  Run /vc:login, then try again.",
+    );
+  });
+
+  it("reports every installed, cancelled, and failed selection in order", () => {
+    expect(
+      formatRegistrySessionResult({
+        items: [
+          { title: "Web Chat", facts: [], output: [] },
+          { title: "Notion", facts: [], output: [] },
+        ],
+        failures: [{ title: "GitHub", message: "Installation failed." }],
+        outcomes: [
+          { kind: "installed", title: "Web Chat", facts: [], output: [] },
+          { kind: "cancelled", title: "Slack" },
+          { kind: "failed", title: "GitHub", message: "Installation failed." },
+          { kind: "installed", title: "Notion", facts: [], output: [] },
+        ],
+      }),
+    ).toBe(
+      "Added Web Chat and Notion\n\n" +
+        "✓ Web Chat\n" +
+        "  Installed.\n\n" +
+        "⨯ Slack\n" +
+        "  Cancelled.\n\n" +
+        "⨯ GitHub\n" +
+        "  Installation failed.\n\n" +
+        "✓ Notion\n" +
+        "  Installed.",
     );
   });
 });

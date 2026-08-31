@@ -600,6 +600,68 @@ describe("runRegistryFlow", () => {
     });
   });
 
+  it("continues with later selections after one item is cancelled", async () => {
+    const answers = ["install"];
+    const selections = [["channel/web", "channel/slack"], ["connection/linear"]];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+    const installRegistryItem = vi
+      .fn<RegistryFlowDeps["installRegistryItem"]>()
+      .mockResolvedValueOnce({ output: [] })
+      .mockRejectedValueOnce(new WizardCancelledError())
+      .mockResolvedValueOnce({ output: [] });
+    const flowDeps = deps({ installRegistryItem });
+    flowDeps.browseRegistryCatalog = vi.fn(async () => ({
+      items: [
+        {
+          address: "channel/web",
+          name: "channel/web",
+          title: "Web Chat",
+          source: "Vercel",
+        },
+        {
+          address: "channel/slack",
+          name: "channel/slack",
+          title: "Slack",
+          source: "Vercel",
+        },
+        {
+          address: "connection/linear",
+          name: "connection/linear",
+          title: "Linear",
+          source: "Vercel",
+        },
+      ],
+      total: 3,
+      errors: [],
+    }));
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: flowDeps,
+      }),
+    ).resolves.toMatchObject({
+      kind: "done",
+      result: {
+        items: [
+          expect.objectContaining({ title: "Web Chat" }),
+          expect.objectContaining({ title: "Linear" }),
+        ],
+        outcomes: [
+          { kind: "installed", title: "Web Chat" },
+          { kind: "cancelled", title: "Slack" },
+          { kind: "installed", title: "Linear" },
+        ],
+      },
+    });
+    expect(installRegistryItem).toHaveBeenCalledTimes(3);
+    expect(fake.selectMessages).not.toContain("Couldn't add Slack");
+  });
+
   it("lets structured setup failures reach the command boundary", async () => {
     const answers = ["install"];
     const selections = [["channel/web"], []];

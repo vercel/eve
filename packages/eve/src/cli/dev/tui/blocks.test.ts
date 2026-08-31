@@ -22,6 +22,22 @@ describe("renderBlockLines", () => {
     expect(lines[0]).toBe("▲ all done");
   });
 
+  it("colors per-item status markers in a mixed command result", () => {
+    const colored = createTheme({ color: true, unicode: true });
+    const lines = renderBlockLines(
+      {
+        kind: "result",
+        body: "Added Web Chat\n\n✓ Web Chat\n  Installed.\n\n⨯ Slack\n  Cancelled.",
+      },
+      80,
+      colored,
+      ctx,
+    );
+
+    expect(lines.join("\n")).toContain(colored.colors.green("✓"));
+    expect(lines.join("\n")).toContain(colored.colors.red("⨯"));
+  });
+
   it("summarizes a completed tool with a result line", () => {
     const lines = render({
       kind: "tool",

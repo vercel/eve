@@ -19,7 +19,8 @@ export function registryItemProgress(renderer: {
 }
 
 export function registryResultTone(result: RegistrySessionResult): "success" | "error" | undefined {
-  if (result.failures.length > 0) return "error";
+  if (result.failures.length > 0 && result.items.length === 0) return "error";
+  if (result.outcomes?.some((outcome) => outcome.kind === "cancelled")) return undefined;
   return result.items.length > 0 ? "success" : undefined;
 }
 
@@ -33,24 +34,30 @@ function joinedTitles(titles: readonly string[]): string {
 /** Formats structured registry setup results after their temporary panel closes. */
 export function formatRegistrySessionResult(result: RegistrySessionResult): string {
   const lines: string[] = [];
-  if (result.items.length > 0)
+  const outcomes = result.outcomes ?? [
+    ...result.items.map((item) => ({ kind: "installed" as const, ...item })),
+    ...result.failures.map((failure) => ({ kind: "failed" as const, ...failure })),
+  ];
+  if (result.items.length > 0) {
     lines.push(`Added ${joinedTitles(result.items.map((item) => item.title))}`);
-  for (const item of result.items) {
-    lines.push("", item.title);
-    if (item.facts.length === 0 && item.output.length === 0) {
+  }
+  for (const outcome of outcomes) {
+    lines.push("", `${outcome.kind === "installed" ? "✓" : "⨯"} ${outcome.title}`);
+    if (outcome.kind === "cancelled") {
+      lines.push("  Cancelled.");
+      continue;
+    }
+    if (outcome.kind === "failed") {
+      lines.push(...outcome.message.split("\n").map((line) => `  ${line}`));
+      continue;
+    }
+    if (outcome.facts.length === 0 && outcome.output.length === 0) {
       lines.push("  Installed.");
       continue;
     }
-    const width = Math.max(0, ...item.facts.map((fact) => fact.label.length));
-    for (const fact of item.facts) lines.push(`  ${fact.label.padEnd(width)}  ${fact.value}`);
-    for (const output of item.output) lines.push(`  ${output}`);
-  }
-  for (const failure of result.failures) {
-    lines.push(
-      "",
-      `Couldn't add ${failure.title}`,
-      ...failure.message.split("\n").map((line) => `  ${line}`),
-    );
+    const width = Math.max(0, ...outcome.facts.map((fact) => fact.label.length));
+    for (const fact of outcome.facts) lines.push(`  ${fact.label.padEnd(width)}  ${fact.value}`);
+    for (const output of outcome.output) lines.push(`  ${output}`);
   }
   if (result.cancelled === true) {
     lines.push("", "Setup cancelled before the remaining selections were added.");
