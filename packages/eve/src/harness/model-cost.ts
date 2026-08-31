@@ -1,14 +1,15 @@
 import type { LanguageModel, LanguageModelUsage, ProviderMetadata } from "ai";
 
+import { AI_GATEWAY_MODELS_URL, vercelGatewayFetch } from "#internal/gateway.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import {
-  createRuntimeModelCatalog,
-  type RuntimeModelCatalog,
-} from "#runtime/agent/model-catalog.js";
+  gatewayModelListResponseSchema,
+  modelCostEstimatesFromGatewayModelList,
+} from "#internal/model-catalog.js";
 import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
 import type { ModelCostEstimate, ModelCostSource } from "#shared/model-cost.js";
 
-const modelCatalog = createRuntimeModelCatalog();
+let modelCostEstimatesPromise: Promise<Readonly<Record<string, ModelCostEstimate>>> | undefined;
 
 export interface ResolvedModelCost {
   readonly costUsd: number;
@@ -21,22 +22,41 @@ export interface ResolvedModelCost {
  * intentionally invisible to the model call.
  */
 export async function resolveModelCostEstimate(input: {
-  readonly catalog?: RuntimeModelCatalog;
   readonly model: LanguageModel;
   readonly modelReference: InternalAgentModelDefinition;
+  readonly prices?: Readonly<Record<string, ModelCostEstimate>>;
 }): Promise<ModelCostEstimate | undefined> {
   try {
     const routing = classifyModelRouting(input.model, input.modelReference.providerOptions);
     if (routing.kind === "gateway" && routing.byok === undefined) return undefined;
-    const catalog = input.catalog ?? modelCatalog;
-    if (typeof input.model === "string" || input.model.provider.split(".")[0] === "gateway") {
-      return (await catalog.getByGatewayId(input.modelReference.id))?.costEstimate;
-    }
-    return (await catalog.getByProviderModelId(input.model.provider, input.model.modelId))
-      ?.costEstimate;
+    const prices = input.prices ?? (await loadModelCostEstimates());
+    return prices[input.modelReference.id];
   } catch {
     return undefined;
   }
+}
+
+function loadModelCostEstimates(): Promise<Readonly<Record<string, ModelCostEstimate>>> {
+  if (modelCostEstimatesPromise === undefined) {
+    modelCostEstimatesPromise = vercelGatewayFetch(AI_GATEWAY_MODELS_URL)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            `AI Gateway model list request failed with HTTP ${response.status} ${response.statusText}.`,
+          );
+        }
+        const parsed = gatewayModelListResponseSchema.safeParse(await response.json());
+        if (!parsed.success) {
+          throw new Error("AI Gateway model list response did not match the expected schema.");
+        }
+        return modelCostEstimatesFromGatewayModelList(parsed.data.data);
+      })
+      .catch((error: unknown) => {
+        modelCostEstimatesPromise = undefined;
+        throw error;
+      });
+  }
+  return modelCostEstimatesPromise;
 }
 
 /**
