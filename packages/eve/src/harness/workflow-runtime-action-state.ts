@@ -77,62 +77,6 @@ export function getRuntimeActionKeysFromWorkflowInterrupt(
   return buildRuntimeActionsFromWorkflowInterrupt(interrupt).map(getRuntimeActionRequestKey);
 }
 
-/** Reads pending calls only to terminate continuations parked by the retired v1 engine. */
-export function getLegacyWorkflowRuntimeActionInterrupts(
-  interrupt: WorkflowSandboxInterrupt,
-): WorkflowSandboxInterrupt[] {
-  const ledger: unknown = Reflect.get(interrupt.continuation, "ledger");
-  if (!Array.isArray(ledger)) return [];
-
-  return ledger.flatMap((value) => {
-    if (!isRecord(value) || value.kind !== "tool" || value.status !== "interrupted") return [];
-    if (
-      typeof value.interruptId !== "string" ||
-      typeof value.toolCallId !== "string" ||
-      typeof value.name !== "string" ||
-      !isRecord(value.interruptPayload) ||
-      value.interruptPayload.kind !== WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND
-    ) {
-      return [];
-    }
-
-    let toolInput: unknown;
-    if (typeof value.inputJson === "string" && value.inputJson !== "") {
-      toolInput = JSON.parse(value.inputJson);
-    }
-
-    return [
-      {
-        continuation: interrupt.continuation,
-        input: toolInput,
-        interruptId: value.interruptId,
-        outerToolCallId: interrupt.outerToolCallId,
-        payload: {
-          ...value.interruptPayload,
-          kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
-        },
-        toolCallId: value.toolCallId,
-        toolName: value.name,
-        type: "code-mode-interrupt" as const,
-      },
-    ];
-  });
-}
-
-export function buildLegacyRuntimeActionsFromWorkflowInterrupt(
-  interrupt: WorkflowSandboxInterrupt,
-): RuntimeActionRequest[] {
-  return getLegacyWorkflowRuntimeActionInterrupts(interrupt).map((pending) =>
-    buildRuntimeActionFromWorkflowInterrupt(pending),
-  );
-}
-
-export function getLegacyRuntimeActionKeysFromWorkflowInterrupt(
-  interrupt: WorkflowSandboxInterrupt,
-): string[] {
-  return buildLegacyRuntimeActionsFromWorkflowInterrupt(interrupt).map(getRuntimeActionRequestKey);
-}
-
 function sanitizeCallId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, "_");
 }

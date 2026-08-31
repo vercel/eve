@@ -21,8 +21,8 @@ export type WorkflowSubagentDispatchPlan = {
 /**
  * Splits the pending actions of one workflow interrupt into the prefix that
  * still fits the invocation's `maxSubagents` budget and the remainder that
- * must be blocked. Actions keep ledger order so results pair with the
- * sandbox program's call order.
+ * must be blocked. Actions keep request order so results pair with the sandbox
+ * program's call order.
  */
 export function planWorkflowSubagentDispatch(input: {
   readonly actions: readonly RuntimeActionRequest[];

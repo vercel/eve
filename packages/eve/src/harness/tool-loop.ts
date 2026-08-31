@@ -65,7 +65,6 @@ import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { resolveAgentsAnnouncement } from "#harness/handles/prompt.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import {
-  getLegacyWorkflowRuntimeActionInterrupts,
   getWorkflowRuntimeActionInterrupts,
   isWorkflowRuntimeActionInterrupt,
 } from "#harness/workflow-runtime-action-state.js";
@@ -89,9 +88,7 @@ import {
 import {
   clearPendingWorkflowInterrupt,
   getPendingWorkflowInterrupt,
-  isLegacyPendingWorkflowInterrupt,
   setPendingWorkflowInterrupt,
-  WORKFLOW_RUNTIME_UPGRADE_MESSAGE,
 } from "#harness/workflow-interrupt-state.js";
 import {
   compactMessages,
@@ -2840,9 +2837,7 @@ async function continuePendingWorkflowInterrupt(input: {
   }
 
   const childResults = input.childResults ?? [];
-  const pendingInterrupts = isLegacyPendingWorkflowInterrupt(pending)
-    ? getLegacyWorkflowRuntimeActionInterrupts(interrupt)
-    : getWorkflowRuntimeActionInterrupts(interrupt);
+  const pendingInterrupts = getWorkflowRuntimeActionInterrupts(interrupt);
   if (input.emit !== undefined && childResults.length > 0) {
     await emitWorkflowActionResults({
       emit: input.emit,
@@ -2850,22 +2845,6 @@ async function continuePendingWorkflowInterrupt(input: {
       interrupts: pendingInterrupts,
       results: childResults,
     });
-  }
-
-  if (isLegacyPendingWorkflowInterrupt(pending)) {
-    const baseMessages = [...input.session.history, ...pending.responseMessages];
-    const replacedMessages = replaceWorkflowToolResult(baseMessages, interrupt.outerToolCallId, {
-      error: "workflow_runtime_upgraded",
-      message: WORKFLOW_RUNTIME_UPGRADE_MESSAGE,
-      retryable: true,
-    });
-    return {
-      next: input.runStep,
-      session: clearPendingWorkflowInterrupt({
-        ...input.session,
-        history: replacedMessages,
-      }),
-    };
   }
 
   const continuationSecurity = getWorkflowContinuationSecurity(input.session);
@@ -2878,8 +2857,8 @@ async function continuePendingWorkflowInterrupt(input: {
 
     let currentInterrupt = interrupt;
     let resultIndex = 0;
-    // Promise.all can park several child calls together. Resolve one ledger
-    // entry per replay until every supplied child result has been consumed.
+    // Promise.all can park several child calls together. Resolve one pending
+    // interruption per replay until every supplied child result is consumed.
     // eslint-disable-next-line no-constant-condition
     while (true) {
       continuationOutput = await continueWorkflowSandboxInterrupt({
