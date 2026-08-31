@@ -47,6 +47,26 @@ export function createRuntimeSession(id: string = "test-session"): RuntimeSessio
   };
 }
 
+export function setRuntimeSessionCompiledArtifacts(
+  session: RuntimeSession,
+  input: BundledCompiledArtifacts,
+): void {
+  const installed = session.compiledArtifacts;
+  const snapshotChanged =
+    installed?.manifest !== input.manifest ||
+    installed.moduleMap !== input.moduleMap ||
+    installed.metadata !== input.metadata;
+
+  // Resolved bundles retain references into the installed snapshot, so a
+  // replacement must not inherit caches populated by the prior deployment.
+  if (snapshotChanged) {
+    session.bundleCache.clear();
+    session.bundleCacheKeyBySourceKey.clear();
+  }
+
+  session.compiledArtifacts = input;
+}
+
 /**
  * Process-global storage for the current `RuntimeSession`.
  *
