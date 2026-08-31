@@ -352,6 +352,44 @@ describe("dynamic subagent lifecycle", () => {
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeUndefined();
   });
 
+  it('supports a dynamic subagent map entry named "kind"', async () => {
+    const ctx = createContext();
+    const created = createResolver();
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: {
+        "session.started": () => ({
+          kind: defineRemoteAgent({
+            description: "Classifies the request kind.",
+            url: "https://kind.example.com",
+          }),
+        }),
+      },
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      persistentSessions: false,
+      resolvers: [resolver],
+    });
+
+    expect(buildDynamicSubagentTools(ctx)).toMatchObject([
+      {
+        name: "researcher__kind",
+        runtimeAction: {
+          nodeId: "subagents/researcher#kind",
+          remoteAgentName: "researcher__kind",
+        },
+      },
+    ]);
+    expect(getDynamicSubagentSelection(ctx, "subagents/researcher#kind")).toMatchObject({
+      kind: "remote",
+      remoteAgent: { url: "https://kind.example.com" },
+    });
+  });
+
   it("lets a turn map replace every session entry from the same resolver", async () => {
     const ctx = createContext();
     const created = createResolver({ eventNames: ["session.started", "turn.started"] });

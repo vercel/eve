@@ -45,13 +45,10 @@ function isRemoteAgentMap(value: unknown): value is Readonly<Record<string, unkn
 function isDynamicSubagentMapSelection(
   value: DurableDynamicSubagentResolverSelection,
 ): value is Readonly<Record<string, DurableDynamicSubagentSelection>> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Object.hasOwn(value, "kind") &&
-    Object.values(value).every(
-      (entry) => entry === null || (typeof entry === "object" && entry.kind === "remote"),
-    )
+  if (typeof value !== "object" || value === null) return false;
+  if (value.kind === "remote" || value.kind === "subagent") return false;
+  return Object.values(value).every(
+    (entry) => entry === null || (typeof entry === "object" && entry.kind === "remote"),
   );
 }
 
