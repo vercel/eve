@@ -14,6 +14,7 @@ import {
 } from "ai";
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
+import { readClientContext } from "#internal/client-context.js";
 import { resolveProviderHeaders } from "#internal/gateway.js";
 import { createErrorId, createLogger, formatError, logError } from "#internal/logging.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
@@ -926,6 +927,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     // --- Turn preamble ------------------------------------------------------
 
+    const clientContext = readClientContext(effectiveStepInput);
+    const ephemeralContextMessages: ModelMessage[] =
+      clientContext === undefined || pending.deferredContext === true
+        ? []
+        : clientContext.map((content) => ({ content, role: "user" }));
     const preparedTurnInput: ModelMessage[] = [];
     if (effectiveStepInput?.context !== undefined && pending.deferredContext !== true) {
       for (const entry of effectiveStepInput.context) {
@@ -951,7 +957,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         );
         prepareMemoryPreamble(store, {
           history: pending.messages,
-          input: preparedTurnInput,
+          input: [...ephemeralContextMessages, ...preparedTurnInput],
           state: pending.session.state,
         });
       }
@@ -1039,7 +1045,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
 
     messages = [...messages, ...preparedTurnInput];
 
-    let projectedMessages = projectHistory(messages, session.state);
+    const createModelMessages = (durableMessages: readonly ModelMessage[]): ModelMessage[] => {
+      if (ephemeralContextMessages.length === 0) return [...durableMessages];
+
+      const insertionIndex = Math.max(0, durableMessages.length - preparedTurnInput.length);
+      return [
+        ...durableMessages.slice(0, insertionIndex),
+        ...ephemeralContextMessages,
+        ...durableMessages.slice(insertionIndex),
+      ];
+    };
+    let projectedMessages = projectHistory(createModelMessages(messages), session.state);
 
     // --- Model + tools ------------------------------------------------------
 
@@ -1090,6 +1106,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       messages: [...messages],
       model,
       onCompaction: config.onCompaction,
+      promptMessages: createModelMessages(messages),
       resolveModel: config.resolveModel,
       runtimeIdentity: config.runtimeIdentity,
       session,
@@ -1099,7 +1116,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (compaction.compacted) {
       messages = compaction.messages;
     }
-    projectedMessages = normalizeModelMessages(projectHistory(messages, session.state));
+    projectedMessages = normalizeModelMessages(
+      projectHistory(createModelMessages(messages), session.state),
+    );
 
     if (emit) {
       await emitStepStarted(
@@ -1745,7 +1764,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       emit,
       emissionState,
       delegatedCaller: taskUpdatesEnabled,
-      modelPromptMessageCount: projectedMessages.length,
+      durableModelPromptMessageCount:
+        ephemeralContextMessages.length === 0 ? projectedMessages.length : undefined,
       promptMessages: messages,
       result,
       runStep,
@@ -2276,7 +2296,7 @@ async function handleStepResult(input: {
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly delegatedCaller: boolean;
-  readonly modelPromptMessageCount: number;
+  readonly durableModelPromptMessageCount?: number;
   readonly promptMessages: readonly ModelMessage[];
   readonly result: HarnessStepResult;
   readonly runStep: StepFn;
@@ -2331,7 +2351,7 @@ async function handleStepResult(input: {
     ...session,
     compaction: createNextCompactionConfig(
       session.compaction,
-      input.modelPromptMessageCount,
+      input.durableModelPromptMessageCount,
       result,
     ),
   };
@@ -2994,7 +3014,7 @@ async function parkOnWorkflowInterrupt(input: {
 
 function createNextCompactionConfig(
   current: CompactionConfig,
-  promptMessageCount: number,
+  durablePromptMessageCount: number | undefined,
   result: HarnessStepResult,
 ): CompactionConfig {
   const next: {
@@ -3009,9 +3029,9 @@ function createNextCompactionConfig(
     thresholdPercent: current.thresholdPercent,
   };
 
-  if (result.usage?.inputTokens !== undefined) {
+  if (result.usage?.inputTokens !== undefined && durablePromptMessageCount !== undefined) {
     next.lastKnownInputTokens = result.usage.inputTokens;
-    next.lastKnownPromptMessageCount = promptMessageCount;
+    next.lastKnownPromptMessageCount = durablePromptMessageCount;
   }
 
   return next;
@@ -3036,6 +3056,8 @@ async function maybeCompact(input: {
   readonly messages: ModelMessage[];
   readonly model: LanguageModel;
   readonly onCompaction?: ToolLoopHarnessConfig["onCompaction"];
+  /** Model-visible prompt used only to decide whether durable history needs compaction. */
+  readonly promptMessages?: readonly ModelMessage[];
   readonly resolveModel: ToolLoopHarnessConfig["resolveModel"];
   readonly runtimeIdentity?: ToolLoopHarnessConfig["runtimeIdentity"];
   readonly session: HarnessSession;
@@ -3048,9 +3070,11 @@ async function maybeCompact(input: {
   const { emit, emissionState } = input;
   let messages = input.messages;
   let session = input.session;
-  const projectedMessages =
-    input.historyProjector?.({ messages, state: session.state }) ?? messages;
-  const needsSummary = input.force === true || shouldCompact(projectedMessages, session.compaction);
+  const promptMessages = input.promptMessages ?? messages;
+  const projectedPromptMessages =
+    input.historyProjector?.({ messages: promptMessages, state: session.state }) ?? promptMessages;
+  const needsSummary =
+    input.force === true || shouldCompact(projectedPromptMessages, session.compaction);
   const needsMemoryCanonicalization = shouldCanonicalizeMemory(messages);
 
   if (!needsSummary && !needsMemoryCanonicalization) {
@@ -3082,9 +3106,9 @@ async function maybeCompact(input: {
         sequence: emissionState.sequence,
         sessionId: session.sessionId,
         turnId: emissionState.turnId,
-        usageInputTokens: getInputTokenCount(projectedMessages, session.compaction),
+        usageInputTokens: getInputTokenCount(projectedPromptMessages, session.compaction),
       }),
-      projectedMessages,
+      projectedPromptMessages,
     );
   }
 

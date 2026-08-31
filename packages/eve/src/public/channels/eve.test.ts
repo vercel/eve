@@ -5,6 +5,7 @@ import { buildAdapterContext } from "#channel/adapter-context.js";
 import { callAdapterEventHandler, type ChannelAdapter } from "#channel/adapter.js";
 import { isCompiledChannel } from "#channel/compiled-channel.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
+import { readClientContext } from "#internal/client-context.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { type AuthFn, none } from "#public/channels/auth.js";
@@ -125,7 +126,9 @@ function createEveCreateHandler(
   const mockSend = vi.fn().mockResolvedValue(createMockSession());
   const createSession = vi.fn(async (runInput: RunInput) => {
     const payload =
-      runInput.input.context === undefined && runInput.input.outputSchema === undefined
+      runInput.input.context === undefined &&
+      readClientContext(runInput.input) === undefined &&
+      runInput.input.outputSchema === undefined
         ? runInput.input.message
         : runInput.input;
     await mockSend(payload, {
@@ -652,7 +655,7 @@ describe("eveChannel — stream cursor", () => {
 });
 
 describe("eveChannel — onMessage", () => {
-  it("runs after auth on create requests and appends returned context", async () => {
+  it("runs after auth on create requests and keeps returned context durable", async () => {
     const onMessage = vi.fn((ctx, message) => {
       expect(ctx.eve.caller).toEqual(ACCEPTED_AUTH);
       expect(defaultEveAuth(ctx)).toEqual(ACCEPTED_AUTH);
@@ -681,10 +684,11 @@ describe("eveChannel — onMessage", () => {
     expect(onMessage).toHaveBeenCalledTimes(1);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload).toEqual({
+    expect(payload).toMatchObject({
       message: "What word is selected?",
-      context: ["Client context:\nselection: jazz", "Authenticated caller profile: enterprise"],
+      context: ["Authenticated caller profile: enterprise"],
     });
+    expect(readClientContext(payload)).toEqual(["Client context:\nselection: jazz"]);
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ACCEPTED_AUTH);
     expect(options.title).toBe("HTTP run");
@@ -1197,10 +1201,8 @@ describe("eveChannel — create session (text)", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload).toEqual({
-      message: "What word is selected?",
-      context: ['Client context:\n{"selectedWord":"jazz"}'],
-    });
+    expect(payload).toMatchObject({ message: "What word is selected?" });
+    expect(readClientContext(payload)).toEqual(['Client context:\n{"selectedWord":"jazz"}']);
   });
 
   it("forwards outputSchema with a create-session message", async () => {
@@ -1254,7 +1256,7 @@ describe("eveChannel — create session (text)", () => {
     expect(response.status).toBe(202);
     expect(handler.send).toHaveBeenCalledTimes(1);
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
-    expect(payload.context).toEqual([
+    expect(readClientContext(payload)).toEqual([
       "Client context:\nroute: /editor",
       "Client context:\nselection: jazz",
     ]);
@@ -1600,10 +1602,10 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(handler.send).toHaveBeenCalledWith(
-      "yes please",
-      expect.objectContaining({ context: ["Client context:\napproval modal open"] }),
-    );
+    expect(handler.send).toHaveBeenCalledWith("yes please", expect.any(Object));
+    expect(readClientContext(handler.send.mock.calls[0]?.[1])).toEqual([
+      "Client context:\napproval modal open",
+    ]);
   });
 
   it("forwards outputSchema with a continue-session message", async () => {

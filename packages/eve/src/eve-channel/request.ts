@@ -523,15 +523,6 @@ function parseInputResponses(
   return inputResponses;
 }
 
-export function mergeContext(
-  existing: readonly string[] | undefined,
-  added: readonly string[] | undefined,
-): readonly string[] | undefined {
-  if (existing === undefined) return added;
-  if (added === undefined) return existing;
-  return [...existing, ...added];
-}
-
 const CLIENT_CONTEXT_PREFIX = "Client context:\n";
 
 function parseClientContextField(value: unknown): string[] | Response | undefined {
