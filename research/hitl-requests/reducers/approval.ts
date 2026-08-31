@@ -1,12 +1,12 @@
 /**
- * Approval variant: human consent for one tool call.
+ * Approval reducer: human consent for one tool call.
  *
  * ## Dynamic and ephemeral approval policies
  *
  * Approval semantics are per-tool and per-call — `defineTool.approval` is
  * authored code, and dynamic tools (`defineDynamic`) exist only in the steps
  * that advertised them. A policy function therefore CANNOT be persisted with
- * the row. The spec stores only durable facts, and the policy is late-bound
+ * the request. The spec stores only durable facts, and the policy is late-bound
  * at every interpretation pass:
  *
  *   park time     spec records { action, intentKey, responseAuthRequired }
@@ -28,14 +28,14 @@
  *     correlated allow/deny settles directly (today's
  *     `settleDirectApprovalResponse`). A vanished dynamic tool with no
  *     response policy still settles — the request was already fully
- *     specified when raised, and execution of the underlying call is the
- *     group continuation's problem (it rechecks tool existence at dispatch,
+ *     specified when created, and execution of the underlying call is the
+ *     Group owner delivery's problem (it rechecks tool existence at dispatch,
  *     failing the CALL, not the consent).
  *
- *   responseAuthRequired = true, policy unavailable → fail closed, row
+ *   responseAuthRequired = true, policy unavailable → fail closed, request
  *     stays open: reject policy-failed (today's failCandidate "Approval
  *     authorization is temporarily unavailable"). A redeploy restoring the
- *     tool makes the same row answerable again — the row outlives the
+ *     tool makes the same request answerable again — the request outlives the
  *     policy's availability, never the other way around.
  */
 
@@ -44,7 +44,7 @@ import type {
   InputRequest,
   SessionAuthContext,
 } from "../harness-types.js";
-import type { Row, Variant, Verdict } from "../types.js";
+import type { Request, RequestReducer, Verdict } from "../types.js";
 
 export interface ApprovalSpec {
   /** The gated tool call: { toolName, callId, input }. Durable. */
@@ -63,7 +63,7 @@ export interface ApprovalSpec {
 
 export type ApprovalPolicyResult =
   | ApprovalResponseDecision
-  | { readonly status: "needs-auth"; readonly challenge: unknown };
+  | { readonly status: "needs-auth"; readonly authorization: unknown };
 
 export type ApprovalResponsePolicy = (input: {
   readonly responder: SessionAuthContext | null;
@@ -72,14 +72,14 @@ export type ApprovalResponsePolicy = (input: {
 
 export type ApprovalOutcome = "allowed" | "denied" | "cancelled";
 
-export const approval: Variant<ApprovalSpec, ApprovalOutcome> = {
+export const approval: RequestReducer<ApprovalSpec, ApprovalOutcome> = {
   intentKey: (spec) => spec.intentKey,
 
-  async resolve(row, input): Promise<Verdict<ApprovalOutcome>> {
+  async resolve(request, input): Promise<Verdict<ApprovalOutcome>> {
     if (input.kind === "linked") {
-      // The sign-in this candidate was blocked on completed.
+      // The sign-in this attempt was blocked on completed.
       return input.outcome === "authorized"
-        ? runResponsePolicy(row, input.heldResponse.optionId, input.heldResponse.responder ?? null)
+        ? runResponsePolicy(request, input.heldResponse.optionId, input.heldResponse.responder ?? null)
         : { reject: input.outcome === "declined" ? "unauthorized" : "policy-failed" };
     }
 
@@ -93,27 +93,27 @@ export const approval: Variant<ApprovalSpec, ApprovalOutcome> = {
       // Authenticated cancel bypasses the allow-authorizer.
       return input.responder !== null ? { settle: "cancelled" } : { reject: "unauthorized" };
 
-    return runResponsePolicy(row, option, input.responder);
+    return runResponsePolicy(request, option, input.responder);
   },
 };
 
 async function runResponsePolicy(
-  row: Row<ApprovalSpec>,
+  request: Request<ApprovalSpec>,
   option: string | undefined,
   responder: SessionAuthContext | null,
 ): Promise<Verdict<ApprovalOutcome>> {
   const outcome: ApprovalOutcome = option === "allow" ? "allowed" : "denied";
 
-  if (row.spec.responsePolicy === undefined) {
+  if (request.spec.responsePolicy === undefined) {
     // Ephemerality rule: settle when no policy was ever required; fail
-    // closed (row stays open) when one was required but is unavailable now.
-    return row.spec.responseAuthRequired ? { reject: "policy-failed" } : { settle: outcome };
+    // closed (request stays open) when one was required but is unavailable now.
+    return request.spec.responseAuthRequired ? { reject: "policy-failed" } : { settle: outcome };
   }
 
-  // Policy throw/timeout → policy-failed, row stays open: the interpreter
+  // Policy throw/timeout → policy-failed, request stays open: the interpreter
   // wraps this call (handleApprovalResponsePolicyError semantics move there).
-  const decision = await row.spec.responsePolicy({ responder, request: row.spec.request });
+  const decision = await request.spec.responsePolicy({ responder, request: request.spec.request });
   if (decision.status === "rejected") return { reject: "unauthorized" };
-  if (decision.status === "needs-auth") return { blockOn: decision.challenge };
+  if (decision.status === "needs-auth") return { blockOn: decision.authorization };
   return { settle: outcome };
 }

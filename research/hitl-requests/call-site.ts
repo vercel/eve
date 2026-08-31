@@ -6,7 +6,7 @@
  *
  * Today (tool-loop.ts:1050):
  *
- *   coordinateApprovalDelivery(...)        // candidates, policies, challenges
+ *   coordinateApprovalDelivery(...)        // attempts, policies, authorizations
  *   resolvePendingInput({                  // route by domain → 3 resolvers
  *     deferMessagesWhileApprovalsPending,  //   approval-input-requests.ts
  *     resolveApprovalKey,                  //   question-input-requests.ts
@@ -20,7 +20,7 @@
  *   → ResolvePendingInputResult
  *
  * The park side is likewise unmoved: the model step still ends, the harness
- * still calls appendPendingInputBatch (which raiseRows consumes at the next
+ * still calls appendPendingInputBatch (which createRequests consumes at the next
  * pass). Nothing about WHEN HITL runs changes — mid-step approval gating
  * still surfaces at step end via AI SDK approval parts, and the body-run
  * owner is only reachable in background tasks where the step already ended
@@ -38,7 +38,7 @@ import type {
 import { interpretDelivery } from "./interpret.js";
 import { ledgerFromSessionState } from "./ledger.js";
 import type { LedgerEffect } from "./types.js";
-import { variants, type ApprovalSpec } from "./variants/index.js";
+import { reducers, type ApprovalSpec } from "./reducers/index.js";
 
 export async function resolvePendingInputViaInterpreter(input: {
   readonly history?: readonly ModelMessage[];
@@ -48,19 +48,21 @@ export async function resolvePendingInputViaInterpreter(input: {
 }): Promise<ResolvePendingInputResult> {
   const baseHistory = [...(input.history ?? input.session.history)];
   let ledger = ledgerFromSessionState(input.session.state);
-  if (ledger.rows.every((row) => row.state.phase !== "open")) {
+  const hasOpenRequest = ledger.requests.some((request) => request.state.phase === "open");
+  const hasReadyGroup = ledger.groups.some((group) => group.completion === "ready");
+  if (!hasOpenRequest && !hasReadyGroup) {
     return { outcome: "continue", messages: baseHistory, session: input.session };
   }
 
-  // Per-tool dynamic approval: inject each approval row's resolved policy
+  // Per-tool dynamic approval: inject each approval request's resolved policy
   // from the live tool map — the reducer never sees the registry. This is
   // resolveApprovalKeyFromTools generalized to the whole policy surface.
   ledger = {
     ...ledger,
-    rows: ledger.rows.map((row) =>
-      row.kind === "approval"
-        ? { ...row, spec: bindApprovalPolicy(row.spec as ApprovalSpec, input.tools) }
-        : row,
+    requests: ledger.requests.map((request) =>
+      request.kind === "approval"
+        ? { ...request, spec: bindApprovalPolicy(request.spec as ApprovalSpec, input.tools) }
+        : request,
     ),
   };
 
@@ -72,12 +74,12 @@ export async function resolvePendingInputViaInterpreter(input: {
       input.stepInput?.message !== undefined
         ? { actor: actorOf(input.stepInput, input.session) }
         : undefined,
-    variants,
+    reducers,
   });
 
   // Persist the ledger back onto session state, then translate effects into
   // today's result contract (state before effects):
-  //  - claim-continuation → splice the group's withheld responseMessages +
+  //  - deliver-group → idempotently splice the group's withheld responseMessages +
   //    member outcome tool parts into `messages`; remove the batch
   //    (appendResolvedBatchTranscript / removePendingInputBatches semantics)
   //  - settled(denied|cancelled) → rejectedActions entries
@@ -85,19 +87,18 @@ export async function resolvePendingInputViaInterpreter(input: {
   //  - reject-response(context-turn) → synthetic context message appended;
   //    (drop) → event only
   //  - consume-message → outcome "resolved" with consumedMessage: true
-  //  - no claims and no message → outcome "unresolved" (park continues);
+  //  - no ready-group delivery and no message → outcome "unresolved" (park continues);
   //    a message with open approvals still defers via the same
   //    deferMessagesWhileApprovalsPending rule the caller passes today
   return translateEffects({ baseHistory, effects, ledger: next, session: input.session });
 }
 
 /**
- * Owner delivery is the second half of the call site. Effects targeting rows whose
- * owner is not "session" do not splice into the transcript — they serialize
- * to the owner's hook token:
+ * Owner delivery is the second half of the call site. Group delivery for an owner other than "session" does not splice into the
+ * transcript. It serializes to the owner's hook token:
  *
- *   settled(row)  → resumeSessionInbox(row.owner, { inputResponses: [...] })
- *   dismissed(row)→ resumeSessionInbox(row.owner, { dismissed: [row.id] })
+ *   deliver-group(group) → deliverToOwner(group.owner, group.id, outcomes)
+ *   success              → acknowledgeGroupDelivery(group.id)
  *
  * For a body-run owner that payload resolves/rejects the awaited
  * ctx.request promise; for a child session it is today's
@@ -111,14 +112,14 @@ declare function translateEffects(input: {
 }): ResolvePendingInputResult;
 
 /**
- * Late-binds the tool's CURRENT response policy onto an approval row's spec
+ * Late-binds the tool's CURRENT response policy onto an approval request's spec
  * for this pass only — the policy is never persisted. Same lookup
  * `authorizeCandidate` performs today
  * (approval-delivery-coordinator.ts:334); dynamic tools resolve here iff
  * they are advertised in the live map for this step. A tool absent from the
  * map leaves `responsePolicy` undefined and the reducer applies the
  * ephemerality rule recorded at park time: settle directly when
- * `responseAuthRequired` is false, fail closed (`policy-failed`, row stays
+ * `responseAuthRequired` is false, fail closed (`policy-failed`, request stays
  * open and answerable after a redeploy) when true.
  */
 function bindApprovalPolicy(spec: ApprovalSpec, tools: HarnessToolMap): ApprovalSpec {
@@ -159,7 +160,7 @@ type RawResponsePolicy = (input: {
     readonly toolInput: Record<string, unknown>;
     readonly toolName: string;
   };
-}) => Promise<import("./variants/index.js").ApprovalPolicyResult>;
+}) => Promise<import("./reducers/index.js").ApprovalPolicyResult>;
 
 declare function actorOf(
   stepInput: StepInput,

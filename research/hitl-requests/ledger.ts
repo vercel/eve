@@ -9,45 +9,45 @@
  *   PendingInputBatch                     Ledger
  *   ─────────────────                     ──────
  *   one batch                          →  one Group (id = batch identity)
- *   batch.requests[i]                  →  one Row (id = requestId,
+ *   batch.requests[i]                  →  one Request (id = requestId,
  *                                          kind from InputRequest.kind,
  *                                          spec = the InputRequest itself)
- *   batch.responseMessages             →  the group's continuation payload
+ *   batch.responseMessages             →  the Group's owner-completion payload
  *                                          (withheld output, restored once
- *                                          at claim — same splice semantics
+ *                                          on acknowledged delivery — same splice semantics
  *                                          as appendResolvedBatchTranscript)
- *   batch.event {turnId, stepIndex}    →  Row.turnId + event attribution
+ *   batch.event {turnId, stepIndex}    →  Request.turnId + event attribution
  *   batch.responseAuthRequiredRequestIds → ApprovalSpec.responseAuthRequired
- *   pendingAuthorization.challenges    →  challenge Rows in one Group
- *   approval audit activeCandidates    →  heldCandidates (authorization-
- *                                          required) — pending candidates
+ *   pendingAuthorization.authorizations    →  authorization Requests in one Group
+ *   approval audit activeCandidates    →  responseAttempts (authorization-
+ *                                          required) — pending attempts
  *                                          are in-pass state, not persisted
- *   sessionLimit batch (generation)    →  limit Row (baseId + generation)
+ *   sessionLimit batch (generation)    →  limit Request (baseId + generation)
  *
  * Batch semantics preserved by construction:
  *   - "earlier batches stay open and independently answerable"
- *     (appendPendingInputBatch): rows in different groups never interact.
- *   - requestId uniqueness across batches (assertUniqueRequestIds): row ids
+ *     (appendPendingInputBatch): requests in different groups never interact.
+ *   - requestId uniqueness across batches (assertUniqueRequestIds): request ids
  *     are unique in the flat table — the same invariant, one level up.
- *   - removal-only shrinkage (removePendingInputBatches): rows transition
- *     open → terminal; nothing overwrites rows it never resolved.
- *   - withheld output appears zero times until closure: the continuation
- *     payload lives on the group and is spliced exactly at claim.
+ *   - removal-only shrinkage (removePendingInputBatches): requests transition
+ *     open → terminal; nothing overwrites requests it never resolved.
+ *   - withheld output appears zero times until completion: the owner-completion
+ *     payload lives beside the Group and is spliced through idempotent delivery.
  */
 
 import type { PendingInputBatch, SessionStateMap } from "./harness-types.js";
-import type { Group, Ledger, Row, VariantKind } from "./types.js";
+import type { Group, Ledger, Request, RequestKind } from "./types.js";
 
 export function ledgerFromSessionState(state: SessionStateMap | undefined): Ledger {
   const batches = readPendingInputBatches(state);
-  const rows: Row[] = [];
+  const requests: Request[] = [];
   const groups: Group[] = [];
 
   batches.forEach((batch, index) => {
     const groupId = `batch:${batch.event?.turnId ?? "pre"}:${batch.event?.stepIndex ?? index}`;
-    groups.push({ id: groupId, continuation: "pending" });
+    groups.push({ id: groupId, owner: "session", completion: "waiting" });
     for (const request of batch.requests) {
-      rows.push({
+      requests.push({
         id: request.requestId,
         baseId: request.requestId,
         generation: readLimitGeneration(request) ?? 0,
@@ -57,7 +57,6 @@ export function ledgerFromSessionState(state: SessionStateMap | undefined): Ledg
           responseAuthRequired:
             batch.responseAuthRequiredRequestIds?.includes(request.requestId) ?? false,
         },
-        owner: "session", // session-turn owner; body runs supply their inbox token
         groupId,
         turnId: batch.event?.turnId,
         state: { phase: "open" },
@@ -65,13 +64,13 @@ export function ledgerFromSessionState(state: SessionStateMap | undefined): Ledg
     }
   });
 
-  // pendingAuthorization challenges join as challenge rows (elided: shape
+  // pendingAuthorization authorizations join as authorization requests (elided: shape
   // mirrors the batch mapping; one AuthGroup per park).
 
-  return { rows, groups, heldCandidates: readHeldCandidates(state) };
+  return { requests, groups, responseAttempts: readResponseAttempts(state) };
 }
 
-function kindFromRequest(kind: "question" | "session-limit" | "tool-approval"): VariantKind {
+function kindFromRequest(kind: "question" | "session-limit" | "tool-approval"): RequestKind {
   switch (kind) {
     case "question":
       return "question";
@@ -86,4 +85,4 @@ declare function readPendingInputBatches(
   state: SessionStateMap | undefined,
 ): readonly PendingInputBatch[];
 declare function readLimitGeneration(request: unknown): number | undefined;
-declare function readHeldCandidates(state: SessionStateMap | undefined): Ledger["heldCandidates"];
+declare function readResponseAttempts(state: SessionStateMap | undefined): Ledger["responseAttempts"];

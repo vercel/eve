@@ -1,6 +1,6 @@
-import type { VariantRegistry } from "../types.js";
+import type { RequestReducerRegistry } from "../types.js";
 import { approval } from "./approval.js";
-import { challenge } from "./challenge.js";
+import { authorization } from "./authorization.js";
 import { limit } from "./limit.js";
 import { question } from "./question.js";
 
@@ -10,8 +10,8 @@ export type {
   ApprovalResponsePolicy,
   ApprovalSpec,
 } from "./approval.js";
-export type { ChallengeOutcome, ChallengeSpec } from "./challenge.js";
+export type { AuthorizationOutcome, AuthorizationSpec } from "./authorization.js";
 export type { LimitOutcome, LimitSpec } from "./limit.js";
 export type { QuestionOutcome, QuestionSpec } from "./question.js";
 
-export const variants: VariantRegistry = { approval, question, limit, challenge };
+export const reducers: RequestReducerRegistry = { approval, question, limit, authorization };

@@ -16,7 +16,7 @@
  *           (#1224 invariant 5). HTTP routes and channels never write.
  *   reads   anyone: channels list open requests without hydrating a run;
  *           the task-input route validates a capability token against a
- *           live row; input_required task views derive from open rows.
+ *           live request; input_required task views derive from open requests.
  *
  * Same shape as MemoryDocumentBackend (public/memory/file/backend.ts):
  * read / conditional write / conflict error. Default backend via nitro
@@ -27,16 +27,16 @@
  * deterministic over (ledger version, deliveryId). The step does
  * read → interpret → write(CAS) → perform effects; a crash after the write
  * retries the step, the CAS conflicts, the re-read interprets the same
- * delivery against the new version, and deliveryId hits tombstones and
- * held-candidate dedupe — same effects re-derived, performed once.
+ * delivery against the new version, and deliveryId hits retained terminal requests and
+ * held-attempt dedupe — same effects re-derived, performed once.
  * "State before effects" (#1224 invariant 8) is preserved verbatim; it
  * points at the store instead of the snapshot.
  */
 
-import type { Ledger, Row } from "./types.js";
+import type { Ledger, Request } from "./types.js";
 
 /**
- * Root session id. Body-run rows live under their root session's scope —
+ * Root session id. Body-run requests live under their root session's scope —
  * the parent projection reads them — never under the run's own id.
  */
 export type LedgerScope = string;
@@ -48,9 +48,9 @@ export interface VersionedLedger {
 }
 
 /**
- * The store holds rows, groups, and held candidates ONLY. A group's
- * continuation payload (the withheld model output — the big blobs) is a
- * separate record written once at park and read once at claim, so the hot
+ * The store holds Requests, Groups, and ResponseAttempts only. A group's
+ * owner-completion payload (the withheld model output — the big blobs) is a
+ * separate record written once when the Group is created and read for idempotent delivery, so the hot
  * read path never drags model output.
  */
 export interface RequestLedgerStore {
@@ -72,6 +72,6 @@ export class LedgerConflictError extends Error {
 }
 
 /** Derived reads are pure functions over the ledger — not store methods. */
-export function openRows(ledger: Ledger): readonly Row[] {
-  return ledger.rows.filter((row) => row.state.phase === "open");
+export function openRequests(ledger: Ledger): readonly Request[] {
+  return ledger.requests.filter((request) => request.state.phase === "open");
 }

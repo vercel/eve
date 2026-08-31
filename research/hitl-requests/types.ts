@@ -1,45 +1,40 @@
 /**
- * Prototype types. `Row` answers "why 'row' and what does it mean": one row
- * is one open request — the unit that today is one element of
- * `PendingInputBatch.requests` (plus, separately, one pending authorization
- * challenge, one limit prompt, one approval candidate's target). "Row"
- * because the durable ledger is a flat table of them; a batch is not a state
- * shape of its own, it is the set of rows sharing a `groupId` (see
- * ledger.ts for the derivation from the existing batch state).
+ * Prototype types. A Request is one durable question awaiting an outcome: the
+ * unit represented today by one `PendingInputBatch.requests` element, one
+ * session-limit prompt, or one pending connection authorization. Requests
+ * created by one parked operation share a Group.
  */
 
 import type { InputResponse, SessionAuthContext } from "./harness-types.js";
 
-export type RowPhase =
+export type RequestState =
   | { readonly phase: "open" }
   | { readonly phase: "settled"; readonly outcome: unknown }
   | { readonly phase: "dismissed"; readonly reason: string };
 
-export interface Row<Spec = unknown> {
+export interface Request<Spec = unknown> {
   readonly id: string;
   /** Stable identity across reopen generations (limit prompts). */
   readonly baseId: string;
   readonly generation: number;
-  readonly kind: VariantKind;
-  /** Variant-owned data, opaque to the interpreter. */
+  readonly kind: RequestKind;
+  /** RequestReducer-owned data, opaque to the interpreter. */
   readonly spec: Spec;
-  /** Hook token — where settlement/dismissal payloads deliver. */
-  readonly owner: string;
-  /** Rows raised by one park share a group; closure fires once per group. */
+  /** Requests created by one parked operation share a group; closure fires once per group. */
   readonly groupId: string;
   /** Owning turn, for scoped forced closure. */
   readonly turnId?: string;
-  readonly state: RowPhase;
+  readonly state: RequestState;
 }
 
-export type VariantKind = "approval" | "question" | "limit" | "challenge";
+export type RequestKind = "approval" | "question" | "limit" | "authorization";
 
-export interface RowRef {
+export interface RequestRef {
   readonly id: string;
 }
 
 /** What the interpreter feeds a reducer. `message` carries no text. */
-export type RowInput =
+export type RequestInput =
   | {
       readonly kind: "response";
       readonly response: InputResponse;
@@ -56,7 +51,7 @@ export type Verdict<Outcome = unknown> =
   | "ignore"
   | { readonly settle: Outcome }
   | {
-      readonly reject: "unauthorized" | "invalid" | "policy-failed" | "candidate-cancelled";
+      readonly reject: "unauthorized" | "invalid" | "policy-failed" | "attempt-cancelled";
     }
   | {
       readonly dismiss: string;
@@ -65,51 +60,52 @@ export type Verdict<Outcome = unknown> =
     }
   | { readonly blockOn: unknown };
 
-export interface Variant<Spec = unknown, Outcome = unknown> {
-  resolve(row: Row<Spec>, input: RowInput): Verdict<Outcome> | Promise<Verdict<Outcome>>;
+export interface RequestReducer<Spec = unknown, Outcome = unknown> {
+  resolve(request: Request<Spec>, input: RequestInput): Verdict<Outcome> | Promise<Verdict<Outcome>>;
   intentKey?(spec: Spec): string | undefined;
   /** Stale-response visibility; "drop" only for limit. */
   readonly staleResponses?: "context-turn" | "drop";
 }
 
-export type VariantRegistry = Record<VariantKind, Variant<any, any>>;
+export type RequestReducerRegistry = Record<RequestKind, RequestReducer<any, any>>;
 
-export interface HeldCandidate {
-  readonly rowId: string;
-  readonly linkedRowId: string;
+export interface ResponseAttempt {
+  readonly requestId: string;
+  readonly authorizationRequestId: string;
   readonly response: InputResponse;
-  /** Admission identity: redeliveries dedupe on {rowId, deliveryId}. */
+  /** Admission identity: redeliveries dedupe on {requestId, deliveryId}. */
   readonly deliveryId: string;
 }
 
 export interface Group {
   readonly id: string;
+  /** The parked operation to notify once every request is terminal. */
+  readonly owner: string;
   /**
-   * The withheld continuation payload. For a session-turn owner this is the
-   * batch's `responseMessages` (the withheld assistant output); for a body
-   * run it is empty — the run's own frame is the continuation.
+   * `ready` remains retryable until idempotent owner delivery acknowledges it.
+   * Forced closure moves a group to `cancelled` without delivering completion.
    */
-  readonly continuation: "pending" | "claimed" | "suppressed";
+  readonly completion: "waiting" | "ready" | "delivered" | "cancelled";
 }
 
 export interface Ledger {
-  readonly rows: readonly Row[];
+  readonly requests: readonly Request[];
   readonly groups: readonly Group[];
-  readonly heldCandidates: readonly HeldCandidate[];
+  readonly responseAttempts: readonly ResponseAttempt[];
 }
 
 /** Ordered effects; the caller persists the ledger before performing them. */
 export type LedgerEffect =
-  | { readonly kind: "opened"; readonly rowId: string }
-  | { readonly kind: "settled"; readonly rowId: string; readonly outcome: unknown }
-  | { readonly kind: "dismissed"; readonly rowId: string; readonly reason: string }
+  | { readonly kind: "opened"; readonly requestId: string }
+  | { readonly kind: "settled"; readonly requestId: string; readonly outcome: unknown }
+  | { readonly kind: "dismissed"; readonly requestId: string; readonly reason: string }
   | {
       readonly kind: "reject-response";
       readonly reason: string;
       readonly response: InputResponse | undefined;
       readonly visibility: "context-turn" | "drop";
     }
-  | { readonly kind: "claim-continuation"; readonly groupId: string }
+  | { readonly kind: "deliver-group"; readonly groupId: string; readonly owner: string }
   | { readonly kind: "consume-message" }
   /** input.response.pending(reason: authorization-required) on the wire. */
-  | { readonly kind: "candidate-pending"; readonly rowId: string; readonly linkedRowId: string };
+  | { readonly kind: "attempt-pending"; readonly requestId: string; readonly authorizationRequestId: string };

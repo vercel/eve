@@ -13,194 +13,193 @@ import type { InputResponse } from "./harness-types.js";
 import type {
   Ledger,
   LedgerEffect,
-  Row,
-  RowInput,
-  RowRef,
+  Request,
+  RequestInput,
+  RequestRef,
   Verdict,
-  VariantRegistry,
+  RequestReducerRegistry,
 } from "./types.js";
 
 /**
  * One interpreter pass: interpret one delivery against the ledger.
  *
- * Owns everything variant-agnostic, in order:
- *   1. staleness — responses naming terminal rows reject before any reducer
- *   2. candidate identity — single winner per row per pass
- *   3. reducer dispatch — one variant, one row, one verdict
+ * Owns everything kind-agnostic, in order:
+ *   1. staleness — responses naming terminal requests reject before any reducer
+ *   2. attempt identity — single winner per request per pass
+ *   3. reducer dispatch — one reducer, one request, one verdict
  *   4. verdict application — settle / reject / dismiss / blockOn bookkeeping
- *   5. group closure — continuation claim exactly once, all members terminal
+ *   5. group completion — mark terminal groups ready for retryable owner delivery
  *
  * The caller persists `ledger` before performing `effects` (state before
  * effects). Reducers may be async (authored policies); the interpreter awaits
- * them sequentially in row order so replay is journal-deterministic.
+ * them sequentially in request order so replay is journal-deterministic.
  */
 export async function interpretDelivery(input: {
   readonly ledger: Ledger;
   /**
-   * Server-assigned admission id for this delivery. Candidate identity is
+   * Server-assigned admission id for this delivery. Response attempt identity is
    * {requestId, deliveryId}: a workflow-level redelivery reuses it (held
-   * candidates dedupe on it); a new delivery is a new candidate.
+   * attempts dedupe on it); a new delivery is a new attempt.
    */
   readonly deliveryId: string;
   readonly responses: readonly InputResponse[];
   readonly message: { readonly actor: "originating" | "other" | "anonymous" } | undefined;
   /** Connection-authorization callbacks and fired deadlines, arrival-ordered. */
-  readonly callbacks?: readonly { readonly rowId: string; readonly params: Record<string, unknown> }[];
-  readonly deadlines?: readonly { readonly rowId: string }[];
-  readonly variants: VariantRegistry;
+  readonly callbacks?: readonly { readonly requestId: string; readonly params: Record<string, unknown> }[];
+  readonly deadlines?: readonly { readonly requestId: string }[];
+  readonly reducers: RequestReducerRegistry;
 }): Promise<{ ledger: Ledger; effects: LedgerEffect[] }> {
   let ledger = input.ledger;
   const effects: LedgerEffect[] = [];
 
-  // 1+2. Responses: staleness, then per-row dispatch. One response per
+  // 1+2. Responses: staleness, then per-request dispatch. One response per
   // request id per delivery (canonicalized upstream, as today).
   for (const response of input.responses) {
-    const row = ledger.rows.find((candidate) => candidate.id === response.requestId);
+    const request = ledger.requests.find((attempt) => attempt.id === response.requestId);
 
-    if (row === undefined) {
-      // Unknown id: malformed, never raised. #1224 reason "invalid".
+    if (request === undefined) {
+      // Unknown id: malformed, never created. #1224 reason "invalid".
       effects.push({ kind: "reject-response", reason: "invalid", response, visibility: "context-turn" });
       continue;
     }
-    if (row.state.phase !== "open") {
-      // Tombstone: single-winner already decided. Visibility is the
-      // variant's one per-variant setting (staleResponses).
-      const visibility = input.variants[row.kind].staleResponses ?? "context-turn";
+    if (request.state.phase !== "open") {
+      // Retained terminal request: single-winner already decided. Visibility is the
+      // request kind's one setting (staleResponses).
+      const visibility = input.reducers[request.kind].staleResponses ?? "context-turn";
       effects.push({ kind: "reject-response", reason: "stale", response, visibility });
       continue;
     }
-    // Redelivery of a delivery whose candidate is already held on a
-    // challenge: return the existing pending candidate, never a second
-    // challenge (owner.approval.response.pend-authorization dedupe).
-    const held = ledger.heldCandidates.find(
-      (candidate) => candidate.rowId === row.id && candidate.deliveryId === input.deliveryId,
+    // Redelivery of a delivery whose attempt is already held on a
+    // authorization: return the existing pending attempt, never a second
+    // authorization (owner.approval.response.pend-authorization dedupe).
+    const held = ledger.responseAttempts.find(
+      (attempt) => attempt.requestId === request.id && attempt.deliveryId === input.deliveryId,
     );
     if (held !== undefined) continue;
 
-    const verdict = await input.variants[row.kind].resolve(row, {
+    const verdict = await input.reducers[request.kind].resolve(request, {
       kind: "response",
       response,
       responder: response.responder ?? null,
       actor: response.actor ?? "anonymous",
     });
-    ({ ledger } = applyVerdict({ ledger, row, verdict, effects, response, deliveryId: input.deliveryId }));
+    ({ ledger } = applyVerdict({ ledger, request, verdict, effects, response, deliveryId: input.deliveryId }));
   }
 
-  // Callbacks and deadlines dispatch to their challenge rows, then any row
-  // that was blocked on a newly terminal linked row is re-fed in the SAME
+  // Callbacks and deadlines dispatch to their authorization requests, then any request
+  // that was blocked on a newly terminal linked request is re-fed in the SAME
   // pass (pend-authorization: authorized → re-run the authorizer without
   // a further external delivery).
   for (const callback of input.callbacks ?? []) {
-    ledger = await dispatchToRow(ledger, callback.rowId, { kind: "callback", params: callback.params }, input.variants, effects);
+    ledger = await dispatchToRequest(ledger, callback.requestId, { kind: "callback", params: callback.params }, input.reducers, effects);
   }
   for (const deadline of input.deadlines ?? []) {
-    ledger = await dispatchToRow(ledger, deadline.rowId, { kind: "deadline" }, input.variants, effects);
+    ledger = await dispatchToRequest(ledger, deadline.requestId, { kind: "deadline" }, input.reducers, effects);
   }
-  ledger = await refeedUnblockedCandidates(ledger, input.variants, effects);
+  ledger = await refeedUnblockedAttempts(ledger, input.reducers, effects);
 
-  // 3. Message observation: broadcast to every open row. Variants answer
+  // 3. Message observation: broadcast to every open request. Reducers answer
   // independently; mixed batches (owner.batch.message.dismiss-question-only)
-  // fall out of per-row dispatch with no batch-level case.
+  // fall out of per-request dispatch with no batch-level case.
   if (input.message !== undefined) {
     let consumed = false;
-    for (const row of [...ledger.rows]) {
-      if (row.state.phase !== "open") continue;
-      const verdict = await input.variants[row.kind].resolve(row, {
+    for (const request of [...ledger.requests]) {
+      if (request.state.phase !== "open") continue;
+      const verdict = await input.reducers[request.kind].resolve(request, {
         kind: "message",
         actor: input.message.actor,
       });
       if (verdict === "ignore") continue;
-      // At most one consumer per delivery, deterministic by row order.
+      // At most one consumer per delivery, deterministic by request order.
       if (typeof verdict === "object" && "dismiss" in verdict && verdict.consumeDelivery === true) {
         if (consumed) continue;
         consumed = true;
       }
-      ({ ledger } = applyVerdict({ ledger, row, verdict, effects }));
+      ({ ledger } = applyVerdict({ ledger, request, verdict, effects }));
     }
     if (consumed) effects.push({ kind: "consume-message" });
   }
 
-  // 4. Group closure: a group whose members are all terminal claims its
-  // continuation exactly once. Forced closure (cancel/session-end) goes
-  // through closeForced instead and suppresses it.
-  ledger = claimClosedGroups(ledger, effects);
+  // 4. Group completion: terminal groups become ready. A ready group keeps
+  // emitting retryable delivery work until the owner acknowledges it.
+  ledger = prepareCompletedGroups(ledger, effects);
 
   return { ledger, effects };
 }
 
-/** Dispatches one input to one open row and applies the verdict. */
-async function dispatchToRow(
+/** Dispatches one input to one open request and applies the verdict. */
+async function dispatchToRequest(
   ledger: Ledger,
-  rowId: string,
+  requestId: string,
   rowInput: { readonly kind: "callback"; readonly params: Record<string, unknown> } | { readonly kind: "deadline" },
-  variants: VariantRegistry,
+  reducers: RequestReducerRegistry,
   effects: LedgerEffect[],
 ): Promise<Ledger> {
-  const row = ledger.rows.find((candidate) => candidate.id === rowId);
-  // A callback after completion, or with no matching challenge, is rejected
+  const request = ledger.requests.find((attempt) => attempt.id === requestId);
+  // A callback after completion, or with no matching authorization, is rejected
   // stale — never silently queued (owner.auth.callback.reject-stale).
-  if (row === undefined || row.state.phase !== "open") {
+  if (request === undefined || request.state.phase !== "open") {
     effects.push({ kind: "reject-response", reason: "stale", response: undefined, visibility: "context-turn" });
     return ledger;
   }
-  const verdict = await variants[row.kind].resolve(row, rowInput);
-  return applyVerdict({ ledger, row, verdict, effects }).ledger;
+  const verdict = await reducers[request.kind].resolve(request, rowInput);
+  return applyVerdict({ ledger, request, verdict, effects }).ledger;
 }
 
 /**
- * Re-feeds every row whose held candidate's linked row reached terminal
- * state in this pass, with the linked outcome as data. The blocking variant
+ * Re-feeds every request whose held attempt's linked request reached terminal
+ * state in this pass, with the linked outcome as data. The blocking reducer
  * re-runs the response policy (pend-authorization: authorized re-runs the authorizer;
  * declined → unauthorized; failed/timed-out → policy-failed).
  */
-async function refeedUnblockedCandidates(
+async function refeedUnblockedAttempts(
   input: Ledger,
-  variants: VariantRegistry,
+  reducers: RequestReducerRegistry,
   effects: LedgerEffect[],
 ): Promise<Ledger> {
   let ledger = input;
-  for (const held of [...ledger.heldCandidates]) {
-    const linked = ledger.rows.find((row) => row.id === held.linkedRowId);
+  for (const held of [...ledger.responseAttempts]) {
+    const linked = ledger.requests.find((request) => request.id === held.authorizationRequestId);
     if (linked === undefined || linked.state.phase === "open") continue;
-    const row = ledger.rows.find((candidate) => candidate.id === held.rowId);
-    ledger = { ...ledger, heldCandidates: ledger.heldCandidates.filter((c) => c !== held) };
-    if (row === undefined || row.state.phase !== "open") continue;
+    const request = ledger.requests.find((attempt) => attempt.id === held.requestId);
+    ledger = { ...ledger, responseAttempts: ledger.responseAttempts.filter((c) => c !== held) };
+    if (request === undefined || request.state.phase !== "open") continue;
     const outcome =
       linked.state.phase === "settled" ? String(linked.state.outcome) : "failed";
-    const verdict = await variants[row.kind].resolve(row, {
+    const verdict = await reducers[request.kind].resolve(request, {
       kind: "linked",
       outcome,
       heldResponse: held.response,
     });
-    ({ ledger } = applyVerdict({ ledger, row, verdict, effects, response: held.response, deliveryId: held.deliveryId }));
+    ({ ledger } = applyVerdict({ ledger, request, verdict, effects, response: held.response, deliveryId: held.deliveryId }));
   }
   return ledger;
 }
 
-/** Applies one verdict to one row. The only writer of row phases. */
+/** Applies one verdict to one request. The only writer of request phases. */
 function applyVerdict(input: {
   readonly ledger: Ledger;
-  readonly row: Row;
+  readonly request: Request;
   readonly verdict: Verdict;
   readonly effects: LedgerEffect[];
   readonly response?: InputResponse;
   readonly deliveryId?: string;
 }): { ledger: Ledger } {
-  const { row, verdict, effects } = input;
+  const { request, verdict, effects } = input;
   let ledger = input.ledger;
 
   if (verdict === "ignore") return { ledger };
 
   if ("settle" in verdict) {
-    ledger = setRowPhase(ledger, row.id, { phase: "settled", outcome: verdict.settle });
-    effects.push({ kind: "settled", rowId: row.id, outcome: verdict.settle });
-    // A row settling while it holds a blocked candidate cancels the linked
-    // row and rejects the held candidate (settle-cancel-pending-candidate).
-    const held = ledger.heldCandidates.find((candidate) => candidate.rowId === row.id);
+    ledger = setRequestState(ledger, request.id, { phase: "settled", outcome: verdict.settle });
+    effects.push({ kind: "settled", requestId: request.id, outcome: verdict.settle });
+    // A request settling while it holds a blocked attempt cancels the linked
+    // request and rejects the held attempt (settle-cancel-pending-attempt).
+    const held = ledger.responseAttempts.find((attempt) => attempt.requestId === request.id);
     if (held !== undefined) {
-      ledger = setRowPhase(ledger, held.linkedRowId, { phase: "settled", outcome: "cancelled" });
-      ledger = { ...ledger, heldCandidates: ledger.heldCandidates.filter((c) => c !== held) };
-      effects.push({ kind: "reject-response", reason: "candidate-cancelled", response: held.response, visibility: "context-turn" });
+      ledger = setRequestState(ledger, held.authorizationRequestId, { phase: "settled", outcome: "cancelled" });
+      ledger = { ...ledger, responseAttempts: ledger.responseAttempts.filter((c) => c !== held) };
+      effects.push({ kind: "reject-response", reason: "attempt-cancelled", response: held.response, visibility: "context-turn" });
     }
     return { ledger };
   }
@@ -212,49 +211,48 @@ function applyVerdict(input: {
       response: input.response,
       visibility: "context-turn",
     });
-    return { ledger }; // row stays open — rejection never settles
+    return { ledger }; // request stays open — rejection never settles
   }
 
   if ("dismiss" in verdict) {
-    ledger = setRowPhase(ledger, row.id, { phase: "dismissed", reason: verdict.dismiss });
-    effects.push({ kind: "dismissed", rowId: row.id, reason: verdict.dismiss });
+    ledger = setRequestState(ledger, request.id, { phase: "dismissed", reason: verdict.dismiss });
+    effects.push({ kind: "dismissed", requestId: request.id, reason: verdict.dismiss });
     if (verdict.reopen !== undefined) {
-      const reopened: Row = {
-        ...row,
-        id: `${row.baseId}:${row.generation + 1}`,
-        generation: row.generation + 1,
+      const reopened: Request = {
+        ...request,
+        id: `${request.baseId}:${request.generation + 1}`,
+        generation: request.generation + 1,
         spec: verdict.reopen,
         state: { phase: "open" },
       };
-      ledger = { ...ledger, rows: [...ledger.rows, reopened] };
-      effects.push({ kind: "opened", rowId: reopened.id });
+      ledger = { ...ledger, requests: [...ledger.requests, reopened] };
+      effects.push({ kind: "opened", requestId: reopened.id });
     }
     return { ledger };
   }
 
-  // blockOn: open the linked challenge row, hold the candidate. The row is
-  // re-fed a "linked" input when the linked row reaches terminal — same
-  // pass via refeedUnblockedCandidates, or a later one.
-  const linked: Row = {
-    id: `${row.id}:challenge`,
-    baseId: `${row.id}:challenge`,
+  // blockOn: open the linked authorization request, hold the attempt. The request is
+  // re-fed a "linked" input when the linked request reaches terminal — same
+  // pass via refeedUnblockedAttempts, or a later one.
+  const linked: Request = {
+    id: `${request.id}:authorization`,
+    baseId: `${request.id}:authorization`,
     generation: 0,
-    kind: "challenge",
+    kind: "authorization",
     spec: verdict.blockOn,
-    owner: row.owner,
-    groupId: row.groupId,
+    groupId: request.groupId,
     state: { phase: "open" },
   };
-  effects.push({ kind: "candidate-pending", rowId: row.id, linkedRowId: linked.id });
+  effects.push({ kind: "attempt-pending", requestId: request.id, authorizationRequestId: linked.id });
   return {
     ledger: {
       ...ledger,
-      rows: [...ledger.rows, linked],
-      heldCandidates: [
-        ...ledger.heldCandidates,
+      requests: [...ledger.requests, linked],
+      responseAttempts: [
+        ...ledger.responseAttempts,
         {
-          rowId: row.id,
-          linkedRowId: linked.id,
+          requestId: request.id,
+          authorizationRequestId: linked.id,
           response: input.response!,
           deliveryId: input.deliveryId ?? "",
         },
@@ -264,9 +262,9 @@ function applyVerdict(input: {
 }
 
 /**
- * Forced closure: turn cancel or session end. Dismisses every open row owned
- * by the scope, suppresses continuations, cancels held candidates. Uniform —
- * no variant consulted; challenge dismissals translate to
+ * Forced closure: turn cancel or session end. Dismisses every open Request in the scope, cancels Group completion, and
+ * removes waiting ResponseAttempts. Uniform —
+ * no reducer consulted; authorization dismissals translate to
  * `completed(cancelled)` at the event layer.
  */
 export function closeForced(input: {
@@ -275,81 +273,96 @@ export function closeForced(input: {
 }): { ledger: Ledger; effects: LedgerEffect[] } {
   const effects: LedgerEffect[] = [];
   let ledger = input.ledger;
-  for (const row of ledger.rows) {
-    if (row.state.phase !== "open") continue;
-    if (input.scope !== "session" && row.turnId !== input.scope.turnId) continue;
+  for (const request of ledger.requests) {
+    if (request.state.phase !== "open") continue;
+    if (input.scope !== "session" && request.turnId !== input.scope.turnId) continue;
     const reason = input.scope === "session" ? "session-ended" : "cancelled";
-    ledger = setRowPhase(ledger, row.id, { phase: "dismissed", reason });
-    effects.push({ kind: "dismissed", rowId: row.id, reason });
+    ledger = setRequestState(ledger, request.id, { phase: "dismissed", reason });
+    effects.push({ kind: "dismissed", requestId: request.id, reason });
   }
-  // Groups touched by forced closure suppress instead of claim.
+  // Groups touched by forced closure are cancelled instead of delivered.
   ledger = {
     ...ledger,
     groups: ledger.groups.map((group) =>
-      group.continuation === "pending" && groupIsTerminal(ledger, group.id)
-        ? { ...group, continuation: "suppressed" }
+      group.completion === "waiting" && groupIsTerminal(ledger, group.id)
+        ? { ...group, completion: "cancelled" }
         : group,
     ),
-    heldCandidates: [],
+    responseAttempts: [],
   };
   return { ledger, effects };
 }
 
 /**
- * Intent dedup at raise time (invariant 4): a new row whose variant intent
- * key matches an open row resolves already-pending instead of opening.
+ * Intent dedup at creation (invariant 4): a new request whose kind-specific intent
+ * key matches an open request resolves already-pending instead of opening.
  * Cross-owner by design — a body run and a session turn share the check.
  */
-export function raiseRows(input: {
+export function createRequests(input: {
   readonly ledger: Ledger;
-  readonly rows: readonly Row[];
-  readonly variants: VariantRegistry;
-}): { ledger: Ledger; alreadyPending: readonly { row: Row; openRef: RowRef }[] } {
-  const alreadyPending: { row: Row; openRef: RowRef }[] = [];
-  const admitted: Row[] = [];
-  for (const row of input.rows) {
-    const key = input.variants[row.kind].intentKey?.(row.spec);
+  readonly requests: readonly Request[];
+  readonly reducers: RequestReducerRegistry;
+}): { ledger: Ledger; alreadyPending: readonly { request: Request; openRef: RequestRef }[] } {
+  const alreadyPending: { request: Request; openRef: RequestRef }[] = [];
+  const admitted: Request[] = [];
+  for (const request of input.requests) {
+    const key = input.reducers[request.kind].intentKey?.(request.spec);
     const open =
       key === undefined
         ? undefined
-        : input.ledger.rows.find(
-            (candidate) =>
-              candidate.state.phase === "open" &&
-              candidate.kind === row.kind &&
-              input.variants[candidate.kind].intentKey?.(candidate.spec) === key,
+        : input.ledger.requests.find(
+            (attempt) =>
+              attempt.state.phase === "open" &&
+              attempt.kind === request.kind &&
+              input.reducers[attempt.kind].intentKey?.(attempt.spec) === key,
           );
     if (open !== undefined) {
-      alreadyPending.push({ row, openRef: { id: open.id } });
+      alreadyPending.push({ request, openRef: { id: open.id } });
       continue;
     }
-    admitted.push(row);
+    admitted.push(request);
   }
   return {
-    ledger: { ...input.ledger, rows: [...input.ledger.rows, ...admitted] },
+    ledger: { ...input.ledger, requests: [...input.ledger.requests, ...admitted] },
     alreadyPending,
   };
 }
 
-function claimClosedGroups(ledger: Ledger, effects: LedgerEffect[]): Ledger {
+function prepareCompletedGroups(ledger: Ledger, effects: LedgerEffect[]): Ledger {
+  const groups = ledger.groups.map((group) =>
+    group.completion === "waiting" && groupIsTerminal(ledger, group.id)
+      ? { ...group, completion: "ready" as const }
+      : group,
+  );
+  for (const group of groups) {
+    if (group.completion === "ready") {
+      effects.push({ kind: "deliver-group", groupId: group.id, owner: group.owner });
+    }
+  }
+  return { ...ledger, groups };
+}
+
+/** Called only after idempotent owner delivery succeeds. */
+export function acknowledgeGroupDelivery(ledger: Ledger, groupId: string): Ledger {
   return {
     ...ledger,
-    groups: ledger.groups.map((group) => {
-      if (group.continuation !== "pending" || !groupIsTerminal(ledger, group.id)) return group;
-      effects.push({ kind: "claim-continuation", groupId: group.id });
-      return { ...group, continuation: "claimed" };
-    }),
+    groups: ledger.groups.map((group) =>
+      group.id === groupId && group.completion === "ready"
+        ? { ...group, completion: "delivered" }
+        : group,
+    ),
   };
 }
 
 function groupIsTerminal(ledger: Ledger, groupId: string): boolean {
-  return ledger.rows
-    .filter((row) => row.groupId === groupId)
-    .every((row) => row.state.phase !== "open");
+  return ledger.requests
+    .filter((request) => request.groupId === groupId)
+    .every((request) => request.state.phase !== "open");
 }
 
-function setRowPhase(ledger: Ledger, rowId: string, state: Row["state"]): Ledger {
+function setRequestState(ledger: Ledger, requestId: string, state: Request["state"]): Ledger {
   return {
     ...ledger,
-    rows: ledger.rows.map((row) => (row.id === rowId ? { ...row, state } : row)),
+    requests: ledger.requests.map((request) => (request.id === requestId ? { ...request, state } : request)),
   };
 }
