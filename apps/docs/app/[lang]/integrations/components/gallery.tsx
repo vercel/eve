@@ -23,7 +23,7 @@ const FILTERS: { value: GalleryFilter; label: string }[] = [
   { value: "channel", label: "Channels" },
   { value: "connection", label: "Connections" },
   { value: "extension", label: "Extensions" },
-  { value: "memory", label: "Memory providers" },
+  { value: "memory", label: "Memory" },
   { value: "instrumentation", label: "Observability" },
 ];
 
