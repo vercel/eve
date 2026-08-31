@@ -4,11 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { GatewayCatalogModel } from "#setup/boxes/select-model.js";
-import type {
-  PrompterValue,
-  SelectNotice,
-  SelectOption,
-  SingleSelectOptions,
+import {
+  PlannerNavigationError,
+  type PrompterValue,
+  type SelectNotice,
+  type SelectOption,
+  type SingleSelectOptions,
 } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -805,20 +806,20 @@ describe("runModelFlow", () => {
     expect(resolveAvailableProviders).toHaveBeenCalledTimes(1);
   });
 
-  it("treats the external-provider branch as informational — no notice, no outcome", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
+  it("completes after the user acknowledges direct-provider setup", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider"] });
     const deps = flowDeps({
       runProviderFlow: vi.fn(async () => ({ kind: "external-provider" }) as const),
     });
 
-    // Nothing changed on disk (any existing gateway link is untouched), so
-    // the lap leaves no trace and the empty exit folds to cancelled.
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "cancelled",
+      kind: "done",
+      accessChanged: false,
+      externalProviderSelected: true,
     });
 
     expect(deps.resolveAvailableProviders).toHaveBeenCalledTimes(1);
-    expect(menuPaints[1]?.notices).toEqual([]);
+    expect(menuPaints).toHaveLength(1);
   });
 
   it("returns to the menu after a cancelled sub-flow and folds an empty exit", async () => {
@@ -838,6 +839,49 @@ describe("runModelFlow", () => {
     expect(deps.applySettings).not.toHaveBeenCalled();
   });
 
+  it("lets Right Arrow complete a valid model step in an enclosing journey", async () => {
+    const fake = createFakePrompter({
+      single: () => {
+        throw new PlannerNavigationError("forward", []);
+      },
+    });
+    const deps = flowDeps({
+      resolveAvailableProviders: vi.fn(async () => ["ai-gateway-project"] as const),
+      readProviderSelection: vi.fn(async () => "ai-gateway-project" as const),
+    });
+
+    await expect(
+      runModelFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps,
+        allowUnchangedCompletion: true,
+        navigation: {
+          kind: "planner",
+          activeStep: 0,
+          steps: [{ label: "Model" }, { label: "Channels" }],
+        },
+      }),
+    ).resolves.toEqual({ kind: "done", accessChanged: false });
+  });
+
+  it("lets an enclosing journey complete an unchanged model step", async () => {
+    const { prompter } = scriptedPrompter({ menu: ["done"] });
+    const deps = flowDeps({
+      resolveAvailableProviders: vi.fn(async () => ["ai-gateway-project"] as const),
+      readProviderSelection: vi.fn(async () => "ai-gateway-project" as const),
+    });
+
+    await expect(
+      runModelFlow({
+        appRoot: APP_ROOT,
+        prompter,
+        deps,
+        allowUnchangedCompletion: true,
+      }),
+    ).resolves.toEqual({ kind: "done", accessChanged: false });
+  });
+
   describe("cursor pre-selection", () => {
     it("opens on the model row when a provider is already set", async () => {
       const { prompter, menuPaints } = scriptedPrompter({ menu: ["esc"] });
@@ -849,17 +893,6 @@ describe("runModelFlow", () => {
       await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
 
       expect(menuPaints[0]?.initialValue).toBe("model");
-    });
-
-    it("lands on Done after the external-provider branch", async () => {
-      const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
-      const deps = flowDeps({
-        runProviderFlow: vi.fn(async () => ({ kind: "external-provider" }) as const),
-      });
-
-      await runModelFlow({ appRoot: APP_ROOT, prompter, deps });
-
-      expect(menuPaints[1]?.initialValue).toBe("done");
     });
 
     it("keeps the cursor on the row a cancelled sub-flow came from", async () => {

@@ -83,6 +83,38 @@ describe("runRegistryFlow", () => {
     );
   });
 
+  it("orders first-party Photon before non-featured channel providers", async () => {
+    const channelLabels: string[] = [];
+    const fake = createFakePrompter({
+      multiple: (options) => {
+        if (options.message === "Where should people reach your agent?") {
+          channelLabels.push(...options.options.map((option) => option.label));
+        }
+        return [];
+      },
+      single: () => "install",
+    });
+    const flowDeps = deps({
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [
+          { address: "channel/blooio", name: "channel/blooio", title: "Blooio", source: "Vercel" },
+          {
+            address: "channel/photon-imessage",
+            name: "channel/photon-imessage",
+            title: "Photon iMessage",
+            source: "Vercel",
+          },
+        ],
+        total: 2,
+        errors: [],
+      })),
+    });
+
+    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
+
+    expect(channelLabels).toEqual(["Photon iMessage", "Blooio"]);
+  });
+
   it("lets the user browse, retain selections, and review the plan before installing", async () => {
     const answers = ["install"];
     const prompts: unknown[] = [];
@@ -115,18 +147,86 @@ describe("runRegistryFlow", () => {
       placeholder: "Search integrations",
     });
     expect(prompts[2]).toMatchObject({
-      message: "Review your agent",
+      message: "Review additions",
       navigation: {
         kind: "planner",
         activeStep: 2,
         steps: [{ label: "Channels" }, { label: "Integrations", count: 1 }, { label: "Review" }],
       },
-      metadata: [{ label: "Integration", value: "Linear" }],
+      metadata: [{ label: "Integrations", value: "Linear" }],
       options: [
         { value: "install", label: "Install and set up" },
         { value: "back", label: "Back" },
       ],
     });
+  });
+
+  it("composes onboarding progress and review facts without changing standalone defaults", async () => {
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        return "install";
+      },
+      multiple: (options) => {
+        prompts.push(options);
+        return [];
+      },
+    });
+
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      deps: deps(),
+      plannerContext: {
+        prefixSteps: [{ label: "Model", complete: true }],
+        reviewMetadata: [
+          { label: "Model", value: "openai/gpt-5.6-luna" },
+          { label: "Access", value: "AI Gateway via Vercel project" },
+        ],
+        reviewMessage: "Review your agent",
+        emptyActionLabel: "Finish setup",
+      },
+    });
+
+    expect(prompts[0]).toMatchObject({
+      navigation: {
+        activeStep: 1,
+        steps: [
+          { label: "Model", complete: true },
+          { label: "Channels" },
+          { label: "Integrations" },
+          { label: "Review" },
+        ],
+      },
+    });
+    expect(prompts[2]).toMatchObject({
+      metadata: [
+        { label: "Model", value: "openai/gpt-5.6-luna" },
+        { label: "Access", value: "AI Gateway via Vercel project" },
+      ],
+      options: [
+        { value: "install", label: "Finish setup" },
+        { value: "back", label: "Back" },
+      ],
+    });
+  });
+
+  it("returns planner selections when onboarding navigates back before Channels", async () => {
+    const fake = createFakePrompter({
+      multiple: () => {
+        throw new PlannerNavigationError("back", ["channel/web"]);
+      },
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps(),
+        plannerContext: { navigateBackBeforeChannels: true },
+      }),
+    ).resolves.toEqual({ kind: "navigate-back", selectedAddresses: ["channel/web"] });
   });
 
   it("starts bare /add on integrations when requested and keeps empty Review open", async () => {
@@ -152,7 +252,7 @@ describe("runRegistryFlow", () => {
     expect(prompts).toMatchObject([
       { message: "What should your agent be able to work with?" },
       {
-        message: "Review your agent",
+        message: "Review additions",
         description: "No channels or integrations selected.",
         options: [
           { value: "install", label: "Finish without adding" },
@@ -293,10 +393,10 @@ describe("runRegistryFlow", () => {
     });
 
     expect(prompts[0]).toMatchObject({
-      message: "Review your agent",
+      message: "Review additions",
       metadata: [
-        { label: "Channel", value: "Linear Agent" },
-        { label: "Integration", value: "Linear" },
+        { label: "Channels", value: "Linear Agent" },
+        { label: "Integrations", value: "Linear" },
       ],
     });
     expect(installRegistryItem).toHaveBeenNthCalledWith(
@@ -339,6 +439,37 @@ describe("runRegistryFlow", () => {
       "@acme/analytics",
       expect.objectContaining({ silent: true }),
     );
+  });
+
+  it("repairs a Vercel prerequisite and retries the same registry item", async () => {
+    const fake = createFakePrompter({
+      single: () => "install",
+      multiple: (options) =>
+        options.message === "Where should people reach your agent?" ? ["channel/web"] : [],
+    });
+    const installRegistryItem = vi
+      .fn<RegistryFlowDeps["installRegistryItem"]>()
+      .mockRejectedValueOnce(
+        new HumanActionRequiredError({
+          kind: "vercel-login",
+          command: "vercel login",
+          reason: "The channel requires a Vercel login.",
+        }),
+      )
+      .mockResolvedValueOnce({ output: [] });
+    const recoverHumanAction = vi.fn(async () => "retry" as const);
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({ installRegistryItem }),
+        recoverHumanAction,
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(recoverHumanAction).toHaveBeenCalledOnce();
+    expect(installRegistryItem).toHaveBeenCalledTimes(2);
   });
 
   it("reports an explicitly requested address that cannot be resolved", async () => {
@@ -411,28 +542,6 @@ describe("runRegistryFlow", () => {
     expect(fake.selectMessages).not.toContain("Couldn't add Web Chat");
   });
 
-  it("treats setup-prompt cancellation as a dismissed flow, not an installation failure", async () => {
-    const answers = ["install"];
-    const selections = [["channel/web"], []];
-    const fake = createFakePrompter({
-      single: () => answers.shift()!,
-      multiple: () => selections.shift()!,
-    });
-
-    await expect(
-      runRegistryFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        deps: deps({
-          installRegistryItem: vi.fn(async () => {
-            throw new WizardCancelledError();
-          }),
-        }),
-      }),
-    ).resolves.toEqual({ kind: "cancelled" });
-    expect(fake.selectMessages).not.toContain("Couldn't add Web Chat");
-  });
-
   it("keeps a skipped installation failure in the result and proceeds with later items", async () => {
     const answers = ["install", "skip"];
     const selections = [["channel/web"], ["connection/linear"]];
@@ -491,34 +600,6 @@ describe("runRegistryFlow", () => {
     });
   });
 
-  it("preserves settled items when a later installation is cancelled", async () => {
-    const answers = ["install"];
-    const selections = [["channel/web"], ["connection/linear"]];
-    const fake = createFakePrompter({
-      single: () => answers.shift()!,
-      multiple: () => selections.shift()!,
-    });
-    const installRegistryItem = vi
-      .fn<RegistryFlowDeps["installRegistryItem"]>()
-      .mockResolvedValueOnce({ output: [] })
-      .mockRejectedValueOnce(new WizardCancelledError());
-
-    await expect(
-      runRegistryFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        deps: deps({ installRegistryItem }),
-      }),
-    ).resolves.toEqual({
-      kind: "done",
-      result: {
-        items: [{ title: "Web Chat", facts: [], output: [] }],
-        failures: [],
-        cancelled: true,
-      },
-    });
-  });
-
   it("lets structured setup failures reach the command boundary", async () => {
     const answers = ["install"];
     const selections = [["channel/web"], []];
@@ -544,6 +625,42 @@ describe("runRegistryFlow", () => {
       }),
     ).rejects.toBe(error);
     expect(fake.selectMessages).not.toContain("Couldn't add Web Chat");
+  });
+
+  it("repairs a Vercel prerequisite before the batch deployment decision", async () => {
+    const answers = ["install", "finish"];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => ["channel/web"],
+    });
+    const authError = new HumanActionRequiredError({
+      kind: "vercel-login",
+      command: "vercel login",
+      reason: "Deployment detection requires a Vercel login.",
+    });
+    const detectDeployment = vi
+      .fn<RegistryFlowDeps["detectDeployment"]>()
+      .mockRejectedValueOnce(authError)
+      .mockResolvedValueOnce({ state: "linked", projectId: "prj_1" });
+    const recoverHumanAction = vi.fn(async () => "retry" as const);
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        recoverHumanAction,
+        deps: deps({
+          detectDeployment,
+          installRegistryItem: vi.fn(async () => ({
+            output: [],
+            setup: { facts: [], deploymentRequired: true as const },
+          })),
+        }),
+      }),
+    ).resolves.toMatchObject({ kind: "done" });
+
+    expect(recoverHumanAction).toHaveBeenCalledWith(authError);
+    expect(detectDeployment).toHaveBeenCalledTimes(2);
   });
 
   it("offers deployment once after the selected batch completes", async () => {

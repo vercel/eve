@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import type { VercelAuthStatus } from "#setup/vercel-project.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
 
 import {
   EXTERNAL_PROVIDER_INSTRUCTIONS,
@@ -163,6 +164,26 @@ describe("runProviderFlow", () => {
     });
   });
 
+  it("does not mark an inferred provider as current during onboarding", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    const picker: ProviderPicker = async (request) => {
+      expect(request.initialValue).toBe("ai-gateway-project");
+      expect(request.options.every((option) => option.checked !== true)).toBe(true);
+      expect(request.options.every((option) => option.hint !== "Current")).toBe(true);
+      return undefined;
+    };
+
+    await runTestProviderFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      picker,
+      selectedProvider: "ai-gateway-project",
+      selectionExplicit: false,
+      deps,
+    });
+  });
+
   it("uses the stored selection when multiple providers are available", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();
@@ -184,6 +205,60 @@ describe("runProviderFlow", () => {
       selectedProvider: "ai-gateway-project",
       deps,
     });
+  });
+
+  it("repairs a missing CLI and login in place before linking", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    deps.getVercelAuthStatus
+      .mockResolvedValueOnce("cli-missing")
+      .mockResolvedValueOnce("logged-out")
+      .mockResolvedValueOnce("authenticated");
+    const actions: string[] = [];
+
+    await expect(
+      runTestProviderFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        picker: async () => ({ kind: "ai-gateway-project" }),
+        recoverHumanAction: async (error) => {
+          actions.push(error.action.kind);
+          return "retry";
+        },
+        deps,
+      }),
+    ).resolves.toEqual({ kind: "ai-gateway-project" });
+
+    expect(actions).toEqual(["vercel-cli-missing", "vercel-login"]);
+    expect(deps.runLinkFlow).toHaveBeenCalledOnce();
+  });
+
+  it("repairs a link-time Vercel capability and resumes the same link", async () => {
+    const fake = createFakePrompter();
+    const deps = createDeps();
+    deps.runLinkFlow
+      .mockRejectedValueOnce(
+        new HumanActionRequiredError({
+          kind: "vercel-cli-upgrade",
+          command: "vercel upgrade",
+          reason: "The CLI cannot list teams.",
+        }),
+      )
+      .mockResolvedValueOnce({ kind: "done" });
+    const recoverHumanAction = vi.fn(async () => "retry" as const);
+
+    await expect(
+      runTestProviderFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        picker: async () => ({ kind: "ai-gateway-project" }),
+        recoverHumanAction,
+        deps,
+      }),
+    ).resolves.toEqual({ kind: "ai-gateway-project" });
+
+    expect(recoverHumanAction).toHaveBeenCalledOnce();
+    expect(deps.runLinkFlow).toHaveBeenCalledTimes(2);
   });
 
   it("preserves cancellation from the project link flow", async () => {

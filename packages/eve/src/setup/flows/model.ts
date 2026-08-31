@@ -36,7 +36,13 @@ import {
   type GatewayServiceTierState,
 } from "#shared/gateway-service-tier.js";
 import { formatModelSummary } from "#shared/model-summary.js";
-import type { Prompter, SelectNotice, SelectOption } from "../prompter.js";
+import {
+  PlannerNavigationError,
+  type PlannerNavigation,
+  type Prompter,
+  type SelectNotice,
+  type SelectOption,
+} from "../prompter.js";
 import { WizardCancelledError } from "../step.js";
 import { withSpinner } from "../with-spinner.js";
 import {
@@ -142,6 +148,8 @@ export type ModelFlowResult =
       modelMessage?: string;
       /** The provider selected in a completed provider sub-flow. */
       providerSelection?: ProviderSelection;
+      /** The user chose the manual direct-provider path and acknowledged its instructions. */
+      externalProviderSelected?: true;
     };
 
 // The bordered panel's title ("Configure the agent model") is the menu's header,
@@ -286,6 +294,10 @@ export async function runModelFlow(input: {
   prompter: Prompter;
   /** Opens provider setup before the root menu when runtime evidence requires it. */
   initialStep?: "provider";
+  /** Lets an enclosing journey treat Done with no edits as a completed step. */
+  allowUnchangedCompletion?: boolean;
+  /** Progress and directional navigation supplied by an enclosing journey. */
+  navigation?: PlannerNavigation;
   signal?: AbortSignal;
   /** Gives Codex uncontested inherited stdio while it performs login. */
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -347,6 +359,8 @@ export async function runModelFlow(input: {
   let lastApply: ApplyModelSettingsOutcome | undefined;
   let committedProviderSelection: ProviderSelection | undefined;
   let shouldAuthenticateChatGpt = false;
+  let externalProviderSelected = false;
+  let modelSettingsConfirmed = false;
   let commitDraft = false;
   const sourceOwnedExternalRouting =
     routing?.kind === "external" && !isChatGptModelRouting(routing);
@@ -392,8 +406,13 @@ export async function runModelFlow(input: {
           hintLayout: "stacked",
           initialValue: nextSelection,
           notices: externalNotice === undefined ? [] : [externalNotice],
+          navigation: input.navigation,
         });
       } catch (error) {
+        if (error instanceof PlannerNavigationError && error.direction === "forward") {
+          commitDraft = true;
+          break;
+        }
         if (!(error instanceof WizardCancelledError)) throw error;
         // Esc discards the draft. Say so: before drafts existed, a completed
         // model pick applied immediately, so a silent drop reads as success.
@@ -432,6 +451,7 @@ export async function runModelFlow(input: {
         nextSelection = "model";
         continue;
       }
+      modelSettingsConfirmed = true;
       if (result.model !== undefined) {
         current = result.model;
         routing = routingForModelSelection(result.model);
@@ -450,6 +470,10 @@ export async function runModelFlow(input: {
             ? { kind: "set", value: "priority" }
             : { kind: "remove" };
       }
+      if (input.navigation !== undefined) {
+        commitDraft = true;
+        break;
+      }
       nextSelection = "done";
       continue;
     }
@@ -460,6 +484,7 @@ export async function runModelFlow(input: {
       signal,
       availableProviders,
       selectedProvider,
+      selectionExplicit: storedProviderSelection !== undefined,
     });
     // Backing out of the provider sub-flow changed nothing; the cursor stays on
     // the provider row so a retry is one keypress away.
@@ -468,11 +493,14 @@ export async function runModelFlow(input: {
       nextSelection = "provider";
       continue;
     }
-    // External-provider setup only shows instructions, so keep the menu open.
+    // The direct-provider branch is a manual configuration path. Acknowledging
+    // its instructions is an explicit onboarding choice even though source and
+    // credentials remain user-owned.
     if (result.kind === "external-provider") {
       if (signal?.aborted) return { kind: "cancelled" };
-      nextSelection = "done";
-      continue;
+      externalProviderSelected = true;
+      commitDraft = true;
+      break;
     }
     nextProviderSelection = result.kind;
     if (nextProviderSelection === "chatgpt") {
@@ -512,9 +540,15 @@ export async function runModelFlow(input: {
   if (
     lastApply === undefined &&
     committedProviderSelection === undefined &&
-    !shouldAuthenticateChatGpt
+    !shouldAuthenticateChatGpt &&
+    !externalProviderSelected
   ) {
-    return { kind: "cancelled" };
+    const unchangedCompletionAllowed =
+      input.allowUnchangedCompletion === true ||
+      (input.navigation !== undefined && modelSettingsConfirmed);
+    return commitDraft && unchangedCompletionAllowed
+      ? { kind: "done", accessChanged: false }
+      : { kind: "cancelled" };
   }
   const done: Extract<ModelFlowResult, { kind: "done" }> = {
     kind: "done",
@@ -528,6 +562,7 @@ export async function runModelFlow(input: {
   if (committedProviderSelection !== undefined) {
     done.providerSelection = committedProviderSelection;
   }
+  if (externalProviderSelected) done.externalProviderSelected = true;
   return done;
 }
 

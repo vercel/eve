@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Guide newly created agents through model configuration and a channel and integration planner before the first chat prompt. `/add` now installs multiple selections as one batch and reports each result.
+Guide newly created agents through a resumable model, channel, integration, and review journey before the first chat prompt. Vercel prerequisites recover in place, while standalone `/add` remains a focused batch planner that reports each result.

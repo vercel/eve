@@ -62,7 +62,7 @@ import type {
   SetupSelectRequest,
   SetupSelectResult,
 } from "./setup-flow.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
@@ -242,6 +242,7 @@ type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: num
 
 type SetupFlowState = {
   title: string;
+  navigation?: PlannerNavigation;
   indicator: SetupFlowIndicatorState;
   lines: FlowPanelLine[];
   summary?: { headline: string; facts: readonly { label: string; value: string }[] };
@@ -589,6 +590,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
+    setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
@@ -1824,6 +1826,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The ticker runs for the whole flow: the idle pulse, the status indicator,
     // and the output preview all animate through it.
     this.#startTicker();
+    this.#paint();
+  }
+
+  #setSetupFlowNavigation(navigation: PlannerNavigation | undefined): void {
+    if (this.#setupFlow === undefined) return;
+    this.#setupFlow.navigation = navigation;
     this.#paint();
   }
 
@@ -4161,6 +4169,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       const state: Parameters<typeof renderFlowPanel>[0] = {
         title: flow.title,
+        navigation: flow.navigation,
         lines:
           flow.summary === undefined
             ? flow.hideLinesWhileQuestion === true

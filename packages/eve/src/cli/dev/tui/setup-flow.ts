@@ -74,6 +74,8 @@ export type SetupSelectResult =
 
 export interface SetupFlowRenderer {
   begin(title: string, indicator?: SetupFlowIndicator): void;
+  /** Sets progress owned by an enclosing setup journey, independent of its active question. */
+  setNavigation?(navigation: PlannerNavigation | undefined): void;
   end(options?: { preserveDiagnostics?: boolean }): void;
   readSelect(options: SetupSelectRequest): Promise<SetupSelectResult>;
   readEditableSelect(options: {

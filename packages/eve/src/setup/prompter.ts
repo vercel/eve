@@ -113,7 +113,9 @@ export class PlannerNavigationError extends Error {
 export interface PlannerNavigation {
   kind: "planner";
   activeStep: number;
-  steps: readonly { label: string; count?: number }[];
+  steps: readonly { label: string; count?: number; complete?: boolean }[];
+  /** Preserve directional behavior when an enclosing flow already renders the progress rail. */
+  hidden?: boolean;
 }
 
 /** Options common to every {@link Prompter.select} call. */

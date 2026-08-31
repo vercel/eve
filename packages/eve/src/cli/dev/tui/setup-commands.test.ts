@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { RegistryFlowFailedError } from "#setup/flows/registry.js";
+import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 
 import {
@@ -46,18 +47,7 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
   };
 }
 
-function registryResult(
-  overrides: Partial<{
-    items: readonly {
-      title: string;
-      facts: readonly never[];
-      output: readonly string[];
-    }[];
-    failures: readonly never[];
-    cancelled: true;
-    deployed: "production";
-  }> = {},
-) {
+function registryResult(overrides: Partial<RegistrySessionResult> = {}) {
   return {
     kind: "done" as const,
     result: { items: [], failures: [], ...overrides },
@@ -118,18 +108,6 @@ function run(input: {
 }
 
 describe("runTuiSetupCommand", () => {
-  it("keeps registry setup interruptible through the parent drawer", async () => {
-    const renderer = fakePanelRenderer();
-    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => registryResult());
-
-    await run({ command: "add", flows: fakeFlows({ runRegistryFlow }), renderer });
-
-    expect(runRegistryFlow).toHaveBeenCalledWith(
-      expect.objectContaining({ initialScreen: "integrations" }),
-    );
-    expect(renderer.waitForInterrupt).toHaveBeenCalledWith();
-  });
-
   it("uses the requested initial registry screen and suspends the runtime during installation", async () => {
     const calls: string[] = [];
     const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async (input) => {
@@ -206,6 +184,25 @@ describe("runTuiSetupCommand", () => {
         deps: expect.objectContaining({ runProviderFlow: expect.any(Function) }),
       }),
     );
+  });
+
+  it("returns direct-provider review facts after its instructions are acknowledged", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        accessChanged: false,
+        externalProviderSelected: true,
+      })),
+    });
+
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message: "Other provider instructions acknowledged.",
+      modelReviewMetadata: [
+        { label: "Model", value: "Configure in agent.ts" },
+        { label: "Access", value: "Other provider (manual setup)" },
+      ],
+      preserveFlowDiagnostics: false,
+    });
   });
 
   it("does not rebuild model access after a rejected edit", async () => {
@@ -337,6 +334,7 @@ describe("runTuiSetupCommand", () => {
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "/model dismissed.",
+      cancelled: true,
       preserveFlowDiagnostics: false,
     });
   });
@@ -479,7 +477,6 @@ describe("runTuiSetupCommand", () => {
 
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
       message: expect.stringContaining("Couldn't add GitHub"),
-      tone: "error",
       preserveFlowDiagnostics: true,
     });
   });
@@ -494,40 +491,6 @@ describe("runTuiSetupCommand", () => {
     expect(flows.runDeployFlow).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true }),
     );
-  });
-
-  it("preserves settled registry results when batch setup is interrupted", async () => {
-    const renderer = fakePanelRenderer();
-    const flows = fakeFlows({
-      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(
-        ({ signal }) =>
-          new Promise((resolve) => {
-            signal?.addEventListener(
-              "abort",
-              () =>
-                resolve(
-                  registryResult({
-                    items: [{ title: "Web Chat", facts: [], output: [] }],
-                    cancelled: true,
-                  }),
-                ),
-              { once: true },
-            );
-          }),
-      ),
-    });
-
-    const result = run({ command: "add", flows, renderer });
-    renderer.fireInterrupt();
-
-    await expect(result).resolves.toEqual({
-      message:
-        "Added Web Chat\n\nWeb Chat\n  Installed.\n\n" +
-        "Setup cancelled before the remaining selections were added.",
-      partial: true,
-      tone: "error",
-      preserveFlowDiagnostics: true,
-    });
   });
 
   it("preserves model access refreshes when provider setup is interrupted", async () => {

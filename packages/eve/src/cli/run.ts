@@ -1,4 +1,9 @@
-import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import {
+  Command,
+  CommanderError,
+  InvalidArgumentError,
+  Option,
+} from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
@@ -118,28 +123,25 @@ function createDevBootProgressReporter(
   };
 }
 
-async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
-  return (await import("#cli/commands/info.js")).printApplicationInfo;
-}
+const loadPrintApplicationInfo = async (): Promise<
+  CliRuntimeDependencies["printApplicationInfo"]
+> => (await import("#cli/commands/info.js")).printApplicationInfo;
 
 async function loadDevelopmentTuiModule() {
   return await import("#cli/dev/tui/tui.js");
 }
 
-async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalCommand"]> {
-  return (await import("#evals/cli/eval.js")).runEvalCommand;
-}
+const loadRunEvalCommand = async (): Promise<CliRuntimeDependencies["runEvalCommand"]> =>
+  (await import("#evals/cli/eval.js")).runEvalCommand;
 
-async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
-  return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
-}
+const loadStartHost = async (): Promise<CliRuntimeDependencies["startHost"]> =>
+  (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 
 const loadIsActiveDevelopmentServerForApp = async () =>
   (await import("#internal/nitro/host.js")).isActiveDevelopmentServerForApp;
 
-async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startProductionHost"]> {
-  return (await import("#internal/nitro/host.js")).startProductionServer;
-}
+const loadStartProductionHost = async (): Promise<CliRuntimeDependencies["startProductionHost"]> =>
+  (await import("#internal/nitro/host.js")).startProductionServer;
 
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -335,7 +337,8 @@ function createCliProgram(
     )
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
-    .option("--input <text>", "Pre-fill the prompt input, or start onboarding with /model")
+    .option("--input <text>", "Pre-fill the prompt input")
+    .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
     .option(
       "--tools <mode>",
       "How tool calls render: full | collapsed | auto-collapsed | hidden",
@@ -393,6 +396,7 @@ function createCliProgram(
           serverUrl: remoteServerUrl,
         });
       }
+
       if (remoteServerUrl) {
         const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
         loadDevelopmentEnvironmentFiles(applicationContext.root);
@@ -449,7 +453,7 @@ function createCliProgram(
 
       let tuiStartup: DevelopmentTuiStartup | undefined;
       const tuiStartupPromise =
-        mode === "tui" && runtime.runDevelopmentTui === undefined
+        mode === "tui" && options.onboard !== true && runtime.runDevelopmentTui === undefined
           ? loadDevelopmentTuiModule().then((module) => {
               onBootProgress({ type: "before-first-paint" });
               return module.startDevelopmentTuiStartup({
