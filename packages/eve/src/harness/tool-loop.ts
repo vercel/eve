@@ -116,7 +116,7 @@ import {
   setTurnUsageState,
   type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
-import { resolveModelCallCost } from "#harness/model-cost.js";
+import { resolveModelCallCost, resolveModelCostEstimate } from "#harness/model-cost.js";
 import {
   applySessionLimitContinuation,
   enforceSessionTokenLimit,
@@ -1570,7 +1570,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               turnId: instrumentationTurnId,
             };
       activeAttemptScope = attemptScope;
-      const costEstimate = requireSessionModelReference(session).costEstimate;
+      const modelReference = requireSessionModelReference(session);
+      const costEstimate = await resolveModelCostEstimate({ model, modelReference });
       const bridgeIntegration =
         attemptScope === undefined || instrumentationHooks === undefined
           ? undefined
@@ -1690,7 +1691,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             throw new EmptyModelResponseError();
           }
           await emitStepActions(emit, emissionState, stepResult, {
-            costEstimate: requireSessionModelReference(session).costEstimate,
+            costEstimate,
             emittedActionCallIds,
             excludedActionCallIds: invalidInputToolCallIds,
             excludedActionToolNames,
@@ -2024,7 +2025,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       turnId: emissionState.turnId,
       usage: extractTokenUsageDelta({
         cost: resolveModelCallCost({
-          costEstimate: requireSessionModelReference(session).costEstimate,
+          costEstimate: await resolveModelCostEstimate({
+            model,
+            modelReference: requireSessionModelReference(session),
+          }),
           providerMetadata: result.providerMetadata,
           usage: result.usage,
         }),

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { LanguageModelUsage } from "ai";
+import type { LanguageModel, LanguageModelUsage } from "ai";
+import { vi } from "vitest";
 
-import { resolveModelCallCost } from "#harness/model-cost.js";
+import { resolveModelCallCost, resolveModelCostEstimate } from "#harness/model-cost.js";
+import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 
 const pricing = {
   inputUsdPerToken: 0.000003,
@@ -76,3 +78,65 @@ describe("resolveModelCallCost", () => {
     ).toEqual({ costUsd: 0.0001335, source: "estimated" });
   });
 });
+
+describe("resolveModelCostEstimate", () => {
+  it("looks up external providers by their provider-native model id", async () => {
+    const catalog = createCatalog();
+
+    await expect(
+      resolveModelCostEstimate({
+        catalog,
+        model: { provider: "anthropic.messages", modelId: "claude-test" } as LanguageModel,
+        modelReference: { id: "anthropic/claude-test" },
+      }),
+    ).resolves.toEqual(pricing);
+    expect(catalog.getByProviderModelId).toHaveBeenCalledWith("anthropic.messages", "claude-test");
+  });
+
+  it("looks up request-scoped BYOK by its gateway model id", async () => {
+    const catalog = createCatalog();
+
+    await expect(
+      resolveModelCostEstimate({
+        catalog,
+        model: "anthropic/claude-test" as LanguageModel,
+        modelReference: {
+          id: "anthropic/claude-test",
+          providerOptions: { gateway: { byok: { anthropic: [{ apiKey: "test" }] } } },
+        },
+      }),
+    ).resolves.toEqual(pricing);
+    expect(catalog.getByGatewayId).toHaveBeenCalledWith("anthropic/claude-test");
+  });
+
+  it("does not load prices for ordinary Gateway calls", async () => {
+    const catalog = createCatalog();
+
+    await expect(
+      resolveModelCostEstimate({
+        catalog,
+        model: "anthropic/claude-test" as LanguageModel,
+        modelReference: { id: "anthropic/claude-test" },
+      }),
+    ).resolves.toBeUndefined();
+    expect(catalog.getByGatewayId).not.toHaveBeenCalled();
+  });
+});
+
+function createCatalog(): RuntimeModelCatalog & {
+  getByGatewayId: ReturnType<typeof vi.fn<RuntimeModelCatalog["getByGatewayId"]>>;
+  getByProviderModelId: ReturnType<typeof vi.fn<RuntimeModelCatalog["getByProviderModelId"]>>;
+} {
+  return {
+    getByGatewayId: vi.fn(async () => ({
+      costEstimate: pricing,
+      contextWindowTokens: 1,
+      resolvedModelId: "anthropic/claude-test",
+    })),
+    getByProviderModelId: vi.fn(async () => ({
+      costEstimate: pricing,
+      contextWindowTokens: 1,
+      resolvedModelId: "anthropic/claude-test",
+    })),
+  };
+}

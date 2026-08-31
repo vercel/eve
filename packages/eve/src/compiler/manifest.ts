@@ -541,15 +541,6 @@ const modelRoutingSchema = z.union([
 
 const compiledRuntimeModelReferenceSchema: z.ZodType<CompiledRuntimeModelReference> = z
   .object({
-    costEstimate: z
-      .object({
-        cacheReadUsdPerToken: z.number().finite().nonnegative().optional(),
-        cacheWriteUsdPerToken: z.number().finite().nonnegative().optional(),
-        inputUsdPerToken: z.number().finite().nonnegative(),
-        outputUsdPerToken: z.number().finite().nonnegative(),
-      })
-      .strict()
-      .optional(),
     contextWindowTokens: z.number().int().positive().optional(),
     id: z.string(),
     maxOutputTokens: z.number().int().positive().optional(),
@@ -1270,9 +1261,6 @@ function cloneCompiledRuntimeModelReference(
   };
   if (model.contextWindowTokens !== undefined) {
     clone.contextWindowTokens = model.contextWindowTokens;
-  }
-  if (model.costEstimate !== undefined) {
-    clone.costEstimate = { ...model.costEstimate };
   }
   if (model.maxOutputTokens !== undefined) {
     clone.maxOutputTokens = model.maxOutputTokens;

@@ -104,19 +104,9 @@ const MOCK_MODELS: CatalogModel[] = [
 const MOCK_PROVIDER_ALIASES: Record<string, string> = { blackForestLabs: "bfl" };
 
 function mockCatalogFetch(): void {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    if (String(input).endsWith("/v1/models")) {
-      return Response.json({
-        data: [
-          {
-            id: "anthropic/claude-opus-4.7",
-            pricing: { input: "0.000003", output: "0.000015" },
-          },
-        ],
-      });
-    }
-    return Response.json({ models: MOCK_MODELS, providerAliases: MOCK_PROVIDER_ALIASES });
-  });
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    Response.json({ models: MOCK_MODELS, providerAliases: MOCK_PROVIDER_ALIASES }),
+  );
 }
 
 describe("catalogModelProviderSchema", () => {
@@ -249,10 +239,6 @@ describe("createCompiledRuntimeModelCatalogLoader", () => {
     const result = await loader.getByProviderModelId("anthropic", "claude-opus-4-7");
     expect(result?.slug).toBe("anthropic/claude-opus-4.7");
     expect(result?.limits).toEqual({ contextWindowTokens: 200_000, maxOutputTokens: 32_000 });
-    expect(result?.costEstimate).toEqual({
-      inputUsdPerToken: 0.000003,
-      outputUsdPerToken: 0.000015,
-    });
   });
 
   it("strips dotted sub-path from provider before lookup", async () => {

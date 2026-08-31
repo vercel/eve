@@ -2,24 +2,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { z } from "#compiled/zod/index.js";
-import {
-  AI_GATEWAY_MODELS_CATALOG_URL,
-  AI_GATEWAY_MODELS_URL,
-  vercelGatewayFetch,
-} from "#internal/gateway.js";
+import { AI_GATEWAY_MODELS_CATALOG_URL, vercelGatewayFetch } from "#internal/gateway.js";
 import {
   catalogModelSchema,
   findCatalogModelByProviderModelId,
   findCatalogModelBySlug,
-  gatewayModelListResponseSchema,
-  modelCostEstimatesFromGatewayModelList,
   modelCatalogLimitsFromProvider,
   modelCatalogResponseSchema,
   normalizeCatalogModelId,
 } from "#internal/model-catalog.js";
-import type { ModelCostEstimate } from "#shared/model-cost.js";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
-const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION = 3;
+const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION = 2;
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 export {
   catalogModelProviderSchema,
@@ -34,11 +27,6 @@ export type { CatalogModelProvider, CatalogModel } from "#internal/model-catalog
  */
 export type CompiledRuntimeModelLimits = z.infer<typeof compiledRuntimeModelLimitsSchema>;
 
-export interface CompiledRuntimeModelMetadata extends CompiledRuntimeModelLimits {
-  readonly costEstimate?: ModelCostEstimate;
-  readonly slug: string;
-}
-
 const compiledRuntimeModelLimitsSchema = z
   .object({
     contextWindowTokens: z.number().int().positive(),
@@ -50,17 +38,6 @@ const compiledRuntimeModelCatalogCacheSchema = z
   .object({
     fetchedAt: z.string(),
     kind: z.literal(COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND),
-    modelCostEstimates: z.record(
-      z.string(),
-      z
-        .object({
-          cacheReadUsdPerToken: z.number().finite().nonnegative().optional(),
-          cacheWriteUsdPerToken: z.number().finite().nonnegative().optional(),
-          inputUsdPerToken: z.number().finite().nonnegative(),
-          outputUsdPerToken: z.number().finite().nonnegative(),
-        })
-        .strict(),
-    ),
     models: z.array(catalogModelSchema),
     providerAliases: z.record(z.string(), z.string()),
     version: z.literal(COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION),
@@ -95,16 +72,11 @@ const builtInCompiledRuntimeModelLimitsById = new Map<string, CompiledRuntimeMod
  * Loader that resolves compile-time model limits for one application build.
  */
 export interface CompiledRuntimeModelCatalogLoader {
-  getByGatewayId(modelId: string): Promise<CompiledRuntimeModelMetadata | null>;
   getModelLimits(modelId: string): Promise<CompiledRuntimeModelLimits | null>;
   getByProviderModelId(
     provider: string,
     providerModelId: string,
-  ): Promise<{
-    slug: string;
-    limits: CompiledRuntimeModelLimits;
-    costEstimate?: ModelCostEstimate;
-  } | null>;
+  ): Promise<{ slug: string; limits: CompiledRuntimeModelLimits } | null>;
 }
 
 /**
@@ -173,16 +145,16 @@ export function createCompiledRuntimeModelCatalogLoader(
   };
 
   return {
-    async getByGatewayId(modelId) {
-      const normalizedId = normalizeCatalogModelId(modelId);
+    async getModelLimits(modelId) {
       const builtInLimits =
         builtInCompiledRuntimeModelLimitsById.get(modelId) ??
-        builtInCompiledRuntimeModelLimitsById.get(normalizedId);
+        builtInCompiledRuntimeModelLimitsById.get(normalizeCatalogModelId(modelId));
+      if (builtInLimits !== undefined) {
+        return builtInLimits;
+      }
 
       let resolved = await resolveModelsFromCacheOrFetch();
-      if (resolved === null) {
-        return builtInLimits === undefined ? null : { ...builtInLimits, slug: normalizedId };
-      }
+      if (resolved === null) return null;
 
       let model = findCatalogModelBySlug(resolved.models, modelId);
       if (model === undefined) {
@@ -196,30 +168,14 @@ export function createCompiledRuntimeModelCatalogLoader(
           const limits = modelCatalogLimitsFromProvider(provider);
           if (limits !== null) {
             return {
-              ...limits,
-              costEstimate: resolved.modelCostEstimates[model.slug],
-              slug: model.slug,
+              contextWindowTokens: limits.contextWindowTokens,
+              maxOutputTokens: limits.maxOutputTokens,
             };
           }
         }
       }
 
-      return builtInLimits === undefined ? null : { ...builtInLimits, slug: normalizedId };
-    },
-
-    async getModelLimits(modelId) {
-      const normalizedId = normalizeCatalogModelId(modelId);
-      const builtInLimits =
-        builtInCompiledRuntimeModelLimitsById.get(modelId) ??
-        builtInCompiledRuntimeModelLimitsById.get(normalizedId);
-      if (builtInLimits !== undefined) return builtInLimits;
-      const metadata = await this.getByGatewayId(modelId);
-      return metadata === null
-        ? null
-        : {
-            contextWindowTokens: metadata.contextWindowTokens,
-            maxOutputTokens: metadata.maxOutputTokens,
-          };
+      return null;
     },
 
     async getByProviderModelId(provider, providerModelId) {
@@ -247,7 +203,6 @@ export function createCompiledRuntimeModelCatalogLoader(
         const limits = modelCatalogLimitsFromProvider(match.provider);
         if (limits !== null) {
           return {
-            costEstimate: resolved.modelCostEstimates[match.model.slug],
             slug: match.model.slug,
             limits,
           };
@@ -264,12 +219,7 @@ type CompiledRuntimeModelCatalogCache = z.infer<typeof compiledRuntimeModelCatal
 async function fetchAndPersistModelCatalog(
   appRoot: string,
 ): Promise<CompiledRuntimeModelCatalogCache> {
-  const catalogResponsePromise = vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL);
-  const modelListResponsePromise = vercelGatewayFetch(AI_GATEWAY_MODELS_URL).catch(() => undefined);
-  const [catalogResponse, modelListResponse] = await Promise.all([
-    catalogResponsePromise,
-    modelListResponsePromise,
-  ]);
+  const catalogResponse = await vercelGatewayFetch(AI_GATEWAY_MODELS_CATALOG_URL);
 
   if (!catalogResponse.ok) {
     throw new Error(
@@ -277,9 +227,6 @@ async function fetchAndPersistModelCatalog(
     );
   }
   const parsed = await modelCatalogResponseSchema.safeParseAsync(await catalogResponse.json());
-  const modelList = modelListResponse?.ok
-    ? await gatewayModelListResponseSchema.safeParseAsync(await modelListResponse.json())
-    : undefined;
 
   if (!parsed.success) {
     throw new Error("AI Gateway model catalog response did not match the expected schema.");
@@ -288,9 +235,6 @@ async function fetchAndPersistModelCatalog(
   const cacheArtifact: CompiledRuntimeModelCatalogCache = {
     fetchedAt: new Date().toISOString(),
     kind: COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND,
-    modelCostEstimates: modelList?.success
-      ? modelCostEstimatesFromGatewayModelList(modelList.data.data)
-      : {},
     models: parsed.data.models,
     providerAliases: parsed.data.providerAliases,
     version: COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION,

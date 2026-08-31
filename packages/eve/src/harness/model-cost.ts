@@ -1,10 +1,42 @@
-import type { LanguageModelUsage, ProviderMetadata } from "ai";
+import type { LanguageModel, LanguageModelUsage, ProviderMetadata } from "ai";
 
+import { classifyModelRouting } from "#internal/classify-model-routing.js";
+import {
+  createRuntimeModelCatalog,
+  type RuntimeModelCatalog,
+} from "#runtime/agent/model-catalog.js";
+import type { InternalAgentModelDefinition } from "#shared/agent-definition.js";
 import type { ModelCostEstimate, ModelCostSource } from "#shared/model-cost.js";
+
+const modelCatalog = createRuntimeModelCatalog();
 
 export interface ResolvedModelCost {
   readonly costUsd: number;
   readonly source: ModelCostSource;
+}
+
+/**
+ * Resolves base pricing only for model calls that cannot rely on ordinary
+ * Gateway cost metadata. The catalog is process-cached and lookup failures are
+ * intentionally invisible to the model call.
+ */
+export async function resolveModelCostEstimate(input: {
+  readonly catalog?: RuntimeModelCatalog;
+  readonly model: LanguageModel;
+  readonly modelReference: InternalAgentModelDefinition;
+}): Promise<ModelCostEstimate | undefined> {
+  try {
+    const routing = classifyModelRouting(input.model, input.modelReference.providerOptions);
+    if (routing.kind === "gateway" && routing.byok === undefined) return undefined;
+    const catalog = input.catalog ?? modelCatalog;
+    if (typeof input.model === "string" || input.model.provider.split(".")[0] === "gateway") {
+      return (await catalog.getByGatewayId(input.modelReference.id))?.costEstimate;
+    }
+    return (await catalog.getByProviderModelId(input.model.provider, input.model.modelId))
+      ?.costEstimate;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

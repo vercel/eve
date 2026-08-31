@@ -16,6 +16,7 @@ import {
 } from "#shared/agent-definition.js";
 import type { DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
+import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
@@ -275,10 +276,6 @@ async function normalizeAuthoredModelReference(input: {
       if (providerResult) {
         return {
           ...sourceBackedModel,
-          ...(shouldEstimateModelCost(sourceBackedModel) &&
-            providerResult.costEstimate !== undefined && {
-              costEstimate: providerResult.costEstimate,
-            }),
           id: providerResult.slug,
           contextWindowTokens: providerResult.limits.contextWindowTokens,
           maxOutputTokens: providerResult.limits.maxOutputTokens,
@@ -331,37 +328,23 @@ async function withCompiledRuntimeModelLimits(
   },
 ): Promise<CompiledRuntimeModelReference> {
   if (input.contextWindowTokens !== undefined) {
-    if (shouldEstimateModelCost(model)) {
-      try {
-        const metadata = await input.modelCatalog.getByGatewayId(model.id);
-        if (metadata?.costEstimate !== undefined) {
-          return {
-            ...model,
-            contextWindowTokens: input.contextWindowTokens,
-            costEstimate: metadata.costEstimate,
-          };
-        }
-      } catch {
-        // Explicit limits keep a price lookup from blocking model compilation.
-      }
-    }
     return {
       ...model,
       contextWindowTokens: input.contextWindowTokens,
     };
   }
 
-  let metadata: Awaited<ReturnType<ManifestCompileContext["modelCatalog"]["getByGatewayId"]>>;
+  let limits: CompiledRuntimeModelLimits | null;
 
   try {
-    metadata = await input.modelCatalog.getByGatewayId(model.id);
+    limits = await input.modelCatalog.getModelLimits(model.id);
   } catch (error) {
     throw new Error(
       `Failed to load AI Gateway model metadata for ${input.purpose} "${model.id}". ${toErrorMessage(error)}`,
     );
   }
 
-  if (metadata === null) {
+  if (limits === null) {
     throw new Error(
       `Cannot compile agent compaction because ${input.purpose} "${model.id}" does not have known AI Gateway context window metadata.`,
     );
@@ -369,17 +352,9 @@ async function withCompiledRuntimeModelLimits(
 
   return {
     ...model,
-    ...(shouldEstimateModelCost(model) &&
-      metadata.costEstimate !== undefined && {
-        costEstimate: metadata.costEstimate,
-      }),
-    contextWindowTokens: metadata.contextWindowTokens,
-    maxOutputTokens: metadata.maxOutputTokens,
+    contextWindowTokens: limits.contextWindowTokens,
+    maxOutputTokens: limits.maxOutputTokens,
   };
-}
-
-function shouldEstimateModelCost(model: Pick<CompiledRuntimeModelReference, "routing">): boolean {
-  return model.routing.kind === "external" || model.routing.byok !== undefined;
 }
 
 function parseProviderOptionsRecord(

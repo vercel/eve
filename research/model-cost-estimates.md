@@ -30,10 +30,10 @@ rollups. OTel spans use `gen_ai.usage.cost` with `eve.cost.source` set to
 ## Pricing and limits
 
 Model identity and context limits remain sourced from AI Gateway's catalog.
-Base pricing comes from its public `/v1/models` response and is cached with
-the compile-time catalog metadata. Unavailable, malformed, or incomplete
-pricing never prevents a model from compiling or running; eve emits no
-estimate for that call.
+Base pricing comes from its public `/v1/models` response and is cached in the
+runtime process only. Unavailable, malformed, or incomplete pricing never
+prevents a model from compiling or running; eve emits no estimate for that
+call.
 
 ## Accuracy boundary
 
