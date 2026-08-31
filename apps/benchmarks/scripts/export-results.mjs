@@ -57,7 +57,8 @@ const experimentIds = benchmarks.flatMap((benchmark) =>
   authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
 );
 const stale = staleCells(experimentIds);
-const previousResults = readPreviousResults();
+const previous = readPublishedResults();
+const previousResults = readPreviousResults(previous);
 const results = [];
 
 for (const benchmark of benchmarks) {
@@ -87,6 +88,48 @@ for (const benchmark of benchmarks) {
   }
 }
 
+const experiments = benchmarks.flatMap((benchmark) =>
+  authoringTreatments.map((treatment) => ({
+    id: publishedExperimentId(benchmark, treatment),
+    groupId: `${benchmark.id}-${harnessId(benchmark.harness)}`,
+    model: benchmark.model,
+    modelDisplayName: benchmark.displayName,
+    harness: benchmark.harness,
+    treatment,
+  })),
+);
+const completeCurrentExperimentIds = new Set(
+  experiments
+    .filter((experiment) =>
+      caseIds.every((caseId) =>
+        results.some(
+          (result) =>
+            result.experimentId === experiment.id &&
+            result.caseId === caseId &&
+            result.status === "current",
+        ),
+      ),
+    )
+    .map((experiment) => experiment.id),
+);
+const published = experiments.map((experiment) => {
+  if (completeCurrentExperimentIds.has(experiment.id)) {
+    return {
+      experiment,
+      results: results.filter((result) => result.experimentId === experiment.id),
+    };
+  }
+  const previousExperiment = previous?.experiments.find(
+    (candidate) =>
+      candidate.model === experiment.model && candidate.treatment === experiment.treatment,
+  );
+  return {
+    experiment: previousExperiment ?? experiment,
+    results: previousExperiment
+      ? previous.results.filter((result) => result.experimentId === previousExperiment.id)
+      : results.filter((result) => result.experimentId === experiment.id),
+  };
+});
 const output = {
   schemaVersion: 1,
   generatedAt: new Date().toISOString(),
@@ -96,17 +139,8 @@ const output = {
     caseCount: caseIds.length,
     runsPerCell: publishedBenchmark.runs,
   },
-  experiments: benchmarks.flatMap((benchmark) =>
-    authoringTreatments.map((treatment) => ({
-      id: publishedExperimentId(benchmark, treatment),
-      groupId: `${benchmark.id}-${harnessId(benchmark.harness)}`,
-      model: benchmark.model,
-      modelDisplayName: benchmark.displayName,
-      harness: benchmark.harness,
-      treatment,
-    })),
-  ),
-  results,
+  experiments: published.map((entry) => entry.experiment),
+  results: published.flatMap((entry) => entry.results),
   ...(previousResults.length === 0 ? {} : { previouslyMeasured: previousResults }),
 };
 
@@ -116,12 +150,15 @@ mkdirSync(dirname(destination), { recursive: true });
 writeFileSync(destination, `${JSON.stringify(output, null, 2)}\n`);
 console.log(`Exported ${results.length} benchmark cells to ${destination}`);
 
-function readPreviousResults() {
+function readPublishedResults() {
   const destination =
     values.output === undefined ? outputPath : resolve(process.cwd(), values.output);
-  if (!existsSync(destination)) return [];
+  if (!existsSync(destination)) return undefined;
+  return JSON.parse(readFileSync(destination, "utf8"));
+}
 
-  const previous = JSON.parse(readFileSync(destination, "utf8"));
+function readPreviousResults(previous) {
+  if (previous === undefined) return [];
   const supersededExperimentIds = new Set(
     benchmarkModels
       .filter((benchmark) => benchmark.support === "superseded")
