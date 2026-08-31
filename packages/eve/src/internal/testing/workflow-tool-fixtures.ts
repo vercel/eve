@@ -76,6 +76,46 @@ export async function stepThenRaceWorkflow(
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
 }
 
+/** Holds in a step until `ctx.abortSignal` fires, then cleans up in `finally`. */
+export async function holdUntilAbortedWorkflow(
+  input: DeployInput,
+  ctx: ToolContext,
+): Promise<{ readonly held: boolean }> {
+  "use workflow";
+  try {
+    await holdStep(ctx.abortSignal);
+    return { held: true };
+  } finally {
+    await releaseStep(input.service);
+  }
+}
+
+async function holdStep(signal: AbortSignal): Promise<void> {
+  "use step";
+
+  await new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(resolve, 60_000);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+async function releaseStep(service: string): Promise<string> {
+  "use step";
+
+  return `released ${service}`;
+}
+
 export async function askThenRaceWorkflow(
   input: DeployInput,
   ctx: ToolContext,

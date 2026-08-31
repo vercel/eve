@@ -52,9 +52,7 @@ export async function cancelDescendantTurnsStep(input: {
   }
 
   await Promise.all(
-    toolRuns.map((record) =>
-      cancelToolRun({ ...record, reason: "The turn that called the tool was cancelled." }),
-    ),
+    toolRuns.map((record) => cancelToolRun(record, "The turn that called the tool was cancelled.")),
   );
   if (running.length === 0) return;
 

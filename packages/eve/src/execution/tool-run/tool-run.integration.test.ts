@@ -10,12 +10,13 @@ import {
   askThenRaceWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
-  stepThenRaceWorkflow,
   failingDeployWorkflow,
+  holdUntilAbortedWorkflow,
   reportingDeployWorkflow,
+  stepThenRaceWorkflow,
 } from "#internal/testing/workflow-tool-fixtures.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { getWorld, start } from "#internal/workflow/runtime.js";
+import { getRun, getWorld, start } from "#internal/workflow/runtime.js";
 import { toolRunWorkflowReference } from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
@@ -77,41 +78,42 @@ async function createWorkflowToolRuntime(input: {
   return runtime;
 }
 
-/** Polls the world until a tool run reaches `status`, returning its row. */
-async function waitForToolRunStatus(
-  status: string,
-  timeout = 15_000,
-): Promise<{ readonly runId: string; readonly status: string }> {
+/** Ids of every tool run in the shared world, so a test can spot the one it started. */
+async function listToolRunIds(): Promise<Set<string>> {
   const world = await getWorld();
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    const page = await world.runs.list({ pagination: { limit: 100 } });
-    const row = page.data.find(
-      (entry: { readonly status?: string; readonly workflowName?: string }) =>
-        entry.workflowName === toolRunWorkflowReference.workflowId && entry.status === status,
-    );
-    if (row?.runId !== undefined) return { runId: row.runId, status: row.status };
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Timed out waiting for a tool run to reach "${status}".`);
+  const page = await world.runs.list({ pagination: { limit: 100 } });
+  return new Set(
+    page.data
+      .filter(
+        (entry: { readonly workflowName?: string }) =>
+          entry.workflowName === toolRunWorkflowReference.workflowId,
+      )
+      .map((entry: { readonly runId: string }) => entry.runId),
+  );
 }
 
-async function waitForToolRunTerminal(timeout = 15_000): Promise<string> {
-  const world = await getWorld();
+/** Polls until exactly one tool run exists that was not in `before`. */
+async function waitForNewToolRun(before: ReadonlySet<string>, timeout = 15_000): Promise<string> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const started = [...(await listToolRunIds())].filter((runId) => !before.has(runId));
+    if (started.length === 1) return started[0]!;
+    if (started.length > 1) throw new Error(`Expected one new tool run, found ${started.length}.`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Timed out waiting for a tool run to start.");
+}
+
+/** Polls one run until it reaches a terminal status, returning that status. */
+async function waitForRunTerminal(runId: string, timeout = 15_000): Promise<string> {
   const terminal = new Set(["completed", "failed", "cancelled"]);
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    const page = await world.runs.list({ pagination: { limit: 100 } });
-    const row = page.data.find(
-      (entry: { readonly status?: string; readonly workflowName?: string }) =>
-        entry.workflowName === toolRunWorkflowReference.workflowId &&
-        entry.status !== undefined &&
-        terminal.has(entry.status),
-    );
-    if (row?.status !== undefined) return row.status;
+    const status = await getRun(runId).status;
+    if (terminal.has(status)) return status;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("Timed out waiting for a tool run to reach a terminal status.");
+  throw new Error(`Timed out waiting for run ${runId} to reach a terminal status.`);
 }
 
 function eventsText(events: readonly { readonly data?: unknown }[]): string {
@@ -290,38 +292,36 @@ describe("workflow tools", () => {
     });
   }, 30_000);
 
-  it("cancels the run when the waiting turn is cancelled", async () => {
+  it("cancels the run when the waiting turn is cancelled and lets the body clean up", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-cancel",
-      execute: confirmDeployWorkflow,
-      toolName: "confirm_deploy",
+      execute: holdUntilAbortedWorkflow,
+      toolName: "deploy_service",
     });
 
     await runtime.run(async () => {
+      const before = await listToolRunIds();
       const run = await start(workflowEntry, [
         {
-          input: { message: 'Run confirm_deploy with service "api"' },
+          input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "http:workflow-tool-cancel",
             mode: "conversation",
-            requestInput: true,
           }),
         },
       ]);
       const stream = captureTurnEvents(run);
 
       try {
-        const asked = await stream.nextTurn();
-        expect(filterEventsByType(asked, "input.requested")).toHaveLength(1);
-        await waitForToolRunStatus("running");
-
+        const toolRunId = await waitForNewToolRun(before);
         const commandToken = sessionCommandHookToken(run.runId);
         await waitForHook(run, { token: commandToken });
-        // Asking already streamed the turn's waiting boundary, so the cancel
-        // settles silently: the run is cancelled and the session keeps
-        // taking messages.
         await resumeSessionInbox(commandToken, { kind: "cancel", turnId: "turn_0" });
-        expect(await waitForToolRunTerminal()).toMatch(/completed|cancelled/);
+
+        // The body is holding in a step that received ctx.abortSignal, so the
+        // run ends well inside its grace period once the step rejects and
+        // `finally` runs; a run that ignored the signal would still be running.
+        expect(await waitForRunTerminal(toolRunId)).toBe("completed");
 
         await resumeSessionInbox(commandToken, {
           kind: "send",

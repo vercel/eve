@@ -1,4 +1,4 @@
-import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { getWorkflowMetadata, sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
 
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
@@ -14,6 +14,11 @@ import { resumeHookStep } from "#execution/tool-run/resume-hook-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
+
+/** How long a cancelled run waits for its body to unwind before it ends. */
+const CANCEL_GRACE = "30s";
+
+function noop(): void {}
 
 type WorkflowToolExecute = (
   input: unknown,
@@ -31,9 +36,12 @@ type WorkflowToolExecute = (
  *
  * The run's own hook is its identity claim and its control inbox: a duplicate
  * start loses the claim and exits, and a `cancel` message aborts
- * `ctx.abortSignal` so the body can unwind through `finally` before the run
- * ends. The hook is disposed on teardown so a late control message fails
- * loudly instead of queueing against a finished run.
+ * `ctx.abortSignal`. The run then waits up to {@link CANCEL_GRACE} for the
+ * body to unwind — steps that received the signal reject and `finally` blocks
+ * run — and ends as cancelled whether or not it did, so a body parked on a
+ * hook or a sleep cannot keep a cancelled run alive. The hook is disposed on
+ * teardown so a late control message fails loudly instead of queueing against
+ * a finished run.
  */
 export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void> {
   "use workflow";
@@ -62,20 +70,29 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
     const ctx = createWorkflowToolContext({ from, input, signal: control.signal });
     attachRunContext(ctx, { from, owner: input.owner });
 
+    const body = runBody(input, ctx, from);
+    body.catch(() => {});
+
     let outcome: RunOutcome;
     try {
-      // Race the control read so a cancel trips `ctx.abortSignal` and settles
-      // the run as cancelled even when the body is parked on a hook or sleep.
-      const output = await Promise.race([runBody(input, ctx, from), control.cancelled]);
-      outcome = { output, status: "completed" };
+      // Racing the control read is what drives it; an unawaited durable read
+      // is not scheduled under replay, so a cancel would never be observed.
+      outcome = { output: await Promise.race([body, control.cancelled]), status: "completed" };
     } catch (error) {
-      outcome = control.signal.aborted
-        ? { reason: control.reason(), status: "cancelled" }
-        : { error: normalizeSerializableError(error), status: "failed" };
+      if (!control.signal.aborted) {
+        outcome = { error: normalizeSerializableError(error), status: "failed" };
+      } else {
+        await Promise.race([body.then(noop, noop), workflowSleep(CANCEL_GRACE)]);
+        outcome = { reason: control.reason(), status: "cancelled" };
+      }
     }
 
     const message: RunOutcomeMessage = { from, result: outcome };
-    await resumeHookStep(input.owner.outcome, message);
+    // An owner that cancelled the run may have finished before the grace
+    // period ended; a cancelled outcome has nobody left to reach.
+    await resumeHookStep(input.owner.outcome, message, {
+      ifPresent: outcome.status === "cancelled",
+    });
   } finally {
     if (ownsInbox) await disposeHook(control.hook);
   }

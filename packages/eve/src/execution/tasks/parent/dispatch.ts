@@ -166,16 +166,9 @@ async function propagateTaskCancel(input: {
 }): Promise<void> {
   const toolRun = readWorkflowToolExecutor(input.view.executor?.binding);
   if (toolRun !== undefined) {
-    // The run cannot report its own end once cancelled, so settle the
-    // executor here; that is what lets the task run finish and release
-    // its hook.
-    await cancelToolRun({
-      callId: input.entry.taskId,
-      hookToken: toolRun.hookToken,
-      reason: `Task ${input.entry.taskId} was cancelled.`,
-      runId: toolRun.runId,
-      toolName: input.entry.metadata.name,
-    });
+    // The run reports its own end only after its cancel grace period; settle
+    // the executor now so the task run finishes and releases its hook.
+    await cancelToolRun(toolRun, `Task ${input.entry.taskId} was cancelled.`);
     await sendTaskCommand({
       command: { kind: "settle-executor" },
       taskInboxToken: input.entry.taskInboxToken,

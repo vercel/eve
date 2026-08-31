@@ -352,13 +352,7 @@ async function compensateBackgroundToolExecution(
     }
     const toolRun = readWorkflowToolExecutor(record.task.executor);
     if (toolRun !== undefined) {
-      await cancelToolRun({
-        callId: record.task.taskId,
-        hookToken: toolRun.hookToken,
-        reason: "The step that started the tool failed.",
-        runId: toolRun.runId,
-        toolName: record.task.metadata.name,
-      });
+      await cancelToolRun(toolRun, "The step that started the tool failed.");
     }
   }
   if (failures.length > 0) {
