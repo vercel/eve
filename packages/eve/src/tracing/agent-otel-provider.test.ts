@@ -14,6 +14,7 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { ForwardedTracePolicyKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
@@ -882,6 +883,29 @@ describe("createAgentOtelInstrumentation", () => {
     await expect(runtime.projectEvent(modelStartedEvent("session-policy"))).resolves.toMatchObject({
       input: undefined,
     });
+  });
+
+  it("preserves a private decision already intersected with a forwarded ceiling", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    stateStore.setSession("session-forwarded-private", {
+      channelAudience: "private",
+      context: spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      rootSessionId: "session-forwarded-private",
+    });
+    const runtime = createRuntime(stateStore, null);
+    const ctx = new ContextContainer();
+    ctx.set(ForwardedTracePolicyKey, {
+      ceiling: { recordInputs: true, recordOutputs: false },
+      forwarder: "service:router",
+      originAudience: "private",
+    });
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runtime.projectEvent(modelStartedEvent("session-forwarded-private")),
+      ),
+    ).resolves.toMatchObject({ input: { instructions: "private prompt" } });
   });
 
   it("reconstructs a sampled public session decision when persisted policy is absent", async () => {

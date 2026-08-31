@@ -46,11 +46,8 @@ import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
-import {
-  FORWARDED_AUDIENCE_SOURCE,
-  FORWARDED_AUDIENCE_SOURCE_KEY,
-  readForwardedAudienceBaggage,
-} from "#protocol/baggage.js";
+import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
+import { formatTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, GET, HEAD, POST } from "#public/definitions/channel.js";
@@ -181,23 +178,33 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           }
         }
 
-        const forwardedAudienceBaggage =
+        const forwardedTraceAssertion =
           parsedParentTraceContext === undefined
             ? "absent"
             : readForwardedAudienceBaggage(req.headers.get("baggage"));
-        const acceptsForwardedAudience =
-          forwarded.accepted && forwardedAudienceBaggage === "public";
-        if (forwardedAudienceBaggage === "malformed") {
+        const acceptedForwardedTracePolicy =
+          forwarded.accepted &&
+          parsedParentTraceContext !== undefined &&
+          (parsedParentTraceContext.traceFlags & 1) === 1 &&
+          typeof forwardedTraceAssertion === "object"
+            ? {
+                ...forwardedTraceAssertion,
+                forwarder: authResult.principalId,
+              }
+            : undefined;
+        if (forwardedTraceAssertion === "malformed") {
           log.warn("ignoring malformed forwarded audience baggage", {
             forwarder: authResult.principalId,
           });
-        } else if (forwardedAudienceBaggage === "public") {
-          if (forwarded.accepted) {
-            log.info("accepted forwarded public audience", {
+        } else if (typeof forwardedTraceAssertion === "object") {
+          if (acceptedForwardedTracePolicy !== undefined) {
+            log.info("accepted forwarded trace policy", {
+              audience: forwardedTraceAssertion.originAudience,
+              ceiling: formatTraceContentCeiling(forwardedTraceAssertion.ceiling),
               forwarder: authResult.principalId,
             });
           } else {
-            log.warn("ignoring forwarded audience without an accepted principal", {
+            log.warn("ignoring forwarded trace policy without an accepted sampled principal", {
               forwarder: authResult.principalId,
             });
           }
@@ -226,16 +233,8 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
-            channelMetadata: !acceptsForwardedAudience
-              ? undefined
-              : {
-                  kind: "eve",
-                  metadata: {
-                    audience: "public",
-                    [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
-                  },
-                },
             continuationToken: operationToken,
+            forwardedTracePolicy: acceptedForwardedTracePolicy,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(
               {

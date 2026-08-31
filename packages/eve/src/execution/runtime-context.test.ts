@@ -4,6 +4,7 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
+  ForwardedTracePolicyKey,
   type Session,
   type SessionAuthContext,
   ActivityObserverKey,
@@ -308,5 +309,27 @@ describe("buildRunContext", () => {
     expect(projection).toBeDefined();
     expect(projection!.kind).toBe("http");
     expect(projection!.metadata).toEqual({ audience: "unknown" });
+  });
+
+  it("keeps forwarded origin policy authoritative over inherited channel metadata", () => {
+    const forwardedTracePolicy = {
+      ceiling: { recordInputs: false, recordOutputs: true },
+      forwarder: "service:router",
+      originAudience: "private",
+    } as const;
+    const ctx = buildRunContext({
+      bundle: createMinimalBundle(),
+      run: {
+        auth: null,
+        adapter: { kind: "eve" },
+        channelMetadata: { kind: "eve", metadata: { audience: "unknown" } },
+        forwardedTracePolicy,
+        input: { message: "hi" },
+        mode: "task",
+      },
+    });
+
+    expect(ctx.get(ForwardedTracePolicyKey)).toEqual(forwardedTracePolicy);
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("private");
   });
 });

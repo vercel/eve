@@ -34,6 +34,7 @@ import { expectFunction, expectObjectRecord } from "#internal/authored-module.js
 import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import { writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -61,7 +62,7 @@ export async function startRemoteAgentSession(input: {
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly callbackToken?: string;
-  readonly channelAudience?: ChannelAudience;
+  readonly originAudience?: ChannelAudience;
   readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
@@ -134,13 +135,12 @@ export async function startRemoteAgentSession(input: {
   }
   const baggage = writeForwardedAudienceBaggage(
     readHeader(headers, "baggage"),
-    forwardedPrincipal !== undefined &&
-      input.channelAudience === "public" &&
-      input.parentTraceContext !== undefined &&
-      (input.parentTraceContext.traceFlags & 1) === 1 &&
-      traceparent !== undefined
-      ? "public"
-      : "unknown",
+    buildForwardedTraceAssertion({
+      forwardedPrincipal,
+      originAudience: input.originAudience,
+      parentTraceContext: input.parentTraceContext,
+      traceparent,
+    }),
   );
   setHeader(headers, "baggage", baggage);
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
@@ -175,6 +175,28 @@ export async function startRemoteAgentSession(input: {
   }
 
   return { sessionId: parsed.data.sessionId };
+}
+
+function buildForwardedTraceAssertion(input: {
+  readonly forwardedPrincipal: ForwardedPrincipal | undefined;
+  readonly originAudience: ChannelAudience | undefined;
+  readonly parentTraceContext: SessionTraceContext | undefined;
+  readonly traceparent: string | undefined;
+}) {
+  const ceiling = decisionToTraceContentCeiling(input.parentTraceContext?.decision);
+  if (
+    input.forwardedPrincipal === undefined ||
+    input.parentTraceContext === undefined ||
+    (input.parentTraceContext.traceFlags & 1) !== 1 ||
+    input.traceparent === undefined ||
+    ceiling === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ceiling,
+    originAudience: input.originAudience ?? "unknown",
+  };
 }
 
 /** Continues one remote-agent session by its immutable session ID. */

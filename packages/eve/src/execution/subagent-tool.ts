@@ -81,6 +81,7 @@ export function buildSubagentRunInput(input: {
    */
   readonly capabilities?: SessionCapabilities;
   readonly channelMetadata?: ChannelInstrumentationProjection;
+  readonly forwardedTracePolicy?: RunInput["forwardedTracePolicy"];
   /**
    * Number of local subagent calls dispatched in this batch. The parent's
    * remaining token quota is split evenly across them so parallel children
@@ -110,6 +111,7 @@ export function buildSubagentRunInput(input: {
     batchEvent,
     capabilities,
     channelMetadata,
+    forwardedTracePolicy,
     initiatorAuth,
     session,
     source,
@@ -158,6 +160,7 @@ export function buildSubagentRunInput(input: {
     auth,
     capabilities,
     channelMetadata,
+    forwardedTracePolicy,
     continuationToken: childContinuationToken,
     initiatorAuth,
     input: {

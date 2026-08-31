@@ -15,7 +15,7 @@ import {
   ChannelInstrumentationKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
-  ForwardedTraceAudienceKey,
+  ForwardedTracePolicyKey,
   ModeKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
@@ -39,7 +39,6 @@ import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
-import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
@@ -3255,7 +3254,7 @@ describe("runProxySubagentEventStep", () => {
    */
   function buildSerializedContextForAdapter(
     adapter: ChannelAdapter,
-    options: { readonly acceptedForwardedAudience?: boolean } = {},
+    options: { readonly acceptedForwardedTracePolicy?: boolean } = {},
   ): Record<string, unknown> {
     const bundle = {
       adapterRegistry: {
@@ -3286,8 +3285,12 @@ describe("runProxySubagentEventStep", () => {
     ctx.set(AuthKey, null);
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
-    if (options.acceptedForwardedAudience) {
-      ctx.set(ForwardedTraceAudienceKey, "public");
+    if (options.acceptedForwardedTracePolicy) {
+      ctx.set(ForwardedTracePolicyKey, {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        forwarder: "service:router",
+        originAudience: "private",
+      });
     }
     ctx.set(ContinuationTokenKey, "http:proxy-test");
     ctx.set(ModeKey, "conversation");
@@ -3362,7 +3365,7 @@ describe("runProxySubagentEventStep", () => {
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
       serializedContext: buildSerializedContextForAdapter(cachingAdapter, {
-        acceptedForwardedAudience: true,
+        acceptedForwardedTracePolicy: true,
       }),
       sessionState,
     });
@@ -3382,11 +3385,14 @@ describe("runProxySubagentEventStep", () => {
       turnId: "child-turn",
       requests: [expect.objectContaining({ requestId: "req-1" })],
     });
-    expect(result.serializedContext[ForwardedTraceAudienceKey.name]).toBe("public");
+    expect(result.serializedContext[ForwardedTracePolicyKey.name]).toEqual({
+      ceiling: { recordInputs: false, recordOutputs: true },
+      forwarder: "service:router",
+      originAudience: "private",
+    });
     expect(result.serializedContext[ChannelInstrumentationKey.name]).toMatchObject({
       metadata: {
-        audience: "public",
-        [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
+        audience: "private",
       },
     });
 

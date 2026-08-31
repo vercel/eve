@@ -35,6 +35,9 @@ export async function startLocalSubagent(input: {
   readonly currentSession: RuntimeSession;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly fanoutSize: number;
+  readonly forwardedTracePolicy: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["forwardedTracePolicy"];
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
@@ -67,6 +70,7 @@ export async function startLocalSubagent(input: {
     capabilities: input.capabilities,
     channelMetadata: input.channelMetadata,
     fanoutSize: input.fanoutSize,
+    forwardedTracePolicy: input.forwardedTracePolicy,
     initiatorAuth: input.initiatorAuth,
     graph: input.bundle.graph,
     parentContinuationToken: input.parentContinuationToken,

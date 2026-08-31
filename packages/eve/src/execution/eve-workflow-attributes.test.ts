@@ -18,11 +18,11 @@ import {
 import {
   ChannelInstrumentationKey,
   ChannelRequestIdKey,
-  ForwardedTraceAudienceKey,
+  ForwardedTracePolicyKey,
   ScheduleIdKey,
+  SessionTraceSeedKey,
 } from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 const slackChannelCtx = {
   "eve.channel": { kind: "slack", state: { team: "T1" }, audience: "public" },
@@ -74,20 +74,26 @@ describe("isWorkflowTraceContentVisible", () => {
   it("prefers an accepted forwarded audience and exposes its audit source", () => {
     const serializedContext = {
       [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
-      [ForwardedTraceAudienceKey.name]: "public",
+      [ForwardedTracePolicyKey.name]: {
+        ceiling: { recordInputs: true, recordOutputs: true },
+        forwarder: "service:router",
+        originAudience: "public",
+      },
+      [SessionTraceSeedKey.name]: {
+        decision: { action: "record", recordInputs: true, recordOutputs: true },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      },
       [ChannelInstrumentationKey.name]: {
         kind: "eve",
-        metadata: {
-          audience: "public",
-          [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
-        },
+        metadata: { audience: "public" },
       },
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(true);
     expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": true,
-      "$eve.trace_audience_source": "trusted_forwarder",
     });
   });
 
@@ -96,17 +102,35 @@ describe("isWorkflowTraceContentVisible", () => {
       [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
       [ChannelInstrumentationKey.name]: {
         kind: "eve",
-        metadata: {
-          audience: "public",
-          [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
-        },
+        metadata: { audience: "public" },
       },
     };
 
     expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
     expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
-      "$eve.trace_audience_source": undefined,
+    });
+  });
+
+  it("keeps workflow content hidden for a directional forwarded ceiling", () => {
+    const serializedContext = {
+      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "private", kind: "eve" },
+      [ForwardedTracePolicyKey.name]: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        forwarder: "service:router",
+        originAudience: "private",
+      },
+      [SessionTraceSeedKey.name]: {
+        decision: { action: "record", recordInputs: false, recordOutputs: true },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      },
+    };
+
+    expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
+    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+      "$eve.is_trace_content_visible": false,
     });
   });
 });

@@ -145,7 +145,7 @@ A receiver on an eve version that predates all principal forwarding may instead 
 
 ## Preserving trace content
 
-When `forwardPrincipal: true` forwards an authenticated principal for a sampled public parent trace, remote dispatch also writes `eve.audience=public` into [W3C Baggage](https://www.w3.org/TR/baggage/). The receiver ignores that member unless it accepts the transport-authenticated caller with `trustedForwarders`:
+When `forwardPrincipal: true` forwards an authenticated principal for a sampled trace, remote dispatch also writes the origin audience and the parent deployment's effective input/output ceiling into one [W3C Baggage](https://www.w3.org/TR/baggage/) member. For example, `eve.audience=private;ceiling=i0o1` identifies a private origin and permits outputs, but not inputs, to cross the next hop. The receiver ignores the entire assertion unless it accepts the transport-authenticated caller with `trustedForwarders`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -158,9 +158,11 @@ export default eveChannel({
 });
 ```
 
-eve reads the baggage member only when the request body includes a callback, `traceparent` is valid, and the forwarded principal was accepted. The callback and headers are caller-supplied; they identify the protocol shape but do not prove parentage. `trustedForwarders` is the authorization boundary.
+eve reads the baggage member only when the request body includes a callback, `traceparent` is valid and sampled, and the forwarded principal was accepted. The callback and headers are caller-supplied; they identify the protocol shape but do not prove parentage. `trustedForwarders` is the authorization boundary, and the forwarded ceiling is only an upper bound: the receiver evaluates its own trace policy against the immutable origin audience and intersects that decision with the incoming ceiling.
 
-An accepted public audience is fixed when the remote session is created. With the default trace policy, it records model and tool inputs and outputs; process and provider trace policies on the receiver may narrow or drop capture. Continuations do not re-evaluate the parent audience. Direct sessions, untrusted calls, malformed baggage, older senders, and calls without principal forwarding retain the receiving HTTP channel's `unknown` classification. Older receivers ignore the baggage member.
+Each later remote hop forwards that intersection, never the ceiling it originally received, so a deployment can narrow capture but cannot restore a direction removed upstream. The origin audience is fixed at the first remote hop and relayed unchanged through intermediate eve HTTP and local-subagent hops. With the default receiver policy, public origins may retain content while private and unknown origins remain metadata-only; private content crosses only when both the incoming ceiling and an explicit receiver policy allow it.
+
+Missing, duplicate, malformed, unsampled, untrusted, direct, and partial assertions are treated as absent. `drop` uses only the unsampled `traceparent` flag and never appears as a second baggage signal. Older senders omit the mandatory `ceiling` property, while older receivers either ignore Baggage or reject the new property, so mixed versions degrade to metadata-only. Accepted sessions keep the origin audience, incoming ceiling, and immediate authenticated forwarder in internal durable context and log the accepted policy. Because Workflow observability content is not directional, `$eve.is_trace_content_visible` is true only when the effective ceiling permits both inputs and outputs. Continuations retain that creation-time policy.
 
 ## How remote dispatch and callbacks work
 

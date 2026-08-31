@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { SessionAuthContext } from "#channel/types.js";
+import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
@@ -31,6 +31,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  ForwardedTracePolicyKey,
   InitiatorAuthKey,
   type LocalDevRequestProvenance,
   SessionIdKey,
@@ -656,7 +657,12 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       false,
       null,
       undefined,
-      "public",
+      "unknown",
+      {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        forwarder: "service:origin-router",
+        originAudience: "private",
+      },
     );
 
     const result = await dispatchRuntimeActionsStep({
@@ -690,7 +696,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(result.results).toEqual([]);
     expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        channelAudience: "public",
+        originAudience: "private",
         parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
       }),
     );
@@ -1345,6 +1351,7 @@ function installContext(
   auth: SessionAuthContext | null = null,
   localDevRequest?: LocalDevRequestProvenance,
   channelAudience?: ChannelAudience,
+  forwardedTracePolicy?: NonNullable<RunInput["forwardedTracePolicy"]>,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1376,6 +1383,7 @@ function installContext(
         : { kind: "slack", metadata: { audience: channelAudience } },
     ],
     [InitiatorAuthKey, null],
+    [ForwardedTracePolicyKey, forwardedTracePolicy],
     [ChannelKey, ADAPTER],
   ]);
   mocks.deserializeContext.mockResolvedValue({

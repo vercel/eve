@@ -26,7 +26,7 @@ export async function startRemoteSubagent(input: {
   readonly batchEvent: { readonly sequence: number; readonly turnId: string };
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
-  readonly channelAudience: ChannelAudience;
+  readonly originAudience: ChannelAudience;
   readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: NonNullable<
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
@@ -101,7 +101,7 @@ export async function startRemoteSubagent(input: {
       auth: input.auth,
       callbackBaseUrl,
       callbackToken: input.parentContinuationToken,
-      channelAudience: input.channelAudience,
+      originAudience: input.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,

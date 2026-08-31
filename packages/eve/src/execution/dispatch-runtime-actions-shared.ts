@@ -19,6 +19,7 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
+  ForwardedTracePolicyKey,
   InitiatorAuthKey,
   SandboxKey,
   type LocalDevRequestProvenance,
@@ -80,6 +81,7 @@ import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -164,6 +166,9 @@ export interface PreparedRuntimeActionDispatch {
    * under their own limits, so neither dilutes the local shares.
    */
   readonly fanoutSize: number;
+  readonly forwardedTracePolicy: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["forwardedTracePolicy"];
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
@@ -294,6 +299,7 @@ async function prepareActionDispatch(input: {
     fanoutSize:
       input.fanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
+    forwardedTracePolicy: ctx.get(ForwardedTracePolicyKey),
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
     localDevRequest: ctx.localDevRequest,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
@@ -602,6 +608,9 @@ export async function startSubagent(input: {
   readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
+  readonly forwardedTracePolicy: Parameters<
+    typeof buildSubagentRunInput
+  >[0]["forwardedTracePolicy"];
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
@@ -622,6 +631,11 @@ export async function startSubagent(input: {
       input.batchEvent.turnId,
       input.target.action.callId,
     ) ?? input.parentTraceContext;
+  const parentCeiling = decisionToTraceContentCeiling(parentTraceContext?.decision);
+  const forwardedTracePolicy =
+    input.forwardedTracePolicy === undefined || parentCeiling === undefined
+      ? input.forwardedTracePolicy
+      : { ...input.forwardedTracePolicy, ceiling: parentCeiling };
 
   switch (input.target.kind) {
     case "local":
@@ -635,6 +649,7 @@ export async function startSubagent(input: {
         currentSession: input.currentSession,
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,
+        forwardedTracePolicy,
         initiatorAuth: input.initiatorAuth,
         localDevRequest: input.localDevRequest,
         parentContinuationToken: input.parentContinuationToken,
@@ -653,7 +668,9 @@ export async function startSubagent(input: {
         batchEvent: input.batchEvent,
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
-        channelAudience: normalizeChannelAudience(input.channelMetadata?.metadata.audience),
+        originAudience:
+          input.forwardedTracePolicy?.originAudience ??
+          normalizeChannelAudience(input.channelMetadata?.metadata.audience),
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,

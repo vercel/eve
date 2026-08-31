@@ -576,7 +576,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
-        channelAudience: "public",
+        originAudience: "private",
         initiatorAuth: INITIATOR_AUTH,
         parentTraceContext: {
           decision: { action: "record", recordInputs: true, recordOutputs: false },
@@ -601,8 +601,39 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       "forwardedTracePolicy",
     );
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
-      baggage: "vendor=value,eve.audience=public",
+      baggage: "vendor=value,eve.audience=private;ceiling=i1o0",
     });
+  });
+
+  it("uses unsampled trace flags as the only propagated drop signal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      auth: CURRENT_AUTH,
+      callbackBaseUrl: "https://caller.example.com",
+      initiatorAuth: INITIATOR_AUTH,
+      originAudience: "private",
+      parentTraceContext: {
+        decision: { action: "drop" },
+        spanId: "2".repeat(16),
+        traceFlags: 0,
+        traceId: "1".repeat(32),
+      },
+      remote: {
+        ...createRemoteAgent(),
+        forwardPrincipal: true,
+        headers: { baggage: "vendor=value,eve.audience=public;ceiling=i1o1" },
+      },
+      session: createSession(),
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty(
+      "baggage",
+      expect.stringContaining("drop"),
+    );
   });
 
   it("omits the initiator when the dispatching turn has none", async () => {
@@ -641,7 +672,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: null,
         callbackBaseUrl: "https://caller.example.com",
-        channelAudience: "public",
+        originAudience: "public",
         initiatorAuth: null,
         parentTraceContext: {
           spanId: "2".repeat(16),
@@ -677,7 +708,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
-        channelAudience: "public",
+        originAudience: "public",
         initiatorAuth: INITIATOR_AUTH,
         parentTraceContext: {
           spanId: "2".repeat(16),

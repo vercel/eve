@@ -9,7 +9,7 @@ import {
   ChannelRequestIdKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
-  ForwardedTraceAudienceKey,
+  ForwardedTracePolicyKey,
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
@@ -21,7 +21,6 @@ import {
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 /**
  * Builds the bootstrap {@link ContextContainer} for one run.
@@ -36,20 +35,24 @@ export function buildRunContext(input: {
   const auth: SessionAuthContext | null = run.auth;
 
   ctx.set(BundleKey, bundle);
+  if (run.forwardedTracePolicy !== undefined) {
+    ctx.set(ForwardedTracePolicyKey, run.forwardedTracePolicy);
+  }
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
 
   if (run.channelMetadata !== undefined) {
-    if (
-      run.channelMetadata.metadata.audience === "public" &&
-      run.channelMetadata.metadata[FORWARDED_AUDIENCE_SOURCE_KEY] === FORWARDED_AUDIENCE_SOURCE
-    ) {
-      ctx.set(ForwardedTraceAudienceKey, "public");
-    }
+    const forwardedTracePolicy = ctx.get(ForwardedTracePolicyKey);
     const existing = ctx.get(ChannelInstrumentationKey);
     ctx.set(ChannelInstrumentationKey, {
       channelType: existing?.channelType ?? run.channelMetadata.channelType,
       kind: existing?.kind ?? run.channelMetadata.kind,
-      metadata: run.channelMetadata.metadata,
+      metadata:
+        forwardedTracePolicy === undefined
+          ? run.channelMetadata.metadata
+          : {
+              ...run.channelMetadata.metadata,
+              audience: forwardedTracePolicy.originAudience,
+            },
     });
   }
 

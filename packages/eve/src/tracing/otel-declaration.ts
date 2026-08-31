@@ -70,9 +70,11 @@ export interface OtelOptions {
    * existing audience-aware behavior; explicit decisions can disable emission
    * or select input and output capture independently. Defaults to emitting
    * every audience, with content only for public conversations. The result is
-   * an OpenTelemetry capture ceiling: per-delivery audience and destination
-   * settings can only narrow it. It never changes what authored instrumentation
-   * providers receive. A thrown error rejects trace production without
+   * an OpenTelemetry capture ceiling: local delivery audience and destination
+   * settings can only narrow it. For a trusted remote trace, eve evaluates this
+   * policy against the immutable origin audience and intersects it with the
+   * parent's effective ceiling, so every hop can only narrow capture. It never
+   * changes what authored instrumentation providers receive. A thrown error rejects trace production without
    * silencing lifecycle providers. The policy may be invoked more than once
    * while a new session is being prepared, so it must be deterministic for
    * consistent results.

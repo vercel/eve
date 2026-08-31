@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
-  ForwardedTraceAudienceKey,
+  ForwardedTracePolicyKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -21,6 +21,7 @@ import {
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -46,7 +47,7 @@ function createRuntime(
   };
 }
 
-function createContext(audience: "private" | "public" = "public"): ContextContainer {
+function createContext(audience: "private" | "public" | "unknown" = "public"): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(ChannelInstrumentationKey, {
     kind: "channel:test",
@@ -71,9 +72,20 @@ beforeEach(() => {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
 });
 
-function initializeRemoteSession(tracePolicy: TraceCapturePolicy): ContextContainer {
-  const ctx = createContext("public");
-  ctx.set(ForwardedTraceAudienceKey, "public");
+function initializeRemoteSession(
+  tracePolicy: TraceCapturePolicy,
+  input: {
+    readonly ceiling?: { readonly recordInputs: boolean; readonly recordOutputs: boolean };
+    readonly originAudience?: "private" | "public" | "unknown";
+  } = {},
+): ContextContainer {
+  const originAudience = input.originAudience ?? "public";
+  const ctx = createContext(originAudience);
+  ctx.set(ForwardedTracePolicyKey, {
+    ceiling: input.ceiling ?? { recordInputs: true, recordOutputs: true },
+    forwarder: "service:previous-hop",
+    originAudience,
+  });
   registerInstrumentationRuntime({
     ...createRuntime({ capturesContent: true, publish: vi.fn() }, tracePolicy),
     idGenerator: new AgentSpanIdGenerator(),
@@ -136,6 +148,129 @@ describe("initializeSessionInstrumentation", () => {
       decision: { action: "drop" },
       traceFlags: 0,
     });
+  });
+
+  it("allows private content only within both hop ceilings", async () => {
+    const ctx = initializeRemoteSession(
+      () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+      {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
+    );
+
+    expect(ctx.get(SessionTraceSeedKey)?.decision).toEqual({
+      action: "record",
+      recordInputs: true,
+      recordOutputs: false,
+    });
+    await expect(
+      readTelemetry(
+        bindSessionInstrumentation({
+          agentName: "remote-agent",
+          ctx,
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+        }),
+      ),
+    ).resolves.toMatchObject({ recordInputs: true, recordOutputs: false });
+  });
+
+  it("redacts runtime-context model input when the forwarded ceiling denies inputs", async () => {
+    const ctx = createContext("public");
+    ctx.set(ForwardedTracePolicyKey, {
+      ceiling: { recordInputs: false, recordOutputs: true },
+      forwarder: "service:previous-hop",
+      originAudience: "public",
+    });
+    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
+      emit: true,
+      recordInputs: true,
+      recordOutputs: true,
+    }));
+    runtime.stepStartedRuntimeContextResolver = (event) => ({
+      runtimeContext: { messageCount: event.modelInput.messages.length },
+    });
+    registerInstrumentationRuntime({
+      ...runtime,
+      idGenerator: new AgentSpanIdGenerator(),
+      prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
+    });
+    initializeSessionInstrumentation({
+      agentName: "remote-agent",
+      ctx,
+      parentTraceContext: {
+        spanId: "c".repeat(16),
+        traceFlags: 1,
+        traceId: "d".repeat(32),
+      },
+    });
+
+    const messageCount = await bindSessionInstrumentation({
+      agentName: "remote-agent",
+      ctx,
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+    })
+      ?.prepareExecution()
+      .runStep(
+        {
+          environment: "test",
+          eveVersion: "0.0.0",
+          hasInput: true,
+          session: { sessionId: "session-1" },
+        },
+        async (scope) =>
+          scope.resolveRuntimeContext({
+            eveVersion: "0.0.0",
+            emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
+            environment: "test",
+            modelInput: {
+              instructions: "private",
+              messages: [{ content: "secret", role: "user" }],
+            },
+            session: { sessionId: "session-1" } as never,
+          })?.["messageCount"],
+      );
+
+    expect(messageCount).toBe(0);
+  });
+
+  it("narrows monotonically across a three-hop chain", () => {
+    const receiverPolicies = [
+      { emit: true, recordInputs: true, recordOutputs: true },
+      { emit: true, recordInputs: false, recordOutputs: true },
+      { emit: true, recordInputs: true, recordOutputs: false },
+    ] as const;
+    let ceiling = { recordInputs: true, recordOutputs: true };
+
+    for (const receiverPolicy of receiverPolicies) {
+      const previous = ceiling;
+      const ctx = initializeRemoteSession(() => receiverPolicy, {
+        ceiling: previous,
+        originAudience: "private",
+      });
+      const decision = ctx.get(SessionTraceSeedKey)?.decision;
+      expect(decision?.action).toBe("record");
+      if (decision?.action !== "record") throw new Error("Expected a record decision");
+      ceiling = {
+        recordInputs: decision.recordInputs,
+        recordOutputs: decision.recordOutputs,
+      };
+      expect(Number(ceiling.recordInputs)).toBeLessThanOrEqual(Number(previous.recordInputs));
+      expect(Number(ceiling.recordOutputs)).toBeLessThanOrEqual(Number(previous.recordOutputs));
+      const relayed = readForwardedAudienceBaggage(
+        writeForwardedAudienceBaggage(undefined, {
+          ceiling,
+          originAudience: "private",
+        }) ?? null,
+      );
+      expect(relayed).toEqual({ ceiling, originAudience: "private" });
+      if (typeof relayed !== "object") throw new Error("Expected a relayed trace assertion");
+      ceiling = relayed.ceiling;
+    }
+
+    expect(ceiling).toEqual({ recordInputs: false, recordOutputs: false });
   });
 
   it("preserves sampled flags for a non-forwarded parent decision", () => {

@@ -11,7 +11,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import { contextStorage } from "#context/container.js";
-import { SessionTraceSeedKey } from "#context/keys.js";
+import { ForwardedTracePolicyKey, SessionTraceSeedKey } from "#context/keys.js";
 import { withoutInstrumentationContent } from "#instrumentation/content.js";
 import { instrumentationEventForTraceDecision } from "#instrumentation/content-policy.js";
 import type { AgentTraceStateStore, AgentTurnTraceState } from "#tracing/agent-trace-state.js";
@@ -165,6 +165,9 @@ export function createAgentOtelInstrumentation(
             recordOutputs: recordOutputs && decision.recordOutputs,
           },
       audience,
+      {
+        applyAudienceCeiling: contextStorage.getStore()?.get(ForwardedTracePolicyKey) === undefined,
+      },
     );
   };
 
