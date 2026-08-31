@@ -10,7 +10,7 @@ import {
 } from "#execution/tool-run/messages.js";
 import { openRunControlInbox } from "#execution/tool-run/run-control.js";
 import type { ToolRunWorkflowInput } from "#execution/tool-run/types.js";
-import { resumeHook } from "#execution/tool-run/workflow-api.js";
+import { resumeHookStep } from "#execution/tool-run/resume-hook-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
@@ -75,7 +75,7 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
     }
 
     const message: RunOutcomeMessage = { from, result: outcome };
-    await resumeHook(input.owner.outcome, message);
+    await resumeHookStep(input.owner.outcome, message);
   } finally {
     if (ownsInbox) await disposeHook(control.hook);
   }
@@ -100,7 +100,7 @@ async function runBody(
   while (next.done !== true) {
     last = next.value;
     const report: RunReport = { from, update: next.value };
-    await resumeHook(input.owner.report, report);
+    await resumeHookStep(input.owner.report, report);
     next = await iterator.next();
   }
   return (next.value as JsonValue | undefined) ?? last ?? null;

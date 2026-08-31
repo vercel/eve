@@ -1,8 +1,8 @@
 import { defineEval } from "eve/evals";
 
 /**
- * A workflow body starts a fan-out of child runs with `start` and collects
- * their return values through the run handle. Both replicas come back.
+ * A workflow body starts a fan-out of child runs through a `start` step and
+ * collects their results on reply hooks. Both replicas come back.
  */
 export default defineEval({
   description: "A workflow tool starts child workflow runs and combines their results.",

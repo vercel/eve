@@ -1,4 +1,4 @@
-import { resumeHook } from "workflow/api";
+import { resumeHook, start } from "workflow/api";
 
 import { describePlan, hashPlan } from "./plan.ts";
 
@@ -21,5 +21,19 @@ export async function planReplica(input: ReplicaInput): Promise<void> {
   "use workflow";
 
   const digest = await hashPlan(`${describePlan(input.service)} #${input.replica}`);
-  await resumeHook(input.replyTo, { digest, replica: input.replica });
+  await reportReplica(input.replyTo, { digest, replica: input.replica });
+}
+
+/** `workflow/api` runs in steps; a body starts a child run through one. */
+export async function startReplica(input: ReplicaInput): Promise<string> {
+  "use step";
+
+  const run = await start(planReplica, [input]);
+  return run.runId;
+}
+
+async function reportReplica(replyTo: string, result: ReplicaResult): Promise<void> {
+  "use step";
+
+  await resumeHook(replyTo, result);
 }

@@ -1,6 +1,6 @@
 import { createHook, defineHook, type Hook } from "#compiled/@workflow/core/index.js";
 
-import { resumeHook } from "#execution/tool-run/workflow-api.js";
+import { resumeHookStep } from "#execution/tool-run/resume-hook-step.js";
 
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 import type { InputRequest } from "#shared/input.js";
@@ -158,6 +158,6 @@ export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInput
     token: `${ANSWER_HOOK_PREFIX}${context.from.runId}:${seq}`,
   });
   const message: RunRequestMessage = { from: context.from, replyTo: answer.token, request };
-  void resumeHook(context.owner.request, message);
+  void resumeHookStep(context.owner.request, message);
   return answer;
 }
