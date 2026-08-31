@@ -1,11 +1,9 @@
 import { isDisabledToolSentinel } from "#tools/definition.js";
-import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
 import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
   expectOnlyKnownKeys,
-  expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
@@ -48,7 +46,6 @@ type MutableNormalizedAuthoredTool = {
 type NormalizedToolEntry =
   | { readonly kind: "tool"; readonly definition: NormalizedAuthoredTool }
   | { readonly kind: "disabled" }
-  | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
   | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
   | {
       readonly kind: "dynamic-tool";
@@ -59,7 +56,7 @@ type NormalizedToolEntry =
 /**
  * Normalizes one authored tool default export. Recognizes real tool
  * definitions (`defineTool(...)`), disable sentinels (`disableTool()`), and the
- * experimental `Workflow` tool definition.
+ * framework tool definitions.
  *
  * Authored `name` fields are rejected — tool identity is path-derived.
  */
@@ -74,17 +71,6 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   }
   if (isDisabledToolSentinel(value)) {
     return { kind: "disabled" };
-  }
-  if (isExperimentalWorkflowToolDefinition(value)) {
-    const record = expectObjectRecord(value, message);
-    expectOnlyKnownKeys(record, ["kind", "maxSubagents"], message);
-    return {
-      kind: "workflow-tool",
-      maxSubagents:
-        record.maxSubagents === undefined
-          ? undefined
-          : expectPositiveInteger(record.maxSubagents, message),
-    };
   }
   if (isWebSearchToolDefinition(value)) {
     const record = expectObjectRecord(value, message);

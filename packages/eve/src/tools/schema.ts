@@ -37,6 +37,7 @@ const rehydratedSchemas: Record<SchemaDirection, WeakMap<object, ToolSchema>> = 
   input: new WeakMap(),
   output: new WeakMap(),
 };
+const validationFreeSchemas = new WeakSet<object>();
 
 /**
  * Resolves a source into a live input {@link ToolSchema}. Live schemas pass
@@ -104,6 +105,11 @@ export function isToolSchema(value: unknown): value is ToolSchema {
   );
 }
 
+/** Whether a schema has executable validation rather than Eve's permissive fallback. */
+export function isValidationFreeToolSchema(value: unknown): boolean {
+  return typeof value === "object" && value !== null && validationFreeSchemas.has(value);
+}
+
 /**
  * Permissive schema lowered onto model-visible tools whose definitions
  * declare no input schema. Accepts any input — an absent schema declares no
@@ -168,7 +174,7 @@ function rehydrateJsonSchema(jsonSchema: JsonObject): ToolSchema {
 function toPassthroughSchema(jsonSchema: JsonObject): ToolSchema {
   const emit = (): Record<string, unknown> =>
     structuredClone(jsonSchema) as Record<string, unknown>;
-  return {
+  const schema: ToolSchema = {
     "~standard": {
       version: 1,
       vendor: "eve",
@@ -176,6 +182,8 @@ function toPassthroughSchema(jsonSchema: JsonObject): ToolSchema {
       jsonSchema: { input: emit, output: emit },
     },
   };
+  validationFreeSchemas.add(schema);
+  return schema;
 }
 
 function serializeSchema(

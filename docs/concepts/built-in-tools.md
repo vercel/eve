@@ -1,6 +1,6 @@
 ---
 title: "Built-in Tools"
-description: "The default and opt-in tools eve provides, including Workflow, glob, grep, and sleep."
+description: "The default and opt-in tools eve provides, including code mode, glob, grep, and sleep."
 ---
 
 eve provides a default tool set for every agent and additional tools you can add with one file. Each default occupies the same `agent/tools/<name>.ts` slot you would author yourself, so an authored definition replaces it and `disableTool()` removes it. Use this page to review what the model can call, opt into more capabilities, or override and disable defaults. For custom tools, see [Tools](../tools).
@@ -28,7 +28,7 @@ The model-facing file tools accept absolute paths and paths beginning with `$HOM
 
 Notes:
 
-- **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](./state). The child receives neither `agent` nor `Workflow`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
+- **`agent`** is available only in the root session. Its child uses the root's instructions, tools, connections, and sandbox, but starts with fresh conversation history and fresh [state](./state). The child does not receive `agent`; declared subagents do not receive the built-in `agent` either. See [Subagents](../subagents).
 - **`load_skill`** only pulls instructions into context. It adds no new execution surface, because behavior still comes from the tools the agent already has.
 - **`connection_search`** surfaces a connection's tools by their qualified name (e.g. `linear__list_issues`), which the model can then call directly. The model sees it only when the agent has connections.
 - **`web_search`** has no local executor; the provider runs it. AI Gateway models use Exa by default. To use Parallel instead, export `webSearch({ provider: "parallel" })` from `agent/tools/web_search.ts`. Direct provider models continue to use their native search implementation. To supply your own implementation, override it with `defineTool()`.
@@ -40,12 +40,11 @@ Review these default tools before production use. Disable, wrap, restrict, or re
 
 Some framework-provided tools stay out of the default set. Add the corresponding file when your agent needs one:
 
-| Tool       | Definition to export                                | Purpose                                            |
-| ---------- | --------------------------------------------------- | -------------------------------------------------- |
-| `glob`     | `glob` from `eve/tools/glob`                        | Find sandbox files by glob pattern.                |
-| `grep`     | `grep` from `eve/tools/grep`                        | Search sandbox file contents by regex.             |
-| `Workflow` | `experimental_workflow()` from `eve/tools/workflow` | Orchestrate root-agent copies from generated code. |
-| `sleep`    | `sleep()` from `eve/tools/sleep`                    | Pause and durably resume the current turn.         |
+| Tool    | Definition to export             | Purpose                                    |
+| ------- | -------------------------------- | ------------------------------------------ |
+| `glob`  | `glob` from `eve/tools/glob`     | Find sandbox files by glob pattern.        |
+| `grep`  | `grep` from `eve/tools/grep`     | Search sandbox file contents by regex.     |
+| `sleep` | `sleep()` from `eve/tools/sleep` | Pause and durably resume the current turn. |
 
 For example, add file discovery and content search with two files:
 
@@ -59,7 +58,7 @@ export { grep as default } from "eve/tools/grep";
 
 The filename supplies the model-facing tool name. The tools run against the agent's sandbox and use the same schemas, results, and error behavior as eve's framework implementations. Wrap either definition with `defineTool({ ...glob, description: "..." })` or `defineTool({ ...grep, description: "..." })` when you need to change its description or approval policy.
 
-The sections below cover `Workflow` and `sleep` in more detail.
+The sections below cover code mode and `sleep` in more detail.
 
 ## Override a default
 
@@ -125,85 +124,55 @@ Three moves shape the harness. The right one depends on whether the model should
 - **Disable** when the model should not have the capability at all. A `disableTool()` sentinel removes the built-in, and the model never sees it. Reach for this to lock down `bash` or `web_fetch` in an agent that should not run shell commands or fetch arbitrary URLs.
 - **Author a new tool** when you want a capability the harness does not ship. Give it a fresh slug under `agent/tools/` and it joins the built-ins instead of replacing one. See [Tools](../tools) for the authoring model.
 
-## Workflow tool
+## Experimental code mode
 
-The opt-in experimental `Workflow` tool lets the model write JavaScript that coordinates the agent's own subagents as a single durable step. The program can run them in sequence, feed one result into the next, fan out over a list, and combine the results. You enable the capability and the model decides and runs the orchestration.
+Set `experimental.codeMode` in `agent.ts` to add one `code_mode` orchestration tool alongside ordinary tools. The model writes a complete TypeScript program and calls typed inline tools as `tools.name(input)`:
 
-A single turn can already call several subagents, and parallel tool calls dispatch concurrently. What a workflow adds is _programmatic_ coordination. The program decides how many subagents to run based on an earlier result, which output feeds which call, and how to combine everything. That is logic the model cannot express as a few one-off calls.
-
-`Workflow` is a model-facing tool, not an API for authored tools, hooks, or application code. Authored code cannot submit a Workflow program or use `Workflow` to start an arbitrary user-authored Vercel Workflow. Use the [client SDK](../guides/client/overview) when application code needs to start or continue an eve session; use ordinary application APIs for other deterministic orchestration.
-
-### Enable Workflow
-
-Export the experimental Workflow definition from `agent/tools/workflow.ts`. The helper name carries the "experimental" warning, but the tool the model actually sees is named `Workflow`.
-
-```ts title="agent/tools/workflow.ts"
-import { experimental_workflow } from "eve/tools/workflow";
-
-export default experimental_workflow();
-```
-
-Without that file, the `Workflow` tool stays off. It earns its keep only when the agent has subagents (or the built-in `agent`) worth coordinating:
-
-```ts title="agent/subagents/analyst/agent.ts"
+```ts title="agent/agent.ts"
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  description: "Analyzes one metric: queries, computes, writes a short finding.",
-  model: "anthropic/claude-opus-4.8",
+  model: "openai/gpt-5.6-terra",
+  experimental: { codeMode: true },
 });
 ```
 
-When asked for a weekly business review, the model picks the metrics, runs one `analyst` per metric in parallel, and combines the findings. The program below is the kind of JavaScript the model authors. It fans `analyst` out over a runtime-decided list of metrics and merges the results:
+The description includes a capped shortest-first signature listing. Generated code can call `await search({ query, limit, offset })` to find omitted tools and their exact signatures from the same request-scoped catalog.
+
+Use code mode when later calls depend on earlier results, runtime results determine how many calls to make, or deterministic loops, filtering, validation, aggregation, and local reduction would otherwise require extra model turns. Every nested call must be read-only or safe to repeat under ordinary tool retry semantics. Prefer direct tools for one call, a small fixed set of independent calls, writes or irreversible effects, and work that needs approval, authorization, model judgment, or user interaction between calls.
+
+The model should call `code_mode` at most once per response. One program can express dependent calls, cursor loops, retries, and parallel work:
 
 ```js
-const metrics = ["revenue", "signups", "churn"];
-const findings = await Promise.all(
-  metrics.map((metric) => tools.analyst({ message: `Summarize last week's ${metric}.` })),
-);
-return findings.join("\n\n");
+const pages = [];
+let cursor = null;
+do {
+  const page = await tools.list_items({ cursor });
+  pages.push(...page.items);
+  cursor = page.nextCursor;
+} while (cursor !== null);
+
+const details = await Promise.all(pages.map((item) => tools.get_item({ id: item.id })));
+return details;
 ```
 
-Each `tools.analyst(...)` call dispatches a child subagent, so the parent stream records one `subagent.called` per metric and one `subagent.completed` as each finishes:
+### Admitted tools
 
-```json
-{ "type": "subagent.called", "data": { "name": "analyst", "toolName": "analyst", "callId": "call_1", "childSessionId": "ses_a1", "sequence": 0 } }
-{ "type": "subagent.called", "data": { "name": "analyst", "toolName": "analyst", "callId": "call_2", "childSessionId": "ses_a2", "sequence": 1 } }
-{ "type": "subagent.called", "data": { "name": "analyst", "toolName": "analyst", "callId": "call_3", "childSessionId": "ses_a3", "sequence": 2 } }
-{ "type": "subagent.completed", "data": { "subagentName": "analyst", "callId": "call_1", "output": "..." } }
-{ "type": "subagent.completed", "data": { "subagentName": "analyst", "callId": "call_2", "output": "..." } }
-{ "type": "subagent.completed", "data": { "subagentName": "analyst", "callId": "call_3", "output": "..." } }
-```
+Code mode automatically admits request-visible tools when they have an inline executor and executable input/output schemas. The rule applies after dynamic tool resolution, so request gates remain authoritative. With `experimental.tasks: true`, subagent and remote-agent tools may launch background tasks and return `{ taskId, status: "working" }` receipts; generated code cannot wait for their final results, and one program may launch at most eight. Eve stages those launches while the program runs and dispatches them only after it succeeds, so a failed, cancelled, or timed-out program starts no staged work. Foreground subagent calls, other background tools, tools with approval policies, provider-managed tools, `load_skill`, and `final_output` stay direct only. A nested tool that unexpectedly requires authorization exits with guidance to call it directly.
 
-### What a workflow can orchestrate
+Generated programs receive the full value validated by `outputSchema`; direct calls continue to use any authored `toModelOutput` projection. Enable code mode only when those validated outputs are appropriate as model-authored program intermediates.
 
-A workflow reaches only this agent's own agents: the built-in `agent` (a copy of itself), declared [subagents](../subagents), and [remote agents](../guides/remote-agents). That is the whole list. No files, network, shell, skills, or connections. A workflow is a coordination layer over subagents, not a place to do other work. Each call can still request structured output via `outputSchema`, exactly like a direct subagent delegation.
+Code-mode programs are foreground work owned by the current turn. Background and task-control tools remain directly callable rather than entering the sandbox.
 
-### Caps on workflow-spawned subagents
+### Execution
 
-Workflow orchestration is capped in two independent ways.
+`code_mode` is an ordinary synchronous AI SDK tool. First-party `@ai-sdk/code-mode` executes each program through its Run-backed isolated QuickJS runtime. Eve waits for every started nested host-tool call and returns the program's JSON value before the model continues.
 
-**Per-program call budget.** One Workflow program may dispatch at most `maxSubagents` subagent calls in total, counted across the whole program — sequential and parallel calls alike. Configure it on `experimental_workflow`; the default is 100. Calls beyond the budget do not start a child session; they resolve inside the program with a `WORKFLOW_SUBAGENT_LIMIT_REACHED` error result, and the budget is stated in the tool's description so the model sizes its fan-out to fit.
+Code mode follows the same retry semantics as other synchronous tools. If the enclosing Eve step is replayed, the program may run again. Tools with non-idempotent effects should use their normal idempotency and external-state checks; code mode does not add an exactly-once boundary.
 
-```ts title="agent/tools/workflow.ts"
-import { experimental_workflow } from "eve/tools/workflow";
+### Sandbox boundary
 
-export default experimental_workflow({ maxSubagents: 4 });
-```
-
-**Root-only orchestration.** Only the root session receives `Workflow`. Children started by a workflow receive neither `Workflow` nor the built-in `agent`, so Workflow programs cannot recurse. A declared child can still call subagents defined in its own directory (see [Subagents](../subagents)).
-
-### Where the JavaScript runs
-
-The orchestration code never touches the agent's process. The runtime hands the program text to a small isolated JavaScript engine (a QuickJS sandbox) and runs it there. Nothing from the host realm crosses in, so there is no `process`, no `globalThis` from the agent, and no `import`/`require`. The program can reach exactly two things, the agent functions bridged in as `tools.<name>` and the ordinary language built-ins.
-
-That is an allowlist, not a denylist. The sandbox cannot read files, open a socket, or see an environment variable because those are not present, not because each one is blocked in turn. When the program calls an agent function, that call bridges back out to the runtime, which dispatches it exactly like a direct delegation. The orchestration glue stays inside the sandbox.
-
-### Durability, approvals, and observability
-
-- **Durable.** The whole orchestration counts as one step. Subagents dispatched together run concurrently, and if a run parks (suspends durably without holding compute; see [Execution model and durability](./execution-model-and-durability)) on a long-running or human-gated child, it resumes where it left off after a restart.
-- **Approval-safe.** A subagent that needs human approval (HITL, human-in-the-loop) mid-run surfaces its request to the user, and the workflow picks back up once that is answered, same as direct delegation.
-- **Observable.** Every orchestrated subagent emits the usual `subagent.called` / `subagent.completed` events on the parent stream and gets its own child session and stream. The telemetry matches direct delegation, so existing dashboards and cost attribution keep working.
+Generated code runs in isolated QuickJS. It has no host `process`, imports, filesystem, or network unless those capabilities are explicitly exposed as tools. Host values cross the bridge as JSON. The program's final result must also be JSON-serializable.
 
 ## The opt-in `sleep` tool
 
@@ -222,4 +191,4 @@ The model calls it with `{ seconds }` when it is useful to wait before checking 
 - [Tools](../tools): define your own tools, gate them on approval, and shape their output with `toModelOutput`
 - [Dynamic capabilities](../guides/dynamic-capabilities): generate the tool set per session with `defineDynamic`
 - [Sandbox](../sandbox): configure the sandbox used by shell and file tools
-- [Subagents](../subagents): declare the agents that `agent` and `Workflow` can call
+- [Subagents](../subagents): declare agents the model can call directly

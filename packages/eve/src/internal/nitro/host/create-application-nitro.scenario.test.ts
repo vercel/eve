@@ -684,34 +684,30 @@ describe("application Nitro creation", () => {
     expect(createNitroMock.mock.calls[0]?.[0].traceDeps).toEqual(["@napi-rs/keyring"]);
   });
 
-  it("includes the Workflow sandbox runtime plugin only when Workflow is enabled", async () => {
+  it("includes the code-mode runtime plugin only when code mode is enabled", async () => {
     const directNitroStub = createNitroStub();
-    const workflowNitroStub = createNitroStub();
+    const codeModeNitroStub = createNitroStub();
     createNitroMock.mockResolvedValueOnce(directNitroStub.nitro);
-    createNitroMock.mockResolvedValueOnce(workflowNitroStub.nitro);
+    createNitroMock.mockResolvedValueOnce(codeModeNitroStub.nitro);
 
     const { createProductionApplicationNitro } =
       await import("#internal/nitro/host/create-application-nitro.js");
 
     const directHost = await createPreparedHost();
-    const workflowHost = await createPreparedHost();
-    workflowHost.compileResult.manifest.workflowTool = {
-      logicalPath: "tools/workflow.ts",
-      sourceId: "test:workflow",
-      sourceKind: "module",
-    };
+    const codeModeHost = await createPreparedHost();
+    codeModeHost.compileResult.manifest.config.experimental = { codeMode: true };
 
     await createProductionApplicationNitro(directHost, createProductionOptions(directHost));
-    await createProductionApplicationNitro(workflowHost, createProductionOptions(workflowHost));
+    await createProductionApplicationNitro(codeModeHost, createProductionOptions(codeModeHost));
 
     const directPlugins = createNitroMock.mock.calls[0]?.[0].plugins as string[];
-    const workflowPlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
+    const codeModePlugins = createNitroMock.mock.calls[1]?.[0].plugins as string[];
 
     expect(directPlugins).not.toEqual(
-      expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
+      expect.arrayContaining([expect.stringContaining("code-mode-runtime-plugin.ts")]),
     );
-    expect(workflowPlugins).toEqual(
-      expect.arrayContaining([expect.stringContaining("workflow-sandbox-runtime-plugin.ts")]),
+    expect(codeModePlugins).toEqual(
+      expect.arrayContaining([expect.stringContaining("code-mode-runtime-plugin.ts")]),
     );
   });
 

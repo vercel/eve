@@ -111,10 +111,6 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    workflowTool:
-      input.manifest.workflowTool === undefined
-        ? undefined
-        : { maxSubagents: input.manifest.workflowTool.maxSubagents },
     webSearchProvider: input.manifest.webSearchProvider,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
@@ -230,6 +226,7 @@ function createResolvedAgentConfig(
 
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
+      codeMode: manifest.config.experimental.codeMode,
       instrumentationProviders: manifest.config.experimental.instrumentationProviders,
       tasks: manifest.config.experimental.tasks,
       workflow:

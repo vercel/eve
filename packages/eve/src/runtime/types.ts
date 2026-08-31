@@ -418,14 +418,6 @@ export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
-  /**
-   * Configuration for the experimental framework `Workflow` orchestration
-   * tool. Present when an authored tool module exports
-   * `experimental_workflow(...)`.
-   */
-  readonly workflowTool?: {
-    readonly maxSubagents?: number;
-  };
   /** AI Gateway provider selected for the framework `web_search` tool. */
   readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];

@@ -45,5 +45,4 @@ export interface HarnessToolDefinition {
   readonly rootOnly?: boolean;
   readonly runtimeAction?: HarnessRuntimeActionDefinition;
   readonly toModelOutput?: (output: unknown) => unknown;
-  readonly workflowCallable?: boolean;
 }

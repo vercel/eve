@@ -29,7 +29,6 @@ import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
-import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -143,10 +142,8 @@ export async function settleCancelledTurnStep(input: {
     setHarnessEmissionState(
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
-          clearPendingWorkflowInterrupt(
-            clearPendingRuntimeActionBatch(
-              abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
-            ),
+          clearPendingRuntimeActionBatch(
+            abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
           ),
         ),
       ),

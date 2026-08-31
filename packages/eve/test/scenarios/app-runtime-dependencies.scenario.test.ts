@@ -294,19 +294,17 @@ describe("app runtime dependency tracing", () => {
     await import(pathToFileURL(bundledDependencyModule.modulePath).href);
   }, 30_000);
 
-  it("bundles Workflow sandbox worker assets only when an agent enables Workflow", async () => {
-    async function createWorkflowAssetsApp(label: string, workflow: boolean): Promise<string> {
-      const appRoot = await createScratchDirectory(`eve-app-workflow-assets-${label}-build-`);
+  it("bundles Run-backed code-mode assets only when an agent enables code mode", async () => {
+    async function createCodeModeAssetsApp(label: string, codeMode: boolean): Promise<string> {
+      const appRoot = await createScratchDirectory(`eve-app-code-mode-assets-${label}-build-`);
 
-      await mkdir(join(appRoot, "agent", "subagents", "researcher"), {
-        recursive: true,
-      });
+      await mkdir(join(appRoot, "agent"), { recursive: true });
 
       await writeFile(
         join(appRoot, "package.json"),
         `${JSON.stringify(
           {
-            name: `workflow-assets-${label}-test`,
+            name: `code-mode-assets-${label}-test`,
             private: true,
             type: "module",
           },
@@ -316,30 +314,15 @@ describe("app runtime dependency tracing", () => {
       );
       await writeFile(
         join(appRoot, "agent", "agent.ts"),
-        'export default { model: "openai/gpt-5.4-mini" };\n',
+        `export default { model: "openai/gpt-5.4-mini"${codeMode ? ", experimental: { codeMode: true }" : ""} };\n`,
       );
-      await writeFile(join(appRoot, "agent", "instructions.md"), "Trace Workflow assets.\n");
-      await writeFile(
-        join(appRoot, "agent", "subagents", "researcher", "agent.ts"),
-        'export default { description: "Research.", model: "openai/gpt-5.4-mini" };\n',
-      );
-      await writeFile(
-        join(appRoot, "agent", "subagents", "researcher", "instructions.md"),
-        "Research the request.\n",
-      );
-      if (workflow) {
-        await mkdir(join(appRoot, "agent", "tools"), { recursive: true });
-        await writeFile(
-          join(appRoot, "agent", "tools", "workflow.ts"),
-          'export default { kind: "eve:enable-workflow-tool", maxSubagents: 6 };\n',
-        );
-      }
+      await writeFile(join(appRoot, "agent", "instructions.md"), "Trace code-mode assets.\n");
 
       return appRoot;
     }
 
     const disabledOutputDir = await buildApplication(
-      await createWorkflowAssetsApp("disabled", false),
+      await createCodeModeAssetsApp("disabled", false),
       DEPLOYABLE_BUILD_OPTIONS,
     );
     const disabledTracedPackageJson = await readTracedServerPackageJson(disabledOutputDir);
@@ -347,10 +330,10 @@ describe("app runtime dependency tracing", () => {
       join(disabledOutputDir, "server"),
     );
 
-    expect(disabledServerSource).not.toContain("[Unprintable QuickJS value]");
+    expect(disabledServerSource).not.toContain("run-replay-v2");
 
     const enabledOutputDir = await buildApplication(
-      await createWorkflowAssetsApp("enabled", true),
+      await createCodeModeAssetsApp("enabled", true),
       DEPLOYABLE_BUILD_OPTIONS,
     );
     const tracedServerPackageJson = await readTracedServerPackageJson(enabledOutputDir);
@@ -358,12 +341,12 @@ describe("app runtime dependency tracing", () => {
       join(enabledOutputDir, "server"),
     );
 
-    expect(enabledServerSource).toContain("[Unprintable QuickJS value]");
-    // The Workflow sandbox runtime ships bundled inline, never traced — and
-    // these apps do not declare the optional just-bash engine, so its
-    // quickjs dependency must not sneak into the trace either.
-    expect(disabledTracedPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
-    expect(tracedServerPackageJson.dependencies).not.toHaveProperty("quickjs-emscripten");
+    expect(enabledServerSource).toContain("run-replay-v2");
+    // @ai-sdk/code-mode and Run ship bundled inline rather than becoming
+    // consumer runtime dependencies.
+    expect(disabledTracedPackageJson.dependencies).not.toHaveProperty("run");
+    expect(tracedServerPackageJson.dependencies).not.toHaveProperty("run");
+    expect(tracedServerPackageJson.dependencies).not.toHaveProperty("quickjs-wasi");
   }, 60_000);
 
   it("includes the optional just-bash engine in hosted output only when the sandbox config selects it", async () => {

@@ -222,7 +222,7 @@ describe("development generation artifacts", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "0.0.0-test",
-          requires: { extension: 1, tool: 1, config: 1 },
+          requires: { extension: 1, tool: 22, config: 1 },
         }),
         "pnpm-workspace.yaml": "packages:\n  - packages/*\n",
       },
@@ -286,7 +286,7 @@ describe("development generation artifacts", () => {
         kind: "eve-extension",
         formatVersion: 1,
         builtWithEve: "0.0.0-test",
-        requires: { extension: 1, tool: 1 },
+        requires: { extension: 1, tool: 22 },
       })}\n`,
     );
     await writeFile(

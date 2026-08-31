@@ -82,6 +82,7 @@ describe("ToolSchema", () => {
     const schema = toInputSchema(source);
 
     expect(isToolSchema(schema)).toBe(true);
+    expect(schema["~standard"].vendor).toBe("eve");
     // The source JSON Schema is advertised verbatim.
     expect(serializeInputSchema(schema)).toEqual(source);
     // Validation accepts any input — the tool's executor validates instead.

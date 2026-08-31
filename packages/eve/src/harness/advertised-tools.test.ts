@@ -3,10 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
-import { buildToolSet } from "#harness/tools.js";
+import type { HarnessToolMap } from "#harness/types.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
-import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 describe("getAdvertisedTools", () => {
   it("keeps the built-in agent tool in the root session", () => {
@@ -92,37 +90,6 @@ describe("getAdvertisedTools", () => {
 
     expect([...advertisedTools.keys()]).toEqual(["add", "delegate"]);
   });
-
-  it("does not add Workflow in runtime subagent sessions", async () => {
-    const tools = new Map([["delegate", createSubagentTool("delegate")]]) satisfies HarnessToolMap;
-
-    const advertisedTools = await getAdvertisedTools({
-      modelTools: buildToolSet({ tools }),
-      session: createSession({ rootSessionId: "root-session", subagentDepth: 1 }),
-      tools,
-      workflow: {},
-    });
-
-    expect(Object.keys(advertisedTools.modelTools)).toEqual(["delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeUndefined();
-  });
-
-  it("adds Workflow in root sessions below the depth limit", async () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["delegate", createSubagentTool("delegate")],
-    ]) satisfies HarnessToolMap;
-
-    const advertisedTools = await getAdvertisedTools({
-      modelTools: buildToolSet({ tools }),
-      session: createSession(),
-      tools,
-      workflow: {},
-    });
-
-    expect([...advertisedTools.harnessTools.keys()]).toEqual(["add", "delegate"]);
-    expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeDefined();
-  });
 });
 
 describe("getAdvertisedTools for definition arrays", () => {
@@ -191,7 +158,6 @@ function createSubagentTool(name: string): HarnessToolDefinition {
       nodeId: "workers",
       subagentName: name,
     },
-    workflowCallable: true,
   };
 }
 
@@ -210,20 +176,5 @@ function createTaskControlTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
     runtimeAction: { kind: "task-control" },
-  };
-}
-
-function createSession(overrides: Partial<HarnessSession> = {}): HarnessSession {
-  return {
-    agent: {
-      modelReference: { id: "test-model" },
-      system: "",
-      tools: [],
-    },
-    compaction: { recentWindowSize: 4, threshold: 1_000_000 },
-    continuationToken: "test-token",
-    history: [],
-    sessionId: "test-session",
-    ...overrides,
   };
 }

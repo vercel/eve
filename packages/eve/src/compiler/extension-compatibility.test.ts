@@ -141,4 +141,17 @@ describe("extension compatibility manifest", () => {
       ).toEqual([{ capability, requiredVersion: unsupportedVersion, supportedVersions }]);
     }
   });
+
+  it("rejects tool epochs from before the code-mode API replacement", () => {
+    expect(EXTENSION_CAPABILITY_SUPPORT.tool).toEqual([22]);
+    expect(EXTENSION_CAPABILITY_SUPPORT.subagent).toEqual([3, 4, 5, 6]);
+    expect(
+      findUnsupportedExtensionCapabilities({
+        kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+        formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
+        builtWithEve: "0.44.3",
+        requires: { tool: 20 },
+      }),
+    ).toEqual([{ capability: "tool", requiredVersion: 20, supportedVersions: [22] }]);
+  });
 });

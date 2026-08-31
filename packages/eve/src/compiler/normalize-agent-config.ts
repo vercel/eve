@@ -176,6 +176,10 @@ function normalizeExperimentalDefinition(
 
   const compiledExperimental: Mutable<NonNullable<CompiledAgentDefinition["experimental"]>> = {};
 
+  if (experimental.codeMode !== undefined) {
+    compiledExperimental.codeMode = experimental.codeMode;
+  }
+
   if (experimental.instrumentationProviders !== undefined) {
     compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
   }

@@ -25,6 +25,9 @@ import { isAsyncIterable } from "#shared/async-iterable.js";
 import {
   createBackgroundToolCallBatch,
   executeBackgroundToolCall,
+  markStagedBackgroundCall,
+  reserveLocalSubagentFanout,
+  rollbackBackgroundToolCalls,
   type BackgroundExecutableTool,
   type BackgroundToolCallBatch,
 } from "#harness/background-tools.js";
@@ -35,6 +38,7 @@ const toolApprovals = new WeakMap<
   object,
   (toolInput: unknown, callId: string) => Promise<NativeApprovalStatus>
 >();
+const backgroundToolBatches = new WeakMap<object, BackgroundToolCallBatch>();
 
 /**
  * Builds an AI SDK `ToolSet` from unified harness tool definitions.
@@ -155,6 +159,9 @@ export function buildToolSet(input: {
             }
           : {}),
     });
+    if (definition.execution === "background") {
+      backgroundToolBatches.set(aiTool, backgroundBatch);
+    }
     tools[definition.name] = aiTool;
     if (definition.approval !== undefined) {
       toolApprovals.set(aiTool, approval);
@@ -162,6 +169,54 @@ export function buildToolSet(input: {
   }
 
   return tools as ToolSet;
+}
+
+export async function prepareNestedBackgroundToolCall(input: {
+  readonly input: unknown;
+  readonly options: ToolExecuteOptions;
+  readonly tool: ToolSet[string];
+}): Promise<void> {
+  const batch = backgroundToolBatches.get(input.tool);
+  if (batch === undefined || input.tool.onInputAvailable === undefined) {
+    throw new Error("Nested background tool is not registered with the current harness step.");
+  }
+  markStagedBackgroundCall(batch.calls, input.options.toolCallId);
+  await input.tool.onInputAvailable({
+    context: undefined,
+    input: input.input,
+    ...input.options,
+  });
+}
+
+export function reserveNestedLocalSubagentFanout(input: {
+  readonly reservationId: string;
+  readonly size: number;
+  readonly tool: ToolSet[string];
+}): void {
+  const batch = backgroundToolBatches.get(input.tool);
+  if (batch === undefined) {
+    throw new Error("Nested background tool is not registered with the current harness step.");
+  }
+  reserveLocalSubagentFanout(batch.calls, input.reservationId, input.size);
+}
+
+export async function rollbackNestedBackgroundToolCalls(input: {
+  readonly callIds: ReadonlySet<string>;
+  readonly cause: unknown;
+  readonly tools: readonly ToolSet[string][];
+}): Promise<void> {
+  const batches = new Set<BackgroundToolCallBatch>();
+  for (const tool of input.tools) {
+    const batch = backgroundToolBatches.get(tool);
+    if (batch !== undefined) batches.add(batch);
+  }
+  for (const batch of batches) {
+    await rollbackBackgroundToolCalls({
+      batch,
+      callIds: input.callIds,
+      cause: input.cause,
+    });
+  }
 }
 
 /**

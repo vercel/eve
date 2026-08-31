@@ -60,7 +60,6 @@ export async function dispatchRuntimeActionsStep(
         // Unreachable: the plan was built with `taskControls: false`.
         throw new Error("Task-control actions require the task dispatch step.");
       }
-
       let outcome: DispatchOutcome;
       switch (entry.kind) {
         case "resume":

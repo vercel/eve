@@ -1,5 +1,6 @@
 import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
+import type { HarnessSession } from "#harness/types.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
 
@@ -31,6 +32,81 @@ export interface BackgroundToolExecutor {
     readonly options: ToolExecuteOptions;
     readonly toolInput: unknown;
   }): Promise<unknown>;
+  rollbackCalls?(input: {
+    readonly callIds: ReadonlySet<string>;
+    readonly cause: unknown;
+  }): Promise<void>;
+}
+
+export interface SubagentTaskLauncher {
+  readonly mode: "local" | "remote";
+  preview(input: {
+    readonly callId: string;
+    readonly session: HarnessSession;
+    readonly toolInput: unknown;
+    readonly turnId: string;
+  }): {
+    readonly agentId: string;
+    readonly status: "working";
+    readonly taskId: string;
+  };
+}
+
+const subagentTaskLaunchers = new WeakMap<object, SubagentTaskLauncher>();
+const localFanoutReservations = new WeakMap<readonly BackgroundToolCall[], Map<string, number>>();
+const stagedBackgroundCallIds = new WeakMap<readonly BackgroundToolCall[], Set<string>>();
+
+export function registerSubagentTaskLauncher(
+  execute: object,
+  launcher: SubagentTaskLauncher,
+): void {
+  subagentTaskLaunchers.set(execute, launcher);
+}
+
+export function readSubagentTaskLauncher(
+  execute: object | undefined,
+): SubagentTaskLauncher | undefined {
+  return execute === undefined ? undefined : subagentTaskLaunchers.get(execute);
+}
+
+export function reserveLocalSubagentFanout(
+  calls: readonly BackgroundToolCall[],
+  reservationId: string,
+  size: number,
+): void {
+  let reservations = localFanoutReservations.get(calls);
+  if (reservations === undefined) {
+    reservations = new Map();
+    localFanoutReservations.set(calls, reservations);
+  }
+  reservations.set(reservationId, size);
+}
+
+export function markStagedBackgroundCall(
+  calls: readonly BackgroundToolCall[],
+  callId: string,
+): void {
+  let callIds = stagedBackgroundCallIds.get(calls);
+  if (callIds === undefined) {
+    callIds = new Set();
+    stagedBackgroundCallIds.set(calls, callIds);
+  }
+  callIds.add(callId);
+}
+
+export function readReservedLocalSubagentFanout(
+  calls: readonly { readonly callId?: string; readonly definition: { readonly execute: object } }[],
+): number | undefined {
+  const backgroundCalls = calls as readonly BackgroundToolCall[];
+  const reservations = localFanoutReservations.get(backgroundCalls);
+  if (reservations === undefined) return undefined;
+  const stagedCallIds = stagedBackgroundCallIds.get(backgroundCalls);
+  const directLocalCalls = calls.filter(
+    (call) =>
+      (call.callId === undefined || stagedCallIds?.has(call.callId) !== true) &&
+      readSubagentTaskLauncher(call.definition.execute)?.mode === "local",
+  ).length;
+  return directLocalCalls + [...reservations.values()].reduce((total, size) => total + size, 0);
 }
 
 // A ContextKey rather than a direct import of the task runtime, for three reasons:
@@ -84,4 +160,18 @@ export async function executeBackgroundToolCall(input: {
   readonly toolInput: unknown;
 }): Promise<unknown> {
   return await loadContext().require(BackgroundToolExecutorKey).execute(input);
+}
+
+export async function rollbackBackgroundToolCalls(input: {
+  readonly batch: BackgroundToolCallBatch;
+  readonly callIds: ReadonlySet<string>;
+  readonly cause: unknown;
+}): Promise<void> {
+  if (input.callIds.size === 0) return;
+  const executor = loadContext().require(BackgroundToolExecutorKey);
+  const rollbackCalls = executor.rollbackCalls;
+  if (rollbackCalls === undefined) {
+    throw new Error("The background tool executor does not support nested rollback.");
+  }
+  await rollbackCalls.call(executor, { callIds: input.callIds, cause: input.cause });
 }

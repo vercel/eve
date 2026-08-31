@@ -44,7 +44,13 @@ export async function computeDevelopmentHostFingerprint(
     environment: readDevelopmentEnvironmentHostValues(host.appRoot),
     instrumentation: await readInstrumentationSource(host),
     workflow: {
-      enabled: agentNodes.some((node) => node.workflowTool !== undefined),
+      enabled: agentNodes.some((node) => {
+        if (!("config" in node) || typeof node.config !== "object" || node.config === null) {
+          return false;
+        }
+        const config = node.config as { experimental?: { codeMode?: boolean } };
+        return config.experimental?.codeMode === true;
+      }),
       world: manifest.config.experimental?.workflow?.world ?? "local",
     },
   };

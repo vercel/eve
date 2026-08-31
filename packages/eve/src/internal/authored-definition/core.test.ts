@@ -267,6 +267,27 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('Unknown key "subagentPersistentSessions"');
   });
 
+  it("accepts only boolean code mode", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: { codeMode: true },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.codeMode).toBe(true);
+    expect(() =>
+      normalizeAgentDefinition(
+        {
+          model: "openai/gpt-5.5",
+          experimental: { codeMode: "progressive" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow('"experimental.codeMode" must be a boolean.');
+  });
+
   it("accepts a boolean tasks flag", () => {
     const definition = normalizeAgentDefinition(
       {

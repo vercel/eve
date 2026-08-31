@@ -33,6 +33,12 @@
  *   bundling?: "shared" | "standalone",  // default "shared"
  *   banner?: string,               // standalone bundle prelude
  *   chunkGroup?: string,                  // default "node"
+ *   fingerprintFiles?: string[],   // package-relative files hashed into the vendor stamp
+ *   bundledPackages?: Array<{      // transitive packages inlined into this bundle
+ *     packageName: string,
+ *     copyFiles?: string[],        // attribution files copied beside the bundle
+ *     fingerprintFiles?: string[], // package-relative files hashed into the vendor stamp
+ *   }>,
  *   typeOnly?: boolean,                   // skips JS bundling entirely
  * }
  * ```
@@ -622,6 +628,15 @@ async function prepareCompiledModule({ module, compiledRoot, packageRoot }) {
   // real upstream types flow across the vendored tree. The upstream LICENSE is
   // still copied below for attribution.
   await copyLicense(packageInfo.packageRoot, destinationRoot);
+  for (const bundledPackage of module.bundledPackages ?? []) {
+    const bundledInfo = await findPackageJson(bundledPackage.packageName, packageInfo.packageRoot);
+    for (const file of bundledPackage.copyFiles ?? []) {
+      await copyFile(
+        join(bundledInfo.packageRoot, file),
+        join(destinationRoot, `${bundledPackage.packageName}-${file}`),
+      );
+    }
+  }
 
   return { destinationRoot, packageInfo };
 }
@@ -838,18 +853,42 @@ async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions })
     scriptHash.update("\0");
   }
 
-  const moduleVersions = {};
+  const moduleFingerprints = {};
   for (const module of modules) {
-    const { packageJson } = await findPackageJson(
+    const { packageJson, packageRoot: moduleRoot } = await findPackageJson(
       module.packageName,
       packageRoot,
       module.packageJsonName,
     );
-    moduleVersions[module.packageName] = packageJson.version ?? "0.0.0";
+    const hash = createHash("sha256");
+    for (const file of [...(module.fingerprintFiles ?? [])].sort()) {
+      hash.update(file);
+      hash.update("\0");
+      hash.update(await readFile(join(moduleRoot, file)));
+      hash.update("\0");
+    }
+    moduleFingerprints[module.packageName] = {
+      contentHash: hash.digest("hex"),
+      version: packageJson.version ?? "0.0.0",
+    };
+    for (const bundledPackage of module.bundledPackages ?? []) {
+      const bundledInfo = await findPackageJson(bundledPackage.packageName, moduleRoot);
+      const bundledHash = createHash("sha256");
+      for (const file of [...(bundledPackage.fingerprintFiles ?? [])].sort()) {
+        bundledHash.update(file);
+        bundledHash.update("\0");
+        bundledHash.update(await readFile(join(bundledInfo.packageRoot, file)));
+        bundledHash.update("\0");
+      }
+      moduleFingerprints[`${module.packageName}>${bundledPackage.packageName}`] = {
+        contentHash: bundledHash.digest("hex"),
+        version: bundledInfo.packageJson.version ?? "0.0.0",
+      };
+    }
   }
 
   return {
-    moduleVersions,
+    moduleFingerprints,
     scriptHash: scriptHash.digest("hex"),
     toolVersions: Object.fromEntries(
       Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),

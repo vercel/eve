@@ -38,6 +38,10 @@ import { propagateSubagentExecutorCancel } from "#execution/tasks/parent/dispatc
 import { sendTaskCommand, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 
 interface BackgroundToolExecutionRecord {
+  readonly callId: string;
+  compensation?: Promise<void>;
+  compensated?: boolean;
+  discarded: boolean;
   settled: boolean;
   task?: BackgroundTask;
 }
@@ -143,8 +147,22 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     return execution;
   }
 
+  async rollbackCalls(input: {
+    readonly callIds: ReadonlySet<string>;
+    readonly cause: unknown;
+  }): Promise<void> {
+    const records = this.records.filter(
+      (record) => !record.compensated && input.callIds.has(record.callId),
+    );
+    for (const record of records) record.discarded = true;
+    await compensateBackgroundToolExecutionOnce(records, input.cause, this.bundle);
+  }
+
   async commit(session: HarnessSession): Promise<HarnessSession> {
-    const incomplete = this.records.filter((record) => !record.settled);
+    if (this.records.some((record) => record.discarded && !record.compensated)) {
+      throw new Error("Staged background tool calls could not be compensated.");
+    }
+    const incomplete = this.records.filter((record) => !record.discarded && !record.settled);
     if (incomplete.length > 0) {
       await compensateBackgroundToolExecution(
         incomplete,
@@ -161,18 +179,21 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   }
 
   async rollback(cause: unknown): Promise<void> {
-    const settled = this.records.filter((record) => record.settled);
-    const incomplete = this.records.filter((record) => !record.settled);
+    const settled = this.records.filter((record) => !record.discarded && record.settled);
+    const cancellation = isTurnCancellation(cause);
+    if (cancellation && settled.length > 0) this.retained = true;
+    const discarded = this.records.filter((record) => record.discarded && !record.compensated);
+    if (discarded.length > 0) {
+      await compensateBackgroundToolExecutionOnce(discarded, cause, this.bundle);
+    }
+    const incomplete = this.records.filter((record) => !record.discarded && !record.settled);
     if (incomplete.length > 0) {
       await compensateBackgroundToolExecution(incomplete, cause, this.bundle);
     }
     if (settled.length === 0) return;
     // Cancellation must not compensate settled records: their tasks are
     // already running. Retain them for readRetainedBackgroundToolResult.
-    if (isTurnCancellation(cause)) {
-      this.retained = true;
-      return;
-    }
+    if (cancellation) return;
     await compensateBackgroundToolExecution(settled, cause, this.bundle);
   }
 
@@ -183,7 +204,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   private apply(session: HarnessSession): HarnessSession {
     let next = session;
     for (const record of this.records) {
-      if (!record.settled || record.task === undefined) continue;
+      if (record.discarded || !record.settled || record.task === undefined) continue;
       // Framework-owned executor commits, matched by executor kind. The
       // subagent binding is the durable copy of the child's addressed
       // handle; committing the task also commits that address into the
@@ -197,7 +218,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
 
   private resultFields(): BackgroundToolStepResult | undefined {
     const tasks = this.records.flatMap((record) =>
-      record.settled && record.task !== undefined ? [record.task] : [],
+      !record.discarded && record.settled && record.task !== undefined ? [record.task] : [],
     );
     if (tasks.length === 0) return undefined;
     return {
@@ -216,7 +237,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     readonly options: ToolExecuteOptions;
     readonly toolInput: unknown;
   }): Promise<unknown> {
-    const record: BackgroundToolExecutionRecord = { settled: false };
+    const record: BackgroundToolExecutionRecord = {
+      callId: input.options.toolCallId,
+      discarded: false,
+      settled: false,
+    };
     this.records.push(record);
     const emission = getHarnessEmissionState(this.initialSession.state);
     const task = await beginBackgroundTask({
@@ -258,11 +283,11 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const settled = await output;
     if (isAuthorizationSignal(settled)) return settled;
     if (isTaskDelegated(settled)) {
+      record.task = { ...task, executor: settled.executor };
       await deliverTaskCommand(task, {
         executor: settled.executor,
         kind: "bind",
       });
-      record.task = { ...task, executor: settled.executor };
       record.settled = true;
       return settled.receipt;
     }
@@ -270,6 +295,35 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     await deliverTaskCommand(task, { data: parseJsonValue(settled), kind: "complete" });
     record.settled = true;
     return settled;
+  }
+}
+
+async function compensateBackgroundToolExecutionOnce(
+  records: readonly BackgroundToolExecutionRecord[],
+  cause: unknown,
+  bundle: CompiledBundle | undefined,
+): Promise<void> {
+  const compensations = records.map((record) => {
+    if (record.compensated) return Promise.resolve();
+    if (record.compensation !== undefined) return record.compensation;
+    const compensation = compensateBackgroundToolExecution([record], cause, bundle)
+      .then(() => {
+        record.compensated = true;
+      })
+      .finally(() => {
+        if (!record.compensated) record.compensation = undefined;
+      });
+    record.compensation = compensation;
+    return compensation;
+  });
+  const outcomes = await Promise.allSettled(compensations);
+  const failures = outcomes.flatMap((outcome) =>
+    outcome.status === "rejected" ? [outcome.reason] : [],
+  );
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "Background tool compensation did not complete.", {
+      cause,
+    });
   }
 }
 

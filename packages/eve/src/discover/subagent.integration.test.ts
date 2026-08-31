@@ -167,7 +167,7 @@ describe("discoverSubagents (memory)", () => {
           kind: "eve-extension",
           formatVersion: 1,
           builtWithEve: "test",
-          requires: { extension: 1, tool: 1 },
+          requires: { extension: 1, tool: 22 },
         }),
         "node_modules/@acme/research/extension/tools/search.ts": "export default {};",
       },

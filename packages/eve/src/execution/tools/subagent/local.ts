@@ -35,6 +35,7 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { createSubagentCalledEvent } from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
+import { readReservedLocalSubagentFanout } from "#harness/background-tools.js";
 
 type SubagentCallAction = RuntimeRemoteAgentCallActionRequest | RuntimeSubagentCallActionRequest;
 
@@ -93,7 +94,10 @@ export function registerLocalSubagentExecutor(execute: object): void {
 export function countLocalSubagentCalls(
   calls: readonly { readonly definition: { readonly execute: object } }[],
 ): number {
-  return calls.filter((call) => localSubagentExecutors.has(call.definition.execute)).length;
+  return (
+    readReservedLocalSubagentFanout(calls) ??
+    calls.filter((call) => localSubagentExecutors.has(call.definition.execute)).length
+  );
 }
 
 export async function executeSubagentTool(input: {
