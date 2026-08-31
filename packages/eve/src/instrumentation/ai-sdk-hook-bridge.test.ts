@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
   attemptIdempotencyKey,
-  createInstrumentationHooks,
+  createInstrumentationHooks as createUnboundInstrumentationHooks,
   modelCallIdempotencyKey,
   type InstrumentationAttemptScope,
   type InstrumentationModelCallStartedEvent,
@@ -23,10 +23,19 @@ const scope: InstrumentationAttemptScope = {
   turnId: "turn-1",
 };
 
+function createInstrumentationHooks(
+  ...args: Parameters<typeof createUnboundInstrumentationHooks>
+): ReturnType<typeof createUnboundInstrumentationHooks> {
+  return createUnboundInstrumentationHooks(...args).forTrace!({
+    agentName: "test-agent",
+    audience: "unknown",
+  });
+}
+
 describe("createAiSdkHookBridge", () => {
-  it("withholds content when a bridge is not bound to a trace", async () => {
+  it("does not publish when a bridge is not bound to a trace", async () => {
     const started = vi.fn();
-    const hooks = createInstrumentationHooks([
+    const hooks = createUnboundInstrumentationHooks([
       { events: { "model.call.started": started }, name: "default-policy" },
     ]);
     const bridge = createAiSdkHookBridge({ ...scope, channelAudience: "public" }, hooks);
@@ -41,7 +50,7 @@ describe("createAiSdkHookBridge", () => {
       },
     ]);
 
-    expect(started.mock.calls[0]?.[0].input).toBeUndefined();
+    expect(started).not.toHaveBeenCalled();
   });
 
   it("publishes normalized model lifecycle to every provider", async () => {

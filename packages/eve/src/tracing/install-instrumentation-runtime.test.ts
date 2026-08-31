@@ -99,9 +99,10 @@ describe("installInstrumentationRuntime", () => {
       serviceName: "weather",
     });
     const idempotencyKey = turnIdempotencyKey("session-1", "turn-1");
+    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
 
     await contextStorage.run(new ContextContainer(), async () => {
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey,
         rootSessionId: "session-1",
         sequence: 0,
@@ -109,7 +110,7 @@ describe("installInstrumentationRuntime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey,
         sessionId: "session-1",
         turnId: "turn-1",

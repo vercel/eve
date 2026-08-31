@@ -44,28 +44,22 @@ export function createInstrumentationDispatcher(
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
   function forTrace(trace: TraceCaptureContext): InstrumentationHooks {
-    return bind(trace);
-  }
-
-  function bind(trace: TraceCaptureContext | undefined): InstrumentationHooks {
     const snapshots = new WeakMap<object, unknown>();
     const decisions = new Map(
       providers.map((provider) => [
         provider,
-        trace === undefined && provider.tracePolicy !== undefined
-          ? ({ action: "drop" } as const)
-          : resolveTracePolicy(
-              provider.tracePolicy ?? legacyCaptureTracePolicy(provider.capture),
-              trace ?? { agentName: "unknown", audience: "unknown" },
-              (error) => {
-                if (warnedPolicyFailures.has(provider)) return;
-                warnedPolicyFailures.add(provider);
-                log.warn("instrumentation provider trace policy failed", {
-                  error: formatError(error),
-                  provider: provider.name,
-                });
-              },
-            ),
+        resolveTracePolicy(
+          provider.tracePolicy ?? legacyCaptureTracePolicy(provider.capture),
+          trace,
+          (error) => {
+            if (warnedPolicyFailures.has(provider)) return;
+            warnedPolicyFailures.add(provider);
+            log.warn("instrumentation provider trace policy failed", {
+              error: formatError(error),
+              provider: provider.name,
+            });
+          },
+        ),
       ]),
     );
     const capturesInputs = [...decisions.values()].some(
@@ -167,12 +161,9 @@ export function createInstrumentationDispatcher(
     return { capturesContent, capturesInputs, capturesOutputs, forTrace, publish };
   }
 
-  let unboundHooks: InstrumentationHooks | undefined;
   let loggedUnboundPublish = false;
   return {
-    capturesContent: providers.some(
-      (provider) => provider.tracePolicy === undefined && provider.capture === "content",
-    ),
+    capturesContent: false,
     forTrace,
     async publish(event) {
       if (!loggedUnboundPublish) {
@@ -181,8 +172,6 @@ export function createInstrumentationDispatcher(
           eventType: event.type,
         });
       }
-      unboundHooks ??= bind(undefined);
-      await unboundHooks.publish(event);
     },
   };
 }

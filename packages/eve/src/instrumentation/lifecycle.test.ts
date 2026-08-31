@@ -5,7 +5,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
-  createInstrumentationHooks,
+  createInstrumentationHooks as createUnboundInstrumentationHooks,
   inputIdempotencyKey,
   modelCallIdempotencyKey,
   sessionIdempotencyKey,
@@ -28,6 +28,15 @@ vi.mock("#internal/logging.js", () => ({
   createLogger: () => ({ debug: logDebug, warn: logWarn }),
   formatError: (error: unknown) => error,
 }));
+
+function createInstrumentationHooks(
+  ...args: Parameters<typeof createUnboundInstrumentationHooks>
+): ReturnType<typeof createUnboundInstrumentationHooks> {
+  return createUnboundInstrumentationHooks(...args).forTrace!({
+    agentName: "test-agent",
+    audience: "unknown",
+  });
+}
 
 const scope: InstrumentationAttemptScope = {
   attemptId: "session-1:turn-1:0:0",
@@ -852,11 +861,11 @@ describe("trace policies", () => {
     expect(tracePolicy).toHaveBeenCalledExactlyOnceWith(trace);
   });
 
-  it("drops unbound provider policies without affecting default providers", async () => {
+  it("does not dispatch providers before trace binding", async () => {
     const tracePolicy = vi.fn(() => true);
     const policyObserved = vi.fn();
     const defaultObserved = vi.fn();
-    const hooks = createInstrumentationHooks([
+    const hooks = createUnboundInstrumentationHooks([
       { events: { "turn.started": policyObserved }, name: "policy", tracePolicy },
       { events: { "turn.started": defaultObserved }, name: "default" },
     ]);
@@ -872,7 +881,7 @@ describe("trace policies", () => {
 
     expect(tracePolicy).not.toHaveBeenCalled();
     expect(policyObserved).not.toHaveBeenCalled();
-    expect(defaultObserved).toHaveBeenCalledOnce();
+    expect(defaultObserved).not.toHaveBeenCalled();
   });
 
   it("lets an explicit provider policy authorize private content", async () => {
@@ -973,7 +982,7 @@ describe("trace policies", () => {
 
   it("reports content capture only when an admitted provider requests it", () => {
     expect(
-      createInstrumentationHooks([
+      createUnboundInstrumentationHooks([
         {
           name: "unbound",
           tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
@@ -981,10 +990,10 @@ describe("trace policies", () => {
       ]).capturesContent,
     ).toBe(false);
     expect(
-      createInstrumentationHooks([{ capture: "content", name: "legacy" }]).capturesContent,
-    ).toBe(true);
+      createUnboundInstrumentationHooks([{ capture: "content", name: "legacy" }]).capturesContent,
+    ).toBe(false);
     expect(
-      createInstrumentationHooks([
+      createUnboundInstrumentationHooks([
         {
           capture: "content",
           name: "explicit-policy",

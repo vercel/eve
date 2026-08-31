@@ -208,7 +208,9 @@ describe("finalizeInstrumentationProviders", () => {
     await register("rows", defineInstrumentation({ events: { "turn.started": started } }));
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
-    await runtime.hooks.publish(turnStarted);
+    await runtime.hooks.forTrace!({ agentName: "weather-agent", audience: "unknown" }).publish(
+      turnStarted,
+    );
 
     expect(runtime.instrumentationProviders).toBe(true);
     expect(started).toHaveBeenCalledOnce();
