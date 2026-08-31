@@ -8,7 +8,13 @@ export {
   type DynamicSubagentDefinition,
   type RemoteAgentDefinition,
   type RemoteAgentDefinitionInput,
+  type WorkspaceSubagentMember,
+  type WorkspaceSubagentTarget,
+  type WorkspaceSubagentTargetResolver,
+  type WorkspaceSubagentsDefinition,
   defineAgent,
   defineDynamic,
   defineRemoteAgent,
+  defineWorkspaceSubagents,
+  vercelWorkspaceTarget,
 } from "../../src/public/index.ts";

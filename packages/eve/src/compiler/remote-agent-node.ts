@@ -33,6 +33,11 @@ export type CompiledRemoteAgentNode = Readonly<
       rootPath: string;
       // Absent when the definition's `url` is a function the runtime resolves.
       url?: string;
+      workspaceMember?: {
+        readonly description?: string;
+        readonly name: string;
+        readonly path: string;
+      };
     }
 >;
 
@@ -101,5 +106,13 @@ export const compiledRemoteAgentNodeSchema: z.ZodType<CompiledRemoteAgentNode> =
     sourceId: z.string(),
     sourceKind: z.literal("module"),
     url: z.string().optional(),
+    workspaceMember: z
+      .object({
+        description: z.string().optional(),
+        name: z.string(),
+        path: z.string(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
