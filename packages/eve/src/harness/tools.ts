@@ -216,15 +216,21 @@ export function wrapToolExecute(
   return (input, options) => {
     let output: unknown;
     try {
-      output =
-        definition.execution === "background"
-          ? executeBackgroundToolCall({
-              batch: backgroundBatch,
-              definition: definition as BackgroundExecutableTool,
-              options,
-              toolInput: input,
-            })
-          : execute(input, options);
+      if (definition.execution === "background") {
+        backgroundBatch.register({
+          callId: options.toolCallId,
+          input,
+          toolName: definition.name,
+        });
+        output = executeBackgroundToolCall({
+          batch: backgroundBatch,
+          definition: definition as BackgroundExecutableTool,
+          options,
+          toolInput: input,
+        });
+      } else {
+        output = execute(input, options);
+      }
     } catch (error) {
       return Promise.reject(error);
     }
