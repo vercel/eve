@@ -1,6 +1,7 @@
 packages:
   - apps/*
   - apps/*/*
+  - "!apps/*/.*"
   - e2e/fixtures/*
   - packages/*
 
