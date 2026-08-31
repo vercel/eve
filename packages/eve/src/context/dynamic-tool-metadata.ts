@@ -4,6 +4,7 @@ import type { DurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 interface DynamicToolMetadataBase {
   readonly name: string;
   readonly description: string;
+  readonly execution?: "background";
   readonly inputSchema: JsonObject;
   readonly outputSchema?: JsonObject;
   readonly resolverSlug: string;

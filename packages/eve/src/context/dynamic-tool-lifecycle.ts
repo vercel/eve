@@ -230,6 +230,7 @@ function createMetadata(input: {
   return {
     callbacks: validateDurableDynamicToolCallbacks(input.name, input.entry),
     description: input.entry.description,
+    execution: input.entry.execution === "background" ? "background" : undefined,
     entryKey: input.entryKey,
     inputSchema: serializeInputSchema(input.entry.inputSchema),
     name: input.name,
