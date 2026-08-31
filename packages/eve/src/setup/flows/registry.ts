@@ -398,17 +398,23 @@ export async function runRegistryFlow(input: {
       const categoryItems = itemsForCategory(catalog.items, selectedCategory);
       const rows = itemRows(categoryItems);
       rows.push({ value: BACK, label: "Back", trailingAction: true });
-      const selected = await input.prompter.select<RegistryRow>({
-        message: categoryFor(selectedCategory)?.browseLabel ?? "Browse integrations",
-        options: rows,
-        search: true,
-        placeholder: "Search integrations or enter an item address",
-        searchAction: {
-          label: (query) => `Add “${query}”`,
-          value: (query) => `${ADDRESS_PREFIX}${query.trim()}`,
-        },
-        hintLayout: "inline",
-      });
+      let selected: RegistryRow;
+      try {
+        selected = await input.prompter.select<RegistryRow>({
+          message: categoryFor(selectedCategory)?.browseLabel ?? "Browse integrations",
+          options: rows,
+          search: true,
+          placeholder: "Search integrations or enter an item address",
+          searchAction: {
+            label: (query) => `Add “${query}”`,
+            value: (query) => `${ADDRESS_PREFIX}${query.trim()}`,
+          },
+          hintLayout: "inline",
+        });
+      } catch (error) {
+        if (error instanceof WizardCancelledError) continue;
+        throw error;
+      }
       if (selected === BACK) continue;
       const resolved = selected.startsWith(ADDRESS_PREFIX)
         ? await resolveAddressItem(

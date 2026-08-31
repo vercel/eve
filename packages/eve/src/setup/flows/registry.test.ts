@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
+import { WizardCancelledError } from "#setup/step.js";
+
 import { RegistryFlowFailedError, runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 
 const APP_ROOT = "/tmp/agent";
@@ -597,6 +599,26 @@ describe("runRegistryFlow", () => {
   it("returns to the category hub from a registry list", async () => {
     const answers = ["category:channel", "action:back", "action:done"];
     const fake = createFakePrompter({ single: () => answers.shift()! });
+
+    await expect(
+      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
+    ).resolves.toEqual({ kind: "done", addedItems: [], items: [], facts: [], output: [] });
+
+    expect(fake.selectMessages).toEqual([
+      "Add an integration",
+      "Browse channels",
+      "Add an integration",
+    ]);
+  });
+
+  it("returns to the category hub when the registry list is cancelled", async () => {
+    const answers = ["category:channel", "action:done"];
+    const fake = createFakePrompter({
+      single: (options) => {
+        if (options.message === "Browse channels") throw new WizardCancelledError();
+        return answers.shift()!;
+      },
+    });
 
     await expect(
       runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
