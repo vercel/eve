@@ -2166,6 +2166,57 @@ describe("EveTUIRunner failure rendering", () => {
   });
 });
 
+describe("EveTUIRunner empty delivery", () => {
+  it("clears streamed sentinel text when completion suppresses delivery", async () => {
+    const prompts: Array<string | undefined> = ["wait for the task", undefined];
+    const emitted: AgentTUIStreamEvent[] = [];
+    const session = sessionYielding([
+      { type: "step.started", data: { sequence: 0, stepIndex: 0, turnId: "t0" } },
+      {
+        type: "message.appended",
+        data: {
+          messageDelta: "<eve-empty-delivery/>",
+          messageSoFar: "<eve-empty-delivery/>",
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t0",
+        },
+      },
+      {
+        type: "message.completed",
+        data: {
+          finishReason: "stop",
+          message: null,
+          sequence: 0,
+          stepIndex: 0,
+          turnId: "t0",
+        },
+      },
+      { type: "turn.completed", data: { sequence: 0, turnId: "t0" } },
+      {
+        type: "session.waiting",
+        data: { continuationToken: "session-id", wait: "next-user-message" },
+      },
+    ]);
+    const renderer: AgentTUIRenderer = {
+      readPrompt: vi.fn(async () => prompts.shift()),
+      renderStream: vi.fn(async (result) => {
+        for await (const event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          emitted.push(event);
+        }
+      }),
+    };
+
+    await new EveTUIRunner({ session, renderer, name: "Weather Agent" }).run();
+
+    expect(emitted).toContainEqual({
+      id: "text:t0:0",
+      text: null,
+      type: "assistant-complete",
+    });
+  });
+});
+
 describe("EveTUIRunner reused step indexes", () => {
   it("renders the post-subagent message that the harness emits under a reused stepIndex", async () => {
     // Mirrors the real parent stream around a subagent dispatch: the second
