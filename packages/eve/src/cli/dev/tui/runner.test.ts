@@ -3227,7 +3227,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     await runner.run();
 
-    expect(order).toEqual(["vc:install", "vc:login", "model", "add", "prompt"]);
+    expect(order).toEqual(["vc:install", "vc:login", "model", "prompt"]);
     expect(results).toContain("/model failed: provider unavailable");
     expect(handle).toHaveBeenNthCalledWith(
       1,
@@ -3248,10 +3248,92 @@ describe("EveTUIRunner boot setup detection", () => {
         keepSetupFlowOpen: true,
       }),
     );
-    expect(handle).toHaveBeenCalledWith(
+    expect(handle).not.toHaveBeenCalledWith(
       { type: "extension", name: "add", argument: "" },
-      expect.objectContaining({ initialRegistryScreen: "channels" }),
+      expect.anything(),
     );
+  });
+
+  it("returns from Channels to Model without losing the planner draft", async () => {
+    const order: string[] = [];
+    const addSelections = [["channel/web"], undefined] as const;
+    let addCall = 0;
+    const handle = vi.fn(async (command: { name: string }) => {
+      order.push(command.name);
+      if (command.name === "model") return { message: "Model ready" };
+      const selected = addSelections[addCall++];
+      return selected === undefined
+        ? { message: "Agent ready" }
+        : {
+            message: "",
+            navigation: {
+              kind: "back-before-registry" as const,
+              selectedAddresses: selected,
+            },
+          };
+    });
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => {
+        order.push("prompt");
+        return undefined;
+      }),
+      setupFlow: createFakeSetupFlowRenderer(),
+    });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      onboard: true,
+      bootDetections: [],
+      getVercelAuthStatus: vi.fn(async () => "authenticated" as const),
+      promptCommandHandler: { handle },
+    });
+
+    await runner.run();
+
+    expect(order).toEqual(["model", "add", "model", "add", "prompt"]);
+    expect(handle).toHaveBeenNthCalledWith(
+      4,
+      { type: "extension", name: "add", argument: "" },
+      expect.objectContaining({
+        initialRegistryAddresses: ["channel/web"],
+        initialRegistryScreen: "channels",
+      }),
+    );
+    expect(handle).toHaveBeenNthCalledWith(
+      3,
+      { type: "extension", name: "model", argument: "" },
+      expect.objectContaining({ allowUnchangedModelCompletion: true }),
+    );
+  });
+
+  it("does not render a detached /add dismissed result when onboarding is cancelled", async () => {
+    const renderCommandResult = vi.fn();
+    const renderer = fakeRenderer({
+      readPrompt: vi.fn(async () => undefined),
+      renderCommandResult,
+      setupFlow: createFakeSetupFlowRenderer(),
+    });
+    const runner = new EveTUIRunner({
+      session: sessionYielding([]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      onboard: true,
+      bootDetections: [],
+      getVercelAuthStatus: vi.fn(async () => "authenticated" as const),
+      promptCommandHandler: {
+        handle: async (command) =>
+          command.name === "model"
+            ? { message: "Model ready" }
+            : { message: "/add dismissed.", cancelled: true as const },
+      },
+    });
+
+    await runner.run();
+
+    expect(renderCommandResult).not.toHaveBeenCalledWith("/add dismissed.", expect.anything());
   });
 
   it("continues onboarding when Vercel CLI installation leaves the CLI unavailable", async () => {
@@ -3360,7 +3442,6 @@ describe("EveTUIRunner boot setup detection", () => {
     });
     expect(headers.map((header) => header.info?.agent.model.endpoint)).toEqual([
       { kind: "gateway", connected: false },
-      { kind: "gateway", connected: true, credential: "api-key" },
     ]);
   });
 
@@ -3394,7 +3475,7 @@ describe("EveTUIRunner boot setup detection", () => {
 
     expect(client.info).toHaveBeenCalledTimes(2);
     expect(detect.mock.calls.at(-1)?.[0].info).toBeUndefined();
-    expect(headers.at(-1)?.info).toBeUndefined();
+    expect(headers.at(-1)?.info).toBe(disconnectedGatewayInfo);
   });
 
   it("stays quiet without a local setup context, even with issues", async () => {

@@ -52,6 +52,38 @@ describe("renderFlowPanel", () => {
     expect(text).toContain("   ▷ Create a new project");
   });
 
+  it("keeps enclosing journey progress visible above nested content", () => {
+    const text = renderFlowPanel(
+      {
+        title: "Set up Weather Agent",
+        navigation: {
+          kind: "planner",
+          activeStep: 0,
+          steps: [
+            { label: "Model" },
+            { label: "Channels" },
+            { label: "Integrations" },
+            { label: "Review" },
+          ],
+        },
+        lines: [],
+        content: {
+          kind: "status",
+          status: {
+            kind: "progress",
+            text: "Checking the project…",
+            indicator: { glyph: "▪", color: "green" },
+          },
+        },
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain(" Model   ·  Channels  ·  Integrations  ·  Review");
+    expect(text).toContain("Checking the project…");
+  });
+
   it("renders multiline diagnostics as separate terminal rows", () => {
     const rows = renderFlowPanel(
       {
@@ -890,9 +922,12 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("Telegram");
   });
 
-  it("renders planner progress and navigation without a Submit row", () => {
-    const options = [{ value: "web", label: "Web Chat", hint: "Built-in chat UI" }];
-    const text = renderSelectQuestion(
+  it("renders planner progress, selection state, and navigation without a Submit row", () => {
+    const options = [
+      { value: "web", label: "Web Chat" },
+      { value: "slack", label: "Slack" },
+    ];
+    const rows = renderSelectQuestion(
       {
         kind: "searchable-multi",
         navigation: PLANNER_NAVIGATION,
@@ -902,14 +937,17 @@ describe("renderSelectQuestion", () => {
       },
       colorTheme,
       80,
-    ).join("\n");
-    const plain = stripAnsi(text);
+    );
+    const plain = stripAnsi(rows.join("\n"));
 
-    expect(text).toContain(
+    expect(rows.join("\n")).toContain(
       colorTheme.colors.inverse(colorTheme.colors.blue(colorTheme.colors.bold(" Channels (1) "))),
     );
-    expect(plain).toContain("1 selected");
-    expect(plain).toContain("enter / → next · ← back");
+    expect(rows).toContain(
+      `  ${colorTheme.colors.inverse(colorTheme.colors.blue(" ✓ Web Chat "))}`,
+    );
+    expect(plain).toContain("◦ Slack");
+    expect(plain).toContain("space toggle · ←/→ back/next");
     expect(plain).not.toContain("Submit");
   });
 

@@ -15,6 +15,7 @@ import {
 import { withSpinner } from "../with-spinner.js";
 
 import type { ProviderSelection } from "#setup/provider-settings.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
 
 import { runLinkFlow } from "./link.js";
 
@@ -85,9 +86,10 @@ function projectConnectionOption(
 function providerOptions(
   authStatus: VercelAuthStatus | undefined,
   selectedProvider: ProviderSelection,
+  selectionExplicit: boolean,
 ): SelectOption<ProviderConnection>[] {
   let project = projectConnectionOption(authStatus);
-  if (selectedProvider === "ai-gateway-project") {
+  if (selectionExplicit && selectedProvider === "ai-gateway-project") {
     project = { ...project, checked: true, hint: "Current" };
   }
 
@@ -96,7 +98,7 @@ function providerOptions(
     label: `AI Gateway via ${AI_GATEWAY_API_KEY_ENV_VAR}`,
     hint: "⎿ type your key",
   };
-  if (selectedProvider === "ai-gateway-key") {
+  if (selectionExplicit && selectedProvider === "ai-gateway-key") {
     gatewayKey = { ...gatewayKey, checked: true, hint: "Current" };
   }
 
@@ -106,8 +108,11 @@ function providerOptions(
     {
       value: "chatgpt",
       label: "ChatGPT subscription",
-      hint: selectedProvider === "chatgpt" ? "Current" : "Authenticate through the Codex CLI",
-      checked: selectedProvider === "chatgpt" || undefined,
+      hint:
+        selectionExplicit && selectedProvider === "chatgpt"
+          ? "Current"
+          : "Authenticate through the Codex CLI",
+      checked: (selectionExplicit && selectedProvider === "chatgpt") || undefined,
     },
     {
       value: "external",
@@ -155,6 +160,10 @@ export async function runProviderFlow(input: {
   availableProviders: readonly ProviderSelection[];
   /** The current provider selection. */
   selectedProvider: ProviderSelection;
+  /** Whether that selection was explicitly persisted rather than inferred from available access. */
+  selectionExplicit?: boolean;
+  /** Interactive caller recovery that resumes project linking after Vercel repair. */
+  recoverHumanAction?: (error: HumanActionRequiredError) => Promise<"retry" | "cancel">;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -177,7 +186,7 @@ export async function runProviderFlow(input: {
     while (true) {
       const choice = await selectProvider({
         picker: input.picker,
-        options: providerOptions(authStatus, selectedProvider),
+        options: providerOptions(authStatus, selectedProvider, input.selectionExplicit !== false),
         initialValue,
         validateInlineKey: (key, validationSignal) =>
           deps.validateGatewayApiKey(
@@ -215,23 +224,62 @@ export async function runProviderFlow(input: {
         return choice;
       }
 
-      const auth = await withSpinner(prompter, "Checking your Vercel login…", () =>
-        deps.getVercelAuthStatus(appRoot, { signal }),
-      );
-      signal?.throwIfAborted();
-      authStatus = auth;
-      if (vercelAuthBlockerReason(authStatus) !== undefined) {
-        initialValue = "ai-gateway-key";
-        continue;
+      while (true) {
+        const auth = await withSpinner(prompter, "Checking your Vercel login…", () =>
+          deps.getVercelAuthStatus(appRoot, { signal }),
+        );
+        signal?.throwIfAborted();
+        authStatus = auth;
+        if (auth === "authenticated") break;
+        const actionKind =
+          auth === "cli-missing"
+            ? "vercel-cli-missing"
+            : auth === "logged-out"
+              ? "vercel-login"
+              : undefined;
+        if (actionKind === undefined || input.recoverHumanAction === undefined) {
+          initialValue = "ai-gateway-key";
+          break;
+        }
+        const recovery = await input.recoverHumanAction(
+          new HumanActionRequiredError({
+            kind: actionKind,
+            command: auth === "cli-missing" ? "npm i -g vercel@latest" : "vercel login",
+            reason:
+              auth === "cli-missing"
+                ? "AI Gateway via Project requires the Vercel CLI."
+                : "AI Gateway via Project requires a Vercel login.",
+          }),
+        );
+        if (recovery === "cancel") {
+          initialValue = "ai-gateway-key";
+          break;
+        }
       }
-      const result = await deps.runLinkFlow({
-        appRoot,
-        prompter,
-        signal,
-        projectSelection: "create-or-link",
-      });
-      if (result.kind === "cancelled") return result;
-      return { kind: "ai-gateway-project" };
+      if (authStatus !== "authenticated") continue;
+      while (true) {
+        try {
+          const result = await deps.runLinkFlow({
+            appRoot,
+            prompter,
+            signal,
+            projectSelection: "create-or-link",
+          });
+          if (result.kind === "cancelled") return result;
+          return { kind: "ai-gateway-project" };
+        } catch (error) {
+          if (
+            !(error instanceof HumanActionRequiredError) ||
+            input.recoverHumanAction === undefined
+          ) {
+            throw error;
+          }
+          if ((await input.recoverHumanAction(error)) === "cancel") {
+            initialValue = "ai-gateway-key";
+            break;
+          }
+        }
+      }
     }
   } catch (error) {
     if (error instanceof WizardCancelledError) return { kind: "cancelled" };

@@ -422,6 +422,15 @@ describe("settling", () => {
     });
   });
 
+  it("lets an enclosing journey continue with Right Arrow from Done", () => {
+    const req = request();
+    const state = toDone(req, initialModelEditorState(req));
+    expect(transitionModelEditor(state, { type: "adjust", direction: "right" }, req)).toEqual({
+      kind: "settle",
+      result: {},
+    });
+  });
+
   it("settles with an empty result when nothing changed", () => {
     const req = request();
     const state = toDone(req, initialModelEditorState(req));
