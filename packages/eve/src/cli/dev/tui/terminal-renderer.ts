@@ -17,6 +17,7 @@ import type {
   SubagentView,
   SubagentToolUpdate,
 } from "./runner.js";
+import type { RegistryResultReportEntry } from "./registry-result-message.js";
 import { interruptedError } from "./errors.js";
 import {
   dismissTypeahead,
@@ -1801,6 +1802,30 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#paint();
   }
 
+  renderRegistryResult(entries: readonly RegistryResultReportEntry[]): void {
+    if (entries.length === 0) return;
+    this.#start();
+    for (const entry of entries) {
+      this.#pushBlock({
+        kind: "command",
+        body: entry.title,
+        live: false,
+        ...(entry.status === "error" ? { status: "error" } : {}),
+      });
+      const body = [
+        ...(entry.lines.length > 0 ? entry.lines : ["Installed."]),
+        ...(entry.detail === undefined ? [] : ["", entry.detail]),
+      ].join("\n");
+      this.#pushBlock({
+        kind: "result",
+        body,
+        live: false,
+        ...(entry.status === "success" ? { status: "done" } : {}),
+      });
+    }
+    this.#paint();
+  }
+
   /**
    * Opens the bordered flow panel for one setup command. Until the flow ends,
    * every flow line, question, and status renders inside it; the transcript
@@ -1882,7 +1907,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const initial: Parameters<typeof initialSelectState>[0] = {
       options: selectOptions,
       searchAction,
-      submitRow: multiple,
+      submitRow: multiple && opts.plannerNavigation !== true,
     };
     if ("initialValue" in opts && opts.initialValue !== undefined) {
       initial.defaultValue = opts.initialValue;
@@ -1905,7 +1930,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         {
           options: selectOptions,
           searchAction,
-          submitRow: multiple,
+          submitRow: multiple && opts.plannerNavigation !== true,
         },
       );
       this.#paint();
@@ -1926,7 +1951,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const filter = select.filter;
         selectOptions = options;
         select = {
-          ...initialSelectState({ options, searchAction, submitRow: multiple }),
+          ...initialSelectState({
+            options,
+            searchAction,
+            submitRow: multiple && opts.plannerNavigation !== true,
+          }),
           filter,
         };
       } catch (reason) {
@@ -1975,9 +2004,19 @@ export class TerminalRenderer implements AgentTUIRenderer {
         return;
       }
 
+      if ((opts.plannerNavigation === true || opts.plannerBack === true) && key.type === "left") {
+        close(undefined);
+        return;
+      }
+
       const base = { key, options: selectOptions, searchAction, select };
       const result = multiple
-        ? reduceSetupSelectInput({ ...base, kind: opts.kind, required: opts.required })
+        ? reduceSetupSelectInput({
+            ...base,
+            kind: opts.kind,
+            required: opts.required,
+            plannerNavigation: opts.plannerNavigation,
+          })
         : reduceSetupSelectInput({ ...base, kind: opts.kind });
       switch (result.kind) {
         case "cancel":

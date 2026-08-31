@@ -17,10 +17,22 @@ export interface RegistrySessionItemResult {
   output: readonly string[];
 }
 
+/** An item the user chose to skip after its installation could not complete. */
+export interface RegistrySessionItemFailure {
+  address: string;
+  title: string;
+  /** Concise error shown while the setup panel asks whether to skip the item. */
+  message: string;
+  /** Full diagnostic preserved for the permanent setup report. */
+  detail: string;
+}
+
 export interface RegistrySessionResult {
   kind: "done";
   addedItems: readonly string[];
   items: readonly RegistrySessionItemResult[];
+  /** Installation failures retained when a user skips an item. */
+  failures: readonly RegistrySessionItemFailure[];
   facts: readonly RegistrySetupFact[];
   output: readonly string[];
   deployed?: "production";
@@ -33,18 +45,20 @@ export interface RegistrySession {
     output: readonly string[],
     setup?: RegistrySetupCompletion,
   ): void;
+  addFailure(item: string, title: string, message: string, detail: string): void;
   result(deployed?: "production"): RegistrySessionResult;
   continueAfterInstall(input: {
     appRoot: string;
     prompter: Prompter;
     signal?: AbortSignal;
-  }): Promise<"add-more" | RegistrySessionResult>;
+  }): Promise<RegistrySessionResult>;
 }
 
 /** Owns the accumulated output and deployment decision for one `/add` session. */
 export function createRegistrySession(deps: RegistrySessionDeps): RegistrySession {
   const addedItems: string[] = [];
   const items: RegistrySessionItemResult[] = [];
+  const failures: RegistrySessionItemFailure[] = [];
   const output: string[] = [];
   let completion: RegistrySetupCompletion = { facts: [] };
   let currentItem = "";
@@ -55,6 +69,7 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
       kind: "done",
       addedItems,
       items,
+      failures,
       facts: completion.facts,
       output,
     };
@@ -72,6 +87,10 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
       completion = mergeRegistrySetupCompletions(completion, setup);
     },
 
+    addFailure(item, title, message, detail) {
+      failures.push({ address: item, title, message, detail });
+    },
+
     result,
 
     async continueAfterInstall(input) {
@@ -84,20 +103,15 @@ export function createRegistrySession(deps: RegistrySessionDeps): RegistrySessio
         facts: currentFacts,
       });
       while (true) {
-        const action = await input.prompter.select<"deploy" | "add-more" | "finish">({
+        const action = await input.prompter.select<"deploy" | "finish">({
           message: "What would you like to do next?",
-          initialValue: "add-more",
+          initialValue: "finish",
           hintLayout: "inline",
           options: [
-            { value: "add-more", label: "Add more" },
             ...(canDeploy ? [{ value: "deploy" as const, label: "Deploy" }] : []),
-            { value: "finish", label: "Finish" },
+            { value: "finish", label: "Start chatting" },
           ],
         });
-        if (action === "add-more") {
-          input.prompter.replaceContent?.();
-          return "add-more";
-        }
         if (action === "finish") return result();
 
         const confirmed = await input.prompter.select<"yes" | "back">({

@@ -418,6 +418,22 @@ describe("eve dev --input", () => {
     ).rejects.toThrow("--input requires the interactive UI");
   });
 
+  it("forwards the internal init onboarding handoff to the local TUI", async () => {
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "existing" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:4321/",
+      }),
+      close: async () => {},
+    }));
+    const runDevelopmentTui = await runInteractiveDev(["dev", "--onboard"], { startHost });
+
+    expect(runDevelopmentTui).toHaveBeenCalledWith(
+      expect.objectContaining({ initialOnboarding: "agent" }),
+    );
+  });
+
   it("rejects the option with explicit --no-ui", async () => {
     await expect(
       runCli(["dev", "--input", "/model", "--no-ui"], {

@@ -1651,6 +1651,32 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
   });
 
+  it("renders each initial registry item as its own durable elbow result", () => {
+    const { screen, renderer } = makeRenderer();
+    renderer.renderRegistryResult([
+      {
+        title: "Telegram",
+        status: "success",
+        lines: ["Installed."],
+      },
+      {
+        title: "Slack",
+        status: "error",
+        lines: ["pnpm add failed."],
+        detail: "Error: pnpm add failed.\n    at installSlack (setup.ts:42:7)",
+      },
+    ]);
+    renderer.shutdown();
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Telegram");
+    expect(snapshot).toContain("⎿  ✓ Installed.");
+    expect(snapshot).toContain("⨯ Slack");
+    expect(snapshot).toContain("⎿  pnpm add failed.");
+    expect(snapshot).toContain("at installSlack (setup.ts:42:7)");
+    expect(screen.rawOutput()).toContain("\u001b[2m    at installSlack");
+  });
+
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/vc:login", "failed");
@@ -3764,8 +3790,26 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("toggles a multi-select with space and confirms from the Submit row", async () => {
-    const { input, renderer } = makeRenderer();
+  it("returns from a planner review with Left Arrow instead of selecting an action", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      plannerBack: true,
+      message: "Review your agent",
+      options: [
+        { value: "install", label: "Install and set up" },
+        { value: "back", label: "Back" },
+      ],
+    });
+
+    expect(screen.snapshot()).toContain("enter to select · ← / esc back");
+    input.left();
+    await expect(answer).resolves.toBeUndefined();
+    renderer.shutdown();
+  });
+
+  it("renders a compact checklist and confirms selected entries from Submit", async () => {
+    const { screen, input, renderer } = makeRenderer();
 
     const answer = renderer.setupFlow.readSelect({
       kind: "multi",
@@ -3777,11 +3821,46 @@ describe("TerminalRenderer setup panel", () => {
       required: true,
     });
 
+    const snapshot = screen.snapshot();
+    expect(snapshot).toContain("Select channels");
+    expect(snapshot).toContain("▶ Web Chat");
+    expect(snapshot).toContain("◦ Slack");
+    expect(snapshot).toContain("Submit");
+    expect(snapshot).toContain("space to toggle · enter on Submit to confirm");
+
     input.type(" ");
+    expect(screen.snapshot()).toContain("✓ Web Chat");
     input.down();
     input.down();
     input.enter();
     await expect(answer).resolves.toEqual(["web"]);
+    renderer.shutdown();
+  });
+
+  it("keeps a compact planner checklist usable in a short terminal and clears its filter before backing out", async () => {
+    const { screen, input, renderer } = makeRenderer(80, 12);
+    const answer = renderer.setupFlow.readSelect({
+      kind: "searchable-multi",
+      plannerNavigation: true,
+      plannerContinue: "integrations",
+      message: "Where should people reach your agent?",
+      options: [
+        { value: "web", label: "Web Chat", hint: "Built-in chat UI" },
+        { value: "slack", label: "Slack", hint: "Slack workspace" },
+        { value: "github", label: "GitHub", hint: "Issues and pull requests" },
+      ],
+      placeholder: "Search channels",
+      required: false,
+    });
+
+    expect(screen.snapshot()).toContain("Where should people reach your agent?");
+    expect(screen.snapshot()).toContain("space toggle · enter integrations · ← / esc back");
+    input.type("sla");
+    expect(screen.snapshot()).toContain("Slack");
+    input.send("\x1b");
+    await vi.waitFor(() => expect(screen.snapshot()).toContain("Web Chat"));
+    input.send("\x1b");
+    await expect(answer).resolves.toBeUndefined();
     renderer.shutdown();
   });
 

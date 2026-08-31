@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
-import { WizardCancelledError } from "#setup/step.js";
 
-import { RegistryFlowFailedError, runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
+import { runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 
 const APP_ROOT = "/tmp/agent";
 
@@ -12,23 +11,22 @@ function deps(overrides: Partial<RegistryFlowDeps> = {}): RegistryFlowDeps {
     browseRegistryCatalog: vi.fn(async () => ({
       items: [
         {
-          address: "extension/agent-browser",
-          name: "extension/agent-browser",
-          type: "registry:item",
-          description: "Browser automation",
+          address: "channel/web",
+          name: "channel/web",
+          title: "Web Chat",
+          description: "A chat UI for your agent",
+          source: "Vercel",
+        },
+        {
+          address: "connection/linear",
+          name: "connection/linear",
+          title: "Linear",
+          description: "Issue tracking",
           source: "Vercel",
         },
       ],
-      total: 1,
+      total: 2,
       errors: [],
-    })),
-    getRegistryItemManifest: vi.fn(async () => ({
-      name: "extension/agent-browser",
-      title: "agent-browser",
-      description: "Browser automation",
-      dependencies: ["@agent-browser/eve"],
-      envVars: { AGENT_BROWSER_TOKEN: "" },
-      files: [{ target: "agent/extensions/browser.ts" }],
     })),
     installRegistryItem: vi.fn(async () => ({ output: [] })),
     detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
@@ -38,491 +36,237 @@ function deps(overrides: Partial<RegistryFlowDeps> = {}): RegistryFlowDeps {
 }
 
 describe("runRegistryFlow", () => {
-  it("browses a category, shows an item's manifest details, and exits after installing", async () => {
-    const answers = ["category:extension", "item:0", "add"];
+  it("plans channels and integrations together, then installs the full plan in order", async () => {
+    const answers = ["install"];
+    const selections = [["channel/web"], ["connection/linear"]];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+    const flowDeps = deps();
+    const starts: string[] = [];
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: flowDeps,
+        onItemStart: (item, index, total) => starts.push(`${item.address}:${index + 1}/${total}`),
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      result: {
+        kind: "done",
+        addedItems: ["channel/web", "connection/linear"],
+        items: [
+          { address: "channel/web", title: "Web Chat", facts: [], output: [] },
+          { address: "connection/linear", title: "Linear", facts: [], output: [] },
+        ],
+        failures: [],
+        facts: [],
+        output: [],
+      },
+    });
+
+    expect(starts).toEqual(["channel/web:1/2", "connection/linear:2/2"]);
+    expect(flowDeps.installRegistryItem).toHaveBeenNthCalledWith(
+      1,
+      APP_ROOT,
+      "channel/web",
+      expect.objectContaining({ silent: true, prompter: fake.prompter }),
+    );
+    expect(flowDeps.installRegistryItem).toHaveBeenNthCalledWith(
+      2,
+      APP_ROOT,
+      "connection/linear",
+      expect.objectContaining({ silent: true, prompter: fake.prompter }),
+    );
+  });
+
+  it("lets the user browse, retain selections, and review the plan before installing", async () => {
+    const answers = ["install"];
     const prompts: unknown[] = [];
     const fake = createFakePrompter({
       single: (options) => {
         prompts.push(options);
         return answers.shift()!;
       },
+      multiple: (options) => {
+        prompts.push(options);
+        return options.message === "What should your agent be able to work with?"
+          ? ["connection/linear"]
+          : [];
+      },
     });
-    const flowDeps = deps();
 
-    await expect(
-      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
-    ).resolves.toEqual({
-      kind: "done",
-      addedItems: ["extension/agent-browser"],
-      items: [
-        {
-          address: "extension/agent-browser",
-          title: "Agent Browser",
-          facts: [],
-          output: ["Environment: AGENT_BROWSER_TOKEN"],
-        },
-      ],
-      facts: [],
-      output: ["Environment: AGENT_BROWSER_TOKEN"],
-    });
-    expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
-      APP_ROOT,
-      "extension/agent-browser",
-      expect.objectContaining({ silent: true, prompter: fake.prompter }),
-    );
+    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() });
+
     expect(prompts[0]).toMatchObject({
-      message: "Add an integration",
-      hintLayout: "inline",
-      options: expect.arrayContaining([
-        expect.objectContaining({
-          value: "category:channel",
-          label: "Channels",
-          hint: "Where people talk to your agent — Web, Slack, Discord, Teams",
-        }),
-        expect.objectContaining({
-          value: "category:connection",
-          label: "MCP connections",
-          hint: "Connect services like Linear, Notion, GitHub, and Vercel",
-        }),
-        expect.objectContaining({
-          value: "category:extension",
-          label: "Extensions",
-          hint: "Add browser automation, memory, and developer tools",
-        }),
-        expect.objectContaining({
-          value: "category:instrumentation",
-          label: "Observability",
-          hint: "Trace, evaluate, and monitor your agent",
-        }),
-        expect.objectContaining({ value: "category:all", label: "Browse all" }),
-        expect.objectContaining({ value: "action:done", label: "Return to chat" }),
-      ]),
+      message: "Where should people reach your agent?",
+      description: "You can add more later with /add.",
+      multiple: true,
+      search: true,
+      placeholder: "Search channels",
     });
     expect(prompts[1]).toMatchObject({
-      message: "Browse extensions",
-      options: [
-        expect.objectContaining({
-          label: "Agent Browser",
-          hint: "Browser automation",
-        }),
-        expect.objectContaining({ value: "action:back", label: "Back" }),
-      ],
+      message: "What should your agent be able to work with?",
+      multiple: true,
+      search: true,
+      placeholder: "Search integrations",
     });
     expect(prompts[2]).toMatchObject({
-      message: "agent-browser",
-      description: "Browser automation",
-      metadata: [
-        { label: "Source", value: "Vercel" },
-        { label: "Packages", value: "@agent-browser/eve" },
-        { label: "Environment", value: "AGENT_BROWSER_TOKEN" },
-        { label: "Files", value: "agent/extensions/browser.ts" },
-      ],
+      message: "Review your agent",
+      plannerBack: true,
+      metadata: [{ label: "Integration", value: "Linear" }],
       options: [
-        { value: "add", label: "Add to project" },
+        { value: "install", label: "Install and set up" },
         { value: "back", label: "Back" },
       ],
     });
   });
 
-  it("prints an installed registry item's environment and documentation", async () => {
-    const answers = ["category:extension", "item:0", "add"];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
-
-    await expect(
-      runRegistryFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        deps: deps({
-          getRegistryItemManifest: vi.fn(async () => ({
-            description: "Browser automation",
-            envVars: { BROWSER_TOKEN: "", BROWSER_URL: "" },
-            meta: { eve: { docs: "/integrations/browser" } },
-            name: "extension/agent-browser",
-          })),
-        }),
-      }),
-    ).resolves.toMatchObject({
-      items: [
-        {
-          output: [
-            "Environment: BROWSER_TOKEN, BROWSER_URL",
-            "Setup: https://eve.dev/integrations/browser",
-          ],
-        },
-      ],
-    });
-  });
-
-  it("uses the registry title when labeling an item", async () => {
-    const answers = ["category:channel", "action:back", "action:done"];
+  it("puts curated choices first while preserving registry order for the remaining entries", async () => {
     const prompts: unknown[] = [];
     const fake = createFakePrompter({
-      single: (options) => {
+      multiple: (options) => {
         prompts.push(options);
-        return answers.shift()!;
+        return [];
       },
     });
-    const flowDeps = deps({
-      browseRegistryCatalog: vi.fn(async () => ({
-        items: [
-          {
-            address: "channel/photon-imessage",
-            name: "channel/photon-imessage",
-            title: "Photon",
-            source: "Vercel",
-          },
-        ],
-        total: 1,
-        errors: [],
-      })),
-    });
-
-    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
-
-    expect(prompts[1]).toMatchObject({
-      options: expect.arrayContaining([expect.objectContaining({ label: "Photon" })]),
-    });
-  });
-
-  it("keeps setup on the parent prompter without leasing the terminal", async () => {
-    const answers = ["category:channel", "item:0", "add"];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
-    const inherited = vi.fn(async (task: () => Promise<unknown>): Promise<unknown> => task());
-    fake.prompter.withInheritedStdio = <T>(task: () => Promise<T>): Promise<T> =>
-      inherited(task) as Promise<T>;
-    fake.prompter.withExclusiveTerminal = <T>(task: () => Promise<T>): Promise<T> => task();
-    const flowDeps = deps({
-      browseRegistryCatalog: vi.fn(async () => ({
-        items: [{ address: "channel/slack", name: "channel/slack", source: "Vercel" }],
-        total: 1,
-        errors: [],
-      })),
-    });
-
-    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
-
-    expect(inherited).not.toHaveBeenCalled();
-    expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
-      APP_ROOT,
-      "channel/slack",
-      expect.objectContaining({ prompter: fake.prompter }),
-    );
-  });
-
-  it("summarizes long package, environment, and file lists", async () => {
-    const answers = ["category:channel", "item:0", "add"];
-    const prompts: unknown[] = [];
-    const fake = createFakePrompter({
-      single: (options) => {
-        prompts.push(options);
-        return answers.shift()!;
-      },
-    });
-    const flowDeps = deps({
-      browseRegistryCatalog: vi.fn(async () => ({
-        items: [
-          {
-            address: "channel/web",
-            name: "channel/web",
-            source: "Vercel",
-          },
-        ],
-        total: 1,
-        errors: [],
-      })),
-      getRegistryItemManifest: vi.fn(async () => ({
-        dependencies: ["next", "react", "react-dom", "streamdown", "tailwindcss"],
-        envVars: { FIRST: "", SECOND: "", THIRD: "", FOURTH: "" },
-        files: ["one", "two", "three", "four", "five"].map((target) => ({ target })),
-      })),
-    });
-
-    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
-
-    expect(prompts[2]).toMatchObject({
-      metadata: [
-        { label: "Source", value: "Vercel" },
-        { label: "Packages", value: "next, react, react-dom … (+2 more)" },
-        { label: "Environment", value: "FIRST, SECOND, THIRD … (+1 more)" },
-        { label: "Files", value: "one, two, three … (+2 more)" },
-      ],
-    });
-  });
-
-  it("omits external registry sources from result rows", async () => {
-    const answers = ["category:extension", "action:back", "action:done"];
-    const prompts: unknown[] = [];
-    const fake = createFakePrompter({
-      single: (options) => {
-        prompts.push(options);
-        return answers.shift()!;
-      },
-    });
-    const flowDeps = deps({
-      browseRegistryCatalog: vi.fn(async () => ({
-        items: [
-          {
-            address: "@acme/analytics",
-            name: "extension/analytics",
-            description: "Product analytics",
-            source: "@acme",
-          },
-        ],
-        total: 1,
-        errors: [],
-      })),
-    });
-
-    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
-
-    expect(prompts[1]).toMatchObject({
-      options: [
-        expect.objectContaining({
-          label: "Analytics",
-          hint: "Product analytics",
-        }),
-        expect.objectContaining({ value: "action:back" }),
-      ],
-    });
-  });
-
-  it("resolves a direct address before offering installation", async () => {
-    const answers = ["category:all", "address:@acme/analytics", "add"];
-    const prompts: unknown[] = [];
-    const fake = createFakePrompter({
-      single: (options) => {
-        prompts.push(options);
-        return answers.shift()!;
-      },
-    });
-    const flowDeps = deps({
-      getRegistryItemManifest: vi.fn(async () => ({
-        name: "analytics",
-        description: "Analytics integration",
-      })),
-    });
-
-    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
-
-    expect(prompts[1]).toMatchObject({
-      placeholder: "Search integrations or enter an item address",
-      searchAction: { label: expect.any(Function), value: expect.any(Function) },
-    });
-    const searchAction = (prompts[1] as { searchAction: { label(query: string): string } })
-      .searchAction;
-    expect(searchAction.label("@acme/analytics")).toBe("Add “@acme/analytics”");
-    expect(flowDeps.getRegistryItemManifest).toHaveBeenCalledWith(APP_ROOT, "@acme/analytics");
-    expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
-      APP_ROOT,
-      "@acme/analytics",
-      expect.objectContaining({ silent: true, prompter: fake.prompter }),
-    );
-  });
-
-  it("opens an initial address without the category or search screens", async () => {
-    const answers = ["add"];
-    const prompts: unknown[] = [];
-    const fake = createFakePrompter({
-      single: (options) => {
-        prompts.push(options);
-        return answers.shift()!;
-      },
-    });
-    const flowDeps = deps({
-      getRegistryItemManifest: vi.fn(async () => ({
-        name: "channel/slack",
-        title: "Slack",
-        description: "Talk to your agent in Slack",
-        dependencies: ["@slack/web-api"],
-      })),
-    });
-
-    await expect(
-      runRegistryFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        initialAddress: "channel/slack",
-        deps: flowDeps,
-      }),
-    ).resolves.toEqual({
-      kind: "done",
-      addedItems: ["channel/slack"],
-      items: [{ address: "channel/slack", title: "Slack", facts: [], output: [] }],
-      facts: [],
-      output: [],
-    });
-    expect(flowDeps.browseRegistryCatalog).not.toHaveBeenCalled();
-    expect(flowDeps.getRegistryItemManifest).toHaveBeenCalledWith(APP_ROOT, "channel/slack");
-    expect(prompts).toHaveLength(1);
-    expect(prompts[0]).toMatchObject({
-      message: "Slack",
-      description: "Talk to your agent in Slack",
-      metadata: [
-        { label: "Source", value: "Vercel" },
-        { label: "Packages", value: "@slack/web-api" },
-      ],
-      options: [
-        { value: "add", label: "Add to project" },
-        { value: "back", label: "Back" },
-      ],
-    });
-    expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
-      APP_ROOT,
-      "channel/slack",
-      expect.objectContaining({ silent: true, prompter: fake.prompter }),
-    );
-  });
-
-  it("falls back to the category hub when an initial address is not added", async () => {
-    const answers = ["back", "action:done"];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
-    const flowDeps = deps();
-
-    await expect(
-      runRegistryFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        initialAddress: "channel/slack",
-        deps: flowDeps,
-      }),
-    ).resolves.toEqual({ kind: "done", addedItems: [], items: [], facts: [], output: [] });
-
-    expect(fake.selectMessages).toEqual(["agent-browser", "Add an integration"]);
-    expect(flowDeps.installRegistryItem).not.toHaveBeenCalled();
-  });
-
-  it("ignores a blank initial address", async () => {
-    const answers = ["action:done"];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
-    const flowDeps = deps();
-
     await runRegistryFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
-      initialAddress: "   ",
-      deps: flowDeps,
-    });
-
-    expect(flowDeps.getRegistryItemManifest).not.toHaveBeenCalled();
-    expect(fake.selectMessages).toEqual(["Add an integration"]);
-  });
-
-  it("surfaces an unresolvable initial address", async () => {
-    const fake = createFakePrompter({ single: () => "add" });
-    const flowDeps = deps({
-      getRegistryItemManifest: vi.fn(async () => {
-        throw new Error('Registry item "channel/slak" was not found.');
+      deps: deps({
+        browseRegistryCatalog: vi.fn(async () => ({
+          items: [
+            {
+              address: "channel/discord",
+              name: "channel/discord",
+              title: "Discord",
+              source: "Vercel",
+            },
+            { address: "channel/slack", name: "channel/slack", title: "Slack", source: "Vercel" },
+            { address: "channel/web", name: "channel/web", title: "Web Chat", source: "Vercel" },
+            {
+              address: "channel/github",
+              name: "channel/github",
+              title: "GitHub",
+              source: "Vercel",
+            },
+            {
+              address: "channel/telegram",
+              name: "channel/telegram",
+              title: "Telegram",
+              source: "Vercel",
+            },
+          ],
+          total: 5,
+          errors: [],
+        })),
       }),
     });
 
-    await expect(
-      runRegistryFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        initialAddress: "channel/slak",
-        deps: flowDeps,
-      }),
-    ).rejects.toThrow('Registry item "channel/slak" was not found.');
-    expect(flowDeps.installRegistryItem).not.toHaveBeenCalled();
+    expect(
+      (prompts[0] as { options: { value: string }[] }).options.map((option) => option.value),
+    ).toEqual([
+      "channel/web",
+      "channel/slack",
+      "channel/github",
+      "channel/discord",
+      "channel/telegram",
+    ]);
   });
 
-  it("reports cancellation from an initial address as a dismissed flow", async () => {
-    const fake = createFakePrompter({
-      single: () => {
-        throw new WizardCancelledError();
-      },
-    });
-
-    await expect(
-      runRegistryFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        initialAddress: "channel/slack",
-        deps: deps(),
-      }),
-    ).resolves.toEqual({ kind: "cancelled" });
-  });
-
-  it("collects deployable setups, adds another, then deploys once", async () => {
-    const answers = [
-      "category:channel",
-      "item:0",
-      "add",
-      "add-more",
-      "category:channel",
-      "item:0",
-      "add",
-      "deploy",
-      "yes",
-    ];
+  it("recommends Linear MCP after Linear Agent and hides the overlapping preset", async () => {
     const prompts: unknown[] = [];
     const fake = createFakePrompter({
-      single: (options) => {
+      single: () => "install",
+      multiple: (options) => {
         prompts.push(options);
-        return answers.shift()!;
+        return options.message === "Where should people reach your agent?"
+          ? ["channel/linear-agent"]
+          : [];
       },
     });
-    const flowDeps = deps({
-      browseRegistryCatalog: vi.fn(async () => ({
-        items: [{ address: "channel/slack", name: "channel/slack", source: "Vercel" }],
-        total: 1,
-        errors: [],
-      })),
-      detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
-      installRegistryItem: vi.fn(async () => ({
-        output: [],
-        setup: {
-          facts: [
-            { label: "Workspace", value: "Acme" },
-            { label: "Open Slack", value: "https://slack.com/app", kind: "url" as const },
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      deps: deps({
+        browseRegistryCatalog: vi.fn(async () => ({
+          items: [
+            { address: "linear", name: "linear", title: "Linear", source: "Vercel" },
+            {
+              address: "channel/linear-agent",
+              name: "channel/linear-agent",
+              title: "Linear Agent",
+              source: "Vercel",
+            },
+            {
+              address: "connection/linear",
+              name: "connection/linear",
+              title: "Linear",
+              description: "Issues, projects, cycles, and comments via Linear's MCP server.",
+              source: "Vercel",
+            },
           ],
-          deploymentRequired: true as const,
-        },
-      })),
+          total: 3,
+          errors: [],
+        })),
+      }),
     });
 
-    await expect(
-      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
-    ).resolves.toMatchObject({
-      kind: "done",
-      addedItems: ["channel/slack", "channel/slack"],
-      deployed: "production",
-      facts: [
-        { label: "Workspace", value: "Acme" },
-        { label: "Open Slack", value: "https://slack.com/app", kind: "url" },
-        { label: "Workspace", value: "Acme" },
-        { label: "Open Slack", value: "https://slack.com/app", kind: "url" },
-      ],
-    });
-    expect(flowDeps.runDeployFlow).toHaveBeenCalledTimes(1);
-    expect(prompts[3]).toMatchObject({
-      initialValue: "add-more",
-      hintLayout: "inline",
-      options: [
-        { value: "add-more", label: "Add more" },
-        { value: "deploy", label: "Deploy" },
-        { value: "finish", label: "Finish" },
-      ],
-    });
-    expect(prompts[8]).toMatchObject({
-      message: "Deploy to prod?",
-      initialValue: "yes",
-      options: [
-        { value: "yes", label: "Yes" },
-        { value: "back", label: "Back" },
-      ],
-    });
+    const channelOptions = (prompts[0] as { options: { value: string }[] }).options;
+    const integrationOptions = (
+      prompts[1] as {
+        options: { value: string; label: string; hint?: string }[];
+      }
+    ).options;
+    expect(channelOptions.map((option) => option.value)).toEqual(["channel/linear-agent"]);
+    expect(integrationOptions).toEqual([
+      {
+        value: "connection/linear",
+        label: "Linear MCP",
+        hint: "Recommended with Linear Agent · Issues, projects, cycles, and comments via Linear's MCP server.",
+        featured: true,
+      },
+    ]);
   });
 
-  it("returns to continuation options when production deployment is not confirmed", async () => {
-    const answers = ["category:channel", "item:0", "add", "deploy", "back", "finish"];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
+  it("keeps a skipped installation failure in the result and proceeds with later items", async () => {
+    const answers = ["install", "skip"];
+    const selections = [["channel/web"], ["connection/linear"]];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+    const installRegistryItem = vi
+      .fn<RegistryFlowDeps["installRegistryItem"]>()
+      .mockRejectedValueOnce(new Error("Missing WEB_TOKEN\nSet it in your environment."))
+      .mockResolvedValueOnce({ output: [] });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({ installRegistryItem }),
+      }),
+    ).resolves.toMatchObject({
+      kind: "done",
+      result: {
+        addedItems: ["connection/linear"],
+        failures: [expect.objectContaining({ title: "Web Chat", message: "Missing WEB_TOKEN" })],
+      },
+    });
+    expect(fake.selectMessages).toContain("Couldn't add Web Chat");
+  });
+
+  it("offers deployment once after the selected batch completes", async () => {
+    const answers = ["install", "deploy", "yes"];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => ["channel/web"],
+    });
     const flowDeps = deps({
-      browseRegistryCatalog: vi.fn(async () => ({
-        items: [{ address: "channel/github", name: "channel/github", source: "Vercel" }],
-        total: 1,
-        errors: [],
-      })),
       detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
       installRegistryItem: vi.fn(async () => ({
         output: [],
@@ -532,80 +276,8 @@ describe("runRegistryFlow", () => {
 
     await expect(
       runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
-    ).resolves.toMatchObject({ addedItems: ["channel/github"] });
-    expect(flowDeps.runDeployFlow).not.toHaveBeenCalled();
-  });
-
-  it("preserves earlier setup results when a later item fails", async () => {
-    const answers = [
-      "category:channel",
-      "item:0",
-      "add",
-      "add-more",
-      "category:channel",
-      "item:0",
-      "add",
-    ];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
-    let installs = 0;
-    const flowDeps = deps({
-      browseRegistryCatalog: vi.fn(async () => ({
-        items: [
-          { address: "channel/photon-imessage", name: "channel/photon-imessage", source: "Vercel" },
-        ],
-        total: 1,
-        errors: [],
-      })),
-      installRegistryItem: vi.fn(async () => {
-        installs += 1;
-        if (installs === 2) throw new Error("Refusing to overwrite photon.ts");
-        return {
-          output: [],
-          setup: {
-            facts: [{ label: "Agent phone number", value: "+15551234567" }],
-            deploymentRequired: true as const,
-          },
-        };
-      }),
-    });
-
-    const error = await runRegistryFlow({
-      appRoot: APP_ROOT,
-      prompter: fake.prompter,
-      deps: flowDeps,
-    }).catch((reason: unknown) => reason);
-
-    expect(error).toBeInstanceOf(RegistryFlowFailedError);
-    expect(error).toMatchObject({
-      message: "Refusing to overwrite photon.ts",
-      completed: {
-        addedItems: ["channel/photon-imessage"],
-        facts: [{ label: "Agent phone number", value: "+15551234567" }],
-      },
-    });
-  });
-
-  it("does not offer another item or deployment after a non-deployable setup", async () => {
-    const answers = ["category:extension", "item:0", "add"];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
-
-    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() });
-
-    expect(fake.selectMessages).not.toContain("What would you like to do next?");
-  });
-
-  it("returns to the category hub from a registry list", async () => {
-    const answers = ["category:channel", "action:back", "action:done"];
-    const fake = createFakePrompter({ single: () => answers.shift()! });
-
-    await expect(
-      runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: deps() }),
-    ).resolves.toEqual({ kind: "done", addedItems: [], items: [], facts: [], output: [] });
-
-    expect(fake.selectMessages).toEqual([
-      "Add an integration",
-      "Browse channels",
-      "Add an integration",
-    ]);
+    ).resolves.toMatchObject({ kind: "done", result: { deployed: "production" } });
+    expect(flowDeps.runDeployFlow).toHaveBeenCalledOnce();
+    expect(fake.selectMessages).not.toContain("Add an integration");
   });
 });
