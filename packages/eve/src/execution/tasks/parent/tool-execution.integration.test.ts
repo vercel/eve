@@ -95,19 +95,20 @@ describe("background subagent tool execution", () => {
         compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
       });
       const sandbox = mockSandbox({ id: "background-subagent-sandbox" });
-      const backend: SandboxBackend = {
-        create: async (input: SandboxBackendCreateInput) => ({
-          captureState: async () => ({
-            backendName: "test",
-            metadata: {},
-            sessionKey: input.sessionKey,
-          }),
-          delete: async () => {},
-          session: sandbox.session,
-          shutdown: async () => {},
-          stop: async () => {},
-          useSessionFn: async () => sandbox.session,
+      const createSandbox = vi.fn(async (input: SandboxBackendCreateInput) => ({
+        captureState: async () => ({
+          backendName: "test",
+          metadata: {},
+          sessionKey: input.sessionKey,
         }),
+        delete: async () => {},
+        session: sandbox.session,
+        shutdown: async () => {},
+        stop: async () => {},
+        useSessionFn: async () => sandbox.session,
+      }));
+      const backend: SandboxBackend = {
+        create: createSandbox,
         name: "test",
         prewarm: async () => ({ reused: false }),
       };
@@ -157,9 +158,7 @@ describe("background subagent tool execution", () => {
           },
         },
         description: "General-purpose agent",
-        kind: "subagent",
         name: "agent",
-        nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       });
       const remoteTool = createBackgroundSubagentHarnessDefinition({
         behavior: {
@@ -174,9 +173,7 @@ describe("background subagent tool execution", () => {
           },
         },
         description: remoteNode.description,
-        kind: "remote",
         name: remoteNode.name,
-        nodeId: remoteNode.nodeId,
       });
       const model = new MockLanguageModelV4({
         doGenerate: {
@@ -232,6 +229,14 @@ describe("background subagent tool execution", () => {
 
       const pendingTasks = result.backgroundTasks ?? [];
       const handles = getAgentHandleStore(result.session.state)?.handles ?? [];
+      expect(createSandbox).toHaveBeenCalledTimes(2);
+      for (const [input] of createSandbox.mock.calls) {
+        expect(input).toEqual(
+          expect.objectContaining({
+            tags: expect.objectContaining({ sessionId: "parent-background-subagent" }),
+          }),
+        );
+      }
       if (pendingTasks.length !== 3) throw new Error("Three durable tasks were not committed.");
       if (handles.some((handle) => handle.phase !== "addressed") || handles.length !== 3) {
         throw new Error("Three child addresses were not committed.");

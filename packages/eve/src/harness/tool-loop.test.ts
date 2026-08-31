@@ -9206,6 +9206,78 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("uses dynamic override metadata when ask_question becomes an ordinary tool", async () => {
+    const toolCall = {
+      input: { prompt: "Handled inline." },
+      toolCallId: "dynamic-question-1",
+      toolName: "ask_question",
+      type: "tool-call" as const,
+    };
+    const toolResult = {
+      input: toolCall.input,
+      output: { handled: true },
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName,
+      type: "tool-result" as const,
+    };
+    setupMockAgent({
+      content: [toolCall, toolResult],
+      finishReason: "tool-calls",
+      response: {
+        messages: [
+          { content: [toolCall], role: "assistant" },
+          {
+            content: [
+              {
+                output: { type: "json", value: toolResult.output },
+                toolCallId: toolCall.toolCallId,
+                toolName: toolCall.toolName,
+                type: "tool-result",
+              },
+            ],
+            role: "tool",
+          },
+        ],
+      },
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: [toolResult],
+    });
+
+    registerDurableDynamicCallback({
+      callback: () => ({ handled: true }),
+      phase: "execute",
+      toolName: "ask_question",
+    });
+    const ctx = new ContextContainer();
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: { execute: { closure: {} } },
+        description: "Handle a question inline.",
+        entryKey: "ask_question",
+        inputSchema: { type: "object" },
+        name: "ask_question",
+        resolverSlug: "question-override",
+      },
+    ]);
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        capabilities: { requestInput: true },
+        tools: new Map([["ask_question", createQuestionHarnessTool()]]),
+      }),
+    );
+    const result = await contextStorage.run(ctx, () =>
+      runStep(createTestSession(), { message: "Handle this inline." }),
+    );
+
+    expect(typeof result.next).toBe("function");
+    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(events.filter((event) => event.type === "input.requested")).toEqual([]);
+    expect(events.filter((event) => event.type === "actions.requested")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "action.result")).toHaveLength(1);
+  });
+
   it("delivers a stale ask_question selection as a new user turn while another question is pending", async () => {
     const nextQuestionInput = {
       allowFreeform: false,

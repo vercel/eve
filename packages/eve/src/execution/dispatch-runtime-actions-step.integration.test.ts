@@ -412,6 +412,9 @@ describe("dispatchRuntimeActionsStep child starts", () => {
 
     expect(create).not.toHaveBeenCalled();
     expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    const childInput = mocks.createSession.mock.calls[0]?.[0];
+    expect(childInput?.adapter.state).not.toHaveProperty("parentSandboxState");
+    expect(childInput?.adapter.state).not.toHaveProperty("sandboxSessionId");
   });
 
   it("rejects recursive self-delegation before opening the parent sandbox", async () => {

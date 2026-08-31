@@ -66,6 +66,7 @@ export interface CreateExecutionNodeStepInput {
   readonly handleEvent?: HandleEventFn;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
+  readonly hasLoadableSkills: boolean;
   readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
@@ -100,8 +101,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     compactOnly: input.compactOnly,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
-    hasLoadableSkills:
-      input.node.agent.skills.length > 0 || input.node.agent.dynamicSkillResolvers.length > 0,
+    hasLoadableSkills: input.hasLoadableSkills,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
@@ -246,9 +246,7 @@ function resolveHarnessToolDefinition(input: {
       behavior,
       description: input.tool.description,
       inputSchema: input.tool.inputSchema,
-      kind: "subagent",
       name: input.tool.name,
-      nodeId: dispatchTarget.nodeId,
       outputSchema: input.tool.outputSchema,
     });
   }

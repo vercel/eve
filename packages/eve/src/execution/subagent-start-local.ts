@@ -38,6 +38,7 @@ export async function startLocalSubagent(input: {
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
+  readonly selfAgent: boolean;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
   readonly taskOwned: boolean;
@@ -69,6 +70,7 @@ export async function startLocalSubagent(input: {
     parentTraceContext: input.parentTraceContext,
     activityObserver,
     sandboxSessionId: input.sandboxSessionId,
+    selfAgent: input.selfAgent,
     session: input.session,
     source,
   });

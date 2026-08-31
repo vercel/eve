@@ -34,9 +34,13 @@ function makeAction(): RuntimeSubagentCallActionRequest {
 }
 
 function buildRuntimeSubagentRunInput(
-  input: Omit<BuildSubagentRunInput, "source">,
+  input: Omit<BuildSubagentRunInput, "selfAgent" | "source"> & { readonly selfAgent?: boolean },
 ): ReturnType<typeof buildSubagentRunInput> {
-  return buildSubagentRunInput({ ...input, source: { type: "runtime" } });
+  return buildSubagentRunInput({
+    ...input,
+    selfAgent: input.selfAgent ?? false,
+    source: { type: "runtime" },
+  });
 }
 
 function makeInheritingGraph(nodeId: string) {
@@ -225,6 +229,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfAgent: false,
       session: makeSession(),
       source: { description: "Research the request.", outputSchema: schema, type: "local" },
     });
@@ -241,6 +246,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfAgent: false,
       session: makeSession(),
       source: { description: "Research the request.", outputSchema: declared, type: "local" },
     });
@@ -279,6 +285,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfAgent: false,
       session: makeSession(),
       source: { description: "Local delegate subagent description.", type: "local" },
     });
@@ -333,6 +340,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfAgent: true,
       session: makeSession(),
       source: { outputSchema: schema, type: "runtime" },
     });
@@ -381,6 +389,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfAgent: true,
       session,
     });
 

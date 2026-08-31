@@ -221,6 +221,7 @@ import {
   unwrapWorkflowSandboxResult,
 } from "#shared/workflow-sandbox.js";
 import { buildFinalOutputTool, FINAL_OUTPUT_TOOL_NAME } from "#harness/final-output.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { createHistoryViewPreparer, type HistoryViewProjector } from "#shared/history-view.js";
@@ -1248,7 +1249,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         session,
         tools: harnessTools,
       });
-      modelCallRuntimeActionTools = advertisedHarnessTools;
+      const effectiveHarnessTools = new Map(advertisedHarnessTools);
 
       const flatTools = await buildToolSetWithProviderTools({
         approvedTools,
@@ -1274,11 +1275,22 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           disabledProviderTools: opts.disabledProviderTools,
           tools: dynamicTools,
         });
+        const dynamicToolsByName = new Map<string, HarnessToolDefinition>();
+        for (const definition of dynamicTools) {
+          if (!dynamicToolsByName.has(definition.name)) {
+            dynamicToolsByName.set(definition.name, definition);
+          }
+        }
         // Dynamic tools override a same-named authored tool.
         for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
           if (advertisedHarnessTools.get(name)?.behavior?.handling?.kind === "dispatch") {
             throw new Error(`Dynamic tool "${name}" collides with a runtime-visible subagent.`);
           }
+          const dynamicDefinition = dynamicToolsByName.get(name);
+          if (dynamicDefinition === undefined) {
+            throw new Error(`Dynamic tool "${name}" has no effective harness definition.`);
+          }
+          effectiveHarnessTools.set(name, dynamicDefinition);
           flatTools[name] = toolDefinition;
         }
       }
@@ -1296,10 +1308,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         hasLoadableSkills: config.hasLoadableSkills,
         modelTools: flatTools,
         session,
-        tools: advertisedHarnessTools,
+        tools: effectiveHarnessTools,
         workflow: workflowConfig,
       });
       session = advertisedModelTools.session;
+      modelCallRuntimeActionTools = advertisedModelTools.harnessTools;
       const modelTools = advertisedModelTools.modelTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;
@@ -1373,10 +1386,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             .filter(
               ([name, tool]) =>
                 tool.behavior?.handling?.kind === "dispatch" &&
-                advertisedHarnessTools.get(name) === undefined,
+                effectiveHarnessTools.get(name) === undefined,
             )
             .map(([name]) => name);
-          const requestInputToolNames = [...config.tools.values()]
+          const requestInputToolNames = [...effectiveHarnessTools.values()]
             .filter((tool) => tool.behavior?.handling?.kind === "request-input")
             .map((tool) => tool.name);
           const excludedActionToolNames = new Set([
@@ -1396,7 +1409,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             trailingInlineToolResultParts,
           } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
             excludedActionToolNames,
-            tools: advertisedHarnessTools,
+            tools: effectiveHarnessTools,
           });
           throwIfTurnAborted(config.abortSignal);
           const [stepResult, accumulatedResponseMessages] = await Promise.all([
@@ -1416,7 +1429,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             excludedActionCallIds: invalidInputToolCallIds,
             excludedActionToolNames,
             handledInlineToolResultCallIds,
-            tools: advertisedHarnessTools,
+            tools: effectiveHarnessTools,
           });
           const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
           const toolResultsByCallId = new Map(

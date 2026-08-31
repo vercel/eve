@@ -635,6 +635,7 @@ export async function startSubagent(input: {
         parentTraceContext,
         activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
+        selfAgent: input.target.selfAgent,
         session: input.session,
         source: input.target.source,
         taskOwned: input.taskOwned,

@@ -514,6 +514,7 @@ describe("createExecutionNodeStep", () => {
     };
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
+      hasLoadableSkills: false,
       instrumentation,
       mode: "task",
       modelResolutionScope,
@@ -555,6 +556,66 @@ describe("createExecutionNodeStep", () => {
     expect(forceFlush).toHaveBeenCalledOnce();
   });
 
+  it("keeps load_skill available when the effective bundle reports a skill source", async () => {
+    setupMockAgentForToolExecution("load_skill", { skill: "deploy-note" });
+    const toolRegistry = await createRuntimeToolRegistry({
+      tools: [
+        {
+          behavior: {
+            availability: ["requires-loadable-skill"],
+            presentation: "load-skill",
+          },
+          description: "Load one skill.",
+          execute: async () => "deploy-note instructions",
+          inputSchema: toInputSchema({ type: "object" }),
+          logicalPath: "tools/load_skill.ts",
+          name: "load_skill",
+          owner: { feature: "load-skill", kind: "framework" },
+          sourceId: "framework:tools/load_skill.ts",
+          sourceKind: "module",
+        },
+      ],
+    });
+    const rootNode = createTestNode(createTestTurnAgent({ tools: toolRegistry.preparedTools }), {
+      toolRegistry,
+    });
+    expect(rootNode.agent.skills).toEqual([]);
+    const step = createExecutionNodeStep({
+      createRuntime: () => createNoopRuntime(),
+      hasLoadableSkills: true,
+      instrumentation: undefined,
+      mode: "task",
+      modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
+      node: rootNode,
+    });
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(InitiatorAuthKey, null);
+    ctx.set(BundleKey, {
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    } as never);
+    ctx.set(ChannelKey, { kind: "http" });
+    ctx.set(SessionIdKey, "sess-root");
+    ctx.set(SessionKey, {
+      auth: { current: null, initiator: null },
+      sessionId: "sess-root",
+      turn: { id: "root-turn", sequence: 0 },
+    });
+
+    const result = await contextStorage.run(ctx, () =>
+      step(
+        createSession({
+          continuationToken: "test-root",
+          sessionId: "sess-root",
+          turnAgent: rootNode.turnAgent,
+        }),
+        { message: "Load the deploy note skill." },
+      ),
+    );
+
+    expect(result.next).toEqual({ done: true, output: "deploy-note instructions" });
+  });
+
   it("records visible subagent tools as pending runtime actions", async () => {
     setupMockAgentForToolCall("child-agent", { task: "Delegate this." });
 
@@ -589,6 +650,7 @@ describe("createExecutionNodeStep", () => {
     );
     const step = createExecutionNodeStep({
       createRuntime,
+      hasLoadableSkills: false,
       instrumentation: undefined,
       mode: "task",
       modelResolutionScope: {

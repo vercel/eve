@@ -28,6 +28,7 @@ import type {
   RuntimeSubagentCallActionRequest,
 } from "#shared/action-types.js";
 import type { PendingAgentDispatchAction } from "#shared/dispatch-action.js";
+import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
 import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 import { parseJsonObject } from "#shared/json.js";
@@ -42,7 +43,7 @@ type SubagentCallAction = RuntimeRemoteAgentCallActionRequest | RuntimeSubagentC
 interface SubagentDefinitionInput {
   readonly description: string;
   readonly name: string;
-  readonly nodeId: string;
+  readonly target: PendingAgentDispatchAction["target"];
 }
 
 interface SubagentDispatchInput {
@@ -81,7 +82,7 @@ export function defineSubagent(input: SubagentDefinitionInput) {
     inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
     outputSchema: SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA,
     execute: (toolInput, ctx, task) =>
-      executeSubagentTool({ definition: input, kind: "local", task, toolContext: ctx, toolInput }),
+      executeSubagentTool({ definition: input, task, toolContext: ctx, toolInput }),
   });
   return definition;
 }
@@ -102,7 +103,6 @@ export function countLocalSubagentCalls(
 
 export async function executeSubagentTool(input: {
   readonly definition: SubagentDefinitionInput;
-  readonly kind: "local" | "remote";
   readonly task: TaskExec;
   readonly toolContext: ToolContext;
   readonly toolInput: unknown;
@@ -110,43 +110,14 @@ export async function executeSubagentTool(input: {
   const ctx = loadContext();
   const { batch, session, task } = input.task;
   const emission = getHarnessEmissionState(session.state);
-  const commonAction = {
+  const dispatchAction: PendingAgentDispatchAction = {
     callId: input.toolContext.callId,
     description: input.definition.description,
     input: parseJsonObject(SUBAGENT_TOOL_INPUT_SCHEMA.parse(input.toolInput)),
-    name: input.definition.name,
-    nodeId: input.definition.nodeId,
-  };
-  const action: SubagentCallAction =
-    input.kind === "remote"
-      ? {
-          ...commonAction,
-          kind: "remote-agent-call",
-          remoteAgentName: input.definition.name,
-        }
-      : {
-          ...commonAction,
-          kind: "subagent-call",
-          subagentName: input.definition.name,
-        };
-  const dispatchAction: PendingAgentDispatchAction = {
-    callId: commonAction.callId,
-    description: commonAction.description,
-    input: commonAction.input,
-    target:
-      input.kind === "remote"
-        ? {
-            kind: "remote-agent-call",
-            nodeId: input.definition.nodeId,
-            remoteAgentName: input.definition.name,
-          }
-        : {
-            kind: "subagent-call",
-            nodeId: input.definition.nodeId,
-            subagentName: input.definition.name,
-          },
+    target: input.definition.target,
     toolName: input.definition.name,
   };
+  const action: SubagentCallAction = resolvePreparedAgentAction(dispatchAction).action;
   const dispatched = await dispatchSubagent({
     action,
     batch,
