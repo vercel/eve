@@ -497,7 +497,7 @@ describe("defaultMessageReducer", () => {
               url: "https://connect.example.com/authorize/sca_123",
               userCode: "ABCD-EFGH",
             },
-            description: "Authorization required for Notion",
+            description: "Authorize Notion to continue this agent session.",
             displayName: "Notion",
             name: "notion",
             state: "required",
