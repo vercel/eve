@@ -30,20 +30,20 @@ export function parseForwardedTracePolicy(value: unknown): ForwardedTracePolicy 
   return parsed.success ? parsed.data : undefined;
 }
 
-/** Accepts trace policy only through the receiver's dedicated transport-principal allowlist. */
+/** Accepts trace policy only through the receiver's transport-principal allowlist. */
 export async function resolveForwardedTracePolicy(input: {
   readonly forwarder: SessionAuthContext;
   readonly payload: Record<string, unknown>;
-  readonly trustedTraceForwarders: TrustedForwarders | undefined;
+  readonly trustedForwarders: TrustedForwarders | undefined;
 }): Promise<ForwardedTracePolicy | undefined> {
-  if (input.trustedTraceForwarders === undefined) return undefined;
+  if (input.trustedForwarders === undefined) return undefined;
   const policy = parseForwardedTracePolicy(input.payload.forwardedTracePolicy);
   if (policy === undefined) return undefined;
 
   try {
-    return (await input.trustedTraceForwarders(input.forwarder)) ? policy : undefined;
+    return (await input.trustedForwarders(input.forwarder)) ? policy : undefined;
   } catch (error) {
-    logError(log, "trustedTraceForwarders handler failed", error, {
+    logError(log, "trustedForwarders handler failed for trace policy", error, {
       forwarder: input.forwarder.principalId,
     });
     return undefined;

@@ -96,29 +96,23 @@ export interface EveChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
-   * assert a forwarded principal on the create-session or continuation route (the
-   * `forwardedPrincipal` body field a `defineRemoteAgent({ forwardPrincipal:
-   * true })` sender emits). The predicate receives the *verified* route-auth
-   * principal of the forwarder — who is asserting, never what is asserted —
-   * and must match it precisely (for example
+   * assert a forwarded principal or callback-bound trace policy. The predicate
+   * receives the *verified* route-auth principal of the forwarder — who is
+   * asserting, never what is asserted — and must match it precisely (for example
    * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
    * A permissive predicate lets any authenticated forwarder assert any
-   * principal.
+   * principal and public trace audience.
    *
    * When a trusted forwarder's assertion is accepted on session creation, the
    * forwarded principal replaces `session.auth.current` and
    * `session.auth.initiator`. On continuation, only `session.auth.current`
    * changes; the initiator remains pinned to the session's creator. The
    * forwarder is recorded on accepted contexts as the `eve:forwarded-by`
-   * attribute. Omit the option to reject every forwarded assertion with 403.
+   * attribute. Callback-bound trace policy is intersected with this
+   * deployment's local trace policy. Omit the option to reject forwarded
+   * principals with 403 and ignore forwarded trace policy.
    */
   readonly trustedForwarders?: TrustedForwarders;
-  /**
-   * Transport-authenticated callers whose remote trace policy may be inherited.
-   * The inherited policy is accepted only on callback-bound requests with a
-   * valid `traceparent` and is intersected with this deployment's trace policy.
-   */
-  readonly trustedTraceForwarders?: TrustedForwarders;
   /**
    * Attachment policy for inbound file parts. Omit for the framework default (25 MB cap, all media
    * types); `"disabled"` rejects every attachment; a partial config is merged onto the default. Violations reject with 413 (too large) or 415 (bad type).

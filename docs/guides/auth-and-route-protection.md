@@ -243,7 +243,7 @@ When the predicate accepts a create request, `ctx.session.auth.current` and `.in
 
 The forwarder is recorded on accepted contexts as the `eve:forwarded-by` attribute (always overwritten by the receiver, so a forwarder cannot falsify it). Rejections fail loud: a forwarded body without `trustedForwarders` configured or with a forwarder the predicate refuses is a `403`, and a malformed payload is a `400`. Only principal metadata is ever accepted — tokens and credentials never cross the hop.
 
-Trace policy has a separate trust grant. Set `trustedTraceForwarders` to preserve public trace content from specific remote callers; eve accepts it only with a callback-bound `traceparent` and intersects it with the receiver's local trace policy. See [Preserving trace content](./remote-agents#preserving-trace-content).
+For callback-bound remote delegations with a valid `traceparent`, the same `trustedForwarders` decision also accepts the parent channel audience and trace-capture decision. eve intersects the inherited decision with the receiver's local trace policy. See [Preserving trace content](./remote-agents#preserving-trace-content).
 
 > ⚠️ Both deployments must support continuation forwarding before you resume persistent remote sessions. A create-only receiver rejects a forwarded continuation with HTTP 400; the sender does not fall back to service authority. See [Forwarding the caller identity](./remote-agents#forwarding-the-caller-identity) for the upgrade behavior.
 

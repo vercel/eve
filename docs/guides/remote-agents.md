@@ -145,7 +145,7 @@ A receiver on an eve version that predates all principal forwarding may instead 
 
 ## Preserving trace content
 
-Remote dispatch always propagates W3C `traceparent` plus the parent channel audience and trace-capture decision. The receiver ignores the asserted policy by default. To preserve public trace content across a trusted remote hop, allowlist the transport-authenticated caller separately with `trustedTraceForwarders`:
+Remote dispatch always propagates W3C `traceparent` plus the parent channel audience and trace-capture decision. The receiver ignores the asserted policy by default. To preserve public trace content across a trusted remote hop, allowlist the transport-authenticated caller with `trustedForwarders`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -153,7 +153,7 @@ import { vercelOidc, vercelSubject } from "eve/channels/auth";
 
 export default eveChannel({
   auth: [vercelOidc()],
-  trustedTraceForwarders: (forwarder) =>
+  trustedForwarders: (forwarder) =>
     forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
 });
 ```

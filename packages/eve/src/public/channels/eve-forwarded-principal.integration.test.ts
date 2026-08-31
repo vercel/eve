@@ -107,7 +107,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
   it("seeds the forwarded principal into the run context and resolves a user Connect principal", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: (caller) => caller.principalId === ROUTER_CALLER.principalId,
-      trustedTraceForwarders: (caller) => caller.principalId === ROUTER_CALLER.principalId,
       auth: () => ROUTER_CALLER,
     });
 
@@ -197,7 +196,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,
-      trustedTraceForwarders: () => true,
       auth: () => ROUTER_CALLER,
     });
 

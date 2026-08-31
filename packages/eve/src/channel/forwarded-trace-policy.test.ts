@@ -37,22 +37,22 @@ describe("parseForwardedTracePolicy", () => {
 });
 
 describe("resolveForwardedTracePolicy", () => {
-  it("requires the dedicated trusted-forwarder policy", async () => {
-    const trustedTraceForwarders = vi.fn(() => true);
+  it("requires the trusted-forwarder policy", async () => {
+    const trustedForwarders = vi.fn(() => true);
     const payload = { forwardedTracePolicy: { audience: "public" } };
 
     await expect(
       resolveForwardedTracePolicy({
         forwarder: FORWARDER,
         payload,
-        trustedTraceForwarders,
+        trustedForwarders,
       }),
     ).resolves.toEqual({ audience: "public" });
     await expect(
       resolveForwardedTracePolicy({
         forwarder: FORWARDER,
         payload,
-        trustedTraceForwarders: undefined,
+        trustedForwarders: undefined,
       }),
     ).resolves.toBeUndefined();
   });
@@ -62,14 +62,14 @@ describe("resolveForwardedTracePolicy", () => {
       resolveForwardedTracePolicy({
         forwarder: FORWARDER,
         payload: { forwardedTracePolicy: { audience: "public" } },
-        trustedTraceForwarders: () => false,
+        trustedForwarders: () => false,
       }),
     ).resolves.toBeUndefined();
     await expect(
       resolveForwardedTracePolicy({
         forwarder: FORWARDER,
         payload: { forwardedTracePolicy: { audience: "public" } },
-        trustedTraceForwarders: () => {
+        trustedForwarders: () => {
           throw new Error("boom");
         },
       }),

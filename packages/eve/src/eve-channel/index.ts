@@ -150,7 +150,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             : await resolveForwardedTracePolicy({
                 forwarder: authResult,
                 payload,
-                trustedTraceForwarders: input.trustedTraceForwarders,
+                trustedForwarders: input.trustedForwarders,
               });
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
