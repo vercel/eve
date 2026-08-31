@@ -4,12 +4,6 @@
   "private": true,
   "description": "Monorepo for eve, a filesystem-first framework for durable backend agents on Vercel.",
   "homepage": "https://eve.dev/",
-  "workspaces": [
-    "apps/*",
-    "apps/*/*",
-    "e2e/fixtures/*",
-    "packages/*"
-  ],
   "type": "module",
   "scripts": {
     "benchmark": "pnpm --filter @eve-internal/benchmarks benchmark",

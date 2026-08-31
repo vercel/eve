@@ -1,6 +1,7 @@
 packages:
   - apps/*
-  - apps/*/*
+  - apps/fixtures/*
+  - apps/frameworks/*
   - e2e/fixtures/*
   - packages/*
 
