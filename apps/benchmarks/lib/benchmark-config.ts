@@ -8,7 +8,7 @@ export interface AuthoringBenchmarkModel {
   readonly id: string;
   readonly model: string;
   readonly displayName: string;
-  readonly harness: "OpenCode" | "Claude Code";
+  readonly harness: "OpenCode" | "Claude Code" | "Codex";
   readonly support: AuthoringBenchmarkSupport;
 }
 
@@ -45,14 +45,14 @@ export const benchmarkModels = [
     id: "gpt-5-6-sol",
     model: "openai/gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
-    harness: "OpenCode",
+    harness: "Codex",
     support: "supported",
   },
   {
     id: "gpt-5-6-terra",
     model: "openai/gpt-5.6-terra",
     displayName: "GPT-5.6 Terra",
-    harness: "OpenCode",
+    harness: "Codex",
     support: "supported",
   },
   {
@@ -110,7 +110,9 @@ export function publishedExperimentId(
 }
 
 export function harnessId(harness: AuthoringBenchmarkModel["harness"]): string {
-  return harness === "Claude Code" ? "claude-code" : "opencode";
+  if (harness === "Claude Code") return "claude-code";
+  if (harness === "Codex") return "codex";
+  return "opencode";
 }
 
 export function parseAuthoringTreatment(value: string): AuthoringTreatment {

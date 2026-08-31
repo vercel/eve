@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   findBenchmarkModel,
   findPublishedBenchmarkModel,
+  harnessId,
   publishedBenchmark,
   publishedBenchmarkModels,
 } from "./benchmark-config.ts";
@@ -39,6 +40,9 @@ test("publishes only compatibility-validated models", () => {
   assert.equal(findPublishedBenchmarkModel("claude-sonnet-5").harness, "Claude Code");
   assert.equal(findPublishedBenchmarkModel("claude-opus-5").harness, "Claude Code");
   assert.equal(findPublishedBenchmarkModel("kimi-k3").harness, "OpenCode");
+  assert.equal(findPublishedBenchmarkModel("gpt-5-6-sol").harness, "Codex");
+  assert.equal(findPublishedBenchmarkModel("gpt-5-6-terra").harness, "Codex");
+  assert.equal(harnessId("Codex"), "codex");
 });
 
 test("allows candidate probes and rejects unknown models", () => {

@@ -2,13 +2,24 @@ import { existsSync, readFileSync } from "node:fs";
 
 import { expect, test } from "vitest";
 
-import { subjectDefaultAgentModel } from "./grader.js";
+const sourceRoot = "/tmp/eve-source";
+const projectRoot = "wayfinder";
+
+function subjectDefaultAgentModel(): string {
+  const source = readFileSync(
+    `${sourceRoot}/packages/eve/src/shared/default-agent-model.ts`,
+    "utf8",
+  );
+  const model = source.match(/DEFAULT_AGENT_MODEL_ID\s*=\s*["']([^"']+)["']/u)?.[1];
+  if (model === undefined) throw new Error("Could not read the subject's default agent model.");
+  return model;
+}
 
 test("creates a complete eve project in place", () => {
-  expect(existsSync("agent/channels/eve.ts")).toBe(true);
-  expect(existsSync("agent/instructions.md")).toBe(true);
+  expect(existsSync(`${projectRoot}/agent/channels/eve.ts`)).toBe(true);
+  expect(existsSync(`${projectRoot}/agent/instructions.md`)).toBe(true);
 
-  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+  const packageJson = JSON.parse(readFileSync(`${projectRoot}/package.json`, "utf8")) as {
     dependencies?: Record<string, string>;
     scripts?: Record<string, string>;
   };
@@ -17,15 +28,15 @@ test("creates a complete eve project in place", () => {
 });
 
 test("authors the requested identity without pinning a different model", () => {
-  const instructions = readFileSync("agent/instructions.md", "utf8");
+  const instructions = readFileSync(`${projectRoot}/agent/instructions.md`, "utf8");
   expect(instructions).toMatch(/Wayfinder/i);
   expect(instructions).toMatch(/travel/i);
 
   // `agent/agent.ts` is optional, and omitting it selects the same default the
   // scaffold pins explicitly. Both shapes satisfy "use the default model"; a
   // different model id does not.
-  if (existsSync("agent/agent.ts")) {
-    expect(readFileSync("agent/agent.ts", "utf8")).toContain(
+  if (existsSync(`${projectRoot}/agent/agent.ts`)) {
+    expect(readFileSync(`${projectRoot}/agent/agent.ts`, "utf8")).toContain(
       `model: "${subjectDefaultAgentModel()}"`,
     );
   }

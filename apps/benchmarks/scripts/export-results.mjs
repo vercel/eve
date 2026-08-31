@@ -81,7 +81,7 @@ for (const benchmark of benchmarks) {
         caseId,
         status: status ?? "current",
         ...result,
-        ...meanRunMetrics(summaryPath, benchmark.model),
+        ...meanRunMetrics(summaryPath, benchmark.model, benchmark.harness),
       });
     }
   }
@@ -227,8 +227,8 @@ function latestValidResult(experimentId, caseId) {
   return undefined;
 }
 
-function meanRunMetrics(summaryPath, model) {
-  const performanceRuns = runMetrics(summaryPath);
+function meanRunMetrics(summaryPath, model, harness) {
+  const performanceRuns = runMetrics(summaryPath, harness);
   const performanceUsage = performanceRuns.flatMap((run) =>
     run.usage === null ? [] : [run.usage],
   );
@@ -248,14 +248,14 @@ function meanRunMetrics(summaryPath, model) {
   return result;
 }
 
-function runMetrics(summaryPath) {
+function runMetrics(summaryPath, harness) {
   return readdirSync(dirname(summaryPath), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^run-\d+$/u.test(entry.name))
     .flatMap((entry) => {
       const transcriptPath = join(dirname(summaryPath), entry.name, "transcript-raw.jsonl");
       if (!existsSync(transcriptPath)) return [];
       const raw = readFileSync(transcriptPath, "utf8");
-      return [{ usage: extractRunUsage(raw), toolInvocations: countToolInvocations(raw) }];
+      return [{ usage: extractRunUsage(raw, harness), toolInvocations: countToolInvocations(raw) }];
     });
 }
 
