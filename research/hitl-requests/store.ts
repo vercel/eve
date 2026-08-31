@@ -19,9 +19,9 @@
  *           live request; input_required task views derive from open requests.
  *
  * Same shape as MemoryDocumentBackend (public/memory/file/backend.ts):
- * read / conditional write / conflict error. Default backend via nitro
- * (db0 locally, the deployment's database in production); the interface is
- * eve-owned so a World or user supplies another.
+ * read / conditional write / conflict error. Backend selection is an
+ * implementation decision; this proposal defines only the eve-owned
+ * storage contract.
  *
  * Crash consistency without step-result atomicity: interpretation is
  * deterministic over (ledger version, deliveryId). The step does

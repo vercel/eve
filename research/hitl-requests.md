@@ -187,9 +187,9 @@ The ledger moves to a dedicated store (prototype
 [`store.ts`](./hitl-requests/store.ts)) — the same shape as
 `MemoryDocumentBackend`: `read` / conditional `write` / conflict error.
 Derived reads (`openRequests`) are pure functions over the ledger, not store
-methods, so backends cannot diverge on query semantics. Default backend via
-nitro (`db0` locally, the deployment's database in production); the
-interface stays eve-owned.
+methods, so backends cannot diverge on query semantics. Backend selection is
+an implementation decision; this proposal defines only the eve-owned read,
+conditional-write, and conflict contract.
 
 ```ts
 interface RequestLedgerStore {
