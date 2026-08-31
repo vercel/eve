@@ -58,6 +58,7 @@ const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
 };
 const CONNECT_METHODS: Readonly<Record<string, "mcp" | "oauth">> = {
   agentcard: "mcp",
+  vercel: "mcp",
 };
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {

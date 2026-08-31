@@ -60,12 +60,14 @@ import type {
   SetupFlowRenderer,
   SetupFlowStatus,
   SetupSelectRequest,
+  SetupSelectResult,
 } from "./setup-flow.js";
 import type { SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
+  orderedSelection,
   reduceSelect,
   searchActionQuery,
   selectValueAtCursor,
@@ -1873,16 +1875,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * clears an active search first. One question at a time; it vanishes on
    * resolve.
    */
-  async #readSetupSelect(opts: SetupSelectRequest): Promise<readonly string[] | undefined> {
+  async #readSetupSelect(opts: SetupSelectRequest): Promise<SetupSelectResult> {
     const flow = this.#beginSetupQuestion();
     const multiple = isMultiSelectRequest(opts);
     const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
     let selectOptions: readonly SetupPanelOption[] = opts.options;
 
+    const plannerNavigation = opts.navigation?.kind === "planner";
     const initial: Parameters<typeof initialSelectState>[0] = {
       options: selectOptions,
       searchAction,
-      submitRow: multiple,
+      submitRow: multiple && !plannerNavigation,
     };
     if ("initialValue" in opts && opts.initialValue !== undefined) {
       initial.defaultValue = opts.initialValue;
@@ -1905,7 +1908,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         {
           options: selectOptions,
           searchAction,
-          submitRow: multiple,
+          submitRow: multiple && !plannerNavigation,
         },
       );
       this.#paint();
@@ -1926,7 +1929,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const filter = select.filter;
         selectOptions = options;
         select = {
-          ...initialSelectState({ options, searchAction, submitRow: multiple }),
+          ...initialSelectState({
+            options,
+            searchAction,
+            submitRow: multiple && !plannerNavigation,
+          }),
           filter,
         };
       } catch (reason) {
@@ -1963,8 +1970,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.question = (width) => renderSelectQuestion(panelState(), this.#theme, width);
     this.#paint();
 
-    const question = this.#captureSetupQuestion<readonly string[] | undefined>((key, settle) => {
-      const close = (value: readonly string[] | undefined): void => {
+    const question = this.#captureSetupQuestion<SetupSelectResult>((key, settle) => {
+      const close = (value: SetupSelectResult): void => {
         searchVersion += 1;
         settle(value);
       };
@@ -1975,9 +1982,32 @@ export class TerminalRenderer implements AgentTUIRenderer {
         return;
       }
 
+      const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
+      const plannerDirection =
+        key.type === "left" && (plannerStep?.activeStep ?? 0) > 0
+          ? "back"
+          : key.type === "right" &&
+              plannerStep !== undefined &&
+              plannerStep.activeStep < plannerStep.steps.length - 1
+            ? "forward"
+            : undefined;
+      if (plannerDirection !== undefined) {
+        close({
+          kind: "navigate",
+          direction: plannerDirection,
+          values: multiple ? orderedSelection(selectOptions, select.selected) : [],
+        });
+        return;
+      }
+
       const base = { key, options: selectOptions, searchAction, select };
       const result = multiple
-        ? reduceSetupSelectInput({ ...base, kind: opts.kind, required: opts.required })
+        ? reduceSetupSelectInput({
+            ...base,
+            kind: opts.kind,
+            required: opts.required,
+            plannerNavigation: plannerNavigation || undefined,
+          })
         : reduceSetupSelectInput({ ...base, kind: opts.kind });
       switch (result.kind) {
         case "cancel":
@@ -2516,7 +2546,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    return this.#requireSetupFlow();
+    const flow = this.#requireSetupFlow();
+    // A standard question means the preceding background operation settled.
+    // Clear its transient item summary and timer before painting the prompt.
+    if (flow.status !== undefined) {
+      flow.status = undefined;
+      flow.summary = undefined;
+      flow.preview = undefined;
+    }
+    return flow;
   }
 
   /** A flow is implicitly opened for a bare question (tests, future hosts). */
@@ -2736,6 +2774,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.lines = [];
     flow.outputBuffer = [];
     flow.preview = undefined;
+    flow.status = undefined;
     flow.summary =
       content === undefined
         ? undefined

@@ -105,6 +105,33 @@ describe("setupSelectionIntent", () => {
     ).toMatchObject({ kind: "update", select: { filter: "j" } });
   });
 
+  it("uses Space to toggle a planner checklist", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
+    const toggled = reduceSetupSelectInput({
+      key: { type: "text", value: " ", framing: "unframed" },
+      kind: "searchable-multi",
+      options,
+      select: initialSelectState({ options }),
+      required: false,
+      plannerNavigation: true,
+    });
+    expect(toggled).toMatchObject({ kind: "update", select: { selected: new Set(["web"]) } });
+  });
+
+  it("continues a planner checklist without a Submit row", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
+    expect(
+      reduceSetupSelectInput({
+        key: { type: "enter" },
+        kind: "searchable-multi",
+        options,
+        select: initialSelectState({ options, initialValues: ["web"] }),
+        required: false,
+        plannerNavigation: true,
+      }),
+    ).toEqual({ kind: "submit", values: ["web"] });
+  });
+
   it("applies filter text and submits the visible match", () => {
     const options = [
       { value: "web", label: "Web Chat" },

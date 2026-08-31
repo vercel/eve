@@ -96,6 +96,26 @@ export interface SelectMetadata {
   value: string;
 }
 
+/** Directional transition requested from a batch-planner step. */
+export class PlannerNavigationError extends Error {
+  readonly direction: "back" | "forward";
+  readonly values: readonly PrompterValue[];
+
+  constructor(direction: "back" | "forward", values: readonly PrompterValue[]) {
+    super(`Planner requested ${direction} navigation.`);
+    this.name = "PlannerNavigationError";
+    this.direction = direction;
+    this.values = values;
+  }
+}
+
+/** Progress rail and directional controls for a multi-step picker. */
+export interface PlannerNavigation {
+  kind: "planner";
+  activeStep: number;
+  steps: readonly { label: string; count?: number }[];
+}
+
 /** Options common to every {@link Prompter.select} call. */
 export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
@@ -120,14 +140,16 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   /**
    * How option hints are laid out in the dev TUI panel (the CLI prompter ignores
    * it and keeps its default inline, unnumbered rendering). "stacked" renders
-   * each hint on its own line below the label with a blank line between options —
-   * for small action menus whose hints carry current values. "inline" keeps hints
-   * on the label row, suppresses numeric shortcuts, and separates the trailing
-   * completion action (e.g. the `/add` task list).
+   * each hint on its own line below the label with a blank line between options;
+   * it works for both action menus and checklists. "inline" keeps hints on the
+   * label row, suppresses numeric shortcuts, and separates a trailing completion
+   * action.
    */
   hintLayout?: "stacked" | "inline";
   /** Outcome lines from earlier laps of a looping menu. */
   notices?: readonly SelectNotice[];
+  /** Optional batch-planner navigation grammar. */
+  navigation?: PlannerNavigation;
 }
 
 /** A selectable action appended after local matches for a non-empty query. */

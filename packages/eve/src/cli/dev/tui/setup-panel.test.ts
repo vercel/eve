@@ -20,6 +20,11 @@ const OPTIONS = [
   { value: "new", label: "Create a new project", hint: "fastest" },
   { value: "link", label: "Link an existing project" },
 ];
+const PLANNER_NAVIGATION = {
+  kind: "planner" as const,
+  activeStep: 0,
+  steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+};
 
 describe("renderFlowPanel", () => {
   it("aligns the base-foreground title, progress, and question content", () => {
@@ -856,6 +861,75 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("✓ Link an existing project");
     expect(text).toContain("Submit");
     expect(text).toContain("space to toggle");
+  });
+
+  it("shows beyond featured planner choices in its initial compact viewport", () => {
+    const options = [
+      { value: "web", label: "Web Chat", featured: true },
+      { value: "slack", label: "Slack", featured: true },
+      { value: "github", label: "GitHub", featured: true },
+      { value: "linear-agent", label: "Linear Agent", featured: true },
+      { value: "discord", label: "Discord" },
+      { value: "telegram", label: "Telegram" },
+    ];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: PLANNER_NAVIGATION,
+        message: "Where should people reach your agent?",
+        options,
+        placeholder: "Search channels",
+        select: initialSelectState({ options }),
+      },
+      theme,
+      100,
+    ).join("\n");
+
+    expect(text).toContain("Linear Agent");
+    expect(text).toContain("Discord");
+    expect(text).toContain("Telegram");
+  });
+
+  it("renders planner progress and navigation without a Submit row", () => {
+    const options = [{ value: "web", label: "Web Chat", hint: "Built-in chat UI" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: PLANNER_NAVIGATION,
+        message: "Where should people reach your agent?",
+        options,
+        select: initialSelectState({ options, initialValues: ["web"] }),
+      },
+      colorTheme,
+      80,
+    ).join("\n");
+    const plain = stripAnsi(text);
+
+    expect(text).toContain(
+      colorTheme.colors.inverse(colorTheme.colors.blue(colorTheme.colors.bold(" Channels (1) "))),
+    );
+    expect(plain).toContain("1 selected");
+    expect(plain).toContain("enter / → next");
+    expect(plain).not.toContain("← back");
+    expect(plain).not.toContain("Submit");
+  });
+
+  it("advertises only available planner directions", () => {
+    const options = [{ value: "install", label: "Install and set up" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "single",
+        navigation: { ...PLANNER_NAVIGATION, activeStep: 2 },
+        message: "Review additions",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("enter to select · ← back");
+    expect(text).not.toContain("→ next");
   });
 
   it("windows the railed list to five rows with an Esc-only footer", () => {

@@ -1,6 +1,5 @@
 import type { Prompter } from "#setup/prompter.js";
 import { detectDeployment } from "#setup/project-resolution.js";
-import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion, RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 
 import { runDeployFlow } from "./deploy.js";
@@ -11,93 +10,78 @@ export interface RegistrySessionDeps {
 }
 
 export interface RegistrySessionItemResult {
-  address: string;
   title: string;
   facts: readonly RegistrySetupFact[];
   output: readonly string[];
 }
 
+/** An item the user chose to skip after its installation could not complete. */
+export interface RegistrySessionItemFailure {
+  title: string;
+  /** User-facing installation error, including any actionable follow-up lines. */
+  message: string;
+}
+
 export interface RegistrySessionResult {
-  kind: "done";
-  addedItems: readonly string[];
   items: readonly RegistrySessionItemResult[];
-  facts: readonly RegistrySetupFact[];
-  output: readonly string[];
+  /** Installation failures retained when a user skips an item. */
+  failures: readonly RegistrySessionItemFailure[];
+  /** Setup stopped after preserving already-settled item results. */
+  cancelled?: true;
   deployed?: "production";
 }
 
 export interface RegistrySession {
-  add(
-    item: string,
-    title: string,
-    output: readonly string[],
-    setup?: RegistrySetupCompletion,
-  ): void;
+  add(title: string, output: readonly string[], setup?: RegistrySetupCompletion): void;
+  addFailure(title: string, message: string): void;
   result(deployed?: "production"): RegistrySessionResult;
   continueAfterInstall(input: {
     appRoot: string;
     prompter: Prompter;
     signal?: AbortSignal;
-  }): Promise<"add-more" | RegistrySessionResult>;
+  }): Promise<RegistrySessionResult>;
 }
 
 /** Owns the accumulated output and deployment decision for one `/add` session. */
 export function createRegistrySession(deps: RegistrySessionDeps): RegistrySession {
-  const addedItems: string[] = [];
   const items: RegistrySessionItemResult[] = [];
-  const output: string[] = [];
-  let completion: RegistrySetupCompletion = { facts: [] };
-  let currentItem = "";
-  let currentFacts: readonly RegistrySetupFact[] = [];
+  const failures: RegistrySessionItemFailure[] = [];
+  let deploymentRequired = false;
 
   function result(deployed?: "production"): RegistrySessionResult {
-    const session: RegistrySessionResult = {
-      kind: "done",
-      addedItems,
-      items,
-      facts: completion.facts,
-      output,
-    };
+    const session: RegistrySessionResult = { items, failures };
     if (deployed !== undefined) session.deployed = deployed;
     return session;
   }
 
   return {
-    add(item, title, itemOutput, setup = { facts: [] }) {
-      addedItems.push(item);
-      items.push({ address: item, title, facts: setup.facts, output: itemOutput });
-      output.push(...itemOutput);
-      currentItem = title;
-      currentFacts = setup.facts;
-      completion = mergeRegistrySetupCompletions(completion, setup);
+    add(title, itemOutput, setup = { facts: [] }) {
+      items.push({ title, facts: setup.facts, output: itemOutput });
+      deploymentRequired ||= setup.deploymentRequired === true;
+    },
+
+    addFailure(title, message) {
+      failures.push({ title, message });
     },
 
     result,
 
     async continueAfterInstall(input) {
-      if (completion.deploymentRequired !== true) return result();
+      if (!deploymentRequired) return result();
 
       const deployment = await deps.detectDeployment(input.appRoot, { signal: input.signal });
       const canDeploy = deployment.state === "linked" || deployment.state === "deployed";
-      input.prompter.replaceContent?.({
-        headline: `Added ${currentItem}`,
-        facts: currentFacts,
-      });
+      input.prompter.replaceContent?.();
       while (true) {
-        const action = await input.prompter.select<"deploy" | "add-more" | "finish">({
+        const action = await input.prompter.select<"deploy" | "finish">({
           message: "What would you like to do next?",
-          initialValue: "add-more",
+          initialValue: "finish",
           hintLayout: "inline",
           options: [
-            { value: "add-more", label: "Add more" },
             ...(canDeploy ? [{ value: "deploy" as const, label: "Deploy" }] : []),
-            { value: "finish", label: "Finish" },
+            { value: "finish", label: "Start chatting" },
           ],
         });
-        if (action === "add-more") {
-          input.prompter.replaceContent?.();
-          return "add-more";
-        }
         if (action === "finish") return result();
 
         const confirmed = await input.prompter.select<"yes" | "back">({

@@ -27,7 +27,7 @@ import {
   type SearchActionOption,
   type SelectState,
 } from "#setup/cli/select-state.js";
-import type { SelectMetadata, SelectNotice } from "#setup/prompter.js";
+import type { PlannerNavigation, SelectMetadata, SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest } from "#setup/flows/model.js";
 
 import {
@@ -63,6 +63,8 @@ interface SetupQuestionPanelBase {
   error?: string;
   /** Outcome lines from earlier menu laps, shown beneath the options. */
   notices?: readonly SelectNotice[];
+  /** Optional batch-planner navigation grammar. */
+  navigation?: PlannerNavigation;
 }
 
 interface SetupSelectPanelBase extends SetupQuestionPanelBase {
@@ -113,7 +115,11 @@ type SetupOptionSelectPanelState =
       placeholder?: string;
     })
   | (SetupSelectPanelBase & { kind: "multi" })
-  | (SetupSelectPanelBase & { kind: "searchable-multi"; placeholder?: string })
+  | (SetupSelectPanelBase & {
+      kind: "searchable-multi";
+      layout?: "stacked";
+      placeholder?: string;
+    })
   | (SetupSelectPanelBase & { kind: "stacked" })
   | (SetupSelectPanelBase & { kind: "task-list" })
   | (SetupSelectPanelBase & {
@@ -413,7 +419,7 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
       return {
         selection: "multiple",
         filter: { placeholder: state.placeholder },
-        layout: "plain",
+        layout: state.layout ?? "plain",
         edit: undefined,
       };
     case "stacked":
@@ -423,6 +429,22 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
     case "inline-edit":
       return { selection: "single", filter: undefined, layout: state.layout, edit: state.edit };
   }
+}
+
+function plannerStepRows(
+  navigation: Extract<SetupQuestionPanelBase["navigation"], { kind: "planner" }>,
+  activeCount: number | undefined,
+  theme: Theme,
+): string[] {
+  const labels = navigation.steps.map((step, index) => {
+    const resolvedCount = index === navigation.activeStep ? activeCount : step.count;
+    const count = resolvedCount === undefined || resolvedCount === 0 ? "" : ` (${resolvedCount})`;
+    const text = `${step.label}${count}`;
+    return index === navigation.activeStep
+      ? theme.colors.inverse(theme.colors.blue(theme.colors.bold(` ${text} `)))
+      : theme.colors.dim(text);
+  });
+  return [`  ${labels.join(theme.colors.dim("  ·  "))}`, ""];
 }
 
 function selectMessageRows(message: string, layout: SelectLayout, theme: Theme): string[] {
@@ -476,17 +498,18 @@ function isRailedSearch(presentation: SelectPresentation): boolean {
 function selectViewSize(input: {
   search: boolean;
   filter: string;
-  featuredLead: number;
   optionCount: number;
   railed: boolean;
+  stacked: boolean;
 }): number {
   if (!input.search) return input.optionCount;
-  // The railed list keeps a constant five-row viewport; other searchable
-  // presentations open on their featured lead when one exists.
+  // The railed list keeps a constant five-row viewport. Stacked search rows
+  // need the same minimum breadth: a single visible card reads like it changes
+  // into the next choice when the cursor moves.
   if (input.railed) return RAILED_VIEW_SIZE;
-  if (input.filter === "" && input.featuredLead > 0) {
-    return Math.min(input.featuredLead, SEARCH_VIEW_SIZE);
-  }
+  if (input.stacked) return Math.min(input.optionCount, SEARCH_VIEW_SIZE);
+  // Featured choices are ordered to the top, not treated as the whole initial
+  // viewport. The planner still opens on a useful compact window after them.
   return SEARCH_VIEW_SIZE;
 }
 
@@ -739,6 +762,7 @@ function selectFooterHints(
   presentation: SelectPresentation,
   visible: readonly SetupPanelOption[],
   cursor: number,
+  plannerNavigation: PlannerNavigation | undefined,
 ): string[] {
   const hints: string[] = [];
   let cancelHint = "esc to cancel";
@@ -757,6 +781,16 @@ function selectFooterHints(
   }
   if (presentation.filter !== undefined) hints.push("type to filter");
   hints.push("↑/↓ move");
+  if (plannerNavigation !== undefined) {
+    if (presentation.selection === "multiple") hints.push("space toggle");
+    const canGoForward = plannerNavigation.activeStep < plannerNavigation.steps.length - 1;
+    hints.push(
+      presentation.selection === "multiple" && canGoForward ? "enter / → next" : "enter to select",
+    );
+    if (plannerNavigation.activeStep > 0) hints.push("← back");
+    hints.push(cancelHint);
+    return hints;
+  }
   hints.push(presentation.selection === "multiple" ? "space to toggle" : "enter to select");
   if (presentation.selection === "multiple") hints.push("enter on Submit to confirm");
   hints.push(cancelHint);
@@ -805,11 +839,24 @@ export function renderSelectQuestion(
   const visible = presentation.filter
     ? filterOptions(state.options, state.select.filter, state.searchAction)
     : state.options;
-  const submitIndex = presentation.selection === "multiple" ? submitRowIndex(visible) : -1;
+  const plannerNavigation = state.navigation?.kind === "planner" ? state.navigation : undefined;
+  const submitIndex =
+    presentation.selection === "multiple" && plannerNavigation === undefined
+      ? submitRowIndex(visible)
+      : -1;
   const cursor = state.select.cursor;
 
   const railed = isRailedSearch(presentation);
-  const rows = selectMessageRows(state.message, presentation.layout, theme);
+  const rows = [
+    ...(state.navigation?.kind === "planner"
+      ? plannerStepRows(
+          state.navigation,
+          presentation.selection === "multiple" ? state.select.selected.size : undefined,
+          theme,
+        )
+      : []),
+    ...selectMessageRows(state.message, presentation.layout, theme),
+  ];
   if (state.description !== undefined || state.metadata !== undefined) {
     if (rows.at(-1) === "") rows.pop();
     if (state.description !== undefined) {
@@ -842,14 +889,12 @@ export function renderSelectQuestion(
     );
   }
 
-  let featuredLead = 0;
-  while (visible[featuredLead]?.featured) featuredLead += 1;
   const viewSize = selectViewSize({
     search: presentation.filter !== undefined,
     filter: state.select.filter,
-    featuredLead,
     optionCount: visible.length,
     railed,
+    stacked: presentation.layout === "stacked",
   });
   const start = Math.max(
     0,
@@ -883,6 +928,10 @@ export function renderSelectQuestion(
     theme,
   });
   appendSubmitRow(rows, cursor, submitIndex, theme);
+  if (plannerNavigation !== undefined && presentation.selection === "multiple") {
+    const count = state.select.selected.size;
+    rows.push("", `  ${c.dim(`${count} selected`)}`);
+  }
 
   // The railed list scrolls silently: no count row, and Esc is the only
   // footer hint — typing, arrows, and the ↵ badge carry themselves.
@@ -900,7 +949,9 @@ export function renderSelectQuestion(
 
   rows.push(
     ...questionFooter(
-      railed ? ["esc to cancel"] : selectFooterHints(presentation, visible, cursor),
+      railed
+        ? ["esc to cancel"]
+        : selectFooterHints(presentation, visible, cursor, plannerNavigation),
       theme,
     ),
   );
