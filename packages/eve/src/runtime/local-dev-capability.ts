@@ -1,8 +1,13 @@
+import { randomUUID } from "node:crypto";
+
 import {
-  rebuildDevelopmentRuntimeArtifacts,
   resumeDevelopmentRuntimeArtifacts,
   suspendDevelopmentRuntimeArtifacts,
 } from "#services/dev-client/runtime-artifacts.js";
+import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
+import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
+import { isLoopbackHostname } from "#shared/network-address.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
 
 /**
  * Authored application root, published by the `eve dev` host that owns the
@@ -16,25 +21,16 @@ import {
 const LOCAL_DEV_APP_ROOT_ENV = "EVE_DEV_APP_ROOT";
 /** Origin of the dev host's control plane, which owns the watcher handle. */
 const LOCAL_DEV_CONTROL_URL_ENV = "EVE_DEV_CONTROL_URL";
-/**
- * Set by the process that owns the terminal when it also runs the dev TUI.
- *
- * Nothing else distinguishes `eve dev` from `eve dev --no-ui`: both fork the
- * same server child over pipes, so neither the host nor the runtime can observe
- * a TTY. Only the terminal's owner knows, so only it may declare this.
- */
-const LOCAL_DEV_INTERACTIVE_CLIENT_ENV = "EVE_DEV_INTERACTIVE_CLIENT";
+export const LOCAL_DEV_INTERACTIVE_CLIENT_HEADER = "x-eve-dev-interactive-client";
 
 /**
- * Capabilities available to authored code only while a *local* `eve dev`
- * process owns this runtime.
+ * Capabilities available to authored code while handling a same-machine
+ * request to `eve dev`.
  *
  * Absence is the signal, not a disabled flag: a deployed runtime has no
- * authored tree to mutate and no watcher to pause, and a TUI attached to a
- * remote `eve dev <url>` has neither either, since no local server was
- * started for it. {@link getLocalDevCapability} returns `undefined` in both
- * cases, and a tool that requires this capability refuses instead of
- * silently doing something weaker or targeting the wrong root.
+ * authored tree to mutate or watcher to pause, and a request from a remote
+ * client is not authorized to mutate the server's authored tree.
+ * {@link getLocalDevCapability} returns `undefined` in both cases.
  */
 export interface LocalDevCapability {
   /**
@@ -43,15 +39,15 @@ export interface LocalDevCapability {
    */
   readonly appRoot: string;
   /**
-   * Whether an interactive client (the dev TUI) owns the terminal this dev
-   * server was started from, and can therefore run a flow that asks questions.
+   * Whether the requesting client is the dev TUI and can therefore run a flow
+   * that asks questions in its terminal.
    */
   readonly interactiveClient: boolean;
   /**
    * Runs `task` with the authored-source watcher paused, then resumes it.
    *
-   * Suspension is reference counted by the watcher, so concurrent holders
-   * cannot resume each other early; the final release rebuilds authored
+   * Each suspension has an idempotent lease, so concurrent holders cannot
+   * resume each other early; the final release rebuilds authored
    * artifacts instead of waiting for the watcher's change debounce.
    */
   withSuspendedSource<T>(task: () => Promise<T>): Promise<T>;
@@ -77,16 +73,35 @@ export function installLocalDevCapabilityEnvironment(input: {
   };
 }
 
-/** Environment a terminal owner adds to the dev server child it forks. */
-export function localDevInteractiveClientEnvironment(
-  interactiveClient: boolean,
-): Record<string, string> {
-  return interactiveClient ? { [LOCAL_DEV_INTERACTIVE_CLIENT_ENV]: "1" } : {};
+/**
+ * Runs a development request with local-dev access only when the parent host
+ * signed a loopback peer address. Public address headers cannot grant access.
+ */
+export async function withLocalDevRequestScope<T>(
+  request: Request,
+  callback: () => Promise<T>,
+): Promise<T> {
+  const address = readTrustedDevelopmentClientAddress(
+    request.headers,
+    process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
+  );
+  if (address === undefined || !isLoopbackHostname(address)) {
+    return await callback();
+  }
+
+  return await contextStorage.run(
+    new ContextContainer({
+      localDevRequest: {
+        interactiveClient: request.headers.get(LOCAL_DEV_INTERACTIVE_CLIENT_HEADER) === "1",
+      },
+    }),
+    callback,
+  );
 }
 
 /**
- * Resolves the local dev capability, or `undefined` outside a local `eve dev`
- * process.
+ * Resolves the local dev capability, or `undefined` outside an authorized
+ * local request to `eve dev`.
  *
  * This is deliberately not a {@link import("#public/definitions/tool.js").ToolContext}
  * field: both values are meaningless in a deployed runtime, and a capability
@@ -98,32 +113,50 @@ export function getLocalDevCapability(
 ): LocalDevCapability | undefined {
   const appRoot = environment[LOCAL_DEV_APP_ROOT_ENV];
   const controlUrl = environment[LOCAL_DEV_CONTROL_URL_ENV];
-  if (appRoot === undefined || appRoot === "" || controlUrl === undefined || controlUrl === "") {
+  const requestScope = contextStorage.getStore()?.localDevRequest;
+  if (
+    requestScope === undefined ||
+    appRoot === undefined ||
+    appRoot === "" ||
+    controlUrl === undefined ||
+    controlUrl === ""
+  ) {
     return undefined;
   }
 
   return {
     appRoot,
-    interactiveClient: environment[LOCAL_DEV_INTERACTIVE_CLIENT_ENV] === "1",
+    interactiveClient: requestScope.interactiveClient,
     async withSuspendedSource<T>(task: () => Promise<T>): Promise<T> {
-      if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: controlUrl }))) {
+      const leaseId = randomUUID();
+      if (!(await suspendDevelopmentRuntimeArtifacts({ leaseId, serverUrl: controlUrl }))) {
         throw new Error(
           "Could not pause the eve development server. Its authored-source watcher must be suspended before the authored tree is modified.",
         );
       }
+      let outcome:
+        | { readonly error: unknown; readonly ok: false }
+        | { readonly ok: true; value: T };
       try {
-        return await task();
-      } finally {
-        // `resume()` already force-rebuilds once the last suspension lifts
-        // (`dev-authored-source-watcher.ts`), so releasing the capability is
-        // normally sufficient on its own. The explicit `rebuild()` below is
-        // not part of that — it only runs when the resume request itself
-        // could not be served, so a network blip on this one call does not
-        // leave the tree compiled from pre-install sources indefinitely.
-        if ((await resumeDevelopmentRuntimeArtifacts({ serverUrl: controlUrl })) === undefined) {
-          await rebuildDevelopmentRuntimeArtifacts({ force: true, serverUrl: controlUrl });
-        }
+        outcome = { ok: true, value: await task() };
+      } catch (error) {
+        outcome = { error, ok: false };
       }
+
+      // Release is keyed by this acquisition, so retrying after a lost
+      // response cannot release another concurrent holder.
+      if (
+        (await resumeDevelopmentRuntimeArtifacts({ leaseId, serverUrl: controlUrl })) ===
+          undefined &&
+        (await resumeDevelopmentRuntimeArtifacts({ leaseId, serverUrl: controlUrl })) === undefined
+      ) {
+        throw new Error(
+          "Could not resume the eve development server after modifying the authored tree. Restart eve dev before making further source changes.",
+          outcome.ok ? undefined : { cause: outcome.error },
+        );
+      }
+      if (!outcome.ok) throw outcome.error;
+      return outcome.value;
     },
   };
 }

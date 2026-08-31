@@ -466,7 +466,6 @@ function createCliProgram(
         server = startHost(applicationContext.root, {
           existing: mode === "tui" ? "attach-if-unconfigured" : "reject",
           host: options.host,
-          interactiveClient: mode === "tui",
           onBootProgress,
           port: options.port,
         });

@@ -233,12 +233,16 @@ function addDevelopmentControlHandler(input: {
     if (watcher === undefined) {
       return Response.json({ error: "The development server is still starting." }, { status: 503 });
     }
+    const leaseId = url.searchParams.get("lease");
+    if ((isSuspendRequest || isResumeRequest) && (leaseId === null || leaseId.length === 0)) {
+      return Response.json({ error: "A suspension lease is required." }, { status: 400 });
+    }
     if (isSuspendRequest) {
-      await watcher.suspend();
+      await watcher.suspend(leaseId!);
       return Response.json({ suspended: true });
     }
     if (isResumeRequest) {
-      await watcher.resume({ silent: url.searchParams.get("silent") === "1" });
+      await watcher.resume(leaseId!, { silent: url.searchParams.get("silent") === "1" });
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
     }
     if (url.searchParams.get("force") === "1") {

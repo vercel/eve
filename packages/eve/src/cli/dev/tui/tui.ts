@@ -155,6 +155,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     prepared.kind === "local"
       ? resolveLocalDevelopmentClientOptions({
           ...headerOptions,
+          interactiveClient: true,
           serverUrl,
           token: () => resolveLinkedDevelopmentOidcToken(prepared.target.workspaceRoot),
         })

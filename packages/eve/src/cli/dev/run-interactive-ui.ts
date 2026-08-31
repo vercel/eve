@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import {
   resumeDevelopmentRuntimeArtifacts,
@@ -53,17 +55,40 @@ export async function runInteractiveDevelopmentUi(input: {
   if (input.startup !== undefined) tuiInput.startup = input.startup;
   if (target.kind === "local") {
     tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-      if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: input.server.serverUrl }))) {
+      const leaseId = randomUUID();
+      if (
+        !(await suspendDevelopmentRuntimeArtifacts({
+          leaseId,
+          serverUrl: input.server.serverUrl,
+        }))
+      ) {
         throw new Error("Could not pause the development server for integration setup.");
       }
+      let outcome:
+        | { readonly error: unknown; readonly ok: false }
+        | { readonly ok: true; value: T };
       try {
-        return await task();
-      } finally {
-        await resumeDevelopmentRuntimeArtifacts({
-          serverUrl: input.server.serverUrl,
-          silent: true,
-        });
+        outcome = { ok: true, value: await task() };
+      } catch (error) {
+        outcome = { error, ok: false };
       }
+
+      const release = {
+        leaseId,
+        serverUrl: input.server.serverUrl,
+        silent: true,
+      } as const;
+      if (
+        (await resumeDevelopmentRuntimeArtifacts(release)) === undefined &&
+        (await resumeDevelopmentRuntimeArtifacts(release)) === undefined
+      ) {
+        throw new Error(
+          "Could not resume the eve development server after integration setup. Restart eve dev before making further source changes.",
+          outcome.ok ? undefined : { cause: outcome.error },
+        );
+      }
+      if (!outcome.ok) throw outcome.error;
+      return outcome.value;
     };
   }
 

@@ -26,7 +26,6 @@ import { fileURLToPath } from "node:url";
 
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { EVE_DEV_ENV_FLAG } from "#internal/application/optional-package-install.js";
-import { localDevInteractiveClientEnvironment } from "#runtime/local-dev-capability.js";
 import type {
   DevelopmentServer,
   DevelopmentServerHandle,
@@ -104,7 +103,6 @@ export function createDevelopmentServer(
         env: {
           ...shellEnvironment,
           [EVE_DEV_ENV_FLAG]: "1",
-          ...localDevInteractiveClientEnvironment(options.interactiveClient === true),
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       },
