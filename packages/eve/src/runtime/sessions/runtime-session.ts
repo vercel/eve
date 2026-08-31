@@ -52,10 +52,7 @@ export function setRuntimeSessionCompiledArtifacts(
   input: BundledCompiledArtifacts,
 ): void {
   const installed = session.compiledArtifacts;
-  const snapshotChanged =
-    installed?.manifest !== input.manifest ||
-    installed.moduleMap !== input.moduleMap ||
-    installed.metadata !== input.metadata;
+  const snapshotChanged = installed === null || !isSameCompiledArtifactSnapshot(installed, input);
 
   // Resolved bundles retain references into the installed snapshot, so a
   // replacement must not inherit caches populated by the prior deployment.
@@ -65,6 +62,26 @@ export function setRuntimeSessionCompiledArtifacts(
   }
 
   session.compiledArtifacts = input;
+}
+
+function isSameCompiledArtifactSnapshot(
+  installed: BundledCompiledArtifacts,
+  input: BundledCompiledArtifacts,
+): boolean {
+  const installedSourceGraphHash = installed.metadata?.discovery.sourceGraphHash;
+  const inputSourceGraphHash = input.metadata?.discovery.sourceGraphHash;
+
+  // Equivalent bootstrap modules do not share object identity, but the
+  // compiler fingerprint is stable across their copies.
+  if (installedSourceGraphHash && inputSourceGraphHash) {
+    return installedSourceGraphHash === inputSourceGraphHash;
+  }
+
+  return (
+    installed.manifest === input.manifest &&
+    installed.moduleMap === input.moduleMap &&
+    installed.metadata === input.metadata
+  );
 }
 
 /**
