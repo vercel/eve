@@ -1,0 +1,68 @@
+name: Package artifact build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select source
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MAIN_SHA: ${{ github.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+            echo "sha=$MAIN_SHA" >> "$GITHUB_OUTPUT"
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          else
+            echo "repository=$PR_REPOSITORY" >> "$GITHUB_OUTPUT"
+            echo "sha=$PR_SHA" >> "$GITHUB_OUTPUT"
+            echo "ref=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.source.outputs.repository }}
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package artifact
+        env:
+          EVE_PACKAGE_OUTPUT_DIRECTORY: ${{ github.workspace }}/package-artifact
+          EVE_PACKAGE_PUBLIC_ORIGIN: https://pkg.eve.dev
+          EVE_PACKAGE_REF: ${{ steps.source.outputs.ref }}
+          EVE_PACKAGE_SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: pnpm --filter eve-package-artifacts package:prepare
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: eve-package
+          path: package-artifact
+          if-no-files-found: error
+          retention-days: 7
