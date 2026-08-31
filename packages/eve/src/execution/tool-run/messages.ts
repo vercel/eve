@@ -91,9 +91,11 @@ export function isRunControlMessage(value: unknown): value is RunControlMessage 
 
 /**
  * What a body needs to speak to its owner: the run's identity and the owner's
- * channels. Carried on the tool context under a private symbol so the public
- * `ToolContext` stays free of framework internals while `ask(ctx, ...)` still
- * works from a body.
+ * channels. Carried on the tool context under a global-registry symbol, not a
+ * module-level map: the driver composes the framework and application layers
+ * from separate bundles, so `attachRunContext` (framework) and `ask` (reached
+ * from authored code through `eve/workflow`) run in different instances of
+ * this module and share nothing but the objects they pass around.
  */
 const RUN_CONTEXT = Symbol.for("eve.tool-run.context");
 
@@ -103,7 +105,6 @@ interface RunContext {
   readonly owner: ToolRunOwner;
 }
 
-/** Stamps a run's identity and owner onto the context its body receives. */
 export function attachRunContext(ctx: ToolContext, context: Omit<RunContext, "answerSeq">): void {
   Object.defineProperty(ctx, RUN_CONTEXT, {
     enumerable: false,

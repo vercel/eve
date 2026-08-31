@@ -865,6 +865,7 @@ const compiledToolDefinitionSchema = z
     requiresApproval: z.boolean(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+    workflowId: z.string().optional(),
   })
   .strict();
 

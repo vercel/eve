@@ -1,3 +1,4 @@
+import { WORKFLOW_REGISTRY_GLOBAL } from "#execution/workflow-registry.js";
 import { builtinModules } from "node:module";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir } from "node:fs/promises";
@@ -230,23 +231,24 @@ export function createWorkflowRuntimeAliasPlugin(): WorkflowRolldownPlugin {
  * Resolves the public `workflow` surface inside the driver bundle. Authored
  * workflow bodies import `workflow` for hooks, sleeps, and streams; the driver
  * provides those through eve's body-side shim. The runtime API (`workflow/api`)
- * drives runs from outside a body and imports Node.js internals, so in the
- * driver it resolves to a stand-in that fails with the rule when a body calls
- * it: call it from a `"use step"` function instead.
+ * drives runs from outside a body and imports Node.js internals, so an import
+ * of it that is still live after step bodies were stubbed means a body calls
+ * it, and the build fails with the rule instead of the driver failing later.
  */
 export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRolldownPlugin {
   return {
     name: "eve-workflow-driver-aliases",
-    resolveId(source: string) {
+    resolveId(source: string, importer?: string) {
       if (source === "workflow/errors") {
         return resolveWorkflowModulePath(source);
       }
 
       if (source === "workflow/api" || source === "workflow/runtime") {
-        return resolveFirstExistingPath([
-          join(workingDir, "src", "internal", "workflow-bundle", "workflow-api-shim.ts"),
-          join(workingDir, "dist", "src", "internal", "workflow-bundle", "workflow-api-shim.js"),
-        ]);
+        const via = importer ? ` (imported by "${importer}")` : "";
+        throw new Error(
+          `Workflow bundle cannot import "${source}"${via}: the runtime API is not available ` +
+            `inside a workflow body. Call it from a "use step" function and await that step from the body.`,
+        );
       }
 
       if (source !== "workflow") {
@@ -444,9 +446,9 @@ export async function bundleFinalWorkflowOutput(input: {
   await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
 }
 
-// The transform emits bare `globalThis.__private_workflows.set(...)` calls, so
-// the Map must exist before any chunk runs.
-const WORKFLOW_REGISTRY_BANNER = "globalThis.__private_workflows = new Map();";
+// The transform emits bare `globalThis.<registry>.set(...)` calls, so the Map
+// must exist before any chunk runs.
+const WORKFLOW_REGISTRY_BANNER = `globalThis.${WORKFLOW_REGISTRY_GLOBAL} = new Map();`;
 
 /**
  * Composes independently built driver chunks into the one script the driver

@@ -533,6 +533,61 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it("fails the driver build when a workflow body calls workflow/api", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-api-in-body-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const flowFilePath = join(tempRoot, "flow.ts");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+
+    try {
+      await Promise.all([
+        writeFile(
+          compiledArtifactsBootstrapPath,
+          [
+            "export async function __eveInstallCompiledArtifactsStep() {",
+            '  "use step";',
+            "  return null;",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+        writeFile(
+          flowFilePath,
+          [
+            'import { start } from "workflow/api";',
+            "export async function child() {",
+            '  "use workflow";',
+            "  return 1;",
+            "}",
+            "export async function parent() {",
+            '  "use workflow";',
+            "  return await start(child, []);",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      ]);
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: tempRoot,
+          watch: false,
+        },
+        [flowFilePath],
+      );
+
+      await expect(builder.build()).rejects.toThrow(
+        /cannot import "workflow\/api".*not available inside a workflow body.*"use step"/s,
+      );
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("bundles hook ownership checks through the workflow core shim", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-hook-conflict-"));
     const outDir = join(tempRoot, "workflow-build");

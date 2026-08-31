@@ -1,3 +1,4 @@
+import { WORKFLOW_REGISTRY_GLOBAL } from "#execution/workflow-registry.js";
 import {
   readWorkflowDirective,
   type WorkflowDirective,
@@ -181,7 +182,7 @@ export async function transformWorkflowDirectives(input: {
       replacements.push({ end: fn.directiveEnd, start: fn.directiveStart, text: "" });
       suffixes.push(`${fn.name}.workflowId = ${JSON.stringify(workflowId)};`);
       suffixes.push(
-        `globalThis.__private_workflows.set(${JSON.stringify(workflowId)}, ${fn.name});`,
+        `globalThis.${WORKFLOW_REGISTRY_GLOBAL}.set(${JSON.stringify(workflowId)}, ${fn.name});`,
       );
     } else {
       replacements.push({

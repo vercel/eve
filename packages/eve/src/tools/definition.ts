@@ -58,6 +58,12 @@ export interface InternalToolDefinition extends ToolDefinitionBase {
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
+  /**
+   * Id of the Workflow the bundler registered for a `"use workflow"`
+   * `execute`. When set, the harness starts that run for each call instead
+   * of calling `execute`, which the bundler left as a stub.
+   */
+  workflowId?: string;
 }
 
 export type PublicToolInputSchema<TInput = unknown> =

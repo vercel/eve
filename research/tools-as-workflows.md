@@ -70,7 +70,7 @@ Workflow SDK, unchanged:
   root. They retry on failure and never re-run once their result is recorded.
 - `createHook`, `createWebhook`, `sleep`, `getWritable`, `getWorkflowMetadata`, and `FatalError`
   from `workflow` in the body; `start`, `getRun`, and `resumeHook` from `workflow/api` in steps. A
-  body that imports `workflow/api` gets an error naming the rule. Same types, same semantics, same
+  body that calls `workflow/api` fails the build with the rule. Same types, same semantics, same
   version eve builds and runs.
 
 eve:
@@ -207,8 +207,9 @@ recognizes a workflow tool.
 - `ask` returns the hook rather than a promise of the answer, so deadlines are `Promise.race` with
   the SDK's `sleep` and no timeout option exists. A standing question — one card answered
   repeatedly — is not supported: the channel request is retired on its first answer.
-- `workflow/api` keeps its SDK meaning and runs in steps. An earlier draft aliased it to step
-  wrappers inside the body, which made `start` return a run id where the types promised a `Run`.
+- `workflow/api` keeps its SDK meaning and runs in steps; a body that calls it fails the driver
+  build. An earlier draft aliased it to step wrappers inside the body, which made `start` return a
+  run id where the types promised a `Run`.
 - Applications do not install the Workflow SDK. eve resolves `workflow` and `workflow/api` to its
   vendored copy everywhere authored code is bundled, and ships the types as `eve/workflow-modules`,
   an ambient declaration listed in the scaffolded tsconfig's `types`. An installed `workflow`

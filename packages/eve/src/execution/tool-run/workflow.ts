@@ -12,6 +12,7 @@ import { openRunControlInbox } from "#execution/tool-run/run-control.js";
 import type { ToolRunWorkflowInput } from "#execution/tool-run/types.js";
 import { resumeHookStep } from "#execution/tool-run/resume-hook-step.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
+import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { JsonValue } from "#shared/json.js";
 
@@ -147,9 +148,7 @@ function readRunId(): string {
  * the tool under that id.
  */
 function resolveWorkflowToolExecute(input: ToolRunWorkflowInput): WorkflowToolExecute {
-  const registry = (globalThis as { __private_workflows?: Map<string, unknown> })
-    .__private_workflows;
-  const execute = registry?.get(input.workflowId);
+  const execute = readRegisteredWorkflow(input.workflowId);
   if (typeof execute !== "function") {
     throw new Error(
       `Tool "${input.toolName}" is not registered as a workflow in this deployment (${input.workflowId}). ` +

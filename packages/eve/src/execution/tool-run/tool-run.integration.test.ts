@@ -56,7 +56,8 @@ async function createWorkflowToolRuntime(input: {
   readonly execute: (...args: never[]) => unknown;
   readonly toolName: string;
 }): Promise<TestRuntime> {
-  expect(readWorkflowToolId(input.execute)).toEqual(expect.any(String));
+  const workflowId = readWorkflowToolId(input.execute);
+  expect(workflowId).toEqual(expect.any(String));
   const tool: ResolvedToolDefinition = {
     description: `Deploys a service (${input.toolName}).`,
     execute: input.execute as ResolvedToolDefinition["execute"],
@@ -66,6 +67,7 @@ async function createWorkflowToolRuntime(input: {
     owner: { kind: "application" },
     sourceId: `tools/${input.toolName}.ts`,
     sourceKind: "module",
+    workflowId,
   };
   const runtime = await createTestRuntime({ agent: { name: input.agentName }, tools: [tool] });
   const manifestTool = runtime.manifest.tools.find((entry) => entry.name === input.toolName);
