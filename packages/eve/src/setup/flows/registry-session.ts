@@ -22,11 +22,18 @@ export interface RegistrySessionItemFailure {
   message: string;
 }
 
+export type RegistrySessionOutcome =
+  | ({ kind: "installed" } & RegistrySessionItemResult)
+  | ({ kind: "failed" } & RegistrySessionItemFailure)
+  | { kind: "cancelled"; title: string };
+
 export interface RegistrySessionResult {
   items: readonly RegistrySessionItemResult[];
   /** Installation failures retained when a user skips an item. */
   failures: readonly RegistrySessionItemFailure[];
-  /** Setup stopped after preserving already-settled item results. */
+  /** Every item outcome in installation order. */
+  outcomes?: readonly RegistrySessionOutcome[];
+  /** Setup stopped outside an individual item after preserving settled results. */
   cancelled?: true;
   deployed?: "production";
 }
@@ -34,6 +41,7 @@ export interface RegistrySessionResult {
 export interface RegistrySession {
   add(title: string, output: readonly string[], setup?: RegistrySetupCompletion): void;
   addFailure(title: string, message: string): void;
+  addCancellation(title: string): void;
   result(deployed?: "production"): RegistrySessionResult;
   continueAfterInstall(input: {
     appRoot: string;
@@ -44,24 +52,36 @@ export interface RegistrySession {
 
 /** Owns the accumulated output and deployment decision for one `/add` session. */
 export function createRegistrySession(deps: RegistrySessionDeps): RegistrySession {
-  const items: RegistrySessionItemResult[] = [];
-  const failures: RegistrySessionItemFailure[] = [];
+  const outcomes: RegistrySessionOutcome[] = [];
   let deploymentRequired = false;
 
   function result(deployed?: "production"): RegistrySessionResult {
+    const items = outcomes.flatMap((outcome) =>
+      outcome.kind === "installed"
+        ? [{ title: outcome.title, facts: outcome.facts, output: outcome.output }]
+        : [],
+    );
+    const failures = outcomes.flatMap((outcome) =>
+      outcome.kind === "failed" ? [{ title: outcome.title, message: outcome.message }] : [],
+    );
     const session: RegistrySessionResult = { items, failures };
+    if (outcomes.some((outcome) => outcome.kind !== "installed")) session.outcomes = outcomes;
     if (deployed !== undefined) session.deployed = deployed;
     return session;
   }
 
   return {
     add(title, itemOutput, setup = { facts: [] }) {
-      items.push({ title, facts: setup.facts, output: itemOutput });
+      outcomes.push({ kind: "installed", title, facts: setup.facts, output: itemOutput });
       deploymentRequired ||= setup.deploymentRequired === true;
     },
 
     addFailure(title, message) {
-      failures.push({ title, message });
+      outcomes.push({ kind: "failed", title, message });
+    },
+
+    addCancellation(title) {
+      outcomes.push({ kind: "cancelled", title });
     },
 
     result,

@@ -186,7 +186,7 @@ function idleSetupFlow(): SetupFlowRenderer {
     renderOutput: vi.fn(),
     withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
-      promise: new Promise<void>(() => {}),
+      promise: new Promise<"escape" | "ctrl-c">(() => {}),
       dispose: vi.fn(),
     }),
   };

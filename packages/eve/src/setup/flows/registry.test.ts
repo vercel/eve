@@ -466,6 +466,37 @@ describe("runRegistryFlow", () => {
     });
   });
 
+  it("preserves a cancelled item when a later item fails fatally", async () => {
+    const answers = ["install"];
+    const selections = [["channel/web"], ["connection/linear"]];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+    const cause = new HumanActionRequiredError({
+      kind: "vercel-login",
+      command: "vercel login",
+      reason: "Authentication required.",
+    });
+    const installRegistryItem = vi
+      .fn<RegistryFlowDeps["installRegistryItem"]>()
+      .mockRejectedValueOnce(new WizardCancelledError())
+      .mockRejectedValueOnce(cause);
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({ installRegistryItem }),
+      }),
+    ).rejects.toMatchObject({
+      cause,
+      completed: {
+        outcomes: [{ kind: "cancelled", title: "Web Chat" }],
+      },
+    });
+  });
+
   it("lets structured setup failures reach the command boundary", async () => {
     const answers = ["install"];
     const selections = [["channel/web"], []];

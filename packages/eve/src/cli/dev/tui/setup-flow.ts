@@ -72,6 +72,8 @@ export type SetupSelectResult =
   | { kind: "navigate"; direction: "back" | "forward"; values: readonly string[] }
   | undefined;
 
+export type SetupFlowInterrupt = "escape" | "ctrl-c";
+
 export interface SetupFlowRenderer {
   begin(title: string, indicator?: SetupFlowIndicator): void;
   /** Sets progress owned by an enclosing setup journey, independent of its active question. */
@@ -131,7 +133,7 @@ export interface SetupFlowRenderer {
    * the trap; the promise then never resolves.
    */
   waitForInterrupt(options?: { interruptible?: boolean }): {
-    promise: Promise<void>;
+    promise: Promise<SetupFlowInterrupt>;
     dispose(): void;
   };
 }

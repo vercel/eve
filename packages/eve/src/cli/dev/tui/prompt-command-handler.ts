@@ -126,7 +126,7 @@ export function createPromptCommandHandler(
         if (context.registryPlannerContext !== undefined) {
           commandInput.registryPlannerContext = context.registryPlannerContext;
         }
-        // `/add <item>` preselects that registry item; bare `/add` starts empty.
+        // `/add <item>` confirms and installs that address; bare `/add` opens the planner.
         if (command.name === "add" && command.argument.length > 0) {
           commandInput.initialRegistryAddress = command.argument;
         }

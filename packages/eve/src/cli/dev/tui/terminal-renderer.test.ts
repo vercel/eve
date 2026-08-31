@@ -1657,6 +1657,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderCommandResult(
       "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
         "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+      "error",
     );
     renderer.shutdown();
 
@@ -4606,7 +4607,7 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.setupFlow.setStatus("Creating a Slackbot through Vercel Connect...");
 
     input.ctrlC();
-    await expect(interrupt.promise).resolves.toBeUndefined();
+    await expect(interrupt.promise).resolves.toBe("ctrl-c");
 
     renderer.setupFlow.end();
     renderer.shutdown();

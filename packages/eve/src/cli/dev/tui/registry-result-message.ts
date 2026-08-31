@@ -18,7 +18,8 @@ export function registryItemProgress(renderer: {
 }
 
 export function registryResultTone(result: RegistrySessionResult): "success" | "error" | undefined {
-  if (result.failures.length > 0) return "error";
+  if (result.failures.length > 0 && result.items.length === 0) return "error";
+  if (result.outcomes?.some((outcome) => outcome.kind === "cancelled")) return undefined;
   return result.items.length > 0 ? "success" : undefined;
 }
 
@@ -29,30 +30,56 @@ function joinedTitles(titles: readonly string[]): string {
   return `${titles.slice(0, -1).join(", ")}, and ${titles.at(-1)}`;
 }
 
+function resultHeadline(
+  outcomes: readonly { kind: "installed" | "failed" | "cancelled" }[],
+  installedTitles: readonly string[],
+): string {
+  const failed = outcomes.filter((outcome) => outcome.kind === "failed").length;
+  const cancelled = outcomes.filter((outcome) => outcome.kind === "cancelled").length;
+  if (failed === 0 && cancelled === 0) return `Added ${joinedTitles(installedTitles)}`;
+
+  const installed = outcomes.length - failed - cancelled;
+  const parts = [
+    installed > 0 ? `${installed} added` : undefined,
+    failed > 0 ? `${failed} failed` : undefined,
+    cancelled > 0 ? `${cancelled} cancelled` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return `${outcomes.length} ${outcomes.length === 1 ? "addition" : "additions"}: ${parts.join(", ")}`;
+}
+
 /** Formats structured registry setup results after their temporary panel closes. */
 export function formatRegistrySessionResult(result: RegistrySessionResult): string {
-  const lines: string[] = [];
-  if (result.items.length > 0)
-    lines.push(`Added ${joinedTitles(result.items.map((item) => item.title))}`);
-  for (const item of result.items) {
-    lines.push("", item.title);
-    if (item.facts.length === 0 && item.output.length === 0) {
-      lines.push("  Installed.");
+  const outcomes = result.outcomes ?? [
+    ...result.items.map((item) => ({ kind: "installed" as const, ...item })),
+    ...result.failures.map((failure) => ({ kind: "failed" as const, ...failure })),
+  ];
+  const lines = [
+    resultHeadline(
+      outcomes,
+      result.items.map((item) => item.title),
+    ),
+  ];
+  for (const outcome of outcomes) {
+    const marker = outcome.kind === "installed" ? "✓" : outcome.kind === "failed" ? "⨯" : "–";
+    lines.push("", `  ${marker} ${outcome.title}`);
+    if (outcome.kind === "cancelled") {
+      lines.push("    Cancelled.");
       continue;
     }
-    const width = Math.max(0, ...item.facts.map((fact) => fact.label.length));
-    for (const fact of item.facts) lines.push(`  ${fact.label.padEnd(width)}  ${fact.value}`);
-    for (const output of item.output) lines.push(`  ${output}`);
-  }
-  for (const failure of result.failures) {
-    lines.push(
-      "",
-      `Couldn't add ${failure.title}`,
-      ...failure.message.split("\n").map((line) => `  ${line}`),
-    );
+    if (outcome.kind === "failed") {
+      lines.push(...outcome.message.split("\n").map((line) => `    ${line}`));
+      continue;
+    }
+    if (outcome.facts.length === 0 && outcome.output.length === 0) {
+      lines.push("    Installed.");
+      continue;
+    }
+    const width = Math.max(0, ...outcome.facts.map((fact) => fact.label.length));
+    for (const fact of outcome.facts) lines.push(`    ${fact.label.padEnd(width)}  ${fact.value}`);
+    for (const output of outcome.output) lines.push(`    ${output}`);
   }
   if (result.cancelled === true) {
-    lines.push("", "Setup cancelled before the remaining selections were added.");
+    lines.push("", "Setup stopped before the remaining selections were added.");
   }
   return lines.join("\n");
 }

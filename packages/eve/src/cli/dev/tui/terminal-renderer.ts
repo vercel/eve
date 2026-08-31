@@ -57,6 +57,7 @@ import {
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
+  SetupFlowInterrupt,
   SetupFlowRenderer,
   SetupFlowStatus,
   SetupSelectRequest,
@@ -577,7 +578,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
-  #flowInterrupt?: () => void;
+  #flowInterrupt?: (interrupt: SetupFlowInterrupt) => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
   #flowIdleConsumer?: (key: TerminalKey) => void;
   /** The open `/traces` viewer session, if the alt-screen viewer is active. */
@@ -1795,13 +1796,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const content = stripAnsi(text);
     if (content.trim().length === 0) return;
     this.#start();
-    this.#pushBlock(
-      tone === "success"
-        ? { kind: "result", body: content, live: false, status: "done" }
-        : tone === "error"
-          ? { kind: "flow", title: tone, body: content, live: false }
-          : { kind: "result", body: content, live: false },
-    );
+    this.#pushBlock({
+      kind: "result",
+      body: content,
+      live: false,
+      status: tone === "success" ? "done" : undefined,
+    });
     this.#paint();
   }
 
@@ -2647,11 +2647,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** See {@link SetupFlowRenderer.waitForInterrupt}. */
   #waitForFlowInterrupt(options?: { interruptible?: boolean }): {
-    promise: Promise<void>;
+    promise: Promise<SetupFlowInterrupt>;
     dispose(): void;
   } {
-    let fire!: () => void;
-    const promise = new Promise<void>((resolve) => {
+    let fire!: (interrupt: SetupFlowInterrupt) => void;
+    const promise = new Promise<SetupFlowInterrupt>((resolve) => {
       fire = resolve;
     });
     this.#flowInterrupt = fire;
@@ -2684,7 +2684,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const fire = this.#flowInterrupt;
         this.#flowInterrupt = undefined;
         this.#disarmFlowIdleTrap();
-        fire?.();
+        fire?.(key.type === "ctrl-c" ? "ctrl-c" : "escape");
         return;
       }
       if (key.type === "ctrl-r") this.#paint();

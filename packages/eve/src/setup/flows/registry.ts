@@ -22,6 +22,8 @@ const PLANNER_STEPS = ["Channels", "Integrations", "Review"] as const;
 export interface RegistryPlannerContext {
   /** Steps owned by an enclosing journey, rendered before the registry steps. */
   prefixSteps?: readonly { label: string; complete?: boolean }[];
+  /** Facts owned by the enclosing journey, rendered before registry selections. */
+  reviewMetadata?: readonly { label: string; value: string }[];
   reviewMessage?: string;
   primaryActionLabel?: string;
   emptyActionLabel?: string;
@@ -80,8 +82,6 @@ function isPlannerItem(section: Section, item: Item): boolean {
 }
 
 function orderedSectionItems(section: Section, catalog: readonly Item[]): Item[] {
-  // Product-level presets are installed as one item when explicitly requested;
-  // the bare planner presents their independently installable components.
   const matching = catalog.filter((item) => isPlannerItem(section, item));
   const featured = SECTIONS[section].featured
     .map((name) => matching.find((item) => item.name === name))
@@ -238,7 +238,7 @@ async function editPlan(input: {
       ];
       const request: SingleSelectOptions<"install" | "back"> = {
         message: input.plannerContext?.reviewMessage ?? "Review additions",
-        metadata: selectionMetadata,
+        metadata: [...(input.plannerContext?.reviewMetadata ?? []), ...selectionMetadata],
         navigation: plannerNavigation(2, input),
         options: [
           {
@@ -267,6 +267,15 @@ async function editPlan(input: {
   }
 }
 
+function hasSettledOutcomes(
+  result: RegistrySessionResult | undefined,
+): result is RegistrySessionResult {
+  return (
+    result !== undefined &&
+    (result.items.length > 0 || result.failures.length > 0 || result.outcomes !== undefined)
+  );
+}
+
 /** Collects a channel and integration plan, then installs every chosen item in order. */
 export async function runRegistryFlow(input: {
   appRoot: string;
@@ -276,6 +285,8 @@ export async function runRegistryFlow(input: {
   initialAddress?: string;
   plannerContext?: RegistryPlannerContext;
   onItemStart?: (item: Item, index: number, total: number) => void;
+  /** Gives each installation its own cancellation boundary without ending the batch. */
+  runItem?<T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T>;
   deps?: Partial<RegistryFlowDeps>;
 }): Promise<{ kind: "done"; result: RegistrySessionResult } | { kind: "cancelled" }> {
   let session: ReturnType<typeof createRegistrySession> | undefined;
@@ -336,19 +347,22 @@ export async function runRegistryFlow(input: {
       input.signal?.throwIfAborted();
       input.onItemStart?.(item, index, items.length);
       try {
-        const install = () =>
+        const install = (signal = input.signal) =>
           installRegistryItem(input.appRoot, item.address, {
             silent: true,
             prompter: input.prompter,
-            signal: input.signal,
+            signal,
           });
-        const installed = await (input.prompter.withExclusiveTerminal?.(install) ?? install());
+        const run = () => (input.runItem === undefined ? install() : input.runItem(install));
+        const installed = await (input.prompter.withExclusiveTerminal?.(run) ?? run());
         activeSession.add(label(item), installed.output, installed.setup);
       } catch (error) {
         input.signal?.throwIfAborted();
-        if (error instanceof WizardCancelledError || error instanceof HumanActionRequiredError) {
-          throw error;
+        if (error instanceof WizardCancelledError) {
+          activeSession.addCancellation(label(item));
+          continue;
         }
+        if (error instanceof HumanActionRequiredError) throw error;
         const message = error instanceof Error ? error.message : String(error);
         const failureMessage = message.trim() || "Installation failed.";
         const summary = failureMessage.split("\n").find((line) => line.trim() !== "");
@@ -378,12 +392,12 @@ export async function runRegistryFlow(input: {
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       const settled = session?.result();
-      return settled !== undefined && (settled.items.length > 0 || settled.failures.length > 0)
+      return hasSettledOutcomes(settled)
         ? { kind: "done", result: { ...settled, cancelled: true } }
         : { kind: "cancelled" };
     }
     const settled = session?.result();
-    if (settled !== undefined && (settled.items.length > 0 || settled.failures.length > 0)) {
+    if (hasSettledOutcomes(settled)) {
       throw new RegistryFlowFailedError(error, settled);
     }
     throw error;

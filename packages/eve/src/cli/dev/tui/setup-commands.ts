@@ -163,25 +163,57 @@ export async function runTuiSetupCommand(
   const renderer = muteableRenderer(input.renderer, () => interrupted, input.withExclusiveTerminal);
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
-  const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
-  const interrupt = input.renderer.waitForInterrupt();
-  const INTERRUPTED = Symbol("interrupted");
+  let cancelActiveRegistryItem: (() => void) | undefined;
+  const runRegistryItem = async <T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T> => {
+    const itemController = new AbortController();
+    cancelActiveRegistryItem = () => itemController.abort(new WizardCancelledError());
+    try {
+      return await task(AbortSignal.any([controller.signal, itemController.signal]));
+    } finally {
+      cancelActiveRegistryItem = undefined;
+    }
+  };
+  const execution = executeSetupCommand(
+    input,
+    prompter,
+    renderer,
+    controller.signal,
+    runRegistryItem,
+  );
+  const outcomePromise = execution.then((value) => ({ kind: "outcome" as const, value }));
   try {
-    const outcome = await Promise.race([execution, interrupt.promise.then(() => INTERRUPTED)]);
-    if (outcome !== INTERRUPTED) return outcome as TuiSetupCommandResult;
-    interrupted = true;
-    controller.abort(new WizardCancelledError());
-    const settled = await execution;
-    return settled.partial === true
-      ? settled
-      : {
-          ...settled,
-          message: `/${command} interrupted.`,
-          tone: "error",
-          preserveFlowDiagnostics: true,
-        };
+    while (true) {
+      const interrupt = input.renderer.waitForInterrupt();
+      try {
+        const settled = await Promise.race([
+          outcomePromise,
+          interrupt.promise.then((interrupt) => ({ kind: "interrupt" as const, interrupt })),
+        ]);
+        if (settled.kind === "outcome") return settled.value;
+        if (
+          command === "add" &&
+          settled.interrupt === "escape" &&
+          cancelActiveRegistryItem !== undefined
+        ) {
+          cancelActiveRegistryItem();
+          continue;
+        }
+        interrupted = true;
+        controller.abort(new WizardCancelledError());
+        const outcome = await execution;
+        return outcome.partial === true
+          ? outcome
+          : {
+              ...outcome,
+              message: `/${command} interrupted.`,
+              tone: "error",
+              preserveFlowDiagnostics: true,
+            };
+      } finally {
+        interrupt.dispose();
+      }
+    }
   } finally {
-    interrupt.dispose();
     // A flow that threw or was abandoned mid-wait must not leave the footer spinning.
     input.renderer.setStatus(undefined);
   }
@@ -193,6 +225,7 @@ async function executeSetupCommand(
   prompter: Prompter,
   renderer: MuteableSetupRenderer,
   signal: AbortSignal,
+  runRegistryItem: <T>(task: (signal?: AbortSignal) => Promise<T>) => Promise<T>,
 ): Promise<TuiSetupCommandResult> {
   const { command, appRoot } = input;
   const flows: TuiSetupFlows = {
@@ -279,19 +312,21 @@ async function executeSetupCommand(
           initialAddress: input.initialRegistryAddress,
           plannerContext: input.registryPlannerContext,
           onItemStart: registryItemProgress(renderer),
+          runItem: runRegistryItem,
         });
         if (flow.kind === "cancelled") {
           return { message: "/add dismissed.", cancelled: true, preserveFlowDiagnostics: true };
         }
         const result = flow.result;
+        const tone = registryResultTone(result);
+        const report =
+          result.items.length > 0 || result.failures.length > 0 || result.outcomes !== undefined
+            ? formatRegistrySessionResult(result)
+            : "No integrations selected.";
         const outcome: TuiSetupCommandResult = {
-          message:
-            result.items.length > 0 || result.failures.length > 0
-              ? formatRegistrySessionResult(result)
-              : "No integrations selected.",
+          message: tone === "error" ? `/add failed — ${report}` : report,
           preserveFlowDiagnostics: true,
         };
-        const tone = registryResultTone(result);
         if (result.cancelled === true) {
           outcome.partial = true;
           outcome.tone = "error";

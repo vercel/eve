@@ -4,6 +4,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { RegistryFlowFailedError } from "#setup/flows/registry.js";
 import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import {
   runTuiSetupCommand,
@@ -16,10 +17,10 @@ import {
 const APP_ROOT = "/tmp/weather-agent";
 
 function fakePanelRenderer(): TuiSetupCommandRenderer & {
-  fireInterrupt: () => void;
+  fireInterrupt: (kind?: "escape" | "ctrl-c") => void;
   interruptDisposed: () => boolean;
 } {
-  let fire: () => void = () => {};
+  let fire: (kind: "escape" | "ctrl-c") => void = () => {};
   let disposed = false;
   return {
     readSelect: vi.fn(async () => []),
@@ -36,14 +37,14 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
     renderOutput: vi.fn(),
     withInheritedStdio: (task) => task(),
     waitForInterrupt: vi.fn(() => ({
-      promise: new Promise<void>((resolve) => {
+      promise: new Promise<"escape" | "ctrl-c">((resolve) => {
         fire = resolve;
       }),
       dispose: () => {
         disposed = true;
       },
     })),
-    fireInterrupt: () => fire(),
+    fireInterrupt: (kind = "escape") => fire(kind),
     interruptDisposed: () => disposed,
   };
 }
@@ -411,7 +412,7 @@ describe("runTuiSetupCommand", () => {
       registryResult({
         items: [{ title: "Agent Browser", facts: [], output: [] }],
       }),
-      "Added Agent Browser\n\nAgent Browser\n  Installed.",
+      "Added Agent Browser\n\n  ✓ Agent Browser\n    Installed.",
     ],
     ["empty", registryResult(), "No integrations selected."],
     ["deployed", registryResult({ deployed: "production" }), "No integrations selected."],
@@ -451,7 +452,28 @@ describe("runTuiSetupCommand", () => {
     });
 
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringContaining("Couldn't add GitHub"),
+      message: expect.stringContaining("⨯ GitHub"),
+      preserveFlowDiagnostics: true,
+    });
+  });
+
+  it("headlines a completely failed registry batch", async () => {
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
+        kind: "done",
+        result: {
+          items: [],
+          failures: [
+            { title: "Web Chat", message: "Dependency installation failed." },
+            { title: "Vercel", message: "Connector setup failed." },
+          ],
+        },
+      })),
+    });
+
+    await expect(run({ command: "add", flows })).resolves.toMatchObject({
+      message: expect.stringMatching(/^\/add failed — 2 additions: 2 failed/),
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
   });
@@ -466,6 +488,95 @@ describe("runTuiSetupCommand", () => {
     expect(flows.runDeployFlow).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true }),
     );
+  });
+
+  it("limits an installation interrupt to the active registry item", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ runItem }) => {
+        await expect(
+          runItem?.(
+            (signal) =>
+              new Promise((_resolve, reject) => {
+                signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+              }),
+          ),
+        ).rejects.toBeInstanceOf(WizardCancelledError);
+        return registryResult({
+          items: [
+            { title: "Web Chat", facts: [], output: [] },
+            { title: "Notion", facts: [], output: [] },
+          ],
+          outcomes: [
+            { kind: "installed", title: "Web Chat", facts: [], output: [] },
+            { kind: "cancelled", title: "Slack" },
+            { kind: "installed", title: "Notion", facts: [], output: [] },
+          ],
+        });
+      }),
+    });
+
+    const result = run({ command: "add", flows, renderer });
+    renderer.fireInterrupt();
+
+    await expect(result).resolves.toEqual({
+      message:
+        "3 additions: 2 added, 1 cancelled\n\n  ✓ Web Chat\n    Installed.\n\n" +
+        "  – Slack\n    Cancelled.\n\n  ✓ Notion\n    Installed.",
+      preserveFlowDiagnostics: true,
+    });
+  });
+
+  it("interrupts the whole add command on Ctrl-C during an installation", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ runItem, signal }) => {
+        await expect(
+          runItem?.(
+            (itemSignal) =>
+              new Promise((_resolve, reject) => {
+                itemSignal?.addEventListener("abort", () => reject(itemSignal.reason), {
+                  once: true,
+                });
+              }),
+          ),
+        ).rejects.toBeInstanceOf(WizardCancelledError);
+        signal?.throwIfAborted();
+        return registryResult();
+      }),
+    });
+
+    const result = run({ command: "add", flows, renderer });
+    renderer.fireInterrupt("ctrl-c");
+
+    await expect(result).resolves.toEqual({
+      message: "/add interrupted.",
+      cancelled: true,
+      tone: "error",
+      preserveFlowDiagnostics: true,
+    });
+  });
+
+  it("interrupts add while non-item work is in progress", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(
+        ({ signal }) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+      ),
+    });
+
+    const result = run({ command: "add", flows, renderer });
+    renderer.fireInterrupt();
+
+    await expect(result).resolves.toEqual({
+      message: "/add interrupted.",
+      cancelled: true,
+      tone: "error",
+      preserveFlowDiagnostics: true,
+    });
   });
 
   it("preserves model access refreshes when provider setup is interrupted", async () => {
