@@ -215,6 +215,26 @@ describe.skipIf(process.platform === "win32")("MicrosandboxVm", () => {
     expect(sandbox.detach).not.toHaveBeenCalled();
   });
 
+  it("propagates an SDK detach failure outside best-effort shutdown", async () => {
+    const sandbox = {
+      detach: vi.fn(async () => {
+        throw new Error("detach failed");
+      }),
+    };
+    const vm = new MicrosandboxVm(
+      {
+        module: {} as never,
+        options: resolveMicrosandboxOptions({ image: MICROSANDBOX_DEFAULT_IMAGE }),
+        sessionKey: "session-key",
+      },
+      sandbox as never,
+      "sandbox-name",
+      undefined,
+    );
+
+    await expect(vm.detach()).rejects.toThrow("detach failed");
+  });
+
   it("stops the VM before detaching the SDK client on shutdown", async () => {
     const sandbox = {
       detach: vi.fn(async () => {}),
