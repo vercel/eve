@@ -41,6 +41,10 @@ export function createInstrumentationDispatcher(
   const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
   const groups = normalizeDispatchGroups(input);
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
+  const requiresTraceBinding = providers.some(
+    (provider) =>
+      provider.tracePolicy !== undefined && provider.tracePolicyRequiresBinding !== false,
+  );
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
   const forTrace = (trace: TraceCaptureContext): InstrumentationHooks => {
@@ -175,7 +179,12 @@ export function createInstrumentationDispatcher(
           eventType: event.type,
         });
       }
-      unboundHooks ??= forTrace({ audience: "unknown" });
+      if (requiresTraceBinding) {
+        throw new Error(
+          "Instrumentation hooks with tracePolicy must be bound with forTrace before publishing.",
+        );
+      }
+      unboundHooks ??= forTrace({ agentName: "unknown", audience: "unknown" });
       await unboundHooks.publish(event);
     },
   };

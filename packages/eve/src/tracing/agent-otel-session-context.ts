@@ -156,7 +156,7 @@ export function createAgentOtelSessionContext(
     }
 
     const session = await ensureSessionContext({
-      agentName: undefined,
+      agentName: event.agentName,
       channelAudience: "unknown",
       channelKind: undefined,
       idempotencyKey: sessionIdempotencyKey(event.sessionId),
@@ -221,6 +221,9 @@ function resolveSessionTraceDecision(
   }
   if (event.parentTraceContext !== undefined) {
     return resolveTracePolicyDecision(isSampledTrace(event.parentTraceContext), audience);
+  }
+  if (event.agentName === undefined) {
+    return policy === undefined ? resolveTracePolicyDecision(true, audience) : { action: "drop" };
   }
   // The tool loop can evaluate the same policy before this first-session
   // preparation path; the persisted decision removes that window on replay.

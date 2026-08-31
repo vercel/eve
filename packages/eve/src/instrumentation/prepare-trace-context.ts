@@ -63,6 +63,7 @@ export async function prepareTurnTraceContext(
   if (input.instrumentation?.prepareTurnTrace !== undefined) {
     try {
       prepared = await input.instrumentation.prepareTurnTrace({
+        agentName: input.agentName,
         idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,

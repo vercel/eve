@@ -51,9 +51,13 @@ describe("otel and authored provider composition", () => {
         }),
       });
       const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
+      const hooks = runtime.hooks.forTrace!({
+        agentName: "weather-agent",
+        audience: "private",
+      });
 
       await contextStorage.run(new ContextContainer(), () =>
-        runtime.hooks.publish({
+        hooks.publish({
           idempotencyKey: "model:session-1:turn-1:0:0:0",
           input: {
             instructions: "private instructions",

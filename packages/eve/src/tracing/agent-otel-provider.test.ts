@@ -549,6 +549,7 @@ describe("createAgentOtelInstrumentation", () => {
 
     await contextStorage.run(ctx, async () => {
       await runtime.hooks.publish({
+        agentName: "weather",
         delivery,
         idempotencyKey,
         rootSessionId: "session-1",

@@ -330,6 +330,7 @@ export type InstrumentationSessionTransitionEvent =
 
 export interface InstrumentationTurnStartedEvent {
   readonly type: "turn.started";
+  readonly agentName?: string;
   readonly idempotencyKey: string;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
@@ -536,6 +537,8 @@ export interface InstrumentationProviderDefinition {
   ) => InstrumentationEvent | PromiseLike<InstrumentationEvent>;
   /** Provider-specific event admission and directional content policy. */
   readonly tracePolicy?: TraceCapturePolicy;
+  /** Whether `tracePolicy` requires a canonical trace context. Defaults to true. */
+  readonly tracePolicyRequiresBinding?: boolean;
   readonly events?: {
     readonly "channel.delivery.started"?: InstrumentationEventHandler<InstrumentationChannelDeliveryStartedEvent>;
     readonly "channel.delivery.cancelled"?: InstrumentationEventHandler<InstrumentationChannelDeliveryTerminalEvent>;

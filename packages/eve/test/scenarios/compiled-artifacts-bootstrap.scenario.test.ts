@@ -213,7 +213,9 @@ describe("writeCompiledArtifactsFiles", () => {
     ]);
     const providers = getInstrumentationProviders();
     expect(providers.map((entry) => entry.slot)).toEqual(["local", "otel"]);
-    expect(providers[0]?.provider.tracePolicy?.({ audience: "public" })).toEqual({
+    expect(
+      providers[0]?.provider.tracePolicy?.({ agentName: "weather", audience: "public" }),
+    ).toEqual({
       emit: true,
       recordInputs: true,
       recordOutputs: false,

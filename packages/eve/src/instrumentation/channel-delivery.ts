@@ -20,7 +20,7 @@ export interface ChannelDeliveryStartInstrumentation {
   readonly ctx: AlsContext;
   readonly delivery: DeliverHookPayload;
   readonly hooks: InstrumentationHooks | undefined;
-  readonly policyAgentName?: string;
+  readonly policyAgentName: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;
@@ -45,9 +45,11 @@ export async function instrumentChannelDelivery(
     const type =
       `channel.delivery.${input.outcome}` as InstrumentationChannelDeliveryTerminalEvent["type"];
     for (const item of active) {
+      const policyAgentName = item.policyAgentName ?? item.agentName;
+      if (policyAgentName === undefined) continue;
       const hooks =
         input.hooks.forTrace?.({
-          agentName: item.policyAgentName,
+          agentName: policyAgentName,
           audience: normalizeChannelAudience(item.delivery.channelAudience),
           channelType: item.channelType,
         }) ?? input.hooks;

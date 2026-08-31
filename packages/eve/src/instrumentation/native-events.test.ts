@@ -51,6 +51,7 @@ describe("createInstrumentationHandleEvent", () => {
           channelName: "slack",
           deliveryId: "delivery-1",
         },
+        policyAgentName: "weather",
         rootSessionId: "session-1",
         sequence: 0,
         sessionId: "session-1",

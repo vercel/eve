@@ -32,7 +32,7 @@ The process-wide declaration owns trace creation:
 
 ```ts
 interface TraceCaptureContext {
-  readonly agentName?: string;
+  readonly agentName: string;
   readonly audience: ChannelAudience;
   readonly channelType?: string;
 }

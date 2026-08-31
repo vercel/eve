@@ -58,7 +58,7 @@ describe("resolveTracePolicyDecision", () => {
         () => {
           throw new Error("boom");
         },
-        { audience: "public" },
+        { agentName: "weather", audience: "public" },
       ),
     ).toEqual({ action: "drop" });
   });
@@ -69,7 +69,7 @@ describe("resolveTracePolicyDecision", () => {
         () => {
           throw new Error("policy failed");
         },
-        { audience: "public" },
+        { agentName: "weather", audience: "public" },
         () => {
           throw new Error("reporting failed");
         },
@@ -82,7 +82,7 @@ describe("resolveTracePolicyDecision", () => {
     ["private", false],
     ["unknown", false],
   ] as const)("emits the default %s trace with the expected content", (audience, content) => {
-    expect(resolveTracePolicy(undefined, { audience })).toEqual({
+    expect(resolveTracePolicy(undefined, { agentName: "weather", audience })).toEqual({
       action: "record",
       recordInputs: content,
       recordOutputs: content,

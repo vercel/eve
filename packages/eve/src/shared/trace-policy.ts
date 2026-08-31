@@ -9,7 +9,7 @@ import {
 export type InstrumentationCapture = "content" | "metadata";
 
 export interface TraceCaptureContext {
-  readonly agentName?: string;
+  readonly agentName: string;
   readonly audience: ChannelAudience;
   readonly channelType?: string;
 }

@@ -225,7 +225,9 @@ describe("finalizeInstrumentationProviders", () => {
 
       const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
 
-      expect(runtime.hooks.forTrace?.({ audience: "private" }).capturesContent).toBe(expected);
+      expect(
+        runtime.hooks.forTrace?.({ agentName: "weather", audience: "private" }).capturesContent,
+      ).toBe(expected);
     },
   );
 
@@ -240,7 +242,9 @@ describe("finalizeInstrumentationProviders", () => {
 
     const runtime = finalizeInstrumentationProviders({ serviceName: "weather-agent" });
 
-    expect(runtime.hooks.forTrace?.({ audience: "private" }).capturesContent).toBe(true);
+    expect(
+      runtime.hooks.forTrace?.({ agentName: "weather", audience: "private" }).capturesContent,
+    ).toBe(true);
   });
 
   it("still runs execution when no destination was declared", async () => {
