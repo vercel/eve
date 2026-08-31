@@ -858,6 +858,79 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("space to toggle");
   });
 
+  it("keeps searchable checklist descriptions under their own stable rows", () => {
+    const options = [
+      { value: "web", label: "Web Chat", hint: "A built-in chat UI" },
+      { value: "slack", label: "Slack", hint: "Connect your Slack workspace" },
+    ];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        layout: "stacked",
+        message: "Where should people reach your agent?",
+        options,
+        placeholder: "Search channels",
+        select: initialSelectState({ options, submitRow: true }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("▶ Web Chat");
+    expect(text).toContain("A built-in chat UI");
+    expect(text).toContain("Slack");
+    expect(text).toContain("Connect your Slack workspace");
+    expect(text).toContain("Submit");
+  });
+
+  it("shows beyond featured planner choices in its initial compact viewport", () => {
+    const options = [
+      { value: "web", label: "Web Chat", featured: true },
+      { value: "slack", label: "Slack", featured: true },
+      { value: "github", label: "GitHub", featured: true },
+      { value: "linear-agent", label: "Linear Agent", featured: true },
+      { value: "discord", label: "Discord" },
+      { value: "telegram", label: "Telegram" },
+    ];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        plannerNavigation: true,
+        message: "Where should people reach your agent?",
+        options,
+        placeholder: "Search channels",
+        select: initialSelectState({ options }),
+      },
+      theme,
+      100,
+    ).join("\n");
+
+    expect(text).toContain("Linear Agent");
+    expect(text).toContain("Discord");
+    expect(text).toContain("Telegram");
+  });
+
+  it("uses a non-focusable planner footer for count and page navigation", () => {
+    const options = [{ value: "web", label: "Web Chat", hint: "Built-in chat UI" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        plannerNavigation: true,
+        message: "Where should people reach your agent?",
+        options,
+        placeholder: "Search channels",
+        select: initialSelectState({ options, initialValues: ["web"] }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("1 selected");
+    expect(text).toContain("space toggle · enter continue · ← / esc back");
+    expect(text).not.toContain("Submit");
+    expect(text).toContain("✓ Web Chat · Built-in chat UI");
+  });
+
   it("windows the railed list to five rows with an Esc-only footer", () => {
     const many = Array.from({ length: 20 }, (_, index) => ({
       value: `model-${index}`,

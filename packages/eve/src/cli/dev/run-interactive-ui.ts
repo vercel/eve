@@ -46,6 +46,7 @@ export async function runInteractiveDevelopmentUi(input: {
   const tuiInput: RunDevelopmentTuiInput = {
     target,
     initialInput: input.options.input,
+    initialOnboarding: input.options.onboard === true ? "agent" : undefined,
     onBootProgress: input.report,
     lifecycle: input.lifecycle,
     ...display,

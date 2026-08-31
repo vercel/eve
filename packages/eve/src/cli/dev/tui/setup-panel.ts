@@ -63,6 +63,12 @@ interface SetupQuestionPanelBase {
   error?: string;
   /** Outcome lines from earlier menu laps, shown beneath the options. */
   notices?: readonly SelectNotice[];
+  /** Batch-planner checklist navigation: Space toggles, Enter continues, Left/Esc goes back. */
+  plannerNavigation?: true;
+  /** Destination named beside Enter in a batch-planner checklist footer. */
+  plannerContinue?: string;
+  /** Batch-planner review navigation: Enter selects, Left/Esc goes back. */
+  plannerBack?: true;
 }
 
 interface SetupSelectPanelBase extends SetupQuestionPanelBase {
@@ -113,7 +119,11 @@ type SetupOptionSelectPanelState =
       placeholder?: string;
     })
   | (SetupSelectPanelBase & { kind: "multi" })
-  | (SetupSelectPanelBase & { kind: "searchable-multi"; placeholder?: string })
+  | (SetupSelectPanelBase & {
+      kind: "searchable-multi";
+      layout?: "stacked";
+      placeholder?: string;
+    })
   | (SetupSelectPanelBase & { kind: "stacked" })
   | (SetupSelectPanelBase & { kind: "task-list" })
   | (SetupSelectPanelBase & {
@@ -413,7 +423,7 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
       return {
         selection: "multiple",
         filter: { placeholder: state.placeholder },
-        layout: "plain",
+        layout: state.layout ?? "plain",
         edit: undefined,
       };
     case "stacked":
@@ -476,17 +486,18 @@ function isRailedSearch(presentation: SelectPresentation): boolean {
 function selectViewSize(input: {
   search: boolean;
   filter: string;
-  featuredLead: number;
   optionCount: number;
   railed: boolean;
+  stacked: boolean;
 }): number {
   if (!input.search) return input.optionCount;
-  // The railed list keeps a constant five-row viewport; other searchable
-  // presentations open on their featured lead when one exists.
+  // The railed list keeps a constant five-row viewport. Stacked search rows
+  // need the same minimum breadth: a single visible card reads like it changes
+  // into the next choice when the cursor moves.
   if (input.railed) return RAILED_VIEW_SIZE;
-  if (input.filter === "" && input.featuredLead > 0) {
-    return Math.min(input.featuredLead, SEARCH_VIEW_SIZE);
-  }
+  if (input.stacked) return Math.min(input.optionCount, SEARCH_VIEW_SIZE);
+  // Featured choices are ordered to the top, not treated as the whole initial
+  // viewport. The planner still opens on a useful compact window after them.
   return SEARCH_VIEW_SIZE;
 }
 
@@ -739,6 +750,9 @@ function selectFooterHints(
   presentation: SelectPresentation,
   visible: readonly SetupPanelOption[],
   cursor: number,
+  plannerNavigation: boolean,
+  plannerContinue: string | undefined,
+  plannerBack: boolean,
 ): string[] {
   const hints: string[] = [];
   let cancelHint = "esc to cancel";
@@ -757,9 +771,15 @@ function selectFooterHints(
   }
   if (presentation.filter !== undefined) hints.push("type to filter");
   hints.push("↑/↓ move");
+  if (plannerNavigation) {
+    hints.push("space toggle");
+    hints.push(`enter ${plannerContinue ?? "continue"}`);
+    hints.push("← / esc back");
+    return hints;
+  }
   hints.push(presentation.selection === "multiple" ? "space to toggle" : "enter to select");
   if (presentation.selection === "multiple") hints.push("enter on Submit to confirm");
-  hints.push(cancelHint);
+  hints.push(plannerBack ? "← / esc back" : cancelHint);
   return hints;
 }
 
@@ -805,7 +825,11 @@ export function renderSelectQuestion(
   const visible = presentation.filter
     ? filterOptions(state.options, state.select.filter, state.searchAction)
     : state.options;
-  const submitIndex = presentation.selection === "multiple" ? submitRowIndex(visible) : -1;
+  const plannerNavigation = state.plannerNavigation === true;
+  const plannerContinue = state.plannerContinue;
+  const plannerBack = state.plannerBack === true;
+  const submitIndex =
+    presentation.selection === "multiple" && !plannerNavigation ? submitRowIndex(visible) : -1;
   const cursor = state.select.cursor;
 
   const railed = isRailedSearch(presentation);
@@ -842,14 +866,12 @@ export function renderSelectQuestion(
     );
   }
 
-  let featuredLead = 0;
-  while (visible[featuredLead]?.featured) featuredLead += 1;
   const viewSize = selectViewSize({
     search: presentation.filter !== undefined,
     filter: state.select.filter,
-    featuredLead,
     optionCount: visible.length,
     railed,
+    stacked: presentation.layout === "stacked",
   });
   const start = Math.max(
     0,
@@ -883,6 +905,10 @@ export function renderSelectQuestion(
     theme,
   });
   appendSubmitRow(rows, cursor, submitIndex, theme);
+  if (plannerNavigation) {
+    const count = state.select.selected.size;
+    rows.push("", `  ${c.dim(`${count} selected`)}`);
+  }
 
   // The railed list scrolls silently: no count row, and Esc is the only
   // footer hint — typing, arrows, and the ↵ badge carry themselves.
@@ -900,7 +926,16 @@ export function renderSelectQuestion(
 
   rows.push(
     ...questionFooter(
-      railed ? ["esc to cancel"] : selectFooterHints(presentation, visible, cursor),
+      railed
+        ? ["esc to cancel"]
+        : selectFooterHints(
+            presentation,
+            visible,
+            cursor,
+            plannerNavigation,
+            plannerContinue,
+            plannerBack,
+          ),
       theme,
     ),
   );

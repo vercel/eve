@@ -39,6 +39,9 @@ const BASE_VERSIONS = {
   zodPackageVersion: "4.0.0",
 } as const;
 
+const RELEASE_AGE_POLICY =
+  'minimumReleaseAgeExclude:\n  - "@ai-sdk/*"\n  - "@rolldown/*"\n  - "@vercel/*"\n  - "@workflow/*"\n  - ai\n  - experimental-ai-sdk-code-mode\n  - eve\n  - nitro\n  - rolldown\n  - workflow\n';
+
 const WEB_VERSIONS = {
   ...BASE_VERSIONS,
   nextPackageVersion: "16.0.0",
@@ -158,6 +161,7 @@ describe("runInitCommand", () => {
     );
     const manifest = await readFile(join(projectPath, "package.json"), "utf8");
     expect(manifest).toContain('"eve": "^0.6.0"');
+    // pnpm accepts the optional prerelease peer without a manager-specific pin.
     const packageJson: unknown = JSON.parse(manifest);
     expect(packageJson).not.toHaveProperty("overrides");
     expect(packageJson).not.toHaveProperty("resolutions");
@@ -169,15 +173,15 @@ describe("runInitCommand", () => {
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
-      expect.any(Object),
+      expect.objectContaining({ bypassMinimumReleaseAge: true }),
     );
     expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
-      "--input",
-      "/model",
+      "--onboard",
     ]);
     // Substring assertions keep the expectations color-agnostic; picocolors
     // decides at import time whether the strings carry escape codes. The boot
@@ -266,13 +270,13 @@ describe("runInitCommand", () => {
       expect.objectContaining({
         command: "codex",
         cwd: projectPath,
-        prompt: expect.stringContaining("pnpm exec eve dev --no-ui"),
+        prompt: expect.stringContaining("pnpm --config.minimum-release-age=0 exec eve dev --no-ui"),
       }),
     );
     const prompt = deps.spawnCodingAgentRepl.mock.calls[0]?.[0].prompt;
     expect(prompt).toBe(
       initAgentReplPrompt({
-        devCommand: "pnpm exec eve dev",
+        devCommand: "pnpm --config.minimum-release-age=0 exec eve dev",
       }),
     );
     expect(prompt).toContain("What should the agent do?");
@@ -363,15 +367,15 @@ describe("runInitCommand", () => {
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         "pnpm",
         projectPath,
-        expect.any(Object),
+        expect.objectContaining({ bypassMinimumReleaseAge: true }),
       );
       expect(deps.tryInitializeGit).toHaveBeenCalledWith(projectPath);
       expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+        "--config.minimum-release-age=0",
         "exec",
         "eve",
         "dev",
-        "--input",
-        "/model",
+        "--onboard",
       ]);
       expect(output.messages[1]).toContain("Created an eve agent in ");
       expect(output.messages[1]).toContain(projectPath);
@@ -396,12 +400,12 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["npm", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", ["eve", "dev", "--input", "/model"]],
-    ["bun", ["x", "eve", "dev", "--input", "/model"]],
+    ["npm", "overrides", ["exec", "--", "eve", "dev", "--onboard"]],
+    ["yarn", "resolutions", ["eve", "dev", "--onboard"]],
+    ["bun", "overrides", ["x", "eve", "dev", "--onboard"]],
   ] as const)(
-    "scaffolds a fresh project owned by the invoking manager %s without package-manager pins",
-    async (kind, devArguments) => {
+    "scaffolds a fresh project owned by the invoking manager %s without pnpm policy",
+    async (kind, aiPinField, devArguments) => {
       const parentDirectory = await mkdtemp(join(tmpdir(), `eve-init-agent-${kind}-`));
       const output = logger();
       const deps = dependencies();
@@ -419,8 +423,10 @@ describe("runInitCommand", () => {
       const packageJson: unknown = JSON.parse(
         await readFile(join(projectPath, "package.json"), "utf8"),
       );
-      expect(packageJson).not.toHaveProperty("overrides");
-      expect(packageJson).not.toHaveProperty("resolutions");
+      expect(packageJson).toHaveProperty(aiPinField);
+      expect(packageJson).not.toHaveProperty(
+        aiPinField === "overrides" ? "resolutions" : "overrides",
+      );
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
@@ -459,16 +465,20 @@ describe("runInitCommand", () => {
       "x",
       "eve",
       "dev",
-      "--input",
-      "/model",
+      "--onboard",
     ]);
   });
 
   it.each([
-    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--input", "/model"]],
-    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--input", "/model"]],
-    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--input", "/model"]],
-    ["pnpm", "pnpm-lock.yaml", "npm", ["exec", "eve", "dev", "--input", "/model"]],
+    ["npm", "package-lock.json", "bun", ["exec", "--", "eve", "dev", "--onboard"]],
+    ["yarn", "yarn.lock", "npm", ["eve", "dev", "--onboard"]],
+    ["bun", "bun.lock", "npm", ["x", "eve", "dev", "--onboard"]],
+    [
+      "pnpm",
+      "pnpm-lock.yaml",
+      "npm",
+      ["--config.minimum-release-age=0", "exec", "eve", "dev", "--onboard"],
+    ],
   ] as const)(
     "scaffolds a fresh named project with the ancestor %s lockfile before the launcher",
     async (kind, lockfile, invokingManager, devArguments) => {
@@ -509,11 +519,7 @@ describe("runInitCommand", () => {
       `${JSON.stringify({ private: true, engines: { node: "22.x" } }, null, 2)}\n`,
       "utf8",
     );
-    await writeFile(
-      join(workspaceRoot, "pnpm-workspace.yaml"),
-      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n",
-      "utf8",
-    );
+    await writeFile(join(workspaceRoot, "pnpm-workspace.yaml"), "packages:\n  - apps/*\n", "utf8");
     const output = logger();
     const deps = dependencies();
     deps.detectInvokingPackageManager.mockReturnValue("npm");
@@ -523,7 +529,7 @@ describe("runInitCommand", () => {
     const projectPath = join(appsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "minimumReleaseAgeStrict: false\npackages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n",
+      `packages:\n  - apps/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -572,7 +578,7 @@ describe("runInitCommand", () => {
     const projectPath = join(agentsDirectory, "my-agent");
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -614,7 +620,7 @@ describe("runInitCommand", () => {
     await expect(pathExists(join(projectPath, "app/page.tsx"))).resolves.toBe(true);
     await expect(pathExists(join(projectPath, "pnpm-workspace.yaml"))).resolves.toBe(false);
     await expect(readFile(join(workspaceRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
-      "packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n",
+      `packages:\n  - apps/*\n  - agents/*\n\nallowBuilds:\n  sharp: false\n\n${RELEASE_AGE_POLICY}`,
     );
     const projectPackageJson = JSON.parse(
       await readFile(join(projectPath, "package.json"), "utf8"),
@@ -640,11 +646,11 @@ describe("runInitCommand", () => {
   });
 
   it.each([
-    ["yarn", "yarn.lock", ["eve", "dev", "--input", "/model"]],
-    ["bun", "bun.lock", ["x", "eve", "dev", "--input", "/model"]],
+    ["yarn", "yarn.lock", "resolutions", ["eve", "dev", "--onboard"]],
+    ["bun", "bun.lock", "overrides", ["x", "eve", "dev", "--onboard"]],
   ] as const)(
     "scaffolds a fresh %s workspace member without nested root-only package fields",
-    async (kind, lockfile, devArguments) => {
+    async (kind, lockfile, rootAiPinField, devArguments) => {
       const workspaceRoot = await mkdtemp(join(tmpdir(), `eve-init-${kind}-workspace-member-`));
       const appsDirectory = join(workspaceRoot, "apps");
       await mkdir(appsDirectory, { recursive: true });
@@ -683,12 +689,11 @@ describe("runInitCommand", () => {
         await readFile(join(workspaceRoot, "package.json"), "utf8"),
       ) as {
         engines?: { node?: string };
-        overrides?: unknown;
-        resolutions?: unknown;
+        overrides?: { ai?: string };
+        resolutions?: { ai?: string };
       };
       expect(rootPackageJson.engines?.node).toBe("24.x");
-      expect(rootPackageJson.overrides).toBeUndefined();
-      expect(rootPackageJson.resolutions).toBeUndefined();
+      expect(rootPackageJson[rootAiPinField]?.ai).toBe("7.0.0");
       expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
         kind,
         projectPath,
@@ -719,8 +724,7 @@ describe("runInitCommand", () => {
       "--",
       "eve",
       "dev",
-      "--input",
-      "/model",
+      "--onboard",
     ]);
   });
 
@@ -741,11 +745,11 @@ describe("runInitCommand", () => {
       `Git initialization failed during commit: commit refused\nThe eve agent was created successfully. Git repository metadata and staged files were preserved at "${projectPath}"; the initial commit is optional.\n\nTo create it later, configure Git identity and run:\n  git -C ${JSON.stringify(projectPath)} commit -m "Initial commit from eve"`,
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
-      "--input",
-      "/model",
+      "--onboard",
     ]);
   });
 
@@ -763,17 +767,21 @@ describe("runInitCommand", () => {
       "export default withEve(nextConfig);",
     );
     expect(await readFile(join(projectPath, "package.json"), "utf8")).toContain('"eve": "^0.6.0"');
+    // The compatibility extension stays limited to releases with the incomplete manifest.
+    expect(await readFile(join(projectPath, "pnpm-workspace.yaml"), "utf8")).toContain(
+      '"eve@>=0.6.0-beta.13 <=0.7.0":',
+    );
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectPath,
       expect.anything(),
     );
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
-      "--input",
-      "/model",
+      "--onboard",
     ]);
   });
 
@@ -830,6 +838,9 @@ describe("runInitCommand", () => {
       dependencies: { "@vercel/connect": "0.2.2", ai: "7.0.0", eve: "^0.6.0", zod: "^3.25.0" },
       engines: { node: "24.x" },
     });
+    expect(await readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).toContain(
+      '"eve@>=0.6.0-beta.13 <=0.7.0":',
+    );
     expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
       "pnpm",
       projectRoot,
@@ -839,6 +850,7 @@ describe("runInitCommand", () => {
     expect(deps.tryInitializeGit).not.toHaveBeenCalled();
     expect(deps.confirmInitInNonEmptyDirectory).not.toHaveBeenCalled();
     expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectRoot, [
+      "--config.minimum-release-age=0",
       "exec",
       "eve",
       "dev",
@@ -1155,7 +1167,7 @@ describe("runInitCommand", () => {
     const messages = stripAnsi(output.messages.join("\n"));
     expect(messages).toContain(`✓ Model ${DEFAULT_AGENT_MODEL_ID} (eve default)`);
     expect(messages).toContain(`✓ Instructions ${join(projectPath, "agent/instructions.md")}`);
-    expect(messages).toContain("pnpm exec eve dev --no-ui");
+    expect(messages).toContain("pnpm --config.minimum-release-age=0 exec eve dev --no-ui");
   });
 
   it("derives the agent dev handoff command from the existing project's own manager", async () => {
@@ -1194,8 +1206,8 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).not.toHaveBeenCalled();
   });
 
-  it("hands off to pnpm dev without extra configuration", async () => {
-    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dev-"));
+  it("carries the pnpm release-age bypass into the dev handoff", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-dev-release-age-"));
     const output = logger();
     const deps = dependencies();
 
@@ -1206,7 +1218,7 @@ describe("runInitCommand", () => {
     expect(deps.spawnPackageManager).toHaveBeenCalledWith(
       "pnpm",
       join(parentDirectory, "my-agent"),
-      ["exec", "eve", "dev", "--input", "/model"],
+      ["--config.minimum-release-age=0", "exec", "eve", "dev", "--onboard"],
     );
   });
 
