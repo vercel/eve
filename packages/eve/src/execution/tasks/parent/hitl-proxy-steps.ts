@@ -64,11 +64,8 @@ export async function recordTaskInputRequestStep(input: {
     return { accepted: false, sessionState: input.sessionState };
   }
 
-  // The request must come from the executor the task bound. The
-  // child-advertised continuation token is a per-request answer route, not an
-  // identity anchor: a workflow tool run is identified by its run id, a
-  // subagent child by the addressed handle matching the claimed child session
-  // (remote creates are ID-addressed and return no continuation token).
+  // The child-advertised token is an answer route, not an identity anchor: a
+  // tool run is identified by its run id, a subagent child by its addressed handle.
   const toolRun = readWorkflowToolExecutor(view.executor?.binding);
   if (toolRun !== undefined && toolRun.runId !== input.hookPayload.childSessionId) {
     return { accepted: false, sessionState: input.sessionState };

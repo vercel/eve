@@ -4,39 +4,25 @@ import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 const TOOL_RUNS_STATE_KEY = "eve.runtime.toolRuns";
 const ANSWER_HOOK_PREFIX = "eve:tool-run-answer:";
 
-/** Token of the hook `ask` creates for one request; delivery resumes it with a plain response. */
 export function toolRunAnswerToken(runId: string, seq: number): string {
   return `${ANSWER_HOOK_PREFIX}${runId}:${seq}`;
 }
 
-/** Whether a route token is a tool run's answer hook; with `runId`, one of that run's. */
 export function isToolRunAnswerToken(token: string, runId?: string): boolean {
   return token.startsWith(
     runId === undefined ? ANSWER_HOOK_PREFIX : `${ANSWER_HOOK_PREFIX}${runId}:`,
   );
 }
 
-/**
- * One authored workflow tool run the session's active turn is waiting on.
- *
- * Recorded by the dispatch step when the run starts and removed when its
- * result resolves the call, so the turn can bind inbox results, route input
- * requests, and cancel the run with the turn. Background tool runs are not
- * recorded here; the task index owns them.
- */
+/** A workflow tool run the active turn waits on. Background runs live in the task index. */
 export interface ToolRunRecord {
   readonly callId: string;
-  /** The run's inbox hook: its identity claim and the route for input answers. */
   readonly hookToken: string;
   readonly runId: string;
   readonly toolName: string;
 }
 
-/**
- * Schema-free read. Every write goes through {@link recordToolRun} and
- * {@link removeToolRun}, which keeps the workflow driver bundle free of the
- * validation runtime.
- */
+// Schema-free: this is bundled into the workflow driver.
 export function getToolRuns(state: SessionStateMap | undefined): readonly ToolRunRecord[] {
   const raw = state?.[TOOL_RUNS_STATE_KEY];
   return Array.isArray(raw) ? (raw as readonly ToolRunRecord[]) : [];
@@ -70,12 +56,7 @@ export function clearToolRuns(session: HarnessSession): HarnessSession {
   return getToolRuns(session.state).length === 0 ? session : writeToolRuns(session, []);
 }
 
-/**
- * A tool result arriving over the shared turn inbox settles a call only when
- * the turn recorded a run for that call and the result names the same tool.
- * Anything else — a stale result for a resolved call, or one for a call that
- * never dispatched — is dropped.
- */
+/** The turn inbox is shared; a result settles a call only if the turn recorded that run. */
 export function isInboxToolResultFromRecordedRun(
   state: SessionStateMap | undefined,
   result: RuntimeToolResultActionResult,

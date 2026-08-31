@@ -77,9 +77,8 @@ export async function applyWorkflowTransform(
       mode === false
         ? undefined
         : await prepareAuthoredWorkflowDirectives({ filePath: absolutePath, source });
-    // Authored ids derive from the application root so the driver bundle
-    // (built from eve's package directory) and the server bundle (built from
-    // the application) mint identical step and workflow ids.
+    // Ids derive from the app root so the driver bundle (built from eve's
+    // package directory) and the server bundle (built from the app) agree.
     return transformWorkflowDirectives({
       authored: true,
       filename: toRelativeImportPath(
@@ -104,11 +103,6 @@ export async function applyWorkflowTransform(
   });
 }
 
-/**
- * True for a module authored inside the application (under the project
- * root, outside `node_modules`, and not part of the eve package itself).
- * Such modules may declare Workflow directives and receive authored ids.
- */
 export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {
   const normalizedRoot = toRealPath(appRoot).replace(/\\/g, "/").replace(/\/$/, "");
   const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
@@ -127,12 +121,8 @@ function toRealPath(path: string): string {
   }
 }
 
-/**
- * True when the project root is an application package: it has its own
- * `package.json` and is not the eve package itself. Applications need not
- * declare a `version`, so this reads the manifest directly rather than
- * through the package-specifier cache.
- */
+// Reads the manifest directly: applications need not declare a `version`,
+// which the package-specifier cache requires.
 export function isAuthoredApplicationRoot(appRoot: string): boolean {
   const packageJsonPath = join(appRoot, "package.json");
   if (!existsSync(packageJsonPath)) return false;

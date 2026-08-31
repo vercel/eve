@@ -27,22 +27,11 @@ type WorkflowToolExecute = (
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
 /**
- * Runs one authored workflow tool call.
- *
- * The authored `execute` body was registered by the bundler as a workflow
- * function; this run looks it up, builds the `ctx` it sees, and calls it. The
- * body speaks to its owner — the parked turn or the owning task — on the
- * owner's three hooks: each `yield` resumes `report`, `ask` resumes `request`,
- * and the return value (or a throw) resumes `outcome` once.
- *
- * The run's own hook is its identity claim and its control inbox: a duplicate
- * start loses the claim and exits, and a `cancel` message aborts
- * `ctx.abortSignal`. The run then waits up to {@link CANCEL_GRACE} for the
- * body to unwind — steps that received the signal reject and `finally` blocks
- * run — and ends as cancelled whether or not it did, so a body parked on a
- * hook or a sleep cannot keep a cancelled run alive. The hook is disposed on
- * teardown so a late control message fails loudly instead of queueing against
- * a finished run.
+ * Runs one authored workflow tool call. The run's own hook is its identity
+ * claim and its control inbox: a duplicate start loses the claim and exits; a
+ * `cancel` message aborts `ctx.abortSignal`, and the run waits up to
+ * {@link CANCEL_GRACE} for the body to unwind before ending as cancelled, so a
+ * body parked on a hook or sleep cannot keep a cancelled run alive.
  */
 export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void> {
   "use workflow";
@@ -100,7 +89,6 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
   }
 }
 
-/** Runs the body, streaming an async generator's yields as progress reports. */
 async function runBody(
   input: ToolRunWorkflowInput,
   ctx: ToolContext,
@@ -110,9 +98,7 @@ async function runBody(
   const result = execute(input.input, ctx);
   if (!isAsyncIterable(result)) return await result;
 
-  // Iterate by hand so the generator's return value becomes the tool result,
-  // falling back to its last yield when the body only streams. `for await`
-  // discards the return, so it cannot be used here.
+  // `for await` discards a generator's return value; it is the tool result.
   const iterator = result[Symbol.asyncIterator]();
   let last: JsonValue | undefined;
   let next = await iterator.next();
@@ -141,12 +127,6 @@ function readRunId(): string {
   return runId;
 }
 
-/**
- * The bundler registers every authored `"use workflow"` function in the
- * driver's workflow registry under its id; the tool's `execute` is one of
- * them. A missing entry means the deployment running this run no longer has
- * the tool under that id.
- */
 function resolveWorkflowToolExecute(input: ToolRunWorkflowInput): WorkflowToolExecute {
   const execute = readRegisteredWorkflow(input.workflowId);
   if (typeof execute !== "function") {

@@ -11,18 +11,9 @@ import type { JsonValue } from "#shared/json.js";
 import type { TaskCommand, TaskInboundUpdate } from "#tasks/types.js";
 import type { ToolInputRequest } from "#tools/definition.js";
 
-/**
- * Translators from a run's three channels into the payloads its owner already
- * understands. Pure and type-only in its imports: this runs in the turn and
- * task driver bodies.
- */
+// Type-only imports: these run in the turn and task driver bodies.
 
-/**
- * Binds a run's terminal outcome to its call as a `tool-result`, the same
- * shape an owner already binds from the runtime-action wire. A cancelled run
- * settles the call as an error so a self-cancelling body never leaves the
- * owner waiting.
- */
+/** A cancelled run settles the call as an error so the owner never waits on it. */
 export function runOutcomeToToolResult(message: RunOutcomeMessage): RuntimeToolResultActionResult {
   const { from, result } = message;
   if (result.status === "completed") {
@@ -46,7 +37,6 @@ export function runOutcomeToToolResult(message: RunOutcomeMessage): RuntimeToolR
   };
 }
 
-/** Reads a human-readable message out of a normalized serialized error. */
 function errorMessage(error: unknown): string {
   if (typeof error === "object" && error !== null && "message" in error) {
     const message = (error as { message?: unknown }).message;
@@ -55,12 +45,7 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
-/**
- * Rewrites a run's request into the `subagent-input-request` payload owners
- * already proxy to the channel. The per-request answer hook (`message.replyTo`)
- * is both the child continuation token the answer is routed to and the request
- * id, so one resume of that hook reaches the body's awaited hook directly.
- */
+/** The answer hook token is both the request id and the route, so one resume reaches the body. */
 export function runRequestToInputRequestPayload(
   message: RunRequestMessage,
 ): SubagentInputRequestHookPayload {
@@ -96,7 +81,6 @@ function toInputRequest(request: ToolInputRequest, from: RunRef, requestId: stri
   return normalized;
 }
 
-/** A background run's progress wakes the owning agent as a task update. */
 export function runReportToTaskUpdate(
   message: RunReport,
   taskId: string,
@@ -111,11 +95,7 @@ export function runReportToTaskUpdate(
   };
 }
 
-/**
- * A background run's outcome drives the task's lifecycle: completion and
- * failure are terminal commands; a cancelled run settles the executor of a
- * task that is already cancelled.
- */
+/** A cancelled run only settles the executor: the task itself was already cancelled. */
 export function runOutcomeToTaskCommand(message: RunOutcomeMessage): TaskCommand {
   const { result } = message;
   if (result.status === "completed") {

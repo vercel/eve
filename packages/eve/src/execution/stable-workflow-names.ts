@@ -1,13 +1,7 @@
 /**
- * Names of eve's workflow functions whose bundled id is stable across
- * deployments (no `@<pkg.version>` stamp). The bundler reads this set when
- * emitting the workflow id so cross-deployment routing — `start(ref, args, {
- * deploymentId: "latest" })` — finds the same workflow on a newer deployment
- * even when the eve version differs.
- *
- * Dependency-free on purpose: the bundler imports it without pulling in the
- * execution runtime, and the runtime's reference templates read the same
- * names so the two halves of the contract cannot drift.
+ * eve workflow functions whose bundled id carries no `@<version>` stamp, so
+ * `start(ref, args, { deploymentId: "latest" })` finds them on a newer
+ * deployment. Dependency-free so the bundler can import it.
  */
 export const WORKFLOW_ENTRY_NAME = "workflowEntry";
 export const TURN_WORKFLOW_NAME = "turnWorkflow";

@@ -61,19 +61,11 @@ export async function transformDynamicToolExecute(
 
 interface WalkContext {
   readonly defineToolAliases: ReadonlySet<string>;
-  /**
-   * Top-level functions that are workflow bodies. A tool whose `execute` is
-   * one of these never runs as a callback — the runtime starts it as a
-   * durable run — so it must keep its identity and is not stamped.
-   */
+  /** Workflow bodies never run as callbacks, so they keep their identity and are not stamped. */
   readonly workflowFunctions: ReadonlySet<string>;
 }
 
-/**
- * Workflow functions are recognizable in both shapes this transform may see:
- * the authored `"use workflow"` directive, and — after the directive
- * transform has run — the `name.workflowId = "..."` stamp it leaves behind.
- */
+// Both shapes this transform may see: the directive, or the stamp the directive transform left.
 function findWorkflowFunctionNames(program: AstNode): ReadonlySet<string> {
   const names = new Set<string>();
   for (const statement of (program.body as AstNode[] | undefined) ?? []) {

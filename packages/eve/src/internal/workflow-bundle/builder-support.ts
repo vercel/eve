@@ -38,7 +38,6 @@ const NODE_BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
 ]);
-/** Source files the workflow build reads, discovers directives in, and resolves imports across. */
 export const WORKFLOW_SOURCE_EXTENSIONS: readonly string[] = [
   ".ts",
   ".tsx",
@@ -228,12 +227,9 @@ export function createWorkflowRuntimeAliasPlugin(): WorkflowRolldownPlugin {
 }
 
 /**
- * Resolves the public `workflow` surface inside the driver bundle. Authored
- * workflow bodies import `workflow` for hooks, sleeps, and streams; the driver
- * provides those through eve's body-side shim. The runtime API (`workflow/api`)
- * drives runs from outside a body and imports Node.js internals, so an import
- * of it that is still live after step bodies were stubbed means a body calls
- * it, and the build fails with the rule instead of the driver failing later.
+ * `workflow` resolves to the body-side shim. A `workflow/api` import still live
+ * after step bodies were stubbed means a body calls the runtime API; fail the
+ * build here rather than the driver later.
  */
 export function createWorkflowDriverAliasPlugin(workingDir: string): WorkflowRolldownPlugin {
   return {
@@ -446,15 +442,13 @@ export async function bundleFinalWorkflowOutput(input: {
   await writeWorkflowBundleAtomically(input.outfile, workflowFunctionCode);
 }
 
-// The transform emits bare `globalThis.<registry>.set(...)` calls, so the Map
-// must exist before any chunk runs.
+// The transform emits bare `.set(...)` calls, so the Map must exist before any chunk runs.
 const WORKFLOW_REGISTRY_BANNER = `globalThis.${WORKFLOW_REGISTRY_GLOBAL} = new Map();`;
 
 /**
- * Composes independently built driver chunks into the one script the driver
- * VM evaluates. Chunks share state only through globals (the workflow
- * registry, the serde class registry, `Symbol.for` context keys), so each one
- * runs inside its own IIFE and their top-level declarations never collide.
+ * Chunks share state only through globals (the workflow registry, the serde
+ * class registry, `Symbol.for` keys), so each runs in its own IIFE and their
+ * top-level declarations never collide.
  */
 export function composeWorkflowDriverCode(chunks: readonly string[]): string {
   const bodies = chunks

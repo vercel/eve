@@ -6,9 +6,7 @@ const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
 
-// The SDK recognizes these by `name` (and `fatal`) when it serializes an error
-// out of a body, so the shim's classes carry the same marks as the SDK's.
-// Retry timing is a step concern; steps run against the real SDK.
+// The SDK matches these by `name` and `fatal` when it serializes an error out of a body.
 export class RetryableError extends Error {
   constructor(message: string) {
     super(message);

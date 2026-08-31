@@ -7,12 +7,9 @@ import { createLogger, logError } from "#internal/logging.js";
 const log = createLogger("execution.tool-run");
 
 /**
- * Cancels one workflow tool run with a `cancel` control message: the body
- * observes `ctx.abortSignal`, unwinds, and the run ends itself as cancelled
- * after its grace period. A run that already finished is not an error. If the
- * message cannot be delivered, the run is cancelled outright; a failure there
- * is logged rather than thrown, because the caller has already committed the
- * cancellation the run was serving and must not roll it back.
+ * Asks the run to cancel itself; cancels it outright only if the message cannot
+ * be delivered. Failures are logged, not thrown: the caller has already
+ * committed the cancellation the run was serving.
  */
 export async function cancelToolRun(run: ToolRunAddress, reason: string): Promise<void> {
   const cancel: RunControlMessage = { kind: "cancel", reason };

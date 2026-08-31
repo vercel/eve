@@ -1,14 +1,8 @@
 /**
- * Reads several hooks from one loop. Each channel keeps at most one durable
- * read outstanding, and a read that lands while no race is waiting is kept
- * until a race claims it: the owner awaits steps between races, and a resume
- * that arrives then must not be dropped or re-issued.
- *
- * Claims follow array order. Separate hooks carry no order between them, so
- * an owner lists a run's progress and questions before its outcome: the
- * outcome is terminal and must not overtake what the run said before it.
- *
- * Pure: this runs inside the owner workflows' replayed bodies.
+ * Races reads across several hooks. A read that lands while no race is waiting
+ * is kept until one claims it: the owner awaits steps between races, and a
+ * resume arriving then must not be dropped or re-issued. Claims follow array
+ * order because separate hooks carry no order between them.
  */
 export interface ChannelReader<C extends string, T> {
   readonly channel: C;
@@ -34,10 +28,6 @@ export type ChannelRead<R extends readonly ChannelReader<string, unknown>[]> = {
 
 const EXTRA = Symbol("extra");
 
-/**
- * Resolves with the first channel to produce a value, or with `extra`'s value
- * when that settles first (an owner races its cancellation here).
- */
 export async function raceChannelReads<
   const R extends readonly ChannelReader<string, unknown>[],
   X = never,

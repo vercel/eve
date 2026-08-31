@@ -8,13 +8,7 @@ import { type JsonObject, parseJsonObject } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskDelegated, TaskExec, TaskExecutorBinding } from "#tools/task.js";
 
-/**
- * The harness-facing `execute` of a background tool whose authored `execute`
- * is a workflow. It runs inside the model step like any background tool,
- * starts the durable run with the task as its owner, and returns the
- * delegation receipt; the run reports completion, failure, progress, and
- * input requests over the task wire from then on.
- */
+/** Harness `execute` for a background workflow tool: starts the run as the task's executor. */
 export function createWorkflowToolBackgroundExecute(input: {
   readonly toolName: string;
   readonly workflowId: string;
@@ -63,11 +57,7 @@ export function readWorkflowToolExecutor(
     : undefined;
 }
 
-/**
- * A run's input crosses the workflow serialization boundary, so the parsed
- * tool input must be a JSON object. Schema parsing can emit other values (a
- * `Date`, for example); those tools cannot be workflows.
- */
+/** The input crosses the run's serialization boundary; a schema may emit a `Date`, which cannot. */
 export function parseWorkflowToolInput(toolInput: unknown, toolName: string): JsonObject {
   try {
     return parseJsonObject(toolInput);

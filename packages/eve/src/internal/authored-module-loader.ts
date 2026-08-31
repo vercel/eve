@@ -261,15 +261,9 @@ export async function bundleExtensionDistributionGraph(input: {
  * Shared dependencies are parsed and emitted once instead of once per authored
  * entry.
  */
-/** The module map bundle plus the identity of its Workflow-bearing sources. */
 export interface AuthoredModuleMapBundle {
   readonly code: string;
-  /**
-   * Hash of every application module reachable from one that declares a
-   * Workflow directive, or `undefined` when the application declares none.
-   * Those sources also feed the workflow driver and the server's step
-   * registrations, so a change to any of them must rebuild the host.
-   */
+  /** Fingerprint of the sources that also feed the driver and step registry; a change rebuilds the host. */
   readonly workflowSourceFingerprint: string | undefined;
 }
 
@@ -310,8 +304,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       source: moduleMapSource,
     }),
     createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
-    // Workflow bodies are hoisted and stubbed before callbacks are stamped:
-    // the stamping transform must see the stub, never the directive.
+    // Before callback stamping, which must see the stub and never the directive.
     createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot, recorder: workflowSources }),
     createDynamicCapabilityTransformPlugin(),
     workflowSources.graphPlugin(),
@@ -364,13 +357,7 @@ function createExternalRuntimeImportPlugin(importSpecifier: string): Record<stri
   };
 }
 
-/**
- * Records, during one module map build, which application modules declare
- * Workflow directives and what every module imports, then fingerprints the
- * sources reachable from the directive-bearing ones. Reusing the build's own
- * resolution keeps the fingerprint exact for aliases and extension probing
- * without a second import resolver.
- */
+/** Reuses the build's own resolution so the fingerprint is exact without a second resolver. */
 class AuthoredWorkflowSourceRecorder {
   readonly #appRoot: string;
   readonly #directiveModules = new Set<string>();
@@ -565,14 +552,8 @@ function createAuthoredDirectiveGuardPlugin(): Record<string, unknown> {
   };
 }
 
-/**
- * Compiles Workflow directives in application modules for a server-side
- * bundle that does not register steps: `"use step"` functions keep their
- * bodies and gain a `stepId`, and `"use workflow"` functions become
- * references the harness starts as durable runs. Step registration itself
- * happens once, through the workflow step entrypoint the application host
- * bundles from the same sources.
- */
+// Client mode: steps keep their bodies, workflows become references. Step
+// registration happens once, in the host's step entrypoint.
 function createAuthoredWorkflowDirectivePlugin(input: {
   readonly appRoot: string;
   readonly recorder?: AuthoredWorkflowSourceRecorder;

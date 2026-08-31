@@ -40,26 +40,16 @@ interface DirectiveFunctionNode {
 }
 
 export interface AuthoredWorkflowDirectiveSource {
-  /** `true` when the module marks at least one function with a Workflow directive. */
   readonly hasDirectives: boolean;
-  /** `true` when the module declares at least one `"use workflow"` function. */
   readonly hasWorkflowDirective: boolean;
-  /** Module source with the default export's `execute` method hoisted to a declaration. */
   readonly source: string;
 }
 
 /**
- * Validates and normalizes Workflow directives in one authored application
- * module before the directive transform runs on it.
- *
- * eve's directive transform understands one shape: a top-level `async
- * function` declaration whose first statement is `"use step"` or
- * `"use workflow"`. Authored tools additionally write the workflow body as
- * the `execute` method of their default export, so that method is hoisted
- * here into a top-level `async function execute` and the property rewritten
- * to reference it. Every other directive placement is rejected with the
- * rewrite the author needs, because an ignored directive would run
- * side-effecting code inline in a replayed body.
+ * The directive transform understands one shape: a top-level `async function`
+ * whose first statement is the directive. A tool's `execute` method is hoisted
+ * into that shape here; every other placement is a build error, because an
+ * ignored directive would run side effects inline in a replayed body.
  */
 export async function prepareAuthoredWorkflowDirectives(input: {
   readonly filePath: string;
@@ -104,9 +94,8 @@ export async function prepareAuthoredWorkflowDirectives(input: {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
   const hasWorkflowDirective = found.some((entry) => entry.directive === "use workflow");
-  // Module discovery gates on the Workflow SDK's line-based pre-scan before it
-  // parses anything. A directive that pre-scan cannot see would still be
-  // compiled here into a stub with no run behind it, so it is rejected instead.
+  // Discovery gates on the SDK's line-based pre-scan; a directive it cannot see
+  // would compile here into a stub with no run behind it.
   const visibleToPrescan = detectWorkflowPatterns(input.source).hasDirective;
 
   for (const entry of found) {
@@ -156,11 +145,6 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   };
 }
 
-/**
- * Finds the `execute` method of the module's default export: the object
- * literal itself, or the object literal passed to a definer such as
- * `defineTool({ ... })`.
- */
 function findDefaultExportExecuteProperty(body: readonly AstNode[]): AstNode | undefined {
   const exported = body.find((statement) => statement.type === "ExportDefaultDeclaration");
   const declaration = exported?.declaration;

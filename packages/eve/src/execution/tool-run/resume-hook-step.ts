@@ -1,13 +1,7 @@
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
-/**
- * `resumeHook` as a step, for eve's own bodies: the Workflow runtime API
- * imports Node.js internals that must not enter the workflow driver, so the
- * driver sees the stub the transform leaves behind and the registered step
- * body calls the real runtime in the app process. With `ifPresent`, a hook
- * that no longer exists is not an error.
- */
+/** `resumeHook` as a step, so the runtime API stays out of the driver. */
 export async function resumeHookStep(
   token: string,
   payload: unknown,

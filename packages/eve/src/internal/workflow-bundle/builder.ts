@@ -262,12 +262,9 @@ export class WorkflowBundleBuilder {
   }
 
   /**
-   * Builds one interim driver chunk: the transformed `"use workflow"` bodies
-   * from the given files, self-contained, registering themselves into
-   * `globalThis.__private_workflows`. The chunk carries no registry banner and
-   * no entrypoint wrapper so `composeWorkflowDriverCode` can concatenate the
-   * framework and app chunks into one script. Returns `""` when the layer has
-   * nothing to bundle — the common case for an app with no workflow tools.
+   * One driver layer, without registry banner or entrypoint wrapper so
+   * `composeWorkflowDriverCode` can concatenate layers. `""` when the layer has
+   * nothing to bundle, the common case for an app with no workflow tools.
    */
   async #buildDriverChunk(options: {
     label: string;
@@ -309,8 +306,7 @@ export class WorkflowBundleBuilder {
           sideEffectFiles: [...workflowFiles, ...serdeOnlyFiles],
           workingDir: this.config.workingDir,
         }),
-        // Must run after the transform so `"use step"` bodies are already
-        // stubbed and their node:* imports stripped from this graph.
+        // After the transform, so stubbed step bodies' node:* imports are already gone.
         createWorkflowNodeBuiltinGuardPlugin(),
       ],
       resolve: {
@@ -354,11 +350,7 @@ export class WorkflowBundleBuilder {
   }
 }
 
-/**
- * Every app directive module joins the framework steps so an `execute` body's
- * own `"use step"` helpers register with the server; driver inputs stay
- * per-layer.
- */
+/** App step modules register with the framework's server steps; driver inputs stay per-layer. */
 function mergeStepEntries(
   framework: WorkflowBundleDiscoveredEntries,
   app: AuthoredWorkflowModules,

@@ -70,11 +70,7 @@ export const runtimeRemoteAgentCallActionRequestSchema = z
   })
   .strict();
 
-/**
- * Call to an authored tool whose `execute` is a workflow. The harness parks
- * the call and the runtime starts the durable run named by `workflowId`;
- * the run's result settles the call as a `tool-result`.
- */
+/** Call to a tool whose `execute` is a workflow; the run's outcome settles it as a `tool-result`. */
 export type RuntimeWorkflowToolCallActionRequest = z.infer<
   typeof runtimeWorkflowToolCallActionRequestSchema
 >;

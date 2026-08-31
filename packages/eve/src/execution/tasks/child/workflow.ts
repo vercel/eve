@@ -86,9 +86,8 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   // claiming so conflict replay is consumed by getConflict(), not a
   // later iterator read.
   const commandReader = createChannelReader("commands", commands);
-  // The run channels exist before the claim: the parent hands the task token
-  // to a background run as soon as the claim lands, and that run may report
-  // at once.
+  // Before the claim: the parent hands the token to a run as soon as the claim
+  // lands, and that run may report at once.
   const runChannels = openRunOwnerChannels(input.taskInboxToken);
   const readers = [...runChannels.readers, commandReader] as const;
   let ownsHook = false;

@@ -6,21 +6,13 @@ import { toolRunAnswerToken } from "#harness/tool-runs.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
-/**
- * The hook tokens of the turn or task that started a run. The run resumes
- * `report` with progress, `request` with a question carrying the token of the
- * hook its answer should resume, and `outcome` once with its result.
- */
 export interface ToolRunOwner {
   readonly outcome: string;
   readonly report: string;
   readonly request: string;
 }
 
-/**
- * Who a message is from: enough for an owner sharing one channel across many
- * runs to bind an outcome to its call, route a request, and render it.
- */
+/** Identifies the sending run to an owner that shares its channels across many runs. */
 export interface RunRef {
   readonly callId: string;
   /** The tool's parsed input, shown as the request's action when the run asks. */
@@ -31,17 +23,11 @@ export interface RunRef {
   readonly turnId: string;
 }
 
-/** Terminal result of one run, reported once to its owner. */
 export type RunOutcome =
   | { readonly status: "completed"; readonly output: JsonValue }
   | { readonly status: "failed"; readonly error: unknown }
   | { readonly status: "cancelled"; readonly reason?: string };
 
-/**
- * The three things a run says to its owner, each on its own hook of the
- * owner's {@link ToolRunOwner}: progress on `report`, a question on `request`
- * with the token of the hook its answer resumes, and the end on `outcome`.
- */
 export interface RunReport {
   readonly from: RunRef;
   readonly update: JsonValue;
@@ -63,10 +49,7 @@ export const reportHook = defineHook<RunReport>();
 export const requestHook = defineHook<RunRequestMessage>();
 export const outcomeHook = defineHook<RunOutcomeMessage>();
 
-/**
- * An owner's three channels derive from its inbox token, so the owner creates
- * them and a run it starts addresses them from the same string.
- */
+/** Derived from the owner's inbox token so owner and run agree without exchanging tokens. */
 export function deriveRunOwner(inboxToken: string): ToolRunOwner {
   return {
     outcome: `${inboxToken}:outcome`,
@@ -75,28 +58,17 @@ export function deriveRunOwner(inboxToken: string): ToolRunOwner {
   };
 }
 
-/** What an owner says to a run, on the run's own hook. */
 export type RunControlMessage = { readonly kind: "cancel"; readonly reason: string };
 
-/**
- * Narrows a control-inbox payload. Hand-written rather than a zod schema: this
- * runs in the replayed body, and a schema would pull all of zod into the
- * workflow driver that ships inside every function bundle.
- */
+// Not a zod schema: this runs in the replayed body, and zod would ship in every function bundle.
 export function isRunControlMessage(value: unknown): value is RunControlMessage {
   if (typeof value !== "object" || value === null) return false;
   const { kind, reason } = value as { kind?: unknown; reason?: unknown };
   return kind === "cancel" && typeof reason === "string";
 }
 
-/**
- * What a body needs to speak to its owner: the run's identity and the owner's
- * channels. Carried on the tool context under a global-registry symbol, not a
- * module-level map: the driver composes the framework and application layers
- * from separate bundles, so `attachRunContext` (framework) and `ask` (reached
- * from authored code through `eve/workflow`) run in different instances of
- * this module and share nothing but the objects they pass around.
- */
+// Carried on `ctx` under a global-registry symbol: the framework and application
+// driver layers are separate bundles and share only the objects they pass around.
 const RUN_CONTEXT = Symbol.for("eve.tool-run.context");
 
 interface RunContext {
@@ -123,14 +95,10 @@ function readRunContext(ctx: ToolContext): RunContext {
 }
 
 /**
- * Asks the owner to put a question to a human and returns the hook the answer
- * resumes, the way `createHook` returns one: await it for the answer, race it
- * against a `sleep` for a deadline.
- *
- * Synchronous on purpose. A `Hook` is thenable, so an async function that
- * returned one would adopt it and its promise would settle with the answer,
- * never the hook. The request is published by a step the body does not await;
- * the workflow runs it before the body suspends on the hook.
+ * Asks the human on the session's channel and returns the hook the answer
+ * resumes, as `createHook` would: await it for the answer, or race it against
+ * a `sleep` for a deadline. Synchronous because a `Hook` is thenable: an async
+ * `ask` would resolve to the answer, never the hook.
  */
 export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
   const context = readRunContext(ctx);

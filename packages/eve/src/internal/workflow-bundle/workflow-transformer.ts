@@ -78,12 +78,7 @@ type AstNode = {
   value?: unknown;
 };
 
-/**
- * Lists the top-level async function declarations in `source` that open
- * with a Workflow directive. Discovery reads the syntax tree rather than
- * the text, so a directive quoted in a string or comment never turns a
- * module into a bundle entry.
- */
+/** Reads the syntax tree, so a directive quoted in a string or comment never counts. */
 export async function findWorkflowDirectiveFunctions(
   filename: string,
   source: string,
@@ -94,11 +89,9 @@ export async function findWorkflowDirectiveFunctions(
 
 export async function transformWorkflowDirectives(input: {
   /**
-   * `true` for an authored application module. In workflow mode the module
-   * body is preserved (step bodies become proxies in place, never the
-   * eve-internal proxy-only rewrite) and a default export built by an eve
-   * definer such as `defineTool(...)` is dropped, so the driver bundle
-   * never evaluates the tool definition or its schema dependencies.
+   * Authored modules keep their body in workflow mode (steps become proxies in
+   * place) and lose an eve-definer default export, so the driver never
+   * evaluates the tool definition or its schema dependencies.
    */
   authored?: boolean;
   filename: string;
@@ -406,13 +399,8 @@ function applySourceReplacements(
   return result + source.slice(cursor);
 }
 
-/**
- * Removes `export default <eveDefiner>(...)` from an authored module bound for
- * the workflow driver. The driver only needs the module's workflow and step
- * functions; the definition object exists for the server-side registry, and
- * evaluating it there would pull the definer (and the schema library behind
- * `inputSchema`) into a bundle that rejects their Node.js dependencies.
- */
+// The driver needs only the workflow and step functions; evaluating the
+// definition would pull the definer and the schema library into the bundle.
 function removeEveDefinerDefaultExport(
   ast: AstProgram,
 ): { end: number; start: number; text: string }[] {

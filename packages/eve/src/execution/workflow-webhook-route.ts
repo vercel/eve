@@ -1,20 +1,10 @@
-/**
- * Framework-shipped endpoint behind `createWebhook()` in authored workflow
- * bodies.
- *
- * `createWebhook()` mints `<deployment>/.well-known/workflow/v1/webhook/<token>`,
- * the Workflow SDK's conventional path, so external systems a tool hands the
- * URL to can call back without knowing anything about eve. The handler resumes
- * the hook with the request itself; the SDK serializes it so the body reads a
- * `Request` and owns the response semantics.
- */
-
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
 
 import { resumeWebhook } from "#internal/workflow/runtime.js";
 import type { RouteContext } from "#public/definitions/channel.js";
 import { walkCauseChain } from "#shared/errors.js";
 
+/** The path `createWebhook()` mints, so external systems call back without knowing eve. */
 export const WORKFLOW_WEBHOOK_ROUTE_PATTERN = "/.well-known/workflow/v1/webhook/:token";
 
 export async function handleWorkflowWebhookRequest(

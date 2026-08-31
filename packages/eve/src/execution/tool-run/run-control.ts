@@ -3,27 +3,18 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 import { isRunControlMessage, type RunControlMessage } from "#execution/tool-run/messages.js";
 
 /**
- * A run's control surface: the hook that is both its identity claim and the
- * inbox its owner cancels it on, a durable `AbortController` a `cancel` message
- * trips, and a `cancelled` promise the body's waits race so the durable read is
- * actually driven. Racing is what makes cancellation observable — an unawaited
- * hook read is not scheduled under replay — so every eve-provided wait races
- * `cancelled`, and the signal is there for steps and manual races.
+ * The run's control inbox. An unawaited hook read is not scheduled under
+ * replay, so `cancelled` must be raced for a cancel to be observed at all.
  */
 export interface RunControlInbox {
   readonly hook: Hook<RunControlMessage>;
   readonly signal: AbortSignal;
   /** Rejects with {@link RunCancelledError} when a cancel message arrives; never resolves. */
   readonly cancelled: Promise<never>;
-  /** The cancel reason once aborted, for the run's `cancelled` outcome. */
   reason(): string | undefined;
 }
 
-/**
- * Opens (does not claim) the run's control inbox. Claiming stays with the
- * caller so a losing duplicate start never trips the signal. The abort fires
- * inside the read continuation so a same-drain observer sees it immediately.
- */
+/** Opens without claiming, so a losing duplicate start never trips the signal. */
 export function openRunControlInbox(hookToken: string): RunControlInbox {
   const hook = createHook<RunControlMessage>({ token: hookToken });
   // Hook promises and iterators share one durable cursor. Create the iterator
@@ -47,12 +38,7 @@ export function openRunControlInbox(hookToken: string): RunControlInbox {
   };
 }
 
-/**
- * Reads the control inbox until a cancel message, aborting in the read
- * continuation and then rejecting so a racing wait throws. A non-cancel or
- * malformed message is skipped; end-of-stream parks forever so the race is
- * simply never won.
- */
+// End-of-stream parks forever so the race is simply never won.
 async function consumeCancel(
   iterator: AsyncIterator<RunControlMessage>,
   onCancel: (reason: string) => void,
@@ -71,7 +57,6 @@ async function consumeCancel(
   }
 }
 
-/** The reason a workflow tool body's awaits reject with when the run is cancelled. */
 export class RunCancelledError extends Error {
   constructor(reason: string) {
     super(reason);

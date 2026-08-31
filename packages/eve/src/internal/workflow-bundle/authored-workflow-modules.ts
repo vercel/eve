@@ -11,9 +11,7 @@ import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directive
 import { isWorkflowSourceFile } from "./builder-support.js";
 import { isAuthoredApplicationModule, isAuthoredApplicationRoot } from "./workflow-builders.js";
 
-// The Workflow SDK's own discovery ignore list (`BaseBuilder.getInputFiles` in
-// @workflow/builders), plus eve's generated locations: `.eve`, `dist`, and the
-// `.output.eve-backup-*` directories a publication leaves while it recovers.
+// The SDK's own ignore list (`BaseBuilder.getInputFiles`) plus eve's generated locations.
 const IGNORED_DIRECTORIES = new Set([
   ".cache",
   ".eve",
@@ -39,23 +37,15 @@ function isIgnoredDirectory(name: string): boolean {
   return IGNORED_DIRECTORIES.has(name) || name.startsWith(".output.");
 }
 
-/** Authored application modules that declare Workflow directives. */
 export interface AuthoredWorkflowModules {
-  /** Every module with a `"use step"` or `"use workflow"` function; the server registers their steps. */
   readonly directiveModules: readonly string[];
-  /** Modules with a `"use workflow"` function; the workflow driver bundle imports these. */
   readonly workflowModules: readonly string[];
 }
 
 /**
- * Finds the application modules whose functions carry Workflow directives.
- *
- * Scans every source file under the application root, the same scope the
- * Workflow SDK's own bundler integrations transform, so a step helper can
- * live wherever the tool that calls it imports it from. The SDK's own regexp
- * pre-scan picks the few files worth parsing; the directive pre-pass then
- * confirms each on the AST and turns an invalid placement into a build error
- * here rather than a silent no-op at run time.
+ * Scans the whole application root, as the SDK's bundler integrations do, so a
+ * step helper can live wherever the tool imports it from. The SDK's pre-scan
+ * picks the files worth parsing.
  */
 export async function discoverAuthoredWorkflowModules(
   appRoot: string,

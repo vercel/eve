@@ -300,7 +300,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   }
 }
 
-/** The turn's run channels, then its inbox. */
 type TurnReaders = readonly [...RunOwnerReaders, ChannelReader<"inbox", TurnInboxPayload>];
 
 async function finishCancelledTurn(input: {

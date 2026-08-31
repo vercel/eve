@@ -7,11 +7,6 @@ import {
 } from "#protocol/message.js";
 import type { JsonValue } from "#shared/json.js";
 
-/**
- * Emits one workflow tool run progress report as an `action.partial` snapshot
- * for the run's call. Snapshots are last-write-wins by call id and never enter
- * model history — the same contract as an in-process generator tool's yields.
- */
 export async function emitRunReportStep(input: {
   readonly from: RunRef;
   readonly parentWritable: WritableStream<Uint8Array>;

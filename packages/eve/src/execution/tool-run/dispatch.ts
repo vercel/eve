@@ -14,13 +14,9 @@ import { toError } from "#shared/errors.js";
 const log = createLogger("execution.tool-run");
 
 /**
- * Starts the durable run behind one workflow tool call and records it on the
- * session so the turn can bind the run's result, route its input requests,
- * and cancel it. A start failure settles the call immediately with an error
- * result; nothing else is recorded, so nothing is left to cancel.
- *
- * `ownerInboxToken` is the parked turn's inbox: the run addresses the turn's
- * channels through it, so a dispatch without one cannot start a run.
+ * Starts the run and records it on the session so the turn can bind its
+ * result, route its requests, and cancel it. A start failure settles the call
+ * with an error and records nothing, so nothing is left to cancel.
  */
 export async function startWorkflowTool(input: {
   readonly action: RuntimeWorkflowToolCallActionRequest;
