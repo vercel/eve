@@ -5,7 +5,10 @@ import {
   SessionDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
+  isLegacyDurableDynamicToolMetadata,
   type DurableDynamicToolMetadata,
+  type LegacyDurableDynamicToolMetadata,
+  type PersistedDurableDynamicToolMetadata,
 } from "#context/keys.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
@@ -17,7 +20,6 @@ import type {
 } from "#approval/definition.js";
 import {
   callDurableDynamicCallback,
-  isReplayableDurableDynamicToolMetadata,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
 } from "#tools/durable-callbacks.js";
@@ -36,10 +38,10 @@ function missingCallbackError(
   );
 }
 
-function legacyMetadataError(metadata: DurableDynamicToolMetadata): Error {
+function legacyMetadataError(metadata: LegacyDurableDynamicToolMetadata): Error {
   return new Error(
-    `Dynamic tool "${metadata.name}" was persisted by an older eve version whose callback ` +
-      "metadata cannot be replayed. Start a new turn or session to re-resolve it.",
+    `Dynamic tool "${metadata.name}" was persisted using a legacy dynamic-tool metadata schema ` +
+      "and cannot be replayed directly. Start a new turn or session to re-resolve it.",
   );
 }
 
@@ -90,10 +92,10 @@ function buildReplayedApproval(
 
 /** Reconstructs every callback exclusively from its durable descriptor. */
 export function replayDynamicTools(
-  metadata: readonly DurableDynamicToolMetadata[],
+  metadata: readonly PersistedDurableDynamicToolMetadata[],
 ): HarnessToolDefinition[] {
   return metadata.map((entry) => {
-    if (!isReplayableDurableDynamicToolMetadata(entry)) {
+    if (isLegacyDurableDynamicToolMetadata(entry)) {
       return {
         description: entry.description,
         execute: createToolExecuteWithAuth({
