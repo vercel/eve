@@ -10,8 +10,9 @@ import { pathToFileURL } from "node:url";
  * watcher suspended for the rest of the session.
  */
 const INSTALL_TIMEOUT_MS = 10 * 60_000;
-/** Only the tail of the child's output is worth reporting on failure. */
-const OUTPUT_TAIL_LIMIT = 4_000;
+const TERMINATION_GRACE_MS = 5_000;
+/** Enough to retain the terminal protocol event without accumulating child output indefinitely. */
+const OUTPUT_LIMIT = 64_000;
 
 /** Minimal spawn surface, injectable so tests need no real child process. */
 export type SpawnLike = typeof nodeSpawn;
@@ -23,9 +24,29 @@ export type EveAddOutcome =
   | { readonly kind: "failed"; readonly message: string };
 
 interface HeadlessEvent {
+  readonly version?: number;
   readonly type: string;
-  readonly message?: string;
   readonly item?: string;
+}
+
+function terminateChildTree(child: ReturnType<SpawnLike>, signal: NodeJS.Signals): void {
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {}
+  }
+  child.kill(signal);
+}
+
+function isChildTreeAlive(child: ReturnType<SpawnLike>): boolean {
+  if (process.platform === "win32" || child.pid === undefined) return false;
+  try {
+    process.kill(-child.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -84,19 +105,16 @@ export function readTerminalHeadlessEvent(output: string): HeadlessEvent | undef
     if (typeof parsed !== "object" || parsed === null) continue;
     const event = parsed as HeadlessEvent;
     if (
-      event.type === "completed" ||
-      event.type === "blocked" ||
-      event.type === "failed" ||
-      event.type === "cancelled"
+      event.version === 1 &&
+      (event.type === "completed" ||
+        event.type === "blocked" ||
+        event.type === "failed" ||
+        event.type === "cancelled")
     ) {
       terminal = event;
     }
   }
   return terminal;
-}
-
-function tail(output: string): string {
-  return output.length <= OUTPUT_TAIL_LIMIT ? output : `…${output.slice(-OUTPUT_TAIL_LIMIT)}`;
 }
 
 /**
@@ -124,62 +142,85 @@ export async function runEveAdd(input: {
     const child = spawn(
       process.execPath,
       [executable, "add", input.address, "--non-interactive", "--skip-setup"],
-      { cwd: input.appRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
+      {
+        cwd: input.appRoot,
+        detached: process.platform !== "win32",
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
     );
 
     let output = "";
     const collect = (chunk: Buffer | string) => {
-      output += String(chunk);
+      output = `${output}${String(chunk)}`.slice(-OUTPUT_LIMIT);
     };
     child.stdout?.on("data", collect);
     child.stderr?.on("data", collect);
 
     let settled = false;
+    let stopOutcome: EveAddOutcome | undefined;
+    let hardKill: NodeJS.Timeout | undefined;
+    let treePoll: NodeJS.Timeout | undefined;
     const finish = (outcome: EveAddOutcome) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (hardKill !== undefined) clearTimeout(hardKill);
+      if (treePoll !== undefined) clearTimeout(treePoll);
       input.signal?.removeEventListener("abort", abort);
       settle(outcome);
     };
+    const finishAfterTreeExits = (outcome: EveAddOutcome) => {
+      if (isChildTreeAlive(child)) {
+        treePoll = setTimeout(() => finishAfterTreeExits(outcome), 25);
+        treePoll.unref?.();
+        return;
+      }
+      finish(stopOutcome ?? outcome);
+    };
+    const stop = (outcome: EveAddOutcome) => {
+      if (stopOutcome !== undefined) return;
+      stopOutcome = outcome;
+      terminateChildTree(child, "SIGTERM");
+      hardKill = setTimeout(() => terminateChildTree(child, "SIGKILL"), TERMINATION_GRACE_MS);
+      hardKill.unref?.();
+    };
     const abort = () => {
-      child.kill("SIGTERM");
-      finish({ kind: "failed", message: `Installing ${input.address} was cancelled.` });
+      stop({ kind: "failed", message: `Installing ${input.address} was cancelled.` });
     };
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
-      finish({
+      stop({
         kind: "failed",
         message: `Installing ${input.address} did not finish within ${INSTALL_TIMEOUT_MS / 60_000} minutes.`,
       });
     }, INSTALL_TIMEOUT_MS);
     timer.unref?.();
-    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted === true) abort();
+    else input.signal?.addEventListener("abort", abort, { once: true });
 
-    child.on("error", (error: Error) => {
-      finish({ kind: "failed", message: error.message });
+    child.on("error", () => {
+      stop({
+        kind: "failed",
+        message: `Could not run \`eve add ${input.address}\`. Run the command in a terminal for details.`,
+      });
     });
     child.on("close", (code: number | null) => {
+      let outcome: EveAddOutcome;
       const event = readTerminalHeadlessEvent(output);
-      if (code === 0 && event?.type === "completed") {
-        finish({ kind: "installed" });
-        return;
-      }
-      if (event?.type === "blocked") {
-        finish({
+      if (code === 0 && event?.type === "completed" && event.item === input.address) {
+        outcome = { kind: "installed" };
+      } else if (event?.type === "blocked" && event.item === input.address) {
+        outcome = {
           kind: "blocked",
-          message:
-            event.message ??
-            `Installing ${input.address} stopped for input that only a terminal can supply.`,
-        });
-        return;
+          message: `Installing ${input.address} stopped for input that only a terminal can supply.`,
+        };
+      } else {
+        outcome = {
+          kind: "failed",
+          message: `\`eve add ${input.address}\` failed. Run it in a terminal for details.`,
+        };
       }
-      finish({
-        kind: "failed",
-        message:
-          event?.message ??
-          `\`eve add ${input.address}\` exited with code ${String(code)}.\n${tail(output)}`.trim(),
-      });
+      finishAfterTreeExits(outcome);
     });
   });
 }

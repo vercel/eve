@@ -13,7 +13,7 @@ const { findPackageJSON, readFile } = vi.hoisted(() => ({
 vi.mock("node:module", () => ({ findPackageJSON }));
 vi.mock("node:fs/promises", () => ({ readFile }));
 
-import { readTerminalHeadlessEvent } from "../extension/eve-add.js";
+import { readTerminalHeadlessEvent, runEveAdd } from "../extension/eve-add.js";
 import { addRegistryItem, handoffMessage, unsetEnvVars } from "../extension/tools/registry_add.js";
 import { clearRegistryIndexCache } from "../extension/tools/search_registry.js";
 
@@ -73,6 +73,18 @@ function fakeSpawn(input: { code: number; output: string }) {
     return child;
   });
   return { calls, spawn: spawn as never };
+}
+
+function controlledSpawn() {
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: Readable;
+    stderr: Readable;
+    kill: ReturnType<typeof vi.fn>;
+  };
+  child.stdout = Readable.from([]);
+  child.stderr = Readable.from([]);
+  child.kill = vi.fn();
+  return { child, spawn: vi.fn(() => child) as never };
 }
 
 const COMPLETED = JSON.stringify({
@@ -139,15 +151,19 @@ describe("addRegistryItem", () => {
     expect(result.message).toContain("/add channel/slack");
   });
 
-  it("routes an address that is not an official item to the terminal", async () => {
-    const { calls, spawn } = fakeSpawn({ code: 0, output: COMPLETED });
-    const result = await addRegistryItem("https://example.com/item.json", {
-      getCapability: () => capability(),
-      spawn,
-    });
+  it("hands off a non-official address without rendering it into a command", async () => {
+    const address = "channel/slack;rm -rf /";
+    const result = await addRegistryItem(address, { getCapability: () => capability() });
 
-    expect(result.status).toBe("needs-terminal");
-    expect(calls).toHaveLength(0);
+    expect(result).toEqual({
+      address,
+      reason: "This tool installs only official eve registry items.",
+      status: "needs-terminal",
+      message:
+        "This item was not installed. Review its address and install it manually in a terminal.",
+    });
+    expect(result.message).not.toContain(address);
+    expect(result.nextCommand).toBeUndefined();
   });
 
   it("rejects an address the registry does not publish", async () => {
@@ -192,11 +208,41 @@ describe("addRegistryItem", () => {
     expect(calls[0]?.options).toMatchObject({ cwd: APP_ROOT });
   });
 
-  it("fails loudly when the child does not report completion", async () => {
-    const { spawn } = fakeSpawn({ code: 1, output: "Registry item not found\n" });
-    await expect(
-      addRegistryItem("extension/browserbase", { getCapability: () => capability(), spawn }),
-    ).rejects.toThrow(/exited with code 1/u);
+  it("does not relay child output when the child does not report completion", async () => {
+    const { spawn } = fakeSpawn({ code: 1, output: "secret-child-output\n" });
+    const install = addRegistryItem("extension/browserbase", {
+      getCapability: () => capability(),
+      spawn,
+    });
+
+    await expect(install).rejects.toThrow(/Run it in a terminal for details/u);
+    await expect(install).rejects.not.toThrow(/secret-child-output/u);
+  });
+
+  it("waits for a cancelled child to close before releasing the install", async () => {
+    const { child, spawn } = controlledSpawn();
+    const controller = new AbortController();
+    const install = runEveAdd({
+      address: "extension/browserbase",
+      appRoot: APP_ROOT,
+      signal: controller.signal,
+      spawn,
+    });
+    controller.abort();
+
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith("SIGTERM"));
+    let settled = false;
+    void install.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    child.emit("close", null);
+    await expect(install).resolves.toEqual({
+      kind: "failed",
+      message: "Installing extension/browserbase was cancelled.",
+    });
   });
 
   it("hands over an install the child reports as blocked", async () => {
@@ -215,7 +261,10 @@ describe("addRegistryItem", () => {
     });
 
     expect(result.status).toBe("needs-terminal");
-    expect(result.reason).toBe("Setup needs an answer.");
+    expect(result.reason).toBe(
+      "Installing extension/browserbase stopped for input that only a terminal can supply.",
+    );
+    expect(result.reason).not.toContain("Setup needs an answer.");
   });
 });
 

@@ -496,7 +496,7 @@ async function annotateInstalled(input: {
 
 export default defineTool({
   description:
-    "Search the eve registry for integrations this project can add: channels, MCP connections, extensions, and observability. Read-only — it installs nothing. Call it before writing an integration by hand, and report the item address (for example `channel/slack`) so the developer can install it with `/add`.",
+    "Search the eve registry for integrations this project can add: channels, MCP connections, extensions, and observability. Read-only — it installs nothing. Call it before writing an integration by hand, then pass an exact result address (for example `channel/slack`) to selfmod__registry_add.",
   inputSchema,
   outputSchema,
   async execute(input, ctx) {

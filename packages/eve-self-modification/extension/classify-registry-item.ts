@@ -3,9 +3,9 @@ import type { CatalogEntry } from "./tools/search_registry.js";
 /**
  * An official item address is a relative path of lowercase slugs.
  *
- * v1 installs official items only. A namespaced (`@acme/...`), URL, or
- * `@skills` address is not rejected as malformed — it is simply not something
- * this tool installs, and the caller routes it onward.
+ * v1 installs official items only. Namespaced (`@acme/...`), URL, `@skills`,
+ * and malformed addresses are handed back for manual installation without
+ * rendering the untrusted address into a command.
  */
 const OFFICIAL_ADDRESS_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/u;
 

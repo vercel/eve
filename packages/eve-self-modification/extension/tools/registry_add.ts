@@ -129,17 +129,12 @@ export async function addRegistryItem(
   }
 
   if (!isOfficialAddress(address)) {
-    const handoff = handoffMessage({
-      address,
-      interactiveClient: capability.interactiveClient,
-      reason: `${address} is not an official eve registry item.`,
-      title: address,
-    });
     return {
       address,
-      reason: `${address} is not an official eve registry item.`,
+      reason: "This tool installs only official eve registry items.",
       status: "needs-terminal",
-      ...handoff,
+      message:
+        "This item was not installed. Review its address and install it manually in a terminal.",
     };
   }
 
