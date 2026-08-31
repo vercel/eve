@@ -79,7 +79,7 @@ export async function dispatchTaskStep(
         const started = await startWorkflowTool({
           action: entry.action,
           batchEvent: batch.event,
-          parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+          ownerInboxToken: input.parentContinuationToken,
           prepared,
           session: nextSession,
         });

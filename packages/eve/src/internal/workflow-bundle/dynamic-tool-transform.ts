@@ -5,6 +5,7 @@
  * body references; identity `(toolName, phase)` is assigned at resolve time.
  */
 
+import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
   collectReferencedIdentifierNames,
@@ -107,12 +108,7 @@ function findWorkflowFunctionNames(program: AstNode): ReadonlySet<string> {
 function hasWorkflowDirective(fn: AstNode): boolean {
   const body = fn.body as AstNode | undefined;
   const statement = ((body?.body as AstNode[] | undefined) ?? [])[0];
-  const directive =
-    statement?.directive ??
-    (statement?.type === "ExpressionStatement"
-      ? ((statement.expression as AstNode | undefined)?.value as unknown)
-      : undefined);
-  return directive === "use workflow";
+  return readWorkflowDirective(statement) === "use workflow";
 }
 
 // Keep the old export name for backward compatibility with the plugin.

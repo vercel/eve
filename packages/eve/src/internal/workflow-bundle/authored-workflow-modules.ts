@@ -8,9 +8,10 @@ import {
 } from "#compiled/@workflow/builders/index.js";
 
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
+import { WORKFLOW_SOURCE_EXTENSIONS } from "./builder-support.js";
 import { isAuthoredApplicationModule, isAuthoredApplicationRoot } from "./workflow-builders.js";
 
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
+const SOURCE_EXTENSIONS = new Set(WORKFLOW_SOURCE_EXTENSIONS);
 
 // The Workflow SDK's own discovery ignore list (`BaseBuilder.getInputFiles` in
 // @workflow/builders), plus eve's generated locations: `.eve`, `dist`, and the

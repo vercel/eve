@@ -1,8 +1,8 @@
 import { detectWorkflowPatterns } from "#compiled/@workflow/builders/index.js";
 
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
+import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
 
-const WORKFLOW_DIRECTIVES = new Set(["use step", "use workflow"]);
 const HOISTED_EXECUTE_NAME = "execute";
 
 type AstNode = {
@@ -70,7 +70,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
 
   for (const statement of body) {
     if (typeof statement.directive !== "string") break;
-    if (WORKFLOW_DIRECTIVES.has(statement.directive)) {
+    if (readWorkflowDirective(statement) !== undefined) {
       throw new Error(
         `Authored module "${input.filePath}" has a module-level ${JSON.stringify(statement.directive)} directive. ` +
           `Put the directive as the first statement of the function it marks: a top-level "async function" declaration` +
@@ -251,17 +251,7 @@ function readLeadingDirective(fn: AstNode): string | undefined {
   if (!isAstNode(fn.body) || fn.body.type !== "BlockStatement" || !Array.isArray(fn.body.body)) {
     return undefined;
   }
-  const statement = fn.body.body[0];
-  const directive =
-    statement?.directive ??
-    (statement?.type === "ExpressionStatement" &&
-    isAstNode(statement.expression) &&
-    statement.expression.type === "Literal"
-      ? statement.expression.value
-      : undefined);
-  return typeof directive === "string" && WORKFLOW_DIRECTIVES.has(directive)
-    ? directive
-    : undefined;
+  return readWorkflowDirective(fn.body.body[0]);
 }
 
 function describeFunction(fn: AstNode): string {

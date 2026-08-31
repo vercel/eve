@@ -37,7 +37,8 @@ const NODE_BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
 ]);
-const WORKFLOW_INPUT_EXTENSIONS = new Set([
+/** Source files the workflow build reads, discovers directives in, and resolves imports across. */
+export const WORKFLOW_SOURCE_EXTENSIONS = [
   ".ts",
   ".tsx",
   ".mts",
@@ -46,7 +47,8 @@ const WORKFLOW_INPUT_EXTENSIONS = new Set([
   ".jsx",
   ".mjs",
   ".cjs",
-]);
+];
+const WORKFLOW_INPUT_EXTENSIONS = new Set(WORKFLOW_SOURCE_EXTENSIONS);
 const IGNORED_INPUT_DIRECTORIES = new Set([
   "node_modules",
   ".git",
@@ -288,7 +290,7 @@ export function createEvePackageImportsPlugin(
       }
 
       return resolveFirstExistingPath(
-        [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"].flatMap((extension) => [
+        WORKFLOW_SOURCE_EXTENSIONS.flatMap((extension) => [
           join(workingDir, "src", `${sourceSubpath}${extension}`),
           join(workingDir, "dist", "src", `${sourceSubpath}${extension}`),
         ]),
@@ -382,7 +384,7 @@ export async function bundleWorkflowStepRegistrations(input: {
     ],
     resolve: {
       conditionNames: ["eve-source"],
-      extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+      extensions: WORKFLOW_SOURCE_EXTENSIONS,
       mainFields: ["module", "main"],
     },
     tsconfig: input.tsconfigPath ?? false,

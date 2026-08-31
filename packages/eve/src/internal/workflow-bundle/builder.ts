@@ -30,6 +30,7 @@ import {
   createWorkflowPseudoPackagePlugin,
   createWorkflowTransformPlugin,
   createWorkflowVirtualEntryPlugin,
+  WORKFLOW_SOURCE_EXTENSIONS,
   WORKFLOW_VIRTUAL_ENTRY_ID,
   type WorkflowBundleBuilderConfig,
   type WorkflowBundleBuilderOptions,
@@ -51,8 +52,6 @@ import {
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
-
-const AUTHORED_RESOLVE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 
 export class WorkflowBundleBuilder {
   readonly #compiledArtifactsBootstrapPath: string;
@@ -297,11 +296,11 @@ export class WorkflowBundleBuilder {
         createWorkflowPseudoPackagePlugin(),
         createWorkflowDriverAliasPlugin(this.config.workingDir),
         createAuthoredRelativeExtensionResolverPlugin({
-          extensions: AUTHORED_RESOLVE_EXTENSIONS,
+          extensions: WORKFLOW_SOURCE_EXTENSIONS,
         }),
         createAuthoredPackageTsConfigPathsPlugin({
           appPackageRoot: this.transformProjectRoot,
-          extensions: AUTHORED_RESOLVE_EXTENSIONS,
+          extensions: WORKFLOW_SOURCE_EXTENSIONS,
         }),
         createEvePackageImportsPlugin(this.config.workingDir, { workflowCondition: true }),
         createWorkflowTransformPlugin({
@@ -316,7 +315,7 @@ export class WorkflowBundleBuilder {
       ],
       resolve: {
         conditionNames: ["eve-source", "workflow"],
-        extensions: [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"],
+        extensions: WORKFLOW_SOURCE_EXTENSIONS,
         mainFields: ["module", "main"],
       },
       tsconfig: options.tsconfigPath ?? false,

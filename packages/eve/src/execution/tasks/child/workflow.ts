@@ -15,13 +15,8 @@ import {
 } from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
-import {
-  deriveRunOwner,
-  outcomeHook,
-  reportHook,
-  requestHook,
-} from "#execution/tool-run/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tool-run/owner-channels.js";
+import { openRunOwnerChannels } from "#execution/tool-run/owner.js";
 import {
   runOutcomeToTaskCommand,
   runReportToTaskUpdate,
@@ -93,19 +88,9 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   const commandReader = createChannelReader("commands", commands);
   // The run channels exist before the claim: the parent hands the task token
   // to a background run as soon as the claim lands, and that run may report
-  // at once. Every run addresses them through `deriveRunOwner(taskInboxToken)`.
-  const owner = deriveRunOwner(input.taskInboxToken);
-  const runHooks = {
-    outcome: outcomeHook.create({ token: owner.outcome }),
-    report: reportHook.create({ token: owner.report }),
-    request: requestHook.create({ token: owner.request }),
-  };
-  const readers = [
-    createChannelReader("report", runHooks.report),
-    createChannelReader("request", runHooks.request),
-    createChannelReader("outcome", runHooks.outcome),
-    commandReader,
-  ] as const;
+  // at once.
+  const runChannels = openRunOwnerChannels(input.taskInboxToken);
+  const readers = [...runChannels.readers, commandReader] as const;
   let ownsHook = false;
 
   try {
@@ -259,11 +244,9 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     // durable read that never settles, leaving this run `running`
     // forever and its hook unswept.
     if (ownsHook) {
-      await disposeHook(runHooks.report);
-      await disposeHook(runHooks.request);
-      await disposeHook(runHooks.outcome);
+      await runChannels.dispose();
+      await disposeHook(commands);
     }
-    if (ownsHook) await disposeHook(commands);
   }
 }
 

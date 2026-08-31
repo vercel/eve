@@ -3,7 +3,6 @@ import { isInboxToolResultFromRecordedRun } from "#harness/tool-runs.js";
 import {
   createHook,
   getWorkflowMetadata,
-  type Hook,
   sleep as workflowSleep,
 } from "#compiled/@workflow/core/index.js";
 
@@ -26,19 +25,15 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { emitRunReportStep } from "#execution/tool-run/emit-run-report-step.js";
 import {
-  deriveRunOwner,
-  outcomeHook,
-  reportHook,
-  requestHook,
-  type RunOutcomeMessage,
-  type RunReport,
-  type RunRequestMessage,
-} from "#execution/tool-run/messages.js";
-import {
   type ChannelReader,
   createChannelReader,
   raceChannelReads,
 } from "#execution/tool-run/owner-channels.js";
+import {
+  openRunOwnerChannels,
+  type RunOwnerChannels,
+  type RunOwnerReaders,
+} from "#execution/tool-run/owner.js";
 import {
   runOutcomeToToolResult,
   runRequestToInputRequestPayload,
@@ -101,7 +96,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   let nextStepInput = input.stepInput.input;
   let ownsInbox = false;
-  let runHooks: RunHooks | undefined;
+  let runChannels: RunOwnerChannels | undefined;
   let cancellation: TurnCancellationControl | undefined;
 
   try {
@@ -113,21 +108,10 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       throw error;
     }
 
-    // Created after the inbox claim so a losing duplicate never contends for
-    // them. Every run this turn starts addresses them through
-    // `deriveRunOwner(inbox.token)`.
-    const owner = deriveRunOwner(inbox.token);
-    runHooks = {
-      outcome: outcomeHook.create({ token: owner.outcome }),
-      report: reportHook.create({ token: owner.report }),
-      request: requestHook.create({ token: owner.request }),
-    };
-    const readers: TurnReaders = [
-      createChannelReader("report", runHooks.report),
-      createChannelReader("request", runHooks.request),
-      createChannelReader("outcome", runHooks.outcome),
-      inboxReader,
-    ];
+    // Opened after the inbox claim so a losing duplicate never contends for
+    // them; the turn starts no run before this point.
+    runChannels = openRunOwnerChannels(inbox.token);
+    const readers: TurnReaders = [...runChannels.readers, inboxReader];
 
     // Claimed after the inbox claim so a losing duplicate run never
     // contends for the session cancel token.
@@ -311,28 +295,13 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     // terminal result publishes so the next turn's claim never races this
     // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
-    if (runHooks !== undefined) {
-      await disposeHook(runHooks.report);
-      await disposeHook(runHooks.request);
-      await disposeHook(runHooks.outcome);
-    }
+    if (runChannels !== undefined) await runChannels.dispose();
     if (ownsInbox) await disposeHook(inbox);
   }
 }
 
-interface RunHooks {
-  readonly outcome: Hook<RunOutcomeMessage>;
-  readonly report: Hook<RunReport>;
-  readonly request: Hook<RunRequestMessage>;
-}
-
-/** The three channels the turn's tool runs report on, in read priority, then its inbox. */
-type TurnReaders = readonly [
-  ChannelReader<"report", RunReport>,
-  ChannelReader<"request", RunRequestMessage>,
-  ChannelReader<"outcome", RunOutcomeMessage>,
-  ChannelReader<"inbox", TurnInboxPayload>,
-];
+/** The turn's run channels, then its inbox. */
+type TurnReaders = readonly [...RunOwnerReaders, ChannelReader<"inbox", TurnInboxPayload>];
 
 async function finishCancelledTurn(input: {
   readonly bufferedDeliveries: readonly DeliverHookPayload[];

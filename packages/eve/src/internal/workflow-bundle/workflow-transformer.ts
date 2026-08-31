@@ -1,3 +1,7 @@
+import {
+  readWorkflowDirective,
+  type WorkflowDirective,
+} from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 
 import type { WorkflowManifest } from "./workflow-builders.js";
@@ -377,21 +381,11 @@ function readBlockStatements(block: AstNode["body"]): AstNode[] | undefined {
 
 function readFunctionDirective(
   statement: AstNode | undefined,
-): { end: number; start: number; value: "use workflow" | "use step" } | null {
-  const value =
-    statement?.directive ??
-    (statement?.type === "ExpressionStatement" && statement.expression?.type === "Literal"
-      ? statement.expression.value
-      : undefined);
-
-  if (
-    (value !== "use workflow" && value !== "use step") ||
-    statement?.start === undefined ||
-    statement.end === undefined
-  ) {
+): { end: number; start: number; value: WorkflowDirective } | null {
+  const value = readWorkflowDirective(statement);
+  if (value === undefined || statement?.start === undefined || statement.end === undefined) {
     return null;
   }
-
   return { end: statement.end, start: statement.start, value };
 }
 
