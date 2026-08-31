@@ -13,7 +13,6 @@ type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "subagentDep
 type AdvertisedToolMapInput = {
   readonly canRequestInput?: boolean;
   readonly delegatedCaller?: boolean;
-  readonly hasLoadableSkills?: boolean;
   readonly session: AdvertisedToolSession;
   readonly tools: HarnessToolMap;
 };
@@ -21,7 +20,6 @@ type AdvertisedToolMapInput = {
 type AdvertisedToolDefinitionsInput = {
   readonly canRequestInput?: boolean;
   readonly delegatedCaller?: boolean;
-  readonly hasLoadableSkills?: boolean;
   readonly session: AdvertisedToolSession;
   readonly tools: readonly HarnessToolDefinition[];
 };
@@ -29,7 +27,6 @@ type AdvertisedToolDefinitionsInput = {
 type AdvertisedModelToolsInput = {
   readonly canRequestInput?: boolean;
   readonly delegatedCaller?: boolean;
-  readonly hasLoadableSkills?: boolean;
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
@@ -108,10 +105,7 @@ async function getAdvertisedModelTools(
 function filterUnavailableDelegationToolDefinitions(
   tools: readonly HarnessToolDefinition[],
   session: AdvertisedToolSession,
-  availability: Pick<
-    AdvertisedToolDefinitionsInput,
-    "canRequestInput" | "delegatedCaller" | "hasLoadableSkills"
-  >,
+  availability: Pick<AdvertisedToolDefinitionsInput, "canRequestInput" | "delegatedCaller">,
 ): readonly HarnessToolDefinition[] {
   const filteredTools: HarnessToolDefinition[] = [];
 
@@ -127,10 +121,7 @@ function filterUnavailableDelegationToolDefinitions(
 function filterUnavailableToolMap(
   tools: HarnessToolMap,
   session: AdvertisedToolSession,
-  availability: Pick<
-    AdvertisedToolMapInput,
-    "canRequestInput" | "delegatedCaller" | "hasLoadableSkills"
-  >,
+  availability: Pick<AdvertisedToolMapInput, "canRequestInput" | "delegatedCaller">,
 ): HarnessToolMap {
   const filteredTools = new Map<string, HarnessToolDefinition>();
 
@@ -174,16 +165,12 @@ function isToolAvailable(
   availability: {
     readonly canRequestInput?: boolean;
     readonly delegatedCaller?: boolean;
-    readonly hasLoadableSkills?: boolean;
   },
 ): boolean {
   for (const condition of definition.behavior?.availability ?? []) {
     switch (condition) {
       case "delegated-task-child":
         if (availability.delegatedCaller !== true) return false;
-        break;
-      case "requires-loadable-skill":
-        if (availability.hasLoadableSkills !== true) return false;
         break;
       case "requires-request-input":
         if (availability.canRequestInput !== true) return false;

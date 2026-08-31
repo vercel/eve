@@ -325,10 +325,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const dynamicConnections = bindDynamicConnections(ctx, bundle.resolvedAgent);
   const dynamicInstructionsResolvers = bundle.resolvedAgent.dynamicInstructionsResolvers ?? [];
   const dynamicSkillResolvers = bundle.resolvedAgent.dynamicSkillResolvers ?? [];
-  const hasLoadableSkills =
-    !Array.isArray(bundle.resolvedAgent.skills) ||
-    bundle.resolvedAgent.skills.length > 0 ||
-    dynamicSkillResolvers.length > 0;
   const dynamicSubagentResolvers = bundle.subagentRegistry.dynamicResolvers ?? [];
   const dynamicToolResolvers = bundle.resolvedAgent.dynamicToolResolvers ?? [];
   const effectiveNode = {
@@ -542,7 +538,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           handleEvent,
           historyProjector: history.projector,
           historyView: history.prepare(modelSession),
-          hasLoadableSkills,
           instrumentation,
           mode,
           modelResolutionScope: {

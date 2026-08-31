@@ -260,7 +260,6 @@ const kernelEffect = z
         "root-session",
         "delegated-task-child",
         "requires-request-input",
-        "requires-loadable-skill",
         "below-subagent-depth",
       ]),
     ),

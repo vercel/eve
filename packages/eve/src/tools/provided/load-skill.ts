@@ -19,7 +19,7 @@ export const loadSkill = attachToolBehavior(
     outputSchema: SKILL_OUTPUT_SCHEMA,
   }),
   {
-    availability: ["requires-loadable-skill"],
+    availability: [],
     presentation: "load-skill",
   },
 );

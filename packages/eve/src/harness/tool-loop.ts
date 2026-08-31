@@ -1245,7 +1245,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const advertisedHarnessTools = getAdvertisedTools({
         canRequestInput: config.capabilities?.requestInput === true,
         delegatedCaller: taskUpdatesEnabled,
-        hasLoadableSkills: config.hasLoadableSkills,
         session,
         tools: harnessTools,
       });
@@ -1264,7 +1263,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         const dynamicTools = getAdvertisedTools({
           canRequestInput: config.capabilities?.requestInput === true,
           delegatedCaller: taskUpdatesEnabled,
-          hasLoadableSkills: config.hasLoadableSkills,
           session,
           tools: buildDynamicTools(ctx),
         });
@@ -1305,7 +1303,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const advertisedModelTools = await getAdvertisedTools({
         canRequestInput: config.capabilities?.requestInput === true,
         delegatedCaller: taskUpdatesEnabled,
-        hasLoadableSkills: config.hasLoadableSkills,
         modelTools: flatTools,
         session,
         tools: effectiveHarnessTools,
@@ -2420,7 +2417,6 @@ async function handleStepResult(input: {
   const advertisedRuntimeActionTools = getAdvertisedTools({
     canRequestInput: input.config.capabilities?.requestInput === true,
     delegatedCaller: input.delegatedCaller,
-    hasLoadableSkills: input.config.hasLoadableSkills,
     session: baseSession,
     tools: input.runtimeActionTools,
   });

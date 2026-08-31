@@ -3,7 +3,6 @@ import type { WebSearchProvider } from "#shared/web-search.js";
 /** Session facts that can hide a selected tool without changing source composition. */
 export type ToolAvailabilityCondition =
   | "delegated-task-child"
-  | "requires-loadable-skill"
   | "requires-request-input"
   | "root-session";
 

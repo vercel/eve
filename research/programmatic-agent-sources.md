@@ -586,7 +586,7 @@ through source composition:
 | `tools/write_file.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
 | `tools/todo.ts`              | `defineTool`                           | every local node | ordinary executor                                                     |
 | `tools/web_fetch.ts`         | `defineTool`                           | every local node | ordinary executor                                                     |
-| `tools/load_skill.ts`        | `defineTool`                           | every local node | visibility: `requires-loadable-skill`                                 |
+| `tools/load_skill.ts`        | `defineTool`                           | every local node | ordinary executor                                                     |
 | `tools/connection_search.ts` | `defineDynamic`                        | every local node | discovers and qualifies connection tools                              |
 | `tools/ask_question.ts`      | internal native tool + `request-input` | every local node | visibility: `requires-request-input`                                  |
 | `tools/agent.ts`             | internal native tool + `dispatch`      | root node        | action: `subagent-call`; visibility: `root-session`                   |
@@ -709,12 +709,7 @@ interface PendingDispatchAction {
   readonly toolName: string;
 }
 
-type ToolAvailabilityCondition =
-  | "root-session"
-  | "delegated-task-child"
-  | "requires-request-input"
-  | "requires-loadable-skill"
-  | "root-session";
+type ToolAvailabilityCondition = "root-session" | "delegated-task-child" | "requires-request-input";
 ```
 
 The internal constructor creates a truthful execute-less native definition and
@@ -725,7 +720,7 @@ it from the logical path. An application `defineTool(...)` at
 `tools/ask_question.ts` therefore becomes an ordinary executor, while an
 application `webSearch(...)` retains provider handling because the selected
 sentinel declares it. `load_skill` remains an ordinary executable tool whose
-behavior carries availability and presentation but no native handling.
+behavior carries presentation, an empty availability set, and no native handling.
 
 Runtime preparation expands `self-agent` and graph-derived local or remote
 subagents into `PreparedDispatchTarget` values with concrete node identity.

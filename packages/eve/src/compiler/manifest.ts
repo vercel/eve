@@ -822,14 +822,7 @@ const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnec
 const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
   .object({
     availability: z
-      .array(
-        z.enum([
-          "delegated-task-child",
-          "requires-loadable-skill",
-          "requires-request-input",
-          "root-session",
-        ]),
-      )
+      .array(z.enum(["delegated-task-child", "requires-request-input", "root-session"]))
       .readonly(),
     handling: z
       .discriminatedUnion("kind", [

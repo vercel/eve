@@ -298,8 +298,6 @@ export interface ToolLoopHarnessConfig {
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;
-  /** Whether this node has a static or dynamic skill source that `load_skill` can resolve. */
-  readonly hasLoadableSkills?: boolean;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;

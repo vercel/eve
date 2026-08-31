@@ -514,7 +514,6 @@ describe("createExecutionNodeStep", () => {
     };
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
-      hasLoadableSkills: false,
       instrumentation,
       mode: "task",
       modelResolutionScope,
@@ -556,13 +555,13 @@ describe("createExecutionNodeStep", () => {
     expect(forceFlush).toHaveBeenCalledOnce();
   });
 
-  it("keeps load_skill available when the effective bundle reports a skill source", async () => {
+  it("always advertises load_skill when the node has no compiled skills", async () => {
     setupMockAgentForToolExecution("load_skill", { skill: "deploy-note" });
     const toolRegistry = await createRuntimeToolRegistry({
       tools: [
         {
           behavior: {
-            availability: ["requires-loadable-skill"],
+            availability: [],
             presentation: "load-skill",
           },
           description: "Load one skill.",
@@ -582,7 +581,6 @@ describe("createExecutionNodeStep", () => {
     expect(rootNode.agent.skills).toEqual([]);
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
-      hasLoadableSkills: true,
       instrumentation: undefined,
       mode: "task",
       modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
@@ -650,7 +648,6 @@ describe("createExecutionNodeStep", () => {
     );
     const step = createExecutionNodeStep({
       createRuntime,
-      hasLoadableSkills: false,
       instrumentation: undefined,
       mode: "task",
       modelResolutionScope: {
