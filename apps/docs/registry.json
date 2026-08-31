@@ -174,7 +174,7 @@
       "name": "memory/supermemory",
       "type": "registry:item",
       "title": "Supermemory",
-      "description": "Recall relevant context, capture completed turns, and manage durable memory.",
+      "description": "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
       "dependencies": ["@supermemory/eve"],
       "envVars": {
         "SUPERMEMORY_API_KEY": ""
