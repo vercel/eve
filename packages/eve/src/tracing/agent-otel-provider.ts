@@ -505,7 +505,6 @@ export function createAgentOtelInstrumentation(
       name: "eve.otel",
       projectEvent,
       tracePolicy: () => ({ emit: true, recordInputs, recordOutputs }),
-      tracePolicyRequiresBinding: false,
     },
     prepareSessionTrace,
     prepareTurnTrace,

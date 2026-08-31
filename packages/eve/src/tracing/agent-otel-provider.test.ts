@@ -89,7 +89,10 @@ function createRuntime(
   };
   if (tracePolicy !== null) agentOtelInput.tracePolicy = tracePolicy;
   const agentOtel = createAgentOtelInstrumentation(agentOtelInput);
-  const hooks = createInstrumentationHooks([agentOtel.hook]);
+  const hooks = createInstrumentationHooks([agentOtel.hook]).forTrace!({
+    agentName: "weather",
+    audience: "public",
+  });
   return {
     exporter,
     hooks,
@@ -1621,7 +1624,10 @@ describe("createAgentOtelInstrumentation", () => {
       stateStore: new InMemoryAgentTraceStateStore(),
       tracer: provider.getTracer("eve.agent"),
     });
-    const hooks = createInstrumentationHooks([agentOtel.hook]);
+    const hooks = createInstrumentationHooks([agentOtel.hook]).forTrace!({
+      agentName: "weather",
+      audience: "public",
+    });
     await emitAttempt({
       hooks,
       runInContext: agentOtel.runInContext,

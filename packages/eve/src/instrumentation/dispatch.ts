@@ -41,10 +41,7 @@ export function createInstrumentationDispatcher(
   const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
   const groups = normalizeDispatchGroups(input);
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
-  const requiresTraceBinding = providers.some(
-    (provider) =>
-      provider.tracePolicy !== undefined && provider.tracePolicyRequiresBinding !== false,
-  );
+  const requiresTraceBinding = providers.some((provider) => provider.tracePolicy !== undefined);
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
   const forTrace = (trace: TraceCaptureContext): InstrumentationHooks => {
