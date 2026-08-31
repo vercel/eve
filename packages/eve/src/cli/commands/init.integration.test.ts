@@ -1390,7 +1390,7 @@ describe("runInitCommand", () => {
         stream: "stderr",
         text: "npm silly fetch manifest @vercel/connect@0.2.2",
       });
-      options?.onOutput?.({ stream: "stderr", text: "npm silly fetch manifest zod@4.4.3" });
+      options?.onOutput?.({ stream: "stderr", text: "npm silly fetch manifest zod@4.5.4" });
       options?.onOutput?.({
         stream: "stderr",
         text: "npm http fetch GET https://registry.npmjs.org/@vercel%2fconnect attempt 1 failed with ENOTFOUND",

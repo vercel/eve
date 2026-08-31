@@ -1552,7 +1552,7 @@
         "tailwind-merge@3.6.0",
         "tailwindcss@4.3.0",
         "use-stick-to-bottom@1.1.4",
-        "zod@4.4.3"
+        "zod@4.5.4"
       ],
       "devDependencies": [
         "@types/node@26",

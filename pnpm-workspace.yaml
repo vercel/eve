@@ -55,7 +55,7 @@ catalog:
   streamdown: "2.5.0"
   typescript: "7.0.2"
   vitest: "4.1.10"
-  zod: "4.4.3"
+  zod: "4.5.4"
 
 catalogs:
   docs:

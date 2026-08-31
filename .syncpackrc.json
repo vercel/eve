@@ -62,7 +62,7 @@
       "dependencies": ["zod"],
       "packages": ["gadget-extension", "gizmo-extension"],
       "dependencyTypes": ["prod"],
-      "pinVersion": "4.4.3"
+      "pinVersion": "4.5.4"
     },
     {
       "label": "Shared third-party deps must use the catalog: protocol",
