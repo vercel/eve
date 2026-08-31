@@ -26,7 +26,7 @@ The slug is the path-relative basename. `agent/hooks/audit.ts` becomes `"audit"`
 
 `defineHook`, `HookDefinition`, and `HookContext` live on `eve/hooks`.
 
-A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, and `action.result`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
+A hook file declares stream-event subscribers under the `events` map, keyed by event type, with `*` matching every event. Subscribe to any event in the runtime stream vocabulary documented in [Sessions, runs and streaming](../concepts/sessions-runs-and-streaming), including the lifecycle events `session.started`, `turn.completed`, `message.completed`, `action.partial`, `action.result`, and `subagent.called`. Handlers are observe-only. They cannot inject model context. To contribute runtime model messages, use `defineDynamic` and `defineInstructions` in `agent/instructions/`.
 
 ## Scope side effects to a channel
 
@@ -177,6 +177,8 @@ Hooks always run after the event is durably recorded, so if a hook throws, the s
 ## What happens when a hook throws
 
 A thrown handler propagates through the emit composer and surfaces as `turn.failed`. If a hook subscribed to a failure-cascade event also throws, it escalates to `session.failed`. For belt-and-suspenders semantics inside a hook, wrap the body in `try`/`catch`. eve treats a thrown hook as a real failure.
+
+`subagent.called` is the exception. The child is already running when eve emits this event, so a hook failure is logged instead of propagating and replaying the dispatch. The parent stream keeps the `subagent.called` event that was written before the hook ran.
 
 ## Subagent isolation
 
