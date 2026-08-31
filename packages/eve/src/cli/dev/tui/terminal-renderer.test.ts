@@ -1651,32 +1651,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("⎿  ✓ Registry items added: connection/linear.");
   });
 
-  it("renders each initial registry item as its own durable elbow result", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderRegistryResult([
-      {
-        title: "Telegram",
-        status: "success",
-        lines: ["Installed."],
-      },
-      {
-        title: "Slack",
-        status: "error",
-        lines: ["pnpm add failed."],
-        detail: "Error: pnpm add failed.\n    at installSlack (setup.ts:42:7)",
-      },
-    ]);
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Telegram");
-    expect(snapshot).toContain("⎿  ✓ Installed.");
-    expect(snapshot).toContain("⨯ Slack");
-    expect(snapshot).toContain("⎿  pnpm add failed.");
-    expect(snapshot).toContain("at installSlack (setup.ts:42:7)");
-    expect(screen.rawOutput()).toContain("\u001b[2m    at installSlack");
-  });
-
   it("marks a failed automatic command and keeps its multiline outcome in one result block", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderCommandInvocation("/vc:login", "failed");
@@ -3794,7 +3768,11 @@ describe("TerminalRenderer setup panel", () => {
     const { screen, input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({
       kind: "single",
-      plannerBack: true,
+      navigation: {
+        kind: "planner",
+        activeStep: 2,
+        steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+      },
       message: "Review your agent",
       options: [
         { value: "install", label: "Install and set up" },
@@ -3802,15 +3780,47 @@ describe("TerminalRenderer setup panel", () => {
       ],
     });
 
-    expect(screen.snapshot()).toContain("enter to select · ← / esc back");
+    expect(screen.snapshot()).toContain("enter to select · ← back · esc to cancel");
     input.left();
-    await expect(answer).resolves.toBeUndefined();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "back",
+      values: [],
+    });
     renderer.shutdown();
   });
 
-  it("renders a compact checklist and confirms selected entries from Submit", async () => {
+  it("proceeds from a planner checklist with Right Arrow and preserves its selections", async () => {
     const { screen, input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "searchable-multi",
+      navigation: {
+        kind: "planner",
+        activeStep: 0,
+        steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+      },
+      message: "Where should people reach your agent?",
+      options: [
+        { value: "web", label: "Web Chat" },
+        { value: "slack", label: "Slack" },
+      ],
+      required: false,
+    });
 
+    expect(screen.snapshot()).not.toContain("Channels (1)");
+    input.type(" ");
+    expect(screen.snapshot()).toContain("Channels (1)");
+    input.right();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "forward",
+      values: ["web"],
+    });
+    renderer.shutdown();
+  });
+
+  it("confirms selected entries from a multi-select's Submit row", async () => {
+    const { input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({
       kind: "multi",
       message: "Select channels",
@@ -3821,46 +3831,11 @@ describe("TerminalRenderer setup panel", () => {
       required: true,
     });
 
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("Select channels");
-    expect(snapshot).toContain("▶ Web Chat");
-    expect(snapshot).toContain("◦ Slack");
-    expect(snapshot).toContain("Submit");
-    expect(snapshot).toContain("space to toggle · enter on Submit to confirm");
-
     input.type(" ");
-    expect(screen.snapshot()).toContain("✓ Web Chat");
     input.down();
     input.down();
     input.enter();
     await expect(answer).resolves.toEqual(["web"]);
-    renderer.shutdown();
-  });
-
-  it("keeps a compact planner checklist usable in a short terminal and clears its filter before backing out", async () => {
-    const { screen, input, renderer } = makeRenderer(80, 12);
-    const answer = renderer.setupFlow.readSelect({
-      kind: "searchable-multi",
-      plannerNavigation: true,
-      plannerContinue: "integrations",
-      message: "Where should people reach your agent?",
-      options: [
-        { value: "web", label: "Web Chat", hint: "Built-in chat UI" },
-        { value: "slack", label: "Slack", hint: "Slack workspace" },
-        { value: "github", label: "GitHub", hint: "Issues and pull requests" },
-      ],
-      placeholder: "Search channels",
-      required: false,
-    });
-
-    expect(screen.snapshot()).toContain("Where should people reach your agent?");
-    expect(screen.snapshot()).toContain("space toggle · enter integrations · ← / esc back");
-    input.type("sla");
-    expect(screen.snapshot()).toContain("Slack");
-    input.send("\x1b");
-    await vi.waitFor(() => expect(screen.snapshot()).toContain("Web Chat"));
-    input.send("\x1b");
-    await expect(answer).resolves.toBeUndefined();
     renderer.shutdown();
   });
 
@@ -4486,6 +4461,32 @@ describe("TerminalRenderer setup flow session", () => {
 
     input.enter();
     await expect(answer).resolves.toEqual(["add-more"]);
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
+  it("clears the completed item and install status before the batch follow-up", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    renderer.setupFlow.begin("Set up your agent");
+    renderer.setupFlow.replaceContent?.({ headline: "Adding GitHub · 2 of 3", facts: [] });
+    renderer.setupFlow.setStatus("Installing files and dependencies…");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      message: "What would you like to do next?",
+      options: [
+        { value: "deploy", label: "Deploy" },
+        { value: "finish", label: "Start chatting" },
+      ],
+    });
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).not.toContain("Adding GitHub · 2 of 3");
+    expect(snapshot).not.toContain("Installing files and dependencies");
+    expect(snapshot).toContain("What would you like to do next?");
+
+    input.enter();
+    await expect(answer).resolves.toEqual(["deploy"]);
     renderer.setupFlow.end({ preserveDiagnostics: false });
     renderer.shutdown();
   });

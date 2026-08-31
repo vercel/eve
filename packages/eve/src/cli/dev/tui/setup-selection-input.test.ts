@@ -105,29 +105,27 @@ describe("setupSelectionIntent", () => {
     ).toMatchObject({ kind: "update", select: { filter: "j" } });
   });
 
-  it("uses Space to toggle and Enter to continue a planner checklist", () => {
-    const options = [
-      { value: "web", label: "Web Chat" },
-      { value: "slack", label: "Slack" },
-    ];
-    const select = initialSelectState({ options });
-
+  it("uses Space to toggle a planner checklist", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
     const toggled = reduceSetupSelectInput({
       key: { type: "text", value: " ", framing: "unframed" },
       kind: "searchable-multi",
       options,
-      select,
+      select: initialSelectState({ options }),
       required: false,
       plannerNavigation: true,
     });
     expect(toggled).toMatchObject({ kind: "update", select: { selected: new Set(["web"]) } });
-    if (toggled.kind !== "update") return;
+  });
+
+  it("continues a planner checklist without a Submit row", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
     expect(
       reduceSetupSelectInput({
         key: { type: "enter" },
         kind: "searchable-multi",
         options,
-        select: toggled.select,
+        select: initialSelectState({ options, initialValues: ["web"] }),
         required: false,
         plannerNavigation: true,
       }),

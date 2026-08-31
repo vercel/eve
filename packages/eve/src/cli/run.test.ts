@@ -429,9 +429,7 @@ describe("eve dev --input", () => {
     }));
     const runDevelopmentTui = await runInteractiveDev(["dev", "--onboard"], { startHost });
 
-    expect(runDevelopmentTui).toHaveBeenCalledWith(
-      expect.objectContaining({ initialOnboarding: "agent" }),
-    );
+    expect(runDevelopmentTui).toHaveBeenCalledWith(expect.objectContaining({ onboard: true }));
   });
 
   it("rejects the option with explicit --no-ui", async () => {
