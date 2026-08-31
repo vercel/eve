@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter eve-package-artifacts build",
+  "buildCommand": "npx --yes pnpm@12.1.0 --filter eve-package-artifacts build",
   "installCommand": "npx --yes pnpm@12.1.0 install --frozen-lockfile",
   "outputDirectory": "public",
   "rewrites": [
