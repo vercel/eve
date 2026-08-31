@@ -108,7 +108,7 @@ async function createDependencySnapshot(
         await current.writeFiles([{ path: SOURCE_ARCHIVE_PATH, content: archive }]);
         const command = await current.runCommand("bash", [
           "-lc",
-          `mkdir -p ${SOURCE_ROOT} && tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT} && npm install --global pnpm@11.15.0 vitest@4.1.10 && cd ${SOURCE_ROOT} && pnpm fetch --frozen-lockfile`,
+          `mkdir -p ${SOURCE_ROOT} && tar -xzf ${SOURCE_ARCHIVE_PATH} -C ${SOURCE_ROOT} && npm install --global pnpm@12.1.0 vitest@4.1.10 && cd ${SOURCE_ROOT} && pnpm fetch --frozen-lockfile`,
         ]);
         if (command.exitCode !== 0) {
           throw new Error(

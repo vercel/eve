@@ -83,16 +83,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Setup pnpm
+      - name: Setup pnpm and Node.js
         if: github.event_name != 'pull_request'
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        if: github.event_name != 'pull_request'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: pnpm/setup@ce3b1e5f04cd26dbb4614172464b544b5633cc92 # v2.1.0
         with:
-          node-version-file: .nvmrc
-          package-manager-cache: false
+          runtime: node@24
+          install: false
 
       - name: Validate VCR configuration
         if: github.event_name != 'pull_request'

@@ -95,20 +95,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Setup pnpm
+      - name: Setup pnpm and Node.js
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-
-      - name: Setup Node.js
-        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: pnpm/setup@ce3b1e5f04cd26dbb4614172464b544b5633cc92 # v2.1.0
         with:
-          node-version-file: .nvmrc
-          cache: "pnpm"
-
-      - name: Install dependencies
-        if: ${{ steps.mode.outputs.acknowledge_only != 'true' }}
-        run: pnpm install --frozen-lockfile
+          runtime: node@24
+          cache: true
+          require-lockfile: true
 
       - name: Prepare pull request base worktree
         if: ${{ steps.mode.outputs.acknowledge_only != 'true' && github.event_name == 'pull_request' }}

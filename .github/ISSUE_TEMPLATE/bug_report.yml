@@ -58,7 +58,7 @@ body:
       placeholder: |
         OS: macOS 15.5 (arm64)
         Node: v24.1.0
-        Package manager: pnpm@10.x
+        Package manager: pnpm@12.x
 
         $ eve info
         ...
