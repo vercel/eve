@@ -298,6 +298,71 @@ uses provider-specific merge rules. A merged result may be compatible, require a
 permission expansion, require another installation, exceed trigger fan-out limits, or
 be incompatible and require a separate connector. eve does not implement those rules.
 
+## Deployment lifecycle and late binding
+
+Connector requirements do not block or trigger deployments. Vercel completes the
+deployment, ingests its immutable manifest snapshot, and compares those requirements
+with the project/environment bindings and actual connector state. Missing or stale
+configuration appears on the deployment and project dashboards without making the
+build or deployment fail.
+
+Completing setup does not require another deployment. Connect creates or updates the
+binding and the next runtime invocation resolves it immediately:
+
+```text
+build -> deploy succeeds -> manifest ingested -> requirements evaluated
+                                            |
+                         ready -------------+------------- action required
+                           |                                  |
+                           v                                  v
+                     runtime works                  dashboard setup
+                                                              |
+                                                              v
+                                                    late binding is active
+```
+
+When outbound runtime work reaches an unresolved requirement, Connect and eve expose a
+typed `binding_required` state containing the logical reference and an operator setup
+URL. This is distinct from `authorization_required`:
+
+- `binding_required` means the project/environment integration is missing or
+  incompatible and an operator must configure it;
+- `authorization_required` means the binding is ready but the current user must grant
+  access.
+
+Inbound channels cannot rely on runtime recovery. If a Slack application is not
+installed or its trigger destination is absent, no request reaches eve to report
+`binding_required`. Deployment and project readiness surfaces must therefore remain the
+primary recovery path for inbound integrations.
+
+Manifest changes are also non-blocking:
+
+- adding a connector creates an unmet requirement until an operator creates or binds
+  it;
+- adding scopes, events, commands, shortcuts, or triggers reports configuration drift
+  and the least disruptive reconciliation action;
+- removing a connector marks its binding stale or excess without deleting shared
+  resources.
+
+Connect stores deployment requirements separately from mutable bindings and actual
+connector state. This separation lets late binding and later connector changes satisfy
+an already-running deployment.
+
+### Rollouts and rollback
+
+During a rolling release, more than one deployment may receive traffic. The effective
+environment requirement is the union of the additive minimum capabilities declared by
+all traffic-eligible deployments. Connect retains deployment provenance so the UI can
+attribute each capability and explain which rollout requires a change.
+
+An instant rollback changes the set of active requirements but does not shrink provider
+permissions or delete connector resources. A pending capability increase from the
+rolled-back deployment may remain visible in that deployment's history, but it is no
+longer an unmet requirement of the active Production deployment. Promoting that version
+again causes Connect to reevaluate and resurface its drift. If the first implementation
+cannot observe every traffic-eligible deployment, it may use the environment's active
+deployment only, but must document that rolling-rollout readiness is approximate.
+
 ## Reconciliation and setup
 
 Build artifacts are declarations of intent, not authority. In the first version,
@@ -342,7 +407,8 @@ readiness. App installations, shared credentials, and trigger destinations do.
 When a requirement disappears, Connect marks its binding state stale but does not
 automatically delete a shared connector, uninstall a provider application, revoke
 credentials, or remove provider capabilities. Binding-owned deployment destinations
-may be cleaned up according to explicit environment policy.
+may be cleaned up according to explicit environment policy. An approved reconciliation
+becomes effective through late binding and does not redeploy the project.
 
 ### Future automatic reconciliation
 
@@ -375,7 +441,9 @@ is future work and does not weaken the first version's approval requirement.
 
 ### Vercel and Connect control plane
 
-- Ingests the private deployment artifact and computes a reconciliation plan.
+- Ingests and retains the private manifest snapshot for each deployment.
+- Computes active environment requirements from traffic-eligible deployments.
+- Compares requirements with mutable bindings and actual connector state.
 - Resolves team, project, and environment bindings under authenticated authority.
 - Presents preselected connector and installation choices for approval.
 - Creates or updates connectors, collects secrets, performs provider handoffs, and
@@ -407,8 +475,11 @@ contract.
 - The manifest contains requirements and source metadata, never secrets.
 - Direct locator and logical binding targets are structurally distinct and never inferred from string shape.
 - A logical reference is not a Connect connector ID, UID, or mutable display name.
+- Connector readiness never blocks deployment, and satisfying a requirement never requires redeployment.
 - Manifest ingestion never grants authority or performs provider mutations by itself.
 - The first version requires human approval for every reconciliation plan.
+- `binding_required` identifies operator setup and remains distinct from per-user `authorization_required`.
+- Rollback changes active requirements without automatically shrinking permissions or deleting resources.
 - Capability requirements are additive minimums and drift is visible in both directions.
 - Shared connectors retain per-binding capability and trigger provenance.
 - Provider configuration and merge semantics remain owned by Connect.
