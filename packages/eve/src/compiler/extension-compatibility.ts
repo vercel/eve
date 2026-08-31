@@ -46,8 +46,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 10,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 10],
+    current: 11,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 10, 11],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
     },

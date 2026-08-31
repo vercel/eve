@@ -75,3 +75,20 @@ export async function stepThenRaceWorkflow(
   const answer = await Promise.race([gate, workflowSleep("50ms")]);
   return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
 }
+
+export async function askThenRaceWorkflow(
+  input: DeployInput,
+  ctx: ToolContext,
+): Promise<{ readonly decided: string; readonly service: string }> {
+  "use workflow";
+  const pending = ask(ctx, {
+    display: "confirmation",
+    options: [
+      { id: "approve", label: "Deploy", style: "primary" },
+      { id: "cancel", label: "Cancel" },
+    ],
+    prompt: `Apply ${input.service}?`,
+  });
+  const answer = await Promise.race([pending, workflowSleep("50ms")]);
+  return { decided: answer === undefined ? "timed out" : "answered", service: input.service };
+}

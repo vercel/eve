@@ -1,8 +1,7 @@
 import type { SessionParent, SessionTurn } from "#channel/types.js";
 import type { SessionAuth } from "#context/keys.js";
+import type { ToolRunOwner } from "#execution/tool-run/messages.js";
 import type { JsonObject } from "#shared/json.js";
-import type { ToolRunOwner } from "#tools/definition.js";
-
 
 /** The session projection an authored workflow body observes as `ctx.session`. */
 export interface ToolRunSessionContext {

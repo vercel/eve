@@ -138,24 +138,17 @@ export interface ToolInputResponse {
  * resolves that provider inline, which lets one tool use multiple credentials.
  *
  * A tool whose `execute` is a workflow (`"use workflow"`) receives the same
- * context inside its durable body, with two differences: `getSandbox`,
- * `getSkill`, `getToken`, and `requireAuth` are unavailable there and throw
- * when touched — read credentials inside a `"use step"` function instead —
- * and {@link owner} becomes available.
+ * context inside its durable body, except that `getSandbox`, `getSkill`,
+ * `getToken`, and `requireAuth` are unavailable there and throw when touched —
+ * read credentials inside a `"use step"` function instead.
  */
-/** The three hooks a workflow tool run reports to; see {@link ToolContext.owner}. */
-export interface ToolRunOwner {
-  readonly outcome: string;
-  readonly report: string;
-  readonly request: string;
-}
-
 export type ToolContext = SessionContext & {
   /**
    * Aborts when the work this tool is doing is cancelled: the active turn
    * for an ordinary tool, the durable run for a workflow tool. In a workflow
-   * body the signal is durable — it survives replay, steps that receive it
-   * observe the abort, and `finally` blocks run before the run ends.
+   * body the signal is durable — it survives replay and steps that receive it
+   * observe the abort — and the run waits a grace period for the body to
+   * unwind through `finally` before it ends.
    */
   readonly abortSignal: AbortSignal;
   /**
@@ -163,15 +156,6 @@ export type ToolContext = SessionContext & {
    * stream events and its {@link ApprovalContext}.
    */
   readonly callId: string;
-  /**
-   * The hook tokens of the turn or task that started this run. A workflow
-   * body resumes `report` with progress, `request` with a question carrying
-   * the token of the hook its answer should resume, and `outcome` once with
-   * its result; `yield`, `ask` from `eve/workflow`, and returning do exactly
-   * that. Only available in a workflow body; an ordinary tool throws when it
-   * reads this.
-   */
-  readonly owner: ToolRunOwner;
   /**
    * Final runtime name of the current tool, including any namespace
    * qualification. This is the same `toolName` carried by stream events and
@@ -237,7 +221,7 @@ export interface BackgroundToolDefinition<
     input: TInput,
     ctx: ToolContext,
     task: TaskExec,
-  ): Promise<TaskDelegated | TOutput> | TaskDelegated | TOutput;
+  ): Promise<TaskDelegated | TOutput> | TaskDelegated | TOutput | AsyncIterable<TOutput>;
   approval?: Approval<ApprovalContextInput<TInput>>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }

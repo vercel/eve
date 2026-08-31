@@ -2,9 +2,20 @@ import { createHook, defineHook, type Hook } from "#compiled/@workflow/core/inde
 
 import { resumeHook } from "#execution/tool-run/workflow-api.js";
 
-import type { ToolContext, ToolInputRequest, ToolInputResponse, ToolRunOwner } from "#tools/definition.js";
+import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+
+/**
+ * The hook tokens of the turn or task that started a run. The run resumes
+ * `report` with progress, `request` with a question carrying the token of the
+ * hook its answer should resume, and `outcome` once with its result.
+ */
+export interface ToolRunOwner {
+  readonly outcome: string;
+  readonly report: string;
+  readonly request: string;
+}
 
 /**
  * A request a run asks its owner to put to a human. Either the author's
@@ -86,15 +97,17 @@ export function isRunControlMessage(value: unknown): value is RunControlMessage 
 }
 
 /**
- * The run identity `ask` and the report path attach to every message. Carried
- * on the tool context under a private symbol so the public `ToolContext` stays
- * free of framework internals while `ask(ctx, ...)` still works from a body.
+ * What a body needs to speak to its owner: the run's identity and the owner's
+ * channels. Carried on the tool context under a private symbol so the public
+ * `ToolContext` stays free of framework internals while `ask(ctx, ...)` still
+ * works from a body.
  */
 const RUN_CONTEXT = Symbol.for("eve.tool-run.context");
 
 interface RunContext {
   readonly answerSeq: { value: number };
   readonly from: RunRef;
+  readonly owner: ToolRunOwner;
 }
 
 /** Prefix marking a per-request answer hook so delivery resumes it directly. */
@@ -105,7 +118,7 @@ export function isToolRunAnswerToken(token: string): boolean {
   return token.startsWith(ANSWER_HOOK_PREFIX);
 }
 
-/** Stamps a run's identity onto the context its body receives. */
+/** Stamps a run's identity and owner onto the context its body receives. */
 export function attachRunContext(ctx: ToolContext, context: Omit<RunContext, "answerSeq">): void {
   Object.defineProperty(ctx, RUN_CONTEXT, {
     enumerable: false,
@@ -125,24 +138,21 @@ function readRunContext(ctx: ToolContext): RunContext {
 
 /**
  * Asks the owner to put a question to a human and returns the hook the answer
- * resumes. Awaiting it suspends the run until a response arrives; iterating it
- * yields every response to the same standing question. Both reject with the
- * abort reason if the run is cancelled first, which withdraws the request.
+ * resumes, the way `createHook` returns one: await it for the answer, race it
+ * against a `sleep` for a deadline.
  *
- * Create a hook, resume the owner's request channel with its token as the
- * return address, wait on it — three SDK operations, with no privilege an
- * author's own version would lack.
+ * Synchronous on purpose. A `Hook` is thenable, so an async function that
+ * returned one would adopt it and its promise would settle with the answer,
+ * never the hook. The request is published by a step the body does not await;
+ * the workflow runs it before the body suspends on the hook.
  */
-export async function ask(
-  ctx: ToolContext,
-  request: ToolInputRequest,
-): Promise<Hook<ToolInputResponse>> {
+export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
   const context = readRunContext(ctx);
   const seq = context.answerSeq.value++;
   const answer = createHook<ToolInputResponse>({
     token: `${ANSWER_HOOK_PREFIX}${context.from.runId}:${seq}`,
   });
   const message: RunRequestMessage = { from: context.from, replyTo: answer.token, request };
-  await resumeHook(ctx.owner.request, message);
+  void resumeHook(context.owner.request, message);
   return answer;
 }

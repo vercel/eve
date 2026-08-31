@@ -16,7 +16,7 @@ export default defineTool({
   async execute({ service }, ctx) {
     "use workflow";
 
-    const pending = await ask(ctx, {
+    const pending = ask(ctx, {
       display: "confirmation",
       options: [
         { id: "approve", label: "Deploy", style: "primary" },

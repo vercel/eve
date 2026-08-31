@@ -11,9 +11,9 @@ on a person, a webhook, or a sleep, the turn is parked and nothing is running. M
 value when the run ends.
 
 Inside the tool, everything is the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`,
-`"use step"`, `createHook`, `createWebhook`, `sleep`, `start`, retries, replay. eve adds `ask` — a
-question the human on the session's channel answers — and treats each `yield` as a durable progress
-report. Both come from `eve/workflow`.
+`"use step"`, `createHook`, `createWebhook`, `sleep`, retries, replay. eve adds `ask` from
+`eve/workflow` — a question the human on the session's channel answers — and treats each `yield` as
+a durable progress report.
 
 ## Write one
 
@@ -38,7 +38,7 @@ export default defineTool({
       ],
     });
 
-    if ((await answer).optionId !== "approve") {
+    if (answer.optionId !== "approve") {
       return { deployed: false, reason: "rejected" };
     }
     return { deployed: true, url: await applyDeploy(plan) };
@@ -70,25 +70,22 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 - The body is replayed, so it must be deterministic. Side effects, clocks, randomness, and Node.js
   APIs belong in steps. A module imported by the body may use Node.js only inside its steps.
 - `createHook`, `createWebhook`, `sleep`, `getWritable`, `getWorkflowMetadata`, and `FatalError`
-  come from `workflow`; `start`, `getRun`, and `resumeHook` from `workflow/api` and are callable from
-  a body. eve resolves both specifiers to the Workflow SDK version it builds and runs, so your app
-  does not install it. For the TypeScript types, list `eve/workflow-modules` in your tsconfig's
-  `compilerOptions.types` (new projects already do); an installed `workflow` package takes
-  precedence if you add one.
+  come from `workflow` and are used in the body. `start`, `getRun`, and `resumeHook` come from
+  `workflow/api` and are used inside a `"use step"` function, as in any Workflow application; a body
+  that imports them gets an error naming the rule. eve resolves both specifiers to the Workflow SDK
+  version it builds and runs, so your app does not install it. For the TypeScript types, list
+  `eve/workflow-modules` in your tsconfig's `compilerOptions.types` (new projects already do); an
+  installed `workflow` package takes precedence if you add one.
 
 ### What eve owns
 
 - One run per tool call. A retried harness step never starts a second run.
 - The run's return value is the tool result. A thrown error is a tool error. `toModelOutput` applies
   to the return value as it does for any tool.
-- `ctx` inside the body carries `session`, `callId`, `toolName`, `owner`, and `abortSignal`. The
-  members that need the turn's process — `getSandbox`, `getSkill`, `getToken`, and `requireAuth` —
-  are unavailable in a workflow body and throw when touched. Read credentials from the environment
-  inside a step instead.
-- `ask` and `yield` reach the session through `ctx.owner`: the three hooks of the turn or task that
-  started the run — `report` for progress, `request` for a question carrying the token of the hook its
-  answer resumes, `outcome` for the result. `ask` is a small helper over `createHook` and `resumeHook`;
-  you can write your own.
+- `ctx` inside the body carries `session`, `callId`, `toolName`, and `abortSignal`. The members that
+  need the turn's process — `getSandbox`, `getSkill`, `getToken`, and `requireAuth` — are unavailable
+  in a workflow body and throw when touched. Read credentials from the environment inside a step
+  instead.
 - The tool's parsed input must be a JSON object: it crosses the run's serialization boundary.
 - Workflow bodies are for static tools under `agent/tools/`, not tools returned from
   `defineDynamic` resolvers.
@@ -117,36 +114,24 @@ const answer = await ask(ctx, {
   display?: "confirmation" | "select" | "text",
   options?: { id: string; label: string; description?: string; style?: "primary" | "danger" | "default" }[],
   allowFreeform?: boolean,
-});
-const response = await answer; // { optionId?: string; text?: string }
+}); // { optionId?: string; text?: string }
 ```
 
 `ask` publishes an `input.requested` event on the session — rendered the way channels render
-`ask_question` and tool approvals — and returns the hook the answer resumes. Awaiting the hook
-suspends the run until a response arrives.
-
-Because `ask` returns the hook rather than a promise of the answer, it composes with the SDK's own
-constructs. Race it against a deadline:
+`ask_question` and tool approvals — and returns the hook the answer resumes, the way `createHook`
+returns one. Awaiting it suspends the run until a response arrives. Because it is a hook, it composes
+with the SDK's own constructs; race it against a deadline:
 
 ```ts
-const answer = await ask(ctx, { prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });
-const decided = await Promise.race([answer, sleep("4h")]);
-if (decided === undefined) return { deployed: false, reason: "timed out" };
-```
-
-Or iterate it as a standing question — one card on the channel, answered repeatedly:
-
-```ts
-const next = await ask(ctx, { prompt: "Next command?", allowFreeform: true });
-for await (const command of next) {
-  if (command.text === "stop") break;
-  await run(command.text);
-}
+const pending = ask(ctx, { prompt: `Deploy ${service}?`, options: APPROVE_OR_CANCEL });
+const answer = await Promise.race([pending, sleep("4h")]);
+if (answer === undefined) return { deployed: false, reason: "timed out" };
 ```
 
 - The request belongs to the run, not the turn. It stays answerable until it is answered or the run
   ends. In a background tool that means long after the turn that started it.
-- Cancelling the run withdraws its pending requests.
+- A request is answered once. Ask again for the next answer.
+- Ending the run, by returning, throwing, or cancellation, withdraws its pending requests.
 - Several requests may be outstanding at once.
 - A response never steers. A new human message while a request is pending follows the session's
   normal `turnPolicy`.
@@ -157,7 +142,7 @@ and can only show the model's input. Both compose: `approval` before the run, `a
 ## Report progress: `yield`
 
 A workflow body may be an async generator. Each `yield` is a durable progress snapshot; the return
-value is the result.
+value is the result, or the last `yield` when the body returns nothing.
 
 ```ts
 async *execute({ service }, ctx) {
@@ -178,7 +163,7 @@ result; throwing ends it with the failure.
 
 `ctx.abortSignal` aborts when the run is cancelled: a steered turn for a waiting tool, `task_cancel`
 or the session ending for a background one. It is durable — it survives replay, and a step that
-receives it observes the abort. Pass it into the awaits that should stop, and clean up in
+receives it observes the abort. Pass it into the steps that should stop, and clean up in
 `try/finally`:
 
 ```ts
@@ -193,8 +178,10 @@ async execute({ projectId }, ctx) {
 }
 ```
 
-A run that never observes the signal is force-cancelled after a short grace period, so cancellation
-always terminates the run; observing the signal is how you clean up gracefully first.
+After the signal fires, the run waits up to 30 seconds for the body to finish unwinding, then ends
+as cancelled whether or not it did. A body parked on a hook or a `sleep` does not observe the signal;
+it is abandoned when the grace period ends. Steps that received the signal are how you clean up
+first.
 
 ## Flows
 
@@ -205,7 +192,7 @@ async execute({ service }, ctx) {
   "use workflow";
 
   const plan = await planDeploy(service);
-  const pending = await ask(ctx, { prompt: `Deploy ${service}?`, display: "confirmation", options: APPROVE_OR_CANCEL });
+  const pending = ask(ctx, { prompt: `Deploy ${service}?`, display: "confirmation", options: APPROVE_OR_CANCEL });
 
   let answer = await Promise.race([pending, sleep("4h")]);
   if (answer === undefined) {
@@ -259,7 +246,7 @@ export default defineTool({
   async execute({ orderId, amount }, ctx) {
     "use workflow";
 
-    const decision = await await ask(ctx, {
+    const decision = await ask(ctx, {
       prompt: `Refund $${amount} on order ${orderId}?`,
       display: "confirmation",
       options: [

@@ -26,8 +26,8 @@ type WorkflowToolExecute = (
  * The authored `execute` body was registered by the bundler as a workflow
  * function; this run looks it up, builds the `ctx` it sees, and calls it. The
  * body speaks to its owner — the parked turn or the owning task — on the
- * owner's three hooks, `ctx.owner`: each `yield` resumes `report`, `ask`
- * resumes `request`, and the return value (or a throw) resumes `outcome` once.
+ * owner's three hooks: each `yield` resumes `report`, `ask` resumes `request`,
+ * and the return value (or a throw) resumes `outcome` once.
  *
  * The run's own hook is its identity claim and its control inbox: a duplicate
  * start loses the claim and exits, and a `cancel` message aborts
@@ -60,7 +60,7 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
       turnId: input.session.turn.id,
     };
     const ctx = createWorkflowToolContext({ from, input, signal: control.signal });
-    attachRunContext(ctx, { from });
+    attachRunContext(ctx, { from, owner: input.owner });
 
     let outcome: RunOutcome;
     try {
@@ -156,7 +156,6 @@ function createWorkflowToolContext(options: {
     getSkill: () => unavailable("getSkill()", "skills are read through the session sandbox"),
     getToken: () =>
       unavailable("getToken()", 'read credentials from the environment inside a "use step" helper'),
-    owner: options.input.owner,
     requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
     session: {
       auth: session.auth,

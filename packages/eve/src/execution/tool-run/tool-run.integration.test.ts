@@ -7,6 +7,7 @@ import { workflowEntry } from "#execution/workflow-entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
+  askThenRaceWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
   stepThenRaceWorkflow,
@@ -245,6 +246,43 @@ describe("workflow tools", () => {
         );
         expect(outputs.some((output) => output.includes('"decided":"timed out"'))).toBe(true);
         expect(filterEventsByType(settled, "turn.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
+
+  it("lets a deadline win a race against an unanswered ask", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-ask-deadline",
+      execute: askThenRaceWorkflow,
+      toolName: "confirm_deploy",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run confirm_deploy with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:workflow-tool-ask-deadline",
+            mode: "conversation",
+            requestInput: true,
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        // Asking parks the turn; the sleep then wins and the same turn resumes.
+        const asked = await stream.nextTurn();
+        expect(filterEventsByType(asked, "input.requested")).toHaveLength(1);
+
+        const resumed = await stream.nextTurn();
+        const outputs = filterEventsByType(resumed, "action.result").map((event) =>
+          JSON.stringify(event.data.result.output),
+        );
+        expect(outputs.some((output) => output.includes('"decided":"timed out"'))).toBe(true);
+        expect(filterEventsByType(resumed, "turn.failed")).toHaveLength(0);
       } finally {
         stream.dispose();
         await run.cancel();
