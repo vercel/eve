@@ -1,7 +1,6 @@
 import * as workflowRuntime from "#compiled/@workflow/core/runtime.js";
 
 export * from "#compiled/@workflow/core/runtime.js";
-export { resumeHookDurable } from "#compiled/@workflow/core/runtime/resume-hook.js";
 export type {
   StartOptionsWithoutDeploymentId,
   WorkflowFunction,

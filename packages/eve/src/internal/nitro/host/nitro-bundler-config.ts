@@ -1,13 +1,11 @@
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
 
 interface BundlerLog {
-  readonly code?: string;
   readonly id?: string;
   readonly ids?: readonly unknown[];
   readonly loc?: {
     readonly file?: string;
   };
-  readonly message?: string;
 }
 
 type BundlerDefaultLogHandler = (level: string, log: unknown) => void;
@@ -55,27 +53,12 @@ function isVendoredDependencyWarning(log: unknown): boolean {
   );
 }
 
-function isWorkflowCoreResumeHookSplitWarning(log: unknown): boolean {
-  if (log === null || typeof log !== "object") {
-    return false;
-  }
-
-  const candidate = log as BundlerLog;
-  return (
-    candidate.code === "INEFFECTIVE_DYNAMIC_IMPORT" &&
-    candidate.message?.includes("compiled/@workflow/core/runtime/resume-hook.js") === true
-  );
-}
-
 function onNitroBundlerLog(
   level: string,
   log: unknown,
   defaultHandler: BundlerDefaultLogHandler,
 ): void {
-  if (
-    level === "warn" &&
-    (isVendoredDependencyWarning(log) || isWorkflowCoreResumeHookSplitWarning(log))
-  ) {
+  if (level === "warn" && isVendoredDependencyWarning(log)) {
     return;
   }
 

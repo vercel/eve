@@ -186,10 +186,6 @@ export default {
       outputPath: "runtime",
     },
     {
-      input: "@workflow/core/runtime/resume-hook",
-      outputPath: "runtime/resume-hook",
-    },
-    {
       entry: "dist/private.js",
       outputPath: "private",
     },

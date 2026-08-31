@@ -53,15 +53,6 @@ describe("createNitroBundlerConfig", () => {
     onLog(
       "warn",
       {
-        code: "INEFFECTIVE_DYNAMIC_IMPORT",
-        message:
-          "/repo/packages/eve/dist/src/compiled/@workflow/core/runtime/resume-hook.js is dynamically imported but also statically imported",
-      },
-      defaultHandler,
-    );
-    onLog(
-      "warn",
-      {
         id: "/repo/packages/eve/src/internal/nitro/host/create-application-nitro.ts",
         message: "eve build warning",
       },

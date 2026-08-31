@@ -20,10 +20,6 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
-vi.mock("#compiled/@workflow/core/runtime/resume-hook.js", () => ({
-  resumeHookDurable: (...args: unknown[]) => resumeHookMock(...args),
-}));
-
 describe("task input response capability", () => {
   beforeEach(() => {
     getHookByTokenMock.mockReset();
