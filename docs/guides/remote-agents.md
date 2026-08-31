@@ -145,7 +145,9 @@ A receiver on an eve version that predates all principal forwarding may instead 
 
 ## Preserving trace content
 
-When `forwardPrincipal: true` forwards an authenticated principal for a sampled trace, remote dispatch also writes the origin audience and the parent deployment's effective input/output ceiling into one [W3C Baggage](https://www.w3.org/TR/baggage/) member. For example, `eve.audience=private;ceiling=i0o1` identifies a private origin and permits outputs, but not inputs, to cross the next hop. The receiver ignores the entire assertion unless it accepts the transport-authenticated caller with `trustedForwarders`:
+With `forwardPrincipal: true`, a sampled trace carries its original audience and the maximum content the next hop may record. For example, `eve.audience=private;ceiling=i0o1` allows outputs but not inputs. eve sends this as [W3C Baggage](https://www.w3.org/TR/baggage/).
+
+The receiver uses it only after `trustedForwarders` accepts the authenticated calling deployment:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -158,11 +160,13 @@ export default eveChannel({
 });
 ```
 
-eve reads the baggage member only when the request body includes a callback, `traceparent` is valid and sampled, and the forwarded principal was accepted. The callback and headers are caller-supplied; they identify the protocol shape but do not prove parentage. `trustedForwarders` is the authorization boundary, and the forwarded ceiling is only an upper bound: the receiver evaluates its own trace policy against the immutable origin audience and intersects that decision with the incoming ceiling.
+The request must also include a callback and a valid sampled `traceparent`. Those fields identify a remote call, but they do not establish trust. `trustedForwarders` is the authorization boundary.
 
-Each later remote hop forwards that intersection, never the ceiling it originally received, so a deployment can narrow capture but cannot restore a direction removed upstream. The origin audience is fixed at the first remote hop and relayed unchanged through intermediate eve HTTP and local-subagent hops. With the default receiver policy, public origins may retain content while private and unknown origins remain metadata-only; private content crosses only when both the incoming ceiling and an explicit receiver policy allow it.
+The receiver combines the incoming ceiling with its own trace policy. Each hop may narrow the result, but it cannot restore inputs or outputs removed earlier. The original audience stays the same across remote and local subagent hops. Public origins may include content by default; private and unknown origins stay metadata-only unless both deployments explicitly allow them.
 
-Missing, duplicate, malformed, unsampled, untrusted, direct, and partial assertions are treated as absent. `drop` uses only the unsampled `traceparent` flag and never appears as a second baggage signal. Older senders omit the mandatory `ceiling` property, while older receivers either ignore Baggage or reject the new property, so mixed versions degrade to metadata-only. Accepted sessions keep the origin audience and incoming ceiling in their existing durable trace seed; structured logs record the immediate authenticated forwarder and resolved policy. Because Workflow observability content is not directional, `$eve.is_trace_content_visible` is true only when the effective ceiling permits both inputs and outputs. Continuations retain that creation-time policy.
+The live delivery audience still matters. An unknown callback delivery, or one matching the origin, uses the session decision. A different explicit audience applies its own hard ceiling, so a private delivery stays redacted even when the trace began in public.
+
+Missing, malformed, duplicate, unsampled, untrusted, and mixed-version assertions fall back to metadata-only tracing. Dropped traces use only the unsampled trace flag. The decision is fixed when the remote session starts and reused by continuations. Agent Runs shows Workflow content only when both inputs and outputs are allowed.
 
 ## How remote dispatch and callbacks work
 
