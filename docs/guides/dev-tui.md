@@ -13,22 +13,22 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 
 ## Commands
 
-| Command       | Description                                                                                                                                           |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/model`      | Configure the model and its provider. Pass a model ID to set it directly: `/model provider/model-id`.                                                 |
-| `/add`        | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to preselect it: `/add channel/slack`. |
-| `/deploy`     | Deploy the agent to Vercel production. Links the directory first if needed.                                                                           |
-| `/vc:install` | Install the Vercel CLI.                                                                                                                               |
-| `/vc:login`   | Log in to Vercel or restore access to a remote deployment.                                                                                            |
-| `/info`       | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                       |
-| `/loglevel`   | Choose which server and agent logs appear in the transcript.                                                                                          |
-| `/traces`     | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                         |
-| `/reset`      | Start a fresh session.                                                                                                                                |
-| `/cancel`     | Cancel the current turn without discarding settled context.                                                                                           |
-| `/clear`      | Clear the session's model-message history. `/new` is an alias.                                                                                        |
-| `/compact`    | Compact the current session's context.                                                                                                                |
-| `/exit`       | Quit the UI.                                                                                                                                          |
-| `/help`       | List available commands.                                                                                                                              |
+| Command       | Description                                                                                                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/model`      | Configure the model and its provider. Pass a model ID to set it directly: `/model provider/model-id`.                                                                    |
+| `/add`        | Select and install channels, MCP connections, extensions, and observability integrations. Pass an item address to confirm and install it directly: `/add channel/slack`. |
+| `/deploy`     | Deploy the agent to Vercel production. Links the directory first if needed.                                                                                              |
+| `/vc:install` | Install the Vercel CLI.                                                                                                                                                  |
+| `/vc:login`   | Log in to Vercel or restore access to a remote deployment.                                                                                                               |
+| `/info`       | Show the resolved application, compiled artifacts, discovery diagnostics, and messaging routes.                                                                          |
+| `/loglevel`   | Choose which server and agent logs appear in the transcript.                                                                                                             |
+| `/traces`     | Open the local trace viewer. Pass a trace ID prefix to open a specific trace.                                                                                            |
+| `/reset`      | Start a fresh session.                                                                                                                                                   |
+| `/cancel`     | Cancel the current turn without discarding settled context.                                                                                                              |
+| `/clear`      | Clear the session's model-message history. `/new` is an alias.                                                                                                           |
+| `/compact`    | Compact the current session's context.                                                                                                                                   |
+| `/exit`       | Quit the UI.                                                                                                                                                             |
+| `/help`       | List available commands.                                                                                                                                                 |
 
 `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
 
@@ -40,11 +40,11 @@ Model and Vercel changes take effect when you complete the Model step. Channel a
 
 ## Add an integration
 
-Bare `/add` opens the standalone planner on **Integrations**. It does not include model configuration. `/add <item>` preselects the requested item and opens **Review**. The progress rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
+Bare `/add` opens the standalone planner on **Integrations**. It does not include model configuration. The progress rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
 
 Press `Right Arrow` or `Enter` to preserve the current selections and continue. Press `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation still requires `Enter` on **Install and set up** from Review. During installation, `Esc` cancels only the active item and continues with the remaining selections. The final summary reports installed, cancelled, and failed items separately.
 
-Pass an official item address — `<category>/<name>`, where category is `channel`, `connection`, `extension`, or `instrumentation` — to preselect it in the planner. Product presets and configured registry addresses are also supported:
+Pass an item address to `/add` to confirm and install that exact address without opening the planner:
 
 ```text
 /add channel/slack
@@ -53,7 +53,7 @@ Pass an official item address — `<category>/<name>`, where category is `channe
 /add @acme/analytics
 ```
 
-Product presets expand into their individual channels and integrations on Review. The UI installs selected items in order and offers deployment once after the batch when an installed item requires it.
+The UI installs planner selections in order and offers deployment once after the batch when an installed item requires it.
 
 ## Work with the agent
 

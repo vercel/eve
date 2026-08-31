@@ -64,7 +64,7 @@ export interface TuiSetupCommandInput {
   modelNavigation?: PlannerNavigation;
   /** First registry planner section for an unaddressed setup flow. */
   initialRegistryScreen?: RegistryPlannerSection;
-  /** Registry address supplied by `/add <item>`, preselected in the batch planner. */
+  /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
   /** Selections restored when an enclosing onboarding journey returns to the planner. */
   initialRegistryAddresses?: readonly string[];

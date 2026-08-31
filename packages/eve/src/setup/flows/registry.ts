@@ -38,7 +38,6 @@ export type RegistryHumanActionRecovery = (
 
 export interface RegistryFlowDeps {
   browseRegistryCatalog: (typeof import("#cli/commands/registry.js"))["browseRegistryCatalog"];
-  getRegistryItemManifest: (typeof import("#cli/commands/registry.js"))["getRegistryItemManifest"];
   installRegistryItem: (typeof import("#cli/commands/registry.js"))["installRegistryItem"];
   detectDeployment: (typeof import("#setup/project-resolution.js"))["detectDeployment"];
   runDeployFlow: (typeof import("./deploy.js"))["runDeployFlow"];
@@ -90,8 +89,6 @@ function isPlannerItem(section: Section, item: Item): boolean {
 }
 
 function orderedSectionItems(section: Section, catalog: readonly Item[]): Item[] {
-  // Product-level presets are installed as one item when explicitly requested;
-  // the bare planner presents their independently installable components.
   const matching = catalog.filter((item) => isPlannerItem(section, item));
   const featured = SECTIONS[section].featured
     .map((name) => matching.find((item) => item.name === name))
@@ -280,82 +277,6 @@ async function editPlan(input: {
   }
 }
 
-function itemSource(address: string): string {
-  if (address.startsWith("@")) return address.split("/")[0] ?? address;
-  if (/^https?:\/\//u.test(address)) {
-    try {
-      return new URL(address).host;
-    } catch {
-      return address;
-    }
-  }
-  return "Vercel";
-}
-
-function manifestRecord(manifest: unknown): Record<string, unknown> {
-  return typeof manifest === "object" && manifest !== null && !Array.isArray(manifest)
-    ? (manifest as Record<string, unknown>)
-    : {};
-}
-
-function manifestComponents(manifest: Record<string, unknown>): string[] {
-  const meta = manifest.meta;
-  if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return [];
-  const eve = (meta as Record<string, unknown>).eve;
-  if (typeof eve !== "object" || eve === null || Array.isArray(eve)) return [];
-  const components = (eve as Record<string, unknown>).components;
-  if (!Array.isArray(components)) return [];
-  return components.flatMap((component) => {
-    if (typeof component !== "object" || component === null || Array.isArray(component)) return [];
-    const item = (component as Record<string, unknown>).item;
-    return typeof item === "string" ? [item] : [];
-  });
-}
-
-async function resolveInitialItems(input: {
-  appRoot: string;
-  address: string;
-  catalog: readonly Item[];
-  prompter: Prompter;
-  getRegistryItemManifest: RegistryFlowDeps["getRegistryItemManifest"];
-}): Promise<Item[]> {
-  const known = input.catalog.find(
-    (item) => item.address === input.address || item.name === input.address,
-  );
-  if (known !== undefined && known.name.includes("/")) return [known];
-
-  const manifest = manifestRecord(
-    await withSpinner(input.prompter, "Loading registry item…", () =>
-      input.getRegistryItemManifest(input.appRoot, input.address),
-    ),
-  );
-  const components = manifestComponents(manifest);
-  if (components.length > 0) {
-    return components.map((address) => {
-      const component = input.catalog.find(
-        (item) => item.address === address || item.name === address,
-      );
-      if (component === undefined) {
-        throw new Error(
-          `Registry package "${input.address}" references unavailable item "${address}".`,
-        );
-      }
-      return component;
-    });
-  }
-  if (known !== undefined) return [known];
-
-  const item: Item = {
-    address: input.address,
-    name: typeof manifest.name === "string" ? manifest.name : input.address,
-    source: itemSource(input.address),
-  };
-  if (typeof manifest.title === "string") item.title = manifest.title;
-  if (typeof manifest.type === "string") item.type = manifest.type;
-  if (typeof manifest.description === "string") item.description = manifest.description;
-  return [item];
-}
-
 async function recoverHumanAction<T>(
   task: () => Promise<T>,
   recover: RegistryHumanActionRecovery | undefined,
@@ -375,7 +296,7 @@ export async function runRegistryFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
-  /** Registry item supplied by `/add <item>`, preselected before the planner opens. */
+  /** Registry item supplied by `/add <item>`, confirmed and installed directly. */
   initialAddress?: string;
   /** First screen for an unaddressed flow; onboarding defaults to channels. */
   initialScreen?: RegistryPlannerSection;
@@ -393,69 +314,62 @@ export async function runRegistryFlow(input: {
 > {
   let session: ReturnType<typeof createRegistrySession> | undefined;
   try {
-    const registry =
-      input.deps?.browseRegistryCatalog === undefined ||
-      input.deps?.getRegistryItemManifest === undefined ||
-      input.deps?.installRegistryItem === undefined
-        ? await import("#cli/commands/registry.js")
-        : undefined;
-    const browseRegistryCatalog =
-      input.deps?.browseRegistryCatalog ?? registry!.browseRegistryCatalog;
-    const getRegistryItemManifest =
-      input.deps?.getRegistryItemManifest ?? registry!.getRegistryItemManifest;
-    const installRegistryItem = input.deps?.installRegistryItem ?? registry!.installRegistryItem;
-    const catalogResult = await withSpinner(input.prompter, "Loading registry…", () =>
-      browseRegistryCatalog(input.appRoot),
-    );
-    const catalog = [...catalogResult.items];
-    const selected = new Set<string>(input.initialAddresses);
     const initialAddress = input.initialAddress?.trim();
+    let items: Item[];
     if (initialAddress !== undefined && initialAddress !== "") {
-      const items = await resolveInitialItems({
-        appRoot: input.appRoot,
-        address: initialAddress,
-        catalog,
-        prompter: input.prompter,
-        getRegistryItemManifest,
+      const confirmed = await input.prompter.select({
+        message: `Add ${initialAddress}?`,
+        options: [
+          { value: "install" as const, label: "Install and set up" },
+          { value: "cancel" as const, label: "Cancel" },
+        ],
       });
-      for (const item of items) {
-        if (!catalog.some((candidate) => candidate.address === item.address)) catalog.push(item);
-        selected.add(item.address);
+      if (confirmed === "cancel") return { kind: "cancelled" };
+      items = [{ address: initialAddress, name: initialAddress, source: "Registry" }];
+    } else {
+      const browseRegistryCatalog =
+        input.deps?.browseRegistryCatalog ??
+        (await import("#cli/commands/registry.js")).browseRegistryCatalog;
+      const catalogResult = await withSpinner(input.prompter, "Loading registry…", () =>
+        browseRegistryCatalog(input.appRoot),
+      );
+      const catalog = [...catalogResult.items];
+      const selected = new Set<string>(input.initialAddresses);
+      const notices = catalogResult.errors.map((error) => ({
+        tone: "warning" as const,
+        text: `${error.registry}: ${error.message}`,
+      }));
+      const itemsByAddress = new Map(catalog.map((item) => [item.address, item]));
+      const plan = await editPlan({
+        prompter: input.prompter,
+        catalog,
+        itemsByAddress,
+        selected,
+        notices,
+        initialScreen: input.initialScreen ?? "channels",
+        plannerContext: input.plannerContext,
+      });
+      if (plan === "back-before-channels") {
+        return { kind: "navigate-back", selectedAddresses: [...selected] };
       }
+      if (plan !== "install") return { kind: "cancelled" };
+      items = [...selected].map((address) => {
+        const item = itemsByAddress.get(address);
+        if (item === undefined)
+          throw new Error(`Registry item "${address}" is no longer available.`);
+        return item;
+      });
     }
-    const notices = catalogResult.errors.map((error) => ({
-      tone: "warning" as const,
-      text: `${error.registry}: ${error.message}`,
-    }));
-    const itemsByAddress = new Map(catalog.map((item) => [item.address, item]));
-    const plan = await editPlan({
-      prompter: input.prompter,
-      catalog,
-      itemsByAddress,
-      selected,
-      notices,
-      initialScreen:
-        initialAddress !== undefined && initialAddress !== ""
-          ? "review"
-          : (input.initialScreen ?? "channels"),
-      plannerContext: input.plannerContext,
-    });
-    if (plan === "back-before-channels") {
-      return { kind: "navigate-back", selectedAddresses: [...selected] };
-    }
-    if (plan !== "install") return { kind: "cancelled" };
 
+    const installRegistryItem =
+      input.deps?.installRegistryItem ??
+      (await import("#cli/commands/registry.js")).installRegistryItem;
     const detectDeployment =
       input.deps?.detectDeployment ??
       (await import("#setup/project-resolution.js")).detectDeployment;
     const runDeployFlow = input.deps?.runDeployFlow ?? (await import("./deploy.js")).runDeployFlow;
     session = createRegistrySession({ detectDeployment, runDeployFlow });
     const activeSession = session;
-    const items = [...selected].map((address) => {
-      const item = itemsByAddress.get(address);
-      if (item === undefined) throw new Error(`Registry item "${address}" is no longer available.`);
-      return item;
-    });
     for (const [index, item] of items.entries()) {
       input.signal?.throwIfAborted();
       input.onItemStart?.(item, index, items.length);
