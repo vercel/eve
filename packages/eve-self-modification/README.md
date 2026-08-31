@@ -41,7 +41,7 @@ The extension also provides `selfmod__search_registry` to search the eve registr
 
 ## Installing registry items
 
-`selfmod__registry_add` installs an official eve registry item — `eve add <address> --non-interactive --skip-setup` in the application root — so the subagent can add an integration eve already ships instead of hand-writing one. It runs only under `eve dev`, requires approval the first time per session, and holds the authored-source watcher suspended for the whole install.
+`selfmod__registry_add` installs an item from the configured eve registry — `eve add <address> --non-interactive --skip-setup` in the application root — so the subagent can add an existing integration instead of hand-writing one. It runs only under `eve dev`, requires approval the first time per session, and holds the authored-source watcher suspended for the whole install.
 
 It installs only items that declare no setup command and no components. An item that declares either is reported back untouched, with the command that completes it: setup flows ask for credentials and open browser authorizations, and neither can be answered from a chat turn. No setup question ever reaches the model, and no secret ever enters the transcript.
 

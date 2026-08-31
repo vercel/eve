@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyCatalogEntry, isOfficialAddress } from "../extension/classify-registry-item.js";
+import { classifyCatalogEntry } from "../extension/classify-registry-item.js";
 import type { CatalogEntry } from "../extension/tools/search_registry.js";
 
 function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
@@ -10,24 +10,6 @@ function entry(overrides: Partial<CatalogEntry> = {}): CatalogEntry {
     ...overrides,
   };
 }
-
-describe("isOfficialAddress", () => {
-  it("accepts relative official addresses", () => {
-    expect(isOfficialAddress("channel/slack")).toBe(true);
-    expect(isOfficialAddress("linear")).toBe(true);
-    expect(isOfficialAddress("experimental/self-modification")).toBe(true);
-  });
-
-  it("rejects everything v1 routes elsewhere", () => {
-    expect(isOfficialAddress("@acme/widget")).toBe(false);
-    expect(isOfficialAddress("https://example.com/item.json")).toBe(false);
-    expect(isOfficialAddress("@skills/writing")).toBe(false);
-    expect(isOfficialAddress("../etc/passwd")).toBe(false);
-    expect(isOfficialAddress("channel/slack;rm -rf /")).toBe(false);
-    expect(isOfficialAddress("--overwrite")).toBe(false);
-    expect(isOfficialAddress("Channel/Slack")).toBe(false);
-  });
-});
 
 describe("classifyCatalogEntry", () => {
   it("installs an item that declares no setup and no components", () => {

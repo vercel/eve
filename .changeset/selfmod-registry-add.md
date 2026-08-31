@@ -2,8 +2,8 @@
 "@eve/self-modification": patch
 ---
 
-The self-modification subagent can now install official eve registry
-items. A new `selfmod__registry_add` tool runs `eve add <address>
+The self-modification subagent can now install items from the configured eve
+registry. A new `selfmod__registry_add` tool runs `eve add <address>
 --non-interactive --skip-setup` in the application root under `eve dev`,
 pausing the authored-source watcher for the whole install and reporting
 the item's declared environment variables that are still unset. Items

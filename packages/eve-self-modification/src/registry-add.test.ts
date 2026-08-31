@@ -41,6 +41,10 @@ const INDEX = {
         eve: { components: [{ item: "channel/linear-agent" }, { item: "connection/linear" }] },
       },
     },
+    {
+      name: "@acme/widget",
+      title: "Acme Widget",
+    },
   ],
 };
 
@@ -151,25 +155,25 @@ describe("addRegistryItem", () => {
     expect(result.message).toContain("/add channel/slack");
   });
 
-  it("hands off a non-official address without rendering it into a command", async () => {
-    const address = "channel/slack;rm -rf /";
-    const result = await addRegistryItem(address, { getCapability: () => capability() });
-
-    expect(result).toEqual({
-      address,
-      reason: "This tool installs only official eve registry items.",
-      status: "needs-terminal",
-      message:
-        "This item was not installed. Review its address and install it manually in a terminal.",
+  it("installs an exact item from a configured registry without restricting its address", async () => {
+    const address = "@acme/widget";
+    const { calls, spawn } = fakeSpawn({
+      code: 0,
+      output: JSON.stringify({ version: 1, type: "completed", item: address }),
     });
-    expect(result.message).not.toContain(address);
-    expect(result.nextCommand).toBeUndefined();
+    const result = await addRegistryItem(address, {
+      getCapability: () => capability(),
+      spawn,
+    });
+
+    expect(result.status).toBe("installed");
+    expect(calls[0]?.args).toContain(address);
   });
 
   it("rejects an address the registry does not publish", async () => {
     await expect(
       addRegistryItem("channel/nonexistent", { getCapability: () => capability() }),
-    ).rejects.toThrow(/No official eve registry item is published/u);
+    ).rejects.toThrow(/No item in the configured eve registry is published/u);
   });
 
   it("installs a no-setup item with a fixed argv and reports unset envVars", async () => {

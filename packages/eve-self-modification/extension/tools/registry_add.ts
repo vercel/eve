@@ -2,7 +2,7 @@ import { getLocalDevCapability, type LocalDevCapability } from "eve/local-dev";
 import { defineTool } from "eve/tools";
 import { once } from "eve/tools/approval";
 
-import { classifyCatalogEntry, isOfficialAddress } from "../classify-registry-item.js";
+import { classifyCatalogEntry } from "../classify-registry-item.js";
 import { runEveAdd, type SpawnLike } from "../eve-add.js";
 import { withAuthoredSourceLock } from "../source-lock.js";
 import {
@@ -20,7 +20,7 @@ const inputSchema = {
       minLength: 1,
       maxLength: 200,
       description:
-        "Relative address of an official eve registry item, for example `channel/slack` or `extension/browserbase`. Third-party, URL, and `@`-scoped addresses are not installed here.",
+        "Exact address of an item in the configured eve registry, for example `channel/slack` or `extension/browserbase`.",
     },
   },
   required: ["address"],
@@ -128,16 +128,6 @@ export async function addRegistryItem(
     );
   }
 
-  if (!isOfficialAddress(address)) {
-    return {
-      address,
-      reason: "This tool installs only official eve registry items.",
-      status: "needs-terminal",
-      message:
-        "This item was not installed. Review its address and install it manually in a terminal.",
-    };
-  }
-
   // Shares the catalog fetch and its five-minute cache with
   // `selfmod__search_registry`, rather than reading the registry index twice.
   const entries = await loadRegistryIndex({
@@ -148,7 +138,7 @@ export async function addRegistryItem(
   const entry = entries.find((candidate) => candidate.address === address);
   if (entry === undefined) {
     throw new Error(
-      `No official eve registry item is published at "${address}". Check the address before trying again.`,
+      `No item in the configured eve registry is published at "${address}". Check the address before trying again.`,
     );
   }
 
@@ -215,13 +205,13 @@ export async function addRegistryItem(
 export default defineTool({
   approval: once(),
   description:
-    "Install an official eve registry item into this project, for example `channel/slack` or `extension/browserbase`. Only items that need no setup are installed here; an item with a setup flow or multiple components is reported back with the command that completes it, and nothing is installed. Development only. Search first, then call this with the exact item address.",
+    "Install an item from the configured eve registry into this project, for example `channel/slack` or `extension/browserbase`. Only items that need no setup are installed here; an item with a setup flow or multiple components is reported back with the command that completes it, and nothing is installed. Development only. Search first, then call this with the exact item address.",
   inputSchema,
   outputSchema,
   async execute(input, ctx) {
     const { address } = input;
     if (typeof address !== "string" || address.length === 0) {
-      throw new Error("address must be the item address of an official eve registry item.");
+      throw new Error("address must be an exact item address from the configured eve registry.");
     }
     return await addRegistryItem(address, { signal: ctx.abortSignal });
   },

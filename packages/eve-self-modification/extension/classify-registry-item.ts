@@ -1,20 +1,6 @@
 import type { CatalogEntry } from "./tools/search_registry.js";
 
 /**
- * An official item address is a relative path of lowercase slugs.
- *
- * v1 installs official items only. Namespaced (`@acme/...`), URL, `@skills`,
- * and malformed addresses are handed back for manual installation without
- * rendering the untrusted address into a command.
- */
-const OFFICIAL_ADDRESS_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*$/u;
-
-/** Whether an address names an official registry item this tool can install. */
-export function isOfficialAddress(address: string): boolean {
-  return OFFICIAL_ADDRESS_PATTERN.test(address);
-}
-
-/**
  * The split rule.
  *
  * An item that declares no setup and no components is installed by the tool. An
