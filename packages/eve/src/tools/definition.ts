@@ -10,7 +10,7 @@ import { stampDefinitionKey } from "#internal/authored-definition/source-identit
 import type { JsonObject } from "#shared/json.js";
 import type { TokenResult } from "#shared/connection-types.js";
 import type { ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
-import type { InputOption, InputRequestKind } from "#shared/input.js";
+import type { InputOption } from "#shared/input.js";
 import {
   collectDurableDynamicToolCallbacks,
   stampDurableDynamicToolCallbacks,
@@ -112,11 +112,6 @@ export interface ToolInputRequest {
   readonly allowFreeform?: boolean;
   /** Rendering hint: confirmation buttons, a selection list, or a text field. */
   readonly display?: "confirmation" | "select" | "text";
-  /**
-   * How the owner resolves, routes, and renders the request. Defaults to
-   * `"question"`; a forwarded child request keeps its own kind.
-   */
-  readonly kind?: InputRequestKind;
   /** Selectable answers. */
   readonly options?: readonly InputOption[];
   readonly prompt: string;

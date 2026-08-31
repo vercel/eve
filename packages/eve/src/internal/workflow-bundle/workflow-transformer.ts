@@ -23,7 +23,7 @@ const BUILTIN_STEP_NAMES = new Set([
 type WorkflowDirectiveMode = "workflow" | "step" | "client" | false;
 
 type DirectiveFunction = {
-  directive: "use workflow" | "use step";
+  directive: WorkflowDirective;
   directiveEnd: number;
   directiveStart: number;
   /**
@@ -86,7 +86,7 @@ type AstNode = {
 export async function findWorkflowDirectiveFunctions(
   filename: string,
   source: string,
-): Promise<readonly { readonly directive: "use workflow" | "use step"; readonly name: string }[]> {
+): Promise<readonly { readonly directive: WorkflowDirective; readonly name: string }[]> {
   const ast = await parseWorkflowSource(filename, source);
   return findDirectiveFunctions(ast).map((fn) => ({ directive: fn.directive, name: fn.name }));
 }

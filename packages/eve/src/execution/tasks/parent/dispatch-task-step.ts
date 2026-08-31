@@ -27,8 +27,8 @@ import {
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
   startSubagent,
-  startWorkflowTool,
 } from "#execution/dispatch-runtime-actions-shared.js";
+import { startWorkflowTool } from "#execution/tool-run/dispatch.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import {

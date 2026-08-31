@@ -1,7 +1,7 @@
 import { builtinModules } from "node:module";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 
 import { atomicWriteFile } from "#shared/atomic-write-file.js";
 
@@ -38,7 +38,7 @@ const NODE_BUILTIN_MODULES = new Set([
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
 ]);
 /** Source files the workflow build reads, discovers directives in, and resolves imports across. */
-export const WORKFLOW_SOURCE_EXTENSIONS = [
+export const WORKFLOW_SOURCE_EXTENSIONS: readonly string[] = [
   ".ts",
   ".tsx",
   ".mts",
@@ -48,7 +48,10 @@ export const WORKFLOW_SOURCE_EXTENSIONS = [
   ".mjs",
   ".cjs",
 ];
-const WORKFLOW_INPUT_EXTENSIONS = new Set(WORKFLOW_SOURCE_EXTENSIONS);
+
+export function isWorkflowSourceFile(fileName: string): boolean {
+  return WORKFLOW_SOURCE_EXTENSIONS.includes(extname(fileName));
+}
 const IGNORED_INPUT_DIRECTORIES = new Set([
   "node_modules",
   ".git",
@@ -143,9 +146,7 @@ export async function collectWorkflowInputFiles(root: string): Promise<string[]>
         continue;
       }
 
-      const extension = entry.name.match(/\.[^.]+$/)?.[0];
-
-      if (extension !== undefined && WORKFLOW_INPUT_EXTENSIONS.has(extension)) {
+      if (isWorkflowSourceFile(entry.name)) {
         files.push(join(directory, entry.name));
       }
     }

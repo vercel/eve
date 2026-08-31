@@ -9,7 +9,7 @@ import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { resumeToolRunAnswers } from "#execution/tool-run/answer.js";
-import { isToolRunAnswerToken } from "#execution/tool-run/messages.js";
+import { isToolRunAnswerToken } from "#harness/tool-runs.js";
 import type { InputResponse } from "#shared/input.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import {

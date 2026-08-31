@@ -10,7 +10,7 @@ import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { resumeToolRunAnswers } from "#execution/tool-run/answer.js";
-import { isToolRunAnswerToken } from "#execution/tool-run/messages.js";
+import { isToolRunAnswerToken } from "#harness/tool-runs.js";
 import { createLogger } from "#internal/logging.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";

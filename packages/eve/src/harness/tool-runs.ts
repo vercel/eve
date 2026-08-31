@@ -2,6 +2,19 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 
 const TOOL_RUNS_STATE_KEY = "eve.runtime.toolRuns";
+const ANSWER_HOOK_PREFIX = "eve:tool-run-answer:";
+
+/** Token of the hook `ask` creates for one request; delivery resumes it with a plain response. */
+export function toolRunAnswerToken(runId: string, seq: number): string {
+  return `${ANSWER_HOOK_PREFIX}${runId}:${seq}`;
+}
+
+/** Whether a route token is a tool run's answer hook; with `runId`, one of that run's. */
+export function isToolRunAnswerToken(token: string, runId?: string): boolean {
+  return token.startsWith(
+    runId === undefined ? ANSWER_HOOK_PREFIX : `${ANSWER_HOOK_PREFIX}${runId}:`,
+  );
+}
 
 /**
  * One authored workflow tool run the session's active turn is waiting on.

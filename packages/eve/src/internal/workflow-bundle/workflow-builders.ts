@@ -109,8 +109,8 @@ export async function applyWorkflowTransform(
  * root, outside `node_modules`, and not part of the eve package itself).
  * Such modules may declare Workflow directives and receive authored ids.
  */
-export function isAuthoredApplicationModule(absolutePath: string, projectRoot: string): boolean {
-  const normalizedRoot = toRealPath(projectRoot).replace(/\\/g, "/").replace(/\/$/, "");
+export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {
+  const normalizedRoot = toRealPath(appRoot).replace(/\\/g, "/").replace(/\/$/, "");
   const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
   if (!normalizedPath.startsWith(`${normalizedRoot}/`)) return false;
   if (isInNodeModules(normalizedPath)) return false;
@@ -133,8 +133,8 @@ function toRealPath(path: string): string {
  * declare a `version`, so this reads the manifest directly rather than
  * through the package-specifier cache.
  */
-export function isAuthoredApplicationRoot(projectRoot: string): boolean {
-  const packageJsonPath = join(projectRoot, "package.json");
+export function isAuthoredApplicationRoot(appRoot: string): boolean {
+  const packageJsonPath = join(appRoot, "package.json");
   if (!existsSync(packageJsonPath)) return false;
   try {
     const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };

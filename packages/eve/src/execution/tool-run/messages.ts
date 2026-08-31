@@ -1,9 +1,9 @@
 import { createHook, defineHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import { resumeHookStep } from "#execution/tool-run/resume-hook-step.js";
+import { toolRunAnswerToken } from "#harness/tool-runs.js";
 
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
-import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
 /**
@@ -16,14 +16,6 @@ export interface ToolRunOwner {
   readonly report: string;
   readonly request: string;
 }
-
-/**
- * A request a run asks its owner to put to a human. Either the author's
- * shape, completed by the owner with the run's call as its `action`, or a
- * full request forwarded from a child. `requestId` is always the hook token
- * the answer resumes, so the owner overwrites it with the message's `replyTo`.
- */
-export type RunRequest = ToolInputRequest | InputRequest;
 
 /**
  * Who a message is from: enough for an owner sharing one channel across many
@@ -55,10 +47,11 @@ export interface RunReport {
   readonly update: JsonValue;
 }
 
+/** `replyTo` is the token of the hook the human's answer resumes. */
 export interface RunRequestMessage {
   readonly from: RunRef;
   readonly replyTo: string;
-  readonly request: RunRequest;
+  readonly request: ToolInputRequest;
 }
 
 export interface RunOutcomeMessage {
@@ -105,29 +98,16 @@ export function isRunControlMessage(value: unknown): value is RunControlMessage 
 const RUN_CONTEXT = Symbol.for("eve.tool-run.context");
 
 interface RunContext {
-  readonly answerSeq: { value: number };
+  answerSeq: number;
   readonly from: RunRef;
   readonly owner: ToolRunOwner;
-}
-
-/** Prefix marking a per-request answer hook so delivery resumes it directly. */
-const ANSWER_HOOK_PREFIX = "eve:tool-run-answer:";
-
-/**
- * A tool run's per-request answer hook is resumed with a plain input response.
- * With `runId`, narrows to the answer hooks of that one run.
- */
-export function isToolRunAnswerToken(token: string, runId?: string): boolean {
-  return token.startsWith(
-    runId === undefined ? ANSWER_HOOK_PREFIX : `${ANSWER_HOOK_PREFIX}${runId}:`,
-  );
 }
 
 /** Stamps a run's identity and owner onto the context its body receives. */
 export function attachRunContext(ctx: ToolContext, context: Omit<RunContext, "answerSeq">): void {
   Object.defineProperty(ctx, RUN_CONTEXT, {
     enumerable: false,
-    value: { ...context, answerSeq: { value: 0 } },
+    value: { ...context, answerSeq: 0 },
   });
 }
 
@@ -153,9 +133,8 @@ function readRunContext(ctx: ToolContext): RunContext {
  */
 export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
   const context = readRunContext(ctx);
-  const seq = context.answerSeq.value++;
   const answer = createHook<ToolInputResponse>({
-    token: `${ANSWER_HOOK_PREFIX}${context.from.runId}:${seq}`,
+    token: toolRunAnswerToken(context.from.runId, context.answerSeq++),
   });
   const message: RunRequestMessage = { from: context.from, replyTo: answer.token, request };
   void resumeHookStep(context.owner.request, message);

@@ -8,10 +8,9 @@ export interface DirectiveStatementNode {
 }
 
 /**
- * Reads a Workflow directive off the first statement of a function body. The
- * parser records a directive prologue on the statement; a string literal that
- * is not in prologue position still counts, so a directive following a
- * comment or a blank expression is recognized the same way.
+ * Reads a Workflow directive off a function body's first statement. Some
+ * parsers record a directive prologue on the statement; others leave a plain
+ * string-literal expression. Both are accepted.
  */
 export function readWorkflowDirective(
   statement: DirectiveStatementNode | undefined,

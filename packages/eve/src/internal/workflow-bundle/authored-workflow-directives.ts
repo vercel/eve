@@ -70,10 +70,11 @@ export async function prepareAuthoredWorkflowDirectives(input: {
 
   for (const statement of body) {
     if (typeof statement.directive !== "string") break;
-    if (readWorkflowDirective(statement) !== undefined) {
+    const directive = readWorkflowDirective(statement);
+    if (directive !== undefined) {
       throw new Error(
-        `Authored module "${input.filePath}" has a module-level ${JSON.stringify(statement.directive)} directive. ` +
-          `Put the directive as the first statement of the function it marks: a top-level "async function" declaration` +
+        `${JSON.stringify(directive)} in "${input.filePath}" is a module-level directive. ` +
+          `Put it as the first statement of the function it marks: a top-level "async function" declaration` +
           ` or, for "use workflow", the "execute" method of the module's default export.`,
       );
     }
@@ -102,19 +103,19 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   if (found.length === 0) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
   }
+  const hasWorkflowDirective = found.some((entry) => entry.directive === "use workflow");
   // Module discovery gates on the Workflow SDK's line-based pre-scan before it
   // parses anything. A directive that pre-scan cannot see would still be
   // compiled here into a stub with no run behind it, so it is rejected instead.
-  if (!detectWorkflowPatterns(input.source).hasDirective) {
-    const [entry] = found;
-    throw new Error(
-      `${JSON.stringify(entry!.directive)} in "${input.filePath}" is not on its own line. ` +
-        `Write the directive as the first statement of the function body, on a line by itself.`,
-    );
-  }
-  const hasWorkflowDirective = found.some((entry) => entry.directive === "use workflow");
+  const visibleToPrescan = detectWorkflowPatterns(input.source).hasDirective;
 
   for (const entry of found) {
+    if (!visibleToPrescan) {
+      throw new Error(
+        `${JSON.stringify(entry.directive)} in "${input.filePath}" is not on its own line. ` +
+          `Write it as the first statement of the function body, on a line by itself.`,
+      );
+    }
     if (!allowed.has(entry.fn)) {
       throw new Error(
         `${JSON.stringify(entry.directive)} in "${input.filePath}" marks ${describeFunction(entry.fn)}. ` +
@@ -143,7 +144,7 @@ export async function prepareAuthoredWorkflowDirectives(input: {
 
   if (declaresTopLevelBinding(body, HOISTED_EXECUTE_NAME)) {
     throw new Error(
-      `"${input.filePath}" declares a top-level "${HOISTED_EXECUTE_NAME}" binding and a "use workflow" "execute" method. ` +
+      `"use workflow" in "${input.filePath}" marks the "execute" method, but the module also declares a top-level "${HOISTED_EXECUTE_NAME}" binding. ` +
         `eve hoists that method to a top-level "async function ${HOISTED_EXECUTE_NAME}"; rename the existing binding.`,
     );
   }

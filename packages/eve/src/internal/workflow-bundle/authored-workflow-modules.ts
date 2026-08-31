@@ -8,10 +8,8 @@ import {
 } from "#compiled/@workflow/builders/index.js";
 
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
-import { WORKFLOW_SOURCE_EXTENSIONS } from "./builder-support.js";
+import { isWorkflowSourceFile } from "./builder-support.js";
 import { isAuthoredApplicationModule, isAuthoredApplicationRoot } from "./workflow-builders.js";
-
-const SOURCE_EXTENSIONS = new Set(WORKFLOW_SOURCE_EXTENSIONS);
 
 // The Workflow SDK's own discovery ignore list (`BaseBuilder.getInputFiles` in
 // @workflow/builders), plus eve's generated locations: `.eve`, `dist`, and the
@@ -100,8 +98,7 @@ async function collectSourceFiles(root: string): Promise<string[]> {
         continue;
       }
       if (!entry.isFile()) continue;
-      const extension = entry.name.match(/\.[^.]+$/)?.[0];
-      if (extension !== undefined && SOURCE_EXTENSIONS.has(extension)) files.push(entryPath);
+      if (isWorkflowSourceFile(entry.name)) files.push(entryPath);
     }
   }
 

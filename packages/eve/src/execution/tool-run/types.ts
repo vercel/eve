@@ -1,15 +1,9 @@
-import type { SessionParent, SessionTurn } from "#channel/types.js";
-import type { SessionAuth } from "#context/keys.js";
+import type { SessionContext } from "#context/session-context.js";
 import type { ToolRunOwner } from "#execution/tool-run/messages.js";
 import type { JsonObject } from "#shared/json.js";
 
-/** The session projection an authored workflow body observes as `ctx.session`. */
-export interface ToolRunSessionContext {
-  readonly auth: SessionAuth;
-  readonly id: string;
-  readonly parent?: SessionParent;
-  readonly turn: SessionTurn;
-}
+/** The session an authored workflow body observes as `ctx.session`. */
+export type ToolRunSessionContext = SessionContext["session"];
 
 /** Input for one authored workflow tool run. Dependency-free: bundled into the driver. */
 export interface ToolRunWorkflowInput {
@@ -31,10 +25,11 @@ export interface ToolRunWorkflowInput {
   readonly workflowId: string;
 }
 
-/** Executor binding kind recorded on durable tasks whose executor is a tool run. */
-export const WORKFLOW_TOOL_EXECUTOR_KIND = "workflow-tool";
-
-export interface WorkflowToolExecutorData {
+/** Where a started tool run lives: the run and the hook its owner controls it on. */
+export interface ToolRunAddress {
   readonly hookToken: string;
   readonly runId: string;
 }
+
+/** Executor binding kind recorded on durable tasks whose executor is a tool run. */
+export const WORKFLOW_TOOL_EXECUTOR_KIND = "workflow-tool";

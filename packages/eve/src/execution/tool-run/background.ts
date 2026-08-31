@@ -1,13 +1,10 @@
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import { deriveRunOwner } from "#execution/tool-run/messages.js";
 import { startToolRun } from "#execution/tool-run/start.js";
-import {
-  WORKFLOW_TOOL_EXECUTOR_KIND,
-  type WorkflowToolExecutorData,
-} from "#execution/tool-run/types.js";
+import { WORKFLOW_TOOL_EXECUTOR_KIND, type ToolRunAddress } from "#execution/tool-run/types.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { parseJsonObject } from "#shared/json.js";
+import { type JsonObject, parseJsonObject } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskDelegated, TaskExec, TaskExecutorBinding } from "#tools/task.js";
 
@@ -48,9 +45,7 @@ export function createWorkflowToolBackgroundExecute(input: {
   };
 }
 
-export function createWorkflowToolExecutorBinding(
-  data: WorkflowToolExecutorData,
-): TaskExecutorBinding {
+export function createWorkflowToolExecutorBinding(data: ToolRunAddress): TaskExecutorBinding {
   return {
     data: { hookToken: data.hookToken, runId: data.runId },
     kind: WORKFLOW_TOOL_EXECUTOR_KIND,
@@ -60,7 +55,7 @@ export function createWorkflowToolExecutorBinding(
 /** Reads the tool run recorded on a task's executor binding, if that is what runs it. */
 export function readWorkflowToolExecutor(
   binding: TaskExecutorBinding | undefined,
-): WorkflowToolExecutorData | undefined {
+): ToolRunAddress | undefined {
   if (binding?.kind !== WORKFLOW_TOOL_EXECUTOR_KIND) return undefined;
   const { hookToken, runId } = binding.data;
   return typeof hookToken === "string" && typeof runId === "string"
@@ -73,10 +68,7 @@ export function readWorkflowToolExecutor(
  * tool input must be a JSON object. Schema parsing can emit other values (a
  * `Date`, for example); those tools cannot be workflows.
  */
-export function parseWorkflowToolInput(
-  toolInput: unknown,
-  toolName: string,
-): ReturnType<typeof parseJsonObject> {
+export function parseWorkflowToolInput(toolInput: unknown, toolName: string): JsonObject {
   try {
     return parseJsonObject(toolInput);
   } catch (error) {

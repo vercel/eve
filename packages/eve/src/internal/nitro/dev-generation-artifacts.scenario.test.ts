@@ -653,7 +653,7 @@ describe("development generation artifacts", () => {
       ].join("\n"),
     );
     await expect(compileAgent({ startPath: app.appRoot })).rejects.toThrow(
-      /module-level "use step" directive/u,
+      /"use step" in .* is a module-level directive/u,
     );
     await expect(readdir(snapshotsRoot)).resolves.toEqual(stagedGenerations);
   });

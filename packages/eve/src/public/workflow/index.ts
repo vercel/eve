@@ -5,3 +5,4 @@
  * `FatalError` — are imported from `workflow` directly.
  */
 export { ask } from "#execution/tool-run/messages.js";
+export type { ToolInputRequest, ToolInputResponse } from "#tools/definition.js";

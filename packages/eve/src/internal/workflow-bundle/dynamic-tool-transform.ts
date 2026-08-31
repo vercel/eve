@@ -78,20 +78,18 @@ function findWorkflowFunctionNames(program: AstNode): ReadonlySet<string> {
   const names = new Set<string>();
   for (const statement of (program.body as AstNode[] | undefined) ?? []) {
     const declaration =
-      statement.type === "ExportNamedDeclaration"
-        ? (statement.declaration as AstNode | null | undefined)
-        : statement;
+      statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
     if (declaration?.type === "FunctionDeclaration") {
-      const name = (declaration.id as AstNode | undefined)?.name;
+      const name = declaration.id?.name;
       if (name !== undefined && hasWorkflowDirective(declaration)) names.add(name);
       continue;
     }
     if (statement.type !== "ExpressionStatement") continue;
-    const expression = statement.expression as AstNode | undefined;
+    const expression = statement.expression;
     if (expression?.type !== "AssignmentExpression") continue;
-    const left = expression.left as AstNode | undefined;
-    const object = left?.object as AstNode | undefined;
-    const property = left?.property as AstNode | undefined;
+    const left = expression.left;
+    const object = left?.object;
+    const property = left?.property;
     if (
       left?.type === "MemberExpression" &&
       object?.type === "Identifier" &&
@@ -106,9 +104,11 @@ function findWorkflowFunctionNames(program: AstNode): ReadonlySet<string> {
 }
 
 function hasWorkflowDirective(fn: AstNode): boolean {
-  const body = fn.body as AstNode | undefined;
-  const statement = ((body?.body as AstNode[] | undefined) ?? [])[0];
-  return readWorkflowDirective(statement) === "use workflow";
+  const body = fn.body;
+  const statements = Array.isArray(body) ? body : body?.body;
+  return (
+    readWorkflowDirective(Array.isArray(statements) ? statements[0] : undefined) === "use workflow"
+  );
 }
 
 // Keep the old export name for backward compatibility with the plugin.

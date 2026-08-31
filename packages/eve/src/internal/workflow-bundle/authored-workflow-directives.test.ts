@@ -133,7 +133,7 @@ describe("prepareAuthoredWorkflowDirectives", () => {
         filePath: FILE,
         source: '"use step";\nexport const value = 1;\n',
       }),
-    ).rejects.toThrow(/module-level "use step" directive/u);
+    ).rejects.toThrow(/"use step" in .* is a module-level directive/u);
   });
 
   it("rejects a directive on a nested or anonymous function", async () => {
@@ -192,7 +192,7 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     const source = `${toolModule(["  async execute() {", '    "use workflow";', "    return 1;", "  },"].join("\n"))}const execute = 1;\n`;
 
     await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
-      /declares a top-level "execute" binding/u,
+      /also declares a top-level "execute" binding/u,
     );
   });
 });

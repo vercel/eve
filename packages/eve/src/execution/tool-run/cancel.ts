@@ -1,5 +1,5 @@
 import type { RunControlMessage } from "#execution/tool-run/messages.js";
-import type { WorkflowToolExecutorData } from "#execution/tool-run/types.js";
+import type { ToolRunAddress } from "#execution/tool-run/types.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -14,7 +14,7 @@ const log = createLogger("execution.tool-run");
  * is logged rather than thrown, because the caller has already committed the
  * cancellation the run was serving and must not roll it back.
  */
-export async function cancelToolRun(run: WorkflowToolExecutorData, reason: string): Promise<void> {
+export async function cancelToolRun(run: ToolRunAddress, reason: string): Promise<void> {
   const cancel: RunControlMessage = { kind: "cancel", reason };
   try {
     await resumeHook(run.hookToken, cancel);

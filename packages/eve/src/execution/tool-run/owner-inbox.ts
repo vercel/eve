@@ -3,13 +3,13 @@ import type {
   RunOutcomeMessage,
   RunRef,
   RunReport,
-  RunRequest,
   RunRequestMessage,
 } from "#execution/tool-run/messages.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskCommand, TaskInboundUpdate } from "#tasks/types.js";
+import type { ToolInputRequest } from "#tools/definition.js";
 
 /**
  * Translators from a run's three channels into the payloads its owner already
@@ -70,7 +70,7 @@ export function runRequestToInputRequestPayload(
     childContinuationToken: replyTo,
     childSessionId: from.runId,
     event: {
-      requests: [normalizeInputRequest(request, from, replyTo)],
+      requests: [toInputRequest(request, from, replyTo)],
       sequence: 0,
       stepIndex: from.stepIndex,
       turnId: from.turnId,
@@ -80,18 +80,13 @@ export function runRequestToInputRequestPayload(
   };
 }
 
-function normalizeInputRequest(request: RunRequest, from: RunRef, requestId: string): InputRequest {
-  if ("action" in request && "requestId" in request) {
-    // A forwarded child request already carries its action and kind; only the
-    // answer id changes to the hook the parent awaits.
-    return { ...request, requestId };
-  }
+function toInputRequest(request: ToolInputRequest, from: RunRef, requestId: string): InputRequest {
   if (typeof request.prompt !== "string" || request.prompt.length === 0) {
     throw new TypeError("A tool run request needs a non-empty `prompt`.");
   }
   const normalized: InputRequest = {
     action: { callId: from.callId, input: from.input, kind: "tool-call", toolName: from.toolName },
-    kind: request.kind ?? "question",
+    kind: "question",
     prompt: request.prompt,
     requestId,
   };

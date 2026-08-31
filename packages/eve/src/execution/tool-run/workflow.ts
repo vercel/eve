@@ -67,11 +67,12 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
       toolName: input.toolName,
       turnId: input.session.turn.id,
     };
-    const ctx = createWorkflowToolContext({ from, input, signal: control.signal });
+    const ctx = createWorkflowToolContext(input, control.signal);
     attachRunContext(ctx, { from, owner: input.owner });
 
     const body = runBody(input, ctx, from);
-    body.catch(() => {});
+    // A body abandoned by a lost race must not surface as an unhandled rejection.
+    const settled = body.catch(noop);
 
     let outcome: RunOutcome;
     try {
@@ -82,7 +83,7 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
       if (!control.signal.aborted) {
         outcome = { error: normalizeSerializableError(error), status: "failed" };
       } else {
-        await Promise.race([body.then(noop, noop), workflowSleep(CANCEL_GRACE)]);
+        await Promise.race([settled, workflowSleep(CANCEL_GRACE)]);
         outcome = { reason: control.reason(), status: "cancelled" };
       }
     }
@@ -158,13 +159,14 @@ function resolveWorkflowToolExecute(input: ToolRunWorkflowInput): WorkflowToolEx
   return execute as WorkflowToolExecute;
 }
 
-function createWorkflowToolContext(options: {
-  readonly from: RunRef;
-  readonly input: ToolRunWorkflowInput;
-  readonly signal: AbortSignal;
-}): ToolContext {
-  const { from, signal } = options;
-  const { callId, session, toolName } = options.input;
+function createWorkflowToolContext(input: ToolRunWorkflowInput, signal: AbortSignal): ToolContext {
+  const { callId, session, toolName } = input;
+  const unavailable = (member: string, hint: string): never => {
+    throw new Error(
+      `ctx.${member} is not available inside a workflow tool; ${hint}. ` +
+        `Tool "${toolName}" runs as a durable workflow body, which only replays deterministic code.`,
+    );
+  };
 
   return {
     abortSignal: signal,
@@ -174,19 +176,7 @@ function createWorkflowToolContext(options: {
     getToken: () =>
       unavailable("getToken()", 'read credentials from the environment inside a "use step" helper'),
     requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
-    session: {
-      auth: session.auth,
-      id: session.id,
-      parent: session.parent,
-      turn: session.turn,
-    },
+    session,
     toolName,
   };
-
-  function unavailable(member: string, hint: string): never {
-    throw new Error(
-      `ctx.${member} is not available inside a workflow tool; ${hint}. ` +
-        `Tool "${from.toolName}" runs as a durable workflow body, which only replays deterministic code.`,
-    );
-  }
 }
