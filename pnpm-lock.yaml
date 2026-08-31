@@ -326,6 +326,9 @@ importers:
       '@resend/chat-sdk-adapter':
         specifier: 0.2.2
         version: 0.2.2(@chat-adapter/shared@4.34.0(ai@7.0.79(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(@react-email/render@2.1.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(bufferutil@4.1.0)(chat@4.34.0(ai@7.0.79(zod@4.4.3))(supports-color@10.2.2)(zod@4.4.3))(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(supports-color@10.2.2)
+      '@supermemory/eve':
+        specifier: 0.1.0
+        version: 0.1.0(eve@packages+eve)
       '@tailwindcss/postcss':
         specifier: 4.3.0
         version: 4.3.0
@@ -6943,6 +6946,12 @@ packages:
     resolution: {integrity: sha512-i7HTNuDgZWb+VdrNVOam9gQhIc5MSSDXKWXgbUrn/4vSRaSMM+Rtl10MQj4wLWPNpF7p80waJsAqFP8HZfb0Jg==}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
+
+  '@supermemory/eve@0.1.0':
+    resolution: {integrity: sha512-aIQf+DXHbOCii7/m2NI0rpWMq4q/eKlpfqDL+hB+PA/yUQX+ZqrrgpONLXoMf1+VFofvoVQsto/V1EsEwBp2/w==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      eve: ^0.47.3
 
   '@superradcompany/microsandbox-darwin-arm64@0.5.5':
     resolution: {integrity: sha512-Yy7b2Ak+/WT+Ho3yRrcKclSl+hNVwcEAqtrWFLIQoGIjSCYEsL30r9S21zKFgd7z5o/FMdaGt/sNqWsV47Ar5g==}
@@ -14592,6 +14601,10 @@ packages:
   super-media-element@1.4.2:
     resolution: {integrity: sha512-9pP/CVNp4NF2MNlRzLwQkjiTgKKe9WYXrLh9+8QokWmMxz+zt2mf1utkWLco26IuA3AfVcTb//qtlTIjY3VHxA==}
 
+  supermemory@4.25.4:
+    resolution: {integrity: sha512-97ME3rlmu7OmsXJTb9OgXOD+3VUv4Wej0ZX9xezG+LKkMwrzi4xeeAZaOJFcr0oI/QQjcHG2WOzm+und1e7MFA==}
+    hasBin: true
+
   supports-color@10.2.2:
     resolution: {integrity: sha512-SS+jx45GF1QjgEXQx4NJZV9ImqmO2NPz5FNsIHrsDjh2YsHnawpan7SNQ1o8NuhrbHZy9AZhIoCUiCeaW/C80g==}
     engines: {node: '>=18'}
@@ -21530,6 +21543,12 @@ snapshots:
     dependencies:
       react: 19.2.6
       shiki: 3.23.0
+
+  '@supermemory/eve@0.1.0(eve@packages+eve)':
+    dependencies:
+      eve: link:packages/eve
+      supermemory: 4.25.4
+      zod: 4.4.3
 
   '@superradcompany/microsandbox-darwin-arm64@0.5.5':
     optional: true
@@ -31921,6 +31940,8 @@ snapshots:
   stylis@4.4.0: {}
 
   super-media-element@1.4.2: {}
+
+  supermemory@4.25.4: {}
 
   supports-color@10.2.2: {}
 

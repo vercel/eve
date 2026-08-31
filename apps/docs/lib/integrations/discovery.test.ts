@@ -123,6 +123,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(arcana!)).toContain("long-term memory");
   });
 
+  it("renders the Supermemory provider setup", () => {
+    const supermemory = getIntegration("supermemory");
+    expect(supermemory).toBeDefined();
+
+    const markdown = integrationMarkdown(supermemory!);
+    expect(markdown).toContain("eve add memory/supermemory");
+    expect(markdown).toContain('import supermemory from "@supermemory/eve"');
+    expect(markdown).toContain("SUPERMEMORY_API_KEY");
+    expect(markdown).toContain("supermemory__search");
+    expect(integrationSearchText(supermemory!)).toContain("Memory provider");
+  });
+
   it("renders the Hindsight memory extension setup", () => {
     const hindsight = getIntegration("hindsight");
     expect(hindsight).toBeDefined();

@@ -8,6 +8,7 @@ import {
   extensionEntries,
   getIntegrationEntry,
   instrumentationEntries,
+  memoryEntries,
 } from "./index.js";
 
 describe("integration catalog", () => {
@@ -21,7 +22,8 @@ describe("integration catalog", () => {
       channelEntries().length +
         connectionEntries().length +
         extensionEntries().length +
-        instrumentationEntries().length,
+        instrumentationEntries().length +
+        memoryEntries().length,
     ).toBe(INTEGRATIONS.length);
   });
 
@@ -54,6 +56,13 @@ describe("integration catalog", () => {
   it("keeps instrumentation providers free of connection identity", () => {
     expect(instrumentationEntries().length).toBeGreaterThan(0);
     for (const entry of instrumentationEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
+  it("keeps memory providers free of connection identity", () => {
+    expect(memoryEntries().length).toBeGreaterThan(0);
+    for (const entry of memoryEntries()) {
       expect(entry.connection).toBeUndefined();
     }
   });
@@ -114,6 +123,11 @@ describe("integration catalog", () => {
   it("exposes Hindsight as an extension", () => {
     expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
     expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
+  it("exposes Supermemory as a memory provider", () => {
+    expect(getIntegrationEntry("supermemory")?.kind).toBe("memory");
+    expect(getIntegrationEntry("supermemory")?.connection).toBeUndefined();
   });
 
   it("exposes Buzz as a gallery-only channel", () => {

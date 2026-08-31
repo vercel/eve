@@ -13,11 +13,12 @@
     "test:unit": "vitest run --config vitest.config.ts",
     "render:eve-5": "NODE_OPTIONS=--loader=./scripts/wgsl-node-loader.mjs tsx scripts/render-eve-5.ts",
     "registry:build": "tsx scripts/prepare-registry-output.ts && shadcn build",
-    "registry:check": "node --test ../../scripts/materialize-registry-release-requirements.test.mjs ../../scripts/validate-public-registry-requirements.test.mjs && node ../../scripts/validate-public-registry-requirements.mjs && pnpm run registry:build && pnpm run registry:validate && pnpm run registry:validate:channels && pnpm run registry:validate:instrumentation && tsc --project registry/tsconfig.json",
+    "registry:check": "node --test ../../scripts/materialize-registry-release-requirements.test.mjs ../../scripts/validate-public-registry-requirements.test.mjs && node ../../scripts/validate-public-registry-requirements.mjs && pnpm run registry:build && pnpm run registry:validate && pnpm run registry:validate:channels && pnpm run registry:validate:instrumentation && pnpm run registry:validate:memory && tsc --project registry/tsconfig.json",
     "registry:validate": "tsx scripts/validate-connection-registry.ts",
     "registry:validate:channels": "tsx scripts/validate-channel-registry.ts",
     "registry:validate:instrumentation": "tsx scripts/validate-instrumentation-registry.ts",
-    "templates:sync": "tsx scripts/sync-templates.ts"
+    "templates:sync": "tsx scripts/sync-templates.ts",
+    "registry:validate:memory": "tsx scripts/validate-memory-registry.ts"
   },
   "dependencies": {
     "@eve/catalog": "workspace:*",
@@ -73,6 +74,7 @@
     "@opentelemetry/sdk-trace-base": "catalog:",
     "@posthog/ai": "7.19.6",
     "@resend/chat-sdk-adapter": "0.2.2",
+    "@supermemory/eve": "0.1.0",
     "@tailwindcss/postcss": "4.3.0",
     "@types/mdx": "2.0.13",
     "@types/node": "catalog:",

@@ -66,6 +66,7 @@ minimumReleaseAge: 2880 # 2 days
 minimumReleaseAgeExclude:
   - "@linqapp/chat-sdk-adapter"
   - "@linqapp/sdk"
+  - "@supermemory/eve"
   - "@vercel/*"
   - "@workflow/*"
   - nitro
