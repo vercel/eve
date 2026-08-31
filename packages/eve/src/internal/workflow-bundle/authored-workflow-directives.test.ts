@@ -180,6 +180,14 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     ).rejects.toThrow(/"use step".*marks the default export's "execute" method/u);
   });
 
+  it("rejects a directive the SDK's line-based pre-scan cannot see", async () => {
+    const source = `export default { description: "d", async execute() { "use workflow"; return 1; } };\n`;
+
+    await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).rejects.toThrow(
+      /"use workflow" in .* is not on its own line/u,
+    );
+  });
+
   it("rejects hoisting over an existing top-level execute binding", async () => {
     const source = `${toolModule(["  async execute() {", '    "use workflow";', "    return 1;", "  },"].join("\n"))}const execute = 1;\n`;
 

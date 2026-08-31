@@ -1,3 +1,5 @@
+import { detectWorkflowPatterns } from "#compiled/@workflow/builders/index.js";
+
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 
 const WORKFLOW_DIRECTIVES = new Set(["use step", "use workflow"]);
@@ -99,6 +101,16 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   const found = collectDirectiveFunctions(program as AstNode);
   if (found.length === 0) {
     return { hasDirectives: false, hasWorkflowDirective: false, source: input.source };
+  }
+  // Module discovery gates on the Workflow SDK's line-based pre-scan before it
+  // parses anything. A directive that pre-scan cannot see would still be
+  // compiled here into a stub with no run behind it, so it is rejected instead.
+  if (!detectWorkflowPatterns(input.source).hasDirective) {
+    const [entry] = found;
+    throw new Error(
+      `${JSON.stringify(entry!.directive)} in "${input.filePath}" is not on its own line. ` +
+        `Write the directive as the first statement of the function body, on a line by itself.`,
+    );
   }
   const hasWorkflowDirective = found.some((entry) => entry.directive === "use workflow");
 

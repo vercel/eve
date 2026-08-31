@@ -47,7 +47,7 @@ import {
   WORKFLOW_STEP_EXTERNAL_PACKAGES,
 } from "#internal/workflow-bundle/vercel-workflow-output.js";
 import {
-  detectWorkflowPatterns,
+  findWorkflowPatterns,
   type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 import { deriveEveWorkflowQueueNamespace } from "#internal/workflow/queue-namespace.js";
@@ -212,7 +212,7 @@ export class WorkflowBundleBuilder {
 
     for (const filePath of inputs) {
       const source = await readFile(filePath, "utf8");
-      const patterns = await detectWorkflowPatterns(filePath, source);
+      const patterns = await findWorkflowPatterns(filePath, source);
 
       if (patterns.hasUseStep) discovered.discoveredSteps.push(filePath);
       if (patterns.hasUseWorkflow) discovered.discoveredWorkflows.push(filePath);

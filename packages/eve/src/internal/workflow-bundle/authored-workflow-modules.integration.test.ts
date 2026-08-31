@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import { discoverAuthoredWorkflowModules } from "./authored-workflow-modules.js";
 
 let appRoot: string;
@@ -114,16 +115,23 @@ export default defineTool({
     });
   });
 
-  it("ignores a directive that is not on its own line, as the SDK pre-scan does", async () => {
-    await write(
-      "agent/tools/inline.ts",
-      `export default { description: "d", async execute() { "use workflow"; return 1; } };`,
-    );
+  it("rejects a directive that is not on its own line instead of compiling half of it", async () => {
+    const source = `export default { description: "d", async execute() { "use workflow"; return 1; } };`;
+    await write("agent/tools/inline.ts", source);
 
+    // Discovery pre-scans by line, as the SDK does, and never sees this file;
+    // the module transform parses it and must refuse rather than emit a stub
+    // with no registered run behind it.
     await expect(discoverAuthoredWorkflowModules(appRoot)).resolves.toEqual({
       directiveModules: [],
       workflowModules: [],
     });
+    await expect(
+      prepareAuthoredWorkflowDirectives({
+        filePath: join(appRoot, "agent/tools/inline.ts"),
+        source,
+      }),
+    ).rejects.toThrow("is not on its own line");
   });
 
   it("reports an invalid directive placement as a build error", async () => {

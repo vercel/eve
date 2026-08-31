@@ -553,13 +553,7 @@ function createAuthoredDirectiveGuardPlugin(): Record<string, unknown> {
         return undefined;
       }
 
-      let hasDirectives: boolean;
-      try {
-        hasDirectives = (await prepareAuthoredWorkflowDirectives({ filePath: id, source }))
-          .hasDirectives;
-      } catch {
-        hasDirectives = true;
-      }
+      const { hasDirectives } = await prepareAuthoredWorkflowDirectives({ filePath: id, source });
       if (hasDirectives) {
         throw new Error(
           `Module "${id}" uses Workflow directives ("use step" or "use workflow"). ` +

@@ -144,7 +144,7 @@ export function isAuthoredApplicationRoot(projectRoot: string): boolean {
   }
 }
 
-export async function detectWorkflowPatterns(
+export async function findWorkflowPatterns(
   filename: string,
   source: string,
 ): Promise<{
