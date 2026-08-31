@@ -32,11 +32,17 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 
 `/model`, `/add`, `/deploy`, `/info`, and `/traces` are available when `eve dev` runs locally. They are unavailable when the UI connects to a server with `--url`.
 
+## Set up a new agent
+
+After `eve init`, the terminal UI guides you through **Model**, **Channels**, **Integrations**, and **Review** before the first chat prompt. Model setup can install or upgrade the Vercel CLI, open Vercel login, and resume project linking without leaving onboarding. Review shows the committed model configuration alongside the channels and integrations that will be installed.
+
+Model and Vercel changes take effect when you complete the Model step. Channel and integration selections remain drafts until you finish Review. If you return from Channels to Model, the planner preserves those selections.
+
 ## Add an integration
 
-Bare `/add` opens the planner on **Integrations**. Fresh-agent onboarding starts on **Channels**, while `/add <item>` preselects the requested item and opens **Review**. The tab rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
+Bare `/add` opens the standalone planner on **Integrations**. It does not include model configuration. `/add <item>` preselects the requested item and opens **Review**. The progress rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
 
-Press `Right Arrow` or `Enter` to preserve the current selections and continue. Press `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation still requires `Enter` on **Install and set up** from the Review tab. If an item fails, you can skip it and continue with the remaining items.
+Press `Right Arrow` or `Enter` to preserve the current selections and continue. Press `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation still requires `Enter` on **Install and set up** from Review.
 
 Pass an official item address — `<category>/<name>`, where category is `channel`, `connection`, `extension`, or `instrumentation` — to preselect it in the planner. Product presets and configured registry addresses are also supported:
 

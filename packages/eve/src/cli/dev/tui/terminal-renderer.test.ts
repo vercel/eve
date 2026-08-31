@@ -3780,7 +3780,7 @@ describe("TerminalRenderer setup panel", () => {
       ],
     });
 
-    expect(screen.snapshot()).toContain("enter to select · ← back · esc to cancel");
+    expect(screen.snapshot()).toContain("enter select · ←/→ back/next");
     input.left();
     await expect(answer).resolves.toEqual({
       kind: "navigate",

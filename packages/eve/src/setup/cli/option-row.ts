@@ -66,6 +66,8 @@ interface OptionRowInput {
   placeholder: boolean;
   /** Spaces inserted before the hint's dot so hints tab-align to a shared column. */
   hintPadding?: number;
+  /** Keeps multi-select state visible independently from the inverse cursor highlight. */
+  selectionIndicator?: boolean;
   /**
    * Accent for an available row. "warning" keeps an attention row yellow at
    * rest and under the cursor highlight.
@@ -143,10 +145,20 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
   const { colors: c, glyphs, state } = input;
 
   switch (state.kind) {
-    case "available":
+    case "available": {
+      if (input.selectionIndicator === true) {
+        return {
+          glyph: input.isCursor
+            ? state.checked
+              ? glyphs.success
+              : glyphs.placeholder
+            : state.checked
+              ? c.green(glyphs.success)
+              : c.dim(glyphs.placeholder),
+          label: input.accent === "warning" ? c.yellow(input.label) : input.label,
+        };
+      }
       if (input.isCursor) {
-        // A checked row keeps its check under the cursor — the highlight says
-        // "active", not "press to activate".
         return {
           glyph: state.checked ? glyphs.success : glyphs.selectedPointer,
           label: input.label,
@@ -156,6 +168,7 @@ function optionRowPresentation(input: OptionRowInput): OptionRowPresentation {
         glyph: state.checked ? c.green(glyphs.success) : unfocusedGlyph(input),
         label: input.accent === "warning" ? c.yellow(input.label) : input.label,
       };
+    }
     case "completed":
       return {
         glyph: input.isCursor ? c.dim(glyphs.pointer) : c.green(glyphs.success),

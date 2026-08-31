@@ -11,9 +11,10 @@ import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
 import {
   RegistryFlowFailedError,
   runRegistryFlow,
+  type RegistryPlannerContext,
   type RegistryPlannerSection,
 } from "#setup/flows/registry.js";
-import type { Prompter } from "#setup/prompter.js";
+import type { PlannerNavigation, Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
 import {
@@ -56,10 +57,18 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** An enclosing journey accepts Done without requiring another model edit. */
+  allowUnchangedModelCompletion?: boolean;
+  /** Enclosing journey progress and directional navigation for the Model menu. */
+  modelNavigation?: PlannerNavigation;
   /** First registry planner section for an unaddressed setup flow. */
   initialRegistryScreen?: RegistryPlannerSection;
   /** Registry address supplied by `/add <item>`, preselected in the batch planner. */
   initialRegistryAddress?: string;
+  /** Selections restored when an enclosing onboarding journey returns to the planner. */
+  initialRegistryAddresses?: readonly string[];
+  /** Presentation and navigation supplied by an enclosing setup journey. */
+  registryPlannerContext?: RegistryPlannerContext;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
@@ -81,6 +90,12 @@ export interface TuiSetupFlows {
 
 export interface TuiSetupCommandResult {
   message: string;
+  /** The registry planner moved back into an enclosing onboarding journey. */
+  navigation?: { kind: "back-before-registry"; selectedAddresses: readonly string[] };
+  /** The user dismissed this setup step without completing it. */
+  cancelled?: true;
+  /** Model facts retained by an enclosing onboarding Review screen. */
+  modelReviewMetadata?: readonly { label: string; value: string }[];
   /** Keep settled batch results instead of replacing them with an interrupt notice. */
   partial?: true;
   /** Promotes an outcome to a top-level status. */
@@ -155,9 +170,9 @@ export async function runTuiSetupCommand(
   const renderer = muteableRenderer(input.renderer, () => interrupted, input.withExclusiveTerminal);
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
+  const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
   const interrupt = input.renderer.waitForInterrupt();
   const INTERRUPTED = Symbol("interrupted");
-  const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
   try {
     const outcome = await Promise.race([execution, interrupt.promise.then(() => INTERRUPTED)]);
     if (outcome !== INTERRUPTED) return outcome as TuiSetupCommandResult;
@@ -213,10 +228,21 @@ async function executeSetupCommand(
           prompter,
           signal,
           chatGptAccountLabel: input.chatGptAccountLabel,
+          allowUnchangedCompletion: input.allowUnchangedModelCompletion,
+          navigation: input.modelNavigation,
           deps: {
             pickModelSettings: (request) => renderer.readModelEditor(request),
             runProviderFlow: (providerInput) =>
-              runProviderFlow({ ...providerInput, picker: pickProvider }),
+              runProviderFlow({
+                ...providerInput,
+                picker: pickProvider,
+                recoverHumanAction: (error) =>
+                  recoverVercelHumanAction(error, flows, {
+                    appRoot,
+                    prompter,
+                    signal,
+                  }),
+              }),
           },
         };
         if (input.initialModelStep !== undefined) {
@@ -231,6 +257,7 @@ async function executeSetupCommand(
               result.discardedDraft === true
                 ? "/model dismissed. Drafted changes were discarded; Done commits them."
                 : "/model dismissed.",
+            cancelled: true,
             preserveFlowDiagnostics: false,
           };
         }
@@ -242,8 +269,18 @@ async function executeSetupCommand(
         if (result.providerSelection !== undefined) {
           lines.push(providerSelectionMessage(result.providerSelection));
         }
+        if (result.externalProviderSelected === true) {
+          lines.push("Other provider instructions acknowledged.");
+        }
         const outcome: TuiSetupCommandResult = {
           message: lines.join("\n"),
+          modelReviewMetadata:
+            result.externalProviderSelected === true
+              ? [
+                  { label: "Model", value: "Configure in agent.ts" },
+                  { label: "Access", value: "Other provider (manual setup)" },
+                ]
+              : undefined,
           preserveFlowDiagnostics: false,
         };
         // A model edit can also move routing between AI Gateway and ChatGPT.
@@ -259,11 +296,25 @@ async function executeSetupCommand(
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
+          initialAddresses: input.initialRegistryAddresses,
           initialScreen: input.initialRegistryScreen ?? "integrations",
+          plannerContext: input.registryPlannerContext,
+          recoverHumanAction: (error) =>
+            recoverVercelHumanAction(error, flows, { appRoot, prompter, signal }),
           onItemStart: registryItemProgress(renderer),
         });
         if (flow.kind === "cancelled") {
-          return { message: "/add dismissed.", preserveFlowDiagnostics: true };
+          return { message: "/add dismissed.", cancelled: true, preserveFlowDiagnostics: true };
+        }
+        if (flow.kind === "navigate-back") {
+          return {
+            message: "",
+            navigation: {
+              kind: "back-before-registry",
+              selectedAddresses: flow.selectedAddresses,
+            },
+            preserveFlowDiagnostics: false,
+          };
         }
         const result = flow.result;
         const outcome: TuiSetupCommandResult = {
@@ -311,6 +362,7 @@ async function executeSetupCommand(
     if (error instanceof WizardCancelledError) {
       return {
         message: `/${command} dismissed.`,
+        cancelled: true,
         preserveFlowDiagnostics: command !== "model",
       };
     }
@@ -340,6 +392,86 @@ async function executeSetupCommand(
       preserveFlowDiagnostics: true,
     };
   }
+}
+
+async function recoverVercelHumanAction(
+  error: HumanActionRequiredError,
+  flows: TuiSetupFlows,
+  input: { appRoot: string; prompter: Prompter; signal: AbortSignal },
+): Promise<"retry" | "cancel"> {
+  const action = error.action.kind;
+  if (
+    action !== "vercel-cli-missing" &&
+    action !== "vercel-cli-upgrade" &&
+    action !== "vercel-login" &&
+    action !== "vercel-forbidden"
+  ) {
+    throw error;
+  }
+
+  const repair =
+    action === "vercel-cli-missing"
+      ? { label: "Install Vercel CLI", message: "The Vercel CLI is required. Install it now?" }
+      : action === "vercel-cli-upgrade"
+        ? {
+            label: "Upgrade Vercel CLI",
+            message: "Your Vercel CLI needs an update. Upgrade it now?",
+          }
+        : {
+            label:
+              action === "vercel-forbidden" ? "Re-authenticate with Vercel" : "Log in to Vercel",
+            message:
+              action === "vercel-forbidden"
+                ? "Vercel denied access to that team. Re-authenticate and continue?"
+                : "You need to log in to Vercel to continue.",
+          };
+
+  let choice: "repair" | "cancel";
+  try {
+    choice = await input.prompter.select({
+      message: repair.message,
+      options: [
+        { value: "repair", label: `${repair.label} and continue` },
+        { value: "cancel", label: "Choose another option" },
+      ],
+      initialValue: "repair",
+    });
+  } catch {
+    return "cancel";
+  }
+  if (choice === "cancel") return "cancel";
+
+  if (action === "vercel-cli-missing" || action === "vercel-cli-upgrade") {
+    const result = await flows.runInstallVercelCliFlow({
+      appRoot: input.appRoot,
+      prompter: input.prompter,
+      signal: input.signal,
+      upgrade: action === "vercel-cli-upgrade",
+    });
+    if (result.kind === "installed" || result.kind === "already") return "retry";
+    input.prompter.log.warning(
+      result.kind === "failed" && result.reason !== undefined
+        ? `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI: ${result.reason}`
+        : `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI.`,
+    );
+    return "cancel";
+  }
+
+  const login = await flows.runLoginFlow({
+    appRoot: input.appRoot,
+    prompter: input.prompter,
+    signal: input.signal,
+    force: action === "vercel-forbidden",
+  });
+  if (login.kind === "logged-in" || login.kind === "already") return "retry";
+  input.prompter.log.warning(
+    login.kind === "cli-missing"
+      ? "The Vercel CLI is not installed."
+      : login.kind === "unavailable"
+        ? "Couldn't reach Vercel."
+        : "Vercel login did not complete.",
+  );
+  return "cancel";
 }
 
 function withRegistryResults(

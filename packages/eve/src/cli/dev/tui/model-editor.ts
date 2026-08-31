@@ -309,6 +309,9 @@ function transitionMenu(
       return toMenu(state, next);
     }
     case "adjust":
+      if (cursor === "done" && event.direction === "right") {
+        return { kind: "settle", result: settleResult(request, state.draft) };
+      }
       return adjustMenuValue(state, request, cursor, event.direction);
     case "submit": {
       const row = rows.find((entry) => entry.value === cursor);

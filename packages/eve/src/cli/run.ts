@@ -453,7 +453,7 @@ function createCliProgram(
 
       let tuiStartup: DevelopmentTuiStartup | undefined;
       const tuiStartupPromise =
-        mode === "tui" && runtime.runDevelopmentTui === undefined
+        mode === "tui" && options.onboard !== true && runtime.runDevelopmentTui === undefined
           ? loadDevelopmentTuiModule().then((module) => {
               onBootProgress({ type: "before-first-paint" });
               return module.startDevelopmentTuiStartup({

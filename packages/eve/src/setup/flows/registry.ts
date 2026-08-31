@@ -20,6 +20,22 @@ type PlannerScreen = Section | "review";
 
 const PLANNER_STEPS = ["Channels", "Integrations", "Review"] as const;
 
+export interface RegistryPlannerContext {
+  /** Steps owned by an enclosing journey, rendered before the registry steps. */
+  prefixSteps?: readonly { label: string; complete?: boolean }[];
+  /** Facts owned by the enclosing journey, rendered before registry selections. */
+  reviewMetadata?: readonly { label: string; value: string }[];
+  reviewMessage?: string;
+  primaryActionLabel?: string;
+  emptyActionLabel?: string;
+  /** Let Left Arrow on Channels return control to the enclosing journey. */
+  navigateBackBeforeChannels?: boolean;
+}
+
+export type RegistryHumanActionRecovery = (
+  error: HumanActionRequiredError,
+) => Promise<"retry" | "cancel">;
+
 export interface RegistryFlowDeps {
   browseRegistryCatalog: (typeof import("#cli/commands/registry.js"))["browseRegistryCatalog"];
   getRegistryItemManifest: (typeof import("#cli/commands/registry.js"))["getRegistryItemManifest"];
@@ -42,7 +58,13 @@ const SECTIONS = {
   channels: {
     title: "Where should people reach your agent?",
     description: "You can add more later with /add.",
-    featured: ["channel/web", "channel/slack", "channel/github", "channel/linear-agent"],
+    featured: [
+      "channel/web",
+      "channel/slack",
+      "channel/github",
+      "channel/linear-agent",
+      "channel/photon-imessage",
+    ],
     includes: (item: Item) => item.name.startsWith("channel/"),
   },
   integrations: {
@@ -105,17 +127,25 @@ function plannerNavigation(
   input: {
     catalog: readonly Item[];
     selected: ReadonlySet<string>;
+    plannerContext?: RegistryPlannerContext;
   },
 ): NonNullable<MultiSelectOptions<string>["navigation"]> {
+  const prefix = (input.plannerContext?.prefixSteps ?? []).map((step) => ({
+    label: step.label,
+    complete: step.complete,
+  }));
   return {
     kind: "planner",
-    activeStep,
-    steps: PLANNER_STEPS.map((label, index) => {
-      if (index === 2) return { label };
-      const section = index === 0 ? "channels" : "integrations";
-      const count = selectedInSection(section, input.catalog, input.selected).length;
-      return count === 0 ? { label } : { label, count };
-    }),
+    activeStep: prefix.length + activeStep,
+    steps: [
+      ...prefix,
+      ...PLANNER_STEPS.map((label, index) => {
+        if (index === 2) return { label };
+        const section = index === 0 ? "channels" : "integrations";
+        const count = selectedInSection(section, input.catalog, input.selected).length;
+        return count === 0 ? { label } : { label, count };
+      }),
+    ],
   };
 }
 
@@ -173,7 +203,8 @@ async function editPlan(input: {
   selected: Set<string>;
   notices?: readonly SelectNotice[];
   initialScreen: PlannerScreen;
-}): Promise<"install" | "cancelled"> {
+  plannerContext?: RegistryPlannerContext;
+}): Promise<"install" | "cancelled" | "back-before-channels"> {
   let screen = input.initialScreen;
   let notices = input.notices;
   while (true) {
@@ -187,6 +218,9 @@ async function editPlan(input: {
         notices = undefined;
         if (direction === "back") {
           if (screen === "integrations") screen = "channels";
+          else if (input.plannerContext?.navigateBackBeforeChannels === true) {
+            return "back-before-channels";
+          }
         } else {
           screen = screen === "channels" ? "integrations" : "review";
         }
@@ -199,22 +233,32 @@ async function editPlan(input: {
 
     try {
       const hasSelections = input.selected.size > 0;
+      const selectedItems = [...input.selected].map((address) => {
+        const item = input.itemsByAddress.get(address);
+        if (item === undefined)
+          throw new Error(`Registry item "${address}" is no longer available.`);
+        return item;
+      });
+      const channels = selectedItems.filter((item) => item.name.startsWith("channel/"));
+      const integrations = selectedItems.filter((item) => !item.name.startsWith("channel/"));
+      const selectionMetadata = [
+        ...(channels.length === 0
+          ? []
+          : [{ label: "Channels", value: channels.map(label).join(", ") }]),
+        ...(integrations.length === 0
+          ? []
+          : [{ label: "Integrations", value: integrations.map(label).join(", ") }]),
+      ];
       const request: SingleSelectOptions<"install" | "back"> = {
-        message: "Review your agent",
-        metadata: [...input.selected].map((address) => {
-          const item = input.itemsByAddress.get(address);
-          if (item === undefined)
-            throw new Error(`Registry item "${address}" is no longer available.`);
-          return {
-            label: item.name.startsWith("channel/") ? "Channel" : "Integration",
-            value: label(item),
-          };
-        }),
+        message: input.plannerContext?.reviewMessage ?? "Review additions",
+        metadata: [...(input.plannerContext?.reviewMetadata ?? []), ...selectionMetadata],
         navigation: plannerNavigation(2, input),
         options: [
           {
             value: "install",
-            label: hasSelections ? "Install and set up" : "Finish without adding",
+            label: hasSelections
+              ? (input.plannerContext?.primaryActionLabel ?? "Install and set up")
+              : (input.plannerContext?.emptyActionLabel ?? "Finish without adding"),
           },
           { value: "back", label: "Back" },
         ],
@@ -312,6 +356,20 @@ async function resolveInitialItems(input: {
   return [item];
 }
 
+async function recoverHumanAction<T>(
+  task: () => Promise<T>,
+  recover: RegistryHumanActionRecovery | undefined,
+): Promise<T | undefined> {
+  while (true) {
+    try {
+      return await task();
+    } catch (error) {
+      if (!(error instanceof HumanActionRequiredError) || recover === undefined) throw error;
+      if ((await recover(error)) === "cancel") return undefined;
+    }
+  }
+}
+
 /** Collects a channel and integration plan, then installs every chosen item in order. */
 export async function runRegistryFlow(input: {
   appRoot: string;
@@ -321,9 +379,16 @@ export async function runRegistryFlow(input: {
   initialAddress?: string;
   /** First screen for an unaddressed flow; onboarding defaults to channels. */
   initialScreen?: RegistryPlannerSection;
+  initialAddresses?: readonly string[];
+  plannerContext?: RegistryPlannerContext;
+  recoverHumanAction?: RegistryHumanActionRecovery;
   onItemStart?: (item: Item, index: number, total: number) => void;
   deps?: Partial<RegistryFlowDeps>;
-}): Promise<{ kind: "done"; result: RegistrySessionResult } | { kind: "cancelled" }> {
+}): Promise<
+  | { kind: "done"; result: RegistrySessionResult }
+  | { kind: "cancelled" }
+  | { kind: "navigate-back"; selectedAddresses: readonly string[] }
+> {
   let session: ReturnType<typeof createRegistrySession> | undefined;
   try {
     const registry =
@@ -341,7 +406,7 @@ export async function runRegistryFlow(input: {
       browseRegistryCatalog(input.appRoot),
     );
     const catalog = [...catalogResult.items];
-    const selected = new Set<string>();
+    const selected = new Set<string>(input.initialAddresses);
     const initialAddress = input.initialAddress?.trim();
     if (initialAddress !== undefined && initialAddress !== "") {
       const items = await resolveInitialItems({
@@ -361,27 +426,29 @@ export async function runRegistryFlow(input: {
       text: `${error.registry}: ${error.message}`,
     }));
     const itemsByAddress = new Map(catalog.map((item) => [item.address, item]));
-    if (
-      (await editPlan({
-        prompter: input.prompter,
-        catalog,
-        itemsByAddress,
-        selected,
-        notices,
-        initialScreen:
-          initialAddress !== undefined && initialAddress !== ""
-            ? "review"
-            : (input.initialScreen ?? "channels"),
-      })) !== "install"
-    ) {
-      return { kind: "cancelled" };
+    const plan = await editPlan({
+      prompter: input.prompter,
+      catalog,
+      itemsByAddress,
+      selected,
+      notices,
+      initialScreen:
+        initialAddress !== undefined && initialAddress !== ""
+          ? "review"
+          : (input.initialScreen ?? "channels"),
+      plannerContext: input.plannerContext,
+    });
+    if (plan === "back-before-channels") {
+      return { kind: "navigate-back", selectedAddresses: [...selected] };
     }
+    if (plan !== "install") return { kind: "cancelled" };
 
     const detectDeployment =
       input.deps?.detectDeployment ??
       (await import("#setup/project-resolution.js")).detectDeployment;
     const runDeployFlow = input.deps?.runDeployFlow ?? (await import("./deploy.js")).runDeployFlow;
     session = createRegistrySession({ detectDeployment, runDeployFlow });
+    const activeSession = session;
     const items = [...selected].map((address) => {
       const item = itemsByAddress.get(address);
       if (item === undefined) throw new Error(`Registry item "${address}" is no longer available.`);
@@ -397,8 +464,12 @@ export async function runRegistryFlow(input: {
             prompter: input.prompter,
             signal: input.signal,
           });
-        const installed = await (input.prompter.withExclusiveTerminal?.(install) ?? install());
-        session.add(label(item), installed.output, installed.setup);
+        const installed = await recoverHumanAction(
+          () => input.prompter.withExclusiveTerminal?.(install) ?? install(),
+          input.recoverHumanAction,
+        );
+        if (installed === undefined) throw new WizardCancelledError();
+        activeSession.add(label(item), installed.output, installed.setup);
       } catch (error) {
         input.signal?.throwIfAborted();
         if (error instanceof WizardCancelledError || error instanceof HumanActionRequiredError) {
@@ -407,7 +478,7 @@ export async function runRegistryFlow(input: {
         const message = error instanceof Error ? error.message : String(error);
         const failureMessage = message.trim() || "Installation failed.";
         const summary = failureMessage.split("\n").find((line) => line.trim() !== "");
-        session.addFailure(label(item), failureMessage);
+        activeSession.addFailure(label(item), failureMessage);
         const request: SingleSelectOptions<"skip" | "cancel"> = {
           message: `Couldn't add ${label(item)}`,
           options: [
@@ -418,17 +489,22 @@ export async function runRegistryFlow(input: {
         if (summary !== undefined) request.description = summary;
         const action = await input.prompter.select(request);
         if (action === "cancel") {
-          return { kind: "done", result: { ...session.result(), cancelled: true } };
+          return { kind: "done", result: { ...activeSession.result(), cancelled: true } };
         }
       }
     }
+    const result = await recoverHumanAction(
+      () =>
+        activeSession.continueAfterInstall({
+          appRoot: input.appRoot,
+          prompter: input.prompter,
+          signal: input.signal,
+        }),
+      input.recoverHumanAction,
+    );
     return {
       kind: "done",
-      result: await session.continueAfterInstall({
-        appRoot: input.appRoot,
-        prompter: input.prompter,
-        signal: input.signal,
-      }),
+      result: result ?? { ...activeSession.result(), cancelled: true },
     };
   } catch (error) {
     if (error instanceof WizardCancelledError) {
