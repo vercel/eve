@@ -1,5 +1,11 @@
 # eve
 
+## 0.47.5
+
+### Patch Changes
+
+- e0317ff: Add Supermemory as a memory provider in the official registry. Run `eve add memory/supermemory` to install the provider and create a principal-scoped memory slot.
+
 ## 0.47.4
 
 ### Patch Changes
