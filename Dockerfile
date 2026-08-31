@@ -49,7 +49,9 @@ RUN set -eux; \
   tar -xJf "${node_file}" -C /usr/local --strip-components=1; \
   rm "${node_file}" "${shasums}"; \
   rm -rf /usr/local/include/node /usr/local/share/doc /usr/local/share/man; \
-  npm install -g "pnpm@${PNPM_VERSION}"; \
+  pnpm_package="@pnpm/exe.linux-${node_arch}"; \
+  npm install -g "${pnpm_package}@${PNPM_VERSION}"; \
+  ln -s "$(npm root -g)/${pnpm_package}/pnpm" /usr/local/bin/pnpm; \
   apt-get purge -y --auto-remove xz-utils; \
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*; \
   npm cache clean --force; \
