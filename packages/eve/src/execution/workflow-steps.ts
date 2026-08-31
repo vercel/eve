@@ -53,10 +53,14 @@ import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
+  getLegacyRuntimeActionKeysFromWorkflowInterrupt,
   getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
 } from "#harness/workflow-runtime-action-state.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
+import {
+  getPendingWorkflowInterrupt,
+  isLegacyPendingWorkflowInterrupt,
+} from "#harness/workflow-interrupt-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
 import type { DurableStepResult } from "#execution/next-driver-action.js";
@@ -641,9 +645,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       return {
         action: "dispatch-workflow-runtime-actions",
         ...backgroundTransition,
-        pendingRuntimeActionKeys: getRuntimeActionKeysFromWorkflowInterrupt(
-          workflowInterrupt.interrupt,
-        ),
+        pendingRuntimeActionKeys: isLegacyPendingWorkflowInterrupt(workflowInterrupt)
+          ? getLegacyRuntimeActionKeysFromWorkflowInterrupt(workflowInterrupt.interrupt)
+          : getRuntimeActionKeysFromWorkflowInterrupt(workflowInterrupt.interrupt),
         ...sleepTransition,
         serializedContext: nextSerializedContext,
         sessionState: nextState,

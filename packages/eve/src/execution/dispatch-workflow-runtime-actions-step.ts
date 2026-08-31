@@ -7,9 +7,17 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
+import {
+  getPendingWorkflowInterrupt,
+  isLegacyPendingWorkflowInterrupt,
+  setPendingWorkflowUsedCalls,
+  WORKFLOW_RUNTIME_UPGRADE_MESSAGE,
+} from "#harness/workflow-interrupt-state.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { buildRuntimeActionsFromWorkflowInterrupt } from "#harness/workflow-runtime-action-state.js";
+import {
+  buildLegacyRuntimeActionsFromWorkflowInterrupt,
+  buildRuntimeActionsFromWorkflowInterrupt,
+} from "#harness/workflow-runtime-action-state.js";
 import {
   planWorkflowSubagentDispatch,
   type WorkflowSubagentDispatchPlan,
@@ -50,9 +58,19 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
     return { results: [], sessionState: input.sessionState, pendingTasks: [] };
   }
 
-  const actions = buildRuntimeActionsFromWorkflowInterrupt(pending.interrupt);
+  const actions = isLegacyPendingWorkflowInterrupt(pending)
+    ? buildLegacyRuntimeActionsFromWorkflowInterrupt(pending.interrupt)
+    : buildRuntimeActionsFromWorkflowInterrupt(pending.interrupt);
   if (actions.length === 0) {
     return { results: [], sessionState: input.sessionState, pendingTasks: [] };
+  }
+
+  if (isLegacyPendingWorkflowInterrupt(pending)) {
+    return {
+      pendingTasks: [],
+      results: actions.map(createWorkflowRuntimeUpgradeResult),
+      sessionState: input.sessionState,
+    };
   }
 
   const ctx = await deserializeContext(input.serializedContext);
@@ -61,8 +79,8 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const plan = planWorkflowSubagentDispatch({
     actions,
-    interrupt: pending.interrupt,
     maxSubagents: durableSession.workflowMaxSubagents,
+    usedCalls: pending.usedCalls,
   });
 
   const blockedResults = plan.blocked.map((action) => {
@@ -89,11 +107,15 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
 
+  const sessionWithUsage = setPendingWorkflowUsedCalls({
+    session,
+    usedCalls: pending.usedCalls + plan.allowed.length,
+  });
   const sessionWithBatch = setPendingRuntimeActionBatch({
     actions: plan.allowed,
     event: { sequence: 0, stepIndex: 0, turnId: "workflow-dispatch" },
     responseMessages: [],
-    session,
+    session: sessionWithUsage,
   });
 
   // Interrupt-sourced batches obey the same mode split as model-authored
@@ -118,6 +140,25 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
     results: [...dispatched.results, ...blockedResults],
     sessionState: dispatched.sessionState,
     pendingTasks: dispatched.pendingTasks,
+  };
+}
+
+function createWorkflowRuntimeUpgradeResult(
+  action: RuntimeActionRequest,
+): RuntimeSubagentDispatchFailure {
+  const subagentName = isSubagentDelegationAction(action)
+    ? getSubagentDelegationName(action)
+    : action.kind;
+  return {
+    callId: action.callId,
+    isError: true,
+    kind: "subagent-result",
+    origin: "dispatch",
+    output: {
+      code: "WORKFLOW_RUNTIME_UPGRADED",
+      message: WORKFLOW_RUNTIME_UPGRADE_MESSAGE,
+    },
+    subagentName,
   };
 }
 

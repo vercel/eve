@@ -400,6 +400,7 @@
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.3.0",
     "@ai-sdk/anthropic": "catalog:",
+    "@ai-sdk/code-mode": "1.0.39",
     "@ai-sdk/google": "catalog:",
     "@ai-sdk/mcp": "catalog:",
     "@ai-sdk/openai": "catalog:",
@@ -447,7 +448,6 @@
     "emulate": "0.6.0",
     "env-runner": "0.1.16",
     "eventsource-parser": "3.1.0",
-    "experimental-ai-sdk-code-mode": "1.0.16",
     "gray-matter": "4.0.3",
     "historical-eve-0-30-8": "npm:eve@0.30.8",
     "jose": "6.2.3",
@@ -459,6 +459,7 @@
     "picocolors": "catalog:",
     "react": "catalog:",
     "react-test-renderer": "19.2.6",
+    "run": "2.1.2",
     "semver": "7.8.4",
     "shadcn": "4.18.0",
     "svelte": "^5.0.0",

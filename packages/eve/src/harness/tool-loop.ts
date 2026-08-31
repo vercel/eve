@@ -65,6 +65,7 @@ import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { resolveAgentsAnnouncement } from "#harness/handles/prompt.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import {
+  getLegacyWorkflowRuntimeActionInterrupts,
   getWorkflowRuntimeActionInterrupts,
   isWorkflowRuntimeActionInterrupt,
 } from "#harness/workflow-runtime-action-state.js";
@@ -81,11 +82,16 @@ import {
   getWorkflowContinuationSecurity,
   readWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
-import { createWorkflowLifecycle } from "#harness/workflow-lifecycle.js";
+import {
+  emitWorkflowActionResults,
+  emitWorkflowActionsRequested,
+} from "#harness/workflow-lifecycle.js";
 import {
   clearPendingWorkflowInterrupt,
   getPendingWorkflowInterrupt,
+  isLegacyPendingWorkflowInterrupt,
   setPendingWorkflowInterrupt,
+  WORKFLOW_RUNTIME_UPGRADE_MESSAGE,
 } from "#harness/workflow-interrupt-state.js";
 import {
   compactMessages,
@@ -1274,19 +1280,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         flatTools[FINAL_OUTPUT_TOOL_NAME] = buildFinalOutputTool(session.outputSchema);
       }
 
-      const workflowLifecycle =
-        emit !== undefined
-          ? ({ tools }: { readonly tools: HarnessToolMap }) =>
-              createWorkflowLifecycle({
-                emit,
-                emissionState,
-                tools,
-              })
-          : undefined;
       const workflowConfig =
-        config.workflow === true
-          ? { lifecycle: workflowLifecycle, maxSubagents: config.workflowMaxSubagents }
-          : undefined;
+        config.workflow === true ? { maxSubagents: config.workflowMaxSubagents } : undefined;
 
       const advertisedModelTools = await getAdvertisedTools({
         delegatedCaller: taskUpdatesEnabled,
@@ -2356,12 +2351,15 @@ async function handleStepResult(input: {
       if (!isWorkflowRuntimeActionInterrupt(workflowInterrupt)) {
         throw new Error(`Unsupported Workflow interrupt kind "${workflowInterrupt.payload.kind}".`);
       }
-      return parkOnWorkflowInterrupt({
+      return await parkOnWorkflowInterrupt({
         baseSession,
+        emit,
         emissionState,
         interrupt: workflowInterrupt,
         promptMessages,
         responseMessages,
+        tools: input.runtimeActionTools,
+        usedCalls: 0,
       });
     }
   }
@@ -2825,7 +2823,7 @@ async function finishConversationTurn(input: {
 
 /** Replays a parked dynamic workflow with completed child-agent results. */
 async function continuePendingWorkflowInterrupt(input: {
-  readonly childResults?: readonly { readonly output?: unknown }[];
+  readonly childResults?: readonly { readonly isError?: boolean; readonly output?: unknown }[];
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
@@ -2841,15 +2839,35 @@ async function continuePendingWorkflowInterrupt(input: {
     throw new Error(`Unsupported Workflow interrupt kind "${interrupt.payload.kind}".`);
   }
 
-  const lifecycle =
-    input.emit === undefined
-      ? undefined
-      : createWorkflowLifecycle({
-          emit: input.emit,
-          emissionState: input.emissionState,
-          skipReplayed: true,
-          tools: input.tools,
-        });
+  const childResults = input.childResults ?? [];
+  const pendingInterrupts = isLegacyPendingWorkflowInterrupt(pending)
+    ? getLegacyWorkflowRuntimeActionInterrupts(interrupt)
+    : getWorkflowRuntimeActionInterrupts(interrupt);
+  if (input.emit !== undefined && childResults.length > 0) {
+    await emitWorkflowActionResults({
+      emit: input.emit,
+      emissionState: input.emissionState,
+      interrupts: pendingInterrupts,
+      results: childResults,
+    });
+  }
+
+  if (isLegacyPendingWorkflowInterrupt(pending)) {
+    const baseMessages = [...input.session.history, ...pending.responseMessages];
+    const replacedMessages = replaceWorkflowToolResult(baseMessages, interrupt.outerToolCallId, {
+      error: "workflow_runtime_upgraded",
+      message: WORKFLOW_RUNTIME_UPGRADE_MESSAGE,
+      retryable: true,
+    });
+    return {
+      next: input.runStep,
+      session: clearPendingWorkflowInterrupt({
+        ...input.session,
+        history: replacedMessages,
+      }),
+    };
+  }
+
   const continuationSecurity = getWorkflowContinuationSecurity(input.session);
 
   let continuationOutput: unknown;
@@ -2858,7 +2876,6 @@ async function continuePendingWorkflowInterrupt(input: {
       tools: input.tools,
     });
 
-    const childResults = input.childResults ?? [];
     let currentInterrupt = interrupt;
     let resultIndex = 0;
     // Promise.all can park several child calls together. Resolve one ledger
@@ -2871,7 +2888,6 @@ async function continuePendingWorkflowInterrupt(input: {
         ),
         continuationSecurity,
         interrupt: currentInterrupt,
-        lifecycle,
         resolution: childResults[resultIndex]?.output,
         tools: hostTools,
       });
@@ -2920,12 +2936,15 @@ async function continuePendingWorkflowInterrupt(input: {
     const promptMessages = replacedMessages.slice(0, promptMessageCount);
     const responseMessages = replacedMessages.slice(promptMessageCount);
     session = { ...session, history: promptMessages };
-    return parkOnWorkflowInterrupt({
+    return await parkOnWorkflowInterrupt({
       baseSession: session,
+      emit: input.emit,
       emissionState: input.emissionState,
       interrupt: unwrapped.interrupt,
       promptMessages,
       responseMessages,
+      tools: input.tools,
+      usedCalls: pending.usedCalls,
     });
   }
 
@@ -2954,16 +2973,29 @@ function replaceWorkflowToolResult(
   }) as ModelMessage[];
 }
 
-function parkOnWorkflowInterrupt(input: {
+async function parkOnWorkflowInterrupt(input: {
   readonly baseSession: HarnessSession;
+  readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
   readonly interrupt: WorkflowSandboxInterrupt;
   readonly promptMessages: readonly ModelMessage[];
   readonly responseMessages: readonly ModelMessage[];
-}): StepResult {
-  const interrupt = getWorkflowRuntimeActionInterrupts(input.interrupt)[0];
+  readonly tools: HarnessToolMap;
+  readonly usedCalls: number;
+}): Promise<StepResult> {
+  const interrupts = getWorkflowRuntimeActionInterrupts(input.interrupt);
+  const interrupt = interrupts[0];
   if (interrupt === undefined) {
     throw new Error("Workflow continuation contains no pending runtime-action interrupt.");
+  }
+
+  if (input.emit !== undefined) {
+    await emitWorkflowActionsRequested({
+      emit: input.emit,
+      emissionState: input.emissionState,
+      interrupts,
+      tools: input.tools,
+    });
   }
 
   const baseSession: HarnessSession = {
@@ -2975,6 +3007,7 @@ function parkOnWorkflowInterrupt(input: {
     interrupt,
     responseMessages: input.responseMessages,
     session: baseSession,
+    usedCalls: input.usedCalls,
   });
 
   return { next: null, session: setHarnessEmissionState(parkedSession, input.emissionState) };
