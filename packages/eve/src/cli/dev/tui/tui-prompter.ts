@@ -1,3 +1,4 @@
+import { PlannerNavigationError } from "#setup/prompter.js";
 import type {
   EditableSelectOptions,
   EditableSelectResult,
@@ -36,11 +37,9 @@ function setupSelectRequest<T extends PrompterValue>(
   } = { message: opts.message, options };
   if (opts.description !== undefined) base.description = opts.description;
   if (opts.metadata !== undefined) base.metadata = opts.metadata;
-  const withNavigation = <Request extends SetupSelectRequest>(request: Request): Request => {
+  const withContext = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;
-    if (opts.plannerNavigation === true) request.plannerNavigation = true;
-    if (opts.plannerContinue !== undefined) request.plannerContinue = opts.plannerContinue;
-    if (opts.plannerBack === true) request.plannerBack = true;
+    if (opts.navigation !== undefined) request.navigation = opts.navigation;
     return request;
   };
 
@@ -67,7 +66,7 @@ function setupSelectRequest<T extends PrompterValue>(
     if (opts.initialValues !== undefined) {
       request.initialValues = opts.initialValues.map(encode);
     }
-    return withNavigation(request);
+    return withContext(request);
   }
 
   if (opts.search === true && opts.hintLayout === "stacked") {
@@ -92,7 +91,7 @@ function setupSelectRequest<T extends PrompterValue>(
     request = { ...base, kind };
   }
   if (opts.initialValue !== undefined) request.initialValue = encode(opts.initialValue);
-  return withNavigation(request);
+  return withContext(request);
 }
 
 /**
@@ -119,8 +118,11 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     const codec = createSelectOptionCodec(opts.options);
     const request = setupSelectRequest(opts, codec.options, codec.encode, codec.encodeOptions);
 
-    const keys = guardCancel(await renderer.readSelect(request));
-    const values = keys.map((key) => {
+    const result = guardCancel(await renderer.readSelect(request));
+    if ("kind" in result) {
+      throw new PlannerNavigationError(result.direction, result.values.map(codec.decode));
+    }
+    const values = result.map((key) => {
       const query = searchActionQuery(key);
       if (query !== undefined && opts.multiple !== true && opts.searchAction !== undefined) {
         return opts.searchAction.value(query);
@@ -207,6 +209,8 @@ export function createTuiPrompter(renderer: TuiPrompterRenderer): Prompter {
     replaceContent: (content) => renderer.replaceContent?.(content),
 
     withInheritedStdio: (task) => renderer.withInheritedStdio(task),
+
+    withExclusiveTerminal: (task) => renderer.withExclusiveTerminal?.(task) ?? task(),
 
     log: {
       message: line("info"),

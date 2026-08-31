@@ -1,36 +1,26 @@
-import type {
-  RegistrySessionItemFailure,
-  RegistrySessionItemResult,
-} from "#setup/flows/registry-session.js";
+import type { RegistryCatalogItem } from "#cli/commands/registry.js";
+import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
 
-export type RegistryResultReport = {
-  items: readonly RegistrySessionItemResult[];
-  failures?: readonly RegistrySessionItemFailure[];
-};
+/** Builds the shared transient progress update for `/add` and initial onboarding. */
+export function registryItemProgress(renderer: {
+  replaceContent?(content?: {
+    headline: string;
+    facts: readonly { label: string; value: string }[];
+  }): void;
+  setStatus(status: string | undefined): void;
+}): (item: RegistryCatalogItem, index: number, total: number) => void {
+  return (item, index, total) => {
+    renderer.replaceContent?.({
+      headline: `Adding ${item.title ?? item.name} · ${index + 1} of ${total}`,
+      facts: [],
+    });
+    renderer.setStatus("Installing files and dependencies…");
+  };
+}
 
-export type RegistryResultReportEntry = {
-  title: string;
-  status: "success" | "error";
-  lines: readonly string[];
-  detail?: string;
-};
-
-export function registryResultReportEntries(
-  result: RegistryResultReport,
-): readonly RegistryResultReportEntry[] {
-  return [
-    ...result.items.map((item) => ({
-      title: item.title,
-      status: "success" as const,
-      lines: [...item.facts.map((fact) => `${fact.label}  ${fact.value}`), ...item.output],
-    })),
-    ...(result.failures ?? []).map((failure) => ({
-      title: failure.title,
-      status: "error" as const,
-      lines: [failure.message],
-      detail: failure.detail,
-    })),
-  ];
+export function registryResultTone(result: RegistrySessionResult): "success" | "error" | undefined {
+  if (result.failures.length > 0) return "error";
+  return result.items.length > 0 ? "success" : undefined;
 }
 
 function joinedTitles(titles: readonly string[]): string {
@@ -41,20 +31,29 @@ function joinedTitles(titles: readonly string[]): string {
 }
 
 /** Formats structured registry setup results after their temporary panel closes. */
-export function formatRegistrySessionResult(result: RegistryResultReport): string {
+export function formatRegistrySessionResult(result: RegistrySessionResult): string {
   const lines: string[] = [];
   if (result.items.length > 0)
     lines.push(`Added ${joinedTitles(result.items.map((item) => item.title))}`);
   for (const item of result.items) {
-    if (item.facts.length === 0 && item.output.length === 0) continue;
     lines.push("", item.title);
+    if (item.facts.length === 0 && item.output.length === 0) {
+      lines.push("  Installed.");
+      continue;
+    }
     const width = Math.max(0, ...item.facts.map((fact) => fact.label.length));
     for (const fact of item.facts) lines.push(`  ${fact.label.padEnd(width)}  ${fact.value}`);
     for (const output of item.output) lines.push(`  ${output}`);
   }
-  for (const failure of result.failures ?? []) {
-    lines.push("", `Couldn't add ${failure.title}`, `  ${failure.message}`);
-    if (failure.detail !== failure.message) lines.push(`  ${failure.detail}`);
+  for (const failure of result.failures) {
+    lines.push(
+      "",
+      `Couldn't add ${failure.title}`,
+      ...failure.message.split("\n").map((line) => `  ${line}`),
+    );
+  }
+  if (result.cancelled === true) {
+    lines.push("", "Setup cancelled before the remaining selections were added.");
   }
   return lines.join("\n");
 }

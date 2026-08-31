@@ -78,13 +78,7 @@ import {
   type BootDetectionContext,
   type SetupIssue,
 } from "./setup-issues.js";
-import { runRegistryFlow } from "#setup/flows/registry.js";
-import { createTuiPrompter } from "./tui-prompter.js";
-import {
-  formatRegistrySessionResult,
-  registryResultReportEntries,
-  type RegistryResultReportEntry,
-} from "./registry-result-message.js";
+import type { RegistryPlannerSection } from "#setup/flows/registry.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
@@ -268,8 +262,6 @@ export type AgentTUIRenderer = {
   /** Commits the startup `/vc:login` invocation to the transcript. */
   renderCommandInvocation?(text: string, status?: "failed"): void;
   renderCommandResult?(text: string, tone?: "success" | "error"): void;
-  /** Renders each completed registry item as a durable startup setup result. */
-  renderRegistryResult?(entries: readonly RegistryResultReportEntry[]): void;
   readonly setupFlow?: SetupFlowRenderer;
   /**
    * The renderer's full-screen local trace viewer, opened by `/traces`.
@@ -382,6 +374,8 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
+  /** First registry planner section requested by automatic onboarding. */
+  readonly initialRegistryScreen?: RegistryPlannerSection;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   readonly chatGptAccountLabel?: string;
   /**
@@ -451,9 +445,7 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Seeds the editable prompt buffer for the first prompt. */
   initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
-  initialOnboarding?: "agent";
-  /** Test seam for the startup-only channel and integration planner. */
-  initialRegistrySetupFlow?: typeof runRegistryFlow;
+  onboard?: boolean;
   /** Handles non-core slash commands without adding feature branches to the runner. */
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
@@ -510,8 +502,7 @@ export class EveTUIRunner {
   readonly #initialInput?: string;
   readonly #startup?: TuiStartup;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
-  readonly #initialOnboarding?: "agent";
-  readonly #initialRegistrySetupFlow?: typeof runRegistryFlow;
+  readonly #onboard: boolean;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
@@ -614,10 +605,7 @@ export class EveTUIRunner {
     this.#formatTransportError = options.formatTransportError ?? toErrorMessage;
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
     if (options.startup !== undefined) this.#startup = options.startup;
-    if (options.initialOnboarding !== undefined)
-      this.#initialOnboarding = options.initialOnboarding;
-    if (options.initialRegistrySetupFlow !== undefined)
-      this.#initialRegistrySetupFlow = options.initialRegistrySetupFlow;
+    this.#onboard = options.onboard === true;
     if (options.appRoot !== undefined) {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
@@ -771,7 +759,7 @@ export class EveTUIRunner {
     this.#mcpConnectionStatus?.refresh();
 
     const initialAgentOnboarding =
-      this.#initialOnboarding === "agent" &&
+      this.#onboard &&
       this.#appRoot !== undefined &&
       this.#promptCommandHandler !== undefined &&
       this.#renderer.setupFlow !== undefined;
@@ -1621,7 +1609,10 @@ export class EveTUIRunner {
 
   async #handleExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
-    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "keepSetupFlowOpen" | "title">,
+    input: Pick<
+      PromptCommandHandlerContext,
+      "initialModelStep" | "initialRegistryScreen" | "keepSetupFlowOpen" | "title"
+    >,
   ): Promise<PromptCommandOutcome | undefined> {
     const handler = this.#promptCommandHandler;
     if (handler === undefined)
@@ -1632,6 +1623,7 @@ export class EveTUIRunner {
       renderer: this.#renderer,
       title: input.title,
       initialModelStep: input.initialModelStep,
+      initialRegistryScreen: input.initialRegistryScreen,
       chatGptAccountLabel:
         endpoint?.kind === "chatgpt" && endpoint.state === "ready"
           ? endpoint.accountLabel
@@ -1682,19 +1674,21 @@ export class EveTUIRunner {
     input: {
       readonly trigger: "startup" | "command";
       readonly initialModelStep?: "provider";
+      readonly initialRegistryScreen?: RegistryPlannerSection;
       readonly keepSetupFlowOpen?: true;
-      readonly suppressTranscript?: true;
+      readonly suppressSuccessfulTranscript?: true;
     },
   ): Promise<void> {
     const outcome = await this.#handleExtensionCommand(command, {
       initialModelStep: input.initialModelStep,
+      initialRegistryScreen: input.initialRegistryScreen,
       keepSetupFlowOpen: input.keepSetupFlowOpen,
       title,
     });
-    if (input.suppressTranscript !== true) {
-      this.#renderStartupCommandInvocation(command, input.trigger);
-      this.#renderCommandOutcome(outcome?.message, outcome?.tone);
-    }
+    const suppressTranscript =
+      input.suppressSuccessfulTranscript === true && outcome?.tone !== "error";
+    if (!suppressTranscript) this.#renderStartupCommandInvocation(command, input.trigger);
+    if (!suppressTranscript) this.#renderCommandOutcome(outcome?.message, outcome?.tone);
     await this.#applyCommandEffect(outcome?.effect);
     this.#refreshHeaderFromRemoteConnection();
   }
@@ -1726,10 +1720,8 @@ export class EveTUIRunner {
         { trigger: "startup", keepSetupFlowOpen: true },
       );
       status = await authStatus();
-      if (status === "cli-missing") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
+      // Model API-key paths and many registry items remain available without
+      // the Vercel CLI, so an unsuccessful bootstrap does not end onboarding.
     }
 
     if (status === "logged-out") {
@@ -1738,62 +1730,21 @@ export class EveTUIRunner {
         title,
         { trigger: "startup", keepSetupFlowOpen: true },
       );
-      status = await authStatus();
-      if (status === "cli-missing" || status === "logged-out") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
+      // Continue to model and registry setup when login remains unavailable;
+      // individual choices report their own Vercel requirements.
     }
 
     await this.#executeExtensionCommand({ type: "extension", name: "model", argument: "" }, title, {
       trigger: "startup",
       initialModelStep: "provider",
       keepSetupFlowOpen: true,
-      suppressTranscript: true,
+      suppressSuccessfulTranscript: true,
     });
 
-    const flow = this.#renderer.setupFlow;
-    if (flow === undefined) return;
-    flow.begin("Set up your agent", "pulse");
-    try {
-      const result = await (this.#initialRegistrySetupFlow ?? runRegistryFlow)({
-        appRoot,
-        prompter: createTuiPrompter(flow),
-        signal: this.#lifecycle?.signal,
-        onItemStart: (item, index, total) => {
-          flow.replaceContent?.({
-            headline: `Adding ${item.title ?? item.name} · ${index + 1} of ${total}`,
-            facts: [],
-          });
-          flow.setStatus("Installing files and dependencies…");
-        },
-      });
-      if (result.kind === "done") {
-        const entries = registryResultReportEntries(result.result);
-        if (entries.length > 0 && this.#renderer.renderRegistryResult !== undefined) {
-          this.#renderer.renderRegistryResult(entries);
-        } else {
-          const report = formatRegistrySessionResult(result.result);
-          this.#renderCommandOutcome(
-            report === ""
-              ? "Your agent is ready. Add channels and integrations any time with /add."
-              : report,
-            result.result.failures.length > 0
-              ? "error"
-              : result.result.items.length > 0
-                ? "success"
-                : undefined,
-          );
-        }
-        if (result.result.deployed === "production") {
-          await this.#applyCommandEffect({ kind: "deployed" });
-        }
-      }
-    } catch (error) {
-      this.#renderCommandOutcome(`Agent setup failed: ${toErrorMessage(error)}`, "error");
-    } finally {
-      flow.end({ preserveDiagnostics: true });
-    }
+    await this.#executeExtensionCommand({ type: "extension", name: "add", argument: "" }, title, {
+      trigger: "command",
+      initialRegistryScreen: "channels",
+    });
   }
 
   #refreshHeaderFromRemoteConnection(): void {

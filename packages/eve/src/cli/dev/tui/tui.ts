@@ -37,7 +37,7 @@ export interface RunDevelopmentTuiInput extends TuiDisplayOptions {
   /** Text to seed the prompt input with after the UI launches. Applies to the first prompt only. */
   readonly initialInput?: string;
   /** Explicit fresh-agent onboarding handoff from `eve init`. */
-  readonly initialOnboarding?: "agent";
+  readonly onboard?: boolean;
   /** Reports local CLI boot phases. Omitted for remote and programmatic TUI runs. */
   readonly onBootProgress?: DevBootProgressReporter;
   /** Gives setup subprocesses exclusive terminal and development-host ownership. */
@@ -140,7 +140,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     target,
     headers,
     initialInput,
-    initialOnboarding,
+    onboard,
     onBootProgress,
     lifecycle,
     startup,
@@ -187,7 +187,7 @@ export async function runDevelopmentTui(input: RunDevelopmentTuiInput): Promise<
     options.renderer = startup.renderer;
     options.startup = startup;
   }
-  if (initialOnboarding !== undefined) options.initialOnboarding = initialOnboarding;
+  if (onboard !== undefined) options.onboard = onboard;
   if (onBootProgress !== undefined) options.onBootProgress = onBootProgress;
   if (lifecycle !== undefined) options.lifecycle = lifecycle;
   if (withExclusiveTerminal !== undefined) options.withExclusiveTerminal = withExclusiveTerminal;

@@ -123,28 +123,25 @@ function createDevBootProgressReporter(
   };
 }
 
-async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
-  return (await import("#cli/commands/info.js")).printApplicationInfo;
-}
+const loadPrintApplicationInfo = async (): Promise<
+  CliRuntimeDependencies["printApplicationInfo"]
+> => (await import("#cli/commands/info.js")).printApplicationInfo;
 
 async function loadDevelopmentTuiModule() {
   return await import("#cli/dev/tui/tui.js");
 }
 
-async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalCommand"]> {
-  return (await import("#evals/cli/eval.js")).runEvalCommand;
-}
+const loadRunEvalCommand = async (): Promise<CliRuntimeDependencies["runEvalCommand"]> =>
+  (await import("#evals/cli/eval.js")).runEvalCommand;
 
-async function loadStartHost(): Promise<CliRuntimeDependencies["startHost"]> {
-  return (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
-}
+const loadStartHost = async (): Promise<CliRuntimeDependencies["startHost"]> =>
+  (await import("#cli/dev/local-server-process.js")).createDevelopmentServer;
 
 const loadIsActiveDevelopmentServerForApp = async () =>
   (await import("#internal/nitro/host.js")).isActiveDevelopmentServerForApp;
 
-async function loadStartProductionHost(): Promise<CliRuntimeDependencies["startProductionHost"]> {
-  return (await import("#internal/nitro/host.js")).startProductionServer;
-}
+const loadStartProductionHost = async (): Promise<CliRuntimeDependencies["startProductionHost"]> =>
+  (await import("#internal/nitro/host.js")).startProductionServer;
 
 function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
@@ -341,9 +338,6 @@ function createCliProgram(
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
     .option("--input <text>", "Pre-fill the prompt input")
-    // Fresh `eve init` crosses a process boundary before it reaches this
-    // command, so onboarding needs an explicit handoff rather than a magic
-    // prompt string.
     .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
     .option(
       "--tools <mode>",

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
+import { PlannerNavigationError } from "#setup/prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 
@@ -28,6 +31,7 @@ function deps(overrides: Partial<RegistryFlowDeps> = {}): RegistryFlowDeps {
       total: 2,
       errors: [],
     })),
+    getRegistryItemManifest: vi.fn(async (_appRoot, item) => ({ name: item })),
     installRegistryItem: vi.fn(async () => ({ output: [] })),
     detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
     runDeployFlow: vi.fn(async () => ({ kind: "deployed" as const })),
@@ -56,15 +60,11 @@ describe("runRegistryFlow", () => {
     ).resolves.toEqual({
       kind: "done",
       result: {
-        kind: "done",
-        addedItems: ["channel/web", "connection/linear"],
         items: [
-          { address: "channel/web", title: "Web Chat", facts: [], output: [] },
-          { address: "connection/linear", title: "Linear", facts: [], output: [] },
+          { title: "Web Chat", facts: [], output: [] },
+          { title: "Linear", facts: [], output: [] },
         ],
         failures: [],
-        facts: [],
-        output: [],
       },
     });
 
@@ -116,7 +116,11 @@ describe("runRegistryFlow", () => {
     });
     expect(prompts[2]).toMatchObject({
       message: "Review your agent",
-      plannerBack: true,
+      navigation: {
+        kind: "planner",
+        activeStep: 2,
+        steps: [{ label: "Channels" }, { label: "Integrations", count: 1 }, { label: "Review" }],
+      },
       metadata: [{ label: "Integration", value: "Linear" }],
       options: [
         { value: "install", label: "Install and set up" },
@@ -125,9 +129,72 @@ describe("runRegistryFlow", () => {
     });
   });
 
+  it("starts bare /add on integrations when requested and keeps empty Review open", async () => {
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        return "install";
+      },
+      multiple: (options) => {
+        prompts.push(options);
+        return [];
+      },
+    });
+
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      initialScreen: "integrations",
+      deps: deps(),
+    });
+
+    expect(prompts).toMatchObject([
+      { message: "What should your agent be able to work with?" },
+      {
+        message: "Review your agent",
+        description: "No channels or integrations selected.",
+        options: [
+          { value: "install", label: "Finish without adding" },
+          { value: "back", label: "Back" },
+        ],
+      },
+    ]);
+  });
+
+  it("preserves selections while navigating forward and back with arrow keys", async () => {
+    let lap = 0;
+    const fake = createFakePrompter({
+      single: () => "install",
+      multiple: (options) => {
+        lap += 1;
+        if (lap === 1) throw new PlannerNavigationError("forward", ["channel/web"]);
+        if (lap === 2) throw new PlannerNavigationError("back", ["connection/linear"]);
+        if (lap === 3) {
+          expect(options.initialValues).toEqual(["channel/web"]);
+          return ["channel/web"];
+        }
+        expect(options.initialValues).toEqual(["connection/linear"]);
+        return ["connection/linear"];
+      },
+    });
+    const installRegistryItem = vi.fn<RegistryFlowDeps["installRegistryItem"]>(async () => ({
+      output: [],
+    }));
+
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      deps: deps({ installRegistryItem }),
+    });
+
+    expect(installRegistryItem).toHaveBeenCalledTimes(2);
+  });
+
   it("puts curated choices first while preserving registry order for the remaining entries", async () => {
     const prompts: unknown[] = [];
     const fake = createFakePrompter({
+      single: () => "install",
       multiple: (options) => {
         prompts.push(options);
         return [];
@@ -177,20 +244,22 @@ describe("runRegistryFlow", () => {
     ]);
   });
 
-  it("recommends Linear MCP after Linear Agent and hides the overlapping preset", async () => {
+  it("expands an explicitly requested product preset into its reviewable components", async () => {
     const prompts: unknown[] = [];
     const fake = createFakePrompter({
-      single: () => "install",
-      multiple: (options) => {
+      single: (options) => {
         prompts.push(options);
-        return options.message === "Where should people reach your agent?"
-          ? ["channel/linear-agent"]
-          : [];
+        return "install";
       },
     });
+    const installRegistryItem = vi.fn<RegistryFlowDeps["installRegistryItem"]>(async () => ({
+      output: [],
+    }));
+
     await runRegistryFlow({
       appRoot: APP_ROOT,
       prompter: fake.prompter,
+      initialAddress: "linear",
       deps: deps({
         browseRegistryCatalog: vi.fn(async () => ({
           items: [
@@ -205,31 +274,163 @@ describe("runRegistryFlow", () => {
               address: "connection/linear",
               name: "connection/linear",
               title: "Linear",
-              description: "Issues, projects, cycles, and comments via Linear's MCP server.",
               source: "Vercel",
             },
           ],
           total: 3,
           errors: [],
         })),
+        getRegistryItemManifest: vi.fn(async () => ({
+          name: "linear",
+          meta: {
+            eve: {
+              components: [{ item: "channel/linear-agent" }, { item: "connection/linear" }],
+            },
+          },
+        })),
+        installRegistryItem,
       }),
     });
 
-    const channelOptions = (prompts[0] as { options: { value: string }[] }).options;
-    const integrationOptions = (
-      prompts[1] as {
-        options: { value: string; label: string; hint?: string }[];
-      }
-    ).options;
-    expect(channelOptions.map((option) => option.value)).toEqual(["channel/linear-agent"]);
-    expect(integrationOptions).toEqual([
-      {
-        value: "connection/linear",
-        label: "Linear MCP",
-        hint: "Recommended with Linear Agent · Issues, projects, cycles, and comments via Linear's MCP server.",
-        featured: true,
+    expect(prompts[0]).toMatchObject({
+      message: "Review your agent",
+      metadata: [
+        { label: "Channel", value: "Linear Agent" },
+        { label: "Integration", value: "Linear" },
+      ],
+    });
+    expect(installRegistryItem).toHaveBeenNthCalledWith(
+      1,
+      APP_ROOT,
+      "channel/linear-agent",
+      expect.objectContaining({ silent: true }),
+    );
+    expect(installRegistryItem).toHaveBeenNthCalledWith(
+      2,
+      APP_ROOT,
+      "connection/linear",
+      expect.objectContaining({ silent: true }),
+    );
+  });
+
+  it("resolves an explicitly requested external address that is not in the catalog", async () => {
+    const fake = createFakePrompter({
+      single: () => "install",
+      multiple: (options) => options.initialValues ?? [],
+    });
+    const getRegistryItemManifest = vi.fn(async () => ({
+      name: "extension/analytics",
+      title: "Analytics",
+    }));
+    const installRegistryItem = vi.fn<RegistryFlowDeps["installRegistryItem"]>(async () => ({
+      output: [],
+    }));
+
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      initialAddress: "@acme/analytics",
+      deps: deps({ getRegistryItemManifest, installRegistryItem }),
+    });
+
+    expect(getRegistryItemManifest).toHaveBeenCalledWith(APP_ROOT, "@acme/analytics");
+    expect(installRegistryItem).toHaveBeenCalledWith(
+      APP_ROOT,
+      "@acme/analytics",
+      expect.objectContaining({ silent: true }),
+    );
+  });
+
+  it("reports an explicitly requested address that cannot be resolved", async () => {
+    const fake = createFakePrompter();
+    const getRegistryItemManifest = vi.fn(async () => {
+      throw new Error('Registry item "channel/slak" was not found.');
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        initialAddress: "channel/slak",
+        deps: deps({ getRegistryItemManifest }),
+      }),
+    ).rejects.toThrow('Registry item "channel/slak" was not found.');
+    expect(fake.selectMessages).toEqual([]);
+  });
+
+  it("surfaces registry source failures on the planner", async () => {
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: () => "install",
+      multiple: (options) => {
+        prompts.push(options);
+        return [];
       },
-    ]);
+    });
+
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      initialScreen: "integrations",
+      deps: deps({
+        browseRegistryCatalog: vi.fn(async () => ({
+          items: [],
+          total: 0,
+          errors: [{ registry: "@acme", message: "Authentication required" }],
+        })),
+      }),
+    });
+
+    expect(prompts[0]).toMatchObject({
+      notices: [{ tone: "warning", text: "@acme: Authentication required" }],
+    });
+  });
+
+  it("propagates cancellation during installation instead of recording a failure", async () => {
+    const answers = ["install"];
+    const selections = [["channel/web"], []];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+    const controller = new AbortController();
+    const reason = new Error("Setup interrupted");
+    const installRegistryItem = vi.fn<RegistryFlowDeps["installRegistryItem"]>(async () => {
+      controller.abort(reason);
+      throw reason;
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        signal: controller.signal,
+        deps: deps({ installRegistryItem }),
+      }),
+    ).rejects.toBe(reason);
+    expect(fake.selectMessages).not.toContain("Couldn't add Web Chat");
+  });
+
+  it("treats setup-prompt cancellation as a dismissed flow, not an installation failure", async () => {
+    const answers = ["install"];
+    const selections = [["channel/web"], []];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({
+          installRegistryItem: vi.fn(async () => {
+            throw new WizardCancelledError();
+          }),
+        }),
+      }),
+    ).resolves.toEqual({ kind: "cancelled" });
+    expect(fake.selectMessages).not.toContain("Couldn't add Web Chat");
   });
 
   it("keeps a skipped installation failure in the result and proceeds with later items", async () => {
@@ -253,11 +454,96 @@ describe("runRegistryFlow", () => {
     ).resolves.toMatchObject({
       kind: "done",
       result: {
-        addedItems: ["connection/linear"],
-        failures: [expect.objectContaining({ title: "Web Chat", message: "Missing WEB_TOKEN" })],
+        items: [expect.objectContaining({ title: "Linear" })],
+        failures: [
+          expect.objectContaining({
+            title: "Web Chat",
+            message: "Missing WEB_TOKEN\nSet it in your environment.",
+          }),
+        ],
       },
     });
     expect(fake.selectMessages).toContain("Couldn't add Web Chat");
+  });
+
+  it("preserves an installation failure when its recovery prompt is cancelled", async () => {
+    let prompt = 0;
+    const fake = createFakePrompter({
+      single: () => (++prompt === 1 ? "install" : Promise.reject(new WizardCancelledError())),
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        initialAddress: "channel/web",
+        deps: deps({
+          installRegistryItem: vi.fn(async () => {
+            throw new Error("Missing WEB_TOKEN\nSet it in your environment.");
+          }),
+        }),
+      }),
+    ).resolves.toMatchObject({
+      result: {
+        failures: [{ title: "Web Chat", message: expect.stringContaining("WEB_TOKEN") }],
+        cancelled: true,
+      },
+    });
+  });
+
+  it("preserves settled items when a later installation is cancelled", async () => {
+    const answers = ["install"];
+    const selections = [["channel/web"], ["connection/linear"]];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+    const installRegistryItem = vi
+      .fn<RegistryFlowDeps["installRegistryItem"]>()
+      .mockResolvedValueOnce({ output: [] })
+      .mockRejectedValueOnce(new WizardCancelledError());
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({ installRegistryItem }),
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      result: {
+        items: [{ title: "Web Chat", facts: [], output: [] }],
+        failures: [],
+        cancelled: true,
+      },
+    });
+  });
+
+  it("lets structured setup failures reach the command boundary", async () => {
+    const answers = ["install"];
+    const selections = [["channel/web"], []];
+    const fake = createFakePrompter({
+      single: () => answers.shift()!,
+      multiple: () => selections.shift()!,
+    });
+    const error = new HumanActionRequiredError({
+      kind: "vercel-cli-upgrade",
+      command: "vercel upgrade",
+      reason: "The installed Vercel CLI is too old.",
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({
+          installRegistryItem: vi.fn(async () => {
+            throw error;
+          }),
+        }),
+      }),
+    ).rejects.toBe(error);
+    expect(fake.selectMessages).not.toContain("Couldn't add Web Chat");
   });
 
   it("offers deployment once after the selected batch completes", async () => {
@@ -266,6 +552,8 @@ describe("runRegistryFlow", () => {
       single: () => answers.shift()!,
       multiple: () => ["channel/web"],
     });
+    const replaceContent = vi.fn();
+    fake.prompter.replaceContent = replaceContent;
     const flowDeps = deps({
       detectDeployment: vi.fn(async () => ({ state: "linked" as const, projectId: "prj_1" })),
       installRegistryItem: vi.fn(async () => ({
@@ -278,6 +566,7 @@ describe("runRegistryFlow", () => {
       runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps }),
     ).resolves.toMatchObject({ kind: "done", result: { deployed: "production" } });
     expect(flowDeps.runDeployFlow).toHaveBeenCalledOnce();
+    expect(replaceContent).toHaveBeenCalledWith();
     expect(fake.selectMessages).not.toContain("Add an integration");
   });
 });
