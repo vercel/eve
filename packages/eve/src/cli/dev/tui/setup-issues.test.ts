@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   BOOT_DETECTIONS,
+  CLI_MISSING_SETUP_ISSUE,
   detectSetupIssues,
   formatSetupIssuesLine,
+  LOGIN_SETUP_ISSUE,
   normalizeLocalModelEndpoint,
+  orderedSetupIssues,
   type BootDetectionContext,
 } from "./setup-issues.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
@@ -144,5 +147,28 @@ describe("formatSetupIssuesLine", () => {
         { kind: "attention", label: "Channels", command: "/channels" },
       ]),
     ).toBe("2 setup issues: AI Gateway credentials · /model, Channels · /channels");
+  });
+
+  it("formats the Vercel auth hints", () => {
+    expect(formatSetupIssuesLine([LOGIN_SETUP_ISSUE])).toBe(
+      "1 setup issue: not logged in · /vc:login",
+    );
+    expect(formatSetupIssuesLine([CLI_MISSING_SETUP_ISSUE])).toBe(
+      "1 setup issue: Vercel CLI not found · /vc:install",
+    );
+  });
+});
+
+describe("orderedSetupIssues", () => {
+  it("puts the auth issue before boot-time issues", () => {
+    const modelIssue = {
+      kind: "attention" as const,
+      label: "model provider not linked",
+      command: "/model",
+    };
+    expect(orderedSetupIssues([modelIssue], CLI_MISSING_SETUP_ISSUE)).toEqual([
+      CLI_MISSING_SETUP_ISSUE,
+      modelIssue,
+    ]);
   });
 });

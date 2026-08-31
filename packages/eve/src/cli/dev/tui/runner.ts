@@ -68,9 +68,12 @@ import {
 import type { DevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import {
   BOOT_DETECTIONS,
+  CLI_MISSING_SETUP_ISSUE,
   detectSetupIssues,
   formatSetupIssuesLine,
+  LOGIN_SETUP_ISSUE,
   normalizeLocalModelEndpoint,
+  orderedSetupIssues,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -98,6 +101,7 @@ import {
   type McpConnectionStatusTracker,
 } from "./mcp-connection-status.js";
 import type { detectProjectIdentity } from "#setup/project-resolution.js";
+import { getVercelAuthStatus, type VercelAuthStatus } from "#setup/vercel-project.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 import type { CommandLifecycle } from "../../shutdown.js";
 
@@ -459,6 +463,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   detectProjectIdentity?: typeof detectProjectIdentity;
   /** Test seam for `/info`; defaults to the filesystem application inspector. */
   inspectApplication?: typeof inspectApplication;
+  /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
+  getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
   onBootProgress?: DevBootProgressReporter;
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
@@ -467,6 +473,13 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Editing-only startup state retained until the final agent header is ready to paint. */
   startup?: TuiStartup;
 };
+
+/** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
+function authIssueForStatus(status: VercelAuthStatus): SetupIssue | undefined {
+  if (status === "logged-out") return LOGIN_SETUP_ISSUE;
+  if (status === "cli-missing") return CLI_MISSING_SETUP_ISSUE;
+  return undefined;
+}
 
 export class EveTUIRunner {
   #session: ClientSession | undefined;
@@ -494,10 +507,19 @@ export class EveTUIRunner {
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
+  readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
   readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
-  /** Cheap-and-local boot detection issues. */
+  /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
+  #disposed = false;
+  /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
+  readonly #authProbeAbort = new AbortController();
+  /** Set once setup changes Vercel state, so a late boot probe cannot paint stale guidance. */
+  #authHintStale = false;
+  /** Cheap-and-local boot detection issues, cached so the auth probe can re-combine. */
   #bootIssues: SetupIssue[] = [];
+  /** The current Vercel auth issue (login / CLI-missing), or undefined when fine. */
+  #authIssue: SetupIssue | undefined;
   /**
    * Vercel segment of the status line (link identity + session-scoped
    * pending-deploy flag). Only local sessions carry one — a remote `--url`
@@ -613,6 +635,7 @@ export class EveTUIRunner {
       });
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
+    this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
     this.#inspectApplication = options.inspectApplication ?? inspectApplication;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
@@ -693,6 +716,8 @@ export class EveTUIRunner {
       await this.#run();
     } finally {
       this.#lifecycle?.signal.removeEventListener("abort", onStop);
+      this.#disposed = true;
+      this.#authProbeAbort.abort();
       this.#subagentPump.abortAll();
       // Restore captured stdout/stderr before a fatal error reaches the CLI.
       this.#unsubscribeDevelopmentSandboxLogs?.();
@@ -1501,20 +1526,41 @@ export class EveTUIRunner {
     this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
     if (this.#renderer.renderSetupWarning === undefined) return;
     this.#paintSetupAttention();
+    if (info?.agent.model.routing.kind !== "external") this.#probeAuthIssue();
   }
 
-  /** Repaints the attention line from the cached detection issues, or clears it. */
+  /** Repaints relevant setup issues, excluding Vercel guidance for external providers. */
   #paintSetupAttention(): void {
-    if (this.#bootIssues.length > 0) {
-      this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(this.#bootIssues));
+    const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue).filter(
+      (issue) =>
+        this.#agentInfo?.agent.model.routing.kind !== "external" ||
+        !issue.command.startsWith("/vc:"),
+    );
+    if (issues.length > 0) {
+      this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
     } else {
       this.#renderer.clearSetupWarning?.();
     }
   }
 
+  /** Checks Vercel auth after boot without delaying the first prompt. */
+  async #probeAuthIssue(): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) return;
+    let status: VercelAuthStatus;
+    try {
+      status = await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
+    } catch {
+      return;
+    }
+    if (this.#disposed || this.#authHintStale) return;
+    this.#authIssue = authIssueForStatus(status);
+    this.#paintSetupAttention();
+  }
+
   /**
-   * Re-evaluates the attention line after a setup command changed local state
-   * so a fixed issue clears instead of lingering stale.
+   * Re-evaluates the attention line after a setup command changed local state,
+   * so fixed issues clear instead of lingering stale.
    */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
     const appRoot = this.#appRoot;
@@ -1524,9 +1570,16 @@ export class EveTUIRunner {
     if (info !== undefined) context.info = info;
     try {
       this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
+      this.#authIssue =
+        info?.agent.model.routing.kind === "external"
+          ? undefined
+          : authIssueForStatus(
+              await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal }),
+            );
     } catch {
       return;
     }
+    if (this.#disposed) return;
     this.#paintSetupAttention();
   }
 
@@ -1599,12 +1652,14 @@ export class EveTUIRunner {
   async #applyCommandEffect(effect: PromptCommandOutcome["effect"]): Promise<void> {
     if (effect?.kind === "model-access-changed") {
       this.#vercelStatus?.applyEffect({ kind: "refresh-identity" });
+      this.#authHintStale = true;
       await this.#refreshModelAccess();
       return;
     }
     if (effect === undefined) return;
 
     this.#vercelStatus?.applyEffect(effect);
+    this.#authHintStale = true;
     void this.#refreshSetupAttention(this.#agentInfo);
   }
 
@@ -1740,6 +1795,10 @@ export class EveTUIRunner {
     loadDevelopmentEnvironmentFiles(appRoot);
     await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
+    if (refreshedInfo?.agent.model.routing.kind === "external") {
+      this.#authIssue = undefined;
+      this.#paintSetupAttention();
+    }
     void this.#refreshSetupAttention(refreshedInfo);
   }
 

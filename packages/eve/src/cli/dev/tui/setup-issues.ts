@@ -164,6 +164,20 @@ const modelProvider: BootDetection = {
 /** The built-in boot detections, run in order. */
 export const BOOT_DETECTIONS: readonly BootDetection[] = [modelProvider];
 
+/** The logged-out hint reported by the runner's off-critical-path auth probe. */
+export const LOGIN_SETUP_ISSUE: SetupIssue = {
+  kind: "attention",
+  label: "not logged in",
+  command: "/vc:login",
+};
+
+/** The missing-CLI hint reported by the runner's off-critical-path auth probe. */
+export const CLI_MISSING_SETUP_ISSUE: SetupIssue = {
+  kind: "attention",
+  label: "Vercel CLI not found",
+  command: "/vc:install",
+};
+
 /**
  * Runs the boot detections and aggregates their issues. Each detection is
  * individually guarded: one that throws contributes nothing and never blocks
@@ -183,6 +197,14 @@ export async function detectSetupIssues(
     }),
   );
   return results.flat();
+}
+
+/** Places the auth issue before boot-time setup issues. */
+export function orderedSetupIssues(
+  bootIssues: readonly SetupIssue[],
+  authIssue: SetupIssue | undefined,
+): SetupIssue[] {
+  return authIssue === undefined ? [...bootIssues] : [authIssue, ...bootIssues];
 }
 
 /**

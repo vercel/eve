@@ -3100,6 +3100,16 @@ describe("EveTUIRunner boot setup detection", () => {
       },
     },
   };
+  const externalProviderInfo: AgentInfoResult = {
+    ...AGENT_INFO,
+    agent: {
+      ...AGENT_INFO.agent,
+      model: {
+        id: "claude-sonnet-4-5",
+        routing: { kind: "external" as const, provider: "anthropic" },
+      },
+    },
+  };
 
   function bootRunner(input: { appRoot?: string; issues: SetupIssue[] }) {
     const warnings: string[] = [];
@@ -3154,6 +3164,7 @@ describe("EveTUIRunner boot setup detection", () => {
         },
       ],
       detectProjectIdentity: vi.fn(async () => undefined),
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: {
         handle: async (command) =>
           command.name === "model"
@@ -3176,6 +3187,88 @@ describe("EveTUIRunner boot setup detection", () => {
     await runner.run();
 
     expect(warnings).toEqual(["1 setup issue: AI Gateway credentials · /model"]);
+  });
+
+  it("shows Vercel auth guidance for an AI Gateway model", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(disconnectedGatewayInfo);
+    const getAuthStatus = vi.fn(async (): Promise<"cli-missing"> => "cli-missing");
+    const renderSetupWarning = vi.fn();
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      client,
+      getVercelAuthStatus: getAuthStatus,
+      name: "Weather Agent",
+      renderer: fakeRenderer({ renderSetupWarning }),
+      serverUrl: "http://localhost:3000",
+      session: stubSession(),
+    });
+
+    await runner.run();
+    await vi.waitFor(() =>
+      expect(renderSetupWarning).toHaveBeenCalledWith(
+        "1 setup issue: Vercel CLI not found · /vc:install",
+      ),
+    );
+    expect(getAuthStatus).toHaveBeenCalledOnce();
+  });
+
+  it("does not probe or show Vercel auth guidance for an external model provider", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(externalProviderInfo);
+    const getAuthStatus = vi.fn(async (): Promise<"cli-missing"> => "cli-missing");
+    const renderSetupWarning = vi.fn();
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [
+        {
+          id: "vercel-test",
+          detect: () => [
+            { kind: "attention", label: "not logged in", command: "/vc:login" },
+            { kind: "attention", label: "Channels", command: "/channels" },
+          ],
+        },
+      ],
+      client,
+      getVercelAuthStatus: getAuthStatus,
+      name: "Weather Agent",
+      renderer: fakeRenderer({ renderSetupWarning }),
+      serverUrl: "http://localhost:3000",
+      session: stubSession(),
+    });
+
+    await runner.run();
+
+    expect(getAuthStatus).not.toHaveBeenCalled();
+    expect(renderSetupWarning).toHaveBeenCalledWith("1 setup issue: Channels · /channels");
+  });
+
+  it("clears Vercel guidance immediately when model setup selects an external provider", async () => {
+    let detectionCount = 0;
+    const clearSetupWarning = vi.fn();
+    const renderSetupWarning = vi.fn();
+    const { runner } = providerSetupRefreshRunner({
+      refreshInfo: async () => externalProviderInfo,
+      renderer: { clearSetupWarning, renderSetupWarning },
+      bootDetections: [
+        {
+          id: "vercel-test",
+          detect: () => {
+            detectionCount += 1;
+            if (detectionCount === 1) {
+              return [{ kind: "attention", label: "not logged in", command: "/vc:login" }];
+            }
+            return new Promise<SetupIssue[]>(() => {});
+          },
+        },
+      ],
+    });
+
+    await runner.run();
+
+    expect(renderSetupWarning).toHaveBeenCalledWith("1 setup issue: not logged in · /vc:login");
+    expect(clearSetupWarning).toHaveBeenCalledOnce();
   });
 
   it("opens initial model onboarding without Vercel prerequisites", async () => {
@@ -3210,6 +3303,7 @@ describe("EveTUIRunner boot setup detection", () => {
           ],
         },
       ],
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: { handle },
     });
 

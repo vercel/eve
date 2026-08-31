@@ -104,6 +104,7 @@ void (async () => {
       name: "Packed install model command",
       appRoot: consumerRoot,
       initialInput: "/model",
+      getVercelAuthStatus: async () => "authenticated",
       promptCommandHandler: createPromptCommandHandler({
         target: {
           kind: "local",
