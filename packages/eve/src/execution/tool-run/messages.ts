@@ -113,9 +113,14 @@ interface RunContext {
 /** Prefix marking a per-request answer hook so delivery resumes it directly. */
 const ANSWER_HOOK_PREFIX = "eve:tool-run-answer:";
 
-/** A tool run's per-request answer hook is resumed with a plain input response. */
-export function isToolRunAnswerToken(token: string): boolean {
-  return token.startsWith(ANSWER_HOOK_PREFIX);
+/**
+ * A tool run's per-request answer hook is resumed with a plain input response.
+ * With `runId`, narrows to the answer hooks of that one run.
+ */
+export function isToolRunAnswerToken(token: string, runId?: string): boolean {
+  return token.startsWith(
+    runId === undefined ? ANSWER_HOOK_PREFIX : `${ANSWER_HOOK_PREFIX}${runId}:`,
+  );
 }
 
 /** Stamps a run's identity and owner onto the context its body receives. */

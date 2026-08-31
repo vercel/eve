@@ -20,6 +20,7 @@ import {
   prepareAgentStart,
 } from "#harness/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getToolRuns, recordToolRun } from "#harness/tool-runs.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -337,6 +338,54 @@ describe("resolvePendingRuntimeActions", () => {
 
     expect(resolved.outcome).toBe("resolved");
     expect(getProxyInputRequests(resolved.session.state).size).toBe(0);
+  });
+
+  it("forgets a finished workflow tool run and withdraws only its unanswered requests", async () => {
+    const parked = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          input: { service: "api" },
+          kind: "workflow-tool-call",
+          toolName: "deploy",
+          workflowId: "workflow//./agent/tools/deploy//execute",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+    });
+    const withRun = recordToolRun(parked, {
+      callId: "call-1",
+      hookToken: "eve:tool-run:op-1",
+      runId: "run-1",
+      toolName: "deploy",
+    });
+    const answerToken = "eve:tool-run-answer:run-1:0";
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["other-request", { childContinuationToken: CHILD_CONTINUATION_TOKEN, kind: "question" }],
+      ],
+      forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
+      session: upsertProxyInputRequests({
+        entries: [[answerToken, { childContinuationToken: answerToken, kind: "question" }]],
+        forChildContinuationToken: answerToken,
+        session: withRun,
+      }),
+    });
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          { callId: "call-1", kind: "tool-result", output: { deployed: true }, toolName: "deploy" },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(getToolRuns(resolved.session.state)).toEqual([]);
+    expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual(["other-request"]);
   });
 
   it("accepts a dispatch-origin failure result by callId", async () => {

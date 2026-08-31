@@ -115,23 +115,30 @@ export function clearProxyInputRequestsForChild(
   session: HarnessSession,
   childContinuationToken: string,
 ): HarnessSession {
+  return clearProxyInputRequestsWhere(
+    session,
+    (route) => route.childContinuationToken === childContinuationToken,
+  );
+}
+
+/** Removes every proxy route the predicate selects. */
+export function clearProxyInputRequestsWhere(
+  session: HarnessSession,
+  select: (route: ProxyInputRequest) => boolean,
+): HarnessSession {
   const current = readMap(session.state);
   const next: Record<string, ProxyInputRequest> = {};
   let changed = false;
 
   for (const [requestId, route] of Object.entries(current)) {
-    if (route.childContinuationToken === childContinuationToken) {
+    if (select(route)) {
       changed = true;
       continue;
     }
     next[requestId] = route;
   }
 
-  if (!changed) {
-    return session;
-  }
-
-  return writeMap(session, next);
+  return changed ? writeMap(session, next) : session;
 }
 
 /** Removes only the request IDs whose responses were successfully forwarded. */
@@ -158,17 +165,7 @@ export function clearProxyInputRequestsForTask(
   session: HarnessSession,
   taskId: string,
 ): HarnessSession {
-  const current = readMap(session.state);
-  const next: Record<string, ProxyInputRequest> = {};
-  let changed = false;
-  for (const [requestId, route] of Object.entries(current)) {
-    if (route.taskId === taskId) {
-      changed = true;
-    } else {
-      next[requestId] = route;
-    }
-  }
-  return changed ? writeMap(session, next) : session;
+  return clearProxyInputRequestsWhere(session, (route) => route.taskId === taskId);
 }
 
 /**
