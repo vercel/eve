@@ -6,7 +6,7 @@ import {
   isDynamicSentinel,
   type DynamicResolveContext,
   type DynamicSentinel,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Optional overrides that eve forwards to the AI SDK model runtime call for
@@ -201,12 +201,12 @@ export interface AgentExperimentalDefinition {
    */
   readonly instrumentationProviders?: boolean;
   /**
-   * Keeps this agent's delegated subagent sessions alive after they answer.
-   * The model can pass `agentId` to a subagent tool to continue a previous
-   * delegation, and the system prompt documents the `<agents>` listing.
-   * When unset, delegated children run as one-shot tasks.
+   * Runs this agent's delegated subagent calls as durable background tasks.
+   * The originating tool call returns a task receipt immediately and the
+   * model manages the work through the `task_*` framework tools. Root agents
+   * only.
    */
-  readonly subagentPersistentSessions?: boolean;
+  readonly tasks?: boolean;
   /**
    * Durable Workflow runtime configuration. Root agents may use this to select
    * the Workflow world backing sessions and runs.

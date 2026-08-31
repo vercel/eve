@@ -43,6 +43,12 @@ const parkedHandle: AgentHandle = {
   phase: "parked",
 };
 
+const addressedHandle: AgentHandle = {
+  address,
+  identity,
+  phase: "addressed",
+};
+
 describe("deriveAgentOperationId / deriveAgentId", () => {
   it("is deterministic on parent-controlled inputs and independent of the child session", () => {
     const again = deriveAgentOperationId({
@@ -105,8 +111,27 @@ describe("getAgentHandleStore", () => {
 
 describe("assertPersistableAgentHandleStore", () => {
   it("returns a valid store unchanged in shape", () => {
-    expect(assertPersistableAgentHandleStore({ handles: [parkedHandle] })).toEqual({
-      handles: [parkedHandle],
+    expect(assertPersistableAgentHandleStore({ handles: [addressedHandle] })).toEqual({
+      handles: [addressedHandle],
+    });
+  });
+
+  it("preserves a remote child's creation-time credential resolver", () => {
+    const remoteHandle: AgentHandle = {
+      address: {
+        callbackBaseUrl: "https://parent.example.com",
+        credentialResolver: { resolverId: "dynamic-credentials-step" },
+        kind: "agent/remote",
+        sessionId: "remote-child",
+        url: "https://remote.example.com",
+      },
+      identity,
+      lastStatus: "waiting",
+      phase: "parked",
+    };
+
+    expect(assertPersistableAgentHandleStore({ handles: [remoteHandle] })).toEqual({
+      handles: [remoteHandle],
     });
   });
 

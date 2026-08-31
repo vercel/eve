@@ -10,6 +10,31 @@ Important naming note:
 - The current published package name is `eve`.
 - The CLI binary is `eve`.
 
+## Find the page for your task
+
+| To do this                                               | Read this                                                                              |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Create a project, or understand the file layout          | [Getting Started](./getting-started.mdx)                                               |
+| Set the model, reasoning, or other agent-wide config     | [Agents](./agent-config.md)                                                            |
+| Change what the agent does and how it behaves            | [Instructions](./instructions.mdx)                                                     |
+| Give the agent a typed capability it can call            | [Tools](./tools/overview.mdx)                                                          |
+| Require approval, or ask the user something mid-turn     | [Human in the Loop](./tools/human-in-the-loop.md)                                      |
+| Call an external HTTP API or MCP server                  | [Connections](./connections/overview.mdx)                                              |
+| Add a messaging surface (Slack, Discord, iMessage, …)    | [Channels](./channels/overview.mdx)                                                    |
+| Expose your own HTTP route as a conversation surface     | [Custom Channels](./channels/custom.mdx)                                               |
+| Package a procedure the agent loads only when it applies | [Skills](./skills.mdx)                                                                 |
+| Carry state across turns, or shape what the model sees   | [State](./concepts/state.md), [Context Control](./concepts/context-control.md)         |
+| Run commands or untrusted code in isolation              | [Sandboxes](./sandbox.mdx)                                                             |
+| Delegate work to a specialist child agent                | [Subagents](./subagents/index.mdx)                                                     |
+| Run work on a recurring schedule                         | [Schedules](./schedules.mdx)                                                           |
+| Install an existing integration instead of writing one   | [Add Integrations](./install-integrations.mdx)                                         |
+| Link a Vercel project and deploy to production           | [Deploy to Vercel](./guides/deployment/vercel.mdx)                                     |
+| Self-host, or compare hosting strategies                 | [Deployment](./guides/deployment/overview.md)                                          |
+| Authorize routes, sessions, and per-user access          | [Authentication](./guides/auth-and-route-protection.md)                                |
+| Build a web UI, or stream a session to a client          | [Client SDK](./guides/client/overview.mdx), [Frontend](./guides/frontend/overview.mdx) |
+| Test the agent's behavior                                | [Evals](./evals/overview.mdx)                                                          |
+| Look up a CLI command or an exported type                | [CLI](./reference/cli.md), [TypeScript API](./reference/typescript-api.md)             |
+
 ## Legal and safeguards
 
 eve is in preview; the framework, APIs, documentation, and behavior may change before general availability.
@@ -24,14 +49,9 @@ Require human approval or other safeguards for sensitive, irreversible, regulate
 
 Unless you configure stricter controls, eve agents may operate with permissive settings, including tool execution without human approval where approval is omitted and sandbox network egress that is not deny-all. Do not rely on model behavior alone to prevent sensitive or irreversible actions.
 
-Casing convention:
-
-- Use Title Case for page `title` frontmatter and `meta.json` section titles (Fumadocs renders the page `title` as both the sidebar entry and the `<h1>`, so one casing covers both) — e.g. `Execution Model & Durability`, `Dynamic Capabilities`, `Build an Agent`.
-- Use sentence case for in-page headings (`##` and below). Capitalize only the first word plus proper nouns/acronyms — e.g. `Next.js`, `SvelteKit`, `Slack`, `GitHub`, `CLI`, `TypeScript API`, `agent.ts`.
-
 ## Read this first
 
-Read in this order:
+For a full picture rather than a single task, read in this order:
 
 1. [Getting Started](./getting-started.mdx)
 2. [Tutorial](./tutorial/first-agent.mdx)
@@ -100,8 +120,3 @@ session without leaking that routing identity into the HTTP client contract.
 - Then learn the durable runtime model: HITL, session context, sessions, streaming, and
   ID-addressed follow-ups and channel address routing.
 - Then add advanced features: subagents, schedules, route protection, deployment.
-
-## Good companions in this repo
-
-- Weather-focused smoke/dev fixture: [`../apps/fixtures/weather-agent`](../apps/fixtures/weather-agent)
-- Public API source of truth: [`../packages/eve/src/public/index.ts`](../packages/eve/src/public/index.ts)

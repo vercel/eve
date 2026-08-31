@@ -6,7 +6,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { ContextContainer } from "#context/container.js";
 import { RuntimeModelMetadataCacheKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { defineDynamic } from "#public/definitions/tool.js";
+import { defineDynamic } from "#dynamic/definition.js";
 import type { RuntimeModelCatalog } from "#runtime/agent/model-catalog.js";
 import {
   loadDynamicRuntimeModelDefinition,

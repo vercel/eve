@@ -2,7 +2,6 @@ import { join, relative, resolve } from "node:path";
 import { discoverConnectionSources } from "#discover/connections.js";
 import { createDiscoverErrorDiagnostic, type DiscoverDiagnostic } from "#discover/diagnostics.js";
 import {
-  detectRootNamespaceCollisions,
   discoverExtensionMountDeclarations,
   resolveExtensionMounts,
 } from "#discover/discover-agent.js";
@@ -24,6 +23,7 @@ import {
 } from "#discover/grammar.js";
 import { DISCOVER_HOOKS_DIRECTORY_INVALID } from "#discover/grammar.js";
 import { discoverLibSources } from "#discover/lib.js";
+import { discoverMemorySources } from "#discover/memory.js";
 import {
   type CreateAgentSourceManifestInput,
   createAgentSourceManifest,
@@ -232,6 +232,13 @@ async function discoverLocalSubagentPackage(input: {
   });
   diagnostics.push(...connectionsResult.diagnostics);
 
+  const memoryResult = await discoverMemorySources({
+    rootEntries,
+    rootPath: input.subagentRoot,
+    source: input.source,
+  });
+  diagnostics.push(...memoryResult.diagnostics);
+
   const sandboxResult = await discoverSandboxSource({
     rootEntries,
     rootPath: input.subagentRoot,
@@ -290,14 +297,6 @@ async function discoverLocalSubagentPackage(input: {
     source: input.source,
   });
   diagnostics.push(...extensionsResult.diagnostics);
-  diagnostics.push(
-    ...detectRootNamespaceCollisions({
-      agentRoot: input.subagentRoot,
-      namespaces: extensionsResult.mounts.map((mount) => mount.namespace),
-      sources: [...toolsResult.sources, ...connectionsResult.connections, ...skillsResult.skills],
-    }),
-  );
-
   const resolvedExtensions = await resolveExtensionMounts({
     agentRoot: input.subagentRoot,
     appRoot: input.appRoot,
@@ -314,6 +313,7 @@ async function discoverLocalSubagentPackage(input: {
     extensions: extensionsResult.mounts.map((mount) => mount.mountRef),
     resolvedExtensions: resolvedExtensions.mounts,
     hooks: hooksResult.sources,
+    memories: memoryResult.memories,
     lib: libResult.lib,
     instructions: instructionsResult.instructions,
     sandbox: sandboxResult.sandbox,

@@ -3,7 +3,7 @@ import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
@@ -120,6 +120,7 @@ export function setPendingRuntimeActionBatch(input: {
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
+  assertUniqueRuntimeActionCallIds(input.actions);
   const state = { ...input.session.state };
   state[PENDING_RUNTIME_ACTION_BATCH_KEY] = {
     actions: [...input.actions],
@@ -128,6 +129,17 @@ export function setPendingRuntimeActionBatch(input: {
   } satisfies PendingRuntimeActionBatch;
 
   return { ...input.session, state };
+}
+
+/** Rejects an ambiguous action batch before any result or side effect can bind by call id. */
+export function assertUniqueRuntimeActionCallIds(actions: readonly RuntimeActionRequest[]): void {
+  const seen = new Set<string>();
+  for (const action of actions) {
+    if (seen.has(action.callId)) {
+      throw new Error(`Runtime action batch contains duplicate callId "${action.callId}".`);
+    }
+    seen.add(action.callId);
+  }
 }
 
 /**
@@ -202,13 +214,14 @@ export async function resolvePendingRuntimeActions(input: {
   if (input.emit !== undefined) {
     for (const result of readyResults) {
       if (result.kind === "subagent-result" && result.isError !== true) {
+        const backgroundTask = readBackgroundTaskReceipt(result);
+        const data = {
+          callId: result.callId,
+          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+          subagentName: result.subagentName,
+        };
         await input.emit({
-          data: {
-            callId: result.callId,
-            output:
-              typeof result.output === "string" ? result.output : JSON.stringify(result.output),
-            subagentName: result.subagentName,
-          },
+          data: backgroundTask === undefined ? data : { ...data, backgroundTask },
           type: "subagent.completed",
         } satisfies Extract<UnstampedMessageStreamEvent, { type: "subagent.completed" }>);
       }
@@ -235,6 +248,11 @@ export async function resolvePendingRuntimeActions(input: {
     // Dispatch failures never settle handles: the dispatch step already
     // rejected (deleted) the handle when it synthesized the failure.
     if (result.kind !== "subagent-result" || result.origin !== "child") {
+      continue;
+    }
+    // A background receipt confirms task admission, not child-turn settlement.
+    // The task snapshot later carries the actual parked/terminal outcome.
+    if (readBackgroundTaskReceipt(result) !== undefined) {
       continue;
     }
     const handle = findRunningAgentHandle(nextSession.state, { callId: result.callId });
@@ -329,6 +347,12 @@ export async function resolvePendingRuntimeActions(input: {
     outcome: "resolved",
     session: nextSession,
   };
+}
+
+function readBackgroundTaskReceipt(
+  result: Extract<RuntimeActionResult, { kind: "subagent-result" }>,
+): { readonly status: "working"; readonly taskId: string } | undefined {
+  return "backgroundTask" in result ? result.backgroundTask : undefined;
 }
 
 /**

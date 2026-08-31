@@ -10,6 +10,7 @@
  * ```
  * {
  *   packageName: string,           // npm package to resolve via require
+ *   packageJsonName?: string,      // original npm name when packageName is an alias
  *   compiledPath: string,          // subdir under compiledRoot to write into
  *
  *   // Declaration emission (pick one)
@@ -409,16 +410,27 @@ export function createOptionalNativeStubPlugin(packageNames) {
  *   these files changes the cached stamp is invalidated and vendoring re-runs.
  *   Pass everything that influences the output: the orchestrator entry script,
  *   the `_shared.mjs` library, per-package configs, and `.d.ts` declarations.
+ * @param {Record<string, string>} [options.toolVersions]
+ *   Resolved versions of build tools whose output contributes to vendored files.
  */
-export async function runVendor({ packageRoot, compiledRoot, modules, scriptFiles }) {
+export async function runVendor({
+  packageRoot,
+  compiledRoot,
+  modules,
+  scriptFiles,
+  toolVersions = {},
+}) {
   const stampPath = join(compiledRoot, ".vendor-stamp.json");
   const lockPath = join(compiledRoot, ".vendor-lock");
 
   await mkdir(compiledRoot, { recursive: true });
 
-  const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot });
+  const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot, toolVersions });
 
-  if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+  if (
+    stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+    (await compiledModuleEntrypointsExist({ compiledRoot, modules }))
+  ) {
     console.log("Compiled vendor modules are already up to date.");
     return;
   }
@@ -426,10 +438,18 @@ export async function runVendor({ packageRoot, compiledRoot, modules, scriptFile
   await acquireLock(lockPath);
   try {
     // A peer process may have completed while we waited for the lock.
-    if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+    if (
+      stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+      (await compiledModuleEntrypointsExist({ compiledRoot, modules }))
+    ) {
       console.log("Compiled vendor modules are already up to date.");
       return;
     }
+
+    // A matching stamp must not survive a repair attempt. Otherwise another
+    // process could accept directories created by an incomplete build as a
+    // valid cache hit while this process is writing, or after it fails.
+    await rm(stampPath, { force: true });
 
     const bundledModules = modules.filter((module) => module.typeOnly !== true);
     const typeOnlyModules = modules.filter((module) => module.typeOnly === true);
@@ -450,6 +470,21 @@ export async function runVendor({ packageRoot, compiledRoot, modules, scriptFile
   } finally {
     await releaseLock(lockPath);
   }
+}
+
+async function compiledModuleEntrypointsExist({ compiledRoot, modules }) {
+  const paths = modules.flatMap((module) =>
+    (module.entries ?? [{ outputPath: "index" }]).map((entry) =>
+      join(compiledRoot, module.compiledPath, `${entry.outputPath}.js`),
+    ),
+  );
+  const entries = await Promise.all(
+    paths.map(async (path) => {
+      const stats = await stat(path).catch(() => null);
+      return stats?.isFile() ?? false;
+    }),
+  );
+  return entries.every(Boolean);
 }
 
 /**
@@ -513,7 +548,7 @@ async function pathExists(path) {
   }
 }
 
-async function findPackageJson(packageName, packageRoot) {
+async function findPackageJson(packageName, packageRoot, packageJsonName = packageName) {
   let currentPath;
   try {
     currentPath = dirname(require.resolve(packageName, { paths: [packageRoot] }));
@@ -527,7 +562,7 @@ async function findPackageJson(packageName, packageRoot) {
 
     if (await pathExists(packageJsonPath)) {
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
-      if (packageJson.name === packageName) {
+      if (packageJson.name === packageJsonName) {
         return {
           packageJson,
           packageJsonPath,
@@ -542,7 +577,7 @@ async function findPackageJson(packageName, packageRoot) {
     const packageJsonPath = join(currentPath, "package.json");
     if (await pathExists(packageJsonPath)) {
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
-      if (packageJson.name === packageName) {
+      if (packageJson.name === packageJsonName) {
         return {
           packageJson,
           packageJsonPath,
@@ -567,7 +602,11 @@ async function copyLicense(sourceRoot, destinationRoot) {
 
 async function prepareCompiledModule({ module, compiledRoot, packageRoot }) {
   const destinationRoot = join(compiledRoot, module.compiledPath);
-  const packageInfo = await findPackageJson(module.packageName, packageRoot);
+  const packageInfo = await findPackageJson(
+    module.packageName,
+    packageRoot,
+    module.packageJsonName,
+  );
 
   await rm(destinationRoot, { recursive: true, force: true });
   await mkdir(destinationRoot, { recursive: true });
@@ -619,16 +658,8 @@ function getModulePlatform(module) {
   return module.platform ?? "node";
 }
 
-function getDefaultResolve(platform) {
-  return platform === "neutral"
-    ? {
-        conditionNames: ["import", "default"],
-        mainFields: ["module", "main"],
-      }
-    : {
-        conditionNames: ["node", "import", "default"],
-        mainFields: ["module", "main"],
-      };
+function getDefaultResolve() {
+  return { mainFields: ["module", "main"] };
 }
 
 async function bundleStandaloneModule({ destinationRoot, module, packageInfo, packageRoot }) {
@@ -649,7 +680,7 @@ async function bundleStandaloneModule({ destinationRoot, module, packageInfo, pa
     moduleTypes: module.loader ?? {},
     platform,
     plugins: module.plugins ?? [],
-    resolve: module.resolve ?? getDefaultResolve(platform),
+    resolve: module.resolve ?? getDefaultResolve(),
     treeshake: true,
     output: {
       banner: module.banner ?? "/* oxlint-disable */",
@@ -795,7 +826,7 @@ async function writeTypeOnlyModule({ module, compiledRoot, packageRoot }) {
  * a no-op, which makes `build:compiled` safe to invoke concurrently from
  * sibling Turbo tasks without racing on shared destination directories.
  */
-async function computeStamp({ scriptFiles, modules, packageRoot }) {
+async function computeStamp({ scriptFiles, modules, packageRoot, toolVersions }) {
   const scriptHash = createHash("sha256");
   // Hash file contents in a deterministic order so identical inputs always
   // produce identical stamps.
@@ -809,13 +840,20 @@ async function computeStamp({ scriptFiles, modules, packageRoot }) {
 
   const moduleVersions = {};
   for (const module of modules) {
-    const { packageJson } = await findPackageJson(module.packageName, packageRoot);
+    const { packageJson } = await findPackageJson(
+      module.packageName,
+      packageRoot,
+      module.packageJsonName,
+    );
     moduleVersions[module.packageName] = packageJson.version ?? "0.0.0";
   }
 
   return {
     moduleVersions,
     scriptHash: scriptHash.digest("hex"),
+    toolVersions: Object.fromEntries(
+      Object.entries(toolVersions).sort(([a], [b]) => a.localeCompare(b)),
+    ),
   };
 }
 

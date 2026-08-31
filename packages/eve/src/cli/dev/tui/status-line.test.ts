@@ -144,6 +144,28 @@ describe("buildStatusLine", () => {
     expect(noProject).toBe("m via ai-gateway(oidc)");
   });
 
+  it("right-aligns monochrome build status and preserves it at narrow widths", () => {
+    const status = (phase: "building" | "complete", width = 120) =>
+      buildStatusLine({
+        devBuild: { phase, summary: "agent/instructions.md changed" },
+        model: "anthropic/claude-sonnet-5",
+        theme,
+        width,
+      })!;
+
+    const building = status("building");
+    const complete = status("complete");
+    expect(stripAnsi(building)).toMatch(
+      /^anthropic\/claude-sonnet-5 +▪ agent\/instructions\.md updating…$/u,
+    );
+    expect(stripAnsi(complete)).toMatch(
+      /^anthropic\/claude-sonnet-5 +✓ agent\/instructions\.md updated$/u,
+    );
+    expect(visibleLength(complete)).toBe(120);
+    expect(complete).not.toContain("\x1b[32m");
+    expect(stripAnsi(status("complete", 20))).toBe("✓ agent/instructions");
+  });
+
   it("leads with the transient logs hint and keeps it as width narrows", () => {
     const input = {
       logLevel: "sandbox",
@@ -218,11 +240,19 @@ describe("buildStatusLine", () => {
 
     const chatgpt = buildStatusLine({
       model: "openai/gpt-5.6-sol",
-      endpoint: { kind: "external", provider: "codex" },
+      endpoint: { kind: "chatgpt", state: "ready" },
       theme: plain,
       width: 120,
     });
     expect(chatgpt).toBe("openai/gpt-5.6-sol via chatgpt-sub⌝");
+
+    const chatgptLogin = buildStatusLine({
+      model: "openai/gpt-5.6-sol",
+      endpoint: { kind: "chatgpt", state: "reauth-required" },
+      theme: plain,
+      width: 120,
+    });
+    expect(chatgptLogin).toBe("openai/gpt-5.6-sol  ⚠ chatgpt-sub login · codex login");
 
     const notConnected = buildStatusLine({
       model: "m",
@@ -264,13 +294,21 @@ describe("buildStatusLine", () => {
   });
 
   it("renders ASCII glyphs when unicode is unavailable", () => {
-    const line = buildStatusLine({
+    const gateway = buildStatusLine({
       model: "m",
       endpoint: { kind: "gateway", connected: false },
       theme: ascii,
       width: 120,
     });
-    expect(stripAnsi(line!)).toBe("m  ! ai-gateway");
+    expect(stripAnsi(gateway!)).toBe("m  ! ai-gateway");
+
+    const chatgpt = buildStatusLine({
+      model: "openai/gpt-5.6-sol",
+      endpoint: { kind: "chatgpt", state: "ready" },
+      theme: ascii,
+      width: 120,
+    });
+    expect(stripAnsi(chatgpt!)).toBe("openai/gpt-5.6-sol via chatgpt-sub^");
   });
 
   it("renders the remote badge first and projects each authentication state", () => {

@@ -19,6 +19,8 @@ describe("discoverSubagents (memory)", () => {
           'throw new Error("local subagent modules should not execute during discovery");\n',
         "subagents/researcher/lib/client.js":
           'throw new Error("subagent lib modules should not execute during discovery");\n',
+        "subagents/researcher/memory/profile.ts":
+          'throw new Error("subagent memory modules should not execute during discovery");\n',
         "subagents/researcher/sandbox/sandbox.js":
           'throw new Error("subagent sandboxes should not execute during discovery");\n',
         "subagents/researcher/subagents/reviewer/agent.js":
@@ -67,11 +69,20 @@ describe("discoverSubagents (memory)", () => {
         instructions: [
           {
             definition: {
-              markdown: "Research tasks thoroughly.",
+              content: "Research tasks thoroughly.",
+              role: "system",
             },
             sourceKind: "markdown",
             logicalPath: "instructions.md",
             sourceId: "instructions.md",
+          },
+        ],
+        memories: [
+          {
+            logicalPath: "memory/profile.ts",
+            slot: "profile",
+            sourceId: "memory/profile.ts",
+            sourceKind: "module",
           },
         ],
         sandbox: {
@@ -91,7 +102,7 @@ describe("discoverSubagents (memory)", () => {
             sourceId: "tools/search.js",
           },
         ],
-        version: 12,
+        version: 15,
       },
       rootPath: researcherRoot,
       sourceId: "subagents/researcher",
@@ -119,7 +130,8 @@ describe("discoverSubagents (memory)", () => {
         instructions: [
           {
             definition: {
-              markdown: "Review drafts for clarity.",
+              content: "Review drafts for clarity.",
+              role: "system",
             },
             sourceKind: "markdown",
             logicalPath: "instructions.md",
@@ -136,7 +148,7 @@ describe("discoverSubagents (memory)", () => {
           logicalPath: "agent.js",
           sourceId: "agent.js",
         },
-        version: 12,
+        version: 15,
       },
       rootPath: reviewerRoot,
       sourceId: "subagents/reviewer",
@@ -215,7 +227,8 @@ describe("discoverSubagents (memory)", () => {
     expect(result.manifest.subagents[0]?.manifest.instructions).toEqual([
       {
         definition: {
-          markdown: "Research carefully.",
+          content: "Research carefully.",
+          role: "system",
         },
         sourceKind: "markdown",
         logicalPath: "instructions.md",

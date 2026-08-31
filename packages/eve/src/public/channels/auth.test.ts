@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import {
   type AuthFn,
   createIpAllowList,
@@ -262,12 +262,12 @@ describe("createUnauthorizedResponse", () => {
     const response = createUnauthorizedResponse({
       challenges: [
         { scheme: "Basic", parameters: { realm: "weather" } },
-        { scheme: "Bearer", parameters: { error: 'need "token"' } },
+        { scheme: "Bearer", parameters: { error: 'need \\"token"' } },
       ],
     });
 
     expect(response.headers.get("www-authenticate")).toContain('Basic realm="weather"');
-    expect(response.headers.get("www-authenticate")).toMatch(/Bearer error="need \\"token\\""/);
+    expect(response.headers.get("www-authenticate")).toMatch(/Bearer error="need \\\\\\"token\\""/);
   });
 });
 
@@ -570,6 +570,60 @@ describe("routeAuth", () => {
     }
   });
 
+  it("marks a supplied Bearer token as invalid after all Bearer strategies decline it", async () => {
+    const first = vi.fn(() => null);
+    const second = vi.fn(() => null);
+    const request = new Request(TEST_ROUTE_URL, {
+      headers: { authorization: "Bearer expired-or-malformed" },
+      method: "POST",
+    });
+    const result = await routeAuth(request, [
+      withAuthChallenges(first, [{ scheme: "Bearer" }]),
+      withAuthChallenges(second, [{ scheme: "Bearer" }]),
+    ]);
+
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).toHaveBeenCalledOnce();
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.status).toBe(401);
+      expect(result.headers.get("www-authenticate")).toBe('Bearer error="invalid_token"');
+    }
+  });
+
+  it("keeps a missing Bearer credential as a bare challenge", async () => {
+    const result = await routeAuth(
+      makeRequest(),
+      withAuthChallenges(() => null, [{ scheme: "Bearer" }]),
+    );
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      expect(result.headers.get("www-authenticate")).toBe("Bearer");
+    }
+  });
+
+  it("does not label a rejected Basic credential as an invalid Bearer token", async () => {
+    const result = await routeAuth(
+      new Request(TEST_ROUTE_URL, {
+        headers: { authorization: `Basic ${Buffer.from("ops:wrong").toString("base64")}` },
+        method: "POST",
+      }),
+      [
+        httpBasic({ password: "top-secret", username: "ops" }),
+        withAuthChallenges(() => null, [{ scheme: "Bearer" }]),
+      ],
+    );
+
+    expect(result).toBeInstanceOf(Response);
+    if (result instanceof Response) {
+      const challenge = result.headers.get("www-authenticate");
+      expect(challenge).toContain('Basic realm="eve"');
+      expect(challenge).toContain("Bearer");
+      expect(challenge).not.toContain("invalid_token");
+    }
+  });
+
   it("advertises both Basic and Bearer for a mixed httpBasic + jwtHmac route", async () => {
     const request = makeRequest();
     const result = await routeAuth(request, [
@@ -814,6 +868,19 @@ describe("verifyVercelOidc", () => {
           subject: "owner:acme:project:weather-agent:environment:production",
         });
       }
+    } finally {
+      issuer.restore();
+    }
+  });
+
+  it("authenticates a current-project token from the global Vercel issuer", async () => {
+    const issuer = await installMockedVercelIssuer("global-issuer", "global");
+    try {
+      const token = await issuer.signToken({ project_id: "prj_current" });
+
+      await expect(
+        verifyVercelOidc(token, { currentVercelProject: { projectId: "prj_current" } }),
+      ).resolves.toMatchObject({ ok: true });
     } finally {
       issuer.restore();
     }
@@ -1246,7 +1313,10 @@ describe("verifyVercelOidc", () => {
  * jose's module-level JWKS cache (keyed on the JWKS URL) does not bleed
  * keys across tests when several cases run in the same file.
  */
-async function installMockedVercelIssuer(slug: string): Promise<{
+async function installMockedVercelIssuer(
+  slug: string,
+  issuerMode: "global" | "team" = "team",
+): Promise<{
   readonly issuer: string;
   readonly signToken: (
     claims: Record<string, unknown>,
@@ -1255,7 +1325,8 @@ async function installMockedVercelIssuer(slug: string): Promise<{
   readonly restore: () => void;
 }> {
   const teamSlug = `${slug}-${crypto.randomUUID()}`;
-  const issuer = `https://oidc.vercel.com/${teamSlug}`;
+  const issuer =
+    issuerMode === "global" ? "https://oidc.vercel.com" : `https://oidc.vercel.com/${teamSlug}`;
   const audience = `https://vercel.com/${teamSlug}`;
   const jwksUrl = `${issuer}/.well-known/jwks.json`;
   const discoveryUrl = `${issuer}/.well-known/openid-configuration`;

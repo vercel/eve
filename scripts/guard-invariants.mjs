@@ -92,20 +92,31 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
- *
- *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
- *             `harness/instrumentation/lifecycle.ts` must not import from
- *             `ai`: its event payloads are eve's published shape, so deriving
- *             them from the model SDK's callback types would make an SDK
- *             upgrade a breaking change for every provider. Map at the bridge.
+ *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
+ *             harness. The lifecycle contract must not import from `ai`, harness
+ *             code may import only runtime facade types, and execution may use
+ *             only runtime entrypoints and cancellation-state preservation.
+ *   rule 38 — Workspace build scripts must not launch a nested
+ *             `pnpm --filter eve build`. Turbo owns workspace dependency
+ *             ordering; nested builds race on eve's clean-and-publish dist
+ *             directory and let consumers observe a partial package.
+ *   rule 40 — Every shipped wire-version module
+ *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
+ *             `*-wire.vN.test.ts`. Version modules, tests, and snapshots already
+ *             present on main are immutable. The session-inbox registry must
+ *             also be contiguous, name every module, and identify its highest
+ *             version as current. Wire versions are append-only protocol
+ *             history: change the contract by adding a version and migration,
+ *             never by updating a historical schema and its snapshot together.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
-import { readFile, readdir, lstat } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { checkExtensionCapabilityContracts } from "./extension-capability-contracts.mjs";
@@ -346,7 +357,23 @@ function checkRule35(posix, lines, violations) {
 
 // ---------- Rule 37: instrumentation lifecycle provider boundary ----------
 
-const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation/lifecycle.ts";
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/instrumentation/lifecycle.ts";
+const HARNESS_RUNTIME_IMPORTS = new Map([
+  ["InstrumentationAttempt", "type"],
+  ["InstrumentationStepScope", "type"],
+  ["SessionInstrumentation", "type"],
+]);
+const EXECUTION_INSTRUMENTATION_IMPORTS = new Map([
+  [
+    "#instrumentation/runtime.js",
+    new Map([
+      ["bindSessionInstrumentation", "value"],
+      ["ExecutionInstrumentation", "type"],
+      ["initializeSessionInstrumentation", "value"],
+    ]),
+  ],
+  ["#instrumentation/state.js", new Map([["preserveSerializedInstrumentationState", "value"]])],
+]);
 
 /**
  * @param {string} posix
@@ -354,7 +381,15 @@ const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumenta
  * @param {Violation[]} violations
  */
 function checkRule37(posix, source, violations) {
-  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT) return;
+  const productionHarness =
+    posix.startsWith("packages/eve/src/harness/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  const productionExecution =
+    posix.startsWith("packages/eve/src/execution/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT && !productionHarness && !productionExecution) {
+    return;
+  }
 
   const sourceFile = ts.createSourceFile(
     posix,
@@ -365,7 +400,11 @@ function checkRule37(posix, source, violations) {
   );
   const visit = (node) => {
     const specifier = importSpecifier(node);
-    if (specifier !== undefined && (specifier.text === "ai" || specifier.text.startsWith("ai/"))) {
+    if (
+      posix === INSTRUMENTATION_LIFECYCLE_CONTRACT &&
+      specifier !== undefined &&
+      (specifier.text === "ai" || specifier.text.startsWith("ai/"))
+    ) {
       violations.push({
         rule: 37,
         file: posix,
@@ -373,9 +412,84 @@ function checkRule37(posix, source, violations) {
         message: `imports from "ai". Lifecycle event payloads are eve's own shape, so an AI SDK type reaching them makes an SDK upgrade a breaking change for every provider. Add an eve type here and map to it in ai-sdk-hook-bridge.ts.`,
       });
     }
+    if (
+      productionHarness &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      specifier.text !== "#instrumentation/runtime.js"
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Harness code may consume instrumentation only through the bound SessionInstrumentation facade from "#instrumentation/runtime.js".`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#tracing/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Tracing implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionHarness &&
+      specifier?.text === "#instrumentation/runtime.js" &&
+      !hasOnlyAllowedNamedImports(node, HARNESS_RUNTIME_IMPORTS)
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation runtime bindings. Harness code may use only the SessionInstrumentation, InstrumentationStepScope, and InstrumentationAttempt types.`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#compiled/@opentelemetry/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports OpenTelemetry directly. OTel implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionExecution &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      !hasOnlyAllowedNamedImports(
+        node,
+        EXECUTION_INSTRUMENTATION_IMPORTS.get(specifier.text) ?? new Map(),
+      )
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation bindings from "${specifier.text}". Execution may use only session binding/initialization, the ExecutionInstrumentation type, and cancellation-state preservation.`,
+      });
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+function hasOnlyAllowedNamedImports(node, allowed) {
+  if (!ts.isImportDeclaration(node)) return false;
+  const clause = node.importClause;
+  if (
+    clause === undefined ||
+    clause.name !== undefined ||
+    clause.namedBindings === undefined ||
+    !ts.isNamedImports(clause.namedBindings) ||
+    clause.namedBindings.elements.length === 0
+  ) {
+    return false;
+  }
+  return clause.namedBindings.elements.every((element) => {
+    const imported = element.propertyName?.text ?? element.name.text;
+    const expectedKind = allowed.get(imported);
+    const actualKind = clause.isTypeOnly || element.isTypeOnly ? "type" : "value";
+    return expectedKind === actualKind;
+  });
 }
 
 function importSpecifier(node) {
@@ -411,6 +525,141 @@ function importSpecifier(node) {
     return node.arguments[0];
   }
   return undefined;
+}
+
+// ---------- Rule 40: wire versions carry colocated contract tests ----------
+
+const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
+const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
+const VERSIONED_WIRE_HISTORY_RE = new RegExp(
+  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+);
+
+function gitOutput(args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function checkRule40ImmutableWireHistory() {
+  const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
+  const comparisons = [
+    ["diff", "--name-status", "--", WIRE_FAMILY_DIR],
+    ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+  ];
+  if (hasBase)
+    comparisons.push(["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR]);
+
+  const changes = new Set();
+  for (const args of comparisons) {
+    for (const line of (gitOutput(args) ?? "").trim().split("\n")) {
+      if (line !== "") changes.add(line);
+    }
+  }
+
+  /** @type {Violation[]} */
+  const violations = [];
+  for (const change of changes) {
+    const [status, ...paths] = change.split("\t");
+    const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
+    if (protectedPaths.length === 0 || status === "A") continue;
+    if (
+      hasBase &&
+      protectedPaths.every(
+        (path) => gitOutput(["cat-file", "-e", `origin/main:${path}`]) === undefined,
+      )
+    ) {
+      continue;
+    }
+    violations.push({
+      rule: 40,
+      file: protectedPaths.at(-1),
+      line: 1,
+      message: `shipped wire-version history is immutable (git status ${status}). Add the next wire version and migration instead of changing or deleting an existing version module, contract test, or snapshot.`,
+    });
+  }
+  return violations;
+}
+
+async function checkRule40WireContracts() {
+  const violations = checkRule40ImmutableWireHistory();
+  let entries;
+  try {
+    entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
+  } catch {
+    return violations;
+  }
+
+  for (const name of entries) {
+    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)\.ts$/);
+    if (match === null) continue;
+    const [, family, version] = match;
+
+    const testName = `${family}-wire.v${version}.test.ts`;
+    if (!entries.includes(testName)) {
+      violations.push({
+        rule: 40,
+        file: `${WIRE_FAMILY_DIR}/${name}`,
+        line: 1,
+        message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
+      });
+    }
+  }
+
+  const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
+  const registryMatch = contractSource.match(
+    /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
+  );
+  const tokens = registryMatch?.[1]
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (tokens === undefined || tokens.length === 0 || tokens.some((token) => !/^\d+$/.test(token))) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line: 1,
+      message:
+        "SESSION_INBOX_WIRE_VERSIONS must be an explicit numeric tuple so CI can compare the declared protocol history with shipped version modules.",
+    });
+    return violations;
+  }
+
+  const line = contractSource.slice(0, registryMatch.index).split("\n").length;
+  const versions = tokens.map(Number);
+  const expectedVersions = versions.map((_, index) => index + 1);
+  if (JSON.stringify(versions) !== JSON.stringify(expectedVersions)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `SESSION_INBOX_WIRE_VERSIONS must be contiguous and ascending from 1; found [${versions.join(", ")}]. Add new versions without renumbering or removing protocol history.`,
+    });
+  }
+
+  const shippedVersions = entries
+    .flatMap((name) => {
+      const match = name.match(/^session-inbox-wire\.v(\d+)\.ts$/);
+      return match === null ? [] : [Number(match[1])];
+    })
+    .sort((left, right) => left - right);
+  const registeredModules = [0, ...versions];
+  if (JSON.stringify(shippedVersions) !== JSON.stringify(registeredModules)) {
+    violations.push({
+      rule: 40,
+      file: SESSION_INBOX_WIRE_CONTRACT,
+      line,
+      message: `session-inbox wire modules [${shippedVersions.join(", ")}] must exactly match legacy v0 plus registered versions [${registeredModules.join(", ")}].`,
+    });
+  }
+
+  return violations;
 }
 
 // ---------- Rule 19: AsyncLocalStorage instances ----------
@@ -969,6 +1218,33 @@ async function checkRule34PhaseBoundary() {
   return violations;
 }
 
+// ---------- Rule 38: one owner for the eve package build ----------
+
+const NESTED_EVE_BUILD_RE = /\bpnpm\s+(?:--filter(?:=|\s+)eve|-F\s+eve)\s+(?:run\s+)?build\b/;
+
+/**
+ * @returns {Promise<Violation[]>}
+ */
+async function checkRule38NoNestedEveBuild() {
+  /** @type {Violation[]} */
+  const violations = [];
+
+  for (const dir of await readPnpmWorkspacePackageDirs()) {
+    if (dir === "packages/eve") continue;
+    const packageJson = await readJsonIfExists(join(REPO_ROOT, dir, "package.json"));
+    for (const [scriptName, command] of Object.entries(packageJson?.scripts ?? {})) {
+      if (typeof command !== "string" || !NESTED_EVE_BUILD_RE.test(command)) continue;
+      violations.push({
+        rule: 38,
+        file: `${dir}/package.json`,
+        message: `script "${scriptName}" launches a nested eve package build. Declare eve as a workspace dependency and let Turbo's ^build edge produce it once; rebuilding eve inside a consumer races its destructive dist clean against other consumers.`,
+      });
+    }
+  }
+
+  return violations;
+}
+
 /**
  * @returns {Promise<Set<string>>}
  */
@@ -996,6 +1272,11 @@ async function readPnpmWorkspacePackageDirs() {
     const excluded = rawPattern.startsWith("!");
     const pattern = excluded ? rawPattern.slice(1) : rawPattern;
     const dirs = await expandWorkspacePackagePattern(pattern);
+
+    if (!excluded && dirs.length === 0) {
+      throw new Error(`Workspace package pattern "${rawPattern}" matched no package.json files.`);
+    }
+
     const target = excluded ? excludeDirs : includeDirs;
 
     dirs.forEach((dir) => target.add(dir));
@@ -1047,31 +1328,16 @@ function stripYamlString(value) {
  * @returns {Promise<string[]>}
  */
 async function expandWorkspacePackagePattern(pattern) {
-  if (pattern.endsWith("/*")) {
-    const root = pattern.slice(0, -2);
-    let entries;
-    try {
-      entries = await readdir(join(REPO_ROOT, root), { withFileTypes: true });
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        return [];
-      }
-      throw error;
-    }
+  const normalizedPattern = pattern.replace(/\/+$/, "");
+  const dirs = [];
 
-    const dirs = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const dir = `${root}/${entry.name}`;
-      if (await readJsonIfExists(join(REPO_ROOT, dir, "package.json"))) dirs.push(dir);
-    }
-    return dirs;
+  for await (const manifestPath of glob(`${normalizedPattern}/package.json`, {
+    cwd: REPO_ROOT,
+  })) {
+    dirs.push(toPosix(dirname(manifestPath)));
   }
 
-  if (await readJsonIfExists(join(REPO_ROOT, pattern, "package.json"))) {
-    return [pattern];
-  }
-  return [];
+  return dirs.sort();
 }
 
 /**
@@ -1246,6 +1512,12 @@ async function main() {
 
   // Rule 37
   violations.push(...state.rule37);
+
+  // Rule 38
+  violations.push(...(await checkRule38NoNestedEveBuild()));
+
+  // Rule 40
+  violations.push(...(await checkRule40WireContracts()));
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

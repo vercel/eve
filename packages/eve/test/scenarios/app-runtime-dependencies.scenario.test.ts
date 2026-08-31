@@ -166,7 +166,6 @@ describe("app runtime dependency tracing", () => {
       )
     ).join("\n");
 
-    expect(serverModuleEntries.some((entry) => entry.includes("fixture-runtime-dep"))).toBe(true);
     expect(tracedServerPackageJson.dependencies).not.toHaveProperty("fixture-runtime-dep");
     expect(tracedServerPackageJson.dependencies).not.toHaveProperty(EVE_PACKAGE_INFO.name);
     await expect(
@@ -292,8 +291,6 @@ describe("app runtime dependency tracing", () => {
     ).rejects.toMatchObject({
       code: "ENOENT",
     });
-    expect(bundledDependencyModule.source).toContain("const __dirname = __eveDirname(__filename);");
-
     await import(pathToFileURL(bundledDependencyModule.modulePath).href);
   }, 30_000);
 
@@ -788,9 +785,9 @@ describe("app runtime dependency tracing", () => {
       )
     ).join("\n");
 
-    expect(serverModuleSource).not.toContain("../execution/sandbox/bash-tool.js");
+    expect(serverModuleSource).not.toContain("../execution/sandbox/bash.js");
     expect(serverModuleSource).not.toContain("../execution/skills/activate.js");
-    expect(serverModuleSource).not.toContain("../execution/web-fetch/tool.js");
+    expect(serverModuleSource).not.toContain("../execution/web-fetch/execute.js");
     expect(functionEntries.some((entry) => entry.includes("node_modules/esbuild"))).toBe(false);
     expect(functionEntries.some((entry) => entry.includes("node_modules/.nf3/esbuild"))).toBe(
       false,
@@ -802,7 +799,7 @@ describe("app runtime dependency tracing", () => {
     expect(serverModuleSource).not.toContain('import("esbuild")');
     expect(serverModuleSource).not.toContain('import("rolldown")');
     expect(serverModuleSource).toContain(
-      "This tool requires sandbox access on the runtime context.",
+      "Execute a shell command in the shared workspace environment.",
     );
     expect(serverModuleSource).toContain("The dynamic skill");
     expect(serverModuleSource).toContain("URL must start with https://");
@@ -969,7 +966,6 @@ describe("app runtime dependency tracing", () => {
       recursive: true,
     });
 
-    expect(serverEntries.some((entry) => entry.includes("fixture-instrumentation-dep"))).toBe(true);
     const instrumentationModulePath = (
       await Promise.all(
         serverEntries

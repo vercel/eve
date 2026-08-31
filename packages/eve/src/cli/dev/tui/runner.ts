@@ -19,13 +19,16 @@ import {
   Client,
   ClientSession,
 } from "#client/index.js";
+import { renderApplicationInfo } from "#cli/commands/info.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
+import { isCurrentTurnBoundaryEvent } from "#protocol/message.js";
 import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
+import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
@@ -70,7 +73,7 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
-  resolveModelProviderState,
+  normalizeLocalModelEndpoint,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -106,6 +109,7 @@ export { parsePromptCommand, type PromptCommand } from "./prompt-commands.js";
 
 const defaultAssistantResponseStats: AssistantResponseStatsMode = "tokensPerSecond";
 const idleRuntimeArtifactPollMs = 500;
+const idleChatGptAuthPollMs = 5_000;
 /**
  * Cooperative-cancel retry cadence: 8 × 250ms covers the turn-dispatch
  * window (locally the cancel hook is claimed well under a second after the
@@ -224,16 +228,15 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line shown under the brand line (local sessions only). */
+  /** Message-of-the-day line shown below the startup card (local sessions only). */
   tip?: string;
 };
 
 export type AgentTUIRenderer = {
   /**
-   * Commits a startup header describing the connected agent (brand mark,
-   * model, instructions, tools, skills, subagents) to the transcript before
-   * the first prompt, and refreshes it after local dev artifact changes.
-   * Optional — renderers without a header simply skip it.
+   * Commits the startup card to the transcript before the first prompt and
+   * refreshes it after local dev artifact changes. Optional — renderers
+   * without a header simply skip it.
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
   /**
@@ -292,6 +295,12 @@ export type AgentTUIRenderer = {
     options?: AgentTUISessionOptions,
   ): Promise<AgentTUIInputQuestionResponse | undefined>;
   renderStream(result: AgentTUIStreamResult, options?: AgentTUISessionOptions): Promise<void>;
+  /**
+   * Renders a server-initiated turn while `readPrompt` still owns input.
+   * Unlike `renderStream`, this must not replace the active key consumer or
+   * clear the user's draft.
+   */
+  renderIdleStream?(result: AgentTUIStreamResult, options?: AgentTUISessionOptions): Promise<void>;
   /**
    * The renderer's whole subagent surface — sections, nested steps and
    * tools, ghost sweeps, completion. One optional capability with required
@@ -353,6 +362,8 @@ export type AgentTUIRenderer = {
    * lifecycle ends.
    */
   shutdown?(): void;
+  /** Suspends an idle prompt so a server-initiated HITL request can own input. */
+  suspendPromptForInput?(): void;
   requestInterrupt?(): void;
   exitRequested?(): boolean;
 };
@@ -362,6 +373,8 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
+  /** Live ChatGPT identity shown only inside model configuration UI. */
+  readonly chatGptAccountLabel?: string;
   /**
    * Leaves the current setup panel mounted for the next automatic onboarding
    * command. The runner closes it if no next command can proceed.
@@ -388,6 +401,11 @@ export interface PromptCommandHandler {
     context: PromptCommandHandlerContext,
   ): Promise<PromptCommandOutcome | undefined>;
 }
+
+type TuiStartup = {
+  readonly headerTip: string;
+  finish(): string;
+};
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
   session?: ClientSession;
@@ -443,6 +461,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   bootDetections?: readonly BootDetection[];
   /** Test seam for the status line's Vercel link probe; defaults to the real one. */
   detectProjectIdentity?: typeof detectProjectIdentity;
+  /** Test seam for `/info`; defaults to the filesystem application inspector. */
+  inspectApplication?: typeof inspectApplication;
   /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
   getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
@@ -450,6 +470,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
   lifecycle?: CommandLifecycle;
+  /** Editing-only startup state retained until the final agent header is ready to paint. */
+  startup?: TuiStartup;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -479,12 +501,14 @@ export class EveTUIRunner {
    * fresh-agent onboarding.
    */
   readonly #initialInput?: string;
+  readonly #startup?: TuiStartup;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
+  readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
@@ -512,7 +536,7 @@ export class EveTUIRunner {
    * refreshes don't re-roll it mid-session. Local sessions only — every
    * tip references local-only slash commands.
    */
-  readonly #headerTip = pickAgentHeaderTip();
+  readonly #headerTip: string;
   #agentInfo?: AgentInfoResult;
   /**
    * approval-id → input-request map populated as `input.requested` events
@@ -520,6 +544,8 @@ export class EveTUIRunner {
    * eve `InputResponse[]` payloads on the next `send()`.
    */
   readonly #pendingInputRequests = new Map<string, InputRequest>();
+  /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
+  #idleInputResult?: AgentTUIStreamResult;
   /**
    * callId → live state for one subagent dispatch. Persists across turn
    * boundaries because a subagent dispatched in one turn may not emit
@@ -550,12 +576,10 @@ export class EveTUIRunner {
    */
   readonly #pendingConnectionAuths = new Set<string>();
   /**
-   * Set when the active server session reaches a terminal failure — either a
-   * `session.failed` stream event or a transport error dispatching the turn.
-   * The run loop starts a fresh session before the next prompt so the user can
-   * keep going instead of typing into a dead session.
+   * The exact session that reported a terminal failure. Recovery replaces it
+   * only if it is still current, so a stale failure from A cannot replace B.
    */
-  #sessionFailed = false;
+  #failedSession?: ClientSession;
   #unsubscribeDevelopmentSandboxLogs?: () => void;
   readonly #lifecycle?: CommandLifecycle;
 
@@ -569,6 +593,7 @@ export class EveTUIRunner {
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
+    this.#headerTip = options.startup?.headerTip ?? pickAgentHeaderTip();
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
@@ -578,6 +603,7 @@ export class EveTUIRunner {
     this.#contextSize = options.contextSize;
     this.#formatTransportError = options.formatTransportError ?? toErrorMessage;
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
+    if (options.startup !== undefined) this.#startup = options.startup;
     if (options.appRoot !== undefined) {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
@@ -614,6 +640,7 @@ export class EveTUIRunner {
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
+    this.#inspectApplication = options.inspectApplication ?? inspectApplication;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
     if (options.serverUrl !== undefined && options.remote === undefined) {
@@ -628,12 +655,12 @@ export class EveTUIRunner {
    * header. Never throws: a missing or unauthorized `/eve/v1/info` simply
    * yields a header without the agent's configuration detail.
    */
-  async #renderAgentHeader(): Promise<void> {
+  async #renderAgentHeader(): Promise<string | undefined> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
       await this.#renderSetupIssues(undefined);
-      return;
+      return this.#startup?.finish() ?? this.#initialInput;
     }
 
     let info: AgentInfoResult | undefined;
@@ -655,14 +682,16 @@ export class EveTUIRunner {
         }
       }
     }
+    const initialDraft = this.#startup?.finish() ?? this.#initialInput;
     this.#reportBeforeFirstPaint();
     const headerInfo = this.#replaceAgentInfo(info);
     await this.#renderSetupIssues(headerInfo);
+    return initialDraft;
   }
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
     const headerInfo =
-      this.#appRoot === undefined ? info : resolveModelProviderState(info, process.env);
+      this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) return headerInfo;
@@ -713,11 +742,7 @@ export class EveTUIRunner {
     let hasRunTurn = false;
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
-    // `--input` seed: applied to the first prompt's editable buffer, then
-    // cleared so later prompts open empty.
-    let initialDraft = this.#initialInput;
-
-    await this.#renderAgentHeader();
+    let initialDraft = await this.#renderAgentHeader();
     if (this.#remoteConnection?.current().connection.state === "auth-required") {
       await this.#executeExtensionCommand(
         { type: "extension", name: "vc:login", argument: "" },
@@ -768,21 +793,23 @@ export class EveTUIRunner {
           }
 
           try {
-            prompt = await this.#readPromptWithIdleRefresh(promptOptions);
+            prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
-              return;
+              if (this.#idleInputResult === undefined) return;
+              streamWithoutPrompt = true;
+              prompt = "";
+            } else {
+              throw error;
             }
-
-            throw error;
           }
 
-          if (prompt == null) {
+          if (prompt == null && this.#idleInputResult === undefined) {
             return;
           }
         }
 
-        const command = parsePromptCommand(prompt);
+        const command = this.#idleInputResult === undefined ? parsePromptCommand(prompt!) : null;
 
         if (command?.type === "exit") {
           this.#lifecycle?.requestStop();
@@ -923,6 +950,14 @@ export class EveTUIRunner {
           continue;
         }
 
+        if (command?.type === "info") {
+          await this.#showApplicationInfo();
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
         // Like /help, /loglevel renders locally: it adjusts the renderer's
         // own log filter, so it works without a prompt-command handler.
         if (command?.type === "loglevel") {
@@ -959,12 +994,19 @@ export class EveTUIRunner {
         hasRunTurn = true;
       }
 
-      let result = followCurrentSession
-        ? this.#streamCurrentSession()
-        : await this.#streamTurn({
-            prompt: streamWithoutPrompt ? undefined : prompt,
-            inputResponses: pendingInputResponses,
-          });
+      const idleInputResult = this.#idleInputResult;
+      this.#idleInputResult = undefined;
+      let result =
+        idleInputResult ??
+        (followCurrentSession
+          ? this.#streamCurrentSession()
+          : await (async () => {
+              this.#recoverFailedSession();
+              return await this.#streamTurn({
+                prompt: streamWithoutPrompt ? undefined : prompt,
+                inputResponses: pendingInputResponses,
+              });
+            })());
       // The session id becomes known once the send is accepted; keep the
       // renderer's copy fresh so the parting line can name the session.
       const acceptedSessionId = this.#session?.state.sessionId;
@@ -1055,9 +1097,7 @@ export class EveTUIRunner {
           }
 
           if (result.turnState && result.turnState.boundaryEvent === undefined) {
-            if (result.turnState.aborted) {
-              this.#sessionFailed = true;
-            } else {
+            if (!result.turnState.aborted) {
               const strandedSessionId = this.#session?.state.sessionId;
               this.#renderer.renderNotice?.(
                 strandedSessionId
@@ -1091,8 +1131,9 @@ export class EveTUIRunner {
       // restores them into the next prompt's editable buffer instead of
       // firing them into a session whose state the user hasn't seen.
       const boundaryEvent = result.turnState?.boundaryEvent;
+      const currentSessionFailed = this.#failedSession === this.#session;
       if (
-        !this.#sessionFailed &&
+        !currentSessionFailed &&
         (boundaryEvent === "session.waiting" || boundaryEvent === "session.completed")
       ) {
         prompt = this.#renderer.takeQueuedPrompt?.();
@@ -1102,23 +1143,7 @@ export class EveTUIRunner {
       // failure, or a user interrupt). Replace it with a fresh one so the
       // next prompt isn't sent into a dead session, but keep the transcript
       // on screen. Server-side context is gone with the old session.
-      if (this.#sessionFailed) {
-        this.#sessionFailed = false;
-        this.#startNewSession();
-        // An aborted turn keeps its explicit notice — the boundary line alone
-        // would hide that the interrupted turn may still run on the server.
-        if (result.turnState?.aborted) {
-          this.#renderer.renderNotice?.(
-            "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
-          );
-        } else if (this.#renderer.renderSessionBoundary !== undefined) {
-          this.#renderer.renderSessionBoundary();
-        } else {
-          this.#renderer.renderNotice?.(
-            "Session ended — started a new session. Earlier context was cleared.",
-          );
-        }
-      }
+      this.#recoverFailedSession(result.turnState?.aborted === true);
     }
   }
 
@@ -1137,6 +1162,27 @@ export class EveTUIRunner {
 
     this.#session = undefined;
     this.#runtimeArtifacts?.clear();
+  }
+
+  /** Clears one failure marker and replaces its source only by identity. */
+  #recoverFailedSession(aborted = false): void {
+    const failedSession = this.#failedSession;
+    if (failedSession === undefined) return;
+    this.#failedSession = undefined;
+    if (this.#session !== failedSession) return;
+
+    this.#startNewSession();
+    if (aborted) {
+      this.#renderer.renderNotice?.(
+        "Stopped following the turn and started a new session. Earlier context was cleared; the interrupted turn may still be running on the server.",
+      );
+    } else if (this.#renderer.renderSessionBoundary !== undefined) {
+      this.#renderer.renderSessionBoundary();
+    } else {
+      this.#renderer.renderNotice?.(
+        "Session ended — started a new session. Earlier context was cleared.",
+      );
+    }
   }
 
   /** Resets the durable owner before clearing the local conversation view. */
@@ -1172,6 +1218,7 @@ export class EveTUIRunner {
     let stopped = false;
     let refreshing = false;
     let inFlightRefresh: Promise<void> | undefined;
+    let lastChatGptAuthRefresh = 0;
     const refresh = async () => {
       if (stopped || refreshing) {
         return;
@@ -1182,6 +1229,16 @@ export class EveTUIRunner {
         await runtimeArtifacts.refreshIdle({
           onRuntimeArtifactsChanged: () => this.#handleRuntimeArtifactsChanged(),
         });
+        const endpoint = this.#agentInfo?.agent.model.endpoint;
+        const shouldRefreshChatGptAuth =
+          endpoint?.kind === "chatgpt" &&
+          (endpoint.state === "signed-out" || endpoint.state === "reauth-required");
+        const now = Date.now();
+        if (shouldRefreshChatGptAuth && now - lastChatGptAuthRefresh >= idleChatGptAuthPollMs) {
+          lastChatGptAuthRefresh = now;
+          const refreshedInfo = await this.#readAgentInfo();
+          if (refreshedInfo !== undefined) this.#replaceAgentInfo(refreshedInfo);
+        }
       } finally {
         refreshing = false;
       }
@@ -1216,6 +1273,84 @@ export class EveTUIRunner {
     }
   }
 
+  /**
+   * Gives the idle prompt exclusive ownership handoff with `send()`:
+   * follow while the prompt is open, then abort and await the follow before
+   * returning the submitted prompt. Both readers advance the same session
+   * cursor, so the next send starts after every wake event already rendered.
+   */
+  async #readPromptFollowingSession(options: AgentTUISessionOptions): Promise<string | undefined> {
+    const prompt = this.#readPromptWithIdleRefresh(options);
+    if (
+      this.#renderer.renderIdleStream === undefined ||
+      this.#session?.state.sessionId === undefined
+    ) {
+      return await prompt;
+    }
+
+    const controller = new AbortController();
+    const follow = this.#followIdleSession(controller.signal, options).catch((error: unknown) => {
+      if (!controller.signal.aborted) {
+        this.#renderer.renderNotice?.(
+          `Stopped following session updates: ${toErrorMessage(error)}`,
+        );
+      }
+    });
+    try {
+      return await prompt;
+    } finally {
+      controller.abort();
+      await follow;
+    }
+  }
+
+  /**
+   * Holds one boundary-blind parent stream open, splitting it into complete
+   * turns for rendering. The underlying iterator stays shared across those
+   * turns and advances the ClientSession cursor once it is stopped.
+   */
+  async #followIdleSession(signal: AbortSignal, options: AgentTUISessionOptions): Promise<void> {
+    const sourceSession = this.#session;
+    if (sourceSession === undefined) return;
+    const source = sourceSession.stream({ signal })[Symbol.asyncIterator]();
+    try {
+      while (!signal.aborted) {
+        let consumed = false;
+        const turn = {
+          async *[Symbol.asyncIterator]() {
+            while (!signal.aborted) {
+              const next = await source.next();
+              if (next.done === true) return;
+              consumed = true;
+              yield next.value;
+              if (isCurrentTurnBoundaryEvent(next.value)) return;
+            }
+          },
+        };
+        const result = this.#createTUIStreamResult(turn, () => {}, sourceSession);
+        await this.#renderer.renderIdleStream!(result, {
+          ...options,
+          continueSession: true,
+        });
+        this.#enterPendingConnectionAuthorization(result);
+        if (
+          (result.turnState?.pendingApprovals.length ?? 0) > 0 ||
+          (result.turnState?.pendingQuestions.length ?? 0) > 0
+        ) {
+          this.#idleInputResult = {
+            events: (async function* () {})(),
+            turnState: result.turnState,
+          };
+          this.#renderer.suspendPromptForInput?.();
+          return;
+        }
+        if (!consumed) return;
+      }
+    } finally {
+      await source.return?.();
+    }
+  }
+
   async #streamTurn(input: {
     prompt: string | undefined;
     inputResponses: readonly InputResponse[] | undefined;
@@ -1234,6 +1369,7 @@ export class EveTUIRunner {
     }
 
     let response: Awaited<ReturnType<ClientSession["send"]>>;
+    const sourceSession = this.#session;
     try {
       if (this.#runtimeArtifacts !== undefined) {
         await this.#runtimeArtifacts.refresh({
@@ -1277,7 +1413,7 @@ export class EveTUIRunner {
       // where the assistant response would have appeared, then let the
       // loop recover onto a fresh session before the next prompt.
       this.#remoteConnection?.reportFailure(error);
-      this.#sessionFailed = true;
+      this.#failedSession = sourceSession;
       return {
         events: errorOnlyTUIStream({
           errorText: this.#formatTransportError(error),
@@ -1286,7 +1422,7 @@ export class EveTUIRunner {
       };
     }
 
-    return this.#createTUIStreamResult(response, () => abortController.abort());
+    return this.#createTUIStreamResult(response, () => abortController.abort(), this.#session);
   }
 
   /**
@@ -1309,7 +1445,10 @@ export class EveTUIRunner {
    * restores the submitted message into the prompt instead of losing it.
    * Single-flight per turn: repeated cancel keys join the running loop.
    */
-  async #requestTurnCancellation(turnState: AgentTUITurnState): Promise<void> {
+  async #requestTurnCancellation(
+    turnState: AgentTUITurnState,
+    sourceSession: ClientSession | undefined,
+  ): Promise<void> {
     if (turnState.cancelInFlight === true) return;
     turnState.cancelInFlight = true;
     try {
@@ -1317,7 +1456,7 @@ export class EveTUIRunner {
         if (turnState.boundaryEvent !== undefined || turnState.aborted === true) return;
         const turnId = turnState.turnId;
         try {
-          const result = await this.#session?.cancel(turnId === undefined ? undefined : { turnId });
+          const result = await sourceSession?.cancel(turnId === undefined ? undefined : { turnId });
           // Accepted means the turn's cancellation hook consumed the
           // request; the turn settles at its next safe boundary.
           if (result?.status === "accepted") return;
@@ -1338,39 +1477,42 @@ export class EveTUIRunner {
       throw new Error("Cannot stream a session before its first turn is accepted.");
     }
     const abortController = new AbortController();
+    const sourceSession = this.#session;
     return this.#createTUIStreamResult(
-      this.#session.stream({ signal: abortController.signal }),
+      sourceSession.stream({ signal: abortController.signal }),
       () => abortController.abort(),
+      sourceSession,
     );
   }
 
   #createTUIStreamResult(
     events: AsyncIterable<MessageStreamEvent>,
     abort: () => void,
+    sourceSession: ClientSession | undefined,
   ): AgentTUIStreamResult {
     const turnState = createTurnState();
     return {
       abort: () => {
         turnState.aborted = true;
+        this.#failedSession = sourceSession;
         abort();
       },
       cancel: () => {
-        void this.#requestTurnCancellation(turnState);
+        void this.#requestTurnCancellation(turnState, sourceSession);
       },
       events: eveEventsToTUIStream({
         events,
         pendingInputRequests: this.#pendingInputRequests,
         turnState,
         onSubagentCalled: (called) => this.#subagentPump.begin(called),
+        onSubagentBackgrounded: (callId) => this.#subagentPump.background(callId),
         onSubagentCompleted: (callId) => this.#subagentPump.settle(callId),
-        // A cancelled turn cancels its pending descendants server-side;
-        // settle their sections and stop their child streams so stale
-        // subagent output cannot paint into the next (steered) turn.
-        onTurnCancelled: () => this.#subagentPump.settleAll(),
+        // Cancellation is turn-scoped; background descendants survive.
+        onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
         onTerminalFailure: () => {
-          this.#sessionFailed = true;
+          this.#failedSession = sourceSession;
         },
         failureHintOverride: this.#appRoot === undefined ? undefined : localFailureHint,
       }),
@@ -1475,10 +1617,15 @@ export class EveTUIRunner {
     if (handler === undefined)
       return { message: `/${command.name} is not available in this session.` };
 
+    const endpoint = this.#agentInfo?.agent.model.endpoint;
     const baseContext: PromptCommandHandlerContext = {
       renderer: this.#renderer,
       title: input.title,
       initialModelStep: input.initialModelStep,
+      chatGptAccountLabel:
+        endpoint?.kind === "chatgpt" && endpoint.state === "ready"
+          ? endpoint.accountLabel
+          : undefined,
       remoteConnection: this.#remoteConnection,
       withExclusiveTerminal: this.#withExclusiveTerminal,
     };
@@ -1543,7 +1690,7 @@ export class EveTUIRunner {
    * Fresh `eve init` launches the TUI with `/model` prefilled. Project-backed
    * model access depends on the Vercel CLI and a Vercel session, so resolve
    * only those missing prerequisites before entering the model picker. A probe
-   * failure still opens `/model`: its own-key and external-provider paths do
+   * failure still opens `/model`: its API-key and external-provider paths do
    * not require Vercel. After model setup, open the categorized registry hub so
    * a new user has concrete next steps before reaching the chat prompt.
    */
@@ -1629,6 +1776,22 @@ export class EveTUIRunner {
     }
   }
 
+  async #showApplicationInfo(): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) {
+      this.#renderCommandOutcome("/info is only available in local dev sessions.");
+      return;
+    }
+    try {
+      this.#renderCommandOutcome(renderApplicationInfo(await this.#inspectApplication(appRoot)));
+    } catch (error) {
+      this.#renderCommandOutcome(
+        `Couldn't inspect the application: ${toErrorMessage(error)}`,
+        "error",
+      );
+    }
+  }
+
   /**
    * Applies `/loglevel [all|stderr|sandbox|none]` against the renderer's buffered
    * log filter and returns the one-line outcome. A bare `/loglevel` reports
@@ -1663,16 +1826,17 @@ export class EveTUIRunner {
   }
 
   /**
-   * Setup commands can write env files before the dev watcher reloads them.
-   * Reload first, then cache the credential-normalized `/info` snapshot shared
-   * by the status bar and setup detector. The Vercel auth probe stays off the
-   * prompt path.
+   * Setup commands can write authored source and env files. Force the local
+   * runtime snapshot to catch up, then cache the credential-normalized `/info`
+   * shared by the status bar and setup detector. The Vercel auth probe stays
+   * off the prompt path.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;
     if (appRoot === undefined) return;
 
     loadDevelopmentEnvironmentFiles(appRoot);
+    await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
     void this.#refreshSetupAttention(refreshedInfo);
   }
@@ -1808,8 +1972,9 @@ type EveStreamTranslatorInput = {
   pendingInputRequests: Map<string, InputRequest>;
   turnState: AgentTUITurnState;
   onSubagentCalled?: (event: SubagentCalledStreamEvent) => void;
+  onSubagentBackgrounded?: (callId: string) => void;
   onSubagentCompleted?: (callId: string) => void;
-  onTurnCancelled?: () => void;
+  onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
@@ -1834,6 +1999,7 @@ async function* eveEventsToTUIStream(
     pendingInputRequests,
     turnState,
     onSubagentCalled,
+    onSubagentBackgrounded,
     onSubagentCompleted,
     onTurnCancelled,
     onConnectionAuthRequired,
@@ -2167,7 +2333,7 @@ async function* eveEventsToTUIStream(
       case "turn.cancelled":
         // A cooperative cancel (`/cancel`, Esc, Ctrl+C, or a steer) — not a failure.
         // `session.waiting` follows and finishes the stream normally.
-        onTurnCancelled?.();
+        onTurnCancelled?.(event.data.turnId);
         yield* closeOpenParts(textParts, "assistant-complete", stepEpoch);
         yield* closeOpenParts(reasoningParts, "reasoning-complete", stepEpoch);
         yield { type: "turn-cancelled" };
@@ -2190,7 +2356,11 @@ async function* eveEventsToTUIStream(
 
       case "subagent.completed": {
         const completed = event as SubagentCompletedStreamEvent;
-        onSubagentCompleted?.(completed.data.callId);
+        if (completed.data.backgroundTask === undefined) {
+          onSubagentCompleted?.(completed.data.callId);
+        } else {
+          onSubagentBackgrounded?.(completed.data.callId);
+        }
         break;
       }
 

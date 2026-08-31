@@ -9,6 +9,7 @@ import type {
   SessionInboxSource,
 } from "#execution/session-command-inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
 
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
@@ -90,13 +91,6 @@ function messageRead(message: string): ScriptedRead {
   };
 }
 
-function runtimeActionResultRead(): ScriptedRead {
-  return {
-    result: { done: false, value: { kind: "runtime-action-result", results: [] } },
-    source: "session",
-  };
-}
-
 // Routing never runs in these tests: scripted reads stop at authorization
 // instructions or exhaust before any deliver-kind turn payload.
 const sessionState = { sessionId: "ses-parked-wait" } as DurableSessionState;
@@ -108,19 +102,11 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
     bufferedSessionControls: [],
     commandInbox: inbox,
     driverWritable: new WritableStream<Uint8Array>(),
-    sessionState,
+    stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState }),
   };
 }
 
 describe("nextTurnDelivery", () => {
-  beforeEach(() => {
-    vi.mocked(routeDeliverToChildren).mockImplementation(async ({ delivery, sessionState }) => ({
-      kind: "continue",
-      remainder: delivery,
-      sessionState,
-    }));
-  });
-
   afterEach(() => {
     vi.mocked(routeDeliverToChildren).mockReset();
   });
@@ -147,20 +133,6 @@ describe("nextTurnDelivery", () => {
 
     expect(next.kind).toBe("authorization");
     expect(inbox.windowTransitions).toEqual([true, false]);
-  });
-
-  it("ignores child results already owned by the runtime-action collector", async () => {
-    const inbox = createMockInbox([runtimeActionResultRead(), messageRead("follow up")]);
-
-    const next = await nextTurnDelivery({
-      ...waitInput(inbox),
-      awaitAuthorizationCallbacks: false,
-    });
-
-    expect(next).toMatchObject({
-      kind: "turn",
-      remainder: { kind: "deliver", payloads: [{ message: "follow up" }] },
-    });
   });
 
   it("does not let buffered deliveries bypass a ready authorization callback", async () => {
@@ -220,11 +192,13 @@ describe("nextTurnDelivery", () => {
       .mockResolvedValueOnce({
         kind: "continue",
         remainder: undefined,
+        serializedContext: {},
         sessionState: retiredState,
       })
       .mockResolvedValueOnce({
         kind: "continue",
         remainder: { kind: "deliver", payloads: [{ message: "parent turn" }] },
+        serializedContext: {},
         sessionState: retiredState,
       });
 
@@ -234,6 +208,69 @@ describe("nextTurnDelivery", () => {
     });
 
     expect(vi.mocked(routeDeliverToChildren).mock.calls[1]?.[0].sessionState).toBe(retiredState);
-    expect(next).toMatchObject({ kind: "turn", sessionState: retiredState });
+    expect(next).toMatchObject({
+      delivery: { payloads: [{ message: "parent turn" }] },
+      kind: "turn",
+    });
+  });
+});
+
+describe("nextTurnDelivery routing", () => {
+  beforeEach(() => vi.clearAllMocks());
+  it("keeps waiting instead of starting a parent turn for a fully routed task response", async () => {
+    const sessionState = {
+      continuationToken: "token",
+      emissionState: { sequence: 0, sessionStarted: false, stepIndex: 0, turnId: "turn" },
+      hasProxyInputRequests: true,
+      sessionId: "session",
+      version: 1,
+    } as const;
+    const routedSessionState = { ...sessionState, hasProxyInputRequests: false };
+    vi.mocked(routeDeliverToChildren)
+      .mockResolvedValueOnce({
+        kind: "continue",
+        remainder: undefined,
+        serializedContext: {},
+        sessionState,
+      })
+      .mockResolvedValueOnce({
+        kind: "continue",
+        remainder: { kind: "deliver", payloads: [{ message: "ordinary" }] },
+        serializedContext: {},
+        sessionState: routedSessionState,
+      });
+    const commands = [
+      { kind: "send" as const, payload: { inputResponses: [{ requestId: "task-request" }] } },
+      { kind: "send" as const, payload: { message: "ordinary" } },
+    ];
+    const commandInbox: SessionCommandInbox = {
+      claimAuthorization: vi.fn(),
+      claimStable: vi.fn(),
+      consumeNext: vi.fn(),
+      hasReadyAuthorization: vi.fn(() => false),
+      next: vi.fn(async () => ({ done: false as const, value: commands.shift()! })),
+      nextWithSource: vi.fn(async () => ({
+        result: { done: false as const, value: commands.shift()! },
+        source: "session" as const,
+      })),
+      rekeyContinuation: vi.fn(),
+      setAuthorizationWindow: vi.fn(),
+    };
+
+    const stateCursor = new SessionStateCursor({ serializedContext: {}, sessionState });
+    const result = await nextTurnDelivery({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
+      driverWritable: new WritableStream<Uint8Array>(),
+      stateCursor,
+    });
+
+    expect(result).toMatchObject({
+      delivery: { payloads: [{ message: "ordinary" }] },
+      kind: "turn",
+    });
+    expect(routeDeliverToChildren).toHaveBeenCalledTimes(2);
+    expect(stateCursor.sessionState).toBe(routedSessionState);
   });
 });

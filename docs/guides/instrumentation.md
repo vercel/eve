@@ -48,15 +48,17 @@ Any OTel-compatible backend works (Braintrust, PostHog, Raindrop, Arize, Honeyco
 
 Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
-- `recordInputs` records full message history on each step span (defaults to `true`). Set it to `false` if inputs contain sensitive content or you want to reduce span payload size.
-- `recordOutputs` records model outputs on spans (defaults to `true`). Set it to `false` to disable output recording.
+- `recordInputs` records full message history on each step span. It defaults to `false`; set it to `true` to include input content.
+- `recordOutputs` records model outputs on spans. It defaults to `false`; set it to `true` to include output content.
 - `functionId` overrides the function name on spans (defaults to the agent name).
 
-For sensitive, regulated, or production data, set `recordInputs` and `recordOutputs` to `false` unless you have reviewed the exporter and its data-retention path.
+eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
+
+Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown.
 
 ## Channel delivery traces
 
@@ -161,7 +163,9 @@ Structural tags describe each run's place in the tree:
 - `$eve.root`: session id of the root session in the chain (group a whole tree with `$eve.root=<id>`)
 - `$eve.subagent`: compiled graph node id (subagent runs only)
 - `$eve.trigger`: the channel kind that started the run
+- `$eve.schedule`: the authored schedule that created the session, including sessions started through a target channel
 - `$eve.title`: truncated title derived from the first user message
+- `$eve.trace_id`: trace id of the sampled agent trace containing the run, written on session, subagent, and turn rows so a dashboard run can be joined to its OpenTelemetry trace. Present only when the trace is sampled; absence means no exported OTEL trace exists.
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 
@@ -173,20 +177,20 @@ Tag writes are best-effort: a failure is logged once per process and then swallo
 
 These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy on Vercel, the platform auto-detects `eve` as the framework and surfaces an Agent Runs view under your project's **Observability** tab, where you can browse sessions and drill into each conversation's trace, with no `instrumentation.ts` required. The tab is currently gated per team. See [Deploy to Vercel](./deployment/vercel#inspect-agent-runs) for enablement. Agent Runs is separate from the OpenTelemetry export above. Use OTel when you want spans in Braintrust, PostHog, Datadog, or another third-party backend.
 
-Note: By default, telemetry records full message history and model outputs You may need to disclose these data flows in your privacy materials if utilized.
-
 ## Local traces
 
 Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
 
-- [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live viewer that replays the trace as a conversation.
+- [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.
+
+Local traces omit model and tool inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` in `.env.local` to capture that content.
 
 Writing `instrumentation.ts` replaces this: your `setup` takes over and nothing is recorded locally. For span attributes, retention, and the `EVE_TRACES*` variables, see [`eve traces`](../reference/cli#eve-traces).
 
 ## Debugging
 
-`eve info` is the fastest way to see what eve actually picked up: the active tools, skills, subagents, schedules, routes, and discovery diagnostics. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
+`eve info` is the fastest way to see what eve actually picked up: ordered static instructions with their roles, plus the active tools, skills, subagents, schedules, routes, and discovery diagnostics. Dynamic instruction results exist only at runtime and are not part of this static inspection. eve also writes inspectable artifacts under `.eve/`, kept even when discovery hits errors:
 
 | Artifact                        | Tells you                                   |
 | ------------------------------- | ------------------------------------------- |

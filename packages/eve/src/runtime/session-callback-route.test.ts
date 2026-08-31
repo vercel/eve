@@ -1,15 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EVE_CALLBACK_ROUTE_PATTERN } from "#protocol/routes.js";
 import type { RouteContext } from "#public/definitions/channel.js";
-import {
-  getSessionCallbackChannelDefinitions,
-  getSessionCallbackChannelNames,
-  handleSessionCallbackRequest,
-  HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX,
-} from "#runtime/session-callback-route.js";
+import { handleSessionCallbackRequest } from "#execution/session-callback-route.js";
 
 const resumeHookMock = vi.fn();
+const TASK_ID = "task_1";
+const TASK_TOKEN = `task:${TASK_ID}:0123456789abcdef0123456789abcdef`;
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
   resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
@@ -20,20 +16,131 @@ describe("session callback route", () => {
     resumeHookMock.mockReset();
   });
 
-  it("registers the POST framework callback route", () => {
-    expect(getSessionCallbackChannelDefinitions()).toEqual([
-      expect.objectContaining({
+  it("forwards remote task turn-start identity to the task hook", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const response = await handleSessionCallbackRequest(
+      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
+        body: JSON.stringify({
+          callId: "call-task",
+          kind: "turn.started",
+          sessionId: "child-session",
+          subagentName: "research",
+          taskId: TASK_ID,
+          turnId: "turn_child_7",
+        }),
         method: "POST",
-        name: `${HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX}/post`,
-        urlPath: EVE_CALLBACK_ROUTE_PATTERN,
       }),
-    ]);
+      createRouteContext({ token: TASK_TOKEN }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
+      childSessionId: "child-session",
+      childTurnId: "turn_child_7",
+      kind: "turn-started",
+      taskId: TASK_ID,
+    });
   });
 
-  it("uses route-aligned logical names for disableRoute", () => {
-    const names = getSessionCallbackChannelNames();
-    expect(names).toEqual(new Set([`${HTTP_SESSION_CALLBACK_CHANNEL_NAME_PREFIX}/post`]));
-    expect([...names].some((name) => name.startsWith(".well-known/"))).toBe(false);
+  it("forwards remote task input requests to the owning task hook", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const event = {
+      requests: [
+        {
+          action: {
+            callId: "release-call",
+            input: { marker: "RELEASE" },
+            kind: "tool-call",
+            toolName: "release",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "reject", label: "Reject" },
+          ],
+          requestId: "req-1",
+          prompt: "Approve release",
+        },
+      ],
+      sequence: 3,
+      stepIndex: 2,
+      turnId: "turn-child",
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
+        body: JSON.stringify({
+          callId: "call-task",
+          childContinuationToken: "remote-child-token",
+          childSessionId: "child-session",
+          event,
+          kind: "task.input-requested",
+          subagentName: "research",
+          taskId: TASK_ID,
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: TASK_TOKEN }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
+      callId: "call-task",
+      childContinuationToken: "remote-child-token",
+      childSessionId: "child-session",
+      event,
+      kind: "subagent-input-request",
+      subagentName: "research",
+    });
+  });
+
+  it("forwards remote task updates to the owning task hook", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const response = await handleSessionCallbackRequest(
+      new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
+        body: JSON.stringify({
+          callId: "update-call",
+          updateIndex: 2,
+          updateEpoch: "turn-child",
+          kind: "task.update",
+          message: "Found three matching records.",
+          taskId: TASK_ID,
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: TASK_TOKEN }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
+      callId: "update-call",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
+      kind: "task-update",
+      message: "Found three matching records.",
+    });
+  });
+
+  it.each([
+    ["parent turn token", "turn-inbox", TASK_ID],
+    ["different task token", TASK_TOKEN, "task_other"],
+  ])("rejects task events carried by a %s", async (_label, token, taskId) => {
+    const response = await handleSessionCallbackRequest(
+      new Request(`https://app.example.com/eve/v1/callback/${token}`, {
+        body: JSON.stringify({
+          kind: "turn.started",
+          sessionId: "child-session",
+          taskId,
+          turnId: "turn-child",
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
   it("synthesizes a terminal outcome envelope for session.completed", async () => {

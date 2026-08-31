@@ -66,7 +66,12 @@ export async function runDeclaredSetups(input: {
             installed: true,
             completedItems: [],
             ...result.blocker,
-            next: headlessSetupContinuation({ item: input.item, installed: true }),
+            next: headlessSetupContinuation({
+              item: input.item,
+              installed: true,
+              question:
+                result.blocker.status === "input_required" ? result.blocker.question : undefined,
+            }),
           }),
         );
         process.exitCode = 2;

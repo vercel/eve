@@ -17,7 +17,7 @@ Every turn runs as a durable workflow, built on the open-source [Workflow SDK](h
 
 The Workflow SDK is not inherently tied to Vercel. In local development and in a self-deployed `eve start` process, eve uses the SDK's local world by default; that world persists workflow runs on disk under `.eve/.workflow-data` and dispatches through the same Nitro-hosted workflow routes. On Vercel, the same workflow code runs against Vercel Workflow instead, which adds platform features such as latest production deployment routing and dashboard run metadata.
 
-When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current instructions, model, and tools. The durable session keeps its conversation history and authored state, so identity-based channels such as Telegram private chats and Twilio phone-number conversations adopt agent updates without requiring a new session.
+When a Vercel production deployment changes, the next model turn in an existing session uses that deployment's current system-role instructions, model, and tools. Static user-role instructions stay pinned in the durable conversation history and are not seeded again. Identity-based channels such as Telegram private chats and Twilio phone-number conversations therefore adopt agent behavior updates without duplicating or rewriting their existing context.
 
 Nitro hosts the HTTP routes and workflow entrypoints. It does not supply the workflow state store or the sandbox runtime. Those are separate adapters: Workflow uses the active world implementation, and Sandbox uses the backend from `agent/sandbox` or `defaultBackend()`.
 
@@ -46,7 +46,7 @@ An eve agent spans two execution environments with different responsibilities:
 
 The agent loop runs as a durable workflow in the app runtime. Model calls, tool executors, hooks, instrumentation, and connection clients also run there with full Node.js access.
 
-App-side code reaches the sandbox through `ctx.getSandbox()`. The built-in `bash`, `read_file`, `write_file`, `glob`, and `grep` tools use it, and authored tools can use it when they need isolated filesystem or process access.
+App-side code reaches the sandbox through `ctx.getSandbox()`. The default `bash`, `read_file`, and `write_file` tools use it, as do opt-in framework tools such as `glob` and `grep`. Authored tools can use it when they need isolated filesystem or process access.
 
 The [sandbox](../sandbox) owns the per-session filesystem and processes. Authored skills are materialized under `$HOME/.agents/skills`, and `agent/sandbox/workspace/**` seeds `/workspace`. The loop and sandbox have decoupled lifetimes: the durable workflow can park or restart independently, while the app runtime opens or reuses sandbox compute only when code needs it.
 
@@ -91,7 +91,7 @@ A turn can hand work off to a [subagent](../subagents). Each subagent gets its o
 
 ## How eve orders session history
 
-Conversation history within a session is append-only. Turns land in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see events in the order they happened.
+Conversation history within a session is append-only. Static user-role instructions lead fresh-session history. Dynamic user-role instructions land at their session or turn boundary before the current delivery. Turns follow in order, and the tool calls inside a turn (plus their results) keep their order too. Read a session back and you see messages in the order they happened.
 
 ## What to read next
 

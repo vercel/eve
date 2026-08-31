@@ -177,6 +177,53 @@ describe("executeTask", () => {
     ]);
   });
 
+  it("exposes the primary session transcript after each turn", async () => {
+    const server = createScriptedServer([
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_1"),
+          messageReceived("Remember marigold.", "turn_1"),
+          messageCompleted("I will remember marigold.", "turn_1"),
+          turnCompleted("turn_1"),
+          sessionWaiting(),
+        ],
+      },
+      {
+        sessionId: "session_1",
+        events: [
+          turnStarted("turn_2"),
+          messageReceived("What word did I ask you to remember?", "turn_2"),
+          messageCompleted("marigold", "turn_2"),
+          turnCompleted("turn_2"),
+          sessionCompleted(),
+        ],
+      },
+    ]);
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("Remember marigold.");
+        expect(t.transcript).toBe(
+          "User:\nRemember marigold.\n\nAssistant:\nI will remember marigold.",
+        );
+
+        await t.send("What word did I ask you to remember?");
+        expect(t.transcript).toBe(
+          [
+            "User:\nRemember marigold.",
+            "Assistant:\nI will remember marigold.",
+            "User:\nWhat word did I ask you to remember?",
+            "Assistant:\nmarigold",
+          ].join("\n\n"),
+        );
+      }, "transcript"),
+    });
+  });
+
   it("sends a single turn for input evals", async () => {
     const server = createScriptedServer([
       {
@@ -218,6 +265,7 @@ describe("executeTask", () => {
         sessionId: "secondary",
         events: [
           turnStarted("turn_2"),
+          messageReceived("secondary", "turn_2"),
           messageCompleted("secondary done", "turn_2"),
           actionsRequested("turn_2", "get_weather"),
           turnCompleted("turn_2"),
@@ -227,18 +275,22 @@ describe("executeTask", () => {
     ]);
     vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
 
+    let secondaryTranscript: string | undefined;
     const { result } = await executeTask({
       client: new Client({ host: target.url }),
       target,
       evaluation: createTestEval(async (t) => {
         await t.send("primary");
-        await t.newSession().send("secondary");
+        const secondary = t.newSession();
+        await secondary.send("secondary");
+        secondaryTranscript = secondary.transcript;
       }, "multi-session"),
     });
 
     expect(result.sessionId).toBe("primary");
     expect(result.sessions?.map((session) => session.sessionId)).toEqual(["primary", "secondary"]);
-    expect(result.events).toHaveLength(9);
+    expect(result.events).toHaveLength(10);
+    expect(secondaryTranscript).toBe("User:\nsecondary\n\nAssistant:\nsecondary done");
     expect(result.derived.toolCalls.map((call) => call.sessionId)).toEqual(["secondary"]);
   });
 
@@ -759,6 +811,13 @@ function turnStarted(
   return { data: { sequence: 0, trace, turnId }, type: "turn.started" };
 }
 
+function messageReceived(message: string, turnId: string): UnstampedMessageStreamEvent {
+  return {
+    data: { message, parts: [{ text: message, type: "text" }], sequence: 1, turnId },
+    type: "message.received",
+  };
+}
+
 function turnCompleted(turnId: string): UnstampedMessageStreamEvent {
   return { data: { sequence: 3, turnId }, type: "turn.completed" };
 }
@@ -852,6 +911,7 @@ function subagentCalled(
     data: {
       callId: "call_subagent",
       childSessionId,
+      childStreamPath: `/eve/v1/session/${encodeURIComponent(childSessionId)}/stream`,
       sessionId: "parent-session",
       sequence: 1,
       name,

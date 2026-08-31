@@ -1,5 +1,5 @@
 import { createProxy } from "@vercel/geistdocs/proxy";
-import type { NextFetchEvent, NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { config as geistdocsConfig } from "@/lib/geistdocs/config";
 import { removeProxyMarkdownCanonical } from "@/lib/geistdocs/markdown-canonical";
 import { markdownRoutes } from "@/lib/geistdocs/markdown-routes";
@@ -9,7 +9,7 @@ const geistdocsProxy = createProxy({
   config: geistdocsConfig,
   markdownRoutes,
   trackMarkdownRequest: trackMdRequest,
-  before: () => null,
+  before: ({ request }) => (request.nextUrl.pathname === "/nights" ? NextResponse.next() : null),
 });
 
 const proxy = async (request: NextRequest, context: NextFetchEvent) =>

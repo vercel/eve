@@ -1,9 +1,15 @@
 import type {
+  ActionInputAppendedStreamEvent,
   UnstampedMessageStreamEvent,
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
 } from "#protocol/message.js";
 import type { HarnessEmitFn } from "#harness/types.js";
+
+type AppendStreamEvent =
+  | ActionInputAppendedStreamEvent
+  | MessageAppendedStreamEvent
+  | ReasoningAppendedStreamEvent;
 
 const MAX_PENDING_EVENTS = 64;
 const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
@@ -167,20 +173,30 @@ function mergeAdjacentEmissions(
   right: UnstampedMessageStreamEvent,
   messages: readonly import("ai").ModelMessage[] | undefined,
 ): boolean {
-  if (left.event.type === "message.appended" && right.type === "message.appended") {
-    if (!sameCoordinates(left.event, right)) return false;
-    left.deltaParts ??= [left.event.data.messageDelta];
-    left.deltaParts.push(right.data.messageDelta);
-    left.event = right;
-    left.messages = messages;
-    return true;
-  }
-
-  if (left.event.type === "reasoning.appended" && right.type === "reasoning.appended") {
-    if (!sameCoordinates(left.event, right)) return false;
-    left.deltaParts ??= [left.event.data.reasoningDelta];
-    left.deltaParts.push(right.data.reasoningDelta);
-    left.event = right;
+  const leftAppendKey = appendKey(left.event);
+  const rightAppendKey = appendKey(right);
+  if (leftAppendKey !== undefined || rightAppendKey !== undefined) {
+    if (
+      leftAppendKey === undefined ||
+      leftAppendKey !== rightAppendKey ||
+      !isAppendEvent(left.event) ||
+      !isAppendEvent(right) ||
+      !sameCoordinates(left.event, right)
+    ) {
+      return false;
+    }
+    left.deltaParts ??= [appendDelta(left.event)];
+    left.deltaParts.push(appendDelta(right));
+    left.event =
+      left.event.type === "action.input.appended" && right.type === "action.input.appended"
+        ? {
+            ...right,
+            data: {
+              ...right.data,
+              inputTextOffset: left.event.data.inputTextOffset,
+            },
+          }
+        : right;
     left.messages = messages;
     return true;
   }
@@ -195,10 +211,35 @@ function mergeAdjacentEmissions(
   return false;
 }
 
+function appendKey(event: UnstampedMessageStreamEvent): string | undefined {
+  switch (event.type) {
+    case "message.appended":
+    case "reasoning.appended":
+      return event.type;
+    case "action.input.appended":
+      return `${event.type}:${event.data.callId}`;
+    default:
+      return undefined;
+  }
+}
+
+function isAppendEvent(event: UnstampedMessageStreamEvent): event is AppendStreamEvent {
+  return appendKey(event) !== undefined;
+}
+
+function appendDelta(event: AppendStreamEvent): string;
+function appendDelta(event: UnstampedMessageStreamEvent): string | undefined;
 function appendDelta(event: UnstampedMessageStreamEvent): string | undefined {
-  if (event.type === "message.appended") return event.data.messageDelta;
-  if (event.type === "reasoning.appended") return event.data.reasoningDelta;
-  return undefined;
+  switch (event.type) {
+    case "message.appended":
+      return event.data.messageDelta;
+    case "reasoning.appended":
+      return event.data.reasoningDelta;
+    case "action.input.appended":
+      return event.data.inputTextDelta;
+    default:
+      return undefined;
+  }
 }
 
 function materializeEvent(emission: PendingEmission): UnstampedMessageStreamEvent {
@@ -224,13 +265,20 @@ function materializeEvent(emission: PendingEmission): UnstampedMessageStreamEven
     };
   }
 
+  if (emission.event.type === "action.input.appended") {
+    return {
+      ...emission.event,
+      data: {
+        ...emission.event.data,
+        inputTextDelta: emission.deltaParts.join(""),
+      },
+    };
+  }
+
   return emission.event;
 }
 
-function sameCoordinates(
-  left: MessageAppendedStreamEvent | ReasoningAppendedStreamEvent,
-  right: MessageAppendedStreamEvent | ReasoningAppendedStreamEvent,
-): boolean {
+function sameCoordinates(left: AppendStreamEvent, right: AppendStreamEvent): boolean {
   return (
     left.data.sequence === right.data.sequence &&
     left.data.stepIndex === right.data.stepIndex &&

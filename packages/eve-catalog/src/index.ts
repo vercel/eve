@@ -121,6 +121,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "blooio",
+    name: "Blooio",
+    kind: "channel",
+    tagline: "Send and receive iMessage, RCS, and SMS through Blooio.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "github",
     name: "GitHub",
     kind: "channel",
@@ -214,10 +221,10 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
-    slug: "chat-sdk-linq",
+    slug: "linq",
     name: "Linq",
     kind: "channel",
-    tagline: "iMessage and SMS conversations, media, and tapbacks through Linq.",
+    tagline: "iMessage and SMS conversations through Linq, with guided Connect or portable setup.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -274,6 +281,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "agent-browser",
     kind: "extension",
     tagline: "Add browser automation tools backed by agent-browser to an eve agent.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "blitzreels",
+    name: "BlitzReels",
+    kind: "extension",
+    tagline: "Turn long videos into short clips, generate media, repair edits, and export.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -401,6 +415,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "agentcard",
+    name: "Agentcard",
+    kind: "connection",
+    tagline: "let agents buy online",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "Agentcard: the agent's wallet. Shop and check out at real merchants (DoorDash, Good Eggs, flights) with the conversational `buy` tool (thread conversation_id on follow-ups), issue a single-use virtual card to pay at any checkout, let the user add their own card, and manage the cash that funds it: balance, top-ups, transactions, KYC, human support.",
+      mcp: { url: "https://mcp.agentcard.sh/mcp" },
+    },
+  },
+  {
     slug: "airtable",
     name: "Airtable",
     kind: "connection",
@@ -475,6 +501,18 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Coda: create, search, and update docs and tables.",
       mcp: { url: "https://coda.io/apis/mcp" },
+    },
+  },
+  {
+    slug: "context",
+    name: "context.dev",
+    kind: "connection",
+    tagline: "search, scrape, extract, and monitor live web data.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description:
+        "context.dev: search the live web, scrape and crawl sites, extract structured data, parse files, retrieve brand intelligence, monitor changes, and run batch jobs.",
+      mcp: { url: "https://mcp.context.dev/mcp" },
     },
   },
   {
@@ -674,6 +712,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Similarweb: web traffic, app, and market intelligence data.",
       mcp: { url: "https://mcp.similarweb.com" },
+    },
+  },
+  {
+    slug: "shopify",
+    name: "Shopify",
+    kind: "connection",
+    tagline: "Search products and manage carts and checkouts on a Shopify storefront.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Search products and build carts and checkouts on a Shopify storefront.",
+      mcp: { url: "https://{shop}.myshopify.com/api/ucp/mcp" },
     },
   },
   {

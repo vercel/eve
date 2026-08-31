@@ -64,6 +64,7 @@ export function createJustBashSandboxBackend(
   input: CreateJustBashSandboxBackendInput = {},
 ): SandboxBackend {
   const autoInstall = input.createOptions?.autoInstall ?? true;
+  const customCommands = input.createOptions?.customCommands;
   const filesystem = input.createOptions?.filesystem;
   return {
     name: JUST_BASH_BACKEND_NAME,
@@ -158,6 +159,7 @@ export function createJustBashSandboxBackend(
       const sandbox = await createBashSandbox({
         appRoot: createInput.runtimeContext.appRoot,
         autoInstall,
+        customCommands,
         filesystem,
         rootPath: sessionRootPath,
         sessionKey: createInput.sessionKey,

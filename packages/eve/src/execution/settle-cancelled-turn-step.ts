@@ -3,8 +3,8 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
+import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import {
   createDurableSessionState,
   type DurableSessionState,
@@ -27,8 +27,8 @@ import {
 } from "#harness/proxy-input-requests.js";
 import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
+import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
   encodeMessageStreamEvent,
@@ -37,10 +37,12 @@ import {
 } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import type { TokenUsage } from "#shared/token-usage.js";
 
 export interface CancelledTurnSettleResult {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly usage?: TokenUsage;
 }
 
 /**
@@ -62,7 +64,6 @@ export async function settleCancelledTurnStep(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const instrumentation = getInstrumentationRuntime();
 
   let session = hydrateDurableSession({
     compactionOverrides: {
@@ -70,6 +71,12 @@ export async function settleCancelledTurnStep(input: {
     },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
+  });
+  const instrumentation = bindSessionInstrumentation({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
+    rootSessionId: session.rootSessionId ?? session.sessionId,
+    sessionId: session.sessionId,
   });
 
   let emissionState = getHarnessEmissionState(durableSession.state);
@@ -95,6 +102,7 @@ export async function settleCancelledTurnStep(input: {
           // Stamp once: the persisted chunk and the hooks must agree on the id.
           const stamped = stampMessageStreamEvent(transformed);
           await writer.write(encodeMessageStreamEvent(stamped));
+          void observeSessionActivity({ ctx, event: stamped, sessionId: session.sessionId });
           await dispatchStreamEventHooks({
             ctx,
             event: stamped,
@@ -102,12 +110,8 @@ export async function settleCancelledTurnStep(input: {
           });
         };
         const emit =
-          createInstrumentationHandleEvent({
-            agentName: bundle.turnAgent.id,
-            channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
+          instrumentation?.createCancellationHandleEvent({
             handleEvent: baseEmit,
-            hooks: instrumentation?.hooks,
-            sessionId: session.sessionId,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
         return {
@@ -118,7 +122,7 @@ export async function settleCancelledTurnStep(input: {
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
-      await instrumentation?.forceFlush();
+      await instrumentation?.flush();
       writer.releaseLock();
     }
   }
@@ -140,16 +144,20 @@ export async function settleCancelledTurnStep(input: {
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
           clearPendingWorkflowInterrupt(
-            clearPendingRuntimeActionBatch(abandonRunningAgentTurns(session)),
+            clearPendingRuntimeActionBatch(
+              abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
+            ),
           ),
         ),
       ),
       emissionState,
     ),
   );
+  const totals = getTurnUsageState(session.state)?.session;
 
-  return {
+  const base = {
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session: cancelledSession }),
   };
+  return totals === undefined ? base : { ...base, usage: toUsage(totals) };
 }

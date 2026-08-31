@@ -42,6 +42,15 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
   );
 }
 
+function createBoundedStreamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  tailIndex = events.length - 1,
+): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(tailIndex));
+  return response;
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -142,6 +151,54 @@ describe("useEveAgent", () => {
     expect(seenHelpers.at(-1)).toBe(firstHelpers);
   });
 
+  it("stops an active turn stream when the component unmounts", async () => {
+    let streamSignal: AbortSignal | null | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return createStartedMessageResponse("session_1", "http:session_1");
+      }
+
+      streamSignal = init?.signal;
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamSignal?.addEventListener("abort", () => controller.error(createAbortError()));
+          },
+        }),
+      );
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+    let root: ReturnType<typeof create> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    await act(async () => {
+      root = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    });
+
+    expect(streamSignal?.aborted).toBe(false);
+
+    await act(async () => {
+      root?.unmount();
+    });
+
+    expect(streamSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      await sendPromise;
+    });
+  });
+
   it("sends a message and projects streamed events with the default reducer", async () => {
     const events = [
       createMessageReceivedEvent({
@@ -227,6 +284,47 @@ describe("useEveAgent", () => {
         userMessage: "Hello",
       }),
     );
+  });
+
+  it("detaches locally on unmount without cancelling the durable turn", async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementationOnce((_input, init) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener("abort", () => reject(createAbortError()), {
+          once: true,
+        });
+      });
+    });
+
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+
+    function TestComponent() {
+      helpers = useEveAgent();
+      return null;
+    }
+
+    let renderer: ReturnType<typeof create> | undefined;
+    await act(async () => {
+      renderer = create(createElement(TestComponent));
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = helpers?.send("Hello");
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+    await act(async () => {
+      await sendPromise;
+    });
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("prepares fresh clientContext before sending without projecting it optimistically", async () => {
@@ -552,6 +650,66 @@ describe("useEveAgent", () => {
     expect(helpers?.status).toBe("ready");
     expect(helpers?.error).toBeUndefined();
     expect(helpers?.events).toEqual(stampTestEvents(events));
+  });
+
+  it("requires a session when automatic resume is enabled", async () => {
+    function TestComponent() {
+      useEveAgent({ resume: true });
+      return null;
+    }
+
+    await expect(
+      act(async () => {
+        create(createElement(TestComponent));
+      }),
+    ).rejects.toThrow("requires initialSession or session");
+  });
+
+  it("keeps settled hydrated history visible without publishing an active-turn status", async () => {
+    const events = stampTestEvents([
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ]);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse([], events.length - 1))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
+    let helpers: UseEveAgentHelpers<EveMessageData> | undefined;
+    const statuses: string[] = [];
+
+    function TestComponent() {
+      helpers = useEveAgent({
+        initialEvents: events,
+        initialSession: { sessionId: "session_1", streamIndex: events.length },
+        resume: true,
+      });
+      statuses.push(helpers.status);
+      return null;
+    }
+
+    await act(async () => {
+      create(createElement(TestComponent));
+      await vi.waitFor(() => expect(helpers?.status).toBe("ready"));
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(statuses[0]).toBe("resuming");
+    expect(statuses).not.toContain("submitted");
+    expect(statuses).not.toContain("streaming");
+    expect(helpers?.status).toBe("ready");
+    expect(helpers?.data).toEqual(
+      completedTurnData({
+        assistantMessage: "Hi there.",
+        turnId: "turn_1",
+        userMessage: "Hello",
+      }),
+    );
   });
 
   it("projects input responses before the resumed stream returns", async () => {

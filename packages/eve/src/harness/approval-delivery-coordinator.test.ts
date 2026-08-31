@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import { settleDirectApprovalResponse } from "#harness/approval-candidates.js";
 import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
-import { appendPendingInputBatch } from "#harness/pending-input-batches.js";
+import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const request: InputRequest = {
   action: { callId: "call-1", input: { marker: "durable" }, kind: "tool-call", toolName: "gate" },
@@ -61,5 +61,48 @@ describe("coordinateApprovalDelivery", () => {
     expect(result.stepInput?.inputResponses).toEqual([
       { optionId: "approve", requestId: request.requestId },
     ]);
+  });
+
+  it("recovers a cancelled settlement before its synthetic response is consumed", async () => {
+    const parked = parkedSession();
+    const settled = settleDirectApprovalResponse({
+      actor: responder,
+      outcome: "cancelled",
+      requestId: request.requestId,
+      settledAt: 100,
+      state: parked.state,
+    });
+    const result = await coordinateApprovalDelivery({
+      now: 101,
+      session: { ...parked, state: settled.state },
+      tools: new Map(),
+    });
+    expect(result.kind).toBe("continue");
+    expect(result.stepInput?.inputResponses).toEqual([
+      { optionId: "cancel", requestId: request.requestId },
+    ]);
+  });
+
+  it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
+    const messageAuth: SessionAuthContext = { ...responder, principalId: "user-2" };
+    const result = await coordinateApprovalDelivery({
+      now: 100,
+      session: parkedSession(),
+      stepInput: {
+        message: "What else can you help with?",
+        messageAuth,
+      },
+      tools: new Map(),
+    });
+
+    expect(result.kind).toBe("continue");
+    expect(result.feedback).toEqual([]);
+    expect(result.stepInput?.message).toBe("What else can you help with?");
+    expect(result.stepInput?.messageAuth).toEqual(messageAuth);
+    expect(
+      getPendingInputBatches(result.session.state).flatMap((batch) =>
+        batch.requests.map((pending) => pending.requestId),
+      ),
+    ).toEqual([request.requestId]);
   });
 });

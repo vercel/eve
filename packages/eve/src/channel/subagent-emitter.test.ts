@@ -34,6 +34,7 @@ describe("subagent adapter", () => {
         parentSessionId: "parent-session",
         subagentName: "summarizer",
       },
+      audience: "unknown",
     });
 
     const rehydrated = deserializeRuntimeAdapter(

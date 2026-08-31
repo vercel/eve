@@ -16,14 +16,19 @@ import chatAdapterSlack from "./@chat-adapter/slack.mjs";
 import chatAdapterStateMemory from "./@chat-adapter/state-memory.mjs";
 import chatAdapterTwilio from "./@chat-adapter/twilio.mjs";
 import photonChatAdapterIMessage from "./@photon-ai/chat-adapter-imessage.mjs";
+import linqChatSdkAdapter from "./@linqapp/chat-sdk-adapter.mjs";
 
+import modelContextProtocolServer from "./@modelcontextprotocol/server.mjs";
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
+import vercelBlob from "./@vercel/blob.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
+import vercelSandboxDelete from "./@vercel/sandbox-delete.mjs";
+import vercelSandboxStable from "./@vercel/sandbox-stable.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
 import workflowSerde from "./@workflow/serde.mjs";
@@ -68,11 +73,13 @@ export const MODULES = [
   jsonSchema,
   marked,
   mcp,
+  modelContextProtocolServer,
   openai,
   opentelemetryApi,
   opentelemetryOtlpTransformer,
   otel,
   photonChatAdapterIMessage,
+  linqChatSdkAdapter,
   picocolors,
   provider,
   providerUtils,
@@ -80,10 +87,13 @@ export const MODULES = [
   shadcnRegistry,
   standardSchemaSpec,
   turndown,
+  vercelBlob,
   vercelDetectAgent,
   vercelOidc,
   vercelOtel,
   vercelSandbox,
+  vercelSandboxDelete,
+  vercelSandboxStable,
   workflowCore,
   workflowErrors,
   workflowSerde,

@@ -130,7 +130,7 @@ export function capLineLength(line: string): string {
 
 /**
  * Counts logical lines, treating a trailing empty element from
- * `split("\n")` as not a separate line (consistent with read-file-tool).
+ * `split("\n")` as not a separate line (consistent with the read-file tool).
  */
 function countLogicalLines(lines: readonly string[]): number {
   if (lines.length > 0 && lines[lines.length - 1] === "") {

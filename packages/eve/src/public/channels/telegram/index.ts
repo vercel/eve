@@ -7,6 +7,7 @@ export type { ModelMessage } from "ai";
  * inbound update populates it.
  */
 export interface TelegramInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: import("#shared/channel-audience.js").ChannelAudience;
   readonly chatId: string | null;
   readonly chatType: import("#public/channels/telegram/inbound.js").TelegramChatType | null;
   readonly triggeringUserId: string | null;
@@ -32,6 +33,7 @@ export {
   answerTelegramCallbackQuery,
   downloadTelegramFile,
   editTelegramMessageReplyMarkup,
+  editTelegramMessageText,
   getTelegramFile,
   resolveTelegramBotToken,
   sendTelegramChatAction,
@@ -43,6 +45,7 @@ export {
   type TelegramApiResponse,
   type TelegramBotToken,
   type TelegramCredentials,
+  type TelegramEphemeralMessageParameters,
   type TelegramFetch,
   type TelegramMessageBody,
   type TelegramMessageResult,

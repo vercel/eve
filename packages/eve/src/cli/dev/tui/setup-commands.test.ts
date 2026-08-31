@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
-import { RegistryFlowFailedError } from "#setup/flows/registry.js";
+import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 
 import {
   runTuiSetupCommand,
@@ -54,6 +54,7 @@ function fakeFlows(overrides: Partial<TuiSetupFlows> = {}): TuiSetupFlows {
     runLoginFlow: vi.fn<TuiSetupFlows["runLoginFlow"]>(async () => ({ kind: "logged-in" })),
     runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
       kind: "done",
+      accessChanged: true,
       modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
     })),
     runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
@@ -75,7 +76,9 @@ function run(input: {
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
+  initialRegistryAddress?: string;
   upgradeChoice?: "upgrade" | "later";
+  withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
 }) {
   const { upgradeChoice } = input;
   const fake = createFakePrompter(
@@ -90,6 +93,12 @@ function run(input: {
   };
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
+  }
+  if (input.initialRegistryAddress !== undefined) {
+    commandInput.initialRegistryAddress = input.initialRegistryAddress;
+  }
+  if (input.withExclusiveTerminal !== undefined) {
+    commandInput.withExclusiveTerminal = input.withExclusiveTerminal;
   }
   return runTuiSetupCommand(commandInput);
 }
@@ -128,6 +137,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message: "Model changed to openai/gpt-5.5. Live on your next prompt.",
       preserveFlowDiagnostics: false,
+      effect: { kind: "model-access-changed" },
     });
     expect(flows.runModelFlow).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -135,6 +145,56 @@ describe("runTuiSetupCommand", () => {
         deps: expect.objectContaining({ runProviderFlow: expect.any(Function) }),
       }),
     );
+  });
+
+  it("does not rebuild model access after a rejected edit", async () => {
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
+        kind: "done",
+        accessChanged: false,
+        modelMessage: "Couldn't confirm the id.",
+      })),
+    });
+
+    await expect(run({ command: "model", flows })).resolves.toEqual({
+      message: "Couldn't confirm the id.",
+      preserveFlowDiagnostics: false,
+    });
+  });
+
+  it("hands model-owned subprocesses both the terminal and suspended runtime", async () => {
+    const calls: string[] = [];
+    const renderer = fakePanelRenderer();
+    renderer.withInheritedStdio = async (task) => {
+      calls.push("terminal:release");
+      const result = await task();
+      calls.push("terminal:restore");
+      return result;
+    };
+    const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+      calls.push("runtime:suspend");
+      const result = await task();
+      calls.push("runtime:resume");
+      return result;
+    };
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async (input) => {
+        await input.withExclusiveTerminal?.(async () => {
+          calls.push("codex");
+        });
+        return { kind: "cancelled" };
+      }),
+    });
+
+    await run({ command: "model", flows, renderer, withExclusiveTerminal });
+
+    expect(calls).toEqual([
+      "terminal:release",
+      "runtime:suspend",
+      "codex",
+      "runtime:resume",
+      "terminal:restore",
+    ]);
   });
 
   it("forwards an automatic provider entry to the model flow", async () => {
@@ -147,89 +207,64 @@ describe("runTuiSetupCommand", () => {
     );
   });
 
-  it("stacks the model and provider outcome lines when both menu actions ran", async () => {
+  it("stacks the model and provider selection lines when both menu actions ran", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
+        accessChanged: true,
         modelMessage: "Model changed to openai/gpt-5.5. Live on your next prompt.",
-        providerOutcome: {
-          resolution: {
-            credential: "api-key",
-            source: { kind: "env-file", path: ".env.local" },
-          },
-          status: { kind: "gateway-project", projectName: "my-agent" },
-        },
+        providerSelection: "ai-gateway-project",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
       message:
         "Model changed to openai/gpt-5.5. Live on your next prompt.\n" +
-        "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.",
+        "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
   });
 
-  it("reports a provider-only model session with the provider outcome", async () => {
+  it("reports a provider-only model session with the provider selection", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
-        providerOutcome: {
-          resolution: { credential: "oidc", file: ".env.local" },
-          status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
-        },
+        accessChanged: true,
+        providerSelection: "ai-gateway-project",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.",
+      message: "AI Gateway via Project selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
   });
 
-  it("names the shadow when a gateway key outranks the freshly linked OIDC token", async () => {
+  it("reports the selected API-key provider without claiming a connection", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
-        providerOutcome: {
-          resolution: {
-            credential: "api-key",
-            source: { kind: "shell" },
-            shadowedOidc: {},
-          },
-          status: { kind: "gateway-project", projectName: "my-agent", teamName: "my-team" },
-        },
+        accessChanged: true,
+        providerSelection: "ai-gateway-key",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message:
-        "Project linked. AI_GATEWAY_API_KEY (shell) outranks the project's " +
-        "VERCEL_OIDC_TOKEN and stays the active credential — unset it in your shell to run " +
-        "on the project.",
+      message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
   });
 
-  it("does not claim a link for a pasted key — the outcome names the env file", async () => {
+  it("reports the selected ChatGPT subscription", async () => {
     const flows = fakeFlows({
       runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async () => ({
         kind: "done",
-        providerOutcome: {
-          resolution: {
-            credential: "api-key",
-            source: { kind: "env-file", path: ".env.local" },
-          },
-          status: {
-            kind: "gateway-key",
-            envKey: "AI_GATEWAY_API_KEY",
-            source: { kind: "env-file", path: ".env.local" },
-          },
-        },
+        accessChanged: true,
+        providerSelection: "chatgpt",
       })),
     });
     await expect(run({ command: "model", flows })).resolves.toEqual({
-      message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+      message: "ChatGPT subscription selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" },
     });
@@ -269,6 +304,34 @@ describe("runTuiSetupCommand", () => {
         upgrade: true,
       }),
     );
+  });
+
+  it("prompts to upgrade when an installed registry item's setup needs a newer CLI", async () => {
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => {
+        throw new RegistryFlowFailedError(
+          new HumanActionRequiredError({
+            kind: "vercel-cli-upgrade",
+            command: "vercel upgrade",
+            reason: "The installed Vercel CLI does not support Linq trigger options.",
+          }),
+          {
+            kind: "done",
+            addedItems: ["channel/linq"],
+            items: [{ address: "channel/linq", title: "Linq", facts: [], output: [] }],
+            facts: [],
+          },
+        );
+      }),
+      runInstallVercelCliFlow: vi.fn<TuiSetupFlows["runInstallVercelCliFlow"]>(async () => ({
+        kind: "installed",
+      })),
+    });
+
+    await expect(run({ command: "add", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
+      message: "Upgraded the Vercel CLI. Retry /add.",
+      preserveFlowDiagnostics: false,
+    });
   });
 
   it("gives the manual upgrade command when the old-CLI prompt is declined", async () => {
@@ -370,6 +433,64 @@ describe("runTuiSetupCommand", () => {
     expect(runRegistryFlow).toHaveBeenCalledWith(expect.objectContaining({ appRoot: APP_ROOT }));
   });
 
+  it("forwards a /add argument as the registry flow's initial address", async () => {
+    const flows = fakeFlows();
+
+    await run({ command: "add", flows, initialRegistryAddress: "channel/slack" });
+
+    expect(flows.runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ appRoot: APP_ROOT, initialAddress: "channel/slack" }),
+    );
+  });
+
+  it("omits an initial address for bare /add", async () => {
+    const flows = fakeFlows();
+
+    await run({ command: "add", flows });
+
+    expect(flows.runRegistryFlow).toHaveBeenCalledWith(
+      expect.not.objectContaining({ initialAddress: expect.anything() }),
+    );
+  });
+
+  it.each([
+    ["bare /add browses the catalog", undefined, "Add an integration"],
+    ["/add <item> opens the item", "channel/slack", "Slack"],
+  ])("composes with the real registry flow: %s", async (_case, address, firstPrompt) => {
+    const prompts: string[] = [];
+    const registryDeps = {
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [{ address: "channel/slack", name: "channel/slack", source: "Vercel" }],
+        total: 1,
+        errors: [],
+      })),
+      getRegistryItemManifest: vi.fn(async () => ({ name: "channel/slack", title: "Slack" })),
+      installRegistryItem: vi.fn(async () => ({ output: [] })),
+      detectDeployment: vi.fn(async () => ({ state: "unlinked" as const })),
+      runDeployFlow: vi.fn(async () => ({ kind: "deployed" as const })),
+    };
+    // The real flow behind the command seam, so the parsed argument is proven
+    // to reach `initialAddress` rather than stopping at a mock.
+    const flows = fakeFlows({
+      runRegistryFlow: (input) => {
+        const fake = createFakePrompter({
+          single: (options) => {
+            prompts.push(options.message);
+            return options.message === "Add an integration" ? "action:done" : "add";
+          },
+        });
+        return runRegistryFlow({ ...input, prompter: fake.prompter, deps: registryDeps });
+      },
+    });
+
+    const commandRun: Parameters<typeof run>[0] = { command: "add", flows };
+    if (address !== undefined) commandRun.initialRegistryAddress = address;
+    await run(commandRun);
+
+    expect(prompts[0]).toBe(firstPrompt);
+    expect(registryDeps.browseRegistryCatalog).toHaveBeenCalledTimes(address === undefined ? 1 : 0);
+  });
+
   it("overrides a settled success tone when add is interrupted", async () => {
     const renderer = fakePanelRenderer();
     const flows = fakeFlows({
@@ -462,17 +583,8 @@ describe("runTuiSetupCommand", () => {
               () =>
                 resolve({
                   kind: "done",
-                  providerOutcome: {
-                    resolution: {
-                      credential: "api-key",
-                      source: { kind: "env-file", path: ".env.local" },
-                    },
-                    status: {
-                      kind: "gateway-key",
-                      envKey: "AI_GATEWAY_API_KEY",
-                      source: { kind: "env-file", path: ".env.local" },
-                    },
-                  },
+                  accessChanged: true,
+                  providerSelection: "ai-gateway-key",
                 }),
               { once: true },
             );

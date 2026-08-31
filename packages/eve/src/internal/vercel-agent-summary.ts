@@ -37,7 +37,7 @@ export const VERCEL_EVE_AGENT_SUMMARY_KIND = "vercel-eve-agent-summary" as const
  * making semantic changes consumers must opt into. Adding optional fields
  * does not require a version bump.
  */
-export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 4;
+export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 5;
 
 /**
  * Output path (relative to the agent's `appRoot`) where eve writes the
@@ -77,11 +77,11 @@ export type VercelEveAgentEntry = VercelEveAgentEntryBase &
  * Authored agent instructions resolved at build time from the agent's
  * `instructions.md` or `instructions.{ts,cts,mts,js,cjs,mjs}` source.
  * Agents without authored instructions fall back to the framework default
- * and the summary's `instructions` field is `null`.
+ * and the summary's `instructions` field is empty.
  *
- * The dashboard renders the markdown body verbatim, so the field carries
+ * The dashboard renders the content verbatim, so the field carries
  * the full resolved content rather than a preview. For module-backed
- * sources the markdown is the result the module produced at build time,
+ * sources the content is the result the module produced at build time,
  * not the module's source code.
  */
 export interface VercelEveInstructionsEntry {
@@ -96,8 +96,9 @@ export interface VercelEveInstructionsEntry {
    * that produces the instructions at build time.
    */
   readonly sourceKind: "markdown" | "module";
-  /** Resolved markdown body of the instructions. */
-  readonly markdown: string;
+  /** Resolved instructions content. */
+  readonly content: string;
+  readonly role: "system" | "user";
 }
 
 export interface VercelEveScheduleEntry {
@@ -147,7 +148,7 @@ export interface VercelEveConnectionEntry {
 
 export interface VercelEveChannelEntry {
   readonly name: string;
-  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "WEBSOCKET";
+  readonly method: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "WEBSOCKET";
   readonly urlPath: string;
   readonly type: VercelEveChannelType;
   /**
@@ -210,10 +211,10 @@ export interface VercelEveAgentSummary {
   readonly generatorVersion: string;
   readonly agent: VercelEveAgentEntry;
   /**
-   * Authored agent instructions, when declared. `null` when the agent
-   * relies on the framework default.
+   * Ordered authored agent instructions. Empty when the agent relies on the
+   * framework default.
    */
-  readonly instructions: VercelEveInstructionsEntry | null;
+  readonly instructions: readonly VercelEveInstructionsEntry[];
   readonly schedules: readonly VercelEveScheduleEntry[];
   readonly tools: readonly VercelEveToolEntry[];
   readonly skills: readonly VercelEveSkillEntry[];

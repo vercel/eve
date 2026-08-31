@@ -3,15 +3,16 @@ import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { resolvePackageRoot } from "#internal/application/package.js";
-import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
+import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 
-import { joinRoutePrefix, normalizeOrigin } from "./routing.js";
+import { normalizeOrigin } from "./routing.js";
 
 export const EVE_BASE_URL_ENV = "EVE_BASE_URL";
 
 const DEFAULT_SERVER_READY_TIMEOUT_MS = 30_000;
 const DEV_SERVER_REGISTRY_TIMEOUT_MS = 30_000;
 const DEV_SERVER_REGISTRY_POLL_MS = 100;
+const DEV_SERVER_READINESS_TIMEOUT_MS = 1_000;
 const DEV_SERVER_STALE_LOCK_MS = 30_000;
 const EVE_CACHE_DIRECTORY_NAME = ".eve";
 const EVE_SVELTEKIT_DEV_SERVER_FILE_NAME = "sveltekit-dev-server.json";
@@ -80,28 +81,19 @@ export function normalizeDevServerRegistry(value: unknown): EveDevServerRegistry
   }
 }
 
-async function isEveServerHealthy(origin: string): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1_000);
-  try {
-    const response = await fetch(joinRoutePrefix(origin, `${EVE_ROUTE_PREFIX}/health`), {
-      signal: controller.signal,
-    });
-    return response.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function readUsableEveDevServerRegistry(appRoot: string): Promise<string | undefined> {
   try {
     const registry = normalizeDevServerRegistry(
       JSON.parse(await readFile(resolveEveDevServerRegistryPath(appRoot), "utf8")) as unknown,
     );
     if (registry === undefined || registry.appRoot !== appRoot) return undefined;
-    if (!(await isEveServerHealthy(registry.origin))) return undefined;
+    if (
+      (await readDevelopmentRuntimeArtifactsRevision({
+        serverUrl: registry.origin,
+        timeoutMs: DEV_SERVER_READINESS_TIMEOUT_MS,
+      })) === undefined
+    )
+      return undefined;
     return registry.origin;
   } catch (error) {
     if (isNodeErrorWithCode(error, "ENOENT")) return undefined;

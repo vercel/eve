@@ -3,7 +3,7 @@ import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
   RuntimeSubagentDispatchFailure,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 export function createUnavailableDynamicSubagentResult(

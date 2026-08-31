@@ -85,7 +85,13 @@ function formatCommand(command: string): string {
 }
 
 function formatNetworkPolicy(policy: SandboxNetworkPolicy): string {
-  return truncateOneLine(typeof policy === "string" ? policy : JSON.stringify(policy));
+  return truncateOneLine(
+    typeof policy === "string"
+      ? policy
+      : JSON.stringify(policy, (key, value: unknown) =>
+          key === "transform" ? "[redacted]" : value,
+        ),
+  );
 }
 
 function truncateOneLine(value: string): string {

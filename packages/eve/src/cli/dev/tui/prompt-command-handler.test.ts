@@ -129,7 +129,7 @@ describe("createPromptCommandHandler", () => {
 
   it("forwards automatic provider entry and model-access changes", async () => {
     const runTuiSetupCommand = vi.fn(async () => ({
-      message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+      message: "AI Gateway via API key selected.",
       preserveFlowDiagnostics: false,
       effect: { kind: "model-access-changed" } as const,
     }));
@@ -150,7 +150,7 @@ describe("createPromptCommandHandler", () => {
           { ...context({ setupFlow }), initialModelStep: "provider" },
         ),
       ).resolves.toEqual({
-        message: "Connected to AI Gateway via AI_GATEWAY_API_KEY in .env.local.",
+        message: "AI Gateway via API key selected.",
         effect: { kind: "model-access-changed" },
       });
       expect(runTuiSetupCommand).toHaveBeenCalledWith(
@@ -158,6 +158,43 @@ describe("createPromptCommandHandler", () => {
       );
       expect(setupFlow.begin).toHaveBeenCalledWith("Configure the agent model", "pulse");
       expect(setupFlow.end).toHaveBeenCalledWith({ preserveDiagnostics: false });
+    } finally {
+      vi.doUnmock("./setup-commands.js");
+      vi.resetModules();
+    }
+  });
+
+  it("routes a /add argument to the registry flow's initial address", async () => {
+    const runTuiSetupCommand = vi.fn(async () => ({
+      message: "Added Slack",
+      preserveFlowDiagnostics: true,
+    }));
+    vi.doMock("./setup-commands.js", () => ({
+      SETUP_FLOW_CONFIG: { add: { title: "Add to your agent", indicator: "pulse" } },
+      runTuiSetupCommand,
+    }));
+
+    try {
+      const setupFlow = setupFlowRenderer();
+      const handler = createPromptCommandHandler({ target: LOCAL_TARGET });
+
+      await handler.handle(
+        { type: "extension", name: "add", argument: "channel/slack" },
+        context({ setupFlow }),
+      );
+      await handler.handle(
+        { type: "extension", name: "add", argument: "" },
+        context({ setupFlow }),
+      );
+
+      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ command: "add", initialRegistryAddress: "channel/slack" }),
+      );
+      expect(runTuiSetupCommand).toHaveBeenNthCalledWith(
+        2,
+        expect.not.objectContaining({ initialRegistryAddress: expect.anything() }),
+      );
     } finally {
       vi.doUnmock("./setup-commands.js");
       vi.resetModules();

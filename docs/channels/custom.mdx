@@ -7,7 +7,7 @@ When eve doesn't ship a channel for your surface, you build one. Custom channels
 
 ## File location and identity
 
-Custom channels live in `agent/channels/` at the root agent. Local subagents do not declare channels today.
+Custom channels live in `agent/channels/` at the root agent or in an [extension](../extensions) mounted there. Local subagents do not declare channels today.
 
 The channel file stem becomes the channel id, so `agent/channels/internal-webhook.ts` is addressed as `internal-webhook`. Export the channel definition as the module's default export.
 
@@ -58,6 +58,8 @@ export default defineChannel({
 });
 ```
 
+A route's `path` is its app URL; the channel filename does not prefix it. The route above answers at `POST /threads/:threadId/messages`, not `/support/threads/:threadId/messages`. Use a unique method-and-path pair for each route, and do not use the framework-owned `/eve/v1/*` namespace.
+
 Each route receives these operation surfaces:
 
 - `from(address)` binds `send`, `respond`, `cancel`, `compact`, `clear`, and `reset` to a channel-local continuation address.
@@ -107,6 +109,18 @@ await session.compact();
 await session.clear();
 await session.reset({ reason: "Retire this session" });
 await session.getEventStream({ startIndex: 12 });
+```
+
+`respond()` accepts exact response literals directly. If responses have already
+been widened to `InputResponse[]`—for example, after decoding a platform
+payload—validate them with eve's strict schema before delivery. The validated
+type preserves that proof across channel wrappers:
+
+```ts
+import { parseInputResponses } from "eve/client";
+
+const inputResponses = parseInputResponses(decodedResponses);
+await source.respond(inputResponses, { auth });
 ```
 
 Message sends use the channel's `turnPolicy`, which defaults to `"steer"`. An accepted message arriving during an active turn is durably buffered before eve cancels that turn and starts the message as a replacement turn. Configure `turnPolicy: "queue"` on `defineChannel(...)` when active turns should finish in order, or override one send:
@@ -210,7 +224,9 @@ The bridge server does not listen on its own port. It receives only upgrade even
 
 ## Cross-channel hand-off
 
-Route handlers can start a session on a different channel via `ctx.to(channel, target).send(message, options)`. Use this when an inbound request on one channel should pivot the conversation onto another, such as an incident webhook that opens an investigation thread in Slack.
+Route handlers can start or resume an agent session on a different channel via `ctx.to(channel, target).send(message, options)`. This is an agent hand-off: the message becomes turn input and invokes the model on the destination channel. Use it when an inbound request should pivot the conversation, such as an incident webhook that opens an investigation thread in Slack.
+
+To post a provider notification without starting an agent turn, call the destination provider's API instead. If that notification must survive process failures, use an application-owned outbox; see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ```ts
 import { defineChannel, POST } from "eve/channels";
@@ -245,6 +261,7 @@ Semantics:
 - The target channel's authored `receive(input, { from })` hook owns the continuation-token format and initial state. Callers supply the target to `to(...)`, then the message and auth to `send(...)`.
 - `auth` flows through to `session.auth.initiator` so the target's event handlers and the agent's tools can read who started the session.
 - Calling `ctx.to(...).send(...)` does not also start a session on the current channel. The inbound channel's response is whatever the route handler returns explicitly.
+- `send(...)` is not a direct provider-message API. It supplies input to the agent on the destination channel.
 - The first argument is the target channel module's default export. Import it directly from `agent/channels/<name>.ts`. Identity is matched by reference.
 
 ## Channel metadata
@@ -288,6 +305,8 @@ export default defineChannel({
 ```
 
 The projection is re-evaluated whenever adapter state changes after channel event handlers run. Dynamic tool resolvers read it via `ctx.channel.metadata` and narrow it with `isChannel`. See [Dynamic capabilities](../guides/dynamic-capabilities) for the full consumption pattern.
+
+Metadata may include an `audience` classification: `public`, `private`, or `unknown`. Omit it when the channel cannot classify the conversation confidently; eve normalizes missing and invalid values to `unknown`. Consumers must treat `unknown` as non-public.
 
 When a parent agent dispatches a subagent, the framework forwards the parent's channel metadata projection to the child. The same `metadata(state)` projector also serves instrumentation metadata resolvers.
 
@@ -388,10 +407,12 @@ defineChannel({
 
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
 
-The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization.
+The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
 
 ## What to read next
 
 - [Channels overview](./overview)
 - [Dynamic capabilities](../guides/dynamic-capabilities)
 - [Auth & route protection](../guides/auth-and-route-protection)
+- [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications): deliver a provider message without starting an agent turn
+- [Universal Commerce Protocol (UCP)](../protocols/ucp): serve a UCP profile from a custom channel

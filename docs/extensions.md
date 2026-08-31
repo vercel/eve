@@ -3,11 +3,11 @@ title: "Extensions"
 description: "Package reusable eve capabilities and mount them from npm or a monorepo workspace."
 ---
 
-Extensions package eve tools, connections, skills, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
+Extensions package eve tools, channels, connections, skills, schedules, subagents, instruction fragments, and hooks. An author builds an extension package; each agent that uses it declares the package as a dependency and mounts it. The package can be published to a package registry or kept private inside a monorepo workspace.
 
 Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
-This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A memory extension could use hooks to capture context and tools to recall it. A self-improving extension could pair hooks with dynamic instructions.
+This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A self-improving extension could pair hooks with dynamic instructions.
 
 ## Author: create an extension
 
@@ -29,18 +29,25 @@ An extension uses the same file conventions as an agent for its contributions:
   extension/
     extension.ts
     tools/search.ts
+    channels/webhook.ts
     connections/api.ts
     skills/triage/SKILL.md
+    schedules/sync.ts
+    subagents/reviewer/agent.ts
     instructions.md
     hooks/audit.ts
     lib/http.ts
 ```
 
-Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/tools/` can contain `defineDynamic(...)`.
+Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, connections, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/connections/` can contain `defineDynamic(...)`.
 
-Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. Keep shared code in `extension/lib/`.
+Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
-Keep agent configuration, sandboxes, schedules, and nested extensions in the consumer's agent.
+The extension root cannot declare agent configuration, instrumentation,
+[memory](./memory), a sandbox, or nested extensions. Those agent-level concerns
+belong to the consuming application. A subagent contributed under
+`extension/subagents/` owns its own agent configuration, memory, and sandbox
+like any other [declared subagent](./subagents).
 
 ### Add configuration and contributions
 
@@ -58,7 +65,7 @@ export default defineExtension({
 });
 ```
 
-Contributions import that handle to read the validated configuration. Defaults have already been applied:
+Contributions, including schedule handlers, can import that handle to read the validated configuration. Defaults have already been applied:
 
 ```ts title="extension/tools/search.ts"
 import { defineTool } from "eve/tools";
@@ -80,6 +87,12 @@ If no configuration is needed, export `defineExtension()` and let consumers re-e
 
 `defineState` is automatically scoped to the extension package, so the same state name does not collide with the consumer or another extension.
 
+### Add a subagent
+
+Author a subagent under `extension/subagents/<id>/` using the same files as a subagent declared by an agent. Mounting the extension as `crm` exposes `extension/subagents/reviewer/` to the consuming agent node as `crm__reviewer`. The subagent's own tools, connections, skills, hooks, instructions, sandbox, and nested subagents remain isolated inside its node and keep their path-derived names.
+
+Modules inside the contributed subagent can import the extension handle. For example, a tool under `extension/subagents/reviewer/tools/` can read the configuration bound by the consumer's `agent/extensions/crm.ts` mount.
+
 ### Build and optionally publish
 
 The scaffold's `package.json` declares separate source and distribution roots:
@@ -93,6 +106,7 @@ The scaffold's `package.json` declares separate source and distribution roots:
     "extension": {
       "source": "./extension",
       "dist": "./dist/extension",
+      "externalDependencies": ["@acme/runtime-sdk"],
     },
   },
   "files": ["dist"],
@@ -112,6 +126,7 @@ The scaffold's `package.json` declares separate source and distribution roots:
     "typecheck": "tsc",
   },
   "dependencies": {
+    "@acme/runtime-sdk": "^x",
     "zod": "^x",
   },
   "devDependencies": {
@@ -140,7 +155,9 @@ eve extension build
 
 The exact `eve` development pin controls the extension authoring API and build tooling. The wildcard peer lets the consumer provide the runtime copy of eve. At consumption time, eve checks generated metadata, not the npm peer range. Do not add eve to regular `dependencies`.
 
-Put runtime packages such as `zod` or an SDK in `dependencies`. If a dependency cannot be bundled, such as a native addon, tell consumers to add it to `build.externalDependencies` in `agent.ts`.
+Put runtime packages such as `zod` or an SDK in `dependencies`. Most dependencies are bundled into the consuming agent automatically.
+
+When a package must keep normal Node.js package layout at runtime, add it to `eve.extension.externalDependencies`. Common cases include native addons and SDKs that load package-relative assets. `eve extension build` requires each listed package to also appear in `dependencies`, `optionalDependencies`, or `peerDependencies`, and records the requirement in the generated compatibility manifest. The consuming eve keeps the package external and preserves its complete package tree; consumers do not need to edit `agent.ts` or install the transitive package directly.
 
 Consumers can now add the built package to an agent. A workspace-only extension uses the same package contract but does not need to be published; see [Use an extension in a workspace](#use-an-extension-in-a-workspace).
 
@@ -168,7 +185,7 @@ export default crm({ apiKey: process.env.CRM_API_KEY! });
 
 Set `CRM_API_KEY` in the consumer's environment, such as `.env.local` for local development.
 
-The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, and `connections/api.ts` becomes `crm__api`.
+The mount adds `crm__` to named contributions: `tools/search.ts` becomes `crm__search`, `channels/webhook.ts` becomes `crm__webhook`, `schedules/sync.ts` becomes `crm__sync`, `connections/api.ts` becomes `crm__api`, and `subagents/reviewer/` becomes `crm__reviewer`. Channels keep their declared route paths, and schedules keep their cron expressions.
 
 For an extension with no configuration, mount its default export directly:
 
@@ -260,7 +277,7 @@ Production `eve build` expects the extension distribution to exist already. Keep
 
 ### Override a contribution
 
-Use a directory mount to replace or remove an extension contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
+Use a directory mount to keep overrides beside the mount declaration. Put the declaration in `extension.ts` and add overrides beside it:
 
 ```
 agent/extensions/crm/
@@ -274,7 +291,7 @@ import crm from "@acme/crm";
 export default crm({ apiKey: process.env.CRM_API_KEY! });
 ```
 
-A same-named consumer tool, connection, or skill wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
+A same-named consumer channel, tool, connection, skill, schedule, or subagent wins. To adjust an extension tool, import it from the package's `./tools` export and define it again:
 
 ```ts title="agent/extensions/crm/tools/search.ts"
 import { search } from "@acme/crm/tools";
@@ -294,7 +311,7 @@ export default disableTool();
 
 Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
 
-The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, or another agent-root slot.
+You can also place an override in the corresponding agent-root slot by using the final qualified name. For example, `agent/tools/crm__search.ts` replaces `tools/search.ts` from the extension package or its directory override. Application sources have the highest precedence, so an agent-root override wins when both forms exist.
 
 ### Use an extension tool result in a hook
 
@@ -325,8 +342,11 @@ At build time, eve checks the extension's generated capability metadata. If the 
 
 - [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
 - [Tools](/docs/tools): static tools, approval, and tool output
-- [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic tools, skills, and instructions
+- [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic connections, tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions
 - [Skills](/docs/skills): package procedures and supporting files
 - [Connections](/docs/connections): integrate external services
+- [Channels](/docs/channels/overview): receive messages and expose routes
+- [Schedules](/docs/schedules): run the agent on a cron cadence
+- [Subagents](/docs/subagents): delegate to declared specialists
 - [Hooks](/docs/guides/hooks): observe agent events

@@ -19,6 +19,7 @@ import {
   createTurnStartedEvent,
   type UnstampedMessageStreamEvent,
 } from "../src/protocol/message.js";
+import { createTestAgentInfoResult } from "../src/internal/testing/agent-info-fixture.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -229,84 +230,12 @@ describe("Client.health", () => {
 
 describe("Client.info", () => {
   it("fetches the agent info payload from the info route", async () => {
-    const payload = {
-      agent: {
-        agentRoot: "/tmp/weather-agent/agent",
-        appRoot: "/tmp/weather-agent",
-        model: {
-          id: "gpt-5",
-          routing: { kind: "gateway", target: "openai" },
-        },
-        name: "Weather Agent",
-      },
-      capabilities: { devRoutes: true },
-      channels: {
-        authored: [],
-        available: [],
-        disabledFramework: [],
-        framework: [],
-      },
-      connections: [],
-      diagnostics: {
-        discoveryErrors: 0,
-        discoveryWarnings: 0,
-      },
-      hooks: [],
-      instructions: {
-        dynamic: [],
-        static: {
-          logicalPath: "agent/instructions.md",
-          markdown: "You are a weather assistant.",
-          name: "instructions",
-          sourceKind: "markdown",
-        },
-      },
-      kind: "eve-agent-info",
-      mode: "development",
-      sandbox: null,
-      schedules: [],
-      skills: {
-        dynamic: [],
-        static: [],
-      },
-      subagents: {
-        local: [],
-        total: 0,
-      },
-      tools: {
-        authored: [
-          {
-            description: "Get the weather.",
-            hasAuth: false,
-            hasExecute: true,
-            hasModelOutputProjection: false,
-            hasOutputSchema: false,
-            inputSchema: { type: "object" },
-            logicalPath: "agent/tools/get_weather.ts",
-            name: "get_weather",
-            origin: "authored",
-            outputSchema: null,
-            replacesFrameworkTool: false,
-            requiresApproval: false,
-            sourceKind: "module",
-          },
-        ],
-        available: [],
-        disabledFramework: [],
-        dynamic: [],
-        framework: [],
-        reserved: [],
-      },
-      version: 1,
-      workflow: {
-        enabled: false,
-        toolName: "Workflow",
-      },
-      workspace: {
-        resourceRoot: null,
-        rootEntries: [],
-      },
-    } satisfies AgentInfoResult;
+    const payload = createTestAgentInfoResult({
+      agentRoot: "/tmp/weather-agent/agent",
+      appRoot: "/tmp/weather-agent",
+      modelId: "gpt-5",
+      name: "Weather Agent",
+    }) satisfies AgentInfoResult;
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(Response.json(payload));
 
     const client = new Client({ host: "http://localhost:3000" });

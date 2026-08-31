@@ -7,6 +7,7 @@ import type { Dispatcher1Wrapper } from "undici";
 import { isLoopbackHostname, isPrivateOrReservedIpAddress } from "#shared/network-address.js";
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 10;
 const UNSAFE_DESTINATION_ERROR =
   "URL must not target localhost, private, link-local, or reserved IP addresses.";
 
@@ -32,23 +33,28 @@ export async function requestPublicUrl(
   urlText: string,
   options: PublicUrlRequestOptions,
 ): Promise<Response> {
-  const url = parseHttpsUrl(urlText);
-  const { dispatcher, response } = await requestOnce(url, options);
+  let url = parseHttpsUrl(urlText);
 
-  try {
-    const location = response.headers.get("location");
+  for (let redirectCount = 0; ; redirectCount++) {
+    const { dispatcher, response } = await requestOnce(url, options);
 
-    if (location !== null && REDIRECT_STATUSES.has(response.status)) {
-      await cancelResponseBody(response);
-      const redirectUrl = parseHttpsUrl(new URL(location, url).toString());
-      throw new Error(
-        `Request redirected to ${redirectUrl.toString()}. Call web_fetch again with that URL.`,
-      );
+    try {
+      const location = response.headers.get("location");
+
+      if (
+        location !== null &&
+        REDIRECT_STATUSES.has(response.status) &&
+        redirectCount < MAX_REDIRECTS
+      ) {
+        await cancelResponseBody(response);
+        url = parseHttpsUrl(new URL(location, url).toString());
+        continue;
+      }
+
+      return await consumeResponse(response, options.maxResponseSize);
+    } finally {
+      await dispatcher.close();
     }
-
-    return await consumeResponse(response, options.maxResponseSize);
-  } finally {
-    await dispatcher.close();
   }
 }
 

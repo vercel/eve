@@ -17,7 +17,7 @@ import type {
 } from "#channel/channel-operations.js";
 import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
-import type { DeliverPayload } from "#channel/types.js";
+import type { DeliverPayload, TurnPolicy } from "#channel/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -35,6 +35,7 @@ export type {
   TurnPolicy,
 } from "#channel/types.js";
 export type { Session, SessionHandle } from "#channel/session.js";
+export type { ChannelAudience, ChannelAudienceMetadata } from "#shared/channel-audience.js";
 export type { SessionRespondOptions, SessionSendOptions } from "#channel/session.js";
 export type {
   ChannelFrom,
@@ -45,7 +46,7 @@ export type {
   ChannelSource,
 };
 export type { ChannelCors, ChannelCorsOptions } from "#channel/cors.js";
-export { GET, POST, PUT, PATCH, DELETE, WS } from "#channel/routes.js";
+export { DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT, WS } from "#channel/routes.js";
 export type {
   AttachSessionFn,
   HttpRouteDefinition,
@@ -65,7 +66,7 @@ export type {
  * is a webhook. Override only when authoring a non-webhook route such as a
  * long-poll endpoint or an event-stream reader.
  */
-export type ChannelMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type ChannelMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
 /**
  * Method-like discriminator used by compiled channel route entries.
@@ -250,6 +251,7 @@ export interface Channel<
     input: ReceiveInput<TReceiveTarget>,
     ctx: ChannelReceiveContext<TState>,
   ) => Promise<Session>;
+  readonly turnPolicy?: TurnPolicy;
 }
 
 /**
@@ -282,6 +284,7 @@ export function defineChannel<
     adapter,
     cors,
     receive: definition.receive,
+    turnPolicy: definition.turnPolicy,
   };
 
   return compiled;

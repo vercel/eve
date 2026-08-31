@@ -5,9 +5,33 @@ description: "Part 3 of the Build an Agent tutorial. Add a run_sql tool over the
 
 The analytics assistant can hold a conversation, but it can't see a single row of data. Give it a tool. A tool is the action primitive. Typed input goes in, your code runs, structured output comes back. The name the model sees is the filename, so `agent/tools/run_sql.ts` becomes the tool `run_sql`.
 
+## Install the sample database
+
+Install `sql.js` and its TypeScript definitions:
+
+```bash
+npm install sql.js
+npm install --save-dev @types/sql.js
+```
+
+`sql.js` loads its WebAssembly binary from the installed package at runtime. Keep the package external so the binary remains next to its JavaScript:
+
+```ts title="agent/agent.ts" {5-7}
+import { defineAgent } from "eve";
+
+export default defineAgent({
+  model: "anthropic/claude-opus-4.8",
+  build: {
+    externalDependencies: ["sql.js"],
+  },
+});
+```
+
+Restart the dev server after changing `externalDependencies`. eve reads this setting when the server starts.
+
 ## A tiny sample dataset
 
-To make the first query work without setup, bundle a small in-memory dataset under `agent/lib/`. Keep it tiny. This is throwaway scaffolding, not the real warehouse (that comes in Step 4).
+Store a small in-memory dataset under `agent/lib/`. Keep it tiny. This is throwaway scaffolding, not the real warehouse (that comes in Step 4).
 
 ```ts title="agent/lib/sample-db.ts"
 // A toy SQLite-in-memory stand-in. Swap for your real warehouse in Step 4.

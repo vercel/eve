@@ -109,6 +109,7 @@ export const Gallery = ({ filter, integrations }: GalleryProps) => {
               href={value === "all" ? "/integrations" : `/integrations?filter=${value}`}
               key={value}
               onClick={() => track(analyticsEvents.integrationFilterSelected, { filter: value })}
+              prefetch={true}
               scroll={false}
             >
               {label}

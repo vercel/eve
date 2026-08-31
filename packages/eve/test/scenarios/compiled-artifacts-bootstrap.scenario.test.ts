@@ -99,10 +99,13 @@ describe("writeCompiledArtifactsFiles", () => {
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
 
     expect(instrumentationPluginSource).toContain(
-      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
+      join(outDir, "compiled-artifacts-module-map.mjs").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).toContain(
-      `import * as instrumentationModule from ${JSON.stringify(join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"))};`,
+      `moduleMap.nodes["__root__"].modules["instrumentation.ts"]`,
+    );
+    expect(instrumentationPluginSource).not.toContain(
+      join(agentRoot, "instrumentation.ts").replaceAll("\\", "/"),
     );
     expect(instrumentationPluginSource).toContain("registerInstrumentationConfig");
 
@@ -146,6 +149,11 @@ describe("writeCompiledArtifactsFiles", () => {
           "const container = globalThis as Record<string, unknown>;",
           "",
           "export default defineInstrumentation({",
+          "  tracePolicy: ({ audience }) => ({",
+          "    emit: true,",
+          '    recordInputs: audience === "public",',
+          "    recordOutputs: false,",
+          "  }),",
           "  setup(context) {",
           "    container.__eveProviderSetups ??= [];",
           `    (container.__eveProviderSetups as string[]).push(\`${slot}:\${context.agentName}\`);`,
@@ -169,8 +177,8 @@ describe("writeCompiledArtifactsFiles", () => {
     }
 
     expect(generatedArtifacts.instrumentationSourcePaths).toEqual([
-      join(agentRoot, "instrumentation", "local.ts"),
-      join(agentRoot, "instrumentation", "otel.ts"),
+      join(outDir, "compiled-artifacts-instrumentation-local.mjs"),
+      join(outDir, "compiled-artifacts-instrumentation-otel.mjs"),
     ]);
 
     const instrumentationPluginSource = await readFile(instrumentationPluginPath, "utf8");
@@ -197,14 +205,21 @@ describe("writeCompiledArtifactsFiles", () => {
     // The plugin resolves the registry by absolute path while the assertion
     // resolves it by package alias, so this also proves the globalThis rooting
     // survives two module instances.
-    const { getInstrumentationProviders } =
-      await import("../../src/harness/instrumentation/providers.js");
+    const { getInstrumentationProviders } = await import("../../src/instrumentation/providers.js");
 
     expect((globalThis as Record<string, unknown>).__eveProviderSetups).toEqual([
       "local:compiled-artifacts-providers-test-agent",
       "otel:compiled-artifacts-providers-test-agent",
     ]);
-    expect(getInstrumentationProviders().map((entry) => entry.slot)).toEqual(["local", "otel"]);
+    const providers = getInstrumentationProviders();
+    expect(providers.map((entry) => entry.slot)).toEqual(["local", "otel"]);
+    expect(
+      providers[0]?.provider.tracePolicy?.({ agentName: "weather", audience: "public" }),
+    ).toEqual({
+      emit: true,
+      recordInputs: true,
+      recordOutputs: false,
+    });
     expect(closeHandlers).toHaveLength(1);
     await closeHandlers[0]?.();
   });
@@ -318,6 +333,9 @@ describe("writeCompiledArtifactsFiles", () => {
 
     const bootstrapSource = await readFile(generatedArtifacts.bootstrapPath, "utf8");
 
+    expect(compileResult.manifest.skills).toContainEqual(
+      expect.objectContaining({ name: "research", sourceKind: "skill-package" }),
+    );
     expect(bootstrapSource).not.toContain("workspaceResources");
     expect(bootstrapSource).not.toContain("contentBase64");
     expect(bootstrapSource).not.toContain("Always confirm the source of truth.");

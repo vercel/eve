@@ -5,7 +5,8 @@ import type { ScheduleDefinition } from "#public/definitions/schedule.js";
 import type { CompiledScheduleDefinition } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
-  type ModuleBackedDefinitionLoadOptions,
+  requireModuleBackedDefinitionLoadOptions,
+  type SourceDefinitionCompileOptions,
 } from "#compiler/normalize-helpers.js";
 
 /**
@@ -20,9 +21,9 @@ import {
  * (`schedules/billing/invoice-sweep.ts` → `"billing/invoice-sweep"`).
  */
 export async function compileScheduleDefinition(
-  agentRoot: string,
+  _agentRoot: string,
   source: ScheduleSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: SourceDefinitionCompileOptions,
 ): Promise<CompiledScheduleDefinition> {
   const definition: ScheduleDefinition =
     source.sourceKind === "markdown"
@@ -32,15 +33,14 @@ export async function compileScheduleDefinition(
         )
       : normalizeScheduleDefinition(
           await loadModuleBackedDefinition({
-            agentRoot,
-            externalDependencies: options.externalDependencies,
+            ...requireModuleBackedDefinitionLoadOptions(options, source.logicalPath),
             kind: "schedule",
             source,
           }),
           `Expected the schedule export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
         );
 
-  const compiled: CompiledScheduleDefinition = {
+  const compiled = {
     cron: definition.cron,
     hasRun: definition.run !== undefined,
     logicalPath: source.logicalPath,
@@ -49,11 +49,14 @@ export async function compileScheduleDefinition(
     sourceKind: source.sourceKind,
   };
 
-  if (definition.markdown !== undefined) {
-    return { ...compiled, markdown: definition.markdown.trim() };
-  }
+  const withMarkdown =
+    definition.markdown === undefined
+      ? compiled
+      : { ...compiled, markdown: definition.markdown.trim() };
 
-  return compiled;
+  return source.sourceKind === "module"
+    ? { ...withMarkdown, sourceKind: "module" }
+    : { ...withMarkdown, owner: options.owner, sourceKind: "markdown" };
 }
 
 function deriveScheduleName(logicalPath: string): string {

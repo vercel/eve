@@ -32,6 +32,9 @@ describe("setup integrations", () => {
   it("registers GitHub", () => {
     expect(setupIntegration("github")).toMatchObject({ kind: "github", label: "GitHub" });
   });
+  it("registers Shopify", () => {
+    expect(setupIntegration("shopify")).toMatchObject({ kind: "shopify", label: "Shopify" });
+  });
   it("rejects unknown integrations", () => {
     expect(() => setupIntegration("unknown")).toThrow(
       'Integration setup "unknown" is not available',

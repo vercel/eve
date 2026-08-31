@@ -4,6 +4,7 @@ import { basename, join, resolve } from "node:path";
 import type { PackageManagerKind } from "../../package-manager.js";
 import { pinnedNodeEngineMajor } from "../../node-engine.js";
 import type { AgentReasoningDefinition } from "../../../shared/agent-definition.js";
+import { parseChatGptModelSelection } from "../../../shared/chatgpt-model.js";
 import { SUPPORTED_AUTHORED_MODULE_FILE_EXTENSIONS } from "../update/module-files.js";
 import { pathExists, writeTextFile } from "../files.js";
 import { blockingCreateInPlaceEntries } from "../create-in-place.js";
@@ -100,13 +101,24 @@ export function agentTemplateFiles(
   reasoning?: AgentReasoningDefinition,
 ): Record<string, string> {
   return {
-    "agent/agent.ts": BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model).replaceAll(
-      "__EVE_INIT_REASONING__",
-      reasoningTemplateLine(reasoning),
-    ),
+    "agent/agent.ts": renderAgentTemplate(model, reasoning),
     "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
     "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   };
+}
+
+function renderAgentTemplate(
+  model: string,
+  reasoning: AgentReasoningDefinition | undefined,
+): string {
+  const chatGptModelId = parseChatGptModelSelection(model);
+  if (chatGptModelId !== undefined) {
+    return `import { defineAgent } from "eve";\nimport { chatgpt } from "eve/models/openai";\n\nexport default defineAgent({\n  model: chatgpt(${JSON.stringify(chatGptModelId)}),\n${reasoningTemplateLine(reasoning)}});\n`;
+  }
+  return BASE_AGENT_TEMPLATE.replaceAll("__EVE_INIT_MODEL__", model).replaceAll(
+    "__EVE_INIT_REASONING__",
+    reasoningTemplateLine(reasoning),
+  );
 }
 
 function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined): string {
@@ -116,6 +128,9 @@ function reasoningTemplateLine(reasoning: AgentReasoningDefinition | undefined):
 }
 
 function renderTemplate(content: string, ctx: TemplateContext): string {
+  if (content === BASE_AGENT_TEMPLATE && parseChatGptModelSelection(ctx.model) !== undefined) {
+    return renderAgentTemplate(ctx.model, ctx.reasoning);
+  }
   return content
     .replaceAll("__EVE_INIT_APP_NAME__", ctx.appName)
     .replaceAll("__EVE_INIT_MODEL__", ctx.model)
@@ -166,38 +181,8 @@ __EVE_INIT_REASONING__  modelOptions: {
 });
 `;
 
-// `@vercel/connect`'s optional `ai` peer (`^6 || ^7`) excludes prereleases, so
-// npm, Bun, and Yarn need a manager-specific pin for the runtime's prerelease
-// `ai` version. pnpm tolerates the unmet optional peer without either field.
-function packageManagerAiPinTemplateSuffix(packageManager: PackageManagerKind): string {
-  switch (packageManager) {
-    case "bun":
-    case "npm":
-      return `,
-  "overrides": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  }`;
-    case "yarn":
-      return `,
-  "resolutions": {
-    "ai": "__EVE_INIT_AI_SDK_VERSION__"
-  }`;
-    case "pnpm":
-      return "";
-    default: {
-      const exhaustive: never = packageManager;
-      return exhaustive;
-    }
-  }
-}
-
-function packageJsonTemplate(input: {
-  includeRootOnlyFields: boolean;
-  packageManager: PackageManagerKind;
-}): string {
-  const rootOnlyFields = input.includeRootOnlyFields
-    ? `${packageManagerAiPinTemplateSuffix(input.packageManager)}${ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX}`
-    : "";
+function packageJsonTemplate(includeRootOnlyFields: boolean): string {
+  const rootOnlyFields = includeRootOnlyFields ? ROOT_ONLY_PACKAGE_JSON_TEMPLATE_SUFFIX : "";
   return `{
   "name": "__EVE_INIT_APP_NAME__",
   "version": "0.0.0",
@@ -208,7 +193,9 @@ function packageJsonTemplate(input: {
   },
   "scripts": {
     "build": "eve build",
+    "deploy": "eve deploy",
     "dev": "eve dev",
+    "eval": "eve eval",
     "start": "eve start",
     "typecheck": "tsc"
   },
@@ -239,6 +226,42 @@ You are a helpful assistant.
 `;
 
 const SHARED_TEMPLATE_FILES: Record<string, string> = {
+  "README.md": `# __EVE_INIT_APP_NAME__
+
+This is an [eve](https://eve.dev) agent bootstrapped with [\`eve init\`](https://eve.dev/docs/reference/cli#eve-init).
+
+## Getting started
+
+First, run the development server:
+
+\`\`\`bash
+eve dev
+\`\`\`
+
+The development TUI opens an interactive session where you can send messages to your agent.
+
+Start by editing \`agent/instructions.md\` to define the agent's identity, purpose, tone, and response guidelines. Configure its model and runtime behavior in \`agent/agent.ts\`.
+
+Add capabilities under \`agent/\`, including tools, connections, channels, skills, subagents, and schedules. eve reloads your changes as you work.
+
+## Learn more
+
+To learn more about eve, explore these resources:
+
+- [eve documentation](https://eve.dev/docs) — learn about eve's features and authoring APIs.
+- [Build an Agent tutorial](https://eve.dev/docs/tutorial/first-agent) — build and deploy an agent step by step.
+- [eve on GitHub](https://github.com/vercel/eve) — view the source and contribute.
+
+## Deploy on Vercel
+
+Deploy your agent to [Vercel](https://vercel.com) from the project root:
+
+\`\`\`bash
+eve deploy
+\`\`\`
+
+\`eve deploy\` links a Vercel project if needed and deploys the agent to production. See the [eve deployment documentation](https://eve.dev/docs/guides/deployment/vercel) for authentication, environment variables, and deployment options.
+`,
   "agent/channels/eve.ts": WEB_APP_TEMPLATE_FILES["agent/channels/eve.ts"],
   "agent/instructions.md": AGENT_INSTRUCTIONS_TEMPLATE,
   "tsconfig.json": `{
@@ -278,56 +301,59 @@ dist
 `,
   "AGENTS.md": `# eve Agent App
 
-This project uses the eve framework. Before writing code, read the relevant guide
-from the installed eve package docs. In most installs, those docs are at
-\`node_modules/eve/docs/\`. In workspaces or local package installs, resolve the
-installed \`eve\` package location first and read its \`docs/\` directory. If
-package docs are unavailable, use https://eve.dev/docs as a fallback.
+This project uses the eve framework: an agent is a directory of files under \`agent/\`, and eve compiles and runs it.
 
-## Adding integrations
+For a content-only change to the root agent's identity, purpose, tone, or response guidelines, edit its existing authored instructions. Fresh projects use \`agent/instructions.md\`; a project may instead use \`agent/instructions.ts\` or files under \`agent/instructions/\`. You do not need to read the framework docs for a content-only instructions change. A fresh project already has its selected model in \`agent/agent.ts\`; preserve that file unless the user asks to change the model.
 
-Before implementing an integration yourself, discover existing integrations:
+## Read the docs before writing code
+
+\`\`\`sh
+ls node_modules/eve/docs
+\`\`\`
+
+Start with \`docs/README.md\`: it maps each task to the page that covers it. Read that page before authoring tools, connections, channels, skills, subagents, schedules, or deployment. In a workspace or local package install, resolve the installed \`eve\` package location first. If the package docs are missing, use https://eve.dev/docs.
+
+Use a bounded authoring loop:
+
+1. Read the relevant page and inspect only files you will modify or need to imitate.
+2. Stop discovery once the file location, imports, and definition shape are clear. Implement the smallest complete behavior the user requested.
+3. Run one narrow verification. Expand investigation only when it fails or the request needs project-specific details.
+
+Follow links or inspect public types only when the routed page leaves the task unanswered. Do not recursively glob \`node_modules\`, enumerate the entire docs tree, or read unrelated scaffold files when the direct path is known. Package-manager links can hide files from recursive glob tools even though direct reads work.
+
+## Prefer an existing integration
+
+When a task names an external product or service, search the registry before implementing its integration. For a generic capability, author a tool instead.
 
 \`\`\`sh
 eve registry search <query> --json
 eve registry view <item>
 \`\`\`
 
-Prefer registry items whose \`implementation\` is \`native\`; use Chat SDK adapters when no
-native channel fits. \`registry view\` provides the selected item's documentation link.
+Prefer items whose \`implementation\` is \`native\`; use Chat SDK adapters when no native channel fits. \`registry view\` links the item's documentation.
 
-Install and configure one without driving interactive terminal prompts:
+Install without driving interactive prompts:
 
 \`\`\`sh
 eve add <item> --non-interactive
 \`\`\`
 
-Exit code 0 means setup completed, 1 means setup failed, and 2 means setup needs
-input or a prerequisite. On exit 2, parse the final NDJSON event and use its
-\`next.command\` as the continuation.
+Exit code 0 means setup completed, 1 failed, and 2 needs an answer or a prerequisite. On exit 2, run the \`next.command\` from the final NDJSON event. For a non-secret question, replace its \`<JSON value>\` answer placeholder with the answer you collected; string values need JSON quotes. Never pass a secret in \`--answer\`. See \`docs/install-integrations.mdx\` for setup prerequisites.
 
-Every \`--answer\` value is JSON, so strings need JSON quotes. For an editable
-question, you may supply its nested \`editable.key\` with the parent key in one
-invocation:
+## Use eve for Vercel operations
+
+Use eve to link and deploy Vercel projects:
 
 \`\`\`sh
-eve add channel/photon-imessage --non-interactive \\
-  --answer 'photon-project-source="create"' \\
-  --answer 'photon-project-name="eve · my-agent"'
+eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]
+eve deploy --non-interactive --yes [--project <name-or-id>]
 \`\`\`
 
-Add \`--yes\` to accept recommended setup values and reduce setup round trips;
-explicit \`--answer\` values take precedence. Use the reported \`--skip-install\`
-continuation after installation.
-A Vercel Connect setup may report \`eve link\` as a prerequisite; run it and
-retry the continuation. Never pass secrets in \`--answer\`; use the documented
-environment variable or secret store.
+A setup may report \`eve link\` as a prerequisite; run it, then retry the continuation. When a completed setup event has \`deploymentRequired: true\`, run the \`next\` command it reports.
 
-An \`external_action\` event with \`blocking: true\` means the command is still
-running while it waits for the user. Surface its URL and code, keep the process
-alive, and wait for its matching \`external_action_resolved\` event or a terminal
-event. Do not start a continuation. When a completed event has
-\`deploymentRequired: true\`, recommend its \`next\` command to deploy the changes.
+## Validate the change
+
+Run the validation the task requests. When it does not establish the behavior you changed, run the narrowest relevant check.
 `,
   "CLAUDE.md": `@AGENTS.md
 `,
@@ -336,15 +362,11 @@ event. Do not start a continuation. When a completed event has
 function templateFiles(input: {
   byokProvider: boolean;
   includeRootOnlyPackageJsonFields: boolean;
-  packageManager: PackageManagerKind;
 }): Record<string, string> {
   return {
     "agent/agent.ts": input.byokProvider ? BYOK_AGENT_TEMPLATE : BASE_AGENT_TEMPLATE,
     ...SHARED_TEMPLATE_FILES,
-    "package.json": packageJsonTemplate({
-      includeRootOnlyFields: input.includeRootOnlyPackageJsonFields,
-      packageManager: input.packageManager,
-    }),
+    "package.json": packageJsonTemplate(input.includeRootOnlyPackageJsonFields),
   };
 }
 
@@ -451,7 +473,6 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
     templateFiles({
       byokProvider,
       includeRootOnlyPackageJsonFields: !workspaceMember,
-      packageManager,
     }),
   )) {
     const filePath = `${targetRoot}/${relPath}`;
@@ -472,7 +493,6 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   });
 
   await patchWorkspaceRootPackageJson(packageManager, workspaceProbeRoot, {
-    aiPackageVersion: ctx.aiPackageVersion,
     nodeEngineRequirement: evePackage.nodeEngine,
     onWorkspaceRootMutation: options.onWorkspaceRootMutation,
   });

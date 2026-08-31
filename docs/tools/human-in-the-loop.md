@@ -52,9 +52,50 @@ approval: ({ session, toolInput }) => {
 
 For compatibility with the previous predicate shape, policies may return booleans: `true` is treated as `"user-approval"` and `false` as `"not-applicable"`. Boolean promises are supported too.
 
-Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from both `eve/tools` and `eve/tools/approval`.
+Policies can also return `"approved"` or `"denied"` to decide automatically. Use `{ type: "approved" | "denied", reason }` when the model should receive a reason. The `Approval`, `ApprovalContext`, and `ApprovalStatus` types are exported from `eve/tools/approval`.
 
 Gating a side effect on approval is also how you make non-idempotent work safe across replays: a charge or email that sits behind `always()` can't fire from a re-run step without a fresh human decision.
+
+### Authorizing approval responses
+
+You may also define an approval response policy that decides whether the authenticated person who selects **Approve** may approve that specific call:
+
+```ts title="agent/tools/refund_charge.ts"
+import { defineTool } from "eve/tools";
+import { always } from "eve/tools/approval";
+import { z } from "zod";
+
+export default defineTool({
+  description: "Refund a charge.",
+  inputSchema: z.object({ chargeId: z.string() }),
+  approval: {
+    request: always(),
+    response: ({ responder, request, response, session, auth }) => {
+      // The Slack channel authenticates the responder and includes the workspace and user IDs.
+      // Larger apps can look up approver membership here instead.
+      const approvers = ["slack:T012AB3CD:U045EF6GH", "slack:T012AB3CD:U078JK9LM"];
+      const canApprove = approvers.includes(responder.principalId);
+
+      return canApprove
+        ? { status: "allowed" }
+        : { status: "rejected", reason: "This user cannot approve refunds." };
+    },
+  },
+  async execute(input) {
+    return refund(input);
+  },
+});
+```
+
+The `response` policy receives:
+
+- `responder`: the authenticated principal that submitted the response, including its `principalId`, `principalType`, `authenticator`, and `attributes`. Your route or channel supplies this identity.
+- `request`: the stable `requestId`, `callId`, `toolName`, and typed `toolInput` for the call being approved.
+- `response`: the submitted decision. Response policies run for approval, so its current value is `{ decision: "approve" }`.
+- `session`: read-only session identity and lineage: `id`, `initiator`, `parent`, and `turn`.
+- `auth`: narrow `getToken(provider, options?)` and `requireAuth(provider, options?)` capabilities bound to the responder. Use these when authorization depends on a provider identity or permission; an interactive provider flow parks durably and then retries the policy.
+
+Return `{ status: "allowed" }` to accept the approval. Return `{ status: "rejected", reason }` to leave the shared request pending so another eligible responder can approve it.
 
 ### Skipping approval for schedule-dispatched turns
 
@@ -91,7 +132,7 @@ The built-in `ask_question` tool lets the model pause and ask the user, rather t
 - `options`: an optional list of choices to offer. Channels render these as buttons or a select menu.
 - `allowFreeform`: whether the user may answer with free text instead of picking an option.
 
-`ask_question` is part of the [default harness](/docs/concepts/default-harness), so it is available without you defining anything. It produces the same `input.requested` pause as an approval, and resumes the same way.
+`ask_question` is part of the [default tool set](/docs/concepts/built-in-tools), so it is available without you defining anything. It produces the same `input.requested` pause as an approval, and resumes the same way.
 
 ## How pause and resume works
 
@@ -109,7 +150,9 @@ semantics.
 
 The run picks back up exactly where it parked. Because the pause is durable, nothing is held in memory while it waits — the process can restart and the parked turn survives.
 
-For approval requests, unrelated follow-up text does not deny the tool call — and it does not wait behind it either. The message runs as an ordinary turn while the approval stays pending and answerable; a later structured answer still resolves the original tool call. Text that exactly matches an option (like `approve`) still resolves the request directly.
+When a background subagent requests input, eve emits the same `input.requested` event on its parent session. Answering through that parent session routes the response directly to the blocked child without invoking the parent model.
+
+For approval requests, unrelated follow-up text does not deny the tool call. eve keeps the approval pending and records that pending state in model-visible session history. Follow-up turns run normally and may call other tools while the approval remains unresolved. Once it is answered, eve settles the original tool call exactly once.
 
 See [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming) for the full event and resume contract that this builds on.
 
@@ -122,7 +165,7 @@ From your own frontend, scan all messages for pending requests and answer throug
 ## What to read next
 
 - [Tools](/docs/tools): define the typed actions an approval gates
-- [Default harness](/docs/concepts/default-harness): the built-in tools, including `ask_question`
+- [Built-in tools](/docs/concepts/built-in-tools): the default tools, including `ask_question`
 - [Sessions, runs & streaming](/docs/concepts/sessions-runs-and-streaming): the event and resume contract behind the pause
 - [Building a frontend](/docs/guides/frontend/overview): render and answer requests from your own UI
 - [Multi-tenant approvals](/docs/patterns/multi-tenant-approvals): resolve per-tenant approval policy for authored and connection tools

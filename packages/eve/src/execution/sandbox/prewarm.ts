@@ -308,10 +308,7 @@ async function loadResourceRootSeedFiles(input: {
   const materialized = await materializeWorkspaceDirectory(
     `${input.compileDirectoryPath}/${input.workspaceResourceRoot.logicalPath}`,
   );
-  return materialized.map((file) => ({
-    content: file.content,
-    path: file.path,
-  }));
+  return materialized.map((file) => ({ content: file.content, path: file.path }));
 }
 
 async function loadGraphFromArtifacts(input: {
@@ -335,7 +332,7 @@ async function loadGraphFromArtifacts(input: {
 function collectNodeSandboxes(graph: ResolvedAgentGraphBundle): readonly NodeSandbox[] {
   return [...graph.nodesByNodeId.entries()].flatMap(([nodeId, node]) => {
     const registered = node.sandboxRegistry.sandbox;
-    return registered === null ? [] : [{ ...registered, nodeId }];
+    return registered.definition.inheritsParent === true ? [] : [{ ...registered, nodeId }];
   });
 }
 

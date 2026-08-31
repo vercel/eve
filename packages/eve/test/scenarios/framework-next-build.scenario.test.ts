@@ -129,12 +129,8 @@ async function readVercelOutputRoutes(outputRoot: string): Promise<readonly unkn
 
 describe("framework-next build", () => {
   it("builds the Next.js framework fixture against the workspace eve dist", async () => {
-    // Runs `build:next` rather than the fixture's `build` script: `build`
-    // regenerates the shared workspace `dist/`, which would corrupt scenario
-    // files running in parallel workers. The scenario globalSetup already
-    // rebuilt `dist/` before any worker forked.
     await runPnpmCommand({
-      args: ["--filter", "framework-next", "build:next"],
+      args: ["--filter", "framework-next", "build"],
       cwd: REPO_ROOT,
     });
   }, 180_000);

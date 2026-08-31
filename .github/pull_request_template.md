@@ -1,10 +1,11 @@
 ### Summary
 
 <!--
-Link the issue where this change was discussed (for example, "Closes #123" or
-"Related to #123"). Explain the concrete problem and solution, then summarize
-meaningful behavior or decisions—not changed files or commits. Call out breaking
-changes, preserved behavior, scope boundaries, or stacked PRs when relevant.
+If an issue or discussion already exists, link it (for example, "Closes #123"
+or "Related to #123"). Do not create an issue solely to accompany this pull
+request. Explain the concrete problem and solution, then summarize meaningful
+behavior or decisions—not changed files or commits. Call out breaking changes,
+preserved behavior, scope boundaries, or stacked PRs when relevant.
 -->
 
 ### Validation
@@ -16,7 +17,7 @@ results or limitations. Explain when tests are not applicable.
 
 ### Checklist
 
-- [ ] I linked an issue with prior discussion confirming this change is wanted
+- [ ] This change was requested or approved by a maintainer
 - [ ] I ran the relevant checks from `CONTRIBUTING.md`
 - [ ] I added tests and documentation where relevant
 - [ ] I added a changeset if this touches the published `eve` package

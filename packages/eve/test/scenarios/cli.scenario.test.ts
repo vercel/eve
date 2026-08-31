@@ -242,7 +242,7 @@ describe("runCli", () => {
     await runCli(["info"], logger);
 
     expect(logger.log).toHaveBeenCalled();
-    expect(getLogOutput(logger)).toContain("eve Info");
+    expect(getLogOutput(logger)).not.toContain("eve Info");
     expect(getLogOutput(logger)).toContain("Application");
     expect(getLogOutput(logger)).toContain("Workflow ID");
     expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_ROUTE_PATH}`);
@@ -278,11 +278,12 @@ describe("runCli", () => {
     expect(output).toContain("0 errors, 0 warnings");
   });
 
-  it("defaults to dev when no command is provided", async () => {
+  it("defaults to dev when no command is provided in an eve project", async () => {
     const logger = {
       error: vi.fn(),
       log: vi.fn(),
     };
+    const findApplicationRoot = vi.fn(async () => process.cwd());
     const startHost = vi.fn(() => ({
       start: async () => {
         throw new Error("dev started");
@@ -292,10 +293,12 @@ describe("runCli", () => {
 
     await expect(
       runCli([], logger, {
+        findApplicationRoot,
         startHost,
       }),
     ).rejects.toThrow("dev started");
 
+    expect(findApplicationRoot).toHaveBeenCalledOnce();
     expect(startHost).toHaveBeenCalledOnce();
   });
 
@@ -343,7 +346,7 @@ describe("runCli", () => {
   });
 
   it("passes host and port to the production start host", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-start-options-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-start-options-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {
@@ -373,7 +376,7 @@ describe("runCli", () => {
   });
 
   it("fails clearly when start runs before build output exists", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-start-missing-output-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-start-missing-output-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {
@@ -477,7 +480,7 @@ describe("runCli", () => {
   });
 
   it("loads development env files before running build", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-build-env-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-build-env-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {
@@ -539,7 +542,7 @@ describe("runCli", () => {
   });
 
   it("forwards the sandbox prewarm opt-out to the build host", async () => {
-    const workspaceRoot = await createScratchDirectory("eve-cli-build-skip-prewarm-");
+    const workspaceRoot = await createMinimalAppRoot("eve-cli-build-skip-prewarm-");
     const resolvedWorkspaceRoot = await realpath(workspaceRoot);
     const previousCwd = process.cwd();
     const logger = {

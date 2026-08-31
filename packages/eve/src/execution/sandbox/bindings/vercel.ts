@@ -1,9 +1,10 @@
 import {
   applyInitialVercelNetworkPolicy,
+  createVercelNetworkPolicySetter,
   ensureVercelSandboxBaseRuntime,
+  withBaseSetupNetworkPolicy,
 } from "#execution/sandbox/bindings/vercel-base-runtime.js";
 import type { SandboxBootstrapContext } from "#public/definitions/sandbox.js";
-import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 import type {
   InternalSandboxSession,
   SandboxProcess,
@@ -25,6 +26,8 @@ import type {
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
 import type {
   VercelSandboxBootstrapUseOptions,
+  VercelSandboxSessionCreateContext,
+  VercelSandboxSessionCreateOptions,
   VercelSandboxSessionUseOptions,
 } from "#public/sandbox/vercel-sandbox.js";
 import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
@@ -42,10 +45,15 @@ import {
   isVercelSnapshotUnavailableError,
 } from "#execution/sandbox/bindings/vercel-errors.js";
 import { getNamedVercelSandbox } from "#execution/sandbox/bindings/vercel-lookup.js";
+import {
+  deleteVercelSandbox,
+  stopVercelSandbox,
+} from "#execution/sandbox/bindings/vercel-lifecycle.js";
 import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
 import { resolveSandboxModelPath } from "#shared/skill-paths.js";
 import type {
   VercelCreateOptions,
+  VercelDeleteModule,
   VercelModule,
   VercelSandbox,
 } from "#execution/sandbox/bindings/vercel-sdk-types.js";
@@ -53,7 +61,11 @@ import type {
 export interface CreateVercelSandboxInput {
   readonly createSandbox?: CreateVercelSandbox;
   readonly createOptions?: VercelCreateOptions;
+  readonly loadDeleteSandboxModule?: () => Promise<VercelDeleteModule>;
   readonly loadSandboxModule?: () => Promise<VercelModule>;
+  readonly resolveSessionCreateOptions?: (
+    context: VercelSandboxSessionCreateContext,
+  ) => Promise<VercelSandboxSessionCreateOptions> | VercelSandboxSessionCreateOptions;
 }
 /**
  * Creates the Vercel-backed sandbox backend.
@@ -68,6 +80,9 @@ export function createVercelSandbox(
 ): SandboxBackend<VercelSandboxBootstrapUseOptions, VercelSandboxSessionUseOptions> {
   const loadSandboxModule =
     input.loadSandboxModule ?? (async () => await import("#compiled/@vercel/sandbox/index.js"));
+  const loadDeleteSandboxModule =
+    input.loadDeleteSandboxModule ??
+    (async () => await import("#compiled/@vercel/sandbox-delete/index.js"));
   const createOptions: VercelCreateOptions = {
     timeout: DEFAULT_SANDBOX_TIMEOUT_MS,
     ...input.createOptions,
@@ -101,7 +116,9 @@ export function createVercelSandbox(
           createOptions,
           createSandbox,
           existingMetadata: createInput.existingMetadata,
+          resolveSessionCreateOptions: input.resolveSessionCreateOptions,
           sandboxModule,
+          sessionId: createInput.tags?.sessionId ?? createInput.sessionKey,
           sessionKey: createInput.sessionKey,
           snapshotId: template?.snapshotId,
           tags,
@@ -129,12 +146,17 @@ export function createVercelSandbox(
         );
       }
 
+      await ensureVercelSandboxBaseRuntime(session.sandbox);
       if (template === null && session.created) {
-        await ensureVercelSandboxBaseRuntime(session.sandbox);
         await applyInitialVercelNetworkPolicy(session.sandbox, createOptions.networkPolicy);
       }
 
-      return createHandle(session.sandbox, createInput.sessionKey);
+      return createHandle({
+        createOptions,
+        loadDeleteSandboxModule,
+        sandbox: session.sandbox,
+        sessionKey: createInput.sessionKey,
+      });
     },
     async prewarm(
       prewarmInput: SandboxBackendPrewarmInput<VercelSandboxBootstrapUseOptions>,
@@ -357,7 +379,9 @@ interface EnsureSessionInput {
   readonly createOptions: VercelCreateOptions;
   readonly createSandbox: CreateVercelSandbox;
   readonly existingMetadata?: Record<string, unknown>;
+  readonly resolveSessionCreateOptions?: CreateVercelSandboxInput["resolveSessionCreateOptions"];
   readonly sandboxModule: VercelModule;
+  readonly sessionId: string;
   readonly sessionKey: string;
   readonly snapshotId?: string;
   readonly tags: Record<string, string> | undefined;
@@ -381,7 +405,10 @@ async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSe
     return { created: false, sandbox: existing };
   }
 
-  const createParams = createSessionCreateParams(input, sandboxName);
+  const sessionCreateOptions = await input.resolveSessionCreateOptions?.({
+    session: { id: input.sessionId },
+  });
+  const createParams = createSessionCreateParams(input, sandboxName, sessionCreateOptions);
   if (input.tags !== undefined) {
     createParams.tags = input.tags;
   }
@@ -398,10 +425,12 @@ async function ensureSession(input: EnsureSessionInput): Promise<VercelSandboxSe
 function createSessionCreateParams(
   input: EnsureSessionInput,
   sandboxName: string,
+  sessionCreateOptions: VercelSandboxSessionCreateOptions = {},
 ): VercelSandboxCreateParams {
+  const createOptions = { ...input.createOptions, ...sessionCreateOptions } as VercelCreateOptions;
   if (input.snapshotId === undefined) {
     return withBaseSetupNetworkPolicy({
-      ...input.createOptions,
+      ...createOptions,
       name: sandboxName,
       persistent: true,
     });
@@ -417,28 +446,25 @@ function createSessionCreateParams(
     image: _image,
     runtime: _runtime,
     source: _source,
-    ...sessionCreateOptions
-  } = input.createOptions as VercelCreateOptions &
+    ...baseSessionCreateOptions
+  } = createOptions as VercelCreateOptions &
     Partial<Record<"image" | "runtime" | "source", unknown>>;
 
   return {
-    ...sessionCreateOptions,
+    ...baseSessionCreateOptions,
     name: sandboxName,
     persistent: true,
     source: { snapshotId: input.snapshotId, type: "snapshot" as const },
   };
 }
 
-function withBaseSetupNetworkPolicy(
-  createOptions: VercelSandboxCreateParams,
-): VercelSandboxCreateParams {
-  return { ...createOptions, networkPolicy: "allow-all" };
-}
-
-function createHandle(
-  sandbox: VercelSandbox,
-  sessionKey: string,
-): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
+function createHandle(input: {
+  readonly createOptions: VercelCreateOptions;
+  readonly loadDeleteSandboxModule: () => Promise<VercelDeleteModule>;
+  readonly sandbox: VercelSandbox;
+  readonly sessionKey: string;
+}): SandboxBackendHandle<VercelSandboxSessionUseOptions> {
+  const { sandbox, sessionKey } = input;
   return {
     session: buildSandboxSession(
       createVercelInternalSandboxSession(sandbox, sessionKey),
@@ -460,6 +486,14 @@ function createHandle(
         sessionKey,
       };
     },
+    async delete(options) {
+      await deleteVercelSandbox({
+        createOptions: input.createOptions,
+        loadDeleteSandboxModule: input.loadDeleteSandboxModule,
+        sandbox,
+        signal: options?.abortSignal,
+      });
+    },
     async stop() {
       await stopVercelSandbox(sandbox);
     },
@@ -470,21 +504,6 @@ function createHandle(
         // Provider-side timeout is the backstop when the sandbox is unreachable.
       }
     },
-  };
-}
-
-async function stopVercelSandbox(sandbox: VercelSandbox): Promise<void> {
-  if (sandbox.status !== "running" && sandbox.status !== "pending") {
-    return;
-  }
-  await sandbox.stop();
-}
-
-function createVercelNetworkPolicySetter(
-  sandbox: VercelSandbox,
-): (policy: SandboxNetworkPolicy) => Promise<void> {
-  return async (policy) => {
-    await sandbox.update({ networkPolicy: policy });
   };
 }
 

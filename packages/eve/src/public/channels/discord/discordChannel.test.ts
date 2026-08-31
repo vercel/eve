@@ -52,6 +52,14 @@ function callEvent(
   return contextStorage.run(stubAlsContext, () => callAdapterEventHandler(adapter, event, ctx));
 }
 
+describe("discordChannel() audience metadata", () => {
+  it.each(["private", "unknown"] as const)("projects the %s audience", (audience) => {
+    const adapter = withState(getAdapter(discordChannel()), { audience });
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+  });
+});
+
 function captureAccessor(initialContinuationToken: string): {
   accessor: any;
   writes: Array<[string, unknown]>;
@@ -192,7 +200,13 @@ describe("discordChannel() inbound route", () => {
 
   it("dispatches verified application commands with Discord auth and state", async () => {
     const { privateKey, publicKeyHex } = testKeys();
-    const channel = discordChannel({ credentials: { publicKey: publicKeyHex } });
+    const channel = discordChannel({
+      credentials: { publicKey: publicKeyHex },
+      onCommand: (_ctx, interaction) => ({
+        auth: defaultDiscordAuth(interaction),
+        title: "Discord run",
+      }),
+    });
 
     const { response, send } = await firePost(
       channel,
@@ -204,6 +218,7 @@ describe("discordChannel() inbound route", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
     expect((input as { context: string[] }).context[0]).toContain("<discord_context>");
+    expect((input as { context: string[] }).context[0]).toContain("application_id: APP1");
     expect(String((input as { message: string }).message)).toContain("hello discord");
     expect(continuationToken).toBe("C01:I01");
     expect(input).toMatchObject({
@@ -220,6 +235,7 @@ describe("discordChannel() inbound route", () => {
         initialResponseSent: false,
         interactionToken: "tok",
       },
+      title: "Discord run",
     });
   });
 
@@ -536,6 +552,7 @@ describe("discordChannel() default event handlers", () => {
       auth: null,
       message: "start",
       state: {
+        audience: "unknown",
         applicationId: null,
         channelId: "C01",
         conversationId: null,

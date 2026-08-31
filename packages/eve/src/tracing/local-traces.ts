@@ -89,26 +89,19 @@ export function createLocalTracesProcessor(
   };
 }
 
-/**
- * The local spool's content policy: its options, intersected with
- * `EVE_TRACES_CONTENT`.
- *
- * The variable used to be the process-wide switch. It now applies to this one
- * destination, and only ever narrows — `off` still wins where it applies, but
- * it no longer decides what a hosted backend beside it receives.
- *
- * @internal
- */
+/** Maps legacy local content configuration onto destination redaction. @internal */
 export function resolveLocalTracesContent(
   options: {
     readonly recordInputs?: boolean;
     readonly recordOutputs?: boolean;
   } = {},
 ): { readonly recordInputs: boolean; readonly recordOutputs: boolean } {
-  const enabled = process.env.EVE_TRACES_CONTENT !== "off";
+  if (process.env.EVE_TRACES_CONTENT === "off") {
+    return { recordInputs: false, recordOutputs: false };
+  }
   return {
-    recordInputs: enabled && options.recordInputs !== false,
-    recordOutputs: enabled && options.recordOutputs !== false,
+    recordInputs: options.recordInputs !== false,
+    recordOutputs: options.recordOutputs !== false,
   };
 }
 

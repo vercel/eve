@@ -2,14 +2,11 @@ import { describe, expect, it } from "vitest";
 import { z as z3 } from "zod/v3";
 import { z } from "#compiled/zod/index.js";
 
-import {
-  defineTool,
-  defineDynamic,
-  disableTool,
-  experimental_workflow,
-} from "#public/definitions/tool.js";
-import { once } from "#public/tools/approval/approval-helpers.js";
-import { webSearch } from "#public/tools/web-search.js";
+import { defineDynamic } from "#dynamic/definition.js";
+import { defineTool, disableTool } from "#tools/definition.js";
+import { experimental_workflow } from "#tools/workflow.js";
+import { once } from "#tools/approval/policies.js";
+import { webSearch } from "#tools/provided/web-search.js";
 import { normalizeToolDefinition } from "#internal/authored-definition/schema-backed.js";
 
 const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.";
@@ -32,6 +29,26 @@ describe("normalizeToolDefinition", () => {
     }
     expect(entry.definition.description).toBe("Echoes the input back to the caller.");
     expect(typeof entry.definition.execute).toBe("function");
+  });
+
+  it("preserves the background execution discriminator", () => {
+    const tool = defineTool({
+      description: "Starts an export.",
+      execution: "background",
+      inputSchema: z.object({ exportId: z.string() }),
+      execute(input, _ctx, task) {
+        return task.delegated({
+          executor: { data: { exportId: input.exportId }, kind: "export" },
+          receipt: { exportId: input.exportId },
+        });
+      },
+    });
+
+    const entry = normalizeToolDefinition(tool, FAILURE_MESSAGE);
+
+    expect(entry.kind).toBe("tool");
+    if (entry.kind !== "tool") throw new Error("expected tool kind");
+    expect(entry.definition.execution).toBe("background");
   });
 
   it("normalizes a tool with a Zod 3 input schema", () => {

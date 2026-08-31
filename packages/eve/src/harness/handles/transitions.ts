@@ -9,8 +9,9 @@ import {
   type ContinueOperation,
   type StartOperation,
 } from "#harness/handles/store.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
+import { jsonValuesEqual } from "#shared/json.js";
 
 /**
  * Records intent to start a fresh child. Must be applied to the step's
@@ -124,7 +125,8 @@ function findActiveHandle(
 ): ActiveAgentHandle | undefined {
   return handles.find(
     (handle): handle is ActiveAgentHandle =>
-      handle.phase !== "parked" && handle.operation.id === operationId,
+      (handle.phase === "starting" || handle.phase === "running") &&
+      handle.operation.id === operationId,
   );
 }
 
@@ -164,6 +166,90 @@ export function confirmAgentStarted(
         : handle,
     ),
   );
+}
+
+/** Confirms a task-mode child as a persistent identity/address record. */
+export function confirmTaskAgentAddress(
+  session: HarnessSession,
+  input: {
+    readonly operationId: string;
+    readonly address: AgentAddress;
+  },
+): HarnessSession {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const existing = findActiveHandle(handles, input.operationId);
+  if (existing === undefined) {
+    throw new Error(`No prepared agent handle for operation "${input.operationId}".`);
+  }
+  if (existing.phase === "running") {
+    throw new Error(
+      `Task agent operation "${input.operationId}" was confirmed as a running handle.`,
+    );
+  }
+
+  return writeHandles(
+    session,
+    handles.map((handle) =>
+      handle === existing
+        ? {
+            address: input.address,
+            identity: existing.identity,
+            phase: "addressed" as const,
+          }
+        : handle,
+    ),
+  );
+}
+
+/**
+ * Records a task-mode child's persistent address from its durable executor
+ * binding, applied when the parent step that delegated the task commits.
+ *
+ * Replay-idempotent: a record identical to the stored handle is a no-op
+ * (a resumed child, or a replayed commit). A different record under the
+ * same id throws — ids derive from unique operations, so a collision
+ * means corrupted derivation, not a replay.
+ */
+export function recordTaskAgentAddress(
+  session: HarnessSession,
+  input: {
+    readonly address: AgentAddress;
+    readonly identity: AgentIdentity;
+  },
+): HarnessSession {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const record: AgentHandle = {
+    address: input.address,
+    identity: input.identity,
+    phase: "addressed",
+  };
+  const existing = handles.find((handle) => handle.identity.id === input.identity.id);
+  if (existing !== undefined) {
+    if (jsonValuesEqual(existing, record)) return session;
+    throw new Error(`Agent handle "${input.identity.id}" already exists with different content.`);
+  }
+  return writeHandles(session, [...handles, record]);
+}
+
+/** Removes a task-mode address after permanent delivery failure. */
+export function removeTaskAgentAddress(session: HarnessSession, agentId: string): HarnessSession {
+  return { ...session, state: removeTaskAgentAddressFromState(session.state, agentId) };
+}
+
+/** State-only variant used while consuming a terminal task wake. */
+export function removeTaskAgentAddressFromState(
+  state: SessionStateMap | undefined,
+  agentId: string,
+): SessionStateMap {
+  const handles = getAgentHandleStore(state)?.handles ?? [];
+  return {
+    ...state,
+    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore({
+      handles: handles.filter(
+        (handle) => !(handle.phase === "addressed" && handle.identity.id === agentId),
+      ),
+    }),
+  };
 }
 
 /**
@@ -311,6 +397,80 @@ export function settleAgentTurn(
       ),
     ),
   };
+}
+
+/**
+ * Rebases the handle delta one dispatch produced (`base` → `next`) onto a
+ * working session that other concurrently staged effects may have advanced
+ * past `base`.
+ *
+ * Per handle id:
+ *
+ * - deleted by the dispatch → deleted from the working session.
+ * - added by the dispatch → appended. If the working session already holds
+ *   the id with different content, throws: ids derive from unique
+ *   operations, so a collision means corrupted derivation.
+ * - changed in place by the dispatch → the dispatched copy replaces the
+ *   working copy while that copy still matches `base`. A working copy that
+ *   diverged from both throws instead of silently dropping either change.
+ * - untouched by the dispatch → the working copy is kept.
+ *
+ * A delta the working session already contains is a no-op, so replaying an
+ * effect is safe.
+ */
+export function rebaseAgentHandles(
+  session: HarnessSession,
+  input: {
+    readonly base: SessionStateMap | undefined;
+    readonly next: SessionStateMap | undefined;
+  },
+): HarnessSession {
+  const baseById = handlesById(input.base);
+  const nextById = handlesById(input.next);
+  const currentHandles = getAgentHandleStore(session.state)?.handles ?? [];
+  const currentIds = new Set(currentHandles.map((handle) => handle.identity.id));
+
+  let changed = false;
+  const rebased: AgentHandle[] = [];
+  for (const current of currentHandles) {
+    const id = current.identity.id;
+    const base = baseById.get(id);
+    const next = nextById.get(id);
+    if (base !== undefined && next === undefined) {
+      changed = true;
+      continue;
+    }
+    if (base === undefined && next !== undefined && !jsonValuesEqual(current, next)) {
+      throw new Error(
+        `Agent handle "${id}" added by a dispatch already exists with different content.`,
+      );
+    }
+    if (base !== undefined && next !== undefined && !jsonValuesEqual(base, next)) {
+      if (jsonValuesEqual(current, base)) {
+        rebased.push(next);
+        changed = true;
+        continue;
+      }
+      if (!jsonValuesEqual(current, next)) {
+        throw new Error(
+          `Agent handle "${id}" was changed by a dispatch and concurrently by another effect.`,
+        );
+      }
+    }
+    rebased.push(current);
+  }
+  const added = [...nextById.values()].filter(
+    (handle) => !baseById.has(handle.identity.id) && !currentIds.has(handle.identity.id),
+  );
+  if (!changed && added.length === 0) {
+    return session;
+  }
+  return writeHandles(session, [...rebased, ...added]);
+}
+
+function handlesById(state: SessionStateMap | undefined): ReadonlyMap<string, AgentHandle> {
+  const handles = getAgentHandleStore(state)?.handles ?? [];
+  return new Map(handles.map((handle) => [handle.identity.id, handle]));
 }
 
 /**

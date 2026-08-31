@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+
 import { context, propagation, trace, type Context } from "#compiled/@opentelemetry/api/index.js";
 import {
   registerOTel,
@@ -11,6 +13,7 @@ import type { OtelPipeline } from "#tracing/otel-declaration.js";
 
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
+const require = createRequire(import.meta.url);
 
 class RegistrationMarkerPropagator {
   #injected = false;
@@ -107,16 +110,18 @@ export function registerOtelPipeline(input: {
   readonly serviceName: string;
 }): RegisteredOtelPipeline {
   const { pipeline } = input;
+  // A tracer cached before registration retains this private proxy even after
+  // the vendored API takes the global slot. Delegate it only after ownership is proven.
+  const optionalPeerTracerProxy = captureOptionalPeerTracerProxy();
   const idGenerator = new AgentSpanIdGenerator();
   const markerPropagator = new RegistrationMarkerPropagator();
   const configuration: Configuration = {
     attributes: pipeline.resource,
     autoDetectResources: false,
     idGenerator,
-    // eve imports the model SDK before any of this runs, so an auto
-    // instrumentation registered here could not patch it anyway.
-    instrumentations: [],
-    propagators: [...(pipeline.propagators ?? ["none"]), markerPropagator],
+    instrumentations: pipeline.instrumentations ?? [],
+    metricReaders: pipeline.metricReaders,
+    propagators: [...(pipeline.propagators ?? ["auto"]), markerPropagator],
     serviceName: input.serviceName,
     spanProcessors: pipeline.spanProcessors.map((processor) =>
       isSpanProcessor(processor) ? new PrivateSpanFilteringProcessor([processor]) : processor,
@@ -150,6 +155,7 @@ export function registerOtelPipeline(input: {
     rollbackRegistration({ ownsPropagator, ownsTracer });
     throw new Error("The registered OpenTelemetry tracer provider has no lifecycle methods.");
   }
+  optionalPeerTracerProxy?.setDelegate(provider);
   return {
     forceFlush: () => provider.forceFlush!(),
     idGenerator,
@@ -171,6 +177,20 @@ interface RuntimeTracerProvider {
 
 interface ProxyTracerProvider {
   getDelegate(): unknown;
+}
+
+interface OptionalPeerTracerProxy {
+  setDelegate(delegate: unknown): void;
+}
+
+function captureOptionalPeerTracerProxy(): OptionalPeerTracerProxy | undefined {
+  try {
+    const api = require("@opentelemetry/api") as typeof import("@opentelemetry/api");
+    const provider = api.trace.getTracerProvider();
+    return provider instanceof api.ProxyTracerProvider ? provider : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function rollbackRegistration(input: {

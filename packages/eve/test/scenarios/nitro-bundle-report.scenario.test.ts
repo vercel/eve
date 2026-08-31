@@ -40,6 +40,10 @@ interface NitroBundleReport {
     baselineLabel: string;
     package: null | {
       installedDependencyBytes: ReportMetricDelta;
+      installedDependencyEdgeCount?: ReportMetricDelta;
+      installedDistinctPackageNameCount?: ReportMetricDelta;
+      installedOptionalPeerEdgeCount?: ReportMetricDelta;
+      installedPackageInstanceCount?: ReportMetricDelta;
       installedSizeBytes: ReportMetricDelta;
       packedSizeBytes: ReportMetricDelta;
       peerDependenciesAdded: string[];
@@ -86,8 +90,12 @@ interface NitroBundleReport {
   internalRouteCount: number;
   publishedPackage: null | {
     installedDependencyBytes: number;
+    installedDependencyEdgeCount?: number;
+    installedDistinctPackageNameCount?: number;
     installedFileCount: number;
+    installedOptionalPeerEdgeCount?: number;
     installedPackageBytes: number;
+    installedPackageInstanceCount?: number;
     installedSizeBytes: number;
     packageLabel: string;
     packageName: string;
@@ -355,6 +363,31 @@ async function createReportFixture(
   await writeSizedFile(join(packageRoot, "README.md"), 400);
   await writeSizedFile(join(packageRoot, "dist", "index.js"), options.packageIndexBytes ?? 1_600);
   await writeSizedFile(join(packageRoot, "dist", "runtime.js"), options.packageRuntimeBytes ?? 900);
+  await mkdir(join(packageRoot, "dist", "embedded"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(packageRoot, "dist", "embedded", "package.json"),
+    `${JSON.stringify(
+      {
+        name: "@fixture/embedded-manifest",
+        dependencies: {
+          "@fixture/phantom-dependency": "1.0.0",
+        },
+        peerDependencies: {
+          "@fixture/phantom-peer": "1.0.0",
+        },
+        peerDependenciesMeta: {
+          "@fixture/phantom-peer": {
+            optional: true,
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
 
   for (const dependency of bundledDependencies) {
     await writeBundledDependency(packageRoot, dependency);
@@ -401,8 +434,12 @@ describe("nitro bundle report", () => {
     ]);
     expect(report.publishedPackage).toMatchObject({
       installedDependencyBytes: expect.any(Number),
+      installedDependencyEdgeCount: 1,
+      installedDistinctPackageNameCount: 2,
       installedFileCount: expect.any(Number),
+      installedOptionalPeerEdgeCount: 1,
       installedPackageBytes: expect.any(Number),
+      installedPackageInstanceCount: 2,
       installedSizeBytes: expect.any(Number),
       packageLabel: "packages/eve",
       packageName: "eve-fixture",
@@ -441,6 +478,13 @@ describe("nitro bundle report", () => {
     expect(markdown).toContain("**Heavy installed dependencies**");
     expect(markdown).toContain("Installed package size");
     expect(markdown).toContain("Installed footprint:");
+    expect(markdown).toContain("Installed package instances: 2");
+    expect(markdown).toContain("Distinct installed package names: 2");
+    expect(markdown).toContain("Installed dependency edges: 1");
+    expect(markdown).toContain("Installed optional peer edges: 1");
+    expect(markdown).toContain(
+      "Graph metrics read only `package.json` files in package directories directly beneath a `node_modules` boundary",
+    );
     expect(markdown).toContain("Published file size");
     expect(markdown).toContain("Runtime dependencies (1)");
     expect(markdown).toContain("Peer dependencies (1)");
@@ -565,6 +609,10 @@ describe("nitro bundle report", () => {
     expect(comparison?.package?.unpackedSizeBytes.delta).toBe(400);
     expect(comparison?.package?.installedSizeBytes.delta).toBeGreaterThan(0);
     expect(comparison?.package?.installedDependencyBytes.delta).toBe(0);
+    expect(comparison?.package?.installedPackageInstanceCount?.delta).toBe(0);
+    expect(comparison?.package?.installedDistinctPackageNameCount?.delta).toBe(0);
+    expect(comparison?.package?.installedDependencyEdgeCount?.delta).toBe(0);
+    expect(comparison?.package?.installedOptionalPeerEdgeCount?.delta).toBe(0);
 
     const serverComparison = comparison?.app.functions.find(
       (functionEntry) => functionEntry.relativePath === "functions/__server.func",
@@ -589,6 +637,10 @@ describe("nitro bundle report", () => {
     );
     expect(markdown).toContain("Add the `acknowledge-bundle-warning` label");
     expect(markdown).toContain("| Runtime | Total function bytes |");
+    expect(markdown).toContain("| Package | Installed package instances | 2 | 2 | 0 |");
+    expect(markdown).toContain("| Package | Distinct installed package names | 2 | 2 | 0 |");
+    expect(markdown).toContain("| Package | Installed dependency edges | 1 | 1 | 0 |");
+    expect(markdown).toContain("| Package | Installed optional peer edges | 1 | 1 | 0 |");
     expect(markdown).toContain(
       "| Package | Runtime dependency added | New runtime dependency `@fixture/new-runtime@1.0.0` was added.",
     );
@@ -617,6 +669,30 @@ describe("nitro bundle report", () => {
     expect(markdown).toContain(
       `| \`functions/__server.func\` | changed | ${formatReportBytes(serverComparison?.totalBytes.baseline ?? 0)} | ${formatReportBytes(serverComparison?.totalBytes.current ?? 0)} | ${formatReportSizeDelta(serverComparison?.totalBytes.delta ?? 0)} |`,
     );
+
+    const legacyBaselineReport = structuredClone(baselineReport);
+    if (legacyBaselineReport.publishedPackage !== null) {
+      delete legacyBaselineReport.publishedPackage.installedPackageInstanceCount;
+      delete legacyBaselineReport.publishedPackage.installedDistinctPackageNameCount;
+      delete legacyBaselineReport.publishedPackage.installedDependencyEdgeCount;
+      delete legacyBaselineReport.publishedPackage.installedOptionalPeerEdgeCount;
+    }
+    const legacyComparison = compareNitroBundleReports(currentReport, legacyBaselineReport, {
+      baselineLabel: "main",
+    });
+    const legacyMarkdown = renderNitroBundleReportMarkdown({
+      ...currentReport,
+      comparison: legacyComparison,
+    });
+
+    expect(legacyComparison?.package?.installedPackageInstanceCount).toBeUndefined();
+    expect(legacyComparison?.package?.installedDistinctPackageNameCount).toBeUndefined();
+    expect(legacyComparison?.package?.installedDependencyEdgeCount).toBeUndefined();
+    expect(legacyComparison?.package?.installedOptionalPeerEdgeCount).toBeUndefined();
+    expect(legacyMarkdown).not.toContain("| Package | Installed package instances |");
+    expect(legacyMarkdown).not.toContain("| Package | Distinct installed package names |");
+    expect(legacyMarkdown).not.toContain("| Package | Installed dependency edges |");
+    expect(legacyMarkdown).not.toContain("| Package | Installed optional peer edges |");
   }, 15_000);
 
   it("fails the warning policy when a runtime dependency is added", async () => {

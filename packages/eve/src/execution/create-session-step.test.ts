@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import { DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION } from "#execution/session.js";
 import { createSessionStep } from "#execution/create-session-step.js";
+import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 
 vi.mock("#runtime/sessions/compiled-agent-cache.js", () => ({
@@ -18,6 +19,57 @@ const TestTurnAgent: RuntimeTurnAgent = {
 };
 
 describe("createSessionStep", () => {
+  it("adds task_update guidance to a task-owned session system prompt", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: { experimental: { tasks: true } },
+      },
+      turnAgent: {
+        ...TestTurnAgent,
+        tools: [
+          {
+            description: "Report task progress.",
+            inputSchema: null,
+            kind: "authored-tool",
+            logicalPath: `tools/${TASK_UPDATE_TOOL_NAME}.ts`,
+            name: TASK_UPDATE_TOOL_NAME,
+            owner: { feature: "tasks", kind: "framework" },
+            sourceId: `framework:tools/${TASK_UPDATE_TOOL_NAME}.ts`,
+          },
+        ],
+      },
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      sessionId: "sess-child",
+      taskOwned: true,
+    });
+
+    expect(state.snapshot?.session.agent.system).toContain("Background task updates");
+    expect(state.snapshot?.session.agent.system).toContain("what you are currently doing");
+    expect(state.snapshot?.session.state).toBeUndefined();
+  });
+
+  it("does not add task_update guidance to a task-owned node without the tool", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: {},
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      sessionId: "sess-child",
+      taskOwned: true,
+    });
+
+    expect(state.snapshot?.session.agent.system).not.toContain("Background task updates");
+  });
+
   it("defaults root sessions to the root input token budget", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {

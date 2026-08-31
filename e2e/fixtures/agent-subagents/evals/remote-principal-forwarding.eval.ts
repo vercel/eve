@@ -1,42 +1,92 @@
-import { defineEval } from "eve/evals";
+import { defineEval, type EveEvalTurn } from "eve/evals";
 
-/**
- * Principal forwarding across a real remote-agent hop, end to end. The
- * fixture deployment plays both sides: `remote-loopback` dynamically selects
- * a `defineRemoteAgent({ forwardPrincipal: true })` pointing back at this
- * deployment, whose authored eve channel trusts principals only from the
- * hop's `router-app` bearer (`trustedForwarders`).
- *
- * Two turns give the parent session *distinct* principals: turn one starts
- * the session as the fixed `user:e2e-user` (pinning it as the initiator),
- * turn two continues it as `user:e2e-user-2` via the second fixture bearer
- * and dispatches the hop. The child session's `whoami` marker can therefore
- * only show `current=e2e-user-2 initiator=e2e-user` — with
- * `forwarded-by=router-app`, the receiver-stamped audit attribute — if both
- * principals crossed the wire independently, the gate accepted the
- * forwarder, and the replacement reached the child runtime. Without
- * forwarding the child would report the transport caller,
- * `service:router-app`, for both.
- */
-const FORWARDED_MARKER =
-  "WHOAMI current=user:e2e-user-2 initiator=user:e2e-user forwarded-by=router-app";
+const ALICE_PRIVATE_DATA = "ALICE_PRIVATE_DM_7K4M";
+const BOB_PRIVATE_DATA = "BOB_PRIVATE_DM_9P2R";
+const BOB_AUTHORIZATION = "Bearer e2e-principal-forwarding-bob";
+const OBSERVER_AUTHORIZATION = "Bearer e2e-principal-forwarding-observer";
+const CHILD_MESSAGE = [
+  "[forward-auth:child] Call read-private-data exactly once.",
+  "If it succeeds, reply with only its privateData value.",
+  "If it fails, reply with only ACCESS_DENIED.",
+].join(" ");
+const CREATE_CHILD_MESSAGE = [
+  "[forward-auth:create] Use remote-loopback exactly once with this message:",
+  JSON.stringify(CHILD_MESSAGE),
+  "Reply with only the child's output.",
+].join(" ");
+const CONTINUE_CHILD_MESSAGE = [
+  "[forward-auth:continue] Continue that same remote-loopback agent using its agentId with this message:",
+  JSON.stringify(CHILD_MESSAGE),
+  "Reply with only the child's output.",
+].join(" ");
 
+function requireRemoteChild(parentTurn: EveEvalTurn, expectedSessionId?: string): string {
+  const call = parentTurn.events.find(
+    (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
+  );
+  if (call?.type !== "subagent.called") {
+    throw new Error("The parent turn did not call remote-loopback.");
+  }
+  if (expectedSessionId !== undefined && call.data.childSessionId !== expectedSessionId) {
+    throw new Error("The parent turn did not continue the existing remote child.");
+  }
+  return call.data.childSessionId;
+}
+
+/** Three users resume one remote child; each tool call resolves only its current caller's grant. */
 export default defineEval({
-  tags: ["real-model"],
+  tags: ["principal-forwarding", "real-model"],
   description:
-    "Dynamic remote-agent selection and principal forwarding: the child session runs as the parent's end user, with the distinct initiator preserved and the forwarder stamped.",
+    "A persistent remote child switches between two user grants and denies a third caller with none.",
   async test(t) {
-    await t.send("Reply with the single word: ready.");
+    // Alice creates the child and reads with her own grant.
+    const aliceParent = await t.send(CREATE_CHILD_MESSAGE);
+    const childSessionId = requireRemoteChild(aliceParent);
+    const aliceChild = await t.target.watchTurn(childSessionId).result();
+    let childEventCount = aliceChild.events.length;
 
-    await t.send(
-      "Use the remote-loopback agent with this exact message and nothing else (no outputSchema): 'Run the whoami tool and reply with only its marker string, verbatim.' When it returns, reply with the agent's exact output included verbatim.",
-      { headers: { authorization: "Bearer e2e-principal-forwarding-second-user" } },
-    );
-
-    t.succeeded();
-    t.calledSubagent("remote-loopback", {
-      output: /WHOAMI current=user:e2e-user-2 initiator=user:e2e-user forwarded-by=router-app/,
+    // Bob continues the same child and must resolve Bob's grant, not Alice's.
+    const bobParent = await t.send(CONTINUE_CHILD_MESSAGE, {
+      headers: { authorization: BOB_AUTHORIZATION },
     });
-    t.messageIncludes(FORWARDED_MARKER);
+    requireRemoteChild(bobParent, childSessionId);
+    const bobChild = await t.target
+      .watchTurn(childSessionId, { startIndex: childEventCount })
+      .result();
+    childEventCount += bobChild.events.length;
+
+    // A grantless observer continues it once more. Reusing either prior bearer
+    // would complete this call; correct per-turn scoping makes it fail.
+    const observerParent = await t.send(CONTINUE_CHILD_MESSAGE, {
+      headers: { authorization: OBSERVER_AUTHORIZATION },
+    });
+    requireRemoteChild(observerParent, childSessionId);
+    const observerChild = await t.target
+      .watchTurn(childSessionId, { startIndex: childEventCount })
+      .result();
+
+    aliceChild.calledTool("read-private-data", {
+      count: 1,
+      output: { privateData: ALICE_PRIVATE_DATA },
+      status: "completed",
+    });
+    bobChild.calledTool("read-private-data", {
+      count: 1,
+      output: { privateData: BOB_PRIVATE_DATA },
+      status: "completed",
+    });
+    observerChild.calledTool("read-private-data", { count: 1, status: "failed" });
+    observerChild.calledTool("read-private-data", { count: 0, status: "completed" });
+    observerChild.event("action.result", {
+      count: 1,
+      data: {
+        error: { message: /No OAuth grant exists for e2e-observer/ },
+        result: { kind: "tool-result", toolName: "read-private-data" },
+        status: "failed",
+      },
+    });
+
+    t.calledSubagent("remote-loopback", { count: 3 });
+    t.succeeded();
   },
 });

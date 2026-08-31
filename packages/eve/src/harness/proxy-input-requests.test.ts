@@ -4,12 +4,11 @@ import {
   clearProxyInputRequestsForChild,
   getProxyInputRequests,
   hasProxyInputRequests,
-  retireProxyInputRequests,
   toProxyInputRequestEntries,
   upsertProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
-import type { InputRequest, InputRequestKind } from "#runtime/input/types.js";
+import type { InputRequest, InputRequestKind } from "#shared/input.js";
 import type { HarnessSession } from "#harness/types.js";
 
 function createSession(state?: Record<string, unknown>): HarnessSession {
@@ -52,7 +51,38 @@ describe("upsertProxyInputRequests", () => {
     });
   });
 
-  it("keeps two batches from the same child independently addressable", () => {
+  it("round-trips task ownership without exposing malformed ownership as an unscoped route", () => {
+    const next = upsertProxyInputRequests({
+      entries: [
+        [
+          "task-1:req-1",
+          {
+            childContinuationToken: "child-a",
+            childRequestId: "req-1",
+            kind: "question",
+            taskId: "task-1",
+          },
+        ],
+      ],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+    expect(getProxyInputRequests(next.state).get("task-1:req-1")).toEqual({
+      childContinuationToken: "child-a",
+      childRequestId: "req-1",
+      kind: "question",
+      taskId: "task-1",
+    });
+    expect(
+      getProxyInputRequests({
+        "eve.runtime.proxyInputRequests": {
+          "req-1": { childContinuationToken: "child-a", kind: "question", taskId: 42 },
+        },
+      }).size,
+    ).toBe(0);
+  });
+
+  it("replaces prior entries for the same child continuation token", () => {
     let session = upsertProxyInputRequests({
       entries: [["req-1", { childContinuationToken: "child-a", kind: "question" }]],
       forChildContinuationToken: "child-a",
@@ -66,18 +96,15 @@ describe("upsertProxyInputRequests", () => {
     });
 
     const entries = getProxyInputRequests(session.state);
-    expect(entries.size).toBe(2);
-    expect(entries.get("req-1")).toEqual({
-      childContinuationToken: "child-a",
-      kind: "question",
-    });
+    expect(entries.size).toBe(1);
+    expect(entries.get("req-1")).toBeUndefined();
     expect(entries.get("req-2")).toEqual({
       childContinuationToken: "child-a",
       kind: "question",
     });
   });
 
-  it("replaces only a reused request ID", () => {
+  it("drops a prior child's batch when its request ID is claimed by another child", () => {
     let session = upsertProxyInputRequests({
       entries: [
         ["req-1", { childContinuationToken: "child-a", kind: "question" }],
@@ -93,10 +120,10 @@ describe("upsertProxyInputRequests", () => {
       session,
     });
 
-    expect([...getProxyInputRequests(session.state)]).toEqual([
-      ["req-1", { childContinuationToken: "child-b", kind: "tool-approval" }],
-      ["req-2", { childContinuationToken: "child-a", kind: "question" }],
-    ]);
+    expect(Object.fromEntries(getProxyInputRequests(session.state))).toEqual({
+      "req-1": { childContinuationToken: "child-b", kind: "tool-approval" },
+      "req-2": { childContinuationToken: "child-a", kind: "question" },
+    });
   });
 
   it("keeps entries from other children when upserting", () => {
@@ -198,30 +225,6 @@ describe("clearProxyInputRequestsForChild", () => {
   });
 });
 
-describe("retireProxyInputRequests", () => {
-  it("removes only answered request IDs, including partial same-child batches", () => {
-    const session = upsertProxyInputRequests({
-      entries: [
-        ["req-1", { childContinuationToken: "child-a", kind: "question" }],
-        ["req-2", { childContinuationToken: "child-a", kind: "question" }],
-      ],
-      forChildContinuationToken: "child-a",
-      session: createSession(),
-    });
-
-    const next = retireProxyInputRequests(session, ["req-1"]);
-
-    expect([...getProxyInputRequests(next.state)]).toEqual([
-      ["req-2", { childContinuationToken: "child-a", kind: "question" }],
-    ]);
-  });
-
-  it("is idempotent for an already-retired request ID", () => {
-    const session = createSession();
-    expect(retireProxyInputRequests(session, ["req-1"])).toBe(session);
-  });
-});
-
 describe("getProxyInputRequests type safety", () => {
   it("returns an empty map when the session carries no proxy state", () => {
     const entries = getProxyInputRequests(createSession().state);
@@ -269,4 +272,45 @@ describe("getProxyInputRequests type safety", () => {
       ["malformed", { childContinuationToken: "child-a", kind: "tool-approval" }],
     ]);
   });
+
+  it("accepts HTTPS child response URLs", () => {
+    expect(readChildResponseUrl("https://remote.example/eve/v1/task-input/token")).toBe(
+      "https://remote.example/eve/v1/task-input/token",
+    );
+  });
+
+  it.each([
+    "http://localhost:3000/eve/v1/task-input/token",
+    "http://worker.localhost:3000/eve/v1/task-input/token",
+    "http://127.0.0.1:3000/eve/v1/task-input/token",
+    "http://127.0.0.2:3000/eve/v1/task-input/token",
+    "http://[::1]:3000/eve/v1/task-input/token",
+    "http://[::ffff:7f00:1]:3000/eve/v1/task-input/token",
+  ])("accepts an HTTP loopback child response URL: %s", (url) => {
+    expect(readChildResponseUrl(url)).toBe(url);
+  });
+
+  it.each([
+    "http://remote.example/eve/v1/task-input/token",
+    "http://10.0.0.1/eve/v1/task-input/token",
+    "http://localhost.example/eve/v1/task-input/token",
+    "ftp://localhost/eve/v1/task-input/token",
+    "not a URL",
+  ])("rejects a non-HTTPS, non-loopback, or malformed child response URL: %s", (url) => {
+    expect(readChildResponseUrl(url)).toBeUndefined();
+  });
 });
+
+function readChildResponseUrl(childResponseUrl: string): string | undefined {
+  return getProxyInputRequests({
+    "eve.runtime.proxyInputRequests": {
+      "task-1:req-1": {
+        childContinuationToken: "child-a",
+        childRequestId: "req-1",
+        childResponseUrl,
+        kind: "question",
+        taskId: "task-1",
+      },
+    },
+  }).get("task-1:req-1")?.childResponseUrl;
+}

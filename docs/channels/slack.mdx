@@ -1,10 +1,10 @@
 ---
 title: "Slack"
-description: "Reach your agent from Slack app mentions and DMs with Vercel Connect-managed credentials, threaded replies, and interactive buttons."
+description: "Reach your agent from Slack app mentions, DMs, slash commands, and interactive callbacks."
 type: integration
 ---
 
-The Slack channel puts your agent inside a workspace. It answers `@mentions` and DMs, replies in threads, shows typing indicators, and turns human-in-the-loop (HITL) prompts into buttons. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview) for the contract this builds on.
+The Slack channel puts your agent inside a workspace. It handles `@mentions`, DMs, slash commands, shortcuts, and interactive callbacks; replies in threads; shows typing indicators; and turns human-in-the-loop (HITL) prompts into buttons. [Vercel Connect](https://vercel.com/kb/guide/vercel-connect) is the recommended setup: it manages the Slack bot token, verifies inbound requests, supports token rotation and multiple workspace installations, and forwards events to your agent without copying Slack secrets into your project environment. If you cannot use Vercel Connect, you can provide the bot token and signing secret through environment variables. See [Channels](./overview) for the contract this builds on.
 
 ## Add the channel
 
@@ -33,6 +33,20 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
+Function-form bot tokens receive `{ teamId }` when Slack supplies the app installation workspace. Use it to select an installation in a self-managed multi-workspace app. The id can differ from the actor or content workspace for Slack Connect events:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  credentials: {
+    botToken: ({ teamId }) => loadInstallationToken(teamId),
+  },
+});
+```
+
+Literal tokens and zero-argument token functions remain supported. A multi-workspace provider should reject a missing `teamId` instead of selecting a default installation.
+
 ### Manage Slack credentials yourself
 
 Use this fallback when the agent does not run on Vercel or Vercel Connect is unavailable. In the setup command, **Use portable credentials** is the environment-variable option; eve adds `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` to `.env.example`.
@@ -43,7 +57,8 @@ This option does not create or install the Slack app. Configure it in [Slack app
 2. Install or reinstall the app, copy its Bot User OAuth Token to `SLACK_BOT_TOKEN`, and copy the signing secret from **Basic Information** to `SLACK_SIGNING_SECRET`.
 3. Set both values in `.env.local` for local development or in the target runtime's environment, then start or deploy the agent at a public URL.
 4. Under **Event Subscriptions**, set the Request URL to `https://your-agent.example/eve/v1/slack`. Subscribe to `app_mention`, plus `message.im` for DMs.
-5. Under **Interactivity & Shortcuts**, use the same Request URL when the agent uses buttons or HITL prompts.
+5. Under **Interactivity & Shortcuts**, use the same Request URL when the agent uses buttons, shortcuts, or HITL prompts.
+6. Under **Slash Commands**, create each command your app handles and use the same Request URL.
 
 Add the matching message events and history scopes if you also want unmentioned thread replies, as described in [Continue conversations without repeated mentions](#continue-conversations-without-repeated-mentions).
 
@@ -125,7 +140,7 @@ Check the delivery path in order so you can identify where a Slack event stops:
 
 ### Message hooks
 
-Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history.
+Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context }` to inject background into history. Public conversations use the returned `title`, or the triggering message text when `title` is omitted. DMs and private channels always use `Private message` so the run title does not expose message details.
 
 - `onMessage(ctx, message)` handles Slack `message` events. eve drops messages authored by the installed app before this hook runs, preventing self-reply loops. Messages from other bots remain visible; check `message.author?.isBot` when those should also be ignored. `ctx.isBotMentioned()` and `ctx.isSubscribed()` support mention and active-thread policies.
 - `onAppMention(ctx, message)` handles only `app_mention` and takes precedence over `onMessage`. Its default derives workspace-scoped auth and posts `Thinking…`.
@@ -140,7 +155,30 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context
 
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
 
-`onInteraction(action, ctx)` separately handles `block_actions` callbacks not consumed by HITL. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+`onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
+
+Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
+
+Use `onSlashCommand(command, ctx)` for commands configured under **Slash Commands** in your Slack app. The handler receives the command name, argument text, invoking user, channel, workspace, trigger ID, and response URL. It also receives workspace-scoped Slack API access. eve acknowledges slash commands immediately with an empty `200 OK` response and keeps the handler alive in the background:
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onSlashCommand(command, ctx) {
+    if (command.command !== "/ask") return;
+    await ctx.slack.request("chat.postEphemeral", {
+      channel: command.channelId,
+      user: command.user.id,
+      text: `Received: ${command.text}`,
+    });
+  },
+});
+```
+
+The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
+
+When a Slack message shares another Slack message, eve extracts the forwarded message body from Slack's message-unfurl attachment and includes it in `<content>`. The original top-level comment, when present, remains alongside the forwarded content.
 
 #### Restrict who can invoke the agent
 
@@ -150,7 +188,7 @@ A valid Slack signature proves that Slack sent the event. It does not decide whi
 import { connectSlackCredentials } from "@vercel/connect/eve";
 import { defaultSlackAuth, slackChannel, type SlackMessage } from "eve/channels/slack";
 
-const allowedChannels = new Set(["C01234567"]);
+const allowedConversations = new Set(["C01234567", "D01234567"]);
 const allowedUsers = new Set(["U01234567"]);
 
 function isAllowedUser(message: SlackMessage) {
@@ -161,23 +199,33 @@ function isAllowedUser(message: SlackMessage) {
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   onAppMention(ctx, message) {
-    if (!isAllowedUser(message) || !allowedChannels.has(message.channelId)) {
+    if (!isAllowedUser(message) || !allowedConversations.has(message.channelId)) {
       return null;
     }
     return { auth: defaultSlackAuth(message, ctx) };
   },
   onDirectMessage(ctx, message) {
-    if (!isAllowedUser(message)) return null;
+    if (!isAllowedUser(message) || !allowedConversations.has(message.channelId)) {
+      return null;
+    }
     return { auth: defaultSlackAuth(message, ctx) };
+  },
+  onInputResponse(ctx, submission) {
+    if (!allowedUsers.has(submission.user.id) || !allowedConversations.has(ctx.slack.channelId)) {
+      return null;
+    }
+    return { auth: ctx.defaultAuth };
   },
 });
 ```
 
-Override every enabled inbound handler; leaving `onDirectMessage` out would retain eve's default DM behavior. Slack Connect can deliver events from external users, so authorize the explicit user and current channel IDs your policy expects. If access depends on organization membership, resolve it from Slack's shared-channel and user data instead of inferring it from the request signature.
+Override every enabled inbound handler; leaving `onDirectMessage` out would retain eve's default DM behavior. Apply the same policy in `onInputResponse` so someone who cannot start a turn cannot resume one through an eve-owned HITL control. Slack Connect can deliver events from external users, so authorize the explicit user and current conversation IDs your policy expects. If access depends on organization membership, resolve it from Slack's shared-channel and user data instead of inferring it from the request signature.
 
 Keep authorization checks inside sensitive tools too. The inbound allowlist controls who can start a turn; tool-level checks control what that authenticated Slack principal may read or change.
 
-The allowlist above gates message-started turns. Built-in HITL buttons are handled before `onInteraction`, and the person who clicks supplies the Slack auth for the resumed session. Anyone who can interact with the Slack message can answer it. Put sensitive prompts in channels limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
+`onInputResponse` runs after eve decodes a built-in HITL answer but before the parked session resumes. Return `{ auth }` to accept the answer. Returning `null` or throwing rejects it, leaves the request pending, and keeps the Slack controls active. `ctx.defaultAuth` identifies the Slack user who submitted the signed interaction; it does not authorize that user by itself.
+
+If you omit `onInputResponse`, Slack accepts HITL answers with the submitting user's auth, regardless of which message or event handlers you define. Define `onInputResponse` when those handlers enforce an invocation policy that must also apply to HITL answers. Put sensitive prompts in conversations limited to the intended approvers, and re-check `ctx.session.auth.current` inside a sensitive tool before performing its side effect.
 
 #### Continue conversations without repeated mentions
 
@@ -188,15 +236,14 @@ export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
   async onMessage(ctx, message) {
     if (message.author?.isBot) return null;
-    const isDirectMessage = message.raw.channel_type === "im";
-    return isDirectMessage || ctx.isBotMentioned() || (await ctx.isSubscribed())
+    return (await ctx.isDMOrPrivateChannel()) || ctx.isBotMentioned() || (await ctx.isSubscribed())
       ? { auth: null }
       : null;
   },
 });
 ```
 
-`isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
+`isDMOrPrivateChannel()` returns `true` for DMs, group DMs, and private channels. Slack message events identify public channels as `channel` and private channels as `group`, so those events do not require an API lookup. Events such as `app_mention` omit the conversation type; for those, the helper calls Slack's `conversations.info` API and checks `is_private`. Missing scopes, API errors, and ambiguous responses return `true` so privacy-sensitive behavior fails closed. `isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. For Vercel Connect, open **Advanced** when creating the connector and add `message.channels` under **Trigger Event Types** and `channels:history` under **Bot Scopes**. Private channels additionally need `message.groups` and `groups:history`.
 
 Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
 
@@ -287,7 +334,7 @@ Reset returns `{ status: "reset", previousSessionId }` when the thread had a ses
 
 ### Other Events API callbacks
 
-Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth })` zero, one, or many times to start turns. Each call returns the resulting session.
+Use `onEvent` for subscribed events such as `reaction_added`, `team_join`, or `channel_created`. It receives the raw, open-ended Slack event and owns control flow. Call `ctx.send(message, { target, auth, title })` zero, one, or many times to start turns. `title` sets the run title without changing the message sent to the model. Each call returns the resulting session.
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -333,13 +380,11 @@ const session = await ctx.resolveSession({ target });
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
-`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration; eve can only handle events Slack sends.
+`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`; add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration so other callbacks reach their handlers.
 
 ### Slack API calls outside a handler
 
-Inside webhook-side handlers (`onAppMention`, `onEvent`, `onInteraction`, `events`),
-`ctx.slack.request(operation, body)` is the raw-API escape hatch. Outside
-those contexts there is no handle — a schedule resolving reactions on old
+Inside inbound webhook handlers such as `onAppMention`, `onEvent`, `onInteraction`, `onShortcut`, `onSlashCommand`, and `onInputResponse`, `ctx.slack.request(operation, body)` is the raw-API escape hatch. Inside an `events` handler, use `channel.slack.request(...)` instead. Outside those contexts there is no handle — a schedule resolving reactions on old
 messages, for example, has no inbound Slack request. For that, call the
 same primitive the handle uses directly:
 
@@ -350,6 +395,7 @@ import { connectSlackCredentials } from "@vercel/connect/eve";
 const { botToken } = connectSlackCredentials("slack/my-agent");
 const response = await callSlackApi({
   botToken,
+  context: { teamId: "T0123456789" },
   operation: "reactions.get",
   body: { channel: "C0123456789", timestamp: "1712345678.000100", full: true },
 });
@@ -357,7 +403,7 @@ if (!response.ok) throw new Error(String(response.error));
 ```
 
 `callSlackApi` resolves function-form tokens (secret managers, Connect
-rotation) at call time and form-encodes the body — the only safe default,
+rotation) with the supplied `context` at call time and form-encodes the body — the only safe default,
 since Slack's JSON support is partial (`conversations.replies` rejects
 JSON). `resolveSlackBotToken` materializes a `SlackBotToken` to a string
 when you need the bearer token itself.
@@ -391,7 +437,7 @@ export default slackChannel({
 
 ### Human-in-the-loop (HITL)
 
-HITL renders as Slack buttons and selects. When the user responds, the parked session (paused awaiting input) resumes.
+HITL renders as Slack buttons and selects. Fixed-choice actions and freeform modal submissions pass through `onInputResponse` before the parked session resumes. The initial **Type your answer** action only opens eve's modal; the hook runs when the user submits an answer.
 
 Authorization prompts split public status from private credentials. A sign-in challenge (OAuth URL, device code) is a credential. Anyone who completes it binds their identity to the session's connection. The default `authorization.required` handler posts a public, link-free status in the thread, delivers the actual challenge ephemerally to the triggering user, device code included, and then updates that public status when `authorization.completed` fires. The handler receives a private-delivery context with `postEphemeral`, `postDirectMessage` (needs the `im:write` scope), and `state`. There is, intentionally, no public `post` and no raw API access.
 
@@ -407,13 +453,15 @@ events: {
 
 ### Proactive sessions
 
-Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, threadTs?, initialMessage? }`.
+Start a session without an inbound message through `ctx.to(slack, target).send(message, { auth })` from another channel, or `to(slack, target).send(message, { auth })` from a schedule `run` handler. The proactive target shape is `{ channelId, installationTeamId?, threadTs?, initialMessage? }`. Set `installationTeamId` to the app installation workspace when a function-form bot token must select an installation. This sends turn input to the agent; it is not a direct Slack post.
+
+To post without invoking the model, use `ctx.thread.post(...)` in an inbound Slack handler or `channel.thread.post(...)` in an `events` handler. Use `callSlackApi(...)` where no Slack channel context exists. For application-managed retries and deduplication, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ### Attachments
 
 Inbound files behind authenticated Slack URLs are staged with `fetchFile`. See [File uploads](./custom#file-uploads) for the `fetchFile` contract.
 
-Private file downloads require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments.
+Private file downloads resolve credentials from the session's app installation workspace and require the Slack bot token's `files:read` scope. Add the scope and reinstall the Slack app before sending attachments.
 
 Staged files live in the session sandbox under `/workspace/attachments`. Session history keeps a reference to that path, not a second copy of the Slack file. If the backend can no longer reattach the original sandbox, eve cannot restore the attachment bytes from history; later turns receive a missing-file result. Store files outside the sandbox when the agent must retain them independently of sandbox availability.
 

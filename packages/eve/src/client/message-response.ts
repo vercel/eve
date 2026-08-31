@@ -1,12 +1,13 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { isCurrentTurnBoundaryEvent, type MessageStreamEvent } from "#protocol/message.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
-import type { MessageResult } from "#client/types.js";
+import type { CancelSessionResult, MessageResult } from "#client/types.js";
 
 /**
  * Internal configuration passed to construct a {@link MessageResponse}.
  */
 interface MessageResponseInput {
+  readonly cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
   readonly createStream: () => AsyncGenerator<MessageStreamEvent>;
   readonly sessionId: string;
 }
@@ -24,13 +25,38 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
    */
   readonly sessionId: string;
 
+  readonly #cancelTurn: (turnId: string) => Promise<CancelSessionResult>;
+  #cancellation: Promise<CancelSessionResult> | undefined;
   #consumed = false;
   readonly #createStream: () => AsyncGenerator<MessageStreamEvent>;
+  #settled = false;
+  readonly #turnId = Promise.withResolvers<string | undefined>();
 
   /** @internal */
   constructor(input: MessageResponseInput) {
+    this.#cancelTurn = input.cancelTurn;
     this.sessionId = input.sessionId;
     this.#createStream = input.createStream;
+  }
+
+  /**
+   * Requests cooperative cancellation of this exact turn.
+   *
+   * The request waits for the response stream to identify the turn when
+   * necessary. Continue consuming the stream to observe its durable boundary.
+   */
+  cancel(): Promise<CancelSessionResult> {
+    if (this.#settled) return Promise.resolve({ status: "no_active_turn" });
+    if (this.#cancellation !== undefined) return this.#cancellation;
+
+    const cancellation = this.#turnId.promise.then<CancelSessionResult>((turnId) =>
+      turnId === undefined ? { status: "no_active_turn" } : this.#cancelTurn(turnId),
+    );
+    this.#cancellation = cancellation;
+    void cancellation.catch(() => {
+      if (!this.#settled && this.#cancellation === cancellation) this.#cancellation = undefined;
+    });
+    return cancellation;
   }
 
   /**
@@ -66,6 +92,22 @@ export class MessageResponse<TOutput = unknown> implements AsyncIterable<Message
     }
     this.#consumed = true;
 
-    return this.#createStream();
+    return this.#observeStream();
+  }
+
+  async *#observeStream(): AsyncGenerator<MessageStreamEvent> {
+    try {
+      for await (const event of this.#createStream()) {
+        if (event.type === "turn.started") {
+          this.#turnId.resolve(event.data.turnId);
+        } else if (isCurrentTurnBoundaryEvent(event)) {
+          this.#settled = true;
+          this.#turnId.resolve(undefined);
+        }
+        yield event;
+      }
+    } finally {
+      this.#turnId.resolve(undefined);
+    }
   }
 }

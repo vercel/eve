@@ -8,7 +8,7 @@ import {
   type AgentModelSetting,
   type AgentModelSettingsPatch,
 } from "#source-change/apply-agent-model-settings.js";
-import { applyModelNameToSource } from "#source-change/apply-model-name.js";
+import { applyModelSelectionToSource } from "#source-change/apply-model-selection.js";
 
 /**
  * Outcome of a static source change, returned to upstream callers (CLI, web
@@ -104,7 +104,7 @@ async function updateAgentModelName(
 
   const absolutePath = join(manifest.agentRoot, source.logicalPath);
   const sourceText = await readFile(absolutePath, "utf8");
-  const edit = await applyModelNameToSource(sourceText, modelName);
+  const edit = await applyModelSelectionToSource(sourceText, modelName);
 
   if (edit.kind === "bail") {
     return {

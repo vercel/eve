@@ -7,9 +7,10 @@ import {
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
   orderedSetupIssues,
-  resolveModelProviderState,
+  normalizeLocalModelEndpoint,
   type BootDetectionContext,
 } from "./setup-issues.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 function context(overrides: Partial<BootDetectionContext> = {}): BootDetectionContext {
   return { appRoot: "/nonexistent", env: {}, ...overrides };
@@ -29,37 +30,8 @@ function infoWithRouting(
         ? { id: "m", routing }
         : { endpoint, id: "m", routing };
 
-  return {
-    agent: {
-      agentRoot: "/a",
-      appRoot: "/a",
-      model,
-      name: "Agent",
-    },
-    capabilities: { devRoutes: true },
-    channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-    connections: [],
-    diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-    hooks: [],
-    instructions: { dynamic: [], static: null },
-    kind: "eve-agent-info",
-    mode: "development",
-    sandbox: null,
-    schedules: [],
-    skills: { dynamic: [], static: [] },
-    subagents: { local: [], total: 0 },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 1,
-    workflow: { enabled: false, toolName: "Workflow" },
-    workspace: { resourceRoot: null, rootEntries: [] },
-  };
+  const info = createTestAgentInfoResult({ agentRoot: "/a/agent", appRoot: "/a", name: "Agent" });
+  return { ...info, agent: { ...info.agent, model } };
 }
 
 describe("BOOT_DETECTIONS", () => {
@@ -109,7 +81,7 @@ describe("BOOT_DETECTIONS", () => {
       { kind: "external", provider: "anthropic" },
     );
 
-    expect(resolveModelProviderState(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
+    expect(normalizeLocalModelEndpoint(info, { AI_GATEWAY_API_KEY: "key" })).toMatchObject({
       agent: {
         model: {
           endpoint: { kind: "gateway", connected: true, credential: "api-key" },

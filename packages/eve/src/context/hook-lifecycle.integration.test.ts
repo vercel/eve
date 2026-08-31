@@ -4,6 +4,7 @@ import { createRuntimeHookRegistry } from "#runtime/hooks/registry.js";
 import type { ResolvedHookDefinition } from "#runtime/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { stampTestEvent } from "#internal/testing/events.js";
+import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import { ContextContainer, contextStorage } from "./container.js";
 import { dispatchStreamEventHooks } from "./hook-lifecycle.js";
 import {
@@ -11,7 +12,7 @@ import {
   ChannelKey,
   type CompiledBundle,
 } from "#runtime/sessions/runtime-context-keys.js";
-import { ContinuationTokenKey, SessionIdKey, SessionKey } from "./keys.js";
+import { ContinuationTokenKey, SandboxKey, SessionIdKey, SessionKey } from "./keys.js";
 
 function createMockBundle(): CompiledBundle {
   return {
@@ -108,5 +109,36 @@ describe("dispatchStreamEventHooks", () => {
         }),
       ),
     ).rejects.toThrow(/event hook boom/);
+  });
+
+  it("can delete the runtime sandbox from a session.completed hook", async () => {
+    let deletions = 0;
+    const sandbox = mockSandbox({
+      delete: () => {
+        deletions += 1;
+      },
+    });
+    const registry = createRuntimeHookRegistry([
+      hook("cleanup", {
+        events: {
+          "session.completed": async (_event, hookContext) => {
+            const live = await hookContext.getSandbox();
+            await live.delete();
+          },
+        },
+      }),
+    ]);
+    const ctx = buildCtx();
+    ctx.set(SandboxKey, sandbox.access);
+
+    await contextStorage.run(ctx, () =>
+      dispatchStreamEventHooks({
+        ctx,
+        registry,
+        event: stampTestEvent({ type: "session.completed" }),
+      }),
+    );
+
+    expect(deletions).toBe(1);
   });
 });

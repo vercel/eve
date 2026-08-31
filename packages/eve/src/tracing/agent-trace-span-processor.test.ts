@@ -42,11 +42,11 @@ describe("AgentTraceSpanProcessor", () => {
     expect([...processor.activeTraceIds()]).toEqual(["trace-2"]);
   });
 
-  it("releases every window a session owns", () => {
+  it("releases every trace a session owns", () => {
     const processor = new AgentTraceSpanProcessor([]);
-    processor.onStart(span("window-0", { "agent.session.id": "session-1" }), {});
-    processor.onStart(span("window-1", { "agent.session.id": "session-1" }), {});
-    expect([...processor.activeTraceIds()].sort()).toEqual(["window-0", "window-1"]);
+    processor.onStart(span("trace-1", { "agent.session.id": "session-1" }), {});
+    processor.onStart(span("trace-2", { "agent.session.id": "session-1" }), {});
+    expect([...processor.activeTraceIds()].sort()).toEqual(["trace-1", "trace-2"]);
 
     expect(processor.releaseSession("session-1")).toBe(true);
     expect([...processor.activeTraceIds()]).toEqual([]);
@@ -66,14 +66,8 @@ describe("AgentTraceSpanProcessor", () => {
       shutdown: vi.fn(async () => {}),
     };
     const processor = new AgentTraceSpanProcessor([child]);
-    const owned = {
-      "agent.root.session.id": "session-1",
-      "agent.session.id": "session-1",
-    };
-    const delegated = {
-      "agent.root.session.id": "session-1",
-      "agent.session.id": "child-1",
-    };
+    const owned = { "agent.session.id": "session-1" };
+    const delegated = { "agent.session.id": "child-1" };
     processor.onStart(span("trace-1", owned), {});
     processor.onStart(span("trace-1", delegated), {});
 

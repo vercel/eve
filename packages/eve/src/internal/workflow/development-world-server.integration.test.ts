@@ -34,6 +34,13 @@ const SECRET = "workflow-transport-secret";
 const RUN_ID = "wrun_01J00000000000000000000000";
 const AGENT_NAME = "workflow-world-test";
 const QUEUE_PREFIX = deriveEveWorkflowQueuePrefix(AGENT_NAME);
+const LOCAL_DELIVERY_TIMEOUT_ENV_NAMES = [
+  "WORKFLOW_LOCAL_BODY_TIMEOUT_MS",
+  "WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS",
+] as const;
+const originalLocalDeliveryTimeoutEnv = new Map(
+  LOCAL_DELIVERY_TIMEOUT_ENV_NAMES.map((name) => [name, process.env[name]]),
+);
 
 const originalFetch = globalThis.fetch;
 
@@ -42,9 +49,46 @@ afterEach(() => {
   delete process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
   delete process.env[DEVELOPMENT_WORKER_APP_ROOT_ENV];
   delete process.env.WORKFLOW_LOCAL_BASE_URL;
+  for (const name of LOCAL_DELIVERY_TIMEOUT_ENV_NAMES) {
+    const originalValue = originalLocalDeliveryTimeoutEnv.get(name);
+    if (originalValue === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = originalValue;
+    }
+  }
 });
 
 describe("parent development Workflow World", () => {
+  it("defaults local delivery timeouts to unbounded", async () => {
+    for (const name of LOCAL_DELIVERY_TIMEOUT_ENV_NAMES) {
+      delete process.env[name];
+    }
+    const appRoot = await createScratchDirectory("eve-parent-workflow-timeouts-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+
+    try {
+      expect(process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS).toBe("0");
+      expect(process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS).toBe("0");
+    } finally {
+      await world.close();
+    }
+  });
+
+  it("preserves explicit local delivery timeouts", async () => {
+    process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS = "123";
+    process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS = "456";
+    const appRoot = await createScratchDirectory("eve-parent-workflow-explicit-timeouts-");
+    const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
+
+    try {
+      expect(process.env.WORKFLOW_LOCAL_BODY_TIMEOUT_MS).toBe("123");
+      expect(process.env.WORKFLOW_LOCAL_HEADERS_TIMEOUT_MS).toBe("456");
+    } finally {
+      await world.close();
+    }
+  });
+
   it("stores local Workflow state under .eve/.workflow-data", async () => {
     const appRoot = await createScratchDirectory("eve-parent-workflow-data-dir-");
     const world = createWorld({ activeGenerationId: () => "generation-a", appRoot });
@@ -82,7 +126,7 @@ describe("parent development Workflow World", () => {
             workflowName: turnWorkflowReference.workflowId,
           },
           eventType: "run_created",
-          specVersion: 5,
+          specVersion: 6,
         },
       ]);
       const runId = readCreatedRunId(created);
@@ -108,7 +152,7 @@ describe("parent development Workflow World", () => {
           runInput: {
             deploymentId: "generation-a",
             input: new Uint8Array(),
-            specVersion: 5,
+            specVersion: 6,
             workflowName: workflowEntryReference.workflowId,
           },
         }),
@@ -142,7 +186,7 @@ describe("parent development Workflow World", () => {
           workflowName: turnWorkflowReference.workflowId,
         },
         eventType: "run_created",
-        specVersion: 5,
+        specVersion: 6,
       },
     ]);
     await first.close();
@@ -187,7 +231,7 @@ describe("parent development Workflow World", () => {
             workflowName: turnWorkflowReference.workflowId,
           },
           eventType: "run_created",
-          specVersion: 5,
+          specVersion: 6,
         },
       ]);
       const runId = readCreatedRunId(created);
@@ -236,7 +280,7 @@ describe("parent development Workflow World", () => {
             workflowName: turnWorkflowReference.workflowId,
           },
           eventType: "run_created",
-          specVersion: 5,
+          specVersion: 6,
         },
       ]);
       const runId = readCreatedRunId(created);

@@ -45,6 +45,7 @@ import {
 import { type TwilioAuthToken, type TwilioWebhookUrl } from "#public/channels/twilio/verify.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { defineChannel, GET, POST, type Channel } from "#public/definitions/channel.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("twilio.channel");
 
@@ -78,6 +79,7 @@ export interface TwilioChannelState {
 
 /** Per-session instrumentation snapshot for Twilio runtime telemetry. Reports the active phone-number pair and the most recent message and call SIDs. */
 export interface TwilioInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: ChannelAudience;
   readonly from: string | null;
   readonly lastCallSid: string | null;
   readonly lastMessageSid: string | null;
@@ -99,6 +101,8 @@ export interface TwilioReceiveTarget {
 /** Result of an inbound Twilio text or transcription hook. Return `null` (or `undefined`) to drop the webhook without dispatching; otherwise supply the session `auth` context. */
 export type TwilioInboundResult = {
   auth: SessionAuthContext | null;
+  /** Overrides the workflow run title without changing the message sent to the model. */
+  title?: string;
 } | null;
 
 /** Sync or async {@link TwilioInboundResult}. */
@@ -307,6 +311,7 @@ export function twilioChannel(config: TwilioChannelConfig): TwilioChannel {
     },
     metadata(state): TwilioInstrumentationMetadata {
       return {
+        audience: "private",
         from: state.from,
         lastCallSid: state.lastCallSid ?? null,
         lastMessageSid: state.lastMessageSid ?? null,
@@ -569,6 +574,7 @@ async function dispatchText(input: {
         lastMessageSid: message.messageSid ?? null,
         to: message.to ?? null,
       },
+      title: result.title,
     });
   } catch (error) {
     log.error("text delivery failed", { error });
@@ -642,6 +648,7 @@ async function dispatchVoiceTranscription(input: {
           lastMessageSid: null,
           to: transcription.to ?? null,
         },
+        title: result.title,
       });
   } catch (error) {
     log.error("voice transcription delivery failed", { error });

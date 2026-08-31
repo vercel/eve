@@ -15,6 +15,7 @@ import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import { createDiskRuntimeCompiledArtifactsSource } from "../../src/runtime/compiled-artifacts-source.js";
 import { loadCompiledManifest } from "../../src/runtime/loaders/manifest.js";
 import { resolveRuntimeAgentGraph } from "../../src/runtime/resolve-agent-graph.js";
+import { loadResolvedModuleExport } from "../../src/runtime/resolve-helpers.js";
 
 const scenarioApp = useScenarioApp();
 const tempRoots: string[] = [];
@@ -73,6 +74,55 @@ const EXT_TREE: Readonly<Record<string, string>> = {
     "      }),",
     "    }),",
     "  },",
+    "});",
+    "",
+  ].join("\n"),
+  "extension/channels/status.ts": [
+    'import { defineChannel, GET } from "eve/channels";',
+    'import extension from "../extension.js";',
+    "export default defineChannel({",
+    "  routes: [",
+    '    GET("/crm/status", async () => new Response(extension.config.apiKey)),',
+    "  ],",
+    "});",
+    "",
+  ].join("\n"),
+  "extension/schedules/sync.ts": [
+    'import { defineSchedule } from "eve/schedules";',
+    'import extension from "../extension.js";',
+    "export default defineSchedule({",
+    '  cron: "0 9 * * *",',
+    "  run({ waitUntil }) {",
+    "    waitUntil(Promise.resolve(extension.config.apiKey));",
+    "  },",
+    "});",
+    "",
+  ].join("\n"),
+  "extension/subagents/reviewer/agent.ts": [
+    'import { defineAgent } from "eve";',
+    "export default defineAgent({",
+    '  model: "openai/gpt-5.4",',
+    '  description: "Review CRM records.",',
+    "});",
+    "",
+  ].join("\n"),
+  "extension/subagents/reviewer/tools/key.ts": [
+    'import { defineTool } from "eve/tools";',
+    'import extension from "../../../extension.js";',
+    "export default defineTool({",
+    '  description: "Read the configured API key.",',
+    '  inputSchema: { type: "object", properties: {}, additionalProperties: false },',
+    "  async execute() {",
+    "    return { apiKey: extension.config.apiKey };",
+    "  },",
+    "});",
+    "",
+  ].join("\n"),
+  "extension/subagents/weather.ts": [
+    'import { defineRemoteAgent } from "eve";',
+    "export default defineRemoteAgent({",
+    '  description: "Answer weather questions.",',
+    '  url: "https://weather.example.com",',
     "});",
     "",
   ].join("\n"),
@@ -197,12 +247,27 @@ describe("mounted extension installed under node_modules", () => {
     expect(Object.keys(extensionFiles)).toContain(
       `node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`,
     );
+    expect(
+      JSON.parse(extensionFiles[`node_modules/${PACKAGE_NAME}/dist/extension/_manifest.json`]!),
+    ).toMatchObject({ requires: { channel: 12, schedule: 5, subagent: 5 } });
     const app = await scenarioApp({
       name: "mounted-extension-installed",
       installDependencies: true,
       files: {
         "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
         "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/subagents/manager/agent.mjs": [
+          "export default {",
+          '  model: "openai/gpt-5.4",',
+          '  description: "Manage CRM reviews.",',
+          "};",
+          "",
+        ].join("\n"),
+        "agent/subagents/manager/extensions/nested.mjs": [
+          `import crm from "${PACKAGE_NAME}";`,
+          'export default crm({ apiKey: "sk-installed" });',
+          "",
+        ].join("\n"),
         "agent/extensions/crm.mjs": [
           `import crm from "${PACKAGE_NAME}";`,
           'export default crm({ apiKey: "sk-installed" });',
@@ -231,6 +296,70 @@ describe("mounted extension installed under node_modules", () => {
     await expect(shout?.execute?.({}, { messages: [], toolCallId: "call_2" })).resolves.toEqual({
       apiKey: "SK-INSTALLED",
     });
+
+    const status = graph.root.agent.channels.find((entry) => entry.name === "crm__status");
+    expect(status).toMatchObject({
+      method: "GET",
+      sourceId: "ext:crm:channels/status.mjs",
+      urlPath: "/crm/status",
+    });
+    if (status === undefined) throw new Error("Expected the extension channel to resolve.");
+    const response = await status.fetch(new Request("https://example.com/crm/status"), {
+      params: {},
+      requestIp: null,
+      waitUntil() {},
+    });
+    await expect(response.text()).resolves.toBe("sk-installed");
+
+    const sync = manifest.schedules.find((entry) => entry.name === "crm__sync");
+    expect(sync).toMatchObject({
+      cron: "0 9 * * *",
+      hasRun: true,
+      sourceId: "ext:crm:schedules/sync.mjs",
+    });
+    if (sync === undefined) throw new Error("Expected the extension schedule to compile.");
+    const syncDefinition = (await loadResolvedModuleExport({
+      definition: sync,
+      kindLabel: "schedule",
+      moduleMap,
+      nodeId: undefined,
+    })) as {
+      run(input: { waitUntil(task: Promise<unknown>): void }): Promise<void> | void;
+    };
+    let scheduledTask: Promise<unknown> | undefined;
+    await syncDefinition.run({
+      waitUntil(task) {
+        scheduledTask = task;
+      },
+    });
+    await expect(scheduledTask).resolves.toBe("sk-installed");
+
+    const reviewer = graph.root.subagentRegistry.subagentsByName.get("crm__reviewer");
+    expect(reviewer?.definition).toMatchObject({
+      name: "crm__reviewer",
+      sourceId: "ext:crm:subagents/reviewer",
+    });
+    const reviewerNode = graph.nodesByNodeId.get(reviewer!.definition.nodeId);
+    const key = reviewerNode?.agent.tools.find((entry) => entry.name === "key");
+    await expect(key?.execute?.({}, { messages: [], toolCallId: "call_3" })).resolves.toEqual({
+      apiKey: "sk-installed",
+    });
+    expect(
+      graph.root.subagentRegistry.subagentsByName.get("crm__weather")?.definition,
+    ).toMatchObject({
+      kind: "remote",
+      sourceId: "ext:crm:subagents/weather.mjs",
+      url: "https://weather.example.com",
+    });
+
+    const manager = graph.root.subagentRegistry.subagentsByName.get("manager");
+    const managerNode = graph.nodesByNodeId.get(manager!.definition.nodeId);
+    const nestedReviewer = managerNode?.subagentRegistry.subagentsByName.get("nested__reviewer");
+    const nestedReviewerNode = graph.nodesByNodeId.get(nestedReviewer!.definition.nodeId);
+    const nestedKey = nestedReviewerNode?.agent.tools.find((entry) => entry.name === "key");
+    await expect(nestedKey?.execute?.({}, { messages: [], toolCallId: "call_4" })).resolves.toEqual(
+      { apiKey: "sk-installed" },
+    );
 
     expect(graph.root.agent.skills.map((skill) => skill.name)).toEqual(
       expect.arrayContaining(["crm__notes", "crm__research", "crm__guide"]),
@@ -278,7 +407,7 @@ describe("mounted extension installed under node_modules", () => {
       {},
     )) as { markdown: string };
     expect(producedInstructions.markdown).toBe("Treat CRM results as authoritative.");
-    expect(manifest.instructions?.markdown).toContain(
+    expect(manifest.instructions.map((entry) => entry.content).join("\n")).toContain(
       "Prefer the CRM tools for account questions.",
     );
   });

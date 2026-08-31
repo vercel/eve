@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createLocalTracesProcessor } from "#tracing/local-traces.js";
+import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
+import { localTracePolicy } from "#tracing/local-instrumentation-runtime.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
 vi.mock("#tracing/local-trace-span-processor.js", () => ({
@@ -29,11 +30,11 @@ function agentSpan(sessionId: string, traceId: string): unknown {
   };
 }
 
-describe("createLocalTracesProcessor", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
+describe("createLocalTracesProcessor", () => {
   it("reports whether the released session owned any traces", async () => {
     const spool = createLocalTracesProcessor({ appRoot: "/tmp/eve-local-traces-test" });
     spool.onStart(agentSpan("session-one", "a".repeat(32)), undefined);
@@ -61,5 +62,54 @@ describe("createLocalTracesProcessor", () => {
     expect(() => processor.onEnd(agentSpan("session-one", "a".repeat(32)))).not.toThrow();
     await expect(processor.forceFlush()).resolves.toBeUndefined();
     await expect(processor.shutdown()).resolves.toBeUndefined();
+  });
+});
+
+describe("resolveLocalTracesContent", () => {
+  it("retains content by default", () => {
+    expect(resolveLocalTracesContent()).toEqual({
+      recordInputs: true,
+      recordOutputs: true,
+    });
+  });
+
+  it("preserves explicit legacy redaction", () => {
+    expect(resolveLocalTracesContent({ recordInputs: false })).toEqual({
+      recordInputs: false,
+      recordOutputs: true,
+    });
+  });
+
+  it("keeps EVE_TRACES_CONTENT=on compatible with the new default", () => {
+    vi.stubEnv("EVE_TRACES_CONTENT", "on");
+
+    expect(resolveLocalTracesContent()).toEqual({
+      recordInputs: true,
+      recordOutputs: true,
+    });
+  });
+
+  it("maps EVE_TRACES_CONTENT=off to full local redaction", () => {
+    vi.stubEnv("EVE_TRACES_CONTENT", "off");
+
+    expect(resolveLocalTracesContent({ recordInputs: true, recordOutputs: true })).toEqual({
+      recordInputs: false,
+      recordOutputs: false,
+    });
+  });
+});
+
+describe("localTracePolicy", () => {
+  it.each([
+    ["public", true],
+    ["unknown", true],
+    ["private", false],
+  ] as const)("accepts the %s audience: %s", (audience, accepted) => {
+    expect(
+      localTracePolicy({
+        agentName: "weather",
+        audience,
+      }),
+    ).toBe(accepted);
   });
 });

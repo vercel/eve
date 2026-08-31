@@ -4,7 +4,6 @@ import { dirname } from "node:path";
 import type {
   CompiledAgentManifest,
   CompiledChannelDefinition,
-  CompiledChannelEntry,
   CompiledConnectionDefinition,
   CompiledInstructionsDefinition,
   CompiledScheduleDefinition,
@@ -55,12 +54,12 @@ export function buildVercelAgentSummary(input: {
             description: manifest.config.description,
             modelRouting: { kind: "dynamic" },
           },
-    instructions: manifest.instructions ? toInstructionsEntry(manifest.instructions) : null,
+    instructions: manifest.instructions.map(toInstructionsEntry),
     schedules: manifest.schedules.map(toScheduleEntry),
     tools: manifest.tools.map(toToolEntry),
     skills: manifest.skills.map(toSkillEntry),
     connections: manifest.connections.map(toConnectionEntry),
-    channels: manifest.channels.filter(isActiveChannel).map(toChannelEntry),
+    channels: manifest.channelRoutes.effective.map(toChannelEntry),
     sandbox:
       manifest.sandbox === null
         ? null
@@ -107,17 +106,14 @@ export async function emitVercelAgentSummary(input: {
   return input.outputPath;
 }
 
-function isActiveChannel(entry: CompiledChannelEntry): entry is CompiledChannelDefinition {
-  return entry.kind === "channel";
-}
-
 function toInstructionsEntry(
   instructions: CompiledInstructionsDefinition,
 ): VercelEveInstructionsEntry {
   return {
+    content: instructions.content,
     logicalPath: instructions.logicalPath,
+    role: instructions.role,
     sourceKind: instructions.sourceKind,
-    markdown: instructions.markdown,
   };
 }
 

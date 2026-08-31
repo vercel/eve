@@ -28,6 +28,37 @@ describe("Browser Use connection setup", () => {
   });
 });
 
+describe("Agentcard connection setup", () => {
+  it("uses the standard connector name for the native Vercel Connect service", () => {
+    const integration = getIntegration("agentcard")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = setup.variants["mcp:user"];
+
+    expect(quickStart).toContain("Agentcard: the agent's wallet.");
+    expect(quickStart).toContain('auth: connect("agentcard")');
+    expect(quickStart).not.toContain("AGENTCARD_CONNECTOR");
+    expect(setup.configureVariants["mcp:user"]).toContain("vercel connect create agentcard");
+    expect(setup.configureVariants["mcp:user"]).not.toContain("--name");
+  });
+});
+
+describe("Shopify connection setup", () => {
+  it("uses hand-authored sections without generating authentication variants", () => {
+    const integration = getIntegration("shopify")!;
+    const setup = buildConnectionSetup(integration);
+
+    expect(setup.protocols).toEqual(["mcp"]);
+    expect(setup.authModes).toEqual([]);
+    expect(setup.variants).toEqual({});
+    expect(setup.configureVariants).toEqual({});
+    expect(integration.quickStart).toContain("defineMcpClientConnection");
+    expect(integration.quickStart).toContain('process.env.EVE_DEV === "1"');
+    expect(integration.quickStart).not.toContain("process.env.NODE_ENV");
+    expect(integration.configure).toContain("SHOPIFY_STORE_DOMAIN");
+    expect(integration.configure).not.toContain("UCP_AGENT_PROFILE_URL");
+  });
+});
+
 describe("Kernel extension setup", () => {
   it("uses Kernel's eve extension with Vercel Connect", () => {
     const integration = getIntegration("kernel")!;

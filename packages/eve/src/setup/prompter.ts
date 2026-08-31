@@ -14,7 +14,7 @@ import {
   type SetupSpinnerIntent,
 } from "#setup/cli/index.js";
 import { createRailLog, type RailSpinner } from "#setup/cli/index.js";
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import {
   initialQuitGuardState,

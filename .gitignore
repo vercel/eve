@@ -16,6 +16,10 @@ coverage/
 
 # Test artifacts
 .vitest/
+apps/benchmarks/experiments/
+apps/benchmarks/results/
+apps/benchmarks/evals/*/PROMPT.md
+apps/benchmarks/evals/*/package.json
 .extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
@@ -47,6 +51,7 @@ Thumbs.db
 
 # IDE/editor
 .codex/
+.githooks/
 .vscode/
 .idea/
 

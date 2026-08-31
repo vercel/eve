@@ -1,0 +1,345 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ContextContainer, contextStorage } from "#context/container.js";
+import {
+  ChannelInstrumentationKey,
+  OtelTraceEnabledKey,
+  SessionTraceSeedKey,
+} from "#context/keys.js";
+import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  bindInstrumentationRuntime,
+  bindSessionInstrumentation,
+  registerInstrumentationRuntime,
+  type ExecutionInstrumentation,
+  type InstrumentationRuntime,
+  type InstrumentationStepScope,
+} from "#instrumentation/runtime.js";
+import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
+import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+
+const boundSession = {
+  agentName: "test-agent",
+  rootSessionId: "session-1",
+  sessionId: "session-1",
+};
+
+function createRuntime(
+  hooks: InstrumentationHooks,
+  tracePolicy?: TraceCapturePolicy,
+): InstrumentationRuntime {
+  return {
+    forceFlush: async () => undefined,
+    hooks,
+    otelSettings: {
+      recordInputs: true,
+      recordOutputs: true,
+      tracePolicy,
+      traceChannelRequests: false,
+    },
+    runInContext: (_operation, execute) => execute(),
+    shutdown: async () => undefined,
+  };
+}
+
+function createContext(audience: "private" | "public" = "public"): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(ChannelInstrumentationKey, {
+    kind: "channel:test",
+    metadata: { audience },
+  });
+  return ctx;
+}
+
+async function readTelemetry(instrumentation: ExecutionInstrumentation | undefined) {
+  return instrumentation?.prepareExecution().runStep(
+    {
+      environment: "test",
+      eveVersion: "0.0.0",
+      hasInput: false,
+      session: { sessionId: "session-1" },
+    },
+    async (scope) => scope.telemetry(),
+  );
+}
+
+beforeEach(() => {
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+});
+
+describe("bindInstrumentationRuntime", () => {
+  it("returns no worker controls when no runtime is loaded", () => {
+    expect(
+      bindInstrumentationRuntime(undefined, new ContextContainer(), boundSession),
+    ).toBeUndefined();
+  });
+
+  it("reads the channel audience when the step runs", async () => {
+    const ctx = createContext("public");
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }),
+      ctx,
+      boundSession,
+    );
+
+    ctx.set(ChannelInstrumentationKey, {
+      kind: "channel:test",
+      metadata: { audience: "private" },
+    });
+
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: false,
+      recordOutputs: false,
+    });
+  });
+
+  it("binds provider hooks to the step-entry agent and channel", async () => {
+    const boundHooks: InstrumentationHooks = { capturesContent: false, publish: vi.fn() };
+    const forTrace = vi.fn(() => boundHooks);
+    const ctx = createContext("private");
+    ctx.set(ChannelInstrumentationKey, {
+      channelType: "slack",
+      kind: "channel:test",
+      metadata: { audience: "private" },
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: false, forTrace, publish: vi.fn() }),
+      ctx,
+      { ...boundSession, agentName: "Weather Display Name" },
+    );
+
+    await readTelemetry(instrumentation);
+
+    expect(forTrace).toHaveBeenCalledExactlyOnceWith({
+      agentName: "Weather Display Name",
+      audience: "private",
+      channelType: "slack",
+    });
+  });
+
+  it("keeps the step-entry audience for the rest of the step", async () => {
+    const ctx = createContext("private");
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }),
+      ctx,
+      boundSession,
+    );
+
+    const telemetry = await instrumentation?.prepareExecution().runStep(
+      {
+        environment: "test",
+        eveVersion: "0.0.0",
+        hasInput: false,
+        session: { sessionId: "session-1" },
+      },
+      async (scope) => {
+        ctx.set(ChannelInstrumentationKey, {
+          kind: "channel:test",
+          metadata: { audience: "public" },
+        });
+        expect(
+          scope.prepareAttempt({
+            attemptIndex: 0,
+            stepIndex: 0,
+            turnId: "turn-1",
+          })?.scope.channelAudience,
+        ).toBe("private");
+        return scope.telemetry();
+      },
+    );
+
+    expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
+  });
+
+  it("isolates concurrent step decisions and audiences", async () => {
+    const ctx = createContext("private");
+    const runtime = createRuntime({ capturesContent: true, publish: vi.fn() });
+    runtime.stepStartedRuntimeContextResolver = (event) => ({
+      runtimeContext: { messageCount: event.modelInput.messages.length },
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      runtime,
+      ctx,
+      boundSession,
+    )?.prepareExecution();
+    let releaseFirst!: () => void;
+    const waitForSecond = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const stepInput = {
+      environment: "test",
+      eveVersion: "0.0.0",
+      hasInput: false,
+      session: { sessionId: "session-1" },
+    };
+    const readScopedState = (scope: InstrumentationStepScope<{ sessionId: string }>) => ({
+      messageCount: scope.resolveRuntimeContext({
+        eveVersion: "0.0.0",
+        emissionState: { sessionStarted: true, sequence: 0, stepIndex: 0, turnId: "turn-1" },
+        environment: "test",
+        modelInput: { instructions: undefined, messages: [{ content: "secret", role: "user" }] },
+        session: { sessionId: "session-1" } as never,
+      })?.["messageCount"],
+      telemetry: scope.telemetry(),
+    });
+
+    const first = instrumentation?.runStep(stepInput, async (scope) => {
+      await waitForSecond;
+      return readScopedState(scope);
+    });
+    ctx.set(ChannelInstrumentationKey, {
+      kind: "channel:test",
+      metadata: { audience: "public" },
+    });
+    const second = instrumentation?.runStep(stepInput, async (scope) => readScopedState(scope));
+    releaseFirst();
+
+    await expect(first).resolves.toMatchObject({
+      messageCount: 0,
+      telemetry: { recordInputs: false, recordOutputs: false },
+    });
+    await expect(second).resolves.toMatchObject({
+      messageCount: 1,
+      telemetry: { recordInputs: true, recordOutputs: true },
+    });
+  });
+
+  it("uses the directional decision from the existing trace seed", async () => {
+    const ctx = createContext();
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }),
+      ctx,
+      boundSession,
+    );
+
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: true,
+      recordOutputs: false,
+    });
+  });
+
+  it("applies the live audience ceiling to a seeded decision", async () => {
+    const ctx = createContext("private");
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }),
+      ctx,
+      boundSession,
+    );
+
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: false,
+      recordOutputs: false,
+    });
+  });
+
+  it("derives a legacy seed decision from trace flags", async () => {
+    const policy = vi.fn(() => true);
+    const ctx = createContext();
+    ctx.set(SessionTraceSeedKey, {
+      spanId: "1".repeat(16),
+      traceFlags: 0,
+      traceId: "2".repeat(32),
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }, policy),
+      ctx,
+      boundSession,
+    );
+
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: false,
+      recordOutputs: false,
+    });
+    expect(policy).not.toHaveBeenCalled();
+  });
+});
+
+describe("bindSessionInstrumentation", () => {
+  it("uses a persisted decision without migrating the durable context", async () => {
+    const policy = vi.fn(() => true);
+    registerInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }, policy),
+    );
+    const ctx = createContext();
+    contextStorage.run(ctx, () => {
+      new ContextAgentTraceStateStore().setSession("session-1", {
+        context: { spanId: "1".repeat(16), traceFlags: 1, traceId: "2".repeat(32) },
+        decision: { action: "record", recordInputs: false, recordOutputs: true },
+        rootSessionId: "session-1",
+      });
+    });
+
+    const instrumentation = bindSessionInstrumentation({
+      agentName: "test-agent",
+      ctx,
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+    });
+
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: false,
+      recordOutputs: true,
+    });
+    expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
+    expect(policy).not.toHaveBeenCalled();
+  });
+
+  it("reevaluates policy for seedless steps", async () => {
+    const policy = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    registerInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }, policy),
+    );
+    const ctx = createContext();
+    const instrumentation = bindSessionInstrumentation({
+      agentName: "test-agent",
+      ctx,
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+    });
+
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: false,
+      recordOutputs: false,
+    });
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: true,
+      recordOutputs: true,
+    });
+    expect(policy).toHaveBeenCalledTimes(2);
+    expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
+  });
+
+  it("does not treat the legacy OTel marker as an admission decision", async () => {
+    const policy = vi.fn(() => true);
+    registerInstrumentationRuntime(
+      createRuntime({ capturesContent: true, publish: vi.fn() }, policy),
+    );
+    const ctx = createContext();
+    ctx.set(OtelTraceEnabledKey, false);
+    const instrumentation = bindSessionInstrumentation({
+      agentName: "test-agent",
+      ctx,
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+    });
+
+    expect(await readTelemetry(instrumentation)).toMatchObject({
+      recordInputs: true,
+      recordOutputs: true,
+    });
+    expect(policy).toHaveBeenCalledOnce();
+    expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
+  });
+});

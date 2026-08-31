@@ -68,6 +68,8 @@ export type AgentStartTarget =
       readonly url: string;
       /** Callback base URL stub captured at dispatch; never model-visible. */
       readonly callbackBaseUrl: string;
+      /** Auth/header resolver selected when this child was created; `{}` means none. */
+      readonly credentialResolver?: { readonly resolverId?: string };
     };
 
 /** Confirmed delivery coordinates of a started child. */
@@ -87,12 +89,14 @@ export type AgentAddress =
       readonly sessionId: string;
       readonly url: string;
       readonly callbackBaseUrl: string;
+      /** Auth/header resolver selected when this child was created; `{}` means none. */
+      readonly credentialResolver?: { readonly resolverId?: string };
     };
 
 /**
  * Durable ownership record for one delegated child.
  *
- * The store owns the full nonterminal lifecycle:
+ * Outside tasks mode, the store owns the full nonterminal lifecycle:
  *
  * - `starting` — the parent committed intent to start; the child may or
  *   may not exist yet.
@@ -100,7 +104,9 @@ export type AgentAddress =
  * - `parked` — the child is idle and resumable; only this phase is
  *   model-visible.
  *
- * A terminal child has no handle: settlement deletes it.
+ * A terminal child has no legacy handle: settlement deletes it. Tasks mode
+ * instead keeps an `addressed` record whose availability is derived from the
+ * tasks bound to its persistent child session.
  */
 export type AgentHandle =
   | {
@@ -120,6 +126,12 @@ export type AgentHandle =
       readonly identity: AgentIdentity;
       readonly address: AgentAddress;
       readonly lastStatus: string;
+    }
+  | {
+      /** Persistent task-mode identity and routing, with no execution claim. */
+      readonly phase: "addressed";
+      readonly identity: AgentIdentity;
+      readonly address: AgentAddress;
     };
 
 /** Lifecycle phase of a delegated agent handle. */
@@ -158,6 +170,7 @@ const startTargetSchema: z.ZodType<AgentStartTarget> = z.discriminatedUnion("kin
   z.strictObject({ continuationToken: nonEmptyString, kind: z.literal("agent/self") }),
   z.strictObject({
     callbackBaseUrl: z.url(),
+    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     url: z.url(),
   }),
@@ -176,6 +189,7 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     callbackBaseUrl: z.url(),
+    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
     url: z.url(),
@@ -200,6 +214,11 @@ const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("phase", 
     identity: identitySchema,
     lastStatus: z.string().max(MAX_STATUS_LENGTH),
     phase: z.literal("parked"),
+  }),
+  z.strictObject({
+    address: addressSchema,
+    identity: identitySchema,
+    phase: z.literal("addressed"),
   }),
 ]);
 

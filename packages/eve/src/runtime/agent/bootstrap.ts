@@ -1,4 +1,6 @@
-import { AGENT_TOOL_NAME, isImplicitAgentToolAvailable } from "#runtime/framework-tools/agent.js";
+import type { ModelMessage } from "ai";
+
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
@@ -34,6 +36,7 @@ interface RuntimeTurnAgentBase {
   readonly availableSkills?: readonly AvailableSkillDescription[];
   readonly id: string;
   readonly instructions: readonly string[];
+  readonly initialMessages?: readonly ModelMessage[];
   /**
    * Optional model used only for compaction summaries.
    *
@@ -91,28 +94,27 @@ export function createResolvedRuntimeTurnAgent(input: {
   const subagentDeclaredTool = input.tools.some(
     (tool) => tool.kind === "subagent" || tool.kind === "remote",
   );
-  // The framework `agent` tool is injected after graph resolution, so
-  // declared tools alone under-count. isImplicitAgentToolAvailable is the
-  // same predicate node-step uses for the injection itself — including the
-  // authored-tool shadowing leg, so instructions never advertise a tool an
-  // authored "agent" tool has replaced.
-  const subagentImplicitRootTool = isImplicitAgentToolAvailable({
-    disabledFrameworkTools: agent.disabledFrameworkTools,
-    hasAuthoredAgentTool: input.tools.some((tool) => tool.name === AGENT_TOOL_NAME),
-    nodeId: input.nodeId,
-  });
+  const subagentFrameworkRootTool = input.tools.some(
+    (tool) =>
+      tool.kind === "authored-tool" &&
+      tool.owner.kind === "framework" &&
+      tool.name === AGENT_TOOL_NAME,
+  );
   const base: RuntimeTurnAgentBase = {
     availableSkills: agent.skills.map((skill) => ({
       description: skill.description,
       name: skill.name,
     })),
     id,
+    initialMessages: agent.instructions
+      .filter((entry) => entry.role === "user" && entry.content.trim().length > 0)
+      .map((entry) => ({ content: entry.content.trim(), role: "user" as const })),
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,
-      persistentSubagentSessions: config?.experimental?.subagentPersistentSessions === true,
-      subagentsAvailable: subagentDeclaredTool || subagentImplicitRootTool,
-      toolsAvailable: input.tools.length > 0 || subagentImplicitRootTool,
+      subagentsAvailable: subagentDeclaredTool || subagentFrameworkRootTool,
+      tasksEnabled: config?.experimental?.tasks === true,
+      toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),
     compactionModel: config?.compaction?.model,

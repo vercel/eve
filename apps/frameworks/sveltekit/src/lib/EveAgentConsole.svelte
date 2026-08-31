@@ -11,7 +11,11 @@
   type EveFilePart = Extract<EveMessagePart, { type: "file" }>;
 
   let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isResuming = $derived(agent.status === "resuming");
+  let isInputDisabled = $derived(isBusy || isResuming);
   let isEmpty = $derived(agent.data.messages.length === 0);
+  let cancellationError = $state<string>();
+  let errorMessage = $derived(cancellationError ?? agent.error?.message);
 
   let messagesEl = $state<HTMLDivElement>();
   let isNearBottom = $state(true);
@@ -43,9 +47,20 @@
 
   function submitMessage() {
     const text = messageText.trim();
-    if (!text || isBusy) return;
+    if (!text || isInputDisabled) return;
+    cancellationError = undefined;
     messageText = "";
     void agent.send(text);
+  }
+
+  async function requestCancellation() {
+    cancellationError = undefined;
+    try {
+      await agent.cancel();
+    } catch (cause) {
+      cancellationError =
+        cause instanceof Error ? cause.message : "The cancellation request failed.";
+    }
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -62,6 +77,7 @@
       readonly text?: string;
     }[],
   ) {
+    cancellationError = undefined;
     void agent.respond(responses);
   }
 
@@ -103,14 +119,14 @@
   </header>
 
   <section class="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col px-4 sm:px-6">
-    {#if agent.error}
+    {#if errorMessage}
       <div
         class="mt-4 flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm"
       >
         <div>
           <p class="font-medium">Request failed</p>
           <p class="mt-0.5 text-muted-foreground">
-            {agent.error.message}
+            {errorMessage}
           </p>
         </div>
       </div>
@@ -221,7 +237,7 @@
                   {:else if part.type === "dynamic-tool"}
                     <ToolBlock
                       {part}
-                      canRespond={!isBusy}
+                      canRespond={!isInputDisabled}
                       onInputResponses={handleInputResponses}
                     />
                   {/if}
@@ -243,7 +259,7 @@
       >
         <textarea
           bind:value={messageText}
-          disabled={isBusy}
+          disabled={isInputDisabled}
           placeholder="Send a message..."
           rows="1"
           class="min-h-20 flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
@@ -254,7 +270,7 @@
             type="button"
             aria-label="Stop response"
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
-            onclick={() => agent.stop()}
+            onclick={requestCancellation}
           >
             <svg class="size-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -264,7 +280,7 @@
           <button
             type="submit"
             aria-label="Send message"
-            disabled={!messageText.trim()}
+            disabled={isInputDisabled || !messageText.trim()}
             class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
           >
             <svg

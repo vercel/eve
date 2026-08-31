@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
 import { buildSubagentRunInput } from "#execution/subagent-tool.js";
 
 type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
@@ -37,6 +37,14 @@ function buildRuntimeSubagentRunInput(
   input: Omit<BuildSubagentRunInput, "source">,
 ): ReturnType<typeof buildSubagentRunInput> {
   return buildSubagentRunInput({ ...input, source: { type: "runtime" } });
+}
+
+function makeInheritingGraph(nodeId: string) {
+  return {
+    nodesByNodeId: new Map([
+      [nodeId, { sandboxRegistry: { sandbox: { definition: { inheritsParent: true } } } }],
+    ]),
+  };
 }
 
 describe("buildSubagentRunInput", () => {
@@ -89,7 +97,7 @@ describe("buildSubagentRunInput", () => {
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
-    expect(runInput.mode).toBe("task");
+    expect(runInput.mode).toBe("conversation");
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {
@@ -207,6 +215,37 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
+    expect(runInput.mode).toBe("conversation");
+  });
+
+  it("uses a declared local outputSchema on the persistent child's first turn", () => {
+    const schema = { properties: { result: { type: "string" } }, type: "object" };
+    const { runInput } = buildSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: { description: "Research the request.", outputSchema: schema, type: "local" },
+    });
+
+    expect(runInput.input.outputSchema).toEqual(schema);
+    expect(runInput.mode).toBe("conversation");
+  });
+
+  it("lets a per-call outputSchema override the local child's declared schema", () => {
+    const declared = { properties: { declared: { type: "string" } }, type: "object" };
+    const requested = { properties: { requested: { type: "number" } }, type: "object" };
+    const { runInput } = buildSubagentRunInput({
+      action: { ...makeAction(), input: { message: "do something", outputSchema: requested } },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: { description: "Research the request.", outputSchema: declared, type: "local" },
+    });
+
+    expect(runInput.input.outputSchema).toEqual(requested);
   });
 
   it("hands the parent's trace window down to the child, and omits it when absent", () => {
@@ -249,7 +288,7 @@ describe("buildSubagentRunInput", () => {
         'You are the subagent "linear".',
         "Description: Local delegate subagent description.",
         "",
-        "The caller delegated the following task to you. Complete it and return the final result directly.",
+        "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
         "",
         "Caller message:",
         "Make an issue titled 'Resolve flaky test'.",
@@ -278,13 +317,28 @@ describe("buildSubagentRunInput", () => {
       [
         `You are the subagent "${action.subagentName}".`,
         "",
-        "The caller delegated the following task to you. Complete it and return the final result directly.",
+        "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
         "",
         "Caller message:",
         "Make an issue titled 'Resolve flaky test'.",
       ].join("\n"),
     );
     expect(runInput.input.message).not.toContain(action.description);
+  });
+
+  it("uses the root agent's declared outputSchema for a fresh built-in copy", () => {
+    const schema = { properties: { result: { type: "string" } }, type: "object" };
+    const { runInput } = buildSubagentRunInput({
+      action: { ...makeAction(), name: "agent", nodeId: "root", subagentName: "agent" },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      source: { outputSchema: schema, type: "runtime" },
+    });
+
+    expect(runInput.input.outputSchema).toEqual(schema);
+    expect(runInput.mode).toBe("conversation");
   });
 
   it("leaves outputSchema undefined when not provided", () => {
@@ -336,18 +390,51 @@ describe("buildSubagentRunInput", () => {
     });
   });
 
-  it("does not include sandbox sharing fields for normal subagents", () => {
+  it("carries parent sandbox state for declared subagents that opt into sharing", () => {
     const sandboxState = { initialized: true, session: null };
     const session = { ...makeSession(), sandboxState };
     const { runInput } = buildRuntimeSubagentRunInput({
       action: makeAction(),
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
+      graph: makeInheritingGraph(makeAction().nodeId),
       initiatorAuth: null,
       session,
     });
 
+    expect(runInput.adapter.state).toMatchObject({
+      parentSandboxState: sandboxState,
+      sandboxSessionId: "parent-session",
+    });
+  });
+
+  it("preserves the root sandbox identity through nested inheritance", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      graph: makeInheritingGraph(makeAction().nodeId),
+      initiatorAuth: null,
+      sandboxSessionId: "root-sandbox-session",
+      session: { ...makeSession(), sessionId: "intermediate-child-session" },
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      sandboxSessionId: "root-sandbox-session",
+    });
+  });
+
+  it("carries the parent session id before the inherited sandbox has been opened", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      graph: makeInheritingGraph(makeAction().nodeId),
+      initiatorAuth: null,
+      session: makeSession(),
+    });
+
+    expect(runInput.adapter.state).toMatchObject({ sandboxSessionId: "parent-session" });
     expect(runInput.adapter.state).not.toHaveProperty("parentSandboxState");
-    expect(runInput.adapter.state).not.toHaveProperty("sandboxSessionId");
   });
 });

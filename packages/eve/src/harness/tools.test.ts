@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey, type Session } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
-import { always, never, once } from "#public/tools/approval/approval-helpers.js";
+import { always, never, once } from "#tools/approval/policies.js";
 
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
 import {
@@ -13,16 +13,16 @@ import {
   WEB_SEARCH_GOOGLE_OUTPUT_SCHEMA,
   WEB_SEARCH_OPENAI_OUTPUT_SCHEMA,
   WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA,
-} from "#runtime/framework-tools/web-search.js";
+} from "#harness/provider-tool-schemas.js";
 import type { JsonObject } from "#shared/json.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { buildToolApproval, buildToolSet, buildToolSetWithProviderTools } from "#harness/tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import type { ApprovalContext } from "#public/definitions/approval.js";
-import type { ToolContext } from "#public/definitions/tool.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ApprovalContext } from "#approval/definition.js";
+import type { ToolContext } from "#tools/definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 
 function getJsonSchema(tool: unknown): unknown {
   return (tool as { inputSchema: { jsonSchema: unknown } }).inputSchema.jsonSchema;

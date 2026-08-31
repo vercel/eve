@@ -10,9 +10,9 @@ import {
   compactClientSession,
   resetClientSession,
 } from "#client/session-controls.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
 import { createClientUrl } from "#client/url.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type {
   CancelSessionResult,
   ClearResult,
@@ -170,6 +170,7 @@ export class ClientSession {
   ): MessageResponse<TOutput> {
     response.body?.cancel().catch(() => {});
     return new MessageResponse<TOutput>({
+      cancelTurn: async (turnId) => await this.cancel({ turnId }),
       createStream: () => this.#createEventStream(initialStreamIndex, input),
       sessionId: this.#state.sessionId,
     });
@@ -180,16 +181,28 @@ export class ClientSession {
     input: SendTurnPayload,
   ): AsyncGenerator<MessageStreamEvent> {
     let eventCount = 0;
+    const pendingAuthorizations = new Set<string>();
     try {
       for await (const event of this.#readStream({
         headers: input.headers,
+        keepAlive: shouldKeepActiveTurnAlive(input.streamReconnectPolicy),
         signal: input.signal,
         startIndex: initialStreamIndex,
         streamReconnectPolicy: input.streamReconnectPolicy,
       })) {
         eventCount += 1;
+        if (event.type === "authorization.required" && event.data.webhookUrl !== undefined) {
+          pendingAuthorizations.add(event.data.name);
+        } else if (event.type === "authorization.completed") {
+          pendingAuthorizations.delete(event.data.name);
+        }
         yield event;
-        if (isCurrentTurnBoundaryEvent(event)) break;
+        if (
+          isCurrentTurnBoundaryEvent(event) &&
+          (event.type !== "session.waiting" || pendingAuthorizations.size === 0)
+        ) {
+          break;
+        }
       }
     } finally {
       this.#state = {
@@ -225,6 +238,7 @@ export class ClientSession {
   #readStream(input: {
     readonly follow?: boolean;
     readonly headers?: Readonly<Record<string, string>>;
+    readonly keepAlive?: boolean;
     readonly signal?: AbortSignal;
     readonly startIndex: number;
     readonly streamReconnectPolicy?: StreamOptions["streamReconnectPolicy"];
@@ -232,6 +246,7 @@ export class ClientSession {
     return followStreamIterable({
       follow: input.follow,
       host: this.#context.host,
+      keepAlive: input.keepAlive,
       resolveHeaders: () => this.#context.resolveHeaders(input.headers),
       redirect: this.#context.redirect,
       sessionId: this.#state.sessionId,
@@ -240,6 +255,14 @@ export class ClientSession {
       streamReconnectPolicy: input.streamReconnectPolicy,
     });
   }
+}
+
+function shouldKeepActiveTurnAlive(policy: StreamOptions["streamReconnectPolicy"]): boolean {
+  if (policy && "reconnect" in policy) {
+    return false;
+  }
+
+  return policy?.streamIdleReconnectPolicy?.maxAttempts === undefined;
 }
 
 async function postTurn(

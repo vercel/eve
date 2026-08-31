@@ -33,8 +33,9 @@ before pushing.
 
 PR descriptions are reviewer-oriented explanations of the problem, solution,
 meaningful behavior changes, and validation—not file lists or commit logs. Keep
-them proportional to the change, link the prior issue, call out important scope
-boundaries or preserved behavior, and report only checks actually run. Use the
+them proportional to the change, link a prior issue or discussion when one
+exists, call out important scope boundaries or preserved behavior, and report
+only checks actually run. Never create an issue solely to accompany a PR. Use the
 [`gh-pr-description`](./.agents/skills/gh-pr-description/SKILL.md) skill when
 drafting or updating one.
 
@@ -67,6 +68,31 @@ narrowest relevant test when a change needs behavioral validation. Copy edits,
 typo fixes, small code reorganizations, and similar non-behavioral changes can
 proceed without local integration or scenario runs. CI is always the official
 line of defense, and every required check must pass before merge.
+
+## Agent-ready product principles
+
+1. **Docs is priority #1.** Agents read your docs before they ever touch your
+   product. If the docs are incomplete or ambiguous, the agent is lost before it
+   starts.
+
+2. **Authentication is the biggest friction point.** Auth is where agent runs
+   stall most often: hidden prerequisites, unset keys, and OAuth flows that
+   quietly assume a human is at the keyboard.
+
+3. **Error messages make or break recovery.** A vague or misleading error sends
+   an agent spiraling; a precise, actionable one lets it self-correct. Your errors
+   are documentation.
+
+4. **CLIs often assume a human is present.** Interactive prompts, TTY checks, and
+   "press y to continue" break agents that have no way to answer back.
+
+5. **Discoverability determines whether agents find you at all.** `llms.txt`,
+   typed SDKs, MCP servers, machine-readable specs. If an agent can't discover
+   your surface, it reaches for a competitor it already knows.
+
+6. **Better for agents, better for humans.** Almost everything that makes a tool
+   agent-ready, from clear docs to precise errors to sane defaults, makes it
+   better for human developers too.
 
 ## Coding principles
 
@@ -192,6 +218,10 @@ live under `packages/eve/test/tui-client` and run with `pnpm test:tui`. See
 - When moving a published route, update authored links to the new URL and add a
   permanent redirect from every old HTML and supported Markdown URL.
 - Sidebar order lives in `docs/meta.json`.
+- Use Title Case for page `title` frontmatter and `meta.json` section titles
+  (Fumadocs renders `title` as both the sidebar entry and the `<h1>`), and
+  sentence case for in-page headings — capitalize only the first word plus
+  proper nouns and acronyms, e.g. `Next.js`, `CLI`, `agent.ts`.
 - Keep markdown framework-agnostic — no MDX-only constructs unless the page is
   `.mdx`.
 
@@ -205,3 +235,28 @@ changed and what they'll see differently, in 1–2 sentences.
 
 Docs-only, internal-tooling, and fixture changes do not need a changeset. When
 in doubt, add one.
+
+## Security
+
+Baseline invariants for authorization, injection, disclosure, and untrusted
+input. Use established patterns in the codebase when existing (libraries, etc.)
+instead of reinventing the wheel.
+
+- **Authorize every access on the server, keyed to the resource.** Check the
+  caller's session against the specific resource id from the request — never
+  trust a client-supplied id, role, or `isAdmin` flag (IDOR / privilege
+  escalation).
+- **Never render untrusted input as HTML.** Use framework escaping (JSX text) or
+  an explicit sanitizer — no `dangerouslySetInnerHTML`, `innerHTML`, or HTML
+  built from template literals on user or third-party data (XSS).
+- **Errors and logs must not leak internals.** Client-facing errors stay
+  generic; stack traces, SQL, internal hostnames, tokens, and other users' data
+  go to server logs only — and logs never persist secrets, credentials, or PII
+  in cleartext.
+- **Bound work derived from untrusted input.** Request-driven loops, pagination,
+  recursion, and body/file reads need explicit caps (page size, timeout, max
+  depth, max bytes) so one caller can't force unbounded work.
+- **Validate outbound destinations before fetching.** Server-side fetches,
+  webhooks, and imports whose URL or host comes from user input must block
+  access to internal resources (SSRF). Use established patterns / libraries from
+  the project already.

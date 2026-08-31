@@ -176,6 +176,7 @@ function buildSkillSource(input: {
     logicalPath: `skills/${input.name}/SKILL.md`,
     markdown: input.markdown,
     name: input.name,
+    owner: { kind: "application" },
     sourceId: `skills/${input.name}/SKILL.md`,
     sourceKind: "skill-package",
     skillId: input.name,

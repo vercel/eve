@@ -6,9 +6,11 @@ import {
   collectOtelPipeline,
   isOtelDeclaration,
   isOtelIntegration,
+  managedOtelIntegration,
   otel,
   otelIntegration,
 } from "#tracing/otel-declaration.js";
+import { composeSpanExportPolicies, redactSpanInputs } from "#tracing/span-export-policy.js";
 
 /** Collection only ever moves processors, so a fresh no-op is identity enough. */
 function processor(): SpanProcessor {
@@ -29,6 +31,14 @@ function exporter(): SpanExporter {
   };
 }
 
+function testSpan(attributes: Record<string, unknown>): never {
+  return {
+    attributes,
+    name: "agent.step",
+    spanContext: () => ({ spanId: "span", traceId: "trace" }),
+  } as never;
+}
+
 describe("otel", () => {
   it("declares settings without registering anything", () => {
     const declaration = otel({ sampler: "always_on" });
@@ -40,7 +50,9 @@ describe("otel", () => {
 describe("otelIntegration", () => {
   it("passes declared processors through untouched", () => {
     const first = processor();
-    const integration = otelIntegration({ spanProcessors: [first] });
+    const integration = otelIntegration({
+      spanProcessors: [first],
+    });
 
     expect(isOtelIntegration(integration)).toBe(true);
     expect(integration.spanProcessors).toStrictEqual([first]);
@@ -57,35 +69,94 @@ describe("otelIntegration", () => {
     expect(integration.spanProcessors[0]).toBe(first);
   });
 
-  it("records everything unless told otherwise", () => {
-    expect(otelIntegration().content).toStrictEqual({ recordInputs: true, recordOutputs: true });
-  });
-
-  // An author's own processor is part of this destination, and the point of
-  // declining is that nothing under it sees what was said.
-  it("puts a declined policy in front of every processor, an author's included", () => {
+  it("maps deprecated capture switches to destination redaction", () => {
     const first = processor();
-    const integration = otelIntegration({ recordOutputs: false, spanProcessors: [first] });
+    const integration = otelIntegration({ recordInputs: false, spanProcessors: [first] });
 
-    expect(integration.content).toStrictEqual({ recordInputs: true, recordOutputs: false });
+    expect(integration.content).toEqual({ recordInputs: false, recordOutputs: true });
     expect(integration.spanProcessors[0]).not.toBe(first);
   });
 });
 
 describe("agentRunsIntegration", () => {
-  it("uses Vercel's automatic processor by default", () => {
+  it("declares the Agent Runs runtime processor", () => {
     const integration = agentRunsIntegration();
 
-    expect(integration.content).toStrictEqual({ recordInputs: true, recordOutputs: true });
-    expect(integration.spanProcessors).toStrictEqual(["auto"]);
-  });
-
-  it("wraps the request-context transport when its content policy is narrowed", () => {
-    const integration = agentRunsIntegration({ recordInputs: false });
-
-    expect(integration.content).toStrictEqual({ recordInputs: false, recordOutputs: true });
     expect(integration.spanProcessors).toHaveLength(1);
     expect(integration.spanProcessors[0]).not.toBe("auto");
+  });
+});
+
+describe("managed export policy", () => {
+  it("does not redact content unless the export pipeline requests it", () => {
+    let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
+    const integration = managedOtelIntegration({
+      exportPolicy: {
+        span: ({ attributes }) => {
+          visibleAttributes = attributes;
+          return true;
+        },
+      },
+      spanProcessors: [processor()],
+    });
+
+    const spanProcessor = integration.spanProcessors[0];
+    if (spanProcessor === undefined || spanProcessor === "auto") throw new Error("Expected policy");
+    spanProcessor.onEnd(
+      testSpan({
+        "agent.channel.audience": "private",
+        "ai.prompt.messages": "private input",
+      }),
+    );
+
+    expect(visibleAttributes).toHaveProperty("ai.prompt.messages", "private input");
+  });
+
+  it("runs composed export policies in declaration order", () => {
+    let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
+    const integration = managedOtelIntegration({
+      exportPolicy: composeSpanExportPolicies(
+        redactSpanInputs(({ audience }) => audience !== "public"),
+        {
+          span: ({ attributes }) => {
+            visibleAttributes = attributes;
+            return true;
+          },
+        },
+      ),
+      spanProcessors: [processor()],
+    });
+
+    const spanProcessor = integration.spanProcessors[0];
+    if (spanProcessor === undefined || spanProcessor === "auto") throw new Error("Expected policy");
+    spanProcessor.onEnd(
+      testSpan({
+        "agent.channel.audience": "private",
+        "ai.prompt.messages": "private input",
+      }),
+    );
+
+    expect(visibleAttributes).toEqual({ "agent.channel.audience": "private" });
+  });
+
+  it("applies deprecated content switches before the configured export policy", () => {
+    let visibleAttributes: Readonly<Record<string, unknown>> | undefined;
+    const integration = managedOtelIntegration({
+      exportPolicy: {
+        span: ({ attributes }) => {
+          visibleAttributes = attributes;
+          return true;
+        },
+      },
+      recordInputs: false,
+      spanProcessors: [processor()],
+    });
+
+    const spanProcessor = integration.spanProcessors[0];
+    if (spanProcessor === undefined || spanProcessor === "auto") throw new Error("Expected policy");
+    spanProcessor.onEnd(testSpan({ "ai.prompt.messages": "private input" }));
+
+    expect(visibleAttributes).toEqual({});
   });
 });
 
@@ -98,7 +169,9 @@ describe("collectOtelPipeline", () => {
   it("concatenates destinations in declaration order", () => {
     const [first, second, third] = [processor(), processor(), processor()];
     const collected = collectOtelPipeline([
-      otelIntegration({ spanProcessors: [first, second] }),
+      otelIntegration({
+        spanProcessors: [first, second],
+      }),
       otelIntegration({ spanProcessors: [third] }),
       otel(),
     ]);
@@ -137,32 +210,17 @@ describe("collectOtelPipeline", () => {
     });
     expect(collected.settings).toStrictEqual({
       functionId: "weather",
-      // Nothing declared a destination, so nothing asked for content.
+      // Nothing declared a destination, so nothing consumes content.
       recordInputs: false,
       recordOutputs: false,
       traceChannelRequests: true,
     });
   });
 
-  // Content governs what is written onto the span, which is upstream of every
-  // destination — so one that wants it is enough, and the ones that declined
-  // drop it on their own way out.
-  it("takes content capture as the union across destinations", () => {
-    const collected = collectOtelPipeline([
-      otelIntegration({ recordInputs: false, recordOutputs: false }),
-      otelIntegration({ recordInputs: false, recordOutputs: true }),
-    ]);
+  it("captures complete spans whenever a destination is declared", () => {
+    const collected = collectOtelPipeline([otelIntegration()]);
 
-    expect(collected.settings).toMatchObject({ recordInputs: false, recordOutputs: true });
-  });
-
-  it("writes nothing when every destination declined", () => {
-    const collected = collectOtelPipeline([
-      otelIntegration({ recordInputs: false, recordOutputs: false }),
-      otelIntegration({ recordInputs: false, recordOutputs: false }),
-    ]);
-
-    expect(collected.settings).toMatchObject({ recordInputs: false, recordOutputs: false });
+    expect(collected.settings).toMatchObject({ recordInputs: true, recordOutputs: true });
   });
 
   // A process has one tracer provider, so letting the first declaration win
@@ -171,5 +229,18 @@ describe("collectOtelPipeline", () => {
     expect(() =>
       collectOtelPipeline([otel({ sampler: "always_on" }), otel({ sampler: "always_off" })]),
     ).toThrow(/declares `otel\(\)` more than once/u);
+  });
+
+  it("passes declared instrumentations onto the pipeline", () => {
+    const instrumentation = { name: "test-instrumentation" };
+    const collected = collectOtelPipeline([otel({ instrumentations: [instrumentation] })]);
+
+    expect(collected.pipeline.instrumentations).toStrictEqual([instrumentation]);
+  });
+
+  it("defaults to undefined instrumentations when none are declared", () => {
+    const collected = collectOtelPipeline([otel()]);
+
+    expect(collected.pipeline.instrumentations).toBeUndefined();
   });
 });

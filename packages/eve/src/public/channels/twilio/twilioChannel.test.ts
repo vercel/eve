@@ -179,6 +179,14 @@ describe("twilioChannel() inbound text pipeline", () => {
     }
   });
 
+  it("classifies phone conversations as direct", () => {
+    const adapter = getAdapter(twilioChannel({ allowFrom: "*" }));
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({
+      audience: "private",
+    });
+  });
+
   it("mounts message, voice, and transcription routes below the base route", () => {
     const channel = twilioChannel({ allowFrom: "*", route: "/twilio" });
     expect(channel.routes.map((route) => ({ method: route.method, path: route.path }))).toEqual([
@@ -260,7 +268,10 @@ describe("twilioChannel() inbound text pipeline", () => {
   });
 
   it("passes inbound media metadata from Twilio message webhooks", async () => {
-    const onText = vi.fn((_ctx: TwilioContext, _message: TwilioTextMessage) => ({ auth: null }));
+    const onText = vi.fn((_ctx: TwilioContext, _message: TwilioTextMessage) => ({
+      auth: null,
+      title: "Twilio text run",
+    }));
     const channel = twilioChannel({ allowFrom: "*", onText });
     const params = new URLSearchParams({
       Body: "see attached",
@@ -271,7 +282,7 @@ describe("twilioChannel() inbound text pipeline", () => {
       To: "+15557654321",
     });
 
-    await firePost(channel, "/eve/v1/twilio/messages", params);
+    const { send } = await firePost(channel, "/eve/v1/twilio/messages", params);
 
     expect(onText).toHaveBeenCalledTimes(1);
     expect(onText.mock.calls[0]![1]).toMatchObject({
@@ -283,6 +294,7 @@ describe("twilioChannel() inbound text pipeline", () => {
         },
       ],
     });
+    expect(send.mock.calls[0]![1]).toMatchObject({ title: "Twilio text run" });
   });
 
   it("drops inbound text when the sender is not in allowFrom", async () => {
@@ -509,7 +521,10 @@ describe("twilioChannel() voice pipeline", () => {
   });
 
   it("dispatches a Gather SpeechResult as voice transcription", async () => {
-    const channel = twilioChannel({ allowFrom: "*" });
+    const channel = twilioChannel({
+      allowFrom: "*",
+      onVoiceTranscription: () => ({ auth: null, title: "Twilio voice run" }),
+    });
     const params = new URLSearchParams({
       CallSid: "CA123",
       From: "+15551234567",
@@ -541,6 +556,7 @@ describe("twilioChannel() voice pipeline", () => {
         lastMessageSid: null,
         to: "+15557654321",
       },
+      title: "Twilio voice run",
     });
   });
 

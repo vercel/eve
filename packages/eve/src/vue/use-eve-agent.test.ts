@@ -40,6 +40,12 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
   );
 }
 
+function createBoundedStreamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+  const response = createEagerStreamResponse(events);
+  response.headers.set("x-eve-stream-tail-index", String(events.length - 1));
+  return response;
+}
+
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (error: unknown) => void;
@@ -334,6 +340,44 @@ describe("EveAgentStore (Vue composable backing store)", () => {
 });
 
 describe("useEveAgent (Vue composable wiring)", () => {
+  it("automatically replays an initial session when resume is enabled", async () => {
+    vi.stubGlobal("window", {});
+    const events = [
+      createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+      createMessageCompletedEvent({
+        message: "Hi there.",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createSessionWaitingEvent(),
+    ];
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
+    const scope = effectScope();
+    const agent = scope.run(() =>
+      useEveAgent({
+        initialSession: { sessionId: "session_1", streamIndex: 0 },
+        resume: true,
+      }),
+    );
+    if (agent === undefined) throw new Error("effect scope did not run");
+
+    expect(agent.status.value).toBe("resuming");
+    await vi.waitFor(() => expect(agent.events.value).toHaveLength(events.length));
+    expect(agent.status.value).toBe("ready");
+    expect(agent.data.value).toEqual(
+      completedTurnData({
+        assistantMessage: "Hi there.",
+        turnId: "turn_1",
+        userMessage: "Hello",
+      }),
+    );
+
+    scope.stop();
+  });
+
   it("projects streamed events into reactive refs in the browser", async () => {
     vi.stubGlobal("window", {});
     const events = [
@@ -378,7 +422,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     scope.stop();
   });
 
-  it("unsubscribes and stops the session when the scope is disposed", async () => {
+  it("unsubscribes and detaches the local stream when the scope is disposed", async () => {
     vi.stubGlobal("window", {});
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(createStartedMessageResponse("session_1", "http:session_1"))

@@ -7,7 +7,23 @@ import type { VercelStatusSnapshot } from "./vercel-status.js";
 import type { ModelEndpointStatus } from "#shared/model-endpoint-status.js";
 import { formatModelSummary } from "#shared/model-summary.js";
 
+export interface DevBuildStatus {
+  readonly phase: "building" | "complete";
+  readonly summary: string;
+}
+
+function formatDevBuildStatus(status: DevBuildStatus, theme: Theme): string {
+  const complete = status.phase === "complete";
+  const glyph = complete ? theme.glyph.success : theme.glyph.validating;
+  const summary = complete
+    ? status.summary.replace(/ changed$/u, " updated")
+    : `${status.summary.replace(/ (?:added|changed|removed)$/u, "")} updating…`;
+  return `${glyph} ${summary}`;
+}
+
 export interface StatusLineInput {
+  /** Transient authored-source build state, independent of the server log filter. */
+  devBuild?: DevBuildStatus;
   /** Port of the connected local development server; omitted for remote sessions. */
   serverPort?: string;
   /** Resolved model slug, e.g. "anthropic/claude-sonnet-5"; absent when `/eve/v1/info` failed. */
@@ -62,8 +78,8 @@ function renderServerPort(
 
 /** Provider slugs whose display name differs from the AI SDK's identifier. */
 const EXTERNAL_PROVIDER_DISPLAY_NAMES: Readonly<Record<string, string>> = {
-  // `experimental_chatgpt` wraps the Codex backend; what the user connected
-  // is their ChatGPT subscription, so the bar names that, not the transport.
+  // `chatgpt()` wraps the Codex backend; what the user connected is their
+  // ChatGPT subscription, so the bar names that, not the transport.
   codex: "chatgpt-sub",
 };
 
@@ -94,6 +110,19 @@ function renderEndpoint(
     // intensity on any theme — while the clause around it is dim.
     return { text: `${c.dim(`via ${provider}`)}${g.external}`, standalone: false };
   }
+  if (input.endpoint.kind === "chatgpt") {
+    switch (input.endpoint.state) {
+      case "ready":
+        return { text: `${c.dim("via chatgpt-sub")}${g.external}`, standalone: false };
+      case "checking":
+        return { text: c.dim("chatgpt-sub checking…"), standalone: true };
+      case "signed-out":
+      case "reauth-required":
+        return { text: c.yellow(`${g.warning} chatgpt-sub login · codex login`), standalone: true };
+      case "unavailable":
+        return { text: c.yellow(`${g.warning} chatgpt-sub unavailable`), standalone: true };
+    }
+  }
   if (!input.endpoint.connected) {
     return { text: c.yellow(`${g.warning} ai-gateway`), standalone: true };
   }
@@ -115,6 +144,8 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
   const { theme, width } = input;
   const c = theme.colors;
 
+  const devBuild =
+    input.devBuild === undefined ? undefined : formatDevBuildStatus(input.devBuild, theme);
   const logLevel = input.logLevel === undefined ? undefined : c.cyan(`logs: ${input.logLevel}`);
   const serverPort = renderServerPort(input);
   const model = renderModel(input);
@@ -140,24 +171,31 @@ export function buildStatusLine(input: StatusLineInput): string | undefined {
     return `${target} ${body}`;
   };
 
-  // Descending fidelity; the first variant that fits wins. The server badge
-  // leads every variant and gets the final stand-alone fallback. Without one,
-  // the logs hint retains its previous priority.
-  const variants = [
+  const leftVariants = [
     compose(leading, [logLevel, modelSegment, endpointSegment]),
     compose(leading, [logLevel, model]),
-    compose(leading, [logLevel]),
     compose(leading, [logLevel]),
     compose(badge, [logLevel]),
     compose(badge, []),
   ];
 
-  if (variants[0]!.length === 0) return undefined;
-  for (const variant of variants) {
+  if (devBuild !== undefined) {
+    for (const left of leftVariants) {
+      const leftWidth = visibleLength(left);
+      const rightWidth = visibleLength(devBuild);
+      const gap = leftWidth > 0 ? 2 : 0;
+      if (leftWidth + gap + rightWidth > width) continue;
+      return `${left}${" ".repeat(width - leftWidth - rightWidth)}${devBuild}`;
+    }
+    return clipVisible(devBuild, width);
+  }
+
+  if (leftVariants[0]!.length === 0) return undefined;
+  for (const variant of leftVariants) {
     if (variant.length > 0 && visibleLength(variant) <= width) return variant;
   }
   // Later variants can be empty, for example when a badge-only line has no hint.
-  const narrowest = variants.findLast((variant) => variant.length > 0)!;
+  const narrowest = leftVariants.findLast((variant) => variant.length > 0)!;
   return clipVisible(narrowest, width);
 }
 

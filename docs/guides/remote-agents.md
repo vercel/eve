@@ -20,15 +20,15 @@ export default defineRemoteAgent({
 
 `defineRemoteAgent` accepts:
 
-| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                                                          |
-| ------------------ | --------------------------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment to call. A string is baked at compile time; a function is resolved at runtime (see [Runtime URLs](#runtime-urls)).                             |
-| `description`      | `string`                                      | Yes      | n/a               | Model-visible delegation description.                                                                                                                                                |
-| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                                                           |
-| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)).                                   |
-| `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                                                           |
-| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                                              |
-| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type the caller requires. Enforced by the remote agent like any task-mode output schema. Set it on the definition to apply to every call, or override it per call. |
+| Parameter          | Type                                          | Required | Default           | Description                                                                                                                                              |
+| ------------------ | --------------------------------------------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`              | `string \| (() => string \| Promise<string>)` | Yes      | n/a               | Base URL of the remote eve deployment to call. A string is baked at compile time; a function is resolved at runtime (see [Runtime URLs](#runtime-urls)). |
+| `description`      | `string`                                      | Yes      | n/a               | Model-visible delegation description.                                                                                                                    |
+| `auth`             | `OutboundAuthFn`                              | No       | none              | Outbound auth hook from `eve/agents/auth`.                                                                                                               |
+| `forwardPrincipal` | `boolean`                                     | No       | `false`           | Forward the dispatching turn's session principal to the remote deployment (see [Forwarding the caller identity](#forwarding-the-caller-identity)).       |
+| `headers`          | `HeadersValue`                                | No       | none              | Static or lazily resolved request headers.                                                                                                               |
+| `path`             | `string`                                      | No       | `/eve/v1/session` | Route appended to `url` for the create-session request.                                                                                                  |
+| `outputSchema`     | `StandardSchema \| JSON Schema`               | No       | none              | Structured return type for the first turn of each fresh remote session. A continuation may provide its own per-call schema.                              |
 
 ## Dynamic remote agents
 
@@ -82,19 +82,36 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 To the model, a remote agent is another subagent tool. You call it the same way you call a local subagent, with a `message` and an optional `outputSchema`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
-To get one structured result back instead of an open-ended reply, set an `outputSchema` on the agent definition or on an individual call. The remote agent then runs in task mode, a single-shot delegation that returns structured output as the tool result. See [Subagents](../subagents) for how task mode works.
+To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value becomes the tool result, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
 
 ## Outbound auth
 
-`auth` is an `OutboundAuthFn` from `eve/agents/auth` that attaches request headers to the outbound dispatch:
+Use `vercelOidc()` from `eve/agents/auth` when one Vercel-deployed eve agent calls another, as shown in the first example on this page.
 
-| Helper                          | Header                                                                       |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `vercelOidc(opts?)`             | `Authorization: Bearer <Vercel OIDC token>` (deployment-to-deployment trust) |
-| `bearer(token)`                 | `Authorization: Bearer <token>` (static or lazily resolved)                  |
-| `basic({ username, password })` | `Authorization: Basic …`                                                     |
+For calls between different Vercel projects, allow the calling project on the receiving agent's eve channel:
 
-If you are calling another Vercel-deployed eve agent, reach for `vercelOidc()`. The remote verifies the OIDC token to authorize the caller. See [Auth & route protection](./auth-and-route-protection) for the receiving side.
+```ts title="agent/channels/eve.ts"
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+import { eveChannel } from "eve/channels/eve";
+
+export default eveChannel({
+  auth: [
+    vercelOidc({
+      subjects: [
+        vercelSubject({
+          teamSlug: "acme",
+          projectName: "calling-agent",
+          environment: "production",
+        }),
+      ],
+    }),
+  ],
+});
+```
+
+Set `teamSlug`, `projectName`, and `environment` to the calling deployment's Vercel OIDC subject. See [subject patterns and `vercelSubject(...)`](./auth-and-route-protection#subjects-patterns-and-vercelsubject) for other environments and wildcard matching.
+
+If [Vercel Deployment Protection](https://vercel.com/docs/deployment-protection) is active on the receiving project, also configure [Trusted Sources](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/trusted-sources) to allow the calling project and environment. The eve subject allowlist and Trusted Sources are separate checks; cross-project calls need both.
 
 ## Forwarding the caller identity
 
@@ -114,15 +131,23 @@ export default defineRemoteAgent({
 });
 ```
 
-The create-session request then carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). Only principal metadata crosses the wire — never tokens or credentials. The receiving deployment mints its own per-user credentials through its own connections.
+The create-session request carries the parent turn's `session.auth.current` and `session.auth.initiator` as a `forwardedPrincipal` body field (`initiator` is optional on the wire; when absent, the receiver seeds both from `current`). Every continuation carries only that turn's `session.auth.current`; the remote session keeps its original `auth.initiator`. Only principal metadata crosses the wire — never tokens or credentials. The receiving deployment resolves its own per-user credentials through its own connections.
 
-Forwarding is explicit on both sides. The receiver names which forwarders it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); a receiver that refuses the forwarder — or has no `trustedForwarders` at all — rejects with a 403 and the dispatch fails. One caveat: a receiver on an eve version that predates principal forwarding drops the unknown field and runs the session as your app's service identity (per-user connections there fail with `principal_required`), so upgrade both deployments together when enabling forwarding. When the dispatching turn has no auth at all, the field is omitted and the call proceeds on transport trust alone.
+This makes caller authority turn-scoped even when the remote child session is persistent. If Alice starts the child and Bob later continues it, the follow-up runs with Bob as `auth.current`, not Alice. If the parent turn's auth is `null`, a local child clears `auth.current`, while a remote child uses the freshly verified transport principal; neither inherits Alice. eve's in-step bearer cache is also keyed by the resolved principal and is not serialized across steps. The external authorization provider may preserve each user's server-side OAuth grant, but a later turn can resolve only the grant belonging to its own `auth.current` principal.
+
+Identity forwarding does not make a persistent session private to one caller. Conversation history, tool outputs, and other child-session state still persist. If those values must not be visible across users, give each user a distinct child session or enforce that ownership at the application boundary.
+
+Forwarding is explicit on both sides. The receiver names which forwarders it trusts with `eveChannel({ trustedForwarders })` (see [Auth & route protection](./auth-and-route-protection#accepting-forwarded-identity-from-another-deployment)); a receiver that refuses the forwarder — or has no `trustedForwarders` at all — rejects with a 403 and the dispatch fails.
+
+> ⚠️ **Upgrade both deployments before resuming persistent remote sessions.** A sender with continuation forwarding includes `forwardedPrincipal` on each authenticated follow-up. A receiver that supports forwarding only on session creation rejects that continuation with HTTP 400. eve does not retry without the field because that would run the follow-up as the transport service principal and silently change caller authority. The parent retains the child handle after this failure, so you can retry the same session after upgrading the receiver.
+
+A receiver on an eve version that predates all principal forwarding may instead drop the unknown field and run the session as your app's service identity; per-user connections there fail with `principal_required`. On remote requests where the dispatching turn has no auth, the field is omitted and the call proceeds on transport trust alone.
 
 ## How remote dispatch and callbacks work
 
 A local subagent runs inline. A remote one runs in its own deployment, so dispatch is asynchronous:
 
-1. The parent starts a task-mode session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
+1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
 2. The parent turn parks (suspends durably without holding compute; see [Execution model & durability](../concepts/execution-model-and-durability)) until the remote posts a terminal callback.
 3. When the callback arrives, the parent resumes and surfaces the result.
 
@@ -130,10 +155,12 @@ The parent stream carries the same `subagent.called`, `action.result`, and `suba
 
 Cancelling the parent while a remote call is active sends an authenticated `POST /eve/v1/session/:childSessionId/cancel` to the remote and waits for that request to be accepted before the parent settles. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
+When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
+
 Both failure paths surface to the parent as a failed tool result, so the caller can explain or recover within the same session. A failed _start_ returns the error inline. A remote that starts and then fails posts a terminal failure callback, which the parent receives as an errored subagent result carrying the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
 
 ## What to read next
 
 - Local delegation and the isolation boundary → [Subagents](../subagents)
-- Have the model orchestrate remote agents programmatically → [Workflow Tool](../subagents/workflow-tool)
+- Have the model orchestrate remote agents programmatically → [Workflow tool](../concepts/built-in-tools#workflow-tool)
 - Securing the receiving deployment → [Auth & route protection](./auth-and-route-protection)

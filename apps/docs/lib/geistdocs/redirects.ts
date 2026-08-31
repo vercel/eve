@@ -55,8 +55,9 @@ export const docsRedirects: DocsRedirect[] = [
   ...createDocsRedirects("/reference/project-layout", "/getting-started"),
   ...createDocsRedirects("/dynamic-capabilities", "/guides/dynamic-capabilities"),
   ...createDocsRedirects("/guides/state", "/concepts/state"),
-  ...createDocsRedirects("/dynamic-workflows", "/subagents/workflow-tool"),
-  ...createDocsRedirects("/guides/dynamic-workflows", "/subagents/workflow-tool"),
+  ...createDocsRedirects("/dynamic-workflows", "/concepts/built-in-tools"),
+  ...createDocsRedirects("/guides/dynamic-workflows", "/concepts/built-in-tools"),
+  ...createDocsRedirects("/subagents/workflow-tool", "/concepts/built-in-tools"),
   ...createDocsRedirects("/sessions", "/concepts/sessions-runs-and-streaming"),
   ...createDocsRedirects("/agent", "/agent-config"),
   ...createDocsRedirects("/guides/acp", "/protocols/acp"),
@@ -96,6 +97,7 @@ export const rootMarkdownRedirects: DocsRedirect[] = [
 
 export const compatibilityRedirects: DocsRedirect[] = [
   ...createIntegrationRedirects("chat-sdk-photon", "photon"),
+  { source: "/evals", destination: "/benchmarks", permanent: true },
   { source: "/feed", destination: "/rss.xml", permanent: true },
   { source: "/feed.xml", destination: "/rss.xml", permanent: true },
   { source: "/guides/hooks", destination: "/docs/guides/hooks", permanent: true },

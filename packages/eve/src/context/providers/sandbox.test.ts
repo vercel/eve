@@ -64,6 +64,29 @@ describe("sandboxProvider", () => {
     });
   });
 
+  it("uses explicit sharing metadata for self-delegation even without inheritsParent", async () => {
+    const ctx = new ContextContainer();
+    const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
+    const parentSandboxState = { initialized: true, session: null };
+
+    ctx.set(BundleKey, createBundle({ agentName: "weather-agent", registry }));
+    ctx.set(ChannelKey, {
+      kind: "subagent",
+      state: { parentSandboxState, sandboxSessionId: "root-sandbox-session" },
+    });
+    ctx.set(SessionIdKey, "self-child-session");
+
+    await sandboxProvider.create(ctx, createHarnessSession());
+
+    expect(ensureSandboxAccess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ownsSandbox: false,
+        sessionId: "root-sandbox-session",
+        state: parentSandboxState,
+      }),
+    );
+  });
+
   it("tags sandbox backend resources with agent, channel, and session id", async () => {
     const ctx = new ContextContainer();
     const registry: RuntimeSandboxRegistry = createStubSandboxRegistry();
@@ -76,6 +99,7 @@ describe("sandboxProvider", () => {
 
     expect(ensureSandboxAccess).toHaveBeenCalledWith(
       expect.objectContaining({
+        ownsSandbox: true,
         tags: {
           agent: "weather-agent",
           channel: "slack",

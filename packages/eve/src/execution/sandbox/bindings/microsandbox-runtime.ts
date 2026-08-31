@@ -181,9 +181,12 @@ export class MicrosandboxVm {
 
   async removePersisted(): Promise<void> {
     await removeSandboxIfExists(this.#input.module, this.#sandboxName);
-    if (this.#stateSnapshotName !== undefined) {
-      await removeSnapshotIfExists(this.#input.module, this.#stateSnapshotName);
+    const stateSnapshotName = this.#stateSnapshotName;
+    if (stateSnapshotName === undefined) {
+      return;
     }
+    await removeSnapshotIfExists(this.#input.module, stateSnapshotName);
+    this.#stateSnapshotName = undefined;
   }
 
   async setNetworkPolicy(policy: SandboxNetworkPolicy): Promise<void> {

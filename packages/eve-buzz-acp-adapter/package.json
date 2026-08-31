@@ -1,6 +1,6 @@
 {
   "name": "@eve/buzz-acp-adapter",
-  "version": "0.0.1",
+  "version": "0.0.18",
   "description": "Buzz ACP compatibility adapter for eve agents.",
   "keywords": [
     "acp",
@@ -40,7 +40,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "eve": "workspace:*"
+    "eve": "workspace:^"
   },
   "devDependencies": {
     "vitest": "catalog:"

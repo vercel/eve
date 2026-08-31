@@ -1,4 +1,4 @@
-import type { RuntimeActionRequest, RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
 
 /**
  * Returns the stable match key used to pair one pending runtime action request

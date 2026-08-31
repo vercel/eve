@@ -8,7 +8,12 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { telegramChannel, type TelegramChannelState } from "#public/channels/telegram/index.js";
+import {
+  defaultTelegramAuth,
+  telegramChannel,
+  type TelegramChannelState,
+} from "#public/channels/telegram/index.js";
+import { isTelegramBotMentioned } from "#public/channels/telegram/defaults.js";
 
 const SECRET = "telegram-secret";
 
@@ -73,6 +78,7 @@ function fakeTelegramFetch(): typeof fetch {
 async function firePost(
   channel: unknown,
   body: unknown,
+  options: { readonly resolveSession?: () => Promise<any> } = {},
 ): Promise<{
   readonly response: Response;
   readonly send: ReturnType<typeof vi.fn>;
@@ -89,6 +95,7 @@ async function firePost(
   const response = await post.handler(signedRequest(JSON.stringify(body)), {
     attachSession: vi.fn() as any,
     ...mockChannelContext(send),
+    resolveSession: options.resolveSession ?? (async () => undefined),
     to: vi.fn() as any,
     params: {},
     requestIp: null,
@@ -138,10 +145,26 @@ describe("telegramChannel() inbound route", () => {
     ).toEqual([{ method: "POST", path: "/eve/v1/telegram" }]);
   });
 
+  it.each([
+    ["private", "private"],
+    ["group", "private"],
+    ["supergroup", "private"],
+    [null, "unknown"],
+  ] as const)("maps %s chats to the %s audience", (chatType, audience) => {
+    const adapter = withState(getAdapter(telegramChannel()), { chatType });
+
+    expect(adapter.instrumentation?.metadata?.(adapter.state)).toMatchObject({ audience });
+  });
+
   it("dispatches verified private messages with Telegram auth and chat-wide token", async () => {
     const channel = telegramChannel({
       api: { fetch: fakeTelegramFetch() },
+      botUsername: "testbot",
       credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+      onMessage: (_ctx, message) => ({
+        auth: defaultTelegramAuth(message),
+        title: "Telegram run",
+      }),
     });
 
     const { response, send } = await firePost(channel, {
@@ -158,6 +181,8 @@ describe("telegramChannel() inbound route", () => {
     expect(send).toHaveBeenCalledTimes(1);
     const [continuationToken, input] = send.mock.calls[0]!;
     expect((input as { context: string[] }).context[0]).toContain("<telegram_context>");
+    expect((input as { context: string[] }).context[0]).toContain("bot_username: testbot");
+    expect((input as { context: string[] }).context[0]).toContain("is_mentioned: false");
     expect(String((input as { message: string }).message)).toContain("hello");
     expect(continuationToken).toBe("42::");
     expect(input).toMatchObject({
@@ -170,7 +195,17 @@ describe("telegramChannel() inbound route", () => {
         chatType: "private",
         conversationId: null,
       },
+      title: "Telegram run",
     });
+  });
+
+  it.each([
+    ["hello @testbot", true],
+    ["/ask@testbot hello", true],
+    ["hello @testbotany", false],
+    ["email x@testbot.org", false],
+  ])("reports exact bot mention state for %j", (text, expected) => {
+    expect(isTelegramBotMentioned({ caption: "", text }, "testbot")).toBe(expected);
   });
 
   it("gates group messages to commands, mentions, and replies to the bot", async () => {
@@ -200,6 +235,9 @@ describe("telegramChannel() inbound route", () => {
     });
     expect(mentioned.send).toHaveBeenCalledTimes(1);
     expect(mentioned.send.mock.calls[0]![0]).toBe("-1001::11");
+    expect((mentioned.send.mock.calls[0]![1] as { context: string[] }).context[0]).toContain(
+      "is_mentioned: true",
+    );
   });
 
   it("delivers Telegram callback queries as compact HITL input responses", async () => {
@@ -227,6 +265,69 @@ describe("telegramChannel() inbound route", () => {
         inputResponses: [{ optionId: "selected", requestId: "telegram_callback:eve:0" }],
       }),
     );
+  });
+
+  it("sends authorization privately after the requester taps its group callback", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true, result: true })));
+    const channel = telegramChannel({
+      api: { fetch: fetchMock },
+      credentials: { botToken: "bot-token", webhookSecretToken: SECRET },
+    });
+    const session = {
+      async getEventStream() {
+        return new ReadableStream({
+          start(controller) {
+            controller.enqueue({
+              type: "authorization.required",
+              data: {
+                authorization: { url: "https://connect.example.com/a/sca_1", userCode: "ABC-123" },
+                name: "notion",
+                sequence: 0,
+                stepIndex: 0,
+                turnId: "t1",
+              },
+            });
+            controller.close();
+          },
+        });
+      },
+      async getStreamTailIndex() {
+        return 0;
+      },
+    };
+
+    await firePost(
+      channel,
+      {
+        callback_query: {
+          id: "cb-auth",
+          from: { id: "U1", is_bot: false },
+          data: "eve_auth:U1",
+          message: {
+            message_id: 55,
+            chat: { id: -1001, type: "supergroup" },
+          },
+        },
+      },
+      { resolveSession: async () => session },
+    );
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      chat_id: "-1001",
+      ephemeral_message_parameters: { callback_query_id: "cb-auth", receiver_user_id: "U1" },
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Sign in with Notion", url: "https://connect.example.com/a/sca_1" }],
+        ],
+      },
+      text: "Authorization required for Notion.\n\nCode: ABC-123",
+    });
+    expect(JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body))).toEqual({
+      callback_query_id: "cb-auth",
+      text: "Sign-in prompt sent privately.",
+    });
   });
 
   it("marks replies to bot messages as possible freeform HITL answers", async () => {
@@ -333,6 +434,140 @@ describe("telegramChannel() deliver hook", () => {
 });
 
 describe("telegramChannel() default event handlers", () => {
+  it("renders authorization privately in a direct chat and replaces it on completion", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            result: { message_id: 71, chat: { id: 42, type: "private" } },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "42", chatType: "private" },
+    );
+    const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
+
+    await callEvent(
+      adapter,
+      makeEvent("authorization.required", {
+        authorization: {
+          displayName: "Notion Workspace",
+          instructions: "Choose a workspace.",
+          url: "https://connect.example.com/a/sca_1",
+          userCode: "ABC-123",
+        },
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body))).toEqual({
+      chat_id: "42",
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "Sign in with Notion Workspace", url: "https://connect.example.com/a/sca_1" }],
+        ],
+      },
+      text: "Authorization required for Notion Workspace.\n\nChoose a workspace.\n\nCode: ABC-123",
+    });
+    expect(ctx.state.pendingAuthMessageIds).toEqual({ notion: "71" });
+
+    await callEvent(
+      adapter,
+      makeEvent("authorization.completed", {
+        authorization: { displayName: "Notion Workspace" },
+        name: "notion",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(JSON.parse(String((fetchMock.mock.calls[2]![1] as RequestInit).body))).toEqual({
+      chat_id: "42",
+      message_id: 71,
+      reply_markup: { inline_keyboard: [] },
+      text: "Notion Workspace connected.",
+    });
+    expect(ctx.state.pendingAuthMessageIds).toEqual({});
+  });
+
+  it("keeps the group status link-free and sends the challenge ephemerally", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            result: { message_id: 72, chat: { id: -100, type: "group" } },
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: true })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, result: true })));
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = withState(
+      getAdapter(telegramChannel({ credentials: { botToken: "bot-token" } })),
+      { chatId: "-100", chatType: "group", triggeringUserId: "U1" },
+    );
+    const ctx = buildAdapterContext(adapter, { get: () => undefined, set: () => {} } as any);
+
+    await callEvent(
+      adapter,
+      makeEvent("authorization.required", {
+        authorization: { url: "https://connect.example.com/a/sca_1", userCode: "ABC-123" },
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    const publicBody = JSON.parse(String((fetchMock.mock.calls[0]![1] as RequestInit).body));
+    expect(publicBody).toEqual({
+      chat_id: "-100",
+      reply_markup: {
+        inline_keyboard: [[{ callback_data: "eve_auth:U1", text: "Authorize" }]],
+      },
+      text: "Authorization required for Notion. The requester must sign in to resume.",
+    });
+    expect(JSON.stringify(publicBody)).not.toContain("connect.example.com");
+
+    await callEvent(
+      adapter,
+      makeEvent("authorization.completed", {
+        name: "notion",
+        outcome: "declined",
+        reason: "access_denied",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+
+    expect(JSON.parse(String((fetchMock.mock.calls[1]![1] as RequestInit).body))).toEqual({
+      chat_id: "-100",
+      message_id: 72,
+      reply_markup: { inline_keyboard: [] },
+      text: "Notion authorization declined (access_denied).",
+    });
+    expect(ctx.state.pendingAuthMessageIds).toEqual({});
+  });
+
   it("restarts the typing indicator after authorization succeeds", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ok: true, result: true }), {

@@ -5,7 +5,8 @@ import {
   type InstallVercelCliResult,
 } from "#setup/flows/install-vercel-cli.js";
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
-import { runModelFlow, type ModelProviderOutcome } from "#setup/flows/model.js";
+import { runModelFlow } from "#setup/flows/model.js";
+import type { ProviderSelection } from "#setup/provider-settings.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
 import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
@@ -46,6 +47,10 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** Registry address from `/add <item>`, opening that item instead of the browser. */
+  initialRegistryAddress?: string;
+  /** Live ChatGPT identity shown only inside model configuration UI. */
+  chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
   withExclusiveTerminal?<T>(task: () => Promise<T>): Promise<T>;
   /** Test seam; defaults to the real TUI-native prompter over `renderer`. */
@@ -213,6 +218,7 @@ async function executeSetupCommand(
           appRoot,
           prompter,
           signal,
+          chatGptAccountLabel: input.chatGptAccountLabel,
           deps: {
             pickModelSettings: (request) => renderer.readModelEditor(request),
             runProviderFlow: (providerInput) =>
@@ -222,6 +228,8 @@ async function executeSetupCommand(
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
         }
+        modelInput.withExclusiveTerminal = (task) =>
+          renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());
         const result = await flows.runModelFlow(modelInput);
         if (result.kind === "cancelled") {
           return {
@@ -234,25 +242,33 @@ async function executeSetupCommand(
         }
         // One line per completed menu action: the apply line (it already
         // distinguishes success from a rejected slug), then the provider
-        // outcome when that sub-flow also ran.
+        // selection when that sub-flow also ran.
         const lines: string[] = [];
         if (result.modelMessage !== undefined) lines.push(result.modelMessage);
-        if (result.providerOutcome !== undefined) {
-          lines.push(providerOutcomeMessage(result.providerOutcome));
+        if (result.providerSelection !== undefined) {
+          lines.push(providerSelectionMessage(result.providerSelection));
         }
         const outcome: TuiSetupCommandResult = {
           message: lines.join("\n"),
           preserveFlowDiagnostics: false,
         };
-        // Provider setup can change both the local env and Vercel identity.
-        // The runner refreshes the complete model-access view after the flow.
-        if (result.providerOutcome !== undefined) {
+        // A model edit can also move routing between AI Gateway and ChatGPT.
+        // The runner rebuilds authored artifacts before refreshing model access.
+        if (result.accessChanged) {
           outcome.effect = { kind: "model-access-changed" };
         }
         return outcome;
       }
       case "add": {
-        const result = await flows.runRegistryFlow({ appRoot, prompter, signal });
+        const registryInput: Parameters<TuiSetupFlows["runRegistryFlow"]>[0] = {
+          appRoot,
+          prompter,
+          signal,
+        };
+        if (input.initialRegistryAddress !== undefined) {
+          registryInput.initialAddress = input.initialRegistryAddress;
+        }
+        const result = await flows.runRegistryFlow(registryInput);
         if (result.kind === "cancelled") {
           return { message: "/add dismissed.", preserveFlowDiagnostics: true };
         }
@@ -278,6 +294,13 @@ async function executeSetupCommand(
             preserveFlowDiagnostics: true,
           };
         }
+        if (result.kind === "local-model") {
+          return {
+            message:
+              "ChatGPT subscription models are local-only. Switch to an AI Gateway or server-authenticated model before deploying.",
+            preserveFlowDiagnostics: true,
+          };
+        }
         return {
           message:
             result.productionUrl === undefined ? "Deployed." : `Deployed: ${result.productionUrl}`,
@@ -287,6 +310,13 @@ async function executeSetupCommand(
       }
     }
   } catch (error) {
+    const actionableError = error instanceof RegistryFlowFailedError ? error.cause : error;
+    const upgrade = await vercelCliUpgradeOutcome(actionableError, command, flows, {
+      appRoot,
+      prompter,
+      signal,
+    });
+    if (upgrade !== undefined) return upgrade;
     if (error instanceof RegistryFlowFailedError) {
       const completed = error.completed;
       return {
@@ -301,12 +331,6 @@ async function executeSetupCommand(
         preserveFlowDiagnostics: command !== "model",
       };
     }
-    const upgrade = await vercelCliUpgradeOutcome(error, command, flows, {
-      appRoot,
-      prompter,
-      signal,
-    });
-    if (upgrade !== undefined) return upgrade;
     // Provisioning steps (link, deploy, Slack) throw a Vercel human action when
     // `whoami` fails or a scope is denied. Route it to the in-TUI fix instead of
     // dumping the raw "Human action required" message.
@@ -339,7 +363,7 @@ async function vercelCliUpgradeOutcome(
   let choice: "upgrade" | "later";
   try {
     choice = await input.prompter.select({
-      message: "Your Vercel CLI needs an update to list your teams. Upgrade now?",
+      message: "Your Vercel CLI needs an update to continue setup. Upgrade now?",
       options: [
         {
           value: "upgrade",
@@ -496,42 +520,9 @@ function loginResultMessage(result: LoginFlowResult): TuiSetupCommandResult {
   }
 }
 
-/**
- * The persistent outcome line for /model's completed provider sub-flow. The
- * panel's success lines vanish with it, so the outcome carries the substance:
- * what the directory now reads (the same detection the menu shows) and which
- * credential is ready, or what to do next. "Project linked" is only claimed
- * when a link is actually detected — the own-key branch pastes a credential
- * without linking anything.
- */
-function providerOutcomeMessage(outcome: ModelProviderOutcome): string {
-  const { resolution, status } = outcome;
-  if (status.kind === "gateway-project") {
-    if (resolution === undefined) {
-      return "Project linked. No model credential found; set AI_GATEWAY_API_KEY in .env.local.";
-    }
-    if (resolution.credential === "oidc") {
-      return "Project linked. Connected to AI Gateway via VERCEL_OIDC_TOKEN.";
-    }
-    // A gateway key outranks the project's OIDC token at runtime — claiming
-    // the OIDC connection while the key authenticates every call would split
-    // this message from the status bar and the actual resolution.
-    if (resolution.shadowedOidc !== undefined) {
-      const from = resolution.source.kind === "shell" ? "shell" : resolution.source.path;
-      const remove =
-        resolution.source.kind === "shell"
-          ? "unset it in your shell"
-          : `remove it from ${resolution.source.path}`;
-      return (
-        `Project linked. AI_GATEWAY_API_KEY (${from}) outranks the project's ` +
-        `VERCEL_OIDC_TOKEN and stays the active credential — ${remove} to run on the project.`
-      );
-    }
-    return "Project linked. Connected to AI Gateway via AI_GATEWAY_API_KEY.";
-  }
-  if (status.kind === "gateway-key") {
-    const where = status.source.kind === "shell" ? "your shell" : status.source.path;
-    return `Connected to AI Gateway via ${status.envKey} in ${where}.`;
-  }
-  return "Provider updated — no gateway credential detected; set AI_GATEWAY_API_KEY in .env.local.";
+function providerSelectionMessage(selection: ProviderSelection): string {
+  if (selection === "chatgpt") return "ChatGPT subscription selected.";
+  return selection === "ai-gateway-project"
+    ? "AI Gateway via Project selected."
+    : "AI Gateway via API key selected.";
 }

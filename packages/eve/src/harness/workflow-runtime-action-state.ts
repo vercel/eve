@@ -1,6 +1,6 @@
 import type { HarnessRuntimeActionDefinition } from "#harness/execute-tool.js";
 import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeActionRequest } from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
@@ -36,15 +36,21 @@ export function buildRuntimeActionFromWorkflowInterrupt(
     };
   }
 
-  return {
-    callId,
-    description: "",
-    input: toolInput,
-    kind: "subagent-call",
-    name: toolName,
-    nodeId: runtimeAction.nodeId,
-    subagentName: runtimeAction.subagentName,
-  };
+  if (runtimeAction.kind === "subagent-call") {
+    return {
+      callId,
+      description: "",
+      input: toolInput,
+      kind: "subagent-call",
+      name: toolName,
+      nodeId: runtimeAction.nodeId,
+      subagentName: runtimeAction.subagentName,
+    };
+  }
+
+  // Dynamic workflows only interrupt on delegation tools; task controls
+  // never enter a workflow sandbox.
+  throw new Error(`Workflow runtime actions cannot carry "${runtimeAction.kind}" tools.`);
 }
 
 /** Returns every pending runtime-action interrupt in deterministic ledger order. */

@@ -19,10 +19,11 @@ import { computed, ref } from "vue";
 const { data, status, send } = useEveAgent();
 const message = ref("");
 const isBusy = computed(() => status.value === "submitted" || status.value === "streaming");
+const isInputDisabled = computed(() => isBusy.value || status.value === "resuming");
 
 async function handleSubmit() {
   const text = message.value.trim();
-  if (!text || isBusy.value) return;
+  if (!text || isInputDisabled.value) return;
   message.value = "";
   await send(text);
 }
@@ -33,8 +34,8 @@ async function handleSubmit() {
     <p>{{ item.role }}: {{ item.parts }}</p>
   </div>
   <form @submit.prevent="handleSubmit">
-    <input v-model="message" :disabled="isBusy" />
-    <button type="submit" :disabled="isBusy">Send</button>
+    <input v-model="message" :disabled="isInputDisabled" />
+    <button type="submit" :disabled="isInputDisabled">Send</button>
   </form>
 </template>
 ```
@@ -43,14 +44,14 @@ async function handleSubmit() {
 
 The state fields are computed refs; the commands are ordinary methods:
 
-| Property                           | Vue shape                                      |
-| ---------------------------------- | ---------------------------------------------- |
-| `data`                             | `ComputedRef<TData>`                           |
-| `status`                           | `ComputedRef<UseEveAgentStatus>`               |
-| `error`                            | `ComputedRef<Error \| undefined>`              |
-| `events`                           | `ComputedRef<readonly MessageStreamEvent[]>`   |
-| `session`                          | `ComputedRef<ClientSessionState \| undefined>` |
-| `send`, `respond`, `stop`, `reset` | Methods                                        |
+| Property                                       | Vue shape                                      |
+| ---------------------------------------------- | ---------------------------------------------- |
+| `data`                                         | `ComputedRef<TData>`                           |
+| `status`                                       | `ComputedRef<UseEveAgentStatus>`               |
+| `error`                                        | `ComputedRef<Error \| undefined>`              |
+| `events`                                       | `ComputedRef<readonly MessageStreamEvent[]>`   |
+| `session`                                      | `ComputedRef<ClientSessionState \| undefined>` |
+| `send`, `respond`, `resume`, `cancel`, `reset` | Methods                                        |
 
 Destructuring preserves reactivity because each state value remains a ref. Read refs with `.value` in `<script>` and without `.value` in a template. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
 
@@ -106,9 +107,9 @@ const pendingRequests = computed(() =>
 
 See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for request semantics and rendering guidance.
 
-## Stop, reset, and resume
+## Cancel, reset, and resume
 
-Call `stop()` to detach the browser stream without cancelling server-side work, and `reset()` to clear local state and start a new session. Pass `initialSession` and `initialEvents` to restore a saved conversation. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
+Call `cancel()` to stop the durable server-side turn while the composable remains attached through settlement. Disposing the component only disconnects its local stream; it does not cancel server execution. Call `reset()` to clear local state and start a new session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `status.value` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"ready"`, `"error"`, or `"streaming"`. Use `resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
 
 ## Custom host and credentials
 

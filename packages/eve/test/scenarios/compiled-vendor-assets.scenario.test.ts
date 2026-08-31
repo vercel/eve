@@ -1,15 +1,23 @@
+import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import { describe, expect, it } from "vitest";
 
 const EVE_PACKAGE_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const COMPILED_VENDOR_ROOT = join(EVE_PACKAGE_ROOT, ".generated", "compiled");
 const VENDOR_WARNING_LOG_PATH = join(EVE_PACKAGE_ROOT, "scripts", "vendor-warning-log.mjs");
+const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
-const VERCEL_SANDBOX_DIST_ROOT = join(
+const VERCEL_BLOB_DIST_ROOT = dirname(require.resolve("@vercel/blob"));
+const VERCEL_SANDBOX_DRIVES_DIST_ROOT = join(
+  dirname(require.resolve("@vercel/sandbox-drives/package.json")),
+  "dist",
+);
+const VERCEL_SANDBOX_STABLE_DIST_ROOT = join(
   dirname(require.resolve("@vercel/sandbox/package.json")),
   "dist",
 );
@@ -20,8 +28,10 @@ type VendorWarningLog = {
       level: string,
       log: {
         readonly id?: string;
+        readonly ids?: readonly string[];
         readonly loc?: { readonly file?: string };
         readonly message: string;
+        readonly pluginCode?: string;
       },
       defaultHandler: (level: string, log: { readonly message: string }) => void,
     ) => void;
@@ -52,6 +62,86 @@ function rewriteDeclarationImports(
 }
 
 describe("compiled vendor assets", () => {
+  it("stamps the Nitro-resolved Rolldown version", async () => {
+    const stamp = JSON.parse(
+      await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
+    ) as { toolVersions?: { rolldown?: string } };
+    const nitroRequire = createRequire(require.resolve("nitro/package.json"));
+    const rolldownPackage = nitroRequire("rolldown/package.json") as { version: string };
+
+    expect(stamp.toolVersions?.rolldown).toBe(rolldownPackage.version);
+  });
+
+  it("shares the OpenTelemetry provider registered through @vercel/otel", async () => {
+    const apiUrl = pathToFileURL(
+      join(COMPILED_VENDOR_ROOT, "@opentelemetry", "api", "index.js"),
+    ).href;
+    const vercelOtelUrl = pathToFileURL(
+      join(COMPILED_VENDOR_ROOT, "@vercel", "otel", "index.js"),
+    ).href;
+    const { stdout } = await execFileAsync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      [
+        'import { createRequire } from "node:module";',
+        `import { ROOT_CONTEXT, context, trace } from ${JSON.stringify(apiUrl)};`,
+        `import { registerOTel } from ${JSON.stringify(vercelOtelUrl)};`,
+        "const require = createRequire(import.meta.url);",
+        'const authoredApi = require("@opentelemetry/api");',
+        "const endedSpans = [];",
+        "const spanProcessor = {",
+        "  forceFlush: async () => {},",
+        "  onEnd: (span) => endedSpans.push(span),",
+        "  onStart: () => {},",
+        "  shutdown: async () => {},",
+        "};",
+        'const earlyTracer = trace.getTracer("early");',
+        'const before = earlyTracer.startSpan("before").isRecording();',
+        "registerOTel({",
+        "  autoDetectResources: false,",
+        "  instrumentations: [],",
+        '  serviceName: "eve-vendored-opentelemetry-test",',
+        "  spanProcessors: [spanProcessor],",
+        "});",
+        'const earlySpan = earlyTracer.startSpan("early-after-registration");',
+        'const lateSpan = trace.getTracer("late").startSpan("late-after-registration");',
+        "const earlyAfter = earlySpan.isRecording();",
+        "const lateAfter = lateSpan.isRecording();",
+        "earlySpan.end();",
+        "lateSpan.end();",
+        'const parent = trace.getTracer("vendored").startSpan("vendored-parent");',
+        "await context.with(trace.setSpan(ROOT_CONTEXT, parent), async () => {",
+        "  await Promise.resolve();",
+        '  authoredApi.trace.getTracer("authored").startSpan("authored-child").end();',
+        "});",
+        "parent.end();",
+        'const child = endedSpans.find((span) => span.name === "authored-child");',
+        "process.stdout.write(JSON.stringify({",
+        "  before,",
+        "  childParentSpanId: child?.parentSpanContext?.spanId,",
+        "  childParentTraceId: child?.parentSpanContext?.traceId,",
+        "  earlyAfter,",
+        "  lateAfter,",
+        "  parentSpanId: parent.spanContext().spanId,",
+        "  parentTraceId: parent.spanContext().traceId,",
+        "}));",
+      ].join("\n"),
+    ]);
+
+    const result = JSON.parse(stdout) as {
+      readonly before: boolean;
+      readonly childParentSpanId: string;
+      readonly childParentTraceId: string;
+      readonly earlyAfter: boolean;
+      readonly lateAfter: boolean;
+      readonly parentSpanId: string;
+      readonly parentTraceId: string;
+    };
+    expect(result).toMatchObject({ before: false, earlyAfter: true, lateAfter: true });
+    expect(result.childParentTraceId).toBe(result.parentTraceId);
+    expect(result.childParentSpanId).toBe(result.parentSpanId);
+  });
+
   it("does not generate source maps for vendored packages", async () => {
     const entries = await readdir(COMPILED_VENDOR_ROOT, {
       recursive: true,
@@ -64,6 +154,28 @@ describe("compiled vendor assets", () => {
 
     expect(sourceMapFiles).toEqual([]);
     expect(javaScriptSources.some(containsSourceMapComment)).toBe(false);
+  });
+
+  it("copies the complete @vercel/blob declaration tree", async () => {
+    const upstreamDeclarations = (await readdir(VERCEL_BLOB_DIST_ROOT, { recursive: true }))
+      .filter((entry) => entry.endsWith(".d.ts"))
+      .sort();
+    const vendoredDeclarations = (
+      await readdir(join(COMPILED_VENDOR_ROOT, "@vercel/blob"), { recursive: true })
+    )
+      .filter((entry) => entry.endsWith(".d.ts"))
+      .sort();
+
+    expect(vendoredDeclarations).toEqual(upstreamDeclarations);
+    await Promise.all(
+      upstreamDeclarations.map(async (declaration) => {
+        const [upstreamSource, vendoredSource] = await Promise.all([
+          readFile(join(VERCEL_BLOB_DIST_ROOT, declaration), "utf8"),
+          readFile(join(COMPILED_VENDOR_ROOT, "@vercel/blob", declaration), "utf8"),
+        ]);
+        expect(vendoredSource).toBe(upstreamSource);
+      }),
+    );
   });
 
   it("suppresses dependency warnings without hiding actionable logs", async () => {
@@ -140,6 +252,18 @@ describe("compiled vendor assets", () => {
       },
     );
     filter.onLog(
+      "warn",
+      {
+        id: scriptFilePath,
+        ids: [scriptFilePath, generatedCompiledFilePath],
+        message: "mixed eve and dependency warning",
+        pluginCode: generatedCompiledFilePath,
+      },
+      (level, log) => {
+        forwardedLogs.push(`${level}:${log.message}`);
+      },
+    );
+    filter.onLog(
       "error",
       {
         loc: {
@@ -152,7 +276,11 @@ describe("compiled vendor assets", () => {
       },
     );
 
-    expect(forwardedLogs).toEqual(["warn:eve vendoring warning", "error:dependency build failure"]);
+    expect(forwardedLogs).toEqual([
+      "warn:eve vendoring warning",
+      "warn:mixed eve and dependency warning",
+      "error:dependency build failure",
+    ]);
   });
 
   it("copies @workflow/core declaration files from the installed package", async () => {
@@ -183,9 +311,9 @@ describe("compiled vendor assets", () => {
     expect(vercelWorld).toContain("createWorld");
   });
 
-  it("copies the complete @vercel/sandbox declaration tree from the installed package", async () => {
+  it("copies the complete Drives-capable @vercel/sandbox declaration tree", async () => {
     const [upstreamEntries, vendoredEntries] = await Promise.all([
-      readdir(VERCEL_SANDBOX_DIST_ROOT, { recursive: true }),
+      readdir(VERCEL_SANDBOX_DRIVES_DIST_ROOT, { recursive: true }),
       readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox"), { recursive: true }),
     ]);
     const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
@@ -197,7 +325,7 @@ describe("compiled vendor assets", () => {
     expect(vendoredDeclarations).toEqual(upstreamDeclarations);
 
     const [upstreamIndex, vendoredIndex, vendoredSandbox, vendoredBaseClient] = await Promise.all([
-      readFile(join(VERCEL_SANDBOX_DIST_ROOT, "index.d.ts"), "utf8"),
+      readFile(join(VERCEL_SANDBOX_DRIVES_DIST_ROOT, "index.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/index.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/sandbox.d.ts"), "utf8"),
       readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox/api-client/base-client.d.ts"), "utf8"),
@@ -207,6 +335,24 @@ describe("compiled vendor assets", () => {
     expect(vendoredSandbox).toContain('from "./_workflow-serde.js"');
     expect(vendoredBaseClient).toContain('from "../_async-retry.js"');
     expect(vendoredBaseClient).toContain('import "#compiled/zod/index.js"');
+  });
+
+  it("copies stable @vercel/sandbox declarations without a second runtime bundle", async () => {
+    const [upstreamEntries, vendoredEntries] = await Promise.all([
+      readdir(VERCEL_SANDBOX_STABLE_DIST_ROOT, { recursive: true }),
+      readdir(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable"), { recursive: true }),
+    ]);
+    const generatedStubNames = new Set(["_async-retry.d.ts", "_workflow-serde.d.ts"]);
+    const upstreamDeclarations = upstreamEntries.filter((entry) => entry.endsWith(".d.ts")).sort();
+    const vendoredDeclarations = vendoredEntries
+      .filter((entry) => entry.endsWith(".d.ts") && !generatedStubNames.has(entry))
+      .sort();
+
+    expect(vendoredDeclarations).toEqual(upstreamDeclarations);
+    expect(vendoredEntries.filter((entry) => entry.endsWith(".js"))).toEqual(["index.js"]);
+    await expect(
+      readFile(join(COMPILED_VENDOR_ROOT, "@vercel/sandbox-stable/index.js"), "utf8"),
+    ).resolves.toBe("export {};\n");
   });
 
   it("copies AI SDK declarations from the installed packages without authored stubs", async () => {

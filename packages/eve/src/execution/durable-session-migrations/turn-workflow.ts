@@ -16,7 +16,7 @@ import type {
   SessionCapabilities,
 } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RunMode } from "#shared/run-mode.js";
 
 import { runMigrationChain, type VersionMigration } from "./chain.js";

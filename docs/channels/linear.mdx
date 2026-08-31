@@ -71,7 +71,7 @@ Linear sends webhook signatures in `Linear-Signature`; eve verifies the HMAC ove
 
 ### Dispatch
 
-The default hook dispatches `created` and `prompted` Agent Session events. eve adds a Linear context block with the agent session, issue, comment, and organization identifiers, then continues the same session with `agent-session:<id>`.
+The default hook dispatches `created` and `prompted` Agent Session events. The Linear context includes `app_user_id` when available, plus the agent session, issue, comment, and organization identifiers. The session continues with `agent-session:<id>`.
 
 ### Delivery
 
@@ -99,7 +99,7 @@ Event handlers receive `channel.linear`, which exposes `createActivity`, `listAc
 
 ## Custom hooks
 
-Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent.
+Return `{ auth }` to dispatch, or `null` to acknowledge without waking the agent. Return `title` alongside `auth` to set the title when the dispatch starts a run.
 
 ```ts
 import { defaultLinearAuth, linearChannel } from "eve/channels/linear";

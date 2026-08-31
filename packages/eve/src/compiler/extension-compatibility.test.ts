@@ -17,6 +17,7 @@ describe("extension compatibility manifest", () => {
       kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
       formatVersion: EXTENSION_COMPATIBILITY_MANIFEST_FORMAT_VERSION,
       builtWithEve: "0.24.6",
+      build: { externalDependencies: ["@acme/runtime-sdk"] },
       requires: { extension: 1, tool: 1 },
     } as const;
 
@@ -26,6 +27,25 @@ describe("extension compatibility manifest", () => {
         "/pkg/dist/extension/_manifest.json",
       ),
     ).toEqual(manifest);
+  });
+
+  it("continues to parse format v1 manifests", () => {
+    expect(
+      parseExtensionCompatibilityManifest(
+        JSON.stringify({
+          kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+          formatVersion: 1,
+          builtWithEve: "0.39.0",
+          requires: { extension: 1 },
+        }),
+        "/pkg/dist/extension/_manifest.json",
+      ),
+    ).toEqual({
+      kind: EXTENSION_COMPATIBILITY_MANIFEST_KIND,
+      formatVersion: 1,
+      builtWithEve: "0.39.0",
+      requires: { extension: 1 },
+    });
   });
 
   it("rejects executable or contribution fields", () => {

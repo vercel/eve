@@ -69,12 +69,7 @@ describe("eve ID-addressed session routes", () => {
     });
     expect(createSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        parentTraceContext: {
-          isRemote: true,
-          spanId: "2".repeat(16),
-          traceFlags: 1,
-          traceId: "1".repeat(32),
-        },
+        parentTraceContext: undefined,
       }),
     );
     expect(createSession).toHaveBeenCalledWith(
@@ -91,6 +86,47 @@ describe("eve ID-addressed session routes", () => {
     );
     expect(rejected.status).toBe(400);
     expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues a remote-agent trace for callback sessions", async () => {
+    const createSession = vi.fn().mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "wrun_A",
+    });
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          message: "hello",
+          mode: "conversation",
+        }),
+        headers: {
+          "content-type": "application/json",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(202);
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTraceContext: {
+          isRemote: true,
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+      }),
+    );
   });
 
   it("rejects input responses on session creation", async () => {

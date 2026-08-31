@@ -54,8 +54,16 @@ export const generateMetadata = async ({
   };
 };
 
-const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="flex flex-col gap-2 border-t py-8 first:border-t-0 first:pt-0">
+const Section = ({
+  id,
+  title,
+  children,
+}: {
+  id?: string;
+  title: string;
+  children: React.ReactNode;
+}) => (
+  <section className="flex flex-col gap-2 border-t py-8 first:border-t-0 first:pt-0" id={id}>
     <h2 className="text-gray-1000 text-heading-20">{title}</h2>
     {children}
   </section>
@@ -81,6 +89,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
       <Link
         className="inline-flex items-center gap-1.5 text-gray-800 text-sm transition-colors hover:text-gray-1000"
         href="/integrations"
+        prefetch={true}
       >
         <ArrowLeftIcon className="size-3.5" />
         All integrations
@@ -126,7 +135,7 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
           </Markdown>
         </Section>
         <Section title="Quick start">
-          {setup ? (
+          {setup && integration.quickStart === undefined ? (
             <Suspense
               fallback={
                 <Markdown>
@@ -147,8 +156,8 @@ const IntegrationDetailPage = async ({ params }: PageProps<"/[lang]/integrations
             </Markdown>
           )}
         </Section>
-        <Section title="Configure">
-          {setup ? (
+        <Section id="configure" title="Configure">
+          {setup && integration.configure === undefined ? (
             <Suspense
               fallback={
                 <Markdown>

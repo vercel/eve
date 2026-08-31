@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   coalesceDeliveries,
   coalesceTurnInputs,
+  normalizeModelMessages,
   normalizeUserContent,
   resolveAssistantStepText,
 } from "#harness/messages.js";
@@ -222,6 +223,26 @@ describe("normalizeUserContent", () => {
     expect(coalesceTurnInputs({ message: [attachment] }, { message: " " }).message).toEqual([
       attachment,
     ]);
+  });
+});
+
+describe("normalizeModelMessages", () => {
+  it("drops blank text without removing meaningful structured content", () => {
+    const toolCall = {
+      input: {},
+      toolCallId: "call-1",
+      toolName: "probe",
+      type: "tool-call" as const,
+    };
+    const visible = { content: "Keep me", role: "user" as const };
+
+    expect(
+      normalizeModelMessages([
+        { content: " ", role: "assistant" },
+        { content: [{ text: "", type: "text" }, toolCall], role: "assistant" },
+        visible,
+      ]),
+    ).toEqual([{ content: [toolCall], role: "assistant" }, visible]);
   });
 });
 

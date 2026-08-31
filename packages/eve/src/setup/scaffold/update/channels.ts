@@ -37,7 +37,6 @@ const NEXT_TYPESCRIPT_PACKAGE_VERSION = "6.0.3";
 const CONNECT_PACKAGE_NAME = "@vercel/connect";
 const NEXT_PACKAGE_NAME = "next";
 const PACKAGE_DEPENDENCY_FIELDS = ["dependencies", "devDependencies"] as const;
-const USER_AUTHORED_CHANNEL_DIR = "agent/channels";
 const WEB_CHANNEL_PATH = "agent/channels/eve.ts";
 const WEB_NEXT_CONFIG_PATH = "next.config.ts";
 const WEB_VERCEL_JSON_PATH = "vercel.json";
@@ -313,7 +312,6 @@ async function patchWebPackageJson(
     packageManager,
     workspaceProbeRoot,
     {
-      aiPackageVersion: dependencies.ai,
       nodeEngineRequirement: evePackage.nodeEngine,
       onWorkspaceRootMutation,
     },
@@ -461,7 +459,7 @@ export interface EnsureChannelOptions {
   /** When false, Web Chat leaves Vercel Services config unwritten for preview-only scaffolds. */
   configureVercelServices?: boolean;
   onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
-  /** Dependencies are already owned and installed by a registry item. */
+  /** Web Chat files and dependencies are already installed by a registry item. */
   skipDependencyMutation?: boolean;
 }
 
@@ -480,7 +478,11 @@ async function ensureWebChannel(
   const packageJsonPath = join(options.projectRoot, "package.json");
   const webEntryPath = join(options.projectRoot, "app/page.tsx");
   const webEntryAlreadyExists = await pathExists(webEntryPath);
-  if (!options.force && (await isNextJsProject(options.projectRoot))) {
+  if (
+    !options.force &&
+    !options.skipDependencyMutation &&
+    (await isNextJsProject(options.projectRoot))
+  ) {
     return {
       kind: "web",
       action: "skipped",
@@ -655,8 +657,8 @@ async function ensureSlackChannel(
   return result;
 }
 
-export async function listAuthoredChannels(projectRoot: string): Promise<string[]> {
-  const channelsDir = join(projectRoot, USER_AUTHORED_CHANNEL_DIR);
+export async function listAuthoredChannels(agentRoot: string): Promise<string[]> {
+  const channelsDir = join(agentRoot, "channels");
   let entries;
   try {
     entries = await readdir(channelsDir, { withFileTypes: true });

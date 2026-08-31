@@ -2,6 +2,7 @@ import { shallowRef, computed, onScopeDispose, type ComputedRef } from "vue";
 import type { UserContent } from "ai";
 
 import {
+  detachEveAgentStore,
   EveAgentStore,
   type EveAgentStoreCallbacks,
   type EveAgentStoreSnapshot,
@@ -14,6 +15,7 @@ import type { ClientSession } from "#client/session.js";
 import { defaultMessageReducer, type EveMessageData } from "#client/message-reducer.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type {
+  CancelSessionResult,
   ClientAuth,
   HeadersValue,
   RespondTurnOptions,
@@ -24,9 +26,9 @@ import type {
 export type { PrepareSend };
 
 /**
- * Lifecycle phase of a `useEveAgent` session: `"ready"` (idle), `"submitted"`
- * (request sent, awaiting first event), `"streaming"` (events arriving), or
- * `"error"`.
+ * Lifecycle phase of a `useEveAgent` session: `"ready"` (idle), `"resuming"`
+ * (checking an attached session), `"submitted"` (request sent, awaiting first
+ * event), `"streaming"` (events arriving), or `"error"`.
  */
 export type UseEveAgentStatus = EveAgentStoreStatus;
 
@@ -43,12 +45,16 @@ export type UseEveAgentSnapshot<TData> = EveAgentStoreSnapshot<TData>;
  * Reactive return value from `useEveAgent`.
  */
 export interface UseEveAgentReturn<TData> {
+  /** Request durable cancellation of the active turn while continuing to receive its events. */
+  readonly cancel: () => Promise<CancelSessionResult>;
   /** Projected state: the reducer folds every stream event into this value. */
   readonly data: ComputedRef<TData>;
   /** Last transport-level error, or `undefined` when healthy. */
   readonly error: ComputedRef<Error | undefined>;
   /** Raw server events from this session (authoritative stream). */
   readonly events: ComputedRef<readonly MessageStreamEvent[]>;
+  /** Replay the attached durable session and follow its in-flight turn, if any. */
+  readonly resume: () => Promise<void>;
   /** Clear all state and start a new session. */
   readonly reset: () => void;
   /** Send a message with optional turn settings. */
@@ -63,10 +69,12 @@ export interface UseEveAgentReturn<TData> {
   ) => Promise<void>;
   /** Current session identity and stream cursor. */
   readonly session: ComputedRef<ClientSessionState | undefined>;
-  /** Lifecycle phase: `"ready"` (idle), `"submitted"` (request sent, awaiting first event), `"streaming"` (events arriving), or `"error"`. */
+  /**
+   * Lifecycle phase: `"ready"` (idle), `"resuming"` (checking an attached
+   * session), `"submitted"` (request sent, awaiting first event), `"streaming"`
+   * (events arriving), or `"error"`.
+   */
   readonly status: ComputedRef<UseEveAgentStatus>;
-  /** Abort the in-flight request. */
-  readonly stop: () => void;
 }
 
 /**
@@ -123,6 +131,8 @@ export interface UseEveAgentOptions<TData> extends EveAgentStoreCallbacks<TData>
    * @default defaultMessageReducer()
    */
   readonly reducer?: EveAgentReducer<TData>;
+  /** Replay the attached durable session after mount. Requires `initialSession` or `session`. */
+  readonly resume?: boolean;
   /**
    * Externally owned {@link ClientSession} to bind instead of creating one.
    *
@@ -146,13 +156,16 @@ export function useEveAgent<TData>(
  * Without a `reducer`, events project into `EveMessageData` via
  * `defaultMessageReducer()`; pass `reducer` to project into a custom `TData`.
  * Returns reactive refs (`data`, `error`, `events`, `session`, `status`) plus
- * `send`, `respond`, `stop`, and `reset`. Configuration is read once on store creation;
- * remount to change it. On scope dispose, the in-flight request is aborted and
+ * `send`, `respond`, `resume`, `cancel`, and `reset`. Configuration is read once on store creation;
+ * remount to change it. On scope dispose, the in-flight request is detached and
  * the store unsubscribed.
  */
 export function useEveAgent<TData>(
   options: UseEveAgentOptions<TData> = {},
 ): UseEveAgentReturn<TData> {
+  if (options.resume && options.initialSession === undefined && options.session === undefined) {
+    throw new Error("useEveAgent({ resume: true }) requires initialSession or session.");
+  }
   const reducer = options.reducer ?? (defaultMessageReducer() as EveAgentReducer<TData>);
 
   const store = new EveAgentStore<TData>({
@@ -180,14 +193,16 @@ export function useEveAgent<TData>(
     const unsubscribe = store.subscribe(() => {
       snapshot.value = store.snapshot;
     });
+    if (options.resume) void store.resume();
 
     onScopeDispose(() => {
       unsubscribe();
-      store.stop();
+      detachEveAgentStore(store);
     });
   }
 
   return {
+    cancel: () => store.cancel(),
     data: computed(() => snapshot.value.data),
     error: computed(() => snapshot.value.error),
     events: computed(() => snapshot.value.events),
@@ -196,10 +211,10 @@ export function useEveAgent<TData>(
       inputResponses: Parameters<ClientSession["respond"]>[0],
       options?: RespondTurnOptions<TOutput>,
     ) => store.send({ ...options, inputResponses }),
+    resume: () => store.resume(),
     send: <TOutput = unknown>(message: string | UserContent, options?: SendTurnOptions<TOutput>) =>
       store.send({ ...options, message }),
     session: computed(() => snapshot.value.session),
     status: computed(() => snapshot.value.status),
-    stop: () => store.stop(),
   };
 }

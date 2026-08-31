@@ -1,14 +1,35 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionIdKey } from "#context/keys.js";
 import {
+  CallbackBaseUrlKey,
   clearPendingAuthorization,
   consumeAuthorizationResult,
   getPendingAuthorization,
+  getHookUrl,
   PendingAuthorizationResultKey,
+  resolveActiveAuthorizationChallenges,
   setPendingAuthorization,
 } from "#harness/authorization.js";
-import type { ConnectionPrincipal } from "#runtime/connections/types.js";
+import type { ConnectionPrincipal } from "#shared/connection-types.js";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("authorization callback URLs", () => {
+  it("includes the Vercel automation bypass query when configured", () => {
+    vi.stubEnv("VERCEL_AUTOMATION_BYPASS_SECRET", "secret value");
+    const ctx = new ContextContainer();
+    ctx.set(CallbackBaseUrlKey, "https://agent.example.com");
+    ctx.set(SessionIdKey, "session-1");
+
+    expect(contextStorage.run(ctx, () => getHookUrl("linear", "attempt-1"))).toBe(
+      "https://agent.example.com/eve/v1/connections/linear/callback/attempt-1/session-1%3Aauth?x-vercel-protection-bypass=secret+value",
+    );
+  });
+});
 
 describe("authorization callback results", () => {
   it("consumes each callback result once", () => {
@@ -41,6 +62,37 @@ describe("authorization callback results", () => {
       });
       expect(ctx.has(PendingAuthorizationResultKey)).toBe(false);
       expect(consumeAuthorizationResult("linear")).toBeUndefined();
+    });
+  });
+
+  it("does not confuse same-named tool and connection callbacks", () => {
+    const ctx = new ContextContainer();
+    ctx.set(PendingAuthorizationResultKey, [
+      {
+        callback: { method: "GET", params: { code: "tool-code" } },
+        hookUrl: "https://agent.example.com/tool",
+        name: "linear",
+        principal: { type: "app" },
+      },
+      {
+        callback: { method: "GET", params: { code: "connection-code" } },
+        hookUrl: "https://agent.example.com/connection",
+        instanceId: "connection:linear-account",
+        name: "linear",
+        principal: { type: "app" },
+      },
+    ]);
+
+    contextStorage.run(ctx, () => {
+      expect(() => consumeAuthorizationResult("linear", "connection:other-account")).toThrow(
+        "resolved connection changed while sign-in was pending",
+      );
+      expect(consumeAuthorizationResult("linear")).toMatchObject({
+        callback: { params: { code: "tool-code" } },
+      });
+      expect(consumeAuthorizationResult("linear", "connection:linear-account")).toMatchObject({
+        callback: { params: { code: "connection-code" } },
+      });
     });
   });
 });
@@ -129,6 +181,22 @@ describe("pending authorization attempts", () => {
       challenge("github", "github-1"),
       challenge("linear", "linear-2"),
     ]);
+  });
+
+  it("keeps only the latest same-scope challenge from one batch", () => {
+    const userA = { id: "user-a", issuer: "idp", type: "user" } as const;
+    const userB = { id: "user-b", issuer: "idp", type: "user" } as const;
+    const first = challenge("linear", "linear-a-1", userA);
+    const otherPrincipal = challenge("linear", "linear-b", userB);
+    const latest = challenge("linear", "linear-a-2", userA);
+    const active = resolveActiveAuthorizationChallenges([first, otherPrincipal, latest]);
+
+    expect(active).toEqual([otherPrincipal, latest]);
+    expect(
+      getPendingAuthorization(
+        setPendingAuthorization(undefined, { challenges: [first, otherPrincipal, latest] }),
+      )?.challenges,
+    ).toEqual([otherPrincipal, latest]);
   });
 
   it("clears by exact attempt identity", () => {

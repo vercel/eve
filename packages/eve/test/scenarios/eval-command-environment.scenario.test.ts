@@ -1,4 +1,4 @@
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -50,6 +50,17 @@ const DEVELOPMENT_ENV_KEYS = [
 
 async function createEnvironmentFixture(): Promise<string> {
   const fixtureRoot = await createScratchDirectory("eve-eval-env-");
+
+  await mkdir(join(fixtureRoot, "agent"), { recursive: true });
+  await writeFile(
+    join(fixtureRoot, "package.json"),
+    `${JSON.stringify({ name: "eve-eval-env-test", private: true, type: "module" })}\n`,
+  );
+  await writeFile(
+    join(fixtureRoot, "agent", "agent.mjs"),
+    'export default { model: "openai/gpt-5.4" };\n',
+  );
+  await writeFile(join(fixtureRoot, "agent", "instructions.md"), "You are a precise assistant.\n");
 
   await writeFile(
     join(fixtureRoot, ".env"),

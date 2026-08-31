@@ -113,6 +113,19 @@ function readMetricValue(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function compareTrackedNumericMetric(currentValue, baselineValue) {
+  if (
+    typeof currentValue !== "number" ||
+    !Number.isFinite(currentValue) ||
+    typeof baselineValue !== "number" ||
+    !Number.isFinite(baselineValue)
+  ) {
+    return null;
+  }
+
+  return compareNumericMetric(currentValue, baselineValue);
+}
+
 function readSortedRoutes(routes) {
   return Array.isArray(routes)
     ? routes.filter((route) => typeof route === "string").sort(compareRoutes)
@@ -310,20 +323,40 @@ function comparePublishedPackages(currentPackage, baselinePackage) {
     readDependencyEntries(currentPackage?.peerDependencies),
     readDependencyEntries(baselinePackage?.peerDependencies),
   );
+  const installedDependencyEdgeCount = compareTrackedNumericMetric(
+    currentPackage?.installedDependencyEdgeCount,
+    baselinePackage?.installedDependencyEdgeCount,
+  );
+  const installedDistinctPackageNameCount = compareTrackedNumericMetric(
+    currentPackage?.installedDistinctPackageNameCount,
+    baselinePackage?.installedDistinctPackageNameCount,
+  );
+  const installedOptionalPeerEdgeCount = compareTrackedNumericMetric(
+    currentPackage?.installedOptionalPeerEdgeCount,
+    baselinePackage?.installedOptionalPeerEdgeCount,
+  );
+  const installedPackageInstanceCount = compareTrackedNumericMetric(
+    currentPackage?.installedPackageInstanceCount,
+    baselinePackage?.installedPackageInstanceCount,
+  );
 
   return {
     installedDependencyBytes: compareNumericMetric(
       readMetricValue(currentPackage?.installedDependencyBytes),
       readMetricValue(baselinePackage?.installedDependencyBytes),
     ),
+    ...(installedDependencyEdgeCount === null ? {} : { installedDependencyEdgeCount }),
+    ...(installedDistinctPackageNameCount === null ? {} : { installedDistinctPackageNameCount }),
     installedFileCount: compareNumericMetric(
       readMetricValue(currentPackage?.installedFileCount),
       readMetricValue(baselinePackage?.installedFileCount),
     ),
+    ...(installedOptionalPeerEdgeCount === null ? {} : { installedOptionalPeerEdgeCount }),
     installedPackageBytes: compareNumericMetric(
       readMetricValue(currentPackage?.installedPackageBytes),
       readMetricValue(baselinePackage?.installedPackageBytes),
     ),
+    ...(installedPackageInstanceCount === null ? {} : { installedPackageInstanceCount }),
     installedSizeBytes: compareNumericMetric(
       readMetricValue(currentPackage?.installedSizeBytes),
       readMetricValue(baselinePackage?.installedSizeBytes),

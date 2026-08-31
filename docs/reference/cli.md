@@ -3,32 +3,33 @@ title: "CLI"
 description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
-The `eve` binary (`bin: eve`) runs from your app root, and every command first loads `.env`/`.env.local` from that root. Running `eve` with no command runs `eve dev`.
+Relevant `eve` commands can run from the application root or any directory beneath it. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
 
 ## Commands
 
-| Command                       | Description                                                                                                                                           |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                                            |
-| `eve info`                    | Print the resolved application, including discovered tools, skills, subagents, schedules, channels, routes, artifact paths, and discovery diagnostics |
-| `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                                      |
-| `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                                              |
-| `eve dev`                     | Start the local dev server and open the terminal UI                                                                                                   |
-| `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                                                 |
-| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                                         |
-| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                                           |
-| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                                     |
-| `eve traces ls`               | List locally captured agent traces, most recent first                                                                                                 |
-| `eve traces [trace]`          | Show a local span tree (the most recent when omitted)                                                                                                 |
-| `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                                                |
-| `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                                         |
-| `eve eval`                    | Run evals against the local app or a remote target                                                                                                    |
-| `eve channels list`           | List user-authored channels                                                                                                                           |
-| `eve extension init [target]` | Create a new extension package                                                                                                                        |
-| `eve extension build`         | Build the current package as an extension                                                                                                             |
-| `eve set`                     | Change the root agent's model and reasoning effort                                                                                                    |
-| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                                     |
-| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                                          |
+| Command                       | Description                                                                                                                        |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `eve`                         | Initialize the current directory, or start development when it is already an eve project                                           |
+| `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                         |
+| `eve info`                    | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
+| `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
+| `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                           |
+| `eve dev`                     | Start the local dev server and open the terminal UI                                                                                |
+| `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                              |
+| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                      |
+| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                        |
+| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                  |
+| `eve traces ls`               | List locally captured agent traces, most recent first                                                                              |
+| `eve traces [trace]`          | Show a local span tree (the most recent when omitted)                                                                              |
+| `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                             |
+| `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                      |
+| `eve eval`                    | Run evals against the local app or a remote target                                                                                 |
+| `eve channels list`           | List user-authored channels                                                                                                        |
+| `eve extension init [target]` | Create a new extension package                                                                                                     |
+| `eve extension build`         | Build the current package as an extension                                                                                          |
+| `eve set`                     | Change the root agent's model and reasoning effort                                                                                 |
+| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                  |
+| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                       |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -40,19 +41,22 @@ eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channe
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
 
-| Target                                    | What happens                                                                                                                                             |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eve init my-agent`                       | New agent project in `my-agent/`                                                                                                                         |
-| `eve init .` (or an existing project dir) | Adds `agent/` plus missing `eve`, `ai`, and `zod` deps. Needs a `package.json` and no `agent/` files yet                                                 |
-| `eve init` with no target                 | Same as `eve init .`, except coding agents (Claude Code, Cursor, and similar) get a setup guide instead of scaffolding — they have not chosen a name yet |
+| Target                                                                     | What happens                                                                                                                                                             |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `eve init my-agent`                                                        | Creates an agent project in `my-agent/`                                                                                                                                  |
+| `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                                                                        |
+| `eve init` or `eve init .` in a non-empty directory without `package.json` | Asks whether to scaffold in the current directory or a named subdirectory. Using the current directory preserves unrelated files but overwrites files at generated paths |
+| `eve init .` in an existing project                                        | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files                                                   |
+
+Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
 
 After scaffolding, a human terminal usually continues into `eve dev`. If a coding-agent REPL is on `PATH`, the handoff menu can open it instead or exit without starting either process. Coding-agent launches print the next steps instead of opening the TUI, so the session does not get stuck. Fresh projects use the parent workspace's package manager when there is one; otherwise they use the manager that launched `eve init`.
 
-| Flag                   | Type   | Default                     | Description                                                                                                              |
-| ---------------------- | ------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `--model <model>`      | string | `anthropic/claude-sonnet-5` | Set the root agent's AI Gateway model ID.                                                                                |
-| `--reasoning <effort>` | enum   | provider default            | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
-| `--channel-web-nextjs` | flag   | off                         | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
+| Flag                   | Type   | Default                    | Description                                                                                                              |
+| ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--model <model>`      | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
+| `--reasoning <effort>` | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
+| `--channel-web-nextjs` | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |
 
 ## `eve extension`
 
@@ -141,7 +145,7 @@ eve info [--json]
 | -------- | ---- | ------- | ------------ |
 | `--json` | flag | off     | Emit as JSON |
 
-Run this first when something behaves unexpectedly. It confirms a file was discovered, lists the active surface, and surfaces discovery diagnostics, all faster than booting the dev server.
+Run this first when something behaves unexpectedly. It confirms a file was discovered, lists the active surface, and surfaces discovery diagnostics, all faster than booting the dev server. Static instructions appear in source order with their `system` or `user` role. Dynamic instruction results are runtime-only and do not appear here.
 
 ## `eve build`
 
@@ -253,7 +257,7 @@ Local callback-based connection authorization requires a persistent server. Run 
 
 Local dev records the last ready URL per resolved app root in `.eve/dev-server-state.v1.json`. A second interactive `eve dev` reconnects only when that URL is loopback and healthy; each terminal UI creates a fresh client session while sharing the server process. A stale or malformed record is replaced when eve starts a new server. Passing `--host`, `--port`, or a `PORT` environment value skips reconnection and reports a healthy recorded server instead.
 
-Local dev keeps immutable runtime source snapshots under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
+Local dev keeps immutable runtime generations under `.eve/dev-runtime/snapshots/` so in-flight turns hold a consistent code revision while new turns pick up rebuilds. Each generation contains the compiled authored module graph and runtime resources rather than a recursive copy of the app or workspace. The terminal REPL keeps its logical session across successful rebuilds, so the next turn continues the conversation on the latest generation; `/new` terminally retires that session before clearing the transcript, and the next prompt starts a fresh session with a new session-scoped sandbox on first sandbox use. After a generation is superseded, `eve dev` retains it for at least 30 minutes and also retains the five most recently superseded generations, regardless of the configured Workflow World. The active generation is never pruned. Old runtime snapshots and local sandbox templates are pruned in the background. For manual cleanup, stop `eve dev` before deleting `.eve/dev-runtime/snapshots/` or `.eve/sandbox-cache/local/templates/`. A turn that remains unfinished beyond the automatic retention window can no longer resume after its generation is pruned.
 
 When no authored `agent/instrumentation.ts` exists, local dev also records traces under `.eve/traces/`, and bounds that store by age, size, and a keep-newest floor. Configure it with `EVE_TRACES*` in `.env.local`; see [`eve traces`](#retention) for the rules and defaults.
 
@@ -290,17 +294,15 @@ eve traces --json          # dump the full trace as JSON
 
 Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
 
-Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `ai.toolCall` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
+Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `execute_tool` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
-A subagent keeps its own session id but records into the trace its parent had open at dispatch, so delegated work appears under the session that caused it, tagged with `agent.root.session.id`. Either session id resolves to that trace. A remote agent traces under its own deployment and is not recorded here.
+A local subagent keeps its own session id but records into the parent trace. Its `invoke_agent` span is parented to the `agent.action` span that dispatched it, so the span tree carries the relationship without duplicate lineage attributes; `agent.subagent.name` remains on the child invocation as a standalone label. Either session id resolves to that trace. Remote agents propagate the parent trace context over `traceparent`.
 
-A session long enough to outgrow one trace — far longer than anything you will drive locally — continues into a new one. Each is a session window, numbered from zero on `agent.session.window`; passing a session id shows every window it produced, oldest first, and a trace id shows just that window.
+A durable session keeps one persisted trace context across turns and worker resumptions. Independently replayed attempts can still produce another trace; passing the session id shows every trace it produced, oldest first.
 
-One parent turn can dispatch several subagents into the same window, so a child's turn spans name the dispatch: `agent.parent.session.id`, `agent.parent.turn.id`, and `agent.parent.call_id` identify the tool call that created the child, and `agent.subagent.name` the subagent it invoked. Top-level sessions carry none of these.
+Every span carries a real duration except `agent.session`: an idle session never closes, so it is recorded as a zero-duration marker and the span tree shows its descendant extent instead. A turn's `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
 
-Every span carries a real duration except `agent.session`: an idle session never closes, so it is recorded as a zero-duration marker and the span tree shows its descendant extent instead. A turn's span is written when the turn settles, so a running turn shows only its steps.
-
-Model and tool-call spans carry their inputs and outputs — system prompt, prompt messages, and response text for models; call arguments and results for tools — each capped at 32 KB. Set `EVE_TRACES_CONTENT=off` to keep payloads out of the spool.
+Model and `execute_tool` spans omit their inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models, plus call arguments and results for tools. Each captured value is capped at 32 KB.
 
 Step spans carry token counts, and cost when Vercel AI Gateway served the call. Both follow the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (`gen_ai.usage.*`), so a third-party backend reads them without mapping.
 
@@ -308,29 +310,35 @@ Step spans carry token counts, and cost when Vercel AI Gateway served the call. 
 
 eve sweeps the store when a session finishes and when the dev server starts, evicting oldest-first past the bounds below — except that the newest traces and anything written in the last five minutes are always kept, so a sweep will exceed the size budget rather than drop a trace you just recorded. Set the bounds in `.env.local`, which `eve dev` loads automatically; each accepts `off` to disable it individually.
 
-| Variable                     | Default              | Effect                                                                                      |
-| ---------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
-| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                               |
-| `EVE_TRACES_CONTENT`         | on                   | `off` stops capturing model prompt/response and tool input/output attributes on local spans |
-| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                                      |
-| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                             |
-| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                                |
+| Variable                     | Default              | Effect                                                                              |
+| ---------------------------- | -------------------- | ----------------------------------------------------------------------------------- |
+| `EVE_TRACES`                 | on                   | `off` stops writing traces and stops sweeping                                       |
+| `EVE_TRACES_CONTENT`         | off                  | `on` captures model prompt/response and tool input/output attributes on local spans |
+| `EVE_TRACES_MAX_AGE_MS`      | `604800000` (7d)     | Age after which a trace may be evicted                                              |
+| `EVE_TRACES_MAX_TOTAL_BYTES` | `536870912` (512 MB) | Size budget for the whole store                                                     |
+| `EVE_TRACES_RETAIN_COUNT`    | `20`                 | Newest traces kept regardless of age or size                                        |
 
 ## `eve link`
 
 ```bash
 eve link
+eve link --non-interactive --project <name-or-id> [--team <team-id-or-slug>]
 ```
 
-Links the current directory to a Vercel project. After selecting a team, you can create a project named for the agent or link an existing project. The existing-project picker shows recent projects; type a project name and choose **Search for '<name>'** to search the rest of that team's projects. Vercel links the resolved project, eve verifies its project ID, and then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links: the pickers always run, and the new choice wins. The command is interactive only; in CI, use `vercel link --project <name> --yes --non-interactive` instead. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
+Links the current directory to a Vercel project. After selecting a team, you can create a project named for the agent or link an existing project. The existing-project picker shows recent projects; type a project name and choose **Search for '<name>'** to search the rest of that team's projects. Vercel links the resolved project, eve verifies its project ID, and then pulls the project's environment so an AI Gateway credential (`VERCEL_OIDC_TOKEN` or `AI_GATEWAY_API_KEY`) lands in `.env.local`. Running it again re-links: the pickers always run, and the new choice wins.
+
+For CI or an agent, pass `--non-interactive` and `--project`. `--project` accepts the same Vercel project name or ID as `vercel link`; `--team` accepts its team ID or slug. The command never opens a picker or browser in this mode. A running `eve dev` reloads env files automatically, so you don't need to restart after the pull.
 
 ## `eve deploy`
 
 ```bash
 eve deploy
+eve deploy --non-interactive --yes [--project <name-or-id>] [--team <team-id-or-slug>]
 ```
 
-Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. An already-linked project deploys with or without a TTY (non-interactive runs pass the non-interactive `vercel` flags). When a terminal is present, an unlinked deployment signs in to Vercel if needed and then walks the `eve link` pickers; otherwise, it exits with guidance.
+Deploys the agent to Vercel production (`vercel deploy --prod`), installing dependencies first and pulling environment variables after. An already-linked project deploys with or without a TTY. When a terminal is present, an unlinked deployment signs in to Vercel if needed and then walks the `eve link` pickers.
+
+For CI or an agent, pass `--non-interactive --yes`. `--yes` explicitly confirms the production deployment. With `--project`, eve links that Vercel project and pulls its environment before deploying; `--team` has the same ID-or-slug semantics as `eve link`. Without `--project`, the directory must already be linked. The non-interactive mode never opens a picker, browser, or login flow.
 
 ## `eve eval`
 

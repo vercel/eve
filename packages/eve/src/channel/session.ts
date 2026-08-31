@@ -6,6 +6,7 @@ import {
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
+  ActivityObserverConfig,
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
@@ -21,7 +22,11 @@ import { DEFAULT_TURN_POLICY } from "#channel/types.js";
 import { serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import type { SessionAuth } from "#context/keys.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import {
+  type InputResponse,
+  parseInputResponses,
+  type StrictInputResponses,
+} from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 
@@ -34,12 +39,12 @@ export interface Session {
     options: SessionSendOptions,
   ): Promise<SessionSendCommandResult>;
   /** Answers pending input requests on this exact session ID. */
-  respond(
-    inputResponses: readonly InputResponse[],
+  respond<const TResponses extends readonly InputResponse[]>(
+    inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn. */
-  cancel(options?: { turnId?: string }): Promise<CancelTurnResult>;
+  /** Requests cancellation of this exact session's active turn or one owned task. */
+  cancel(options?: { taskId?: string; turnId?: string }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -51,6 +56,7 @@ export interface Session {
 }
 
 interface SessionDeliveryOptions {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly auth: SessionAuthContext | null;
   /** Public callback destination for a delegated continuation turn. */
   readonly callback?: SessionCallback;
@@ -89,7 +95,7 @@ export function createSession(
     id,
     async send(message, options) {
       const delivery = createDelivery(metadata);
-      const caller = sessionCallbackToTurnCaller(options.callback);
+      const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
       const payload: {
         context?: readonly string[];
         message: string | UserContent | undefined;
@@ -114,13 +120,14 @@ export function createSession(
       if (inputResponses.length === 0) {
         throw new Error("respond() requires at least one input response.");
       }
-      const caller = sessionCallbackToTurnCaller(options.callback);
+      const validatedInputResponses = parseInputResponses(inputResponses);
+      const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
       const delivery = createDelivery(metadata);
       const payload: {
         context?: readonly string[];
         inputResponses: readonly InputResponse[];
         outputSchema?: JsonObject;
-      } = { inputResponses };
+      } = { inputResponses: validatedInputResponses };
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
@@ -135,9 +142,9 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { turnId?: string }) {
+    async cancel(options?: { taskId?: string; turnId?: string }) {
       return await runtime.dispatchSession({
-        command: { kind: "cancel", turnId: options?.turnId },
+        command: { kind: "cancel", taskId: options?.taskId, turnId: options?.turnId },
         sessionId: id,
       });
     },
@@ -228,12 +235,15 @@ function namespaceContinuationToken(currentToken: string, rawToken: string): str
 /** @internal Converts validated public callback metadata into runtime turn routing. */
 export function sessionCallbackToTurnCaller(
   callback: SessionCallback | undefined,
+  activityObserver?: ActivityObserverConfig,
 ): TurnCaller | undefined {
   return callback === undefined
     ? undefined
     : {
+        activityObserver,
         callId: callback.callId,
-        replyTo: { kind: "callback", url: callback.url },
+        replyTo: { kind: "callback", token: callback.token, url: callback.url },
         subagentName: callback.subagentName,
+        taskId: callback.taskId,
       };
 }

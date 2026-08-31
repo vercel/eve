@@ -19,8 +19,8 @@ import {
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { isEveServerHealthy } from "#shared/eve-server-health.js";
 import { isLoopbackServerUrl } from "#shared/network-address.js";
+import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { handleDevRuntimeArtifactsRequest } from "#internal/nitro/routes/dev-runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import {
@@ -64,6 +64,7 @@ import {
 } from "#internal/nitro/host/dev-server-url.js";
 
 const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
+const DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS = 1_000;
 const PORT_ENV = "PORT";
 
 export { normalizeDevelopmentServerClientUrl };
@@ -82,7 +83,7 @@ export async function isActiveDevelopmentServerForApp(input: {
     if (
       recordedServerUrl === undefined ||
       !isLoopbackServerUrl(recordedServerUrl) ||
-      !(await isEveServerHealthy(recordedServerUrl))
+      !(await isDevelopmentServerReady(recordedServerUrl))
     ) {
       return false;
     }
@@ -94,6 +95,15 @@ export async function isActiveDevelopmentServerForApp(input: {
   } catch {
     return false;
   }
+}
+
+async function isDevelopmentServerReady(serverUrl: string): Promise<boolean> {
+  return (
+    (await readDevelopmentRuntimeArtifactsRevision({
+      serverUrl,
+      timeoutMs: DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS,
+    })) !== undefined
+  );
 }
 
 function isAddressInUseError(error: unknown): error is NodeJS.ErrnoException {
@@ -382,7 +392,7 @@ async function startNitroDevelopmentServer(
   if (
     existingServerUrl !== undefined &&
     isLoopbackServerUrl(existingServerUrl) &&
-    (await isEveServerHealthy(existingServerUrl))
+    (await isDevelopmentServerReady(existingServerUrl))
   ) {
     if (options.existing === "attach-if-unconfigured" && !hasExplicitEndpoint) {
       return {

@@ -153,4 +153,87 @@ describe("mounted extension via directory form with override", () => {
     );
     expect(pulse).toBeUndefined();
   });
+
+  it("replaces extension local and remote subagents with remote overrides", async () => {
+    const app = await scenarioApp({
+      name: "mounted-extension-subagent-override-repro",
+      installDependencies: true,
+      files: {
+        "agent/agent.mjs": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/instructions.md": "You are a precise assistant.\n",
+        "agent/extensions/crm/extension.mjs": [
+          'import crm from "@acme/crm";',
+          "export default crm({});",
+          "",
+        ].join("\n"),
+        "agent/extensions/crm/subagents/weather.mjs": [
+          'import { defineRemoteAgent } from "eve";',
+          "export default defineRemoteAgent({",
+          '  description: "Use the remote weather agent.",',
+          '  url: "https://weather.example.com",',
+          "});",
+          "",
+        ].join("\n"),
+        "agent/extensions/crm/subagents/alerts.mjs": [
+          'import { defineRemoteAgent } from "eve";',
+          "export default defineRemoteAgent({",
+          '  description: "Use the consumer alerts agent.",',
+          '  url: "https://consumer-alerts.example.com",',
+          "});",
+          "",
+        ].join("\n"),
+        "node_modules/@acme/crm/package.json": `${JSON.stringify({
+          name: "@acme/crm",
+          type: "module",
+          eve: { extension: { source: "source", dist: "extension" } },
+          exports: { ".": "./extension/extension.mjs" },
+        })}\n`,
+        "node_modules/@acme/crm/extension/_manifest.json": JSON.stringify({
+          kind: "eve-extension",
+          formatVersion: 1,
+          builtWithEve: "0.0.0-test",
+          requires: { extension: 1, subagent: 3 },
+        }),
+        "node_modules/@acme/crm/extension/extension.mjs": [
+          'import { defineExtension } from "eve/extension";',
+          "export default defineExtension({});",
+          "",
+        ].join("\n"),
+        "node_modules/@acme/crm/extension/subagents/weather/agent.mjs": [
+          "export default {",
+          '  model: "openai/gpt-5.4",',
+          '  description: "Use the local weather agent.",',
+          "};",
+          "",
+        ].join("\n"),
+        "node_modules/@acme/crm/extension/subagents/alerts.mjs": [
+          'import { defineRemoteAgent } from "eve";',
+          "export default defineRemoteAgent({",
+          '  description: "Use the extension alerts agent.",',
+          '  url: "https://extension-alerts.example.com",',
+          "});",
+          "",
+        ].join("\n"),
+      },
+    });
+
+    await compileAgent({ startPath: app.appRoot });
+    const manifest = await loadCompiledManifest({
+      compiledArtifactsSource: createDiskRuntimeCompiledArtifactsSource(app.appRoot),
+    });
+
+    expect(manifest.subagents).toHaveLength(0);
+    expect(manifest.remoteAgents).toMatchObject([
+      {
+        name: "crm__alerts",
+        owner: { kind: "application" },
+        url: "https://consumer-alerts.example.com",
+      },
+      {
+        name: "crm__weather",
+        owner: { kind: "application" },
+        url: "https://weather.example.com",
+      },
+    ]);
+  });
 });

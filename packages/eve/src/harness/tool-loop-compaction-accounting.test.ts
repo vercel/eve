@@ -4,6 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
+import {
+  applyMemoryRecallBatches,
+  createMemoryLock,
+  projectMemoryHistoryFromSessionState,
+  validateMemoryRecallResult,
+} from "#shared/memory-state.js";
 
 vi.mock("ai", () => ({
   generateText: vi.fn(),
@@ -122,6 +128,67 @@ function expectStepFn(value: StepNext): StepFn {
 }
 
 describe("tool-loop structured compaction accounting", () => {
+  it("keeps private memory out of the summary while retaining its attributed record", async () => {
+    vi.mocked(generateText).mockResolvedValue({
+      text: "ordinary summary",
+    } as Awaited<ReturnType<typeof generateText>>);
+    setupMockAgentSequence([
+      {
+        finishReason: "stop",
+        response: { messages: [{ content: "Done.", role: "assistant" }] },
+        text: "Done.",
+        toolCalls: [],
+        toolResults: [],
+      },
+    ]);
+    const memoryLock = createMemoryLock({
+      namespace: "app",
+      scope: "user_1",
+      slot: "profile",
+      turn: { id: "turn_0", input: [], sequence: 0 },
+      visibility: "scope",
+    });
+    const recalled = applyMemoryRecallBatches({
+      batches: [
+        {
+          lock: memoryLock,
+          messages: validateMemoryRecallResult(
+            { messages: [{ content: "PRIVATE_MEMORY_SENTINEL", id: "profile" }] },
+            "profile",
+          ),
+          operationId: "recall_1",
+        },
+      ],
+      history: [],
+      state: undefined,
+    });
+    const runStep = createToolLoopHarness(
+      createTestConfig({
+        historyProjector: projectMemoryHistoryFromSessionState,
+        resolveModel: vi.fn().mockResolvedValue({ modelId: "test-model" } as LanguageModel),
+      }),
+    );
+
+    const result = await runStep(
+      createTestSession({
+        compaction: { recentWindowSize: 0, threshold: 100 },
+        history: [
+          ...recalled.history,
+          { content: `ordinary ${"conversation ".repeat(100)}`, role: "user" },
+        ],
+        state: recalled.state,
+      }),
+      { message: "continue" },
+    );
+
+    expect(vi.mocked(generateText)).toHaveBeenCalledOnce();
+    expect(vi.mocked(generateText).mock.calls[0]?.[0].prompt).not.toContain(
+      "PRIVATE_MEMORY_SENTINEL",
+    );
+    expect(JSON.stringify(result.session.history)).toContain("PRIVATE_MEMORY_SENTINEL");
+    expect(JSON.stringify(result.session.history)).toContain("eve.memory");
+  });
+
   it("compacts before the continuation step when structured tool results were appended", async () => {
     vi.mocked(generateText).mockResolvedValue({
       text: "summary",

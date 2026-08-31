@@ -123,6 +123,14 @@ The pinned-turn assertion is a deliberate tripwire: it must be flipped when
 turn dispatch gains preview latest-routing
 (https://github.com/vercel/eve/issues/582).
 
+`agent-channels/evals/custom-channels/cross-version-session-inbox.eval.ts`
+deploys the fixture with the published `eve@0.30.8`, holds a turn active in
+that old consumer, then redeploys the current checkout and sends a replacement
+message through the same durable session. It verifies both sides of the codec:
+the current producer must choose the old consumer's wire version, and the real
+old consumer must decode and buffer it. The eval then cancels the deliberately
+blocked turn and verifies that the old session runs the buffered follow-up.
+
 The eval redeploys from inside its test body: it mutates the agent source,
 runs `eve build` + `vc deploy`, and repoints a run-scoped Vercel alias at
 each new deployment, polling `/eve/v1/info` until the alias serves it.
@@ -170,6 +178,8 @@ matrices from the registry:
 - `model_matrix` — fixture × model legs for `e2e-local.yml`. The first
   registry model is the default that every fixture runs on; the rest run only
   on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
+  A fixture can add a narrowly scoped leg with `e2e.additionalModels` entries
+  shaped as `{ "name": "short-check-name", "id": "provider/model" }`.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
   workflow. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the

@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { DeploymentInfo } from "#setup/project-resolution.js";
-import { isEveProject } from "#setup/scaffold/index.js";
 
 import { runDeployCommand, type DeployCliLogger } from "./deploy.js";
 
@@ -50,8 +50,8 @@ function createDeployProjectDeps() {
       kind: "pnpm",
       source: "default",
     })),
-    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(
-      async () => true,
+    runPackageManagerInstall: vi.fn<DeployProjectDeps["runPackageManagerInstall"]>(async () =>
+      packageInstallResult(),
     ),
     detectDeployment: vi.fn<DeployProjectDeps["detectDeployment"]>(async () => DEPLOYED),
     syncHostFrameworkPreset: vi.fn<DeployProjectDeps["syncHostFrameworkPreset"]>(async () => {}),
@@ -63,21 +63,6 @@ afterEach(() => {
 });
 
 describe("runDeployCommand", () => {
-  test("refuses a directory without an eve agent", async () => {
-    const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-empty-"));
-    const logger = new TestLogger();
-
-    await runDeployCommand(logger, projectRoot, {
-      isEveProject,
-      hasInteractiveTerminal: () => true,
-    });
-
-    expect(logger.errors).toEqual([
-      "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
-    ]);
-    expect(process.exitCode).toBe(1);
-  });
-
   test("points an unlinked non-interactive run at eve link", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();
@@ -86,7 +71,6 @@ describe("runDeployCommand", () => {
 
     await runDeployCommand(logger, projectRoot, {
       createPrompter: () => fake.prompter,
-      isEveProject,
       hasInteractiveTerminal: () => false,
       flowDeps: {
         detectDeployment: vi.fn(async () => ({ state: "unlinked" }) as DeploymentInfo),
@@ -107,7 +91,6 @@ describe("runDeployCommand", () => {
 
     await runDeployCommand(logger, projectRoot, {
       createPrompter: () => fake.prompter,
-      isEveProject,
       hasInteractiveTerminal: () => false,
       flowDeps: {
         detectDeployment: vi.fn(async () => LINKED),
