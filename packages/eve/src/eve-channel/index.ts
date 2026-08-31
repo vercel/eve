@@ -1,4 +1,4 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
@@ -187,11 +187,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           parsedParentTraceContext !== undefined &&
           (parsedParentTraceContext.traceFlags & 1) === 1 &&
           typeof forwardedTraceAssertion === "object"
-            ? {
-                ...forwardedTraceAssertion,
-                forwarder: authResult.principalId,
-              }
+            ? forwardedTraceAssertion
             : undefined;
+        let parentTraceContext: SessionTraceContext | undefined = parsedParentTraceContext;
+        if (acceptedForwardedTracePolicy !== undefined && parsedParentTraceContext !== undefined) {
+          parentTraceContext = {
+            ...parsedParentTraceContext,
+            forwardedTracePolicy: acceptedForwardedTracePolicy,
+          };
+        }
         if (forwardedTraceAssertion === "malformed") {
           log.warn("ignoring malformed forwarded audience baggage", {
             forwarder: authResult.principalId,
@@ -234,7 +238,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
             continuationToken: operationToken,
-            forwardedTracePolicy: acceptedForwardedTracePolicy,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(
               {
@@ -245,7 +248,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               body.context,
             ),
             mode: body.mode ?? "conversation",
-            parentTraceContext: parsedParentTraceContext,
+            parentTraceContext,
             title: messageResult.title,
           });
         } catch (error) {

@@ -15,7 +15,6 @@ import {
   ChannelInstrumentationKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
-  ForwardedTracePolicyKey,
   ModeKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
@@ -24,6 +23,7 @@ import {
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
+  SessionTraceSeedKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -3286,10 +3286,15 @@ describe("runProxySubagentEventStep", () => {
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
     if (options.acceptedForwardedTracePolicy) {
-      ctx.set(ForwardedTracePolicyKey, {
-        ceiling: { recordInputs: false, recordOutputs: true },
-        forwarder: "service:router",
-        originAudience: "private",
+      ctx.set(SessionTraceSeedKey, {
+        decision: { action: "record", recordInputs: false, recordOutputs: true },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: false, recordOutputs: true },
+          originAudience: "private",
+        },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
       });
     }
     ctx.set(ContinuationTokenKey, "http:proxy-test");
@@ -3385,10 +3390,12 @@ describe("runProxySubagentEventStep", () => {
       turnId: "child-turn",
       requests: [expect.objectContaining({ requestId: "req-1" })],
     });
-    expect(result.serializedContext[ForwardedTracePolicyKey.name]).toEqual({
-      ceiling: { recordInputs: false, recordOutputs: true },
-      forwarder: "service:router",
-      originAudience: "private",
+    expect(result.serializedContext[SessionTraceSeedKey.name]).toMatchObject({
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "private",
+      },
     });
     expect(result.serializedContext[ChannelInstrumentationKey.name]).toMatchObject({
       metadata: {

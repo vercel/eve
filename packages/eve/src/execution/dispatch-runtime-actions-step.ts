@@ -102,7 +102,6 @@ export async function dispatchRuntimeActionsStep(
             channelMetadata: prepared.channelMetadata,
             currentSession: nextSession,
             fanoutSize: prepared.fanoutSize,
-            forwardedTracePolicy: prepared.forwardedTracePolicy,
             initiatorAuth: prepared.initiatorAuth,
             localDevRequest: prepared.localDevRequest,
             parentContinuationToken: input.parentContinuationToken,

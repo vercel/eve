@@ -9,7 +9,7 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import type { AcceptedForwardedTracePolicy } from "#shared/forwarded-trace-policy.js";
+import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 import type { TaskView } from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
@@ -86,6 +86,7 @@ export interface SessionParent {
  */
 export interface SessionTraceContext {
   readonly decision?: InstrumentationDecision;
+  readonly forwardedTracePolicy?: ForwardedTraceAssertion;
   readonly spanId: string;
   readonly traceFlags: number;
   readonly traceId: string;
@@ -441,8 +442,6 @@ export interface RunInput {
    */
   readonly channelName?: string;
   readonly channelMetadata?: ChannelInstrumentationProjection;
-  /** Trusted remote trace policy accepted while creating this run. */
-  readonly forwardedTracePolicy?: AcceptedForwardedTracePolicy;
   /** Inbound channel operation that created this session. */
   readonly delivery?: ChannelDeliveryMetadata;
   /**

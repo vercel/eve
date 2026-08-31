@@ -9,7 +9,6 @@ import {
   ChannelRequestIdKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
-  ForwardedTracePolicyKey,
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
@@ -21,6 +20,7 @@ import {
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import { readForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
 /**
  * Builds the bootstrap {@link ContextContainer} for one run.
@@ -35,13 +35,15 @@ export function buildRunContext(input: {
   const auth: SessionAuthContext | null = run.auth;
 
   ctx.set(BundleKey, bundle);
-  if (run.forwardedTracePolicy !== undefined) {
-    ctx.set(ForwardedTracePolicyKey, run.forwardedTracePolicy);
+  if (run.parentTraceContext !== undefined) {
+    ctx.set(ParentTraceContextKey, run.parentTraceContext);
   }
   setChannelContext(ctx, run.adapter, { channelName: run.channelName });
 
   if (run.channelMetadata !== undefined) {
-    const forwardedTracePolicy = ctx.get(ForwardedTracePolicyKey);
+    const forwardedTracePolicy = readForwardedTraceAssertion(
+      run.parentTraceContext?.forwardedTracePolicy,
+    );
     const existing = ctx.get(ChannelInstrumentationKey);
     ctx.set(ChannelInstrumentationKey, {
       channelType: existing?.channelType ?? run.channelMetadata.channelType,
@@ -93,10 +95,6 @@ export function buildRunContext(input: {
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
-  }
-
-  if (run.parentTraceContext !== undefined) {
-    ctx.set(ParentTraceContextKey, run.parentTraceContext);
   }
 
   if (run.subagentDepth !== undefined) {

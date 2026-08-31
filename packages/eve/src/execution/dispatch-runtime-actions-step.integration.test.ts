@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { RunInput, SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
@@ -31,11 +31,11 @@ import {
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
-  ForwardedTracePolicyKey,
   InitiatorAuthKey,
   type LocalDevRequestProvenance,
   SessionIdKey,
   SessionKey,
+  SessionTraceSeedKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -658,11 +658,6 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       null,
       undefined,
       "unknown",
-      {
-        ceiling: { recordInputs: false, recordOutputs: true },
-        forwarder: "service:origin-router",
-        originAudience: "private",
-      },
     );
 
     const result = await dispatchRuntimeActionsStep({
@@ -670,6 +665,16 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {
+        [SessionTraceSeedKey.name]: {
+          decision: { action: "record", recordInputs: false, recordOutputs: true },
+          forwardedTracePolicy: {
+            ceiling: { recordInputs: false, recordOutputs: true },
+            originAudience: "private",
+          },
+          spanId: "3".repeat(16),
+          traceFlags: 1,
+          traceId,
+        },
         "eve.harness.agentTrace": {
           actions: {
             "action-1": {
@@ -697,7 +702,17 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
         originAudience: "private",
-        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+        parentTraceContext: expect.objectContaining({
+          decision: { action: "record", recordInputs: false, recordOutputs: true },
+          forwardedTracePolicy: {
+            ceiling: { recordInputs: false, recordOutputs: true },
+            originAudience: "private",
+          },
+          isRemote: false,
+          spanId: actionSpanId,
+          traceFlags: 1,
+          traceId,
+        }),
       }),
     );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -1351,7 +1366,6 @@ function installContext(
   auth: SessionAuthContext | null = null,
   localDevRequest?: LocalDevRequestProvenance,
   channelAudience?: ChannelAudience,
-  forwardedTracePolicy?: NonNullable<RunInput["forwardedTracePolicy"]>,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1383,7 +1397,6 @@ function installContext(
         : { kind: "slack", metadata: { audience: channelAudience } },
     ],
     [InitiatorAuthKey, null],
-    [ForwardedTracePolicyKey, forwardedTracePolicy],
     [ChannelKey, ADAPTER],
   ]);
   mocks.deserializeContext.mockResolvedValue({

@@ -18,7 +18,6 @@ import {
 import {
   ChannelInstrumentationKey,
   ChannelRequestIdKey,
-  ForwardedTracePolicyKey,
   ScheduleIdKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
@@ -71,16 +70,15 @@ describe("isWorkflowTraceContentVisible", () => {
     ).toBe(true);
   });
 
-  it("prefers an accepted forwarded audience and exposes its audit source", () => {
+  it("uses the effective decision from a forwarded trace seed", () => {
     const serializedContext = {
       [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
-      [ForwardedTracePolicyKey.name]: {
-        ceiling: { recordInputs: true, recordOutputs: true },
-        forwarder: "service:router",
-        originAudience: "public",
-      },
       [SessionTraceSeedKey.name]: {
         decision: { action: "record", recordInputs: true, recordOutputs: true },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: true, recordOutputs: true },
+          originAudience: "public",
+        },
         spanId: "1".repeat(16),
         traceFlags: 1,
         traceId: "2".repeat(32),
@@ -115,13 +113,12 @@ describe("isWorkflowTraceContentVisible", () => {
   it("keeps workflow content hidden for a directional forwarded ceiling", () => {
     const serializedContext = {
       [CHANNEL_CONTEXT_KEY_NAME]: { audience: "private", kind: "eve" },
-      [ForwardedTracePolicyKey.name]: {
-        ceiling: { recordInputs: false, recordOutputs: true },
-        forwarder: "service:router",
-        originAudience: "private",
-      },
       [SessionTraceSeedKey.name]: {
         decision: { action: "record", recordInputs: false, recordOutputs: true },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: false, recordOutputs: true },
+          originAudience: "private",
+        },
         spanId: "1".repeat(16),
         traceFlags: 1,
         traceId: "2".repeat(32),
@@ -132,6 +129,21 @@ describe("isWorkflowTraceContentVisible", () => {
     expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
+  });
+
+  it("keeps workflow content hidden for malformed forwarded seed state", () => {
+    expect(
+      isWorkflowTraceContentVisible({
+        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "public", kind: "eve" },
+        [SessionTraceSeedKey.name]: {
+          decision: { action: "record", recordInputs: true, recordOutputs: true },
+          forwardedTracePolicy: { originAudience: "public" },
+          spanId: "1".repeat(16),
+          traceFlags: 1,
+          traceId: "2".repeat(32),
+        },
+      }),
+    ).toBe(false);
   });
 });
 
@@ -450,6 +462,19 @@ describe("readSessionTraceId", () => {
     expect(
       readSessionTraceId({
         "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when a malformed durable decision resolves to drop", () => {
+    expect(
+      readSessionTraceId({
+        "eve.sessionTraceSeed": {
+          decision: { action: "record", recordInputs: "yes", recordOutputs: true },
+          spanId: "a".repeat(16),
+          traceFlags: 1,
+          traceId: "b".repeat(32),
+        },
       }),
     ).toBeUndefined();
   });

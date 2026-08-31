@@ -11,7 +11,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import { contextStorage } from "#context/container.js";
-import { ForwardedTracePolicyKey, SessionTraceSeedKey } from "#context/keys.js";
+import { SessionTraceSeedKey } from "#context/keys.js";
 import { withoutInstrumentationContent } from "#instrumentation/content.js";
 import { instrumentationEventForTraceDecision } from "#instrumentation/content-policy.js";
 import type { AgentTraceStateStore, AgentTurnTraceState } from "#tracing/agent-trace-state.js";
@@ -36,6 +36,8 @@ import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
+import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
+import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
@@ -143,10 +145,15 @@ export function createAgentOtelInstrumentation(
     const audience = audienceForEvent(event, session?.channelAudience);
     const eventSeed = "traceSeed" in event ? event.traceSeed : undefined;
     const contextSeed = contextStorage.getStore()?.get(SessionTraceSeedKey);
+    const contextTraceState = resolveForwardedTraceSeed(contextSeed);
+    const eventTraceState = resolveForwardedTraceSeed(
+      eventSeed,
+      contextTraceState?.forwardedTracePolicy,
+    );
     const decision =
-      eventSeed?.decision ??
-      contextSeed?.decision ??
-      session?.decision ??
+      eventTraceState?.decision ??
+      contextTraceState?.decision ??
+      readInstrumentationDecision(session?.decision) ??
       (eventSeed !== undefined
         ? resolveTracePolicyDecision(isSampledTrace(eventSeed), audience)
         : contextSeed !== undefined
@@ -155,8 +162,19 @@ export function createAgentOtelInstrumentation(
             ? resolveTracePolicyDecision(isSampledTrace(session.context), audience)
             : undefined);
     if (decision === undefined) return withoutInstrumentationContent(event);
+    const normalizedEvent =
+      eventTraceState === undefined || !("traceSeed" in event) || event.traceSeed === undefined
+        ? event
+        : {
+            ...event,
+            traceSeed: {
+              ...event.traceSeed,
+              decision: eventTraceState.decision,
+              traceFlags: eventTraceState.traceFlags,
+            },
+          };
     return instrumentationEventForTraceDecision(
-      event,
+      normalizedEvent,
       decision.action === "drop"
         ? decision
         : {
@@ -166,7 +184,9 @@ export function createAgentOtelInstrumentation(
           },
       audience,
       {
-        applyAudienceCeiling: contextStorage.getStore()?.get(ForwardedTracePolicyKey) === undefined,
+        applyAudienceCeiling:
+          eventTraceState?.forwardedTracePolicy === undefined &&
+          contextTraceState?.forwardedTracePolicy === undefined,
       },
     );
   };

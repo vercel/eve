@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
-  ForwardedTracePolicyKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -81,11 +80,6 @@ function initializeRemoteSession(
 ): ContextContainer {
   const originAudience = input.originAudience ?? "public";
   const ctx = createContext(originAudience);
-  ctx.set(ForwardedTracePolicyKey, {
-    ceiling: input.ceiling ?? { recordInputs: true, recordOutputs: true },
-    forwarder: "service:previous-hop",
-    originAudience,
-  });
   registerInstrumentationRuntime({
     ...createRuntime({ capturesContent: true, publish: vi.fn() }, tracePolicy),
     idGenerator: new AgentSpanIdGenerator(),
@@ -95,6 +89,10 @@ function initializeRemoteSession(
     agentName: "remote-agent",
     ctx,
     parentTraceContext: {
+      forwardedTracePolicy: {
+        ceiling: input.ceiling ?? { recordInputs: true, recordOutputs: true },
+        originAudience,
+      },
       spanId: "c".repeat(16),
       traceFlags: 1,
       traceId: "d".repeat(32),
@@ -125,6 +123,11 @@ describe("initializeSessionInstrumentation", () => {
       traceFlags: 1,
     });
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
+    expect(ctx.get(ParentTraceContextKey)).not.toHaveProperty("forwardedTracePolicy");
+    expect(ctx.get(SessionTraceSeedKey)?.forwardedTracePolicy).toEqual({
+      ceiling: { recordInputs: true, recordOutputs: true },
+      originAudience: "public",
+    });
     expect(
       await readTelemetry(
         bindSessionInstrumentation({
@@ -178,11 +181,6 @@ describe("initializeSessionInstrumentation", () => {
 
   it("redacts runtime-context model input when the forwarded ceiling denies inputs", async () => {
     const ctx = createContext("public");
-    ctx.set(ForwardedTracePolicyKey, {
-      ceiling: { recordInputs: false, recordOutputs: true },
-      forwarder: "service:previous-hop",
-      originAudience: "public",
-    });
     const runtime = createRuntime({ capturesContent: true, publish: vi.fn() }, () => ({
       emit: true,
       recordInputs: true,
@@ -200,6 +198,10 @@ describe("initializeSessionInstrumentation", () => {
       agentName: "remote-agent",
       ctx,
       parentTraceContext: {
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: false, recordOutputs: true },
+          originAudience: "public",
+        },
         spanId: "c".repeat(16),
         traceFlags: 1,
         traceId: "d".repeat(32),
@@ -494,6 +496,51 @@ describe("bindInstrumentationRuntime", () => {
       recordInputs: true,
       recordOutputs: false,
     });
+  });
+
+  it("fails a malformed durable trace decision closed", async () => {
+    const ctx = createContext();
+    ctx.set(SessionTraceSeedKey, {
+      decision: {
+        action: "record",
+        recordInputs: "yes",
+        recordOutputs: true,
+      } as never,
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    });
+
+    expect(
+      await readTelemetry(
+        bindInstrumentationRuntime(
+          createRuntime({ capturesContent: true, publish: vi.fn() }),
+          ctx,
+          boundSession,
+        ),
+      ),
+    ).toMatchObject({ recordInputs: false, recordOutputs: false });
+  });
+
+  it("fails a malformed durable forwarded assertion closed", async () => {
+    const ctx = createContext();
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      forwardedTracePolicy: { originAudience: "public" } as never,
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    });
+
+    expect(
+      await readTelemetry(
+        bindInstrumentationRuntime(
+          createRuntime({ capturesContent: true, publish: vi.fn() }),
+          ctx,
+          boundSession,
+        ),
+      ),
+    ).toMatchObject({ recordInputs: false, recordOutputs: false });
   });
 
   it("applies the live audience ceiling to a seeded decision", async () => {

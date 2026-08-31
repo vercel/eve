@@ -16,7 +16,6 @@ import { serializeContext } from "#context/serialize.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
-  ForwardedTracePolicyKey,
   InitiatorAuthKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -109,7 +108,7 @@ function createEveCreateHandler(input: EveChannelInput) {
 }
 
 describe("eveChannel forwarded principal → runtime principal", () => {
-  it("preserves origin audience, ceiling, and forwarder across adapter-state persistence", async () => {
+  it("preserves origin audience and ceiling across adapter-state persistence", async () => {
     const trustedForwarders = vi.fn(
       (caller: SessionAuthContext) => caller.principalId === ROUTER_CALLER.principalId,
     );
@@ -160,9 +159,8 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
     expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("private");
-    expect(ctx.get(ForwardedTracePolicyKey)).toEqual({
+    expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: false },
-      forwarder: ROUTER_CALLER.principalId,
       originAudience: "private",
     });
 
@@ -170,21 +168,31 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("private");
     ctx.set(SessionTraceSeedKey, {
       decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
       spanId: "2".repeat(16),
       traceFlags: 1,
       traceId: "1".repeat(32),
     });
     const serializedContext = serializeContext(ctx);
-    expect(serializedContext[ForwardedTracePolicyKey.name]).toEqual({
-      ceiling: { recordInputs: true, recordOutputs: false },
-      forwarder: ROUTER_CALLER.principalId,
-      originAudience: "private",
+    expect(serializedContext[SessionTraceSeedKey.name]).toMatchObject({
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
     });
     expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": false,
     });
     expect(ctx.get(ParentTraceContextKey)).toEqual({
       isRemote: true,
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
       spanId: "2".repeat(16),
       traceFlags: 1,
       traceId: "1".repeat(32),
@@ -259,7 +267,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       },
     });
     expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
-    expect(ctx.get(ForwardedTracePolicyKey)).toBeUndefined();
+    expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toBeUndefined();
   });
 
   it("ignores a ceiling that disagrees with unsampled trace flags", async () => {
@@ -290,9 +298,9 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       }),
     );
 
-    expect(handler.createSession.mock.calls[0]?.[0]).toMatchObject({
-      forwardedTracePolicy: undefined,
-    });
+    expect(handler.createSession.mock.calls[0]?.[0]?.parentTraceContext).not.toHaveProperty(
+      "forwardedTracePolicy",
+    );
   });
 
   it("ignores public audience baggage without an accepted forwarded principal", async () => {
