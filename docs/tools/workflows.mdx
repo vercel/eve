@@ -59,36 +59,20 @@ async function applyDeploy(plan: DeployPlan) {
 The model calls `deploy`. The turn parks while the human reads the plan. When they answer, minutes
 or days later, the run resumes, deploys, and returns. The model sees one tool result.
 
-### What the Workflow SDK owns
+### Rules
 
-- `"use workflow"` as the first statement of `execute`, on its own line, makes it a durable body.
-  eve hoists the method into a workflow function named after the tool. You can also write the body as a top-level
-  `async function` and reference it: `execute: deploy`.
-- `"use step"` marks a top-level `async function` in the tool module, or in any module it imports,
-  as a step. Steps run in your app runtime with Node.js and `process.env`; they retry on failure and
-  never re-run once their result is recorded.
-- The body is replayed, so it must be deterministic. Side effects, clocks, randomness, and Node.js
-  APIs belong in steps. A module imported by the body may use Node.js only inside its steps.
-- `createHook`, `createWebhook`, `sleep`, `getWritable`, `getWorkflowMetadata`, and `FatalError`
-  come from `workflow` and are used in the body. `start`, `getRun`, and `resumeHook` come from
-  `workflow/api` and are used inside a `"use step"` function, as in any Workflow application; a body
-  that imports them gets an error naming the rule. eve resolves both specifiers to the Workflow SDK
-  version it builds and runs, so your app does not install it. For the TypeScript types, list
-  `eve/workflow-modules` in your tsconfig's `compilerOptions.types` (new projects already do); an
-  installed `workflow` package takes precedence if you add one.
-
-### What eve owns
-
-- One run per tool call. A retried harness step never starts a second run.
-- The run's return value is the tool result. A thrown error is a tool error. `toModelOutput` applies
-  to the return value as it does for any tool.
-- `ctx` inside the body carries `session`, `callId`, `toolName`, and `abortSignal`. The members that
-  need the turn's process — `getSandbox`, `getSkill`, `getToken`, and `requireAuth` — are unavailable
-  in a workflow body and throw when touched. Read credentials from the environment inside a step
-  instead.
-- The tool's parsed input must be a JSON object: it crosses the run's serialization boundary.
-- Workflow bodies are for static tools under `agent/tools/`, not tools returned from
-  `defineDynamic` resolvers.
+- `"use workflow"` goes on its own line as the first statement of `execute`, or of a top-level
+  `async function` you reference as `execute: deploy`.
+- `"use step"` marks a top-level `async function` in the tool module, or any module it imports, as a
+  step. Side effects, clocks, randomness, `process.env`, and Node.js APIs belong in steps; the body
+  is replayed and must stay deterministic.
+- Import `createHook`, `createWebhook`, `sleep`, and `FatalError` from `workflow` in the body.
+  `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
+  the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
+- In the body, `ctx` has `session`, `callId`, `toolName`, and `abortSignal`. `getSandbox`,
+  `getSkill`, `getToken`, and `requireAuth` throw there; read credentials in a step instead.
+- The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
+  not tools returned from `defineDynamic` resolvers.
 
 ## Wait or run in the background
 
@@ -302,6 +286,3 @@ not. An error that escapes the body fails the run.
 Identity follows the tool. The workflow id derives from the tool's path, so renaming or moving the
 file creates a new workflow. Runs in flight finish on the deployment that started them; a run that
 resumes on a deployment without its tool fails with an error naming the missing workflow.
-
-In development, editing a workflow body, a step, or a module they import rebuilds the server, not
-just the module map: those sources are compiled into the workflow driver and the step registry.
