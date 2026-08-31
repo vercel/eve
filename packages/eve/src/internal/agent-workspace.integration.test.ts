@@ -108,6 +108,32 @@ describe("resolveAgentWorkspace", () => {
     );
   });
 
+  it("allows a custom-path member package claimed by the root workspace", async () => {
+    const root = await createWorkspace(["products/support"]);
+    const supportRoot = join(root, "products", "support");
+    const packageJsonPath = join(supportRoot, "package.json");
+    await mkdir(join(supportRoot, "agent"), { recursive: true });
+    await Promise.all([
+      writeFile(join(root, "pnpm-workspace.yaml"), 'packages:\n  - "products/*"\n'),
+      writeFile(packageJsonPath, "{}\n"),
+    ]);
+
+    await expect(resolveAgentWorkspace(root)).resolves.toMatchObject({
+      members: [{ name: "support", packageJsonPath }],
+    });
+  });
+
+  it("rejects an unclaimed custom-path member package", async () => {
+    const root = await createWorkspace(["products/support"]);
+    const supportRoot = join(root, "products", "support");
+    await mkdir(join(supportRoot, "agent"), { recursive: true });
+    await writeFile(join(supportRoot, "package.json"), "{}\n");
+
+    await expect(resolveAgentWorkspace(root)).rejects.toThrow(
+      /not a member of the root pnpm workspace/,
+    );
+  });
+
   it("does not recognize the retired collection declaration", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-retired-collection-"));
     await writeFile(join(root, "package.json"), JSON.stringify({ eve: { collection: true } }));

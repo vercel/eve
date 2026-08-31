@@ -67,9 +67,19 @@ my-project/
         └── agent/
 ```
 
-The `eve.agents` declaration marks the project as a workspace. eve then validates and discovers only direct `agents/<name>/agent/` children. Their directory names become their public identities, exposed at `/eve/agents/<name>/eve/v1/*`. Run `eve dev`, `eve info`, and `eve eval` from an individual child directory; run project-level build, link, and deploy commands from the workspace root.
+The `eve.agents` declaration marks the project as a workspace. Each entry is a workspace-relative directory path or glob pattern. Every matched directory must contain `agent/`; its final directory name becomes the public identity, exposed at `/eve/agents/<name>/eve/v1/*`. Names must be unique across all entries. Run `eve dev`, `eve info`, and `eve eval` from an individual child directory; run project-level build, link, and deploy commands from the workspace root.
 
-An agent may have its own `package.json` when the root package-manager workspace claims `agents/*` (for example, with `packages: ["agents/*"]` in `pnpm-workspace.yaml`). A member package's `build` script runs for its service; otherwise eve runs `eve build` from that agent directory. Member packages can therefore use their own dependencies and build steps while sharing the root workspace installation.
+For example, a workspace can combine a conventional group and an exact path:
+
+```json title="package.json"
+{
+  "eve": {
+    "agents": ["agents/*", "products/escalation"]
+  }
+}
+```
+
+An agent may have its own `package.json` when the root package-manager workspace claims its path (for example, with `packages: ["agents/*", "products/*"]` in `pnpm-workspace.yaml`). A member package's `build` script runs for its service; otherwise eve runs `eve build` from that agent directory. Member packages can therefore use their own dependencies and build steps while sharing the root workspace installation.
 
 ### Choose a workspace or independent packages
 
@@ -77,7 +87,7 @@ Use an agent workspace when several agents form one operational unit. The root o
 
 Keep agents as independent packages when they need separate Vercel projects or deployment lifecycles. A repository can still be a pnpm, npm, Yarn, or Bun workspace with `agents/*` package members without adding `eve.agents`; run `eve link`, `eve deploy`, and `eve build` from each agent package instead. This is the better structure for a mixed monorepo, such as one that contains agents with their own `vercel.json`, framework applications, or non-agent packages.
 
-`eve.agents` is not a generic monorepo marker. It matches every direct `agents/*` directory, and each matched directory must contain `agent/`. Do not use it for a tree that includes non-agent packages under `agents/` or for agents that must retain separate Vercel service graphs.
+`eve.agents` is not a generic monorepo marker. Every configured path or glob match must contain `agent/`. Do not include non-agent packages or agents that must retain separate Vercel service graphs.
 
 Outside Vercel, `eve build` from the workspace root builds each member sequentially. Each member publishes its normal `.output/` directory; your process manager and reverse proxy decide how to run and route them.
 

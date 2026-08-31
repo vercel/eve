@@ -3,10 +3,13 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { parseJsonObject } from "#shared/json.js";
+import { detectPackageManager } from "#setup/package-manager.js";
+import { packageManagerWorkspaceClaimsProject } from "#setup/workspace-membership.js";
 
 export interface AgentWorkspaceMember {
   readonly appRoot: string;
   readonly name: string;
+  readonly packageJsonPath?: string;
 }
 
 export interface AgentWorkspace {
@@ -150,6 +153,8 @@ export async function resolveAgentWorkspace(
     }
   }
 
+  const packageManager =
+    source.kind === "disk" ? await detectPackageManager(workspaceRoot) : undefined;
   const members: AgentWorkspaceMember[] = [];
   const names = new Set<string>();
   for (const appRoot of [...appRoots].sort((left, right) =>
@@ -157,11 +162,12 @@ export async function resolveAgentWorkspace(
   )) {
     const name = basename(appRoot);
     assertValidPublicAgentName(name, "Agent workspace member");
-    if (!names.add(name)) {
+    if (names.has(name)) {
       throw new Error(
         `eve.agents resolves multiple agent directories named ${JSON.stringify(name)}. Use paths with distinct final directory names.`,
       );
     }
+    names.add(name);
 
     if ((await source.stat(join(appRoot, "agent"))) !== "directory") {
       const relativeAppRoot = relative(workspaceRoot, appRoot);
@@ -174,7 +180,19 @@ export async function resolveAgentWorkspace(
       );
     }
 
-    members.push({ appRoot, name });
+    const packageJsonPath = join(appRoot, "package.json");
+    const hasPackageJson = (await source.stat(packageJsonPath)) === "file";
+    if (
+      source.kind === "disk" &&
+      hasPackageJson &&
+      !packageManagerWorkspaceClaimsProject(packageManager!.kind, workspaceRoot, appRoot)
+    ) {
+      throw new Error(
+        `${join(relative(workspaceRoot, appRoot), "package.json")} defines a child package that is not a member of the root ${packageManager!.kind} workspace. Add a matching workspace pattern to the workspace configuration.`,
+      );
+    }
+
+    members.push(hasPackageJson ? { appRoot, name, packageJsonPath } : { appRoot, name });
   }
 
   return { members, root: workspaceRoot };
@@ -184,7 +202,7 @@ export async function resolveAgentWorkspace(
 export async function loadAgentWorkspace(root: string): Promise<AgentWorkspace> {
   const workspace = await resolveAgentWorkspace(root);
   if (workspace === undefined) {
-    throw new Error("An eve agent workspace requires an agents/ directory.");
+    throw new Error("An eve agent workspace requires package.json eve.agents.");
   }
   return workspace;
 }
