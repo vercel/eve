@@ -16,6 +16,8 @@ import {
   moveLeft,
   movePromptLine,
   moveRight,
+  moveWordBackward,
+  moveWordForward,
   visibleLine,
 } from "./line-editor.js";
 
@@ -84,6 +86,22 @@ describe("line editing", () => {
     expect(moveRight({ text: "ab", cursor: 1 })).toEqual({ text: "ab", cursor: 2 });
   });
 
+  it("moves backward and forward by readline-style words", () => {
+    const text = "one,  two_three 世界";
+    expect(moveWordForward({ text, cursor: 0 })).toEqual({ text, cursor: 3 });
+    expect(moveWordForward({ text, cursor: 3 })).toEqual({ text, cursor: 15 });
+    expect(moveWordForward({ text, cursor: 15 })).toEqual({ text, cursor: text.length });
+    expect(moveWordBackward({ text, cursor: text.length })).toEqual({ text, cursor: 16 });
+    expect(moveWordBackward({ text, cursor: 16 })).toEqual({ text, cursor: 6 });
+    expect(moveWordBackward({ text, cursor: 6 })).toEqual({ text, cursor: 0 });
+  });
+
+  it("moves by whole graphemes when words contain combining characters", () => {
+    const text = "e\u0301lan vital";
+    expect(moveWordForward({ text, cursor: 0 })).toEqual({ text, cursor: 5 });
+    expect(moveWordBackward({ text, cursor: 5 })).toEqual({ text, cursor: 0 });
+  });
+
   it("jumps home and end", () => {
     expect(moveHome({ text: "abc", cursor: 2 })).toEqual({ text: "abc", cursor: 0 });
     expect(moveEnd({ text: "abc", cursor: 0 })).toEqual({ text: "abc", cursor: 3 });
@@ -125,6 +143,22 @@ describe("line editing", () => {
     });
     expect(applyLineEditorKey(line, { type: "ctrl-e" })).toEqual({
       text: "abc",
+      cursor: 3,
+    });
+    expect(applyLineEditorKey(line, { type: "ctrl-f" })).toEqual({
+      text: "abc",
+      cursor: 2,
+    });
+    expect(applyLineEditorKey(line, { type: "ctrl-b" })).toEqual({
+      text: "abc",
+      cursor: 0,
+    });
+    expect(applyLineEditorKey(lineOf("one two"), { type: "alt-b" })).toEqual({
+      text: "one two",
+      cursor: 4,
+    });
+    expect(applyLineEditorKey({ text: "one two", cursor: 0 }, { type: "alt-f" })).toEqual({
+      text: "one two",
       cursor: 3,
     });
     expect(applyLineEditorKey(line, { type: "enter" })).toBeUndefined();
