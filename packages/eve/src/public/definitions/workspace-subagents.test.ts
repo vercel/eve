@@ -21,6 +21,15 @@ describe("defineWorkspaceSubagents", () => {
 });
 
 describe("vercelWorkspaceTarget", () => {
+  it("uses an unreachable target without preventing eve dev from starting", async () => {
+    vi.stubEnv("EVE_DEV", "1");
+    vi.stubEnv("VERCEL_URL", undefined);
+    const target = await vercelWorkspaceTarget()(member);
+
+    expect(await (target.url as () => Promise<string>)()).toBe("http://127.0.0.1:1");
+    await expect(target.auth?.()).resolves.toEqual({ headers: {} });
+  });
+
   it("targets the current preview deployment member route", async () => {
     vi.stubEnv("VERCEL_ENV", "preview");
     vi.stubEnv("VERCEL_URL", "preview.example.com");

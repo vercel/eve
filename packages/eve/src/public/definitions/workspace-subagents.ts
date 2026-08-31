@@ -1,6 +1,7 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 
 import { VERCEL_TRUSTED_OIDC_IDP_TOKEN_HEADER, type HeadersValue } from "#client/types.js";
+import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import type { OutboundAuthFn } from "#public/agents/auth.js";
 import type { RemoteAgentUrl } from "#public/definitions/remote-agent.js";
 
@@ -42,6 +43,9 @@ export function defineWorkspaceSubagents(
 export function vercelWorkspaceTarget(): WorkspaceSubagentTargetResolver {
   return (member) => ({
     auth: async () => {
+      if (isEveDevEnvironment()) {
+        return { headers: {} as Readonly<Record<string, string>> };
+      }
       const token = await getVercelOidcToken({});
       return {
         headers: {
@@ -51,6 +55,7 @@ export function vercelWorkspaceTarget(): WorkspaceSubagentTargetResolver {
       };
     },
     url: () => {
+      if (isEveDevEnvironment()) return "http://127.0.0.1:1";
       const host =
         process.env.VERCEL_ENV === "production"
           ? process.env.VERCEL_PROJECT_PRODUCTION_URL
