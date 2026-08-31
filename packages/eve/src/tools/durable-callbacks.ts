@@ -17,6 +17,7 @@ export type DurableDynamicCallbackFn = (closure: JsonObject, ...args: never[]) =
  */
 export interface DurableDynamicCallbackReference {
   readonly closure: JsonObject;
+  readonly stepId?: never;
 }
 
 export interface DurableDynamicToolCallbacks {

@@ -6,7 +6,11 @@ import {
   StepDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
 } from "#context/keys.js";
-import type { CurrentDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
+import {
+  isCurrentDynamicToolMetadata,
+  type CurrentDynamicToolMetadata,
+  type PersistedDynamicToolMetadata,
+} from "#context/dynamic-tool-metadata.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
 import type {
@@ -126,6 +130,18 @@ export function replayDynamicTools(
   });
 }
 
+function requireCurrentDynamicToolMetadata(
+  metadata: readonly PersistedDynamicToolMetadata[],
+): readonly CurrentDynamicToolMetadata[] {
+  const old = metadata.find((entry) => !isCurrentDynamicToolMetadata(entry));
+  if (old !== undefined) {
+    throw new Error(
+      `Dynamic tool "${old.name}" reached replay before its persisted metadata was converted to the current schema.`,
+    );
+  }
+  return metadata as readonly CurrentDynamicToolMetadata[];
+}
+
 /**
  * Builds live dynamic tool definitions. Narrower scopes appear first so they
  * win on name collision (the tool loop uses `??=` for deduplication).
@@ -145,8 +161,14 @@ export function buildResponseAuthorizationTools(input: {
 }
 
 export function buildDynamicTools(ctx: ContextReader): readonly HarnessToolDefinition[] {
-  const step = replayDynamicTools(ctx.get(StepDynamicToolMetadataKey) ?? []);
-  const turn = replayDynamicTools(ctx.get(TurnDynamicToolMetadataKey) ?? []);
-  const session = replayDynamicTools(ctx.get(SessionDynamicToolMetadataKey) ?? []);
+  const step = replayDynamicTools(
+    requireCurrentDynamicToolMetadata(ctx.get(StepDynamicToolMetadataKey) ?? []),
+  );
+  const turn = replayDynamicTools(
+    requireCurrentDynamicToolMetadata(ctx.get(TurnDynamicToolMetadataKey) ?? []),
+  );
+  const session = replayDynamicTools(
+    requireCurrentDynamicToolMetadata(ctx.get(SessionDynamicToolMetadataKey) ?? []),
+  );
   return [...step, ...turn, ...session];
 }

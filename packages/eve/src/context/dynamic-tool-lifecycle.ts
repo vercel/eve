@@ -11,7 +11,7 @@ import {
 } from "#context/keys.js";
 import {
   isCurrentDynamicToolMetadata,
-  toCurrentDynamicToolMetadata,
+  toCurrentDynamicToolMetadataList,
   type CurrentDynamicToolMetadata,
   type PersistedDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
@@ -68,7 +68,7 @@ export function replayDynamicSessionTools(
 
 function durableKeyForEvent(
   eventType: string,
-): ContextKey<readonly CurrentDynamicToolMetadata[]> | undefined {
+): ContextKey<readonly PersistedDynamicToolMetadata[]> | undefined {
   switch (eventType) {
     case "session.started":
       return SessionDynamicToolMetadataKey;
@@ -322,6 +322,27 @@ export async function resolveStepDynamicTools(input: {
   if (coordinate !== undefined) resolvedStepTools.set(input.ctx, { coordinate, metadata });
 }
 
+/** Converts persisted step metadata before any approval replay can read it. */
+export async function restorePersistedStepDynamicToolMetadata(input: {
+  readonly ctx: ContextContainer;
+  readonly resolvers: readonly ResolvedDynamicToolResolver[];
+  readonly event: UnstampedMessageStreamEvent;
+  readonly messages: readonly ModelMessage[];
+}): Promise<void> {
+  const persisted = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
+  const current = persisted.filter(isCurrentDynamicToolMetadata);
+  if (current.length === persisted.length && !hasUnregisteredDurableDynamicCallbacks(current)) {
+    return;
+  }
+
+  await resolveStepDynamicTools(input);
+  const resolved = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
+  input.ctx.set(
+    StepDynamicToolMetadataKey,
+    toCurrentDynamicToolMetadataList(persisted, resolved.filter(isCurrentDynamicToolMetadata)),
+  );
+}
+
 export async function dispatchDynamicToolEvent(input: {
   readonly ctx: ContextContainer;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
@@ -369,10 +390,10 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
   const persisted: readonly PersistedDynamicToolMetadata[] =
     input.ctx.get(SessionDynamicToolMetadataKey) ?? [];
   const current = persisted.filter(isCurrentDynamicToolMetadata);
-  const hasOldPayload = current.length !== persisted.length;
+  const hasOldMetadata = current.length !== persisted.length;
   const revisionChanged =
     input.ctx.get(SessionDynamicToolRuntimeRevisionKey) !== input.runtimeRevision;
-  if (!revisionChanged && !hasOldPayload && !hasUnregisteredDurableDynamicCallbacks(current)) {
+  if (!revisionChanged && !hasOldMetadata && !hasUnregisteredDurableDynamicCallbacks(current)) {
     return;
   }
   const matching = input.resolvers.filter((resolver) =>
@@ -382,7 +403,10 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
     matching.length === 0
       ? { metadata: [] }
       : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
-  input.ctx.set(SessionDynamicToolMetadataKey, metadata);
+  input.ctx.set(
+    SessionDynamicToolMetadataKey,
+    revisionChanged ? metadata : toCurrentDynamicToolMetadataList(persisted, metadata),
+  );
   input.ctx.set(SessionDynamicToolRuntimeRevisionKey, input.runtimeRevision);
 }
 
@@ -401,11 +425,18 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
   );
   if (needsResolution.length === 0) return;
   const resolverSlugs = new Set(needsResolution.map((entry) => entry.resolverSlug));
+  const oldResolverSlugs = new Set(
+    persisted
+      .filter((entry) => !isCurrentDynamicToolMetadata(entry))
+      .map((entry) => entry.resolverSlug),
+  );
   const matching = input.resolvers.filter(
-    (resolver) => resolver.rebindMissingCallbacks === true && resolverSlugs.has(resolver.slug),
+    (resolver) =>
+      resolverSlugs.has(resolver.slug) &&
+      (oldResolverSlugs.has(resolver.slug) || resolver.rebindMissingCallbacks === true),
   );
   if (matching.length === 0) {
-    for (const entry of persisted) toCurrentDynamicToolMetadata(entry, undefined);
+    input.ctx.set(TurnDynamicToolMetadataKey, toCurrentDynamicToolMetadataList(persisted));
     return;
   }
 
@@ -413,25 +444,15 @@ export async function rebindMissingCompiledDynamicToolCallbacks(input: {
     input.ctx,
     async () => await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages),
   );
-  const rebound = resolved.metadata;
-  const reboundByIdentity = new Map(
-    rebound.map((entry) => [`${entry.resolverSlug}\0${entry.name}`, entry] as const),
-  );
-  const updated = persisted.map((entry) =>
-    toCurrentDynamicToolMetadata(
-      entry,
-      reboundByIdentity.get(`${entry.resolverSlug}\0${entry.name}`),
-    ),
-  );
+  const updated = toCurrentDynamicToolMetadataList(persisted, resolved.metadata);
   input.ctx.set(TurnDynamicToolMetadataKey, updated);
 
-  const expectedIdentities = new Set(
-    needsResolution.map((entry) => `${entry.resolverSlug}\0${entry.name}`),
-  );
   const unresolved = updated.filter(
     (entry) =>
-      expectedIdentities.has(`${entry.resolverSlug}\0${entry.name}`) &&
-      hasUnregisteredDurableDynamicCallbacks([entry]),
+      needsResolution.some(
+        (candidate) =>
+          candidate.resolverSlug === entry.resolverSlug && candidate.name === entry.name,
+      ) && hasUnregisteredDurableDynamicCallbacks([entry]),
   );
   if (unresolved.length > 0) {
     throw new Error(

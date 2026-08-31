@@ -19,6 +19,7 @@ import {
   dispatchDynamicToolEvent,
   rebindMissingCompiledDynamicToolCallbacks,
   refreshDynamicSessionToolsForRuntimeRevision,
+  restorePersistedStepDynamicToolMetadata,
 } from "#context/dynamic-tool-lifecycle.js";
 import { dispatchMemoryLifecycleEvent } from "#context/memory-event-lifecycle.js";
 import {
@@ -68,6 +69,7 @@ import { derivePendingState } from "#execution/pending-turn-state.js";
 import {
   createAuthorizationCompletedEvent,
   createSessionStartedEvent,
+  createStepStartedEvent,
   createTurnStartedEvent,
   encodeMessageStreamEvent,
   type UnstampedMessageStreamEvent,
@@ -359,6 +361,17 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         ctx,
         event: createTurnStartedEvent({
           sequence: initialEmissionState.sequence,
+          turnId: activeTurnId(initialEmissionState),
+        }),
+        messages: history.initial.messages,
+        resolvers: dynamicToolResolvers,
+      });
+      await restorePersistedStepDynamicToolMetadata({
+        ctx,
+        event: createStepStartedEvent({
+          modelId: initialSession.agent.modelReference?.id ?? "dynamic",
+          sequence: initialEmissionState.sequence,
+          stepIndex: initialEmissionState.stepIndex,
           turnId: activeTurnId(initialEmissionState),
         }),
         messages: history.initial.messages,

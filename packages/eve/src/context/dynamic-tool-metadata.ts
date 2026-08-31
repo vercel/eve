@@ -45,20 +45,114 @@ export type OldDynamicToolMetadata =
 
 export type PersistedDynamicToolMetadata = CurrentDynamicToolMetadata | OldDynamicToolMetadata;
 
+export function isOldSourceOffsetDynamicToolMetadata(
+  metadata: PersistedDynamicToolMetadata,
+): metadata is OldSourceOffsetDynamicToolMetadata {
+  return metadata.callbacks !== undefined && "stepId" in metadata.callbacks.execute;
+}
+
 export function isCurrentDynamicToolMetadata(
   metadata: PersistedDynamicToolMetadata,
 ): metadata is CurrentDynamicToolMetadata {
-  return metadata.callbacks !== undefined && !("stepId" in metadata.callbacks.execute);
+  return metadata.callbacks !== undefined && !isOldSourceOffsetDynamicToolMetadata(metadata);
 }
 
-/** Replaces an old payload with current output from the same resolver and tool identity. */
+export function isOldStepFunctionDynamicToolMetadata(
+  metadata: PersistedDynamicToolMetadata,
+): metadata is OldStepFunctionDynamicToolMetadata {
+  return metadata.callbacks === undefined;
+}
+
+function withoutSourceOffset(
+  reference: OldSourceOffsetDynamicCallbackReference,
+): DurableDynamicToolCallbacks["execute"] {
+  return { closure: reference.closure };
+}
+
+function convertSourceOffsetMetadata(
+  metadata: OldSourceOffsetDynamicToolMetadata,
+): CurrentDynamicToolMetadata {
+  const callbacks: DurableDynamicToolCallbacks = {
+    execute: withoutSourceOffset(metadata.callbacks.execute),
+    ...(metadata.callbacks.approvalRequest === undefined
+      ? {}
+      : { approvalRequest: withoutSourceOffset(metadata.callbacks.approvalRequest) }),
+    ...(metadata.callbacks.approvalResponse === undefined
+      ? {}
+      : { approvalResponse: withoutSourceOffset(metadata.callbacks.approvalResponse) }),
+    ...(metadata.callbacks.toModelOutput === undefined
+      ? {}
+      : { toModelOutput: withoutSourceOffset(metadata.callbacks.toModelOutput) }),
+  };
+  return { ...metadata, callbacks };
+}
+
+/** Converts persisted metadata without changing already-persisted callback closures. */
 export function toCurrentDynamicToolMetadata(
   persisted: PersistedDynamicToolMetadata,
-  resolved: CurrentDynamicToolMetadata | undefined,
+  resolved?: CurrentDynamicToolMetadata,
 ): CurrentDynamicToolMetadata {
   if (isCurrentDynamicToolMetadata(persisted)) return persisted;
-  if (resolved !== undefined) return resolved;
-  throw new Error(
-    `Dynamic tool "${persisted.name}" uses old persisted metadata, but its resolver did not return a current replacement.`,
+  if (resolved === undefined) {
+    throw new Error(
+      `Dynamic tool "${persisted.name}" uses old persisted metadata, but its resolver did not return a current replacement.`,
+    );
+  }
+  if (resolved.resolverSlug !== persisted.resolverSlug || resolved.name !== persisted.name) {
+    throw new Error(
+      `Dynamic tool "${persisted.name}" received current metadata from a different resolver or tool.`,
+    );
+  }
+  if (!isOldStepFunctionDynamicToolMetadata(persisted)) {
+    for (const phase of Object.keys(persisted.callbacks) as Array<
+      keyof DurableDynamicToolCallbacks
+    >) {
+      if (resolved.callbacks[phase] === undefined) {
+        throw new Error(
+          `Dynamic tool "${persisted.name}" lost its ${phase} callback while converting old persisted metadata.`,
+        );
+      }
+    }
+    return convertSourceOffsetMetadata(persisted);
+  }
+  if (
+    persisted.approvalResponseStepFnName !== undefined &&
+    persisted.approvalStepFnName === undefined
+  ) {
+    throw new Error(
+      `Dynamic tool "${persisted.name}" has an old approval-response callback without an approval-request callback.`,
+    );
+  }
+  if (
+    persisted.approvalStepFnName !== undefined &&
+    resolved.callbacks.approvalRequest === undefined
+  ) {
+    throw new Error(
+      `Dynamic tool "${persisted.name}" lost its approval-request callback while converting old persisted metadata.`,
+    );
+  }
+  if (
+    persisted.approvalResponseStepFnName !== undefined &&
+    resolved.callbacks.approvalResponse === undefined
+  ) {
+    throw new Error(
+      `Dynamic tool "${persisted.name}" lost its approval-response callback while converting old persisted metadata.`,
+    );
+  }
+  return resolved;
+}
+
+export function toCurrentDynamicToolMetadataList(
+  persisted: readonly PersistedDynamicToolMetadata[],
+  resolved: readonly CurrentDynamicToolMetadata[] = [],
+): readonly CurrentDynamicToolMetadata[] {
+  return persisted.map((entry) =>
+    toCurrentDynamicToolMetadata(
+      entry,
+      resolved.find(
+        (candidate) =>
+          candidate.resolverSlug === entry.resolverSlug && candidate.name === entry.name,
+      ),
+    ),
   );
 }
