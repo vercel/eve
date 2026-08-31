@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: proposed
-last_updated: "2026-08-24"
+last_updated: "2026-08-31"
 ---
 
 # Vercel Connect build manifest
@@ -14,12 +14,14 @@ requires, including enough provider configuration for Connect to create or recon
 native connectors. It contains no secrets and does not authorize side effects.
 
 The steady-state model identifies a requirement by a project-local logical reference
-such as `"slack"`. eve is opaque to Connect connector IDs and UIDs. Connect owns the
+derived from its authored filesystem path, such as `"channels/slack"`. An explicit
+reference override supports definitions that use multiple connectors or intentionally
+share one binding. eve is opaque to Connect connector IDs and UIDs. Connect owns the
 mapping from the reference to a connector, installation, credentials, and trigger
 destinations:
 
 ```text
-eve reference "slack"
+eve reference "channels/slack"
         |
         v
 team + project + environment binding
@@ -32,8 +34,9 @@ Connect connector
   `- binding-owned trigger destination(s)
 ```
 
-Several projects may bind their local `"slack"` reference to the same connector.
-Display names remain mutable Connect metadata and are not used for resolution.
+Several projects may bind their local `"channels/slack"` reference to the same
+connector. Display names remain mutable Connect metadata and are not used for
+resolution.
 
 ## Authoring API
 
@@ -47,7 +50,6 @@ import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
   credentials: connectSlackCredentials({
-    reference: "slack",
     capabilities: {
       publicChannelMessages: true,
       privateChannelMessages: true,
@@ -58,25 +60,28 @@ export default slackChannel({
 });
 ```
 
-The object form is intentionally distinct from the existing string form. A reference
-is a logical name in the project's Connect namespace, while a string retains its
+The no-reference object form resolves the project/environment binding derived from the
+authored path, here `"channels/slack"`. An explicit override handles multiple
+connectors in one definition or intentional binding reuse:
+
+```ts
+connectSlackCredentials({ reference: "shared/slack" });
+```
+
+Both forms are intentionally distinct from the existing string form, which retains its
 current meaning as a direct Connect locator:
 
 ```ts
 // Existing behavior: use this exact connector UID or ID.
 connectSlackCredentials("slack/my-agent");
-
-// New behavior: resolve the project/environment binding named "slack".
-connectSlackCredentials({ reference: "slack" });
 ```
 
-Connect and its API requests must preserve this distinction structurally rather than
-inferring it from string syntax. Runtime token selection remains separate from static
-provisioning requirements:
+Connect and its API requests must preserve direct and binding targets structurally
+rather than inferring them from string syntax. Runtime token selection remains
+separate from static provisioning requirements:
 
 ```ts
 connectSlackCredentials({
-  reference: "slack",
   capabilities: { publicChannelMessages: true },
   token: { installationId: process.env.SLACK_INSTALLATION_ID },
 });
@@ -88,9 +93,16 @@ environment policy belongs to Connect and Vercel rather than beside channel beha
 
 ## Manifest contract
 
-Connect owns the provider-specific requirement schemas, expansion rules, validation,
-and merge semantics. eve evaluates authored definitions, combines helper metadata with
-eve-owned defaults and route information, and emits the expanded requirements.
+Connect owns the connector type vocabulary, provider-specific requirement schemas,
+expansion rules, validation, and merge semantics. The manifest's `connector.type`
+discriminator uses Connect's `ConnexClientType` values, such as `"slack"`, `"oauth"`,
+and `"api-key"`; MCP and OpenAPI remain eve resource protocols rather than connector
+types. Connect owns the versioned requirement configuration for each type. That
+configuration may project the safe, declarative subset of the type's create and update
+inputs rather than exposing secret-bearing input schemas directly. eve does not define
+a parallel connector taxonomy. eve evaluates authored definitions,
+combines helper metadata with eve-owned defaults and route information, and emits the
+expanded requirements.
 
 A representative artifact is:
 
@@ -106,7 +118,7 @@ A representative artifact is:
     {
       "target": {
         "mode": "binding",
-        "reference": "slack"
+        "reference": "channels/slack"
       },
       "connector": {
         "type": "slack",
@@ -143,7 +155,7 @@ A representative artifact is:
     {
       "target": {
         "mode": "binding",
-        "reference": "linear"
+        "reference": "connections/linear"
       },
       "connector": {
         "type": "oauth",
@@ -208,19 +220,27 @@ distinct UIDs in source, and an opaque connector ID cannot serve as a create-if-
 declaration. A named UID may support creation when Connect defines that behavior, but
 UID collisions and ownership remain Connect concerns.
 
-The second stage adds the explicit binding form:
+The second stage adds path-derived bindings by default:
 
 ```ts
-connectSlackCredentials({ reference: "slack" });
+// agent/channels/slack.ts derives "channels/slack".
+connectSlackCredentials({});
 ```
 
-Its manifest target is unambiguous:
+An explicit override remains available for multiple connectors in one definition or
+intentional sharing:
+
+```ts
+connectSlackCredentials({ reference: "shared/slack" });
+```
+
+The default manifest target is unambiguous:
 
 ```json
 {
   "target": {
     "mode": "binding",
-    "reference": "slack"
+    "reference": "channels/slack"
   },
   "connector": {
     "type": "slack"
@@ -236,9 +256,9 @@ so adding `"binding"` does not change existing wire semantics.
 
 Migrating an existing project is a coordinated operation:
 
-1. Connect verifies the direct connector and creates the project/environment binding.
-2. The setup UI or `eve` migration flow changes the source to `{ reference: "slack" }`.
-3. Subsequent builds declare only the binding target.
+1. Connect verifies the direct connector and creates the project/environment binding derived from the authored path.
+2. The setup UI or `eve` migration flow removes the direct locator from the source.
+3. Subsequent builds declare only the path-derived binding target.
 
 The binding must exist before code relies on it. Missing bindings do not implicitly
 fall back to global connector lookup. If the source edit and binding creation cannot be
@@ -246,8 +266,9 @@ coordinated, a future explicit migration hint may identify the prior direct loca
 it must be temporary and must not become permanent fallback behavior.
 
 Stage one is therefore independently useful but does not deliver the proposal's full
-portable-template or per-environment naming benefits. New scaffolds should switch to
-references only after Connect can resolve bindings and the setup UI can create them.
+portable-template or per-environment naming benefits. New scaffolds should omit direct
+locators only after Connect can resolve path-derived bindings and the setup UI can
+create them.
 
 ## Requirement and capability semantics
 
@@ -279,10 +300,11 @@ be incompatible and require a separate connector. eve does not implement those r
 
 ## Reconciliation and setup
 
-Build artifacts are declarations of intent, not authority. Ingestion validates the
-manifest and computes a setup plan without creating applications, sharing secrets,
-changing provider permissions, installing applications, or attaching trigger
-destinations.
+Build artifacts are declarations of intent, not authority. In the first version,
+ingestion validates the manifest and computes a setup plan without creating
+applications, sharing secrets, changing provider permissions, installing applications,
+or attaching trigger destinations. Every reconciliation plan requires explicit human
+approval, including plans whose compatible connector choices are preselected.
 
 For each requirement, Connect may propose:
 
@@ -300,10 +322,8 @@ auto-bind merely because Connect found a likely match.
 
 Preview setup must make isolation and sharing explicit. It offers a preview-specific
 connector or reuse of an existing connector, and highlights permission expansion,
-credential sharing, installations, and event fan-out. Automatic parent binding is
-allowed only under a previously approved project policy; without that standing policy,
-the likely parent connector is preselected but still requires approval. Sensitive
-changes require approval even when inheritance is enabled.
+credential sharing, installations, and event fan-out. In the first version, the likely
+parent connector may be preselected but still requires approval.
 
 Requirement readiness is decomposed rather than represented by one boolean:
 
@@ -323,6 +343,16 @@ When a requirement disappears, Connect marks its binding state stale but does no
 automatically delete a shared connector, uninstall a provider application, revoke
 credentials, or remove provider capabilities. Binding-owned deployment destinations
 may be cleaned up according to explicit environment policy.
+
+### Future automatic reconciliation
+
+After the approval-based lifecycle is established, Connect may automatically reconcile
+changes covered by previously granted authority and project policy. Examples include an
+unchanged binding, a trigger URL update for that binding, or Preview inheritance the
+project has explicitly enabled. New credential sharing, ambiguous connector selection,
+provider installation, permission expansion, and changes that affect Production remain
+approval boundaries unless a later policy explicitly authorizes them. This automation
+is future work and does not weaken the first version's approval requirement.
 
 ## Ownership boundaries
 
@@ -378,7 +408,7 @@ contract.
 - Direct locator and logical binding targets are structurally distinct and never inferred from string shape.
 - A logical reference is not a Connect connector ID, UID, or mutable display name.
 - Manifest ingestion never grants authority or performs provider mutations by itself.
-- Connector reuse is explicit or covered by a previously approved environment policy.
+- The first version requires human approval for every reconciliation plan.
 - Capability requirements are additive minimums and drift is visible in both directions.
 - Shared connectors retain per-binding capability and trigger provenance.
 - Provider configuration and merge semantics remain owned by Connect.
