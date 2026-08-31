@@ -852,21 +852,27 @@ describe("trace policies", () => {
     expect(tracePolicy).toHaveBeenCalledExactlyOnceWith(trace);
   });
 
-  it("requires provider policies to be bound before publishing", async () => {
+  it("drops unbound provider policies without affecting default providers", async () => {
     const tracePolicy = vi.fn(() => true);
-    const hooks = createInstrumentationHooks([{ name: "provider", tracePolicy }]);
+    const policyObserved = vi.fn();
+    const defaultObserved = vi.fn();
+    const hooks = createInstrumentationHooks([
+      { events: { "turn.started": policyObserved }, name: "policy", tracePolicy },
+      { events: { "turn.started": defaultObserved }, name: "default" },
+    ]);
 
-    await expect(
-      hooks.publish({
-        idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
-        rootSessionId: "session-1",
-        sequence: 0,
-        sessionId: "session-1",
-        turnId: "turn-1",
-        type: "turn.started",
-      }),
-    ).rejects.toThrow("must be bound with forTrace");
+    await hooks.publish({
+      idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
+      rootSessionId: "session-1",
+      sequence: 0,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "turn.started",
+    });
+
     expect(tracePolicy).not.toHaveBeenCalled();
+    expect(policyObserved).not.toHaveBeenCalled();
+    expect(defaultObserved).toHaveBeenCalledOnce();
   });
 
   it("lets an explicit provider policy authorize private content", async () => {

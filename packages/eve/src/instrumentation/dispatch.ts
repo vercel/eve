@@ -41,26 +41,31 @@ export function createInstrumentationDispatcher(
   const handlerTimeoutMs = options.handlerTimeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS;
   const groups = normalizeDispatchGroups(input);
   const providers = [...groups.serialBefore, ...groups.parallel, ...groups.serialAfter];
-  const requiresTraceBinding = providers.some((provider) => provider.tracePolicy !== undefined);
   const warnedPolicyFailures = new Set<InstrumentationProviderDefinition>();
 
-  const forTrace = (trace: TraceCaptureContext): InstrumentationHooks => {
+  function forTrace(trace: TraceCaptureContext): InstrumentationHooks {
+    return bind(trace);
+  }
+
+  function bind(trace: TraceCaptureContext | undefined): InstrumentationHooks {
     const snapshots = new WeakMap<object, unknown>();
     const decisions = new Map(
       providers.map((provider) => [
         provider,
-        resolveTracePolicy(
-          provider.tracePolicy ?? legacyCaptureTracePolicy(provider.capture),
-          trace,
-          (error) => {
-            if (warnedPolicyFailures.has(provider)) return;
-            warnedPolicyFailures.add(provider);
-            log.warn("instrumentation provider trace policy failed", {
-              error: formatError(error),
-              provider: provider.name,
-            });
-          },
-        ),
+        trace === undefined && provider.tracePolicy !== undefined
+          ? ({ action: "drop" } as const)
+          : resolveTracePolicy(
+              provider.tracePolicy ?? legacyCaptureTracePolicy(provider.capture),
+              trace ?? { agentName: "unknown", audience: "unknown" },
+              (error) => {
+                if (warnedPolicyFailures.has(provider)) return;
+                warnedPolicyFailures.add(provider);
+                log.warn("instrumentation provider trace policy failed", {
+                  error: formatError(error),
+                  provider: provider.name,
+                });
+              },
+            ),
       ]),
     );
     const capturesInputs = [...decisions.values()].some(
@@ -160,7 +165,7 @@ export function createInstrumentationDispatcher(
     };
 
     return { capturesContent, capturesInputs, capturesOutputs, forTrace, publish };
-  };
+  }
 
   let unboundHooks: InstrumentationHooks | undefined;
   let loggedUnboundPublish = false;
@@ -176,12 +181,7 @@ export function createInstrumentationDispatcher(
           eventType: event.type,
         });
       }
-      if (requiresTraceBinding) {
-        throw new Error(
-          "Instrumentation hooks with tracePolicy must be bound with forTrace before publishing.",
-        );
-      }
-      unboundHooks ??= forTrace({ agentName: "unknown", audience: "unknown" });
+      unboundHooks ??= bind(undefined);
       await unboundHooks.publish(event);
     },
   };
