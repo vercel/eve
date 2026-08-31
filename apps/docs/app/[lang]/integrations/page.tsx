@@ -9,7 +9,7 @@ import { Gallery, type GalleryFilter } from "./components/gallery";
 
 const title = "Integrations";
 const description =
-  "Browse the channels, connections, extensions, and instrumentation providers available to an eve agent, each with install, quick start, and configuration steps.";
+  "Browse the channels, connections, extensions, memory providers, and instrumentation providers available to an eve agent, each with install, quick start, and configuration steps.";
 const titleMetadata = pageTitleMetadata(title);
 
 export const metadata: Metadata = {
@@ -55,8 +55,8 @@ const IntegrationsPage = ({ searchParams }: PageProps<"/[lang]/integrations">) =
         <h1 className="text-gray-1000 text-heading-48 sm:text-heading-64">Integrations</h1>
         <p className="mt-5 max-w-2xl text-gray-900 text-lg">
           Add the channels where people reach your agent, connections to external services,
-          extensions that package reusable capabilities, and instrumentation providers that receive
-          traces.
+          extensions that package reusable capabilities, memory providers that retain context across
+          sessions, and instrumentation providers that receive traces.
         </p>
       </section>
       <Suspense fallback={<Gallery filter="all" integrations={integrations} />}>

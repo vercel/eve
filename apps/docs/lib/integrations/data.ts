@@ -6,6 +6,7 @@ import {
   connectionProtocols as protocolsForIdentity,
   extensionEntries,
   instrumentationEntries,
+  memoryEntries,
 } from "@eve/catalog";
 import type { LogoKey } from "./logos";
 
@@ -18,7 +19,7 @@ import type { LogoKey } from "./logos";
  * keyed by slug.
  */
 
-export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation";
+export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
 export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@eve/catalog";
@@ -110,12 +111,15 @@ interface ChannelPresentation extends Presentation {
   configure: string;
 }
 
-/** Extension overlay with hand-authored package setup. */
-interface ExtensionPresentation extends Presentation {
+/** Extension and memory overlays with hand-authored package setup. */
+interface PackagePresentation extends Presentation {
   install: string;
   quickStart: string;
   configure: string;
 }
+
+type ExtensionPresentation = PackagePresentation;
+type MemoryPresentation = PackagePresentation;
 
 /** Connection overlay: presentation plus Connect auth/config details. */
 interface ConnectionPresentation extends Presentation {
@@ -1183,7 +1187,7 @@ See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/ven
     configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
 };
-const extensionPresentations: Record<string, ExtensionPresentation> = {
+const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
   blitzreels: {
     logo: "blitzreels",
     docsHref: "https://www.npmjs.com/package/@blitzreels/eve",
@@ -1627,6 +1631,61 @@ For a self-hosted server, set \`HINDSIGHT_API_URL\` and pass \`apiKey: null\` to
 
 A bank is one isolated memory store, and both files must use the same bank. Do not share the default bank across untrusted users; use separate agent deployments with distinct \`HINDSIGHT_BANK_ID\` values for separate users or tenants. See the [Hindsight eve integration guide](https://hindsight.vectorize.io/sdks/integrations/eve) for Cloud, self-hosted, and factory configuration.`,
   },
+};
+
+const memoryPresentations: Record<string, MemoryPresentation> = {
+  supermemory: {
+    logo: "supermemory",
+    docsHref: "https://github.com/supermemoryai/eve-supermemory#readme",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "semantic search",
+      "rag",
+      "conversation history",
+      "retrieval",
+      "Supermemory",
+    ],
+    install: `Install the Supermemory provider for eve:
+
+\`\`\`bash
+eve add memory/supermemory
+\`\`\`
+
+This installs \`@supermemory/eve\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.47.3 or later.`,
+    quickStart: `Create a Supermemory API key and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+SUPERMEMORY_API_KEY=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/supermemory.ts"
+import supermemory from "@supermemory/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: supermemory({
+    apiKey: process.env.SUPERMEMORY_API_KEY!,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`supermemory\` memory slot, so the provider's tools are named \`supermemory__search\`, \`supermemory__remember\`, and \`supermemory__forget\`. The provider uses eve's locked scope key to partition all reads and writes.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
+
+Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://github.com/supermemoryai/eve-supermemory#readme) for all options and tool behavior.`,
+  },
+};
+
+const extensionPresentations: Record<string, ExtensionPresentation> = {
+  ...baseExtensionPresentations,
   "agent-browser": {
     logo: "agent-browser",
     docsHref:
@@ -2412,6 +2471,27 @@ function buildExtension(entry: IntegrationEntry): Integration {
   };
 }
 
+function buildMemory(entry: IntegrationEntry): Integration {
+  const presentation = memoryPresentations[entry.slug];
+  if (presentation === undefined) {
+    throw new Error(
+      `Memory provider "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+    );
+  }
+  return {
+    slug: entry.slug,
+    name: entry.name,
+    type: "memory",
+    tagline: entry.tagline,
+    logo: presentation.logo,
+    docsHref: presentation.docsHref,
+    keywords: presentation.keywords,
+    install: presentation.install,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
+  };
+}
+
 function buildInstrumentation(entry: IntegrationEntry): Integration {
   const presentation = instrumentationPresentations[entry.slug];
   if (presentation === undefined) {
@@ -2445,6 +2525,10 @@ const extensions: Integration[] = extensionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildExtension);
 
+const memory: Integration[] = memoryEntries()
+  .filter((entry) => entry.surfaces.gallery)
+  .map(buildMemory);
+
 const instrumentation: Integration[] = instrumentationEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildInstrumentation);
@@ -2472,6 +2556,7 @@ export const authModeLabel: Record<AuthMode, string> = {
 export const integrations: Integration[] = [
   ...channels,
   ...extensions,
+  ...memory,
   ...connections,
   ...instrumentation,
 ];

@@ -19,7 +19,7 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation";
+export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -324,6 +324,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Upstash AgentKit",
     kind: "extension",
     tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "supermemory",
+    name: "Supermemory",
+    kind: "memory",
+    tagline: "Recall relevant context, capture completed turns, and manage durable memory.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -927,4 +934,9 @@ export function extensionEntries(): IntegrationEntry[] {
 /** All instrumentation entries, in catalog order. */
 export function instrumentationEntries(): IntegrationEntry[] {
   return integrationsByKind("instrumentation");
+}
+
+/** All memory provider entries, in catalog order. */
+export function memoryEntries(): IntegrationEntry[] {
+  return integrationsByKind("memory");
 }

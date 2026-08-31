@@ -29,12 +29,15 @@ recall and maintain memory:
 | Provider        | Status         | Use it for                                                                |
 | --------------- | -------------- | ------------------------------------------------------------------------- |
 | `fileMemory()`  | Built into eve | A bounded, model-maintained list of durable facts and preferences         |
-| Supermemory     | Coming soon    | The first third-party implementation of the eve provider contract         |
+| Supermemory     | Third-party    | Semantic recall, automatic capture, source extraction, and memory tools   |
 | Custom provider | Supported      | Application-specific retrieval, capture, retention, or model-facing tools |
 
-Supermemory is building the first third-party provider for eve. It is not
-available yet; until it is released, use `fileMemory()` or implement the
-provider contract described below.
+[Supermemory](https://github.com/supermemoryai/eve-supermemory#readme) is a
+third-party provider that recalls relevant context before each turn, captures
+completed turns, and supplies search, memory-management, and source-extraction
+tools. Add it with `eve add memory/supermemory`. It requires a Supermemory API
+key and a memory scope you choose; review its retention and data handling before
+sending sensitive content to the service.
 
 ## Use file memory
 
