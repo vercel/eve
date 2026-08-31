@@ -9,6 +9,7 @@ const DEFAULT_REGISTRY_BASE = "https://eve.dev/r";
 const INDEX_PATH = "/registry.json";
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 25;
+const MIN_RELATIVE_SCORE = 0.4;
 const FETCH_TIMEOUT_MS = 10_000;
 /**
  * The catalog changes when eve releases, not between turns, so one fetch can
@@ -283,21 +284,49 @@ export function selectIntegrationPage(input: {
     .split(/\s+/u)
     .filter((term) => term.length > 0);
 
-  const matches = input.entries.filter((entry) => {
-    if (input.category !== undefined && !matchesCategory(entry, input.category)) return false;
-    if (terms.length === 0) return true;
-    const haystack = [
-      entry.address,
-      entry.title,
-      entry.description ?? "",
-      ...(entry.componentSearchTerms ?? entry.components ?? []),
-    ]
-      .join(" ")
-      .toLowerCase();
-    return terms.every((term) => haystack.includes(term));
+  const searchableEntries = input.entries.map((entry, index) => {
+    const primaryTerms = `${entry.address} ${entry.title}`.toLowerCase();
+    return {
+      entry,
+      haystack: [
+        primaryTerms,
+        entry.description ?? "",
+        ...(entry.componentSearchTerms ?? entry.components ?? []),
+      ]
+        .join(" ")
+        .toLowerCase(),
+      index,
+      primaryTerms,
+    };
   });
+  const termWeights = new Map(
+    terms.map((term) => {
+      const documentFrequency = searchableEntries.filter(({ haystack }) =>
+        haystack.includes(term),
+      ).length;
+      return [term, Math.log((searchableEntries.length + 1) / (documentFrequency + 1)) + 1];
+    }),
+  );
+  const rankedMatches = searchableEntries
+    .map(({ entry, haystack, index, primaryTerms }) => {
+      if (input.category !== undefined && !matchesCategory(entry, input.category)) return undefined;
+      if (terms.length === 0) return { entry, index, score: 0 };
+      const score = terms.reduce((total, term) => {
+        const weight = termWeights.get(term) ?? 0;
+        if (primaryTerms.includes(term)) return total + 2 * weight;
+        return haystack.includes(term) ? total + weight : total;
+      }, 0);
+      return score > 0 ? { entry, index, score } : undefined;
+    })
+    .filter(
+      (match): match is { entry: CatalogEntry; index: number; score: number } =>
+        match !== undefined,
+    )
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+  const minimumScore = (rankedMatches[0]?.score ?? 0) * MIN_RELATIVE_SCORE;
+  const matches = rankedMatches.filter(({ score }) => score >= minimumScore);
 
-  const items = matches.slice(offset, offset + limit).map((entry) => {
+  const items = matches.slice(offset, offset + limit).map(({ entry }) => {
     const row: {
       address: string;
       category?: Category;

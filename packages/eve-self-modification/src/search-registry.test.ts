@@ -103,14 +103,23 @@ describe("parseRegistryIndex", () => {
 });
 
 describe("selectIntegrations", () => {
-  it("matches every query term across address, title, and description", () => {
+  it("returns entries that match any query term and ranks stronger matches first", () => {
     expect(
       selectIntegrations({ entries: catalog(), query: "notion pages" }).map((row) => row.address),
     ).toEqual(["connection/notion"]);
-    expect(selectIntegrations({ entries: catalog(), query: "slack" })).toHaveLength(1);
+    expect(
+      selectIntegrations({
+        category: "channel",
+        entries: catalog(),
+        query: "Slack channel integration",
+      }).map((row) => row.address),
+    ).toEqual(["channel/slack", "channel/discord"]);
     expect(
       selectIntegrations({ entries: catalog(), query: "linear agent" }).map((row) => row.address),
     ).toEqual(["linear"]);
+    expect(
+      selectIntegrations({ entries: catalog(), query: "agent notion" }).map((row) => row.address),
+    ).toEqual(["connection/notion"]);
     expect(selectIntegrations({ entries: catalog(), query: "nothing here" })).toEqual([]);
   });
 
