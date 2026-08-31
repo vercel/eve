@@ -326,8 +326,8 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
-  /** Resolves step-scoped dynamic tools once for approval policy and model work. */
-  readonly resolveStepDynamicTools?: (input: {
+  /** Prepares persisted step-scoped tools before an approved call is resumed. */
+  readonly prepareStepDynamicTools?: (input: {
     readonly ctx: AlsContext;
     readonly event: UnstampedMessageStreamEvent;
     readonly messages: readonly ModelMessage[];

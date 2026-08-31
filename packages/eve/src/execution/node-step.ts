@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
 import {
   createBackgroundSubagentHarnessDefinition,
   createHarnessDelegationToolDefinition,
@@ -113,6 +114,11 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     instrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
+    prepareStepDynamicTools: (prepareInput) =>
+      preparePersistedStepDynamicToolMetadata({
+        ...prepareInput,
+        resolvers: input.node.agent.dynamicToolResolvers ?? [],
+      }),
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),

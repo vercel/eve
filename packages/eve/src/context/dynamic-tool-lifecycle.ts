@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import { replayDynamicTools } from "#context/build-dynamic-tools.js";
-import { contextStorage, type ContextContainer } from "#context/container.js";
+import { contextStorage, type AlsContext } from "#context/container.js";
 import type { ContextKey } from "#context/key.js";
 import {
   SessionDynamicToolMetadataKey,
@@ -239,7 +239,7 @@ interface ResolvedDynamicToolEvent {
 }
 
 async function resolveToolsFromEvent(
-  ctx: ContextContainer,
+  ctx: AlsContext,
   resolvers: readonly ResolvedDynamicToolResolver[],
   event: UnstampedMessageStreamEvent,
   messages: readonly ModelMessage[],
@@ -287,24 +287,39 @@ async function resolveToolsFromEvent(
 }
 
 const resolvedStepTools = new WeakMap<
-  ContextContainer,
+  AlsContext,
   { readonly coordinate: string; readonly metadata: readonly CurrentDynamicToolMetadata[] }
 >();
 
+function stepCoordinate(event: UnstampedMessageStreamEvent): string | undefined {
+  const data = ("data" in event ? event.data : undefined) as
+    | { readonly stepIndex?: unknown; readonly turnId?: unknown }
+    | undefined;
+  return typeof data?.turnId === "string" && typeof data.stepIndex === "number"
+    ? `${data.turnId}:${String(data.stepIndex)}`
+    : undefined;
+}
+
+function storeResolvedStepTools(input: {
+  readonly ctx: AlsContext;
+  readonly event: UnstampedMessageStreamEvent;
+  readonly metadata: readonly CurrentDynamicToolMetadata[];
+}): void {
+  input.ctx.set(StepDynamicToolMetadataKey, input.metadata);
+  const coordinate = stepCoordinate(input.event);
+  if (coordinate !== undefined) {
+    resolvedStepTools.set(input.ctx, { coordinate, metadata: input.metadata });
+  }
+}
+
 /** Resolves step-scoped tools once for one internal policy/model pass. */
 export async function resolveStepDynamicTools(input: {
-  readonly ctx: ContextContainer;
+  readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
-  const data = ("data" in input.event ? input.event.data : undefined) as
-    | { readonly stepIndex?: unknown; readonly turnId?: unknown }
-    | undefined;
-  const coordinate =
-    typeof data?.turnId === "string" && typeof data.stepIndex === "number"
-      ? `${data.turnId}:${String(data.stepIndex)}`
-      : undefined;
+  const coordinate = stepCoordinate(input.event);
   const cached = resolvedStepTools.get(input.ctx);
   if (coordinate !== undefined && cached?.coordinate === coordinate) {
     input.ctx.set(StepDynamicToolMetadataKey, cached.metadata);
@@ -318,13 +333,12 @@ export async function resolveStepDynamicTools(input: {
     matching.length === 0
       ? { metadata: [] }
       : await resolveToolsFromEvent(input.ctx, matching, input.event, input.messages);
-  input.ctx.set(StepDynamicToolMetadataKey, metadata);
-  if (coordinate !== undefined) resolvedStepTools.set(input.ctx, { coordinate, metadata });
+  storeResolvedStepTools({ ctx: input.ctx, event: input.event, metadata });
 }
 
 /** Converts persisted step metadata before any approval replay can read it. */
-export async function restorePersistedStepDynamicToolMetadata(input: {
-  readonly ctx: ContextContainer;
+export async function preparePersistedStepDynamicToolMetadata(input: {
+  readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
@@ -332,19 +346,26 @@ export async function restorePersistedStepDynamicToolMetadata(input: {
   const persisted = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
   const current = persisted.filter(isCurrentDynamicToolMetadata);
   if (current.length === persisted.length && !hasUnregisteredDurableDynamicCallbacks(current)) {
+    if (current.length > 0) {
+      storeResolvedStepTools({ ctx: input.ctx, event: input.event, metadata: current });
+    }
     return;
   }
 
   await resolveStepDynamicTools(input);
   const resolved = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
-  input.ctx.set(
-    StepDynamicToolMetadataKey,
-    toCurrentDynamicToolMetadataList(persisted, resolved.filter(isCurrentDynamicToolMetadata)),
-  );
+  storeResolvedStepTools({
+    ctx: input.ctx,
+    event: input.event,
+    metadata: toCurrentDynamicToolMetadataList(
+      persisted,
+      resolved.filter(isCurrentDynamicToolMetadata),
+    ),
+  });
 }
 
 export async function dispatchDynamicToolEvent(input: {
-  readonly ctx: ContextContainer;
+  readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
@@ -381,7 +402,7 @@ export async function dispatchDynamicToolEvent(input: {
  * a crash, or a redeploy), so replay always resolves against current code.
  */
 export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
-  readonly ctx: ContextContainer;
+  readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
   readonly event: SessionStartedStreamEvent;
   readonly messages: readonly ModelMessage[];
@@ -412,7 +433,7 @@ export async function refreshDynamicSessionToolsForRuntimeRevision(input: {
 
 /** Re-registers callbacks for compiled resolvers that explicitly support cold replay. */
 export async function rebindMissingCompiledDynamicToolCallbacks(input: {
-  readonly ctx: ContextContainer;
+  readonly ctx: AlsContext;
   readonly event: UnstampedMessageStreamEvent;
   readonly messages: readonly ModelMessage[];
   readonly resolvers: readonly ResolvedDynamicToolResolver[];

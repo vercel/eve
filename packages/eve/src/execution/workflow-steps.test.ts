@@ -9,8 +9,6 @@ import type {
 } from "#channel/types.js";
 import { ContextContainer, contextStorage, loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
-import { buildResponseAuthorizationTools } from "#context/build-dynamic-tools.js";
 import {
   ActivityObserverKey,
   AuthKey,
@@ -24,7 +22,6 @@ import {
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
-  StepDynamicToolMetadataKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -2874,135 +2871,6 @@ describe("turnStep", () => {
         resolverSlug: "current",
       }),
     ]);
-  });
-
-  it("converts persisted source-offset step metadata before resumed execution", async () => {
-    const executeCallback = vi.fn((closure) => closure);
-    const approvalRequestCallback = vi.fn((_closure: unknown) => "user-approval" as const);
-    const approvalResponseCallback = vi.fn((_closure: unknown) => ({ status: "allowed" as const }));
-    const execute = stampDurableDynamicCallback(async () => ({ ok: true }), {
-      callback: executeCallback,
-      closure: { version: "current" },
-    });
-    const approvalRequest = stampDurableDynamicCallback(() => "user-approval" as const, {
-      callback: approvalRequestCallback,
-      closure: { version: "current-request" },
-    });
-    const approvalResponse = stampDurableDynamicCallback(() => ({ status: "allowed" as const }), {
-      callback: approvalResponseCallback,
-      closure: { version: "current-response" },
-    });
-    const handler = vi.fn(() => ({
-      tool: defineTool({
-        approval: { request: approvalRequest, response: approvalResponse },
-        description: "Current tool",
-        execute,
-        inputSchema: { type: "object" },
-      }),
-    }));
-    const dynamicToolResolver = {
-      eventNames: ["step.started"],
-      events: { "step.started": handler },
-      logicalPath: "agent/tools/step.ts",
-      slug: "legacy",
-      sourceId: "test:legacy-step",
-      sourceKind: "module",
-    } as never;
-    const compiledBundle = {
-      adapterRegistry: {
-        adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
-      },
-      compiledArtifactsSource: {} as never,
-      graph: {
-        nodesByNodeId: new Map(),
-        root: {
-          sandboxRegistry: { sandbox: null },
-          turnAgent: TestTurnAgent,
-        },
-      },
-      moduleMap: { nodes: {} },
-      hookRegistry: createEmptyHookRegistry(),
-      resolvedAgent: { config: {}, dynamicToolResolvers: [dynamicToolResolver] },
-      subagentRegistry: {},
-      toolRegistry: {},
-      turnAgent: TestTurnAgent,
-    } as never;
-    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(compiledBundle);
-    const session = createStubSession({
-      state: {
-        "eve.harness.emission": {
-          sequence: 1,
-          sessionStarted: true,
-          stepIndex: 1,
-          turnId: "turn-1",
-        },
-      },
-    });
-    installSessionStoreMocks([session]);
-
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => {
-        const tool = buildResponseAuthorizationTools({
-          authoredTools: new Map(),
-          context: loadContext(),
-        }).get("tool");
-        if (
-          tool === undefined ||
-          tool.approval === undefined ||
-          typeof tool.approval === "function"
-        ) {
-          throw new Error("Expected replayed tool with response authorization.");
-        }
-        await tool.execute!({}, { messages: [], toolCallId: "call-1" });
-        await tool.approval.request({} as never);
-        await tool.approval.response!({} as never);
-        return { next: { done: true, output: "ok" }, session: stepSession };
-      };
-    });
-
-    const serializedContext = createSerializedContext();
-    serializedContext[StepDynamicToolMetadataKey.name] = [
-      {
-        callbacks: {
-          approvalRequest: {
-            closure: { version: "offset-request" },
-            stepId: "eve:dynamic-tool//old/approval-request/0-100",
-          },
-          approvalResponse: {
-            closure: { version: "offset-response" },
-            stepId: "eve:dynamic-tool//old/approval-response/0-100",
-          },
-          execute: {
-            closure: { version: "offset-execute" },
-            stepId: "eve:dynamic-tool//old/execute/0-100",
-          },
-        },
-        description: "Old tool",
-        entryKey: "tool",
-        inputSchema: { type: "object" },
-        name: "tool",
-        resolverSlug: "legacy",
-      } satisfies OldSourceOffsetDynamicToolMetadata,
-    ];
-
-    await turnStep({
-      input: { kind: "deliver", payloads: [{ message: "resume" }] },
-      parentWritable: createTestWritable(),
-      serializedContext,
-      sessionState: createStubSessionState({
-        emissionState: {
-          sequence: 1,
-          sessionStarted: true,
-          stepIndex: 1,
-          turnId: "turn-1",
-        },
-      }),
-    });
-
-    expect(handler).toHaveBeenCalledOnce();
-    expect(executeCallback.mock.calls[0]?.[0]).toEqual({ version: "offset-execute" });
-    expect(approvalRequestCallback.mock.calls[0]?.[0]).toEqual({ version: "offset-request" });
-    expect(approvalResponseCallback.mock.calls[0]?.[0]).toEqual({ version: "offset-response" });
   });
 
   it("resumes a legacy pending authorization without attempt metadata", async () => {

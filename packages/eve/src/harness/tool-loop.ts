@@ -895,12 +895,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : effectiveStepInput;
 
     const approvalContext = contextStorage.getStore();
+    const needsResponseAuthorizationTools = shouldPrepareApprovalPolicyTools({
+      session,
+      stepInput: effectiveStepInput,
+    });
+    let responseAuthorizationTools = config.tools;
     if (
+      hasPendingApprovalBatch(session) &&
       approvalContext !== undefined &&
-      config.resolveStepDynamicTools !== undefined &&
-      shouldPrepareApprovalPolicyTools({ session, stepInput: effectiveStepInput })
+      config.prepareStepDynamicTools !== undefined
     ) {
-      await config.resolveStepDynamicTools({
+      await config.prepareStepDynamicTools({
         ctx: approvalContext,
         event: createStepStartedEvent({
           modelId: session.agent.modelReference?.id ?? "dynamic",
@@ -911,13 +916,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: projectHistory(resolvedRuntimeActions.messages, session.state),
       });
     }
+    if (needsResponseAuthorizationTools) {
+      responseAuthorizationTools = buildResponseAuthorizationTools({
+        authoredTools: config.tools,
+        context: approvalContext,
+      });
+    }
     const coordinated = await coordinateApprovalDelivery({
       session,
       stepInput: effectiveStepInput,
-      tools: buildResponseAuthorizationTools({
-        authoredTools: config.tools,
-        context: approvalContext,
-      }),
+      tools: responseAuthorizationTools,
     });
     session = coordinated.session;
     if (emit) {

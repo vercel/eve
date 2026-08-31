@@ -16,7 +16,6 @@ const LONG_SOURCE_FILE_ALLOWLIST = new Set<string>([
   "cli/dev/tui/setup-panel.ts",
   "cli/dev/tui/terminal-renderer.ts",
   "compiler/manifest.ts",
-  "execution/workflow-steps.ts",
   "harness/tool-loop.ts",
   "internal/nitro/host/create-application-nitro.ts",
   "protocol/message.ts",
