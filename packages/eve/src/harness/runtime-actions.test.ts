@@ -21,6 +21,7 @@ import {
 } from "#harness/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getToolRuns, recordToolRun } from "#harness/tool-runs.js";
+import { toolOutput } from "#tools/model-output.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -386,6 +387,55 @@ describe("resolvePendingRuntimeActions", () => {
     expect(resolved.outcome).toBe("resolved");
     expect(getToolRuns(resolved.session.state)).toEqual([]);
     expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual(["other-request"]);
+  });
+
+  it("projects a workflow tool's result through its toModelOutput", async () => {
+    const parked = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          input: { service: "api" },
+          kind: "workflow-tool-call",
+          toolName: "deploy",
+          workflowId: "workflow//./agent/tools/deploy//execute",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+    });
+    const tools = new Map([
+      [
+        "deploy",
+        {
+          description: "Deploy.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "deploy",
+          toModelOutput: (output: unknown) =>
+            toolOutput.text(`deployed to ${(output as { url: string }).url}`),
+        },
+      ],
+    ]);
+
+    const resolved = await resolvePendingRuntimeActions({
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "tool-result",
+            output: { deployed: true, url: "https://api.example" },
+            toolName: "deploy",
+          },
+        ],
+      },
+      tools,
+    });
+
+    const toolMessage = resolved.messages.at(-1);
+    expect(toolMessage?.role).toBe("tool");
+    expect(JSON.stringify(toolMessage?.content)).toContain("deployed to https://api.example");
+    expect(JSON.stringify(toolMessage?.content)).not.toContain('"deployed":true');
   });
 
   it("accepts a dispatch-origin failure result by callId", async () => {

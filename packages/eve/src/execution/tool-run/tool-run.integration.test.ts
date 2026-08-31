@@ -388,6 +388,87 @@ describe("workflow tools", () => {
     });
   }, 90_000);
 
+  it("streams a waiting tool's yields as action.partial and settles with its return", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-progress",
+      execute: reportingDeployWorkflow,
+      toolName: "deploy_service",
+    });
+
+    await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:workflow-tool-progress",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+      try {
+        const settled = await stream.nextTurn();
+        const partials = filterEventsByType(settled, "action.partial").map((event) =>
+          JSON.stringify(event.data.result.output),
+        );
+        expect(partials).toContainEqual(JSON.stringify("planned api"));
+        const results = filterEventsByType(settled, "action.result").map((event) =>
+          JSON.stringify(event.data.result.output),
+        );
+        expect(results).toContainEqual(JSON.stringify({ plan: "plan:api" }));
+        expect(filterEventsByType(settled, "turn.failed")).toHaveLength(0);
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 30_000);
+
+  it("wakes the agent with the failure when a background workflow tool throws", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-background-fail",
+      execute: failingDeployWorkflow,
+      toolName: "deploy_service",
+    });
+
+    await runtime.run(async () => {
+      enableBackgroundTool(runtime, "deploy_service");
+
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "http:workflow-tool-background-fail",
+            mode: "conversation",
+          }),
+        },
+      ]);
+      const stream = captureTurnEvents(run);
+
+      try {
+        const receiptTurn = await stream.nextTurn();
+        expect(filterEventsByType(receiptTurn, "turn.failed")).toHaveLength(0);
+
+        const notifications: string[] = [];
+        for (
+          let turn = 0;
+          turn < 3 && !notifications.some((t) => t.includes("failed"));
+          turn += 1
+        ) {
+          const woken = await stream.nextTurn();
+          expect(filterEventsByType(woken, "turn.failed")).toHaveLength(0);
+          notifications.push(eventsText(filterEventsByType(woken, "message.received")));
+        }
+        const text = notifications.join("\n");
+        expect(text).toContain("(deploy_service) failed.");
+        expect(text).toContain("deploy of api exploded");
+      } finally {
+        stream.dispose();
+        await run.cancel();
+      }
+    });
+  }, 90_000);
+
   it("lets a background workflow tool ask now and act when answered", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-background-hitl",
