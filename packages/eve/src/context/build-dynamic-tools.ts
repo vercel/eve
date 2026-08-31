@@ -5,11 +5,8 @@ import {
   SessionDynamicToolMetadataKey,
   StepDynamicToolMetadataKey,
   TurnDynamicToolMetadataKey,
-  isLegacyDurableDynamicToolMetadata,
-  type DurableDynamicToolMetadata,
-  type LegacyDurableDynamicToolMetadata,
-  type PersistedDurableDynamicToolMetadata,
 } from "#context/keys.js";
+import type { CurrentDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { createLogger } from "#internal/logging.js";
 import type {
@@ -28,7 +25,7 @@ import { toInputSchema, toOutputSchema } from "#tools/schema.js";
 const log = createLogger("dynamic-tools");
 
 function missingCallbackError(
-  metadata: DurableDynamicToolMetadata,
+  metadata: CurrentDynamicToolMetadata,
   phase: DurableDynamicCallbackPhase,
 ): Error {
   return new Error(
@@ -38,15 +35,8 @@ function missingCallbackError(
   );
 }
 
-function legacyMetadataError(metadata: LegacyDurableDynamicToolMetadata): Error {
-  return new Error(
-    `Dynamic tool "${metadata.name}" was persisted using a legacy dynamic-tool metadata schema ` +
-      "and cannot be replayed directly. Start a new turn or session to re-resolve it.",
-  );
-}
-
 function buildReplayedApproval(
-  metadata: DurableDynamicToolMetadata,
+  metadata: CurrentDynamicToolMetadata,
 ): HarnessToolDefinition["approval"] | undefined {
   const requestReference = metadata.callbacks.approvalRequest;
   if (requestReference === undefined) return undefined;
@@ -92,23 +82,9 @@ function buildReplayedApproval(
 
 /** Reconstructs every callback exclusively from its durable descriptor. */
 export function replayDynamicTools(
-  metadata: readonly PersistedDurableDynamicToolMetadata[],
+  metadata: readonly CurrentDynamicToolMetadata[],
 ): HarnessToolDefinition[] {
   return metadata.map((entry) => {
-    if (isLegacyDurableDynamicToolMetadata(entry)) {
-      return {
-        description: entry.description,
-        execute: createToolExecuteWithAuth({
-          scope: entry.name,
-          execute: () => {
-            throw legacyMetadataError(entry);
-          },
-        }),
-        inputSchema: toInputSchema(entry.inputSchema),
-        name: entry.name,
-        outputSchema: toOutputSchema(entry.outputSchema),
-      };
-    }
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
     const toModelOutputReference = entry.callbacks.toModelOutput;

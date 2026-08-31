@@ -6,7 +6,6 @@
 
 import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
-import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type {
   ActivityObserverConfig,
@@ -23,7 +22,7 @@ import { ContextKey } from "#context/key.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
 import type { HandleEventFn } from "#harness/types.js";
-import type { DurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
+import type { CurrentDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { SandboxAccess } from "#sandbox/state.js";
@@ -177,73 +176,13 @@ export const LiveStepDynamicModelSelectionKey = new ContextKey<LiveDynamicModelS
 // Dynamic tool keys
 // ---------------------------------------------------------------------------
 
-interface DynamicToolMetadataBase {
-  readonly name: string;
-  readonly description: string;
-  readonly inputSchema: JsonObject;
-  readonly outputSchema?: JsonObject;
-  readonly resolverSlug: string;
-  readonly entryKey: string;
-}
-
-/**
- * Metadata written before callback descriptors existed. Callback identity lived
- * in workflow step-function names, so this format must be re-resolved.
- */
-export interface LegacyStepFunctionDynamicToolMetadata extends DynamicToolMetadataBase {
-  readonly callbacks?: never;
-  readonly executeStepFnName?: string;
-  readonly approvalStepFnName?: string;
-  readonly approvalResponseStepFnName?: string;
-  readonly closureVars?: Record<string, unknown>;
-}
-
-/** Callback reference written when callback identity was a generated source offset. */
-export interface LegacySourceOffsetDynamicCallbackReference {
-  readonly closure: JsonObject;
-  readonly stepId: string;
-}
-
-interface LegacySourceOffsetDynamicToolCallbacks {
-  readonly execute: LegacySourceOffsetDynamicCallbackReference;
-  readonly approvalRequest?: LegacySourceOffsetDynamicCallbackReference;
-  readonly approvalResponse?: LegacySourceOffsetDynamicCallbackReference;
-  readonly toModelOutput?: LegacySourceOffsetDynamicCallbackReference;
-}
-
-/** Metadata written before callback identity moved from source offsets to tool name and phase. */
-export interface LegacySourceOffsetDynamicToolMetadata extends DynamicToolMetadataBase {
-  readonly callbacks: LegacySourceOffsetDynamicToolCallbacks;
-}
-
-/** Current metadata: callback identity is the surrounding `(tool name, phase)`. */
-export interface DurableDynamicToolMetadata extends DynamicToolMetadataBase {
-  readonly callbacks: DurableDynamicToolCallbacks;
-}
-
-export type LegacyDurableDynamicToolMetadata =
-  | LegacyStepFunctionDynamicToolMetadata
-  | LegacySourceOffsetDynamicToolMetadata;
-
-/** Every dynamic-tool metadata schema eve has persisted. */
-export type PersistedDurableDynamicToolMetadata =
-  | DurableDynamicToolMetadata
-  | LegacyDurableDynamicToolMetadata;
-
-/** Known legacy schemas require resolver restoration before replay. */
-export function isLegacyDurableDynamicToolMetadata(
-  metadata: PersistedDurableDynamicToolMetadata,
-): metadata is LegacyDurableDynamicToolMetadata {
-  return metadata.callbacks === undefined || "stepId" in metadata.callbacks.execute;
-}
-
 /**
  * Session-scoped dynamic tool metadata (from `session.started`).
  * Persists for the session lifetime.
  */
-export const SessionDynamicToolMetadataKey = new ContextKey<
-  readonly PersistedDurableDynamicToolMetadata[]
->("eve.sessionDynamicToolMetadata");
+export const SessionDynamicToolMetadataKey = new ContextKey<readonly CurrentDynamicToolMetadata[]>(
+  "eve.sessionDynamicToolMetadata",
+);
 
 /**
  * Runtime revision that last resolved session-scoped dynamic tools.
@@ -257,9 +196,9 @@ export const SessionDynamicToolRuntimeRevisionKey = new ContextKey<string>(
  * Turn-scoped dynamic tool metadata (from `turn.started`).
  * Replaced each turn.
  */
-export const TurnDynamicToolMetadataKey = new ContextKey<
-  readonly PersistedDurableDynamicToolMetadata[]
->("eve.turnDynamicToolMetadata");
+export const TurnDynamicToolMetadataKey = new ContextKey<readonly CurrentDynamicToolMetadata[]>(
+  "eve.turnDynamicToolMetadata",
+);
 
 export interface LockedMemorySlot {
   readonly scope: MemoryScope;
@@ -301,9 +240,9 @@ export const PreparedMemoryCompactionKey = new ContextKey<PreparedMemoryCompacti
 );
 
 /** Step-scoped dynamic tool metadata, replaced before each model step. */
-export const StepDynamicToolMetadataKey = new ContextKey<
-  readonly PersistedDurableDynamicToolMetadata[]
->("eve.stepDynamicToolMetadata");
+export const StepDynamicToolMetadataKey = new ContextKey<readonly CurrentDynamicToolMetadata[]>(
+  "eve.stepDynamicToolMetadata",
+);
 
 /** Whether this turn executes subagent definitions as durable background tools. */
 export const TasksEnabledKey = new ContextKey<boolean>("eve.tasksEnabled");
