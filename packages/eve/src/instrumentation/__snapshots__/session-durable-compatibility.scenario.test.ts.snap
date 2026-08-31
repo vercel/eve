@@ -1,0 +1,253 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`historical session instrumentation compatibility > disabled OTel marker without a seed from historical-eve-0-45-0 > disabled OTel marker without a seed 1`] = `
+{
+  "exercised": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": false,
+  },
+  "source": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": false,
+  },
+}
+`;
+
+exports[`historical session instrumentation compatibility > private sampled session trace seed from historical-eve-0-45-0 > private sampled session trace seed 1`] = `
+{
+  "exercised": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "private",
+      },
+    },
+    "eve.otelTraceEnabled": true,
+    "eve.sessionTraceSeed": {
+      "spanId": "1111111111111111",
+      "traceFlags": 1,
+      "traceId": "22222222222222222222222222222222",
+    },
+  },
+  "source": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "private",
+      },
+    },
+    "eve.otelTraceEnabled": true,
+    "eve.sessionTraceSeed": {
+      "spanId": "1111111111111111",
+      "traceFlags": 1,
+      "traceId": "22222222222222222222222222222222",
+    },
+  },
+}
+`;
+
+exports[`historical session instrumentation compatibility > sampled agent trace before session seeds from historical-eve-0-44-4 > sampled agent trace before session seeds 1`] = `
+{
+  "exercised": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.harness.agentTrace": {
+      "actions": {},
+      "sessions": {
+        "legacy-session": {
+          "agentName": "weather",
+          "channelAudience": "public",
+          "channelKind": "http",
+          "context": {
+            "isRemote": false,
+            "spanId": "1111111111111111",
+            "traceFlags": 1,
+            "traceId": "22222222222222222222222222222222",
+          },
+          "rootSessionId": "legacy-session",
+        },
+      },
+      "turns": {},
+    },
+  },
+  "source": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.harness.agentTrace": {
+      "actions": {},
+      "sessions": {
+        "legacy-session": {
+          "agentName": "weather",
+          "channelAudience": "public",
+          "channelKind": "http",
+          "context": {
+            "isRemote": false,
+            "spanId": "1111111111111111",
+            "traceFlags": 1,
+            "traceId": "22222222222222222222222222222222",
+          },
+          "rootSessionId": "legacy-session",
+          "turnsInWindow": 7,
+          "window": 0,
+        },
+      },
+      "turns": {},
+    },
+  },
+}
+`;
+
+exports[`historical session instrumentation compatibility > sampled session trace seed from historical-eve-0-45-0 > sampled session trace seed 1`] = `
+{
+  "exercised": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": true,
+    "eve.sessionTraceSeed": {
+      "spanId": "1111111111111111",
+      "traceFlags": 1,
+      "traceId": "22222222222222222222222222222222",
+    },
+  },
+  "source": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": true,
+    "eve.sessionTraceSeed": {
+      "spanId": "1111111111111111",
+      "traceFlags": 1,
+      "traceId": "22222222222222222222222222222222",
+    },
+  },
+}
+`;
+
+exports[`historical session instrumentation compatibility > unsampled agent trace before session seeds from historical-eve-0-44-4 > unsampled agent trace before session seeds 1`] = `
+{
+  "exercised": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.harness.agentTrace": {
+      "actions": {},
+      "sessions": {
+        "legacy-session": {
+          "agentName": "weather",
+          "channelAudience": "public",
+          "channelKind": "http",
+          "context": {
+            "isRemote": false,
+            "spanId": "1111111111111111",
+            "traceFlags": 0,
+            "traceId": "22222222222222222222222222222222",
+          },
+          "rootSessionId": "legacy-session",
+        },
+      },
+      "turns": {},
+    },
+  },
+  "source": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.harness.agentTrace": {
+      "actions": {},
+      "sessions": {
+        "legacy-session": {
+          "agentName": "weather",
+          "channelAudience": "public",
+          "channelKind": "http",
+          "context": {
+            "isRemote": false,
+            "spanId": "1111111111111111",
+            "traceFlags": 0,
+            "traceId": "22222222222222222222222222222222",
+          },
+          "rootSessionId": "legacy-session",
+          "turnsInWindow": 7,
+          "window": 0,
+        },
+      },
+      "turns": {},
+    },
+  },
+}
+`;
+
+exports[`historical session instrumentation compatibility > unsampled session trace seed from historical-eve-0-45-0 > unsampled session trace seed 1`] = `
+{
+  "exercised": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": true,
+    "eve.sessionTraceSeed": {
+      "spanId": "1111111111111111",
+      "traceFlags": 0,
+      "traceId": "22222222222222222222222222222222",
+    },
+  },
+  "source": {
+    "eve.channelInstrumentation": {
+      "channelType": "http",
+      "kind": "channel:http",
+      "metadata": {
+        "audience": "public",
+      },
+    },
+    "eve.otelTraceEnabled": true,
+    "eve.sessionTraceSeed": {
+      "spanId": "1111111111111111",
+      "traceFlags": 0,
+      "traceId": "22222222222222222222222222222222",
+    },
+  },
+}
+`;
