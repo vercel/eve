@@ -1,5 +1,12 @@
 # eve
 
+## 0.47.6
+
+### Patch Changes
+
+- 63f2e07: Run `Workflow` programs with the official AI SDK code-mode runtime while preserving eve's durable subagent accounting and event stream.
+- 450681a: Upgrade eve and newly generated projects to Zod 4.5, with lazy schema compilation for faster internal validation and substantially lower schema memory overhead. Boolean-only checks now use Zod's validation fast path instead of constructing full parse results.
+
 ## 0.47.5
 
 ### Patch Changes
