@@ -20,11 +20,8 @@ import {
 import { getSubagentDelegationName, isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { createLogger } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeSubagentDispatchFailure,
-  RuntimeActionResult,
-} from "#shared/action-types.js";
+import type { RuntimeSubagentDispatchFailure, RuntimeActionResult } from "#shared/action-types.js";
+import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-workflow-runtime-actions");
@@ -74,7 +71,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
       maxSubagents: plan.maxSubagents,
       subagentName: isSubagentDelegationAction(action)
         ? getSubagentDelegationName(action)
-        : action.kind,
+        : action.target.kind,
       usedCalls: plan.usedCalls,
     });
     return createWorkflowSubagentLimitResult({ action, plan });
@@ -129,12 +126,12 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 }
 
 function createWorkflowSubagentLimitResult(input: {
-  readonly action: RuntimeActionRequest;
+  readonly action: PendingDispatchAction;
   readonly plan: WorkflowSubagentDispatchPlan;
 }): RuntimeSubagentDispatchFailure {
   const subagentName = isSubagentDelegationAction(input.action)
     ? getSubagentDelegationName(input.action)
-    : input.action.kind;
+    : input.action.target.kind;
 
   return {
     callId: input.action.callId,

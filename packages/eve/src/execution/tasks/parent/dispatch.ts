@@ -20,17 +20,9 @@ import type { DelegatedTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeActionResult,
-  RuntimeToolCallActionRequest,
-} from "#shared/action-types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { PendingDispatchAction, PendingTaskControlAction } from "#shared/dispatch-action.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import {
-  TASK_CANCEL_TOOL_NAME,
-  TASK_TOOL_NAMES,
-  TASK_UPDATE_TOOL_NAME,
-} from "#tools/framework/task-contract.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import {
   isTerminalTaskStatus,
@@ -47,9 +39,9 @@ const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 
 /** True for task-control calls dispatched outside the model loop. */
 export function isTaskControlAction(
-  action: RuntimeActionRequest,
-): action is RuntimeToolCallActionRequest {
-  return action.kind === "tool-call" && TASK_TOOL_NAMES.has(action.toolName);
+  action: PendingDispatchAction,
+): action is PendingTaskControlAction {
+  return action.target.kind === "task-cancel" || action.target.kind === "task-update";
 }
 
 /**
@@ -60,7 +52,7 @@ export function isTaskControlAction(
  * Returns the current session alongside the action result.
  */
 export async function executeTaskControlAction(input: {
-  readonly action: RuntimeToolCallActionRequest;
+  readonly action: PendingTaskControlAction;
   readonly adapter?: ChannelAdapter;
   readonly bundle: CompiledBundle;
   readonly parentStepIndex?: number;
@@ -74,7 +66,7 @@ export async function executeTaskControlAction(input: {
 }> {
   const { action, session } = input;
 
-  if (action.toolName === TASK_UPDATE_TOOL_NAME) {
+  if (action.target.kind === "task-update") {
     return {
       result: await executeTaskUpdate({
         action,
@@ -100,13 +92,6 @@ export async function executeTaskControlAction(input: {
     return { result: createUnknownTasksError(action, lookup.unknown), session };
   }
   const entries = lookup.entries;
-
-  if (action.toolName !== TASK_CANCEL_TOOL_NAME) {
-    return {
-      result: createTaskControlError(action, `Unsupported task control "${action.toolName}".`),
-      session,
-    };
-  }
 
   const views: TaskView[] = [];
   for (const entry of entries) {

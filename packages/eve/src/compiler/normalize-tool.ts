@@ -21,7 +21,6 @@ export type CompiledToolEntry =
   | {
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
-      readonly provider: "exa" | "parallel";
     }
   | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
 
@@ -71,6 +70,10 @@ export async function compileToolEntry(
     }
     return {
       definition: {
+        behavior: {
+          availability: [],
+          handling: { kind: "provider-tool", provider: entry.provider },
+        },
         description:
           "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
         exportName: source.exportName,
@@ -84,7 +87,6 @@ export async function compileToolEntry(
         requiresApproval: false,
       },
       kind: "web-search-tool",
-      provider: entry.provider,
     };
   }
 
@@ -106,10 +108,11 @@ export async function compileToolEntry(
   return {
     kind: "tool",
     definition: {
+      behavior: entry.definition.behavior,
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,
-      hasExecute: true,
+      hasExecute: entry.definition.hasExecute,
       hasModelOutputProjection: entry.definition.hasModelOutputProjection,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,

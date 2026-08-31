@@ -1,4 +1,5 @@
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 
 /**
  * Returns the stable match key used to pair one pending runtime action request
@@ -14,6 +15,24 @@ export function getRuntimeActionRequestKey(action: RuntimeActionRequest): string
       return `subagent-call:${action.subagentName}:${action.callId}`;
     case "tool-call":
       return `tool-call:${action.toolName}:${action.callId}`;
+  }
+}
+
+/** Returns the stable match key for one durable dispatch request. */
+export function getPendingDispatchActionKey(action: PendingDispatchAction): string {
+  switch (action.target.kind) {
+    case "remote-agent-call":
+      return `subagent-call:${action.target.remoteAgentName}:${action.callId}`;
+    case "self-agent-call":
+    case "subagent-call":
+      return `subagent-call:${action.target.subagentName}:${action.callId}`;
+    case "task-cancel":
+    case "task-update":
+      return `tool-call:${action.toolName}:${action.callId}`;
+    default: {
+      const _exhaustive: never = action.target;
+      return _exhaustive;
+    }
   }
 }
 

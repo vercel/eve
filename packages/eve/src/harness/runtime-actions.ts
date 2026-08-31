@@ -1,9 +1,10 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
 import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
-import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
+import { getPendingDispatchActionKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionRequest, RuntimeActionResult } from "#shared/action-types.js";
+import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
@@ -57,7 +58,7 @@ interface PendingRuntimeActionEventMetadata {
  * authority for continuing, settling, and cancelling children.
  */
 export interface PendingRuntimeActionBatch {
-  readonly actions: readonly RuntimeActionRequest[];
+  readonly actions: readonly PendingDispatchAction[];
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
 }
@@ -115,7 +116,7 @@ export function clearPendingRuntimeActionBatch(session: HarnessSession): Harness
  * Stores one pending runtime-action batch on the session.
  */
 export function setPendingRuntimeActionBatch(input: {
-  readonly actions: readonly RuntimeActionRequest[];
+  readonly actions: readonly PendingDispatchAction[];
   readonly event: PendingRuntimeActionEventMetadata;
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
@@ -132,7 +133,7 @@ export function setPendingRuntimeActionBatch(input: {
 }
 
 /** Rejects an ambiguous action batch before any result or side effect can bind by call id. */
-export function assertUniqueRuntimeActionCallIds(actions: readonly RuntimeActionRequest[]): void {
+export function assertUniqueRuntimeActionCallIds(actions: readonly PendingDispatchAction[]): void {
   const seen = new Set<string>();
   for (const action of actions) {
     if (seen.has(action.callId)) {
@@ -170,7 +171,7 @@ function resolveRuntimeActionResultsForBatch(input: {
   readonly state: SessionStateMap | undefined;
 }): RuntimeActionResult[] | undefined {
   return resolveRuntimeActionResultsForKeys({
-    pendingKeys: input.batch.actions.map((action) => getRuntimeActionRequestKey(action)),
+    pendingKeys: input.batch.actions.map((action) => getPendingDispatchActionKey(action)),
     results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
   });
 }
@@ -363,56 +364,80 @@ export function createRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolMap;
 }): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
+  const toolInput = resolveToolCallInputObject(input.toolCall.input, {
+    callId: input.toolCall.toolCallId,
+    toolName: input.toolCall.toolName,
+  });
 
-  if (definition?.frameworkAction === "load-skill") {
+  if (definition?.behavior?.presentation === "load-skill") {
     return {
       callId: input.toolCall.toolCallId,
-      input: resolveToolCallInputObject(input.toolCall.input, {
-        callId: input.toolCall.toolCallId,
-        toolName: input.toolCall.toolName,
-      }),
+      input: toolInput,
       kind: "load-skill",
     };
   }
 
-  if (definition?.runtimeAction?.kind === "subagent-call") {
+  const target =
+    definition?.execution === "background" || definition?.behavior?.handling?.kind !== "dispatch"
+      ? undefined
+      : definition.behavior.handling.target;
+  if (
+    definition !== undefined &&
+    (target?.kind === "self-agent-call" || target?.kind === "subagent-call")
+  ) {
     return {
       callId: input.toolCall.toolCallId,
       description: definition.description,
-      input: resolveToolCallInputObject(input.toolCall.input, {
-        callId: input.toolCall.toolCallId,
-        toolName: input.toolCall.toolName,
-      }),
+      input: toolInput,
       kind: "subagent-call",
       name: definition.name,
-      nodeId: definition.runtimeAction.nodeId,
-      subagentName: definition.runtimeAction.subagentName,
+      nodeId: target.nodeId,
+      subagentName: target.subagentName,
     };
   }
 
-  if (definition?.runtimeAction?.kind === "remote-agent-call") {
+  if (definition !== undefined && target?.kind === "remote-agent-call") {
     return {
       callId: input.toolCall.toolCallId,
       description: definition.description,
-      input: resolveToolCallInputObject(input.toolCall.input, {
-        callId: input.toolCall.toolCallId,
-        toolName: input.toolCall.toolName,
-      }),
+      input: toolInput,
       kind: "remote-agent-call",
       name: definition.name,
-      nodeId: definition.runtimeAction.nodeId,
-      remoteAgentName: definition.runtimeAction.remoteAgentName ?? definition.name,
+      nodeId: target.nodeId,
+      remoteAgentName: target.remoteAgentName,
     };
   }
 
   return {
     callId: input.toolCall.toolCallId,
+    input: toolInput,
+    kind: "tool-call",
+    toolName: input.toolCall.toolName,
+  };
+}
+
+/** Projects one execute-less dispatch tool call into the durable pending contract. */
+export function createPendingDispatchActionFromToolCall(input: {
+  readonly toolCall: TypedToolCall<ToolSet>;
+  readonly tools: HarnessToolMap;
+}): PendingDispatchAction {
+  const definition = input.tools.get(input.toolCall.toolName);
+  if (definition === undefined) {
+    throw new Error(`Unknown tool "${input.toolCall.toolName}" in dispatch projection.`);
+  }
+  const handling = definition.behavior?.handling;
+  if (handling?.kind !== "dispatch" || definition.execution === "background") {
+    throw new Error(`Tool "${input.toolCall.toolName}" is not a durable dispatch tool.`);
+  }
+  return {
+    callId: input.toolCall.toolCallId,
+    description: definition.description,
     input: resolveToolCallInputObject(input.toolCall.input, {
       callId: input.toolCall.toolCallId,
       toolName: input.toolCall.toolName,
     }),
-    kind: "tool-call",
-    toolName: input.toolCall.toolName,
+    target: handling.target,
+    toolName: definition.name,
   };
 }
 

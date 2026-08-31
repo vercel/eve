@@ -61,7 +61,6 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
-import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import { resolveAgentsAnnouncement } from "#harness/handles/prompt.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import {
@@ -141,7 +140,6 @@ import {
 } from "#harness/approval-delivery-coordinator.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,
@@ -187,6 +185,7 @@ import {
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
+import type { PreparedDispatchTarget } from "#tools/behavior.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import { resolveDeliveryPolicy } from "#tasks/delivery-policy.js";
 import { extractWorkflowStreamWriteErrorDetails } from "#harness/workflow-stream-error.js";
@@ -200,7 +199,7 @@ import {
 } from "#harness/prompt-cache.js";
 import { resolveFrameworkToolFromUpstreamType } from "#harness/provider-tools.js";
 import {
-  createRuntimeActionRequestFromToolCall,
+  createPendingDispatchActionFromToolCall,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
@@ -447,6 +446,13 @@ function buildHarnessToolsWithDynamicSubagents(
   return effectiveTools;
 }
 
+function hasDispatchTarget(tools: HarnessToolMap, kind: PreparedDispatchTarget["kind"]): boolean {
+  return [...tools.values()].some(
+    (tool) =>
+      tool.behavior?.handling?.kind === "dispatch" && tool.behavior.handling.target.kind === kind,
+  );
+}
+
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const baseEmit = config.handleEvent;
 
@@ -494,7 +500,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const taskOwned =
       callback?.taskId !== undefined ||
       readTaskIdFromInboxToken(String(channel?.state?.parentContinuationToken ?? "")) !== undefined;
-    const taskUpdatesEnabled = taskOwned && config.tools.has(TASK_UPDATE_TOOL_NAME);
+    const taskUpdatesEnabled = taskOwned && hasDispatchTarget(config.tools, "task-update");
     let activeAttemptScope: InstrumentationAttempt | undefined;
     const emit =
       stepInstrumentation?.createHandleEvent({
@@ -644,6 +650,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         pendingRequestIds,
         stepInput: stepInput.input,
       }),
+      tools: config.tools,
     });
     const effectiveStepInput = staleConversion.stepInput;
     const preambleStepInput =
@@ -1235,7 +1242,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
+        canRequestInput: config.capabilities?.requestInput === true,
         delegatedCaller: taskUpdatesEnabled,
+        hasLoadableSkills: config.hasLoadableSkills,
         session,
         tools: harnessTools,
       });
@@ -1248,12 +1257,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: requireSessionModelReference(session),
         tools: advertisedHarnessTools,
-        webSearchProvider: config.webSearchProvider,
       });
 
       if (ctx !== undefined) {
         const dynamicTools = getAdvertisedTools({
+          canRequestInput: config.capabilities?.requestInput === true,
           delegatedCaller: taskUpdatesEnabled,
+          hasLoadableSkills: config.hasLoadableSkills,
           session,
           tools: buildDynamicTools(ctx),
         });
@@ -1266,7 +1276,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         });
         // Dynamic tools override a same-named authored tool.
         for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
-          if (advertisedHarnessTools.get(name)?.runtimeAction !== undefined) {
+          if (advertisedHarnessTools.get(name)?.behavior?.handling?.kind === "dispatch") {
             throw new Error(`Dynamic tool "${name}" collides with a runtime-visible subagent.`);
           }
           flatTools[name] = toolDefinition;
@@ -1281,7 +1291,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         config.workflow === true ? { maxSubagents: config.workflowMaxSubagents } : undefined;
 
       const advertisedModelTools = await getAdvertisedTools({
+        canRequestInput: config.capabilities?.requestInput === true,
         delegatedCaller: taskUpdatesEnabled,
+        hasLoadableSkills: config.hasLoadableSkills,
         modelTools: flatTools,
         session,
         tools: advertisedHarnessTools,
@@ -1360,13 +1372,17 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           const hiddenRuntimeActionToolNames = [...config.tools]
             .filter(
               ([name, tool]) =>
-                tool.runtimeAction !== undefined && advertisedHarnessTools.get(name) === undefined,
+                tool.behavior?.handling?.kind === "dispatch" &&
+                advertisedHarnessTools.get(name) === undefined,
             )
             .map(([name]) => name);
+          const requestInputToolNames = [...config.tools.values()]
+            .filter((tool) => tool.behavior?.handling?.kind === "request-input")
+            .map((tool) => tool.name);
           const excludedActionToolNames = new Set([
-            ASK_QUESTION_TOOL_NAME,
             FINAL_OUTPUT_TOOL_NAME,
             ...hiddenRuntimeActionToolNames,
+            ...requestInputToolNames,
           ]);
           const streamResult = await agent.stream({
             abortSignal: config.abortSignal,
@@ -2368,6 +2384,7 @@ async function handleStepResult(input: {
   const approvalRequestCallIds = new Set(approvalRequests.map((request) => request.action.callId));
   const questionRequests = extractQuestionInputRequests({
     toolCalls: result.toolCalls,
+    tools: input.runtimeActionTools,
     excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
@@ -2388,17 +2405,25 @@ async function handleStepResult(input: {
       : [{ content: pendingApprovals, role: "user" as const }]),
   ];
   const advertisedRuntimeActionTools = getAdvertisedTools({
+    canRequestInput: input.config.capabilities?.requestInput === true,
     delegatedCaller: input.delegatedCaller,
+    hasLoadableSkills: input.config.hasLoadableSkills,
     session: baseSession,
     tools: input.runtimeActionTools,
   });
   const pendingRuntimeActions = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
     .filter(
-      (toolCall) => input.runtimeActionTools.get(toolCall.toolName)?.runtimeAction !== undefined,
+      (toolCall) =>
+        input.runtimeActionTools.get(toolCall.toolName)?.behavior?.handling?.kind === "dispatch" &&
+        input.runtimeActionTools.get(toolCall.toolName)?.execution !== "background",
     )
     .filter((toolCall) => {
-      if (advertisedRuntimeActionTools.get(toolCall.toolName)?.runtimeAction !== undefined) {
+      if (
+        advertisedRuntimeActionTools.get(toolCall.toolName)?.behavior?.handling?.kind ===
+          "dispatch" &&
+        advertisedRuntimeActionTools.get(toolCall.toolName)?.execution !== "background"
+      ) {
         return true;
       }
       log.warn("runtime action tool call blocked because tool is not advertised", {
@@ -2409,7 +2434,7 @@ async function handleStepResult(input: {
       return false;
     })
     .map((toolCall) =>
-      createRuntimeActionRequestFromToolCall({
+      createPendingDispatchActionFromToolCall({
         toolCall,
         tools: advertisedRuntimeActionTools,
       }),

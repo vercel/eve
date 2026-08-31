@@ -7,13 +7,14 @@ import {
 } from "#execution/subagent-adapter-state.js";
 import { createTaskControlError } from "#execution/tasks/parent/control-shared.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
-import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { TaskControlInvocation } from "#shared/dispatch-action.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 
 /** Sends one child-authored progress update over its existing parent transport. */
 export async function executeTaskUpdate(input: {
-  readonly action: RuntimeToolCallActionRequest;
+  readonly action: TaskControlInvocation;
   readonly adapter: ChannelAdapter | undefined;
   readonly updateIndex: number;
   readonly updateEpoch: string;
@@ -66,7 +67,7 @@ function readUpdateMessage(input: Record<string, unknown>): string | undefined {
 }
 
 function createTaskUpdateResult(
-  action: RuntimeToolCallActionRequest,
+  action: TaskControlInvocation,
   taskId: string,
 ): RuntimeActionResult {
   return {

@@ -2,7 +2,7 @@ import { getPendingAuthorization } from "#harness/authorization.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessSession } from "#harness/types.js";
-import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
+import { getPendingDispatchActionKey } from "#runtime/actions/keys.js";
 
 /** Derives the workflow fields used to select the next action at the park boundary. */
 export function derivePendingState(session: HarnessSession): {
@@ -25,6 +25,6 @@ export function derivePendingState(session: HarnessSession): {
   if (batch === undefined) return base;
   return {
     ...base,
-    pendingRuntimeActionKeys: batch.actions.map((action) => getRuntimeActionRequestKey(action)),
+    pendingRuntimeActionKeys: batch.actions.map((action) => getPendingDispatchActionKey(action)),
   };
 }

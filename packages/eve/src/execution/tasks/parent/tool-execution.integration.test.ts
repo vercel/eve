@@ -145,12 +145,34 @@ describe("background subagent tool execution", () => {
         { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "turn-background" },
       );
       const localTool = createBackgroundSubagentHarnessDefinition({
+        behavior: {
+          availability: ["root-session"],
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "self-agent-call",
+              nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+              subagentName: "agent",
+            },
+          },
+        },
         description: "General-purpose agent",
         kind: "subagent",
         name: "agent",
         nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       });
       const remoteTool = createBackgroundSubagentHarnessDefinition({
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "remote-agent-call",
+              nodeId: remoteNode.nodeId,
+              remoteAgentName: remoteNode.name,
+            },
+          },
+        },
         description: remoteNode.description,
         kind: "remote",
         name: remoteNode.name,

@@ -1,6 +1,6 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { defineSubagent, registerLocalSubagentExecutor } from "#execution/tools/subagent/local.js";
+import { defineSubagent } from "#execution/tools/subagent/local.js";
 import { defineRemoteSubagent } from "#execution/tools/subagent/remote.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
 import {
@@ -12,38 +12,21 @@ import {
 
 type HarnessDelegationTool = Pick<
   PreparedRuntimeDelegationTool,
-  "description" | "kind" | "name" | "nodeId"
+  "behavior" | "description" | "kind" | "name" | "nodeId"
 > & {
   readonly inputSchema?: ToolSchemaSource | null;
   readonly outputSchema?: ToolSchemaSource | null;
-  readonly rootOnly?: boolean;
 };
 
 export function createHarnessDelegationToolDefinition(
   tool: HarnessDelegationTool,
 ): HarnessToolDefinition {
-  const runtimeAction: HarnessToolDefinition["runtimeAction"] =
-    tool.kind === "remote"
-      ? {
-          kind: "remote-agent-call",
-          nodeId: tool.nodeId,
-          remoteAgentName: tool.name,
-          subagentName: tool.name,
-        }
-      : {
-          kind: "subagent-call",
-          nodeId: tool.nodeId,
-          subagentName: tool.name,
-        };
-
   return {
+    behavior: tool.behavior,
     description: tool.description ?? "",
     inputSchema: toInputSchema(tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
     outputSchema: toOutputSchema(tool.outputSchema) ?? undefined,
-    rootOnly: tool.rootOnly,
-    runtimeAction,
-    workflowCallable: true,
   };
 }
 
@@ -67,15 +50,13 @@ export function createBackgroundSubagentHarnessDefinition(
     execution: definition.execution,
     scope: tool.name,
   });
-  if (tool.kind !== "remote") registerLocalSubagentExecutor(execute);
   return {
+    behavior: tool.behavior,
     description: definition.description,
     execute,
     execution: definition.execution,
     inputSchema: toInputSchema(definition.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
     outputSchema: toOutputSchema(definition.outputSchema) ?? undefined,
-    rootOnly: tool.rootOnly,
-    workflowCallable: true,
   };
 }

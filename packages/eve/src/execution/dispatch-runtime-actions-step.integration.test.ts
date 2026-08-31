@@ -221,10 +221,12 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         callId: "call-1",
         description: "Research",
         input: { message: "research this" },
-        kind: "remote-agent-call",
-        name: "research",
-        nodeId: "remote/research",
-        remoteAgentName: "research",
+        target: {
+          kind: "remote-agent-call",
+          nodeId: "remote/research",
+          remoteAgentName: "research",
+        },
+        toolName: "research",
       },
       ctx,
       event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
@@ -416,6 +418,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     const session = createNamedStartSession({
       name: "agent",
       nodeId: "__root__",
+      selfAgent: true,
       session: { rootSessionId: "root-session", subagentDepth: 1 },
     });
     const { backend, create } = createSandboxBackend();
@@ -1027,10 +1030,12 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
         callId: `call-${n}`,
         description: "Research",
         input: { agentId: LOCAL_PARKED_HANDLE.identity.id, message: `continue ${n}` },
-        kind: "subagent-call" as const,
-        name: "research",
-        nodeId: "subagents/research",
-        subagentName: "research",
+        target: {
+          kind: "subagent-call" as const,
+          nodeId: "subagents/research",
+          subagentName: "research",
+        },
+        toolName: "research",
       })),
       event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
       responseMessages: [],
@@ -1216,19 +1221,23 @@ function createStartSession(input: {
             callId: "call-1",
             description: "Research",
             input: { message: "research this" },
-            kind: "subagent-call",
-            name: "research",
-            nodeId: "subagents/research",
-            subagentName: "research",
+            target: {
+              kind: "subagent-call",
+              nodeId: "subagents/research",
+              subagentName: "research",
+            },
+            toolName: "research",
           }
         : {
             callId: "call-1",
             description: "Research",
             input: { message: "research this" },
-            kind: "remote-agent-call",
-            name: "research",
-            nodeId: "remote/research",
-            remoteAgentName: "research",
+            target: {
+              kind: "remote-agent-call",
+              nodeId: "remote/research",
+              remoteAgentName: "research",
+            },
+            toolName: "research",
           },
     ],
     event: input.event ?? { sequence: 1, stepIndex: 2, turnId: "turn-1" },
@@ -1240,6 +1249,7 @@ function createStartSession(input: {
 function createNamedStartSession(input: {
   readonly name: string;
   readonly nodeId: string;
+  readonly selfAgent?: boolean;
   readonly session?: Partial<HarnessSession>;
 }): HarnessSession {
   return setPendingRuntimeActionBatch({
@@ -1248,10 +1258,18 @@ function createNamedStartSession(input: {
         callId: "call-1",
         description: `Delegate to ${input.name}`,
         input: { message: "research this" },
-        kind: "subagent-call",
-        name: input.name,
-        nodeId: input.nodeId,
-        subagentName: input.name,
+        target: input.selfAgent
+          ? {
+              kind: "self-agent-call",
+              nodeId: input.nodeId,
+              subagentName: input.name,
+            }
+          : {
+              kind: "subagent-call",
+              nodeId: input.nodeId,
+              subagentName: input.name,
+            },
+        toolName: input.name,
       },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
@@ -1270,10 +1288,12 @@ function createPendingSession(input: {
         callId: "call-1",
         description: "Research",
         input: { agentId: input.agentId, message: "continue with raw input" },
-        kind: "subagent-call",
-        name: "research",
-        nodeId: "subagents/research",
-        subagentName: "research",
+        target: {
+          kind: "subagent-call",
+          nodeId: "subagents/research",
+          subagentName: "research",
+        },
+        toolName: "research",
       },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },

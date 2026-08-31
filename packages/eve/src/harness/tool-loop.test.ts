@@ -66,6 +66,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
@@ -296,17 +297,33 @@ function createDelegationToolMap(): ToolLoopHarnessConfig["tools"] {
     [
       "delegate",
       {
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "dispatch",
+            target: { kind: "subagent-call", nodeId: "workers", subagentName: "worker" },
+          },
+        },
         description: "Delegate to a subagent.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "delegate",
-        runtimeAction: {
-          kind: "subagent-call",
-          nodeId: "workers",
-          subagentName: "worker",
-        },
       },
     ],
   ]);
+}
+
+const QUESTION_BEHAVIOR = {
+  availability: ["requires-request-input"],
+  handling: { kind: "request-input", request: "question" },
+} as const;
+
+function createQuestionHarnessTool() {
+  return {
+    behavior: QUESTION_BEHAVIOR,
+    description: "Ask the user a question.",
+    inputSchema: jsonSchema({ type: "object" }),
+    name: "ask_question",
+  };
 }
 
 function createScheduleContext(): ContextContainer {
@@ -1598,10 +1615,8 @@ describe("createToolLoopHarness", () => {
         callId: "call-1",
         description: "Delegate to a subagent.",
         input: { message: "delegate at depth 2" },
-        kind: "subagent-call",
-        name: "delegate",
-        nodeId: "workers",
-        subagentName: "worker",
+        target: { kind: "subagent-call", nodeId: "workers", subagentName: "worker" },
+        toolName: "delegate",
       },
     ]);
   });
@@ -1644,6 +1659,17 @@ describe("createToolLoopHarness", () => {
         },
         kind: "subagent",
         prepared: {
+          behavior: {
+            availability: [],
+            handling: {
+              kind: "dispatch",
+              target: {
+                kind: "subagent-call",
+                nodeId: "subagents/researcher",
+                subagentName: "researcher",
+              },
+            },
+          },
           description: "Research the request.",
           inputSchema: { type: "object" },
           kind: "subagent",
@@ -1672,8 +1698,10 @@ describe("createToolLoopHarness", () => {
     expect(getPendingRuntimeActionBatch(result.session.state)?.actions).toEqual([
       expect.objectContaining({
         callId: "call-dynamic",
-        kind: "subagent-call",
-        nodeId: "subagents/researcher",
+        target: expect.objectContaining({
+          kind: "subagent-call",
+          nodeId: "subagents/researcher",
+        }),
       }),
     ]);
   });
@@ -1747,7 +1775,10 @@ describe("createToolLoopHarness", () => {
 
     expect(parked.next).toBeNull();
     expect(getPendingRuntimeActionBatch(parked.session.state)?.actions).toEqual([
-      expect.objectContaining({ callId: "delegate-1", kind: "subagent-call" }),
+      expect.objectContaining({
+        callId: "delegate-1",
+        target: expect.objectContaining({ kind: "subagent-call" }),
+      }),
     ]);
     expect(hasPendingInputBatch(parked.session.state)).toBe(true);
     expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
@@ -1885,14 +1916,16 @@ describe("createToolLoopHarness", () => {
         [
           "delegate",
           {
+            behavior: {
+              availability: [],
+              handling: {
+                kind: "dispatch",
+                target: { kind: "subagent-call", nodeId: "workers", subagentName: "worker" },
+              },
+            },
             description: "Delegate to a subagent.",
             inputSchema: jsonSchema({ type: "object" }),
             name: "delegate",
-            runtimeAction: {
-              kind: "subagent-call",
-              nodeId: "workers",
-              subagentName: "worker",
-            },
           },
         ],
       ]),
@@ -3507,16 +3540,7 @@ describe("createToolLoopHarness", () => {
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", emit, {
         capabilities: { requestInput: true },
-        tools: new Map([
-          [
-            "ask_question",
-            {
-              description: "Ask the user a question.",
-              inputSchema: jsonSchema({ type: "object" }),
-              name: "ask_question",
-            },
-          ],
-        ]),
+        tools: new Map([["ask_question", createQuestionHarnessTool()]]),
       }),
     );
     const session = createTestSession({
@@ -3744,14 +3768,16 @@ describe("createToolLoopHarness", () => {
         [
           "delegate",
           {
+            behavior: {
+              availability: [],
+              handling: {
+                kind: "dispatch",
+                target: { kind: "subagent-call", nodeId: "workers", subagentName: "worker" },
+              },
+            },
             description: "Delegate to a subagent.",
             inputSchema: jsonSchema({ type: "object" }),
             name: "delegate",
-            runtimeAction: {
-              kind: "subagent-call",
-              nodeId: "workers",
-              subagentName: "worker",
-            },
           },
         ],
       ]),
@@ -3804,10 +3830,16 @@ describe("createToolLoopHarness", () => {
         [
           "delegate",
           {
+            behavior: {
+              availability: [],
+              handling: {
+                kind: "dispatch",
+                target: { kind: "subagent-call", nodeId: "workers", subagentName: "worker" },
+              },
+            },
             description: "Delegate to a subagent.",
             inputSchema: jsonSchema({ type: "object" }),
             name: "delegate",
-            runtimeAction: { kind: "subagent-call", nodeId: "workers", subagentName: "worker" },
           },
         ],
       ]),
@@ -4849,7 +4881,7 @@ describe("createToolLoopHarness", () => {
       const config: ToolLoopHarnessConfig = {
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
-        tools: new Map([
+        tools: new Map<string, HarnessToolDefinition>([
           [
             "add",
             {
@@ -5627,7 +5659,7 @@ describe("createToolLoopHarness", () => {
     const config: ToolLoopHarnessConfig = {
       mode: "conversation",
       resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
-      tools: new Map([
+      tools: new Map<string, HarnessToolDefinition>([
         [
           "web_search",
           {
@@ -6784,7 +6816,24 @@ describe("createToolLoopHarness", () => {
     });
 
     const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
+      createTestConfig("conversation", undefined, {
+        capabilities: { requestInput: true },
+        tools: new Map<string, HarnessToolDefinition>([
+          [
+            "web_search",
+            {
+              behavior: {
+                availability: [],
+                handling: { kind: "provider-tool", provider: "exa" },
+              },
+              description: "Search the web",
+              inputSchema: jsonSchema({}),
+              name: "web_search",
+            },
+          ],
+          ["ask_question", createQuestionHarnessTool()],
+        ]),
+      }),
     );
     const result = await harness(
       createTestSession({
@@ -6912,7 +6961,24 @@ describe("createToolLoopHarness", () => {
     });
 
     const harness = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { tools: new Map() }),
+      createTestConfig("conversation", undefined, {
+        capabilities: { requestInput: true },
+        tools: new Map<string, HarnessToolDefinition>([
+          [
+            "web_search",
+            {
+              behavior: {
+                availability: [],
+                handling: { kind: "provider-tool", provider: "exa" },
+              },
+              description: "Search the web",
+              inputSchema: jsonSchema({}),
+              name: "web_search",
+            },
+          ],
+          ["ask_question", createQuestionHarnessTool()],
+        ]),
+      }),
     );
     const result = await harness(
       createTestSession({
@@ -8123,7 +8189,8 @@ describe("createToolLoopHarness", () => {
       },
     };
     const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
+      capabilities: { requestInput: true },
+      tools: new Map<string, HarnessToolDefinition>([
         [
           "bash",
           {
@@ -8298,7 +8365,8 @@ describe("createToolLoopHarness", () => {
       }),
     });
     const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
+      capabilities: { requestInput: true },
+      tools: new Map<string, HarnessToolDefinition>([
         [
           "bash",
           {
@@ -8308,6 +8376,7 @@ describe("createToolLoopHarness", () => {
             name: "bash",
           },
         ],
+        ["ask_question", createQuestionHarnessTool()],
       ]),
     });
 
@@ -8538,7 +8607,7 @@ describe("createToolLoopHarness", () => {
     });
 
     const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
+      tools: new Map<string, HarnessToolDefinition>([
         [
           "guarded_echo",
           {
@@ -9012,7 +9081,8 @@ describe("createToolLoopHarness", () => {
       },
     };
     const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
+      capabilities: { requestInput: true },
+      tools: new Map<string, HarnessToolDefinition>([
         [
           "bash",
           {
@@ -9022,14 +9092,7 @@ describe("createToolLoopHarness", () => {
             name: "bash",
           },
         ],
-        [
-          "ask_question",
-          {
-            description: "Ask the user a question.",
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "ask_question",
-          },
-        ],
+        ["ask_question", createQuestionHarnessTool()],
       ]),
     });
     const runStep = createToolLoopHarness(config);
@@ -9091,7 +9154,12 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        capabilities: { requestInput: true },
+        tools: new Map([["ask_question", createQuestionHarnessTool()]]),
+      }),
+    );
     const session = createTestSession({
       agent: {
         modelReference: { id: "test-model" },
@@ -9187,7 +9255,12 @@ describe("createToolLoopHarness", () => {
     vi.mocked(ToolLoopAgent).mockImplementationOnce(nextQuestionImplementation!);
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        capabilities: { requestInput: true },
+        tools: new Map([["ask_question", createQuestionHarnessTool()]]),
+      }),
+    );
     const questionInput = {
       allowFreeform: true,
       options: [
@@ -9282,7 +9355,11 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        tools: new Map([["ask_question", createQuestionHarnessTool()]]),
+      }),
+    );
     const questionInput = {
       allowFreeform: true,
       options: [

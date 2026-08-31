@@ -11,7 +11,6 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
@@ -299,8 +298,8 @@ export interface ToolLoopHarnessConfig {
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;
-  /** AI Gateway provider selected for the framework `web_search` tool. */
-  readonly webSearchProvider?: WebSearchProvider;
+  /** Whether this node has a static or dynamic skill source that `load_skill` can resolve. */
+  readonly hasLoadableSkills?: boolean;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;
@@ -319,6 +318,8 @@ export interface ToolLoopHarnessConfig {
    * for terminal assistant text inside the current invocation.
    */
   readonly mode: RunMode;
+  /** Whether this node enables framework background-task behavior. */
+  readonly tasksEnabled?: boolean;
   /**
    * Called after compaction to let the execution layer re-apply
    * framework-owned state preservation (read-before-write reset, todo

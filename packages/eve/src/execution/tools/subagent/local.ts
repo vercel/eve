@@ -27,6 +27,7 @@ import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
 } from "#shared/action-types.js";
+import type { PendingAgentDispatchAction } from "#shared/dispatch-action.js";
 import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 import { parseJsonObject } from "#shared/json.js";
@@ -46,6 +47,7 @@ interface SubagentDefinitionInput {
 
 interface SubagentDispatchInput {
   readonly action: SubagentCallAction;
+  readonly dispatchAction: PendingAgentDispatchAction;
   readonly batch: TaskExec["batch"];
   readonly callbackBaseUrl?: string;
   readonly ctx: AlsContext;
@@ -69,8 +71,6 @@ interface SubagentDispatchResult {
   readonly session: RuntimeSession;
 }
 
-/** Transitional PR 1 classifier, replaced by declared dispatch effects in PR 2. */
-const localSubagentExecutors = new WeakSet<object>();
 const batchAgentClaims = new WeakMap<TaskExec["batch"], Map<string, string>>();
 const log = createLogger("runtime.framework-tools.subagent");
 
@@ -86,14 +86,18 @@ export function defineSubagent(input: SubagentDefinitionInput) {
   return definition;
 }
 
-export function registerLocalSubagentExecutor(execute: object): void {
-  localSubagentExecutors.add(execute);
-}
-
 export function countLocalSubagentCalls(
-  calls: readonly { readonly definition: { readonly execute: object } }[],
+  calls: readonly {
+    readonly definition: { readonly behavior?: import("#tools/behavior.js").PreparedToolBehavior };
+  }[],
 ): number {
-  return calls.filter((call) => localSubagentExecutors.has(call.definition.execute)).length;
+  return calls.filter((call) => {
+    const handling = call.definition.behavior?.handling;
+    return (
+      handling?.kind === "dispatch" &&
+      (handling.target.kind === "self-agent-call" || handling.target.kind === "subagent-call")
+    );
+  }).length;
 }
 
 export async function executeSubagentTool(input: {
@@ -125,11 +129,30 @@ export async function executeSubagentTool(input: {
           kind: "subagent-call",
           subagentName: input.definition.name,
         };
+  const dispatchAction: PendingAgentDispatchAction = {
+    callId: commonAction.callId,
+    description: commonAction.description,
+    input: commonAction.input,
+    target:
+      input.kind === "remote"
+        ? {
+            kind: "remote-agent-call",
+            nodeId: input.definition.nodeId,
+            remoteAgentName: input.definition.name,
+          }
+        : {
+            kind: "subagent-call",
+            nodeId: input.definition.nodeId,
+            subagentName: input.definition.name,
+          },
+    toolName: input.definition.name,
+  };
   const dispatched = await dispatchSubagent({
     action,
     batch,
     callbackBaseUrl: ctx.get(CallbackBaseUrlKey),
     ctx,
+    dispatchAction,
     event: { ...emission, turnId: activeTurnId(emission) },
     localFanoutSize: countLocalSubagentCalls(batch),
     serializedContext: serializeContext(ctx),
@@ -178,7 +201,7 @@ export async function executeSubagentTool(input: {
 
 async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentDispatchResult> {
   const prepared = await prepareAgentActionDispatch({
-    action: input.action,
+    action: input.dispatchAction,
     ctx: input.ctx,
     event: input.event,
     localFanoutSize: input.localFanoutSize,
