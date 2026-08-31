@@ -1,17 +1,76 @@
 import { formatSlackLink } from "#compiled/@chat-adapter/slack/format.js";
 import { isObject } from "#shared/guards.js";
 
-/** Derives inbound mrkdwn from top-level text plus Block Kit and legacy attachments. */
-export function resolveSlackInboundMrkdwn(text: string, raw: Record<string, unknown>): string {
+export interface SlackInboundUnfurl {
+  readonly content: string;
+  readonly source: string;
+}
+
+export interface SlackInboundContent {
+  readonly modelText: string;
+  readonly text: string;
+  readonly unfurls: readonly SlackInboundUnfurl[];
+}
+
+interface SlackAttachmentContent {
+  readonly content: string;
+  readonly isSharedMessage: boolean;
+  readonly unfurl: SlackInboundUnfurl | undefined;
+}
+
+/** Projects inbound Slack content while retaining attachment provenance. */
+export function projectSlackInboundContent(
+  text: string,
+  raw: Record<string, unknown>,
+): SlackInboundContent {
   try {
-    return resolveSlackInboundMrkdwnUnsafe(text, raw);
+    return projectSlackInboundContentUnsafe(text, raw);
   } catch {
-    return text;
+    return { modelText: text, text, unfurls: [] };
   }
 }
 
-function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unknown>): string {
-  const extracted = extractSlackStructuredMrkdwn(raw.blocks, raw.attachments);
+/** Derives inbound mrkdwn from top-level text plus Block Kit and legacy attachments. */
+export function resolveSlackInboundMrkdwn(text: string, raw: Record<string, unknown>): string {
+  return projectSlackInboundContent(text, raw).text;
+}
+
+function projectSlackInboundContentUnsafe(
+  text: string,
+  raw: Record<string, unknown>,
+): SlackInboundContent {
+  const blockContent = extractBlockKitLines(raw.blocks).join("\n").trim();
+  const attachments = extractLegacyAttachmentContent(raw.attachments);
+  const authoredAttachments = attachments.filter((attachment) => attachment.unfurl === undefined);
+  const authoredStructured = joinContent([
+    blockContent,
+    ...authoredAttachments.map((attachment) => attachment.content),
+  ]);
+  const allStructured = joinContent([
+    blockContent,
+    ...attachments.map((attachment) => attachment.content),
+  ]);
+
+  return {
+    modelText: resolveSlackText(text, authoredStructured, {
+      hasLegacyAttachments: authoredAttachments.length > 0,
+      hasSharedMessage: false,
+    }),
+    text: resolveSlackText(text, allStructured, {
+      hasLegacyAttachments: attachments.length > 0,
+      hasSharedMessage: attachments.some((attachment) => attachment.isSharedMessage),
+    }),
+    unfurls: attachments.flatMap((attachment) =>
+      attachment.unfurl === undefined ? [] : [attachment.unfurl],
+    ),
+  };
+}
+
+function resolveSlackText(
+  text: string,
+  extracted: string,
+  options: { readonly hasLegacyAttachments: boolean; readonly hasSharedMessage: boolean },
+): string {
   const trimmedText = text.trim();
 
   if (!trimmedText) return extracted;
@@ -28,14 +87,13 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
     return extracted;
   }
 
-  if (hasSharedMessageAttachment(raw.attachments)) {
+  if (options.hasSharedMessage) {
     if (normalizedTrimmed.includes(normalizedExtracted)) return text;
     return `${text}\n${extracted}`;
   }
 
   if (extracted.length >= trimmedText.length * 2) {
-    const hasLegacyAttachments = Array.isArray(raw.attachments) && raw.attachments.length > 0;
-    if (hasLegacyAttachments && !normalizedExtracted.includes(normalizedTrimmed)) {
+    if (options.hasLegacyAttachments && !normalizedExtracted.includes(normalizedTrimmed)) {
       return `${text}\n${extracted}`;
     }
     return extracted;
@@ -44,12 +102,11 @@ function resolveSlackInboundMrkdwnUnsafe(text: string, raw: Record<string, unkno
   return text;
 }
 
-function extractSlackStructuredMrkdwn(blocks: unknown, legacyAttachments: unknown): string {
-  const lines = [
-    ...extractBlockKitLines(blocks),
-    ...extractLegacyAttachmentLines(legacyAttachments),
-  ];
-  return lines.join("\n").trim();
+function joinContent(parts: readonly string[]): string {
+  return parts
+    .filter((part) => part.length > 0)
+    .join("\n")
+    .trim();
 }
 
 function extractBlockKitLines(blocks: unknown): string[] {
@@ -122,15 +179,14 @@ function extractBlockKitLines(blocks: unknown): string[] {
   return lines;
 }
 
-function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
+function extractLegacyAttachmentContent(legacyAttachments: unknown): SlackAttachmentContent[] {
   if (!Array.isArray(legacyAttachments)) return [];
 
-  const lines: string[] = [];
+  const results: SlackAttachmentContent[] = [];
   for (const attachment of legacyAttachments) {
     if (!isObject(attachment)) continue;
 
-    const attachmentStart = lines.length;
-
+    const lines: string[] = [];
     if (typeof attachment.pretext === "string" && attachment.pretext.length > 0) {
       lines.push(attachment.pretext);
     }
@@ -146,31 +202,67 @@ function extractLegacyAttachmentLines(legacyAttachments: unknown): string[] {
     }
     lines.push(...extractBlockKitLines(attachment.blocks));
     lines.push(...extractSlackMessageUnfurlLines(attachment.message_blocks));
-    // Fallback is per-attachment and only when this attachment has no other
-    // visible fields; nested blocks count, and earlier attachments must not
-    // suppress a later fallback.
     if (
-      lines.length === attachmentStart &&
+      lines.length === 0 &&
       typeof attachment.fallback === "string" &&
       attachment.fallback.length > 0
     ) {
       lines.push(attachment.fallback);
     }
+
+    const content = lines.join("\n").trim();
+    const isSharedMessage = isSharedMessageAttachment(attachment);
+    const isUnfurl =
+      isSharedMessage ||
+      ["service_name", "title_link", "from_url", "original_url"].some(
+        (key) => readStringField(attachment, key) !== undefined,
+      );
+    results.push({
+      content,
+      isSharedMessage,
+      unfurl:
+        isUnfurl && content.length > 0
+          ? {
+              content,
+              source: isSharedMessage
+                ? formatMessageUnfurlSource(attachment)
+                : formatLinkUnfurlSource(attachment),
+            }
+          : undefined,
+    });
   }
 
-  return lines;
+  return results;
 }
 
-function hasSharedMessageAttachment(legacyAttachments: unknown): boolean {
-  if (!Array.isArray(legacyAttachments)) return false;
-  return legacyAttachments.some(
-    (attachment) =>
-      isObject(attachment) &&
-      (Array.isArray(attachment.message_blocks) ||
-        attachment.is_share === true ||
-        attachment.is_msg_unfurl === true ||
-        attachment.is_reply_unfurl === true),
+function isSharedMessageAttachment(attachment: Record<string, unknown>): boolean {
+  return (
+    Array.isArray(attachment.message_blocks) ||
+    attachment.is_share === true ||
+    attachment.is_msg_unfurl === true ||
+    attachment.is_reply_unfurl === true
   );
+}
+
+function formatMessageUnfurlSource(attachment: Record<string, unknown>): string {
+  const author = readStringField(attachment, "author_name");
+  const channel = readStringField(attachment, "channel_name");
+  if (author && channel) return `Slack message from ${author} in #${channel}`;
+  if (author) return `Slack message from ${author}`;
+  if (channel) return `Slack message in #${channel}`;
+  return "Slack message";
+}
+
+function formatLinkUnfurlSource(attachment: Record<string, unknown>): string {
+  const service = readStringField(attachment, "service_name");
+  return service ? `${service} link preview` : "Link preview";
+}
+
+function readStringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function extractSlackMessageUnfurlLines(messageBlocks: unknown): string[] {

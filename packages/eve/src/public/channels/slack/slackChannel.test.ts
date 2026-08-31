@@ -216,6 +216,7 @@ function buildSignedSlashCommandRequest(overrides: Record<string, string> = {}):
 let mentionCounter = 0;
 
 function buildMentionBody(overrides?: {
+  attachments?: readonly Record<string, unknown>[];
   channel?: string;
   threadTs?: string;
   ts?: string;
@@ -234,6 +235,7 @@ function buildMentionBody(overrides?: {
     ts,
     event_ts: ts,
   };
+  if (overrides?.attachments) event.attachments = overrides.attachments;
   if (overrides?.threadTs) event.thread_ts = overrides.threadTs;
   const body = JSON.stringify({
     type: "event_callback",
@@ -245,6 +247,7 @@ function buildMentionBody(overrides?: {
 }
 
 function buildDirectMessageBody(overrides?: {
+  attachments?: readonly Record<string, unknown>[];
   channel?: string;
   ts?: string;
   text?: string;
@@ -265,6 +268,7 @@ function buildDirectMessageBody(overrides?: {
     ts,
     event_ts: ts,
   };
+  if (overrides?.attachments) event.attachments = overrides.attachments;
   if (overrides?.botId !== undefined) event.bot_id = overrides.botId;
   if (overrides?.subtype !== undefined) event.subtype = overrides.subtype;
   const body = JSON.stringify({
@@ -1750,6 +1754,37 @@ describe("slackChannel() inbound mention pipeline", () => {
     expect(message).toContain("<content>\nhello\n</content>");
   });
 
+  it("includes a pasted Slack message unfurl as untrusted context", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onAppMention: () => ({ auth: null, context: ["prior thread context"] }),
+    });
+    const { body } = buildMentionBody({
+      attachments: [
+        {
+          author_name: "Grafana Alerts",
+          channel_name: "sandbox-alerts",
+          from_url: "https://example.slack.com/archives/C01/p1700000000000001",
+          is_msg_unfurl: true,
+          text: "[FIRING:12] LedgerAdapterNotParsedLogsIncreasedSeverity: Critical",
+        },
+      ],
+      text: "<@U_BOT> investigate this https://example.slack.com/archives/C01/p1700000000000001",
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    const [, input] = send.mock.calls[0]!;
+    expect(input.context).toEqual([
+      "prior thread context",
+      expect.stringContaining("[FIRING:12] LedgerAdapterNotParsedLogsIncreasedSeverity: Critical"),
+    ]);
+    expect(input.context[1]).toContain("untrusted quoted content");
+    expect(input.context[1]).toContain("Grafana Alerts");
+    expect(input.context[1]).toContain("sandbox-alerts");
+    expect(input.message).not.toContain("LedgerAdapterNotParsedLogsIncreasedSeverity");
+  });
+
   it("attributes the inbound message without adding a separate context entry", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -2117,6 +2152,44 @@ describe("slackChannel() onMessage", () => {
     expect(send).toHaveBeenCalledWith(
       "C01:1700000000.000100",
       expect.objectContaining({ message: expect.any(String) }),
+    );
+  });
+
+  it("includes an unfurl in a subscribed channel follow-up", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test", signingSecret: SIGNING_SECRET },
+      async onMessage(ctx) {
+        return (await ctx.isSubscribed()) ? { auth: null } : null;
+      },
+    });
+    const reply = buildEventBody(
+      {
+        attachments: [
+          {
+            author_name: "Grafana Alerts",
+            is_msg_unfurl: true,
+            text: "Critical alert",
+          },
+        ],
+        channel: "C01",
+        channel_type: "channel",
+        text: "continue from this alert",
+        thread_ts: "1700000000.000100",
+        ts: "1700000000.000200",
+        type: "message",
+        user: "U01",
+      },
+      { authorizations: [{ is_bot: true, user_id: "U_BOT" }] },
+    );
+
+    const { send } = await firePost(channel, buildSignedRequest({ body: reply }));
+
+    expect(send).toHaveBeenCalledWith(
+      "C01:1700000000.000100",
+      expect.objectContaining({
+        context: [expect.stringContaining("Critical alert")],
+        message: expect.not.stringContaining("Critical alert"),
+      }),
     );
   });
 
@@ -2627,6 +2700,29 @@ describe("slackChannel() inbound direct message pipeline", () => {
     expect(options.title).toBe("Private message");
     expect(options.title).not.toContain("sensitive message");
     expect(options.message).toContain("<content>\nsensitive message\n</content>");
+  });
+
+  it("includes an ordinary link unfurl in direct-message context", async () => {
+    const channel = slackChannel({
+      credentials: { botToken: "xoxb-test" },
+      onDirectMessage: () => ({ auth: null }),
+    });
+    const { body } = buildDirectMessageBody({
+      attachments: [
+        {
+          service_name: "GitHub",
+          text: "The issue body",
+          title: "Dropped Slack unfurls",
+        },
+      ],
+      text: "investigate https://github.com/vercel/eve/issues/1884",
+    });
+
+    const { send } = await firePost(channel, buildSignedRequest({ body }));
+
+    const [, input] = send.mock.calls[0]!;
+    expect(input.context).toEqual([expect.stringContaining('"source":"GitHub link preview"')]);
+    expect(input.context[0]).toContain("Dropped Slack unfurls\\nThe issue body");
   });
 
   it("does not dispatch when onDirectMessage resolves to null", async () => {
