@@ -137,6 +137,9 @@ export class SubagentPump {
   readonly #pumps = new Map<string, AbortController>();
   /** Durable child cursor shared by repeated calls into one conversation subagent. */
   readonly #childStreamIndices = new Map<string, number>();
+  /** One stream follower owns a conversation child session through its boundary. */
+  readonly #activeChildCalls = new Map<string, string>();
+  readonly #queuedChildCalls = new Map<string, string[]>();
 
   constructor(options: SubagentPumpOptions) {
     this.#client = options.client;
@@ -178,7 +181,8 @@ export class SubagentPump {
     this.#view?.markChildToolCallId(callId);
     if (existing !== undefined && existing.status !== "open") return;
     this.#view?.begin({ callId, name: called.data.name });
-    this.#startPump(called);
+    if (existing !== undefined) return;
+    this.#activateOrQueue(callId);
   }
 
   /**
@@ -210,6 +214,8 @@ export class SubagentPump {
     this.#pumps.clear();
     this.#runs.clear();
     this.#childStreamIndices.clear();
+    this.#activeChildCalls.clear();
+    this.#queuedChildCalls.clear();
   }
 
   /**
@@ -237,8 +243,23 @@ export class SubagentPump {
    * times out. Pumps stay open across HITL prompts and resume rendering when
    * the subagent unparks; they end on the child's own boundary or via abort.
    */
-  #startPump(called: SubagentCalledStreamEvent) {
-    const callId = called.data.callId;
+  #activateOrQueue(callId: string): void {
+    const run = this.#runs.get(callId);
+    if (run === undefined || run.status === "authoritative") return;
+    const activeCallId = this.#activeChildCalls.get(run.childSessionId);
+    if (activeCallId === undefined) {
+      run.childStreamIndex = this.#childStreamIndices.get(run.childSessionId) ?? 0;
+      this.#activeChildCalls.set(run.childSessionId, callId);
+      this.#startPump(callId);
+      return;
+    }
+    if (activeCallId === callId) return;
+    const queued = this.#queuedChildCalls.get(run.childSessionId) ?? [];
+    if (!queued.includes(callId)) queued.push(callId);
+    this.#queuedChildCalls.set(run.childSessionId, queued);
+  }
+
+  #startPump(callId: string) {
     if (this.#pumps.has(callId)) return;
     const client = this.#client;
     if (!client) return;
@@ -382,6 +403,31 @@ export class SubagentPump {
     run.currentSectionKey = null;
     this.#sweepPreparingTools(callId, run);
     this.#view?.complete({ authoritative, callId });
+    if (authoritative) this.#releaseChildSession(callId, run.childSessionId);
+  }
+
+  #releaseChildSession(callId: string, childSessionId: string): void {
+    const queued = this.#queuedChildCalls.get(childSessionId) ?? [];
+    const remaining = queued.filter((queuedCallId) => queuedCallId !== callId);
+    if (this.#activeChildCalls.get(childSessionId) !== callId) {
+      if (remaining.length === 0) this.#queuedChildCalls.delete(childSessionId);
+      else this.#queuedChildCalls.set(childSessionId, remaining);
+      return;
+    }
+
+    this.#activeChildCalls.delete(childSessionId);
+    while (remaining.length > 0) {
+      const nextCallId = remaining.shift()!;
+      const nextRun = this.#runs.get(nextCallId);
+      if (nextRun === undefined || nextRun.status === "authoritative") continue;
+      if (remaining.length === 0) this.#queuedChildCalls.delete(childSessionId);
+      else this.#queuedChildCalls.set(childSessionId, remaining);
+      nextRun.childStreamIndex = this.#childStreamIndices.get(childSessionId) ?? 0;
+      this.#activeChildCalls.set(childSessionId, nextCallId);
+      this.#startPump(nextCallId);
+      return;
+    }
+    this.#queuedChildCalls.delete(childSessionId);
   }
 
   /**

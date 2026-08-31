@@ -350,6 +350,49 @@ describe("SubagentPump child stream transport", () => {
     });
   });
 
+  it("does not let a repeated call consume the previous call's trailing boundary", async () => {
+    const firstStream = pushableChildStream();
+    const client = new Client({ host: "http://localhost:3000" });
+    const fetch = vi
+      .spyOn(client, "fetch")
+      .mockImplementationOnce(async (_path, init) =>
+        firstStream.response(init?.signal ?? undefined),
+      )
+      .mockResolvedValueOnce(
+        responseOf([
+          reasoningEvent("second turn", 1),
+          stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 2),
+        ]),
+      );
+    const view = fakeView();
+    const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
+    const first = subagentCalled("call-1");
+    first.data.childSessionId = "conversation-child";
+    const second = subagentCalled("call-2", "turn-2");
+    second.data.childSessionId = "conversation-child";
+
+    pump.begin(first);
+    await settleAsyncWork();
+    pump.settle("call-1");
+    pump.begin(second);
+    await settleAsyncWork();
+
+    expect(fetch).toHaveBeenCalledOnce();
+
+    firstStream.push(boundaryEvent(0));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(view.upsertStep).toHaveBeenCalledWith(
+        expect.objectContaining({ callId: "call-2", reasoning: "second turn" }),
+      ),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/eve/v1/children/call-2/stream?startIndex=1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it("leaves connection authorization events to the parent runner", async () => {
     const client = new Client({ host: "http://localhost:3000" });
     vi.spyOn(client, "fetch").mockResolvedValue(

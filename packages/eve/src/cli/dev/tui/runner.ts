@@ -546,8 +546,9 @@ export class EveTUIRunner {
   readonly #pendingInputRequests = new Map<string, InputRequest>();
   /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
   #idleInputResult?: AgentTUIStreamResult;
-  /** Registry setup queued by a tool result on the root or child stream. */
-  #pendingRegistrySetup?: string;
+  /** Registry setups queued by tool results on root or child streams. */
+  readonly #pendingRegistrySetups: string[] = [];
+  #activeRegistrySetup?: string;
   /** True only while the idle prompt owns terminal input. */
   #readingPrompt = false;
   /**
@@ -784,11 +785,19 @@ export class EveTUIRunner {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
         return;
       }
-      const pendingRegistrySetup = this.#pendingRegistrySetup;
-      if (pendingRegistrySetup !== undefined) {
-        this.#pendingRegistrySetup = undefined;
-        await this.#openRegistrySetup(pendingRegistrySetup);
-        pendingInputResponses = undefined;
+      const pendingRegistrySetup = this.#pendingRegistrySetups[0];
+      if (
+        pendingRegistrySetup !== undefined &&
+        pendingInputResponses === undefined &&
+        this.#idleInputResult === undefined
+      ) {
+        this.#pendingRegistrySetups.shift();
+        this.#activeRegistrySetup = pendingRegistrySetup;
+        try {
+          await this.#openRegistrySetup(pendingRegistrySetup);
+        } finally {
+          this.#activeRegistrySetup = undefined;
+        }
         followCurrentSession = false;
         streamWithoutPrompt = false;
         prompt = undefined;
@@ -817,7 +826,7 @@ export class EveTUIRunner {
             prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
-              if (this.#idleInputResult === undefined && this.#pendingRegistrySetup === undefined) {
+              if (this.#idleInputResult === undefined && this.#pendingRegistrySetups.length === 0) {
                 return;
               }
               streamWithoutPrompt = true;
@@ -829,7 +838,7 @@ export class EveTUIRunner {
             this.#readingPrompt = false;
           }
 
-          if (this.#pendingRegistrySetup !== undefined) {
+          if (this.#pendingRegistrySetups.length > 0 && this.#idleInputResult === undefined) {
             prompt = undefined;
             continue;
           }
@@ -1554,7 +1563,10 @@ export class EveTUIRunner {
   }
 
   #queueRegistrySetup(address: string): void {
-    this.#pendingRegistrySetup ??= address;
+    if (this.#activeRegistrySetup === address || this.#pendingRegistrySetups.includes(address)) {
+      return;
+    }
+    this.#pendingRegistrySetups.push(address);
     if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
   }
 
