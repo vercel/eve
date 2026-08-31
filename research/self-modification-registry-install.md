@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/742
 status: proposed
-last_updated: "2026-08-26"
+last_updated: "2026-08-31"
 ---
 
 # Self-modification: driving registry installs
@@ -43,7 +43,7 @@ the subagent only reaches the first.
 └────────────────────────────────────┘  that may see secrets.
 ```
 
-The sandbox is a red herring. `just-bash` executes no binaries — it rejects
+`just-bash` executes no binaries — it rejects
 `setNetworkPolicy` outright because it "runs no binaries to govern"
 (`shared/sandbox-network-policy.ts`). Mounting the whole repository and opening
 the network would still leave no process to run `pnpm`, `eve`, or a declared
@@ -57,18 +57,15 @@ that layer, and nothing prevents a tool there from spawning a child process.
 
 ### Why a wrapped CLI rather than a raw binary or a new API
 
-Issue #742 leaves "allowlisted host commands" as the expected follow-up. Handing
-the subagent a general `eve` is the wrong shape: `eve add` alone accepts
+Handing the subagent a general `eve` is the wrong shape: `eve add` alone accepts
 namespaces, URLs, `--overwrite`, and setup-bearing flags, so an allowlist entry
 either admits far more than registry installation or degenerates into argument
 parsing in the wrong layer.
 
 A tool that hard-codes the subcommand, forces `--non-interactive`, validates the
-address, and builds argv itself is not exposing the binary. It is exactly as
-constrained as an in-process adapter would be, and it avoids introducing a
+address, and builds argv itself is not exposing the binary. It avoids introducing a
 second implementation of address resolution, eve-version checking, dependency
-installation, and `envVars` reporting. The package manager also runs
-out-of-process, where a slow or failing install cannot block the agent runtime.
+installation, and `envVars` reporting.
 
 The eve binary is located the way eve already locates setup binaries:
 `findPackageJSON("eve", <appRoot>/package.json)` plus the package's declared bin
@@ -82,7 +79,7 @@ bundle. 33 of the plain items additionally declare `envVars` the developer must
 supply — installation completes without them, but the integration does not work
 until they are set.
 
-`channel/slack` is the worked example, because it exercises everything. Its
+`channel/slack` is an illustrative example, because it exercises everything. Its
 `prepare` asks first whether to use Vercel Connect or portable credentials
 (`setup/integrations/slack/setup.ts`), and the two answers fail differently:
 
@@ -92,26 +89,34 @@ until they are set.
 - **Vercel Connect** reaches `apply`, which runs
   `vercel connect create slack --triggers …` (`setup/slack-connect-create.ts`).
   That opens a browser and polls up to five minutes for the workspace to appear.
-  Nothing headless can make that click; a timeout degrades to `not-installed`,
-  whose documented recovery is to re-run, and the re-run detects the connector
-  that already exists.
 
-Setup integrations are structured `prepare(ctx) → Plan` then
-`apply(plan, ctx)` (`setup/integrations/types.ts`): every question lives in
-`prepare`, every effect in `apply`. That is why re-running a setup flow is safe,
-and why the TUI wizard can recover from an abandoned browser step by simply
-being run again — the questions replay, the effects do not.
+### Standard Connect connections provision lazily
 
-## The irreducible human steps
+The Connect-backed connection items are a separate case from channels such as
+Slack. With `@vercel/connect` 1.0, an authored connection such as
+`auth: connect("linear")` provisions or links its managed OAuth connector on the
+first token or authorization request. The request carries the authored
+connection URL and connector identifier and is authenticated by the deployment's
+Vercel OIDC token. Deployment alone does not trigger provisioning; the first
+connection use does.
+
+For each connection that meets that contract, explicit registry setup is not
+required. Its registry item should install `@vercel/connect@>=1.0.0`, write the
+static connection file, and omit `meta.eve.setup`. The existing catalog rule then
+classifies it as installable without any self-modification exception: the tool
+installs it, and Connect activates it on first use. Because Connect creates or
+links the exact authored identifier, this path has no returned replacement UID
+and no source reconciliation step.
+
+## Required human interaction
 
 Two things no automated driver can do, in any of these designs: **click through
 a browser authorization**, and **supply a secret**. They are identical whether
 the driver is Claude Code at a shell, the subagent in chat, or a script in CI.
 
-This is what fixes the architecture. The design question is not _how much can
-the agent automate_ — every design bottoms out at the same two steps. It is
-**where the developer is standing when they are reached.** Today they are asked
-to leave the conversation and retype a command. They should be asked in place.
+This is what fixes the architecture. Today, when hitting one of these actions,
+they are asked to leave the conversation and retype a command. They should be
+asked in place.
 
 ## Authoring API
 
@@ -142,10 +147,6 @@ relay them — was considered and rejected. Both directions fail:
   developer is shown options they cannot pick with the explanation of why
   stripped out.
 
-Over-asking is slow and lossy; under-asking is silently wrong. Handing off
-avoids choosing, renders the question properly, and covers the browser and
-secret steps in the same motion.
-
 ### `selfmod__registry_add`
 
 One tool, one fixed argv shape, one terminal event to parse.
@@ -168,8 +169,10 @@ with no way to answer it.
 
 The result reports outstanding work rather than a success boolean, because an
 installed item can still be non-functional through unset `envVars` — 33 of the
-36 items this tool handles declare them. Naming a required variable is not a
-secret, so that report belongs in chat.
+current 36 plain items declare them. Managed OAuth connections add installable
+items without adding environment variables, because authorization happens
+through Connect on first use. Naming a required variable is not a secret, so
+that report belongs in chat.
 
 Approval is `once()` — approved once per session, then quiet. The request
 renders the tool input, which is the address. That is the same disclosure the
@@ -180,64 +183,19 @@ equivalent shell command gives a human, and it needs no new core mechanism.
 The tool needs two things from its host, and neither should come from the
 environment.
 
-`appRoot` is ambiguous in development: the runtime's own `appRoot` can point at
-an **immutable runtime snapshot**, with the authored application carried
-separately as `sandboxAppRoot` (`runtime/compiled-artifacts-source.ts`); the
-runtime already reconciles three roots (`execution/sandbox/development-prewarm.ts`).
-An install that targets the snapshot writes into a directory that is discarded
-and looks like it succeeded. `EVE_DEV_WORKER_APP_ROOT` is not the answer either.
-It is installed and torn down by `installWorkflowTransportEnvironment`
-unconditionally on every `eve dev` boot — not gated on the parent-owned dev
-World — but it belongs to the workflow-world transport by ownership, not by
-name: nothing about the development capability should depend on a variable
-another subsystem happens to also have set. Publish a dedicated one.
+- `appRoot` is ambiguous in development. The runtime's own `appRoot` can point at
+  an **immutable runtime snapshot**. We should publish the dedicated app root.
+- The ability to suspend / resume the source watcher will prevent agent-driven
+  installs from avoiding collisions / crashes. The primitive already exists and
+  already lives here: `AuthoredSourceWatcherHandle` exposes `suspend()`,
+  `resume()`, `flush()`, and `rebuild()`
+  (`internal/nitro/host/dev-authored-source-watcher.ts`), and its suspension is
+  **reference counted**, so a tool-driven install and a concurrent `/add` cannot
+  un-suspend each other.
 
-Suspension is the second. Installing mutates `package.json` and the authored
-tree while the authored-source watcher is live, in the same process the tool is
-running in. The primitive already exists and already lives here:
-`AuthoredSourceWatcherHandle` exposes `suspend()`, `resume()`, `flush()`, and
-`rebuild()` (`internal/nitro/host/dev-authored-source-watcher.ts`), and its
-suspension is **reference counted**, so a tool-driven install and a concurrent
-`/add` cannot un-suspend each other. What the TUI calls `withExclusiveTerminal`
-is only an HTTP client for it (`services/dev-client/runtime-artifacts.ts`,
-`cli/run.ts`), dispatched onto that same handle by the host. The gap is
-reachability, not capability.
-
-Both arrive together as a **development-only capability object** resolved from
-the tool context, not as new `ToolContext` fields. Both are meaningless in a
-deployed runtime, and a capability absent in production should be absent from
-the type every tool sees rather than present-and-undefined. Its absence is also
-the correct signal for a tool that must refuse to run outside `eve dev`.
-
-Installation holds the capability for the whole operation and serializes
-against concurrent `selfmod__edit_file` writes. It does not need to force a
-rebuild on completion: `resume()` already does this itself once the last
-suspension lifts (`dev-authored-source-watcher.ts`), so releasing the
-capability is sufficient.
-
-### TUI handoff
-
-The dev server child is forked with `stdio: ["ignore", "pipe", "pipe", "ipc"]`.
-It has no TTY, so no wrapping makes an interactive `eve add` possible from the
-tool layer. Browser authorization and secret entry are structurally the TUI's,
-permanently — not a stage to be removed later.
-
-When the tool declines an item, its result carries a structured next action and
-the TUI renders it as an affordance that opens the existing flow inline.
-
-`initialAddress` needs no change at all, precisely because the tool did not
-pre-install. `/add channel/slack` already routes to that item's confirmation
-screen and then installs and runs setup in one pass
-(`setup/flows/registry.ts`); `inspectItem` has no installed-aware, setup-only
-mode and does not need one. Do not add a parallel argument path, and do not
-bypass `offerItem` — that confirmation is the disclosure.
-
-The observable change is the whole point: the developer confirms an offer
-instead of retyping a command the agent already composed.
-
-`eve dev` also has a headless mode with no TUI to offer. There, the tool reports
-the command and stops — today's behavior, correctly scoped to the one case that
-has no better answer.
+Both of these **development-only capabilities** are resolved from
+the tool context. Both are meaningless in a deployed runtime - its absence is
+also a signal for a tool that must refuse to run outside `eve dev`.
 
 ## Invariant: secrets never round-trip through the model
 
@@ -278,29 +236,6 @@ need for all three:
   blocked-event handling, no classification of which questions the model may
   answer. The wizard asks; the tool never does.
 
-## Staging
-
-1. `selfmod__registry_add` and the development capability it needs. Completes
-   all 36 no-setup items in conversation.
-2. The TUI handoff. Turns the retyped command into a one-keystroke offer for the
-   other 50.
-
-There is no third stage. The remaining human steps are irreducible, and the
-surface that handles them already exists.
-
-Instructions and the extension README change with (1) — today they instruct the
-model to stop at discovery and explicitly forbid it from acting.
-
-## Out of scope
-
-- **Third-party, URL, and `@skills` addresses.** v1 installs official items
-  only; everything else routes to the TUI.
-- **Changes to `eve add`, `eve registry`, or `/add` behavior**, beyond fixing
-  the continuation bug below. `/add` gains no new flags.
-- **Production self-modification.** Applying an approved item to an isolated
-  proposal checkout with no connected TUI needs its own authorization,
-  sandboxing, egress, integrity, and publication design.
-
 ## Adjacent fix
 
 `headlessSetupContinuation` should echo the accumulated answers, not only the
@@ -316,6 +251,9 @@ still a real defect for the drivers that do, and worth fixing on its own.
 - The subagent installs a no-setup official item end to end without the
   developer typing a command, and reports unset `envVars` rather than reporting
   bare success.
+- An eligible managed OAuth connection installs without a terminal handoff and
+  relies on Connect's first-use provisioning; ineligible connections retain
+  explicit setup metadata.
 - A setup-bearing or component-bearing item is never partially installed by the
   tool: it reaches the TUI whole, or in headless dev it reaches the developer as
   a command.
@@ -348,13 +286,3 @@ For tests, the tightest tier that holds each assertion: unit for the split rule
 over catalog metadata; integration for the tool's result shape and its refusal
 to run without the development capability; scenario for anything that actually
 spawns the eve bin. E2E is CI-only — see `e2e/README.md`.
-
-## Open questions
-
-- How the tool detects that no TUI is listening, so it can fall back to
-  reporting the command. Headless `eve dev` is the only case, and nothing in the
-  runtime advertises the difference today.
-- Whether declaring setup is too conservative a proxy for asking a question. An
-  item whose setup resolves every answer from detection would hand off to a
-  wizard that asks nothing. Erring this way is safe and keeps the rule
-  mechanical; it is worth revisiting only if a real item lands in that gap.
