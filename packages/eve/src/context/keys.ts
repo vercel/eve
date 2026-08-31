@@ -107,6 +107,8 @@ export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelD
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
+/** Public trace audience accepted from a trusted forwarding deployment. */
+export const ForwardedTraceAudienceKey = new ContextKey<"public">("eve.forwardedTraceAudience");
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */

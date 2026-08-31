@@ -15,7 +15,12 @@ import {
   readScheduleId,
   readSessionTraceId,
 } from "#execution/eve-workflow-attributes.js";
-import { ChannelInstrumentationKey, ChannelRequestIdKey, ScheduleIdKey } from "#context/keys.js";
+import {
+  ChannelInstrumentationKey,
+  ChannelRequestIdKey,
+  ForwardedTraceAudienceKey,
+  ScheduleIdKey,
+} from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
@@ -69,6 +74,7 @@ describe("isWorkflowTraceContentVisible", () => {
   it("prefers an accepted forwarded audience and exposes its audit source", () => {
     const serializedContext = {
       [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+      [ForwardedTraceAudienceKey.name]: "public",
       [ChannelInstrumentationKey.name]: {
         kind: "eve",
         metadata: {
@@ -82,6 +88,25 @@ describe("isWorkflowTraceContentVisible", () => {
     expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
       "$eve.is_trace_content_visible": true,
       "$eve.trace_audience_source": "trusted_forwarder",
+    });
+  });
+
+  it("does not infer forwarded acceptance from projected metadata", () => {
+    const serializedContext = {
+      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+      [ChannelInstrumentationKey.name]: {
+        kind: "eve",
+        metadata: {
+          audience: "public",
+          [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
+        },
+      },
+    };
+
+    expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
+    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+      "$eve.is_trace_content_visible": false,
+      "$eve.trace_audience_source": undefined,
     });
   });
 });

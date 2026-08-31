@@ -12,13 +12,17 @@ import { describe, expect, it, vi } from "vitest";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
+import { serializeContext } from "#context/serialize.js";
 import {
   AuthKey,
   ChannelInstrumentationKey,
+  ForwardedTraceAudienceKey,
   InitiatorAuthKey,
   ParentTraceContextKey,
 } from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { setChannelContext } from "#execution/channel-context.js";
+import { buildSessionAttributes } from "#execution/eve-workflow-attributes.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
@@ -57,7 +61,7 @@ const FORWARDED_INITIATOR: SessionAuthContext = {
 function createEmptySkillBundle(): CompiledBundle {
   return {
     adapterRegistry: undefined as never,
-    compiledArtifactsSource: undefined as never,
+    compiledArtifactsSource: { kind: "bundled" },
     graph: undefined as never,
     hookRegistry: undefined as never,
     moduleMap: undefined as never,
@@ -105,7 +109,7 @@ function createEveCreateHandler(input: EveChannelInput) {
 }
 
 describe("eveChannel forwarded principal → runtime principal", () => {
-  it("seeds the forwarded principal into the run context and resolves a user Connect principal", async () => {
+  it("preserves the accepted audience across adapter-state persistence", async () => {
     const trustedForwarders = vi.fn(
       (caller: SessionAuthContext) => caller.principalId === ROUTER_CALLER.principalId,
     );
@@ -158,6 +162,19 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     expect(ctx.get(ChannelInstrumentationKey)?.metadata).toMatchObject({
       audience: "public",
       [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
+    });
+    expect(ctx.get(ForwardedTraceAudienceKey)).toBe("public");
+
+    setChannelContext(ctx, { ...run.adapter, state: { persisted: true } });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata).toMatchObject({
+      audience: "public",
+      [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
+    });
+    const serializedContext = serializeContext(ctx);
+    expect(serializedContext[ForwardedTraceAudienceKey.name]).toBe("public");
+    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+      "$eve.is_trace_content_visible": true,
+      "$eve.trace_audience_source": "trusted_forwarder",
     });
     expect(ctx.get(ParentTraceContextKey)).toEqual({
       isRemote: true,

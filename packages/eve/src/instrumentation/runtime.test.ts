@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
+  ForwardedTraceAudienceKey,
   OtelTraceEnabledKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -20,7 +21,6 @@ import {
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
-import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -73,13 +73,7 @@ beforeEach(() => {
 
 function initializeRemoteSession(tracePolicy: TraceCapturePolicy): ContextContainer {
   const ctx = createContext("public");
-  ctx.set(ChannelInstrumentationKey, {
-    kind: "channel:test",
-    metadata: {
-      audience: "public",
-      [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
-    },
-  });
+  ctx.set(ForwardedTraceAudienceKey, "public");
   registerInstrumentationRuntime({
     ...createRuntime({ capturesContent: true, publish: vi.fn() }, tracePolicy),
     idGenerator: new AgentSpanIdGenerator(),

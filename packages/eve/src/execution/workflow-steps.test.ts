@@ -12,8 +12,10 @@ import { ContextKey } from "#context/key.js";
 import {
   ActivityObserverKey,
   AuthKey,
+  ChannelInstrumentationKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
+  ForwardedTraceAudienceKey,
   ModeKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
@@ -37,6 +39,7 @@ import { appendPendingInputBatch } from "#harness/input-requests.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
+import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   createDurableSessionState,
@@ -3250,7 +3253,10 @@ describe("runProxySubagentEventStep", () => {
    * `deserializeContext` round-trip resolves the adapter by kind
    * against the bundle's adapter registry.
    */
-  function buildSerializedContextForAdapter(adapter: ChannelAdapter): Record<string, unknown> {
+  function buildSerializedContextForAdapter(
+    adapter: ChannelAdapter,
+    options: { readonly acceptedForwardedAudience?: boolean } = {},
+  ): Record<string, unknown> {
     const bundle = {
       adapterRegistry: {
         adaptersByKind: new Map([[adapter.kind, adapter]]),
@@ -3280,6 +3286,9 @@ describe("runProxySubagentEventStep", () => {
     ctx.set(AuthKey, null);
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
+    if (options.acceptedForwardedAudience) {
+      ctx.set(ForwardedTraceAudienceKey, "public");
+    }
     ctx.set(ContinuationTokenKey, "http:proxy-test");
     ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "parent-session");
@@ -3352,7 +3361,9 @@ describe("runProxySubagentEventStep", () => {
     const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
-      serializedContext: buildSerializedContextForAdapter(cachingAdapter),
+      serializedContext: buildSerializedContextForAdapter(cachingAdapter, {
+        acceptedForwardedAudience: true,
+      }),
       sessionState,
     });
 
@@ -3370,6 +3381,13 @@ describe("runProxySubagentEventStep", () => {
     expect(channel.state.pendingRequests?.[0]).toMatchObject({
       turnId: "child-turn",
       requests: [expect.objectContaining({ requestId: "req-1" })],
+    });
+    expect(result.serializedContext[ForwardedTraceAudienceKey.name]).toBe("public");
+    expect(result.serializedContext[ChannelInstrumentationKey.name]).toMatchObject({
+      metadata: {
+        audience: "public",
+        [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
+      },
     });
 
     // And the parent session's proxy-entry map is reflected on the

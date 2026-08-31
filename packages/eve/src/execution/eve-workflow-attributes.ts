@@ -37,7 +37,7 @@
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import {
   ChannelRequestIdKey,
-  ChannelInstrumentationKey,
+  ForwardedTraceAudienceKey,
   OtelTraceEnabledKey,
   ScheduleIdKey,
   SessionTraceSeedKey,
@@ -48,7 +48,6 @@ import { isNonEmptyString } from "#shared/guards.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
-import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
@@ -66,10 +65,6 @@ export interface SessionIdentitySummary {
 interface SerializedChannelAdapter {
   readonly kind?: unknown;
   readonly audience?: unknown;
-}
-
-interface SerializedChannelInstrumentation {
-  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 /** Untyped session parent snapshot as it survives serialization. */
@@ -109,21 +104,16 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
   const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | SerializedChannelAdapter
     | undefined;
-  const instrumentation = serializedContext[ChannelInstrumentationKey.name] as
-    | SerializedChannelInstrumentation
-    | undefined;
+  const acceptedForwardedAudience = serializedContext[ForwardedTraceAudienceKey.name] === "public";
   return shouldCaptureInstrumentationContent(
-    normalizeChannelAudience(instrumentation?.metadata?.audience ?? channel?.audience),
+    normalizeChannelAudience(acceptedForwardedAudience ? "public" : channel?.audience),
   );
 }
 
 export function readTraceAudienceSource(
   serializedContext: Record<string, unknown>,
 ): string | undefined {
-  const instrumentation = serializedContext[ChannelInstrumentationKey.name] as
-    | SerializedChannelInstrumentation
-    | undefined;
-  return instrumentation?.metadata?.[FORWARDED_AUDIENCE_SOURCE_KEY] === FORWARDED_AUDIENCE_SOURCE
+  return serializedContext[ForwardedTraceAudienceKey.name] === "public"
     ? "trusted_forwarder"
     : undefined;
 }

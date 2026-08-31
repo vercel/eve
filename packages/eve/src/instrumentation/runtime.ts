@@ -51,6 +51,7 @@ import type { SessionTraceSeed } from "#context/keys.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import {
   ChannelInstrumentationKey,
+  ForwardedTraceAudienceKey,
   OtelTraceEnabledKey,
   ParentSessionKey,
   ParentTraceContextKey,
@@ -67,7 +68,6 @@ import { resolveParentLineage } from "#instrumentation/parent-lineage.js";
 import type { ChannelInstrumentationProjection, SessionTraceContext } from "#channel/types.js";
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import { intersectInstrumentationDecisions } from "#shared/instrumentation-decision.js";
-import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 const INSTRUMENTATION_RUNTIME_KEY = Symbol.for("eve.instrumentation-runtime");
 const TURN_TRACE_STATE_KEY = "eve.harness.turnTrace";
@@ -506,8 +506,7 @@ export function initializeSessionInstrumentation(input: {
   const runtime = getInstrumentationRuntime();
   const channel = input.ctx.get(ChannelInstrumentationKey);
   const audience = normalizeChannelAudience(channel?.metadata.audience);
-  const hasForwardedAudience =
-    channel?.metadata[FORWARDED_AUDIENCE_SOURCE_KEY] === FORWARDED_AUDIENCE_SOURCE;
+  const hasForwardedAudience = input.ctx.get(ForwardedTraceAudienceKey) === "public";
   const traceSeed = allocateSessionTraceSeed({
     agentName: input.agentName,
     audience,
