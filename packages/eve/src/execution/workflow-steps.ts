@@ -198,7 +198,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   });
   const history = createExecutionHistoryView(initialSession);
   const instrumentation = bindSessionInstrumentation({
-    agentName: bundle.graph.root.agent?.config?.name,
+    agentName: effectiveAgent.turnAgent.id,
     ctx,
     rootSessionId: initialSession.rootSessionId ?? initialSession.sessionId,
     sessionId: initialSession.sessionId,

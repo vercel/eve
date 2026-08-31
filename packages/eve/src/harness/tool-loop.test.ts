@@ -185,6 +185,7 @@ function declareTelemetry(
     declaredRuntime,
     createInstrumentationContext(decision, audience),
     {
+      agentName: "test-agent",
       rootSessionId: "test-session",
       sessionId: "test-session",
     },
@@ -214,7 +215,7 @@ function bindHookInstrumentation(
       useDeclaredRuntime ? declaredDecision : undefined,
       useDeclaredRuntime ? declaredAudience : "unknown",
     ),
-    { rootSessionId: "test-session", sessionId: "test-session" },
+    { agentName: "test-agent", rootSessionId: "test-session", sessionId: "test-session" },
   )!.prepareExecution();
 }
 

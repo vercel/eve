@@ -14,7 +14,7 @@ import {
 function bindHooks(
   hooks: InstrumentationRuntime["hooks"],
   ctx: ContextContainer,
-  agentName?: string,
+  agentName = "test-agent",
 ) {
   return bindInstrumentationRuntime(
     {

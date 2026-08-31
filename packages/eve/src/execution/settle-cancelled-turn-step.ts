@@ -73,7 +73,7 @@ export async function settleCancelledTurnStep(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
   const instrumentation = bindSessionInstrumentation({
-    agentName: bundle.graph.root.agent?.config?.name,
+    agentName: effectiveAgent.turnAgent.id,
     ctx,
     rootSessionId: session.rootSessionId ?? session.sessionId,
     sessionId: session.sessionId,

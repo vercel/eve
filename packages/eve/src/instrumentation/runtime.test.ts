@@ -18,7 +18,11 @@ import {
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 
-const boundSession = { rootSessionId: "session-1", sessionId: "session-1" };
+const boundSession = {
+  agentName: "test-agent",
+  rootSessionId: "session-1",
+  sessionId: "session-1",
+};
 
 function createRuntime(
   hooks: InstrumentationHooks,
@@ -278,6 +282,7 @@ describe("bindSessionInstrumentation", () => {
     });
 
     const instrumentation = bindSessionInstrumentation({
+      agentName: "test-agent",
       ctx,
       rootSessionId: "session-1",
       sessionId: "session-1",
@@ -298,6 +303,7 @@ describe("bindSessionInstrumentation", () => {
     );
     const ctx = createContext();
     const instrumentation = bindSessionInstrumentation({
+      agentName: "test-agent",
       ctx,
       rootSessionId: "session-1",
       sessionId: "session-1",
@@ -323,6 +329,7 @@ describe("bindSessionInstrumentation", () => {
     const ctx = createContext();
     ctx.set(OtelTraceEnabledKey, false);
     const instrumentation = bindSessionInstrumentation({
+      agentName: "test-agent",
       ctx,
       rootSessionId: "session-1",
       sessionId: "session-1",

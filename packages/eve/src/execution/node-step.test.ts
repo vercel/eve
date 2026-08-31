@@ -401,6 +401,7 @@ describe("createExecutionNodeStep", () => {
       shutdown: async () => undefined,
     };
     const instrumentation = bindInstrumentationRuntime(runtime, new ContextContainer(), {
+      agentName: "test-agent",
       rootSessionId: "sess-root",
       sessionId: "sess-root",
     });

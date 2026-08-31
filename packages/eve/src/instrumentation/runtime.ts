@@ -136,7 +136,7 @@ export interface PreparedInstrumentationAttempt {
 export type InstrumentationAttempt = InstrumentationAttemptScope;
 
 export interface BoundInstrumentationSession {
-  readonly agentName?: string;
+  readonly agentName: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
 }
@@ -470,7 +470,7 @@ export function bindInstrumentationRuntime(
 }
 
 export function bindSessionInstrumentation(input: {
-  readonly agentName?: string;
+  readonly agentName: string;
   readonly ctx: ContextContainer;
   readonly rootSessionId: string;
   readonly sessionId: string;
