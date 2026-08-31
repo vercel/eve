@@ -17,6 +17,7 @@ import {
 import type { PlannerNavigation, Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
+import { runInterruptibleRegistryItem } from "./registry-item-interrupt.js";
 import {
   formatRegistrySessionResult,
   registryItemProgress,
@@ -171,6 +172,14 @@ export async function runTuiSetupCommand(
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
   const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
+  if (command === "add") {
+    try {
+      return await execution;
+    } finally {
+      input.renderer.setStatus(undefined);
+    }
+  }
+
   const interrupt = input.renderer.waitForInterrupt();
   const INTERRUPTED = Symbol("interrupted");
   try {
@@ -302,6 +311,12 @@ async function executeSetupCommand(
           recoverHumanAction: (error) =>
             recoverVercelHumanAction(error, flows, { appRoot, prompter, signal }),
           onItemStart: registryItemProgress(renderer),
+          runItem: (task) =>
+            runInterruptibleRegistryItem({
+              parentSignal: signal,
+              source: input.renderer,
+              task: (itemSignal) => task(itemSignal),
+            }),
         });
         if (flow.kind === "cancelled") {
           return { message: "/add dismissed.", cancelled: true, preserveFlowDiagnostics: true };
@@ -319,7 +334,7 @@ async function executeSetupCommand(
         const result = flow.result;
         const outcome: TuiSetupCommandResult = {
           message:
-            result.items.length > 0 || result.failures.length > 0
+            result.items.length > 0 || result.failures.length > 0 || result.outcomes !== undefined
               ? formatRegistrySessionResult(result)
               : "No integrations selected.",
           preserveFlowDiagnostics: true,

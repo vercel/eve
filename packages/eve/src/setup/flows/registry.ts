@@ -383,6 +383,8 @@ export async function runRegistryFlow(input: {
   plannerContext?: RegistryPlannerContext;
   recoverHumanAction?: RegistryHumanActionRecovery;
   onItemStart?: (item: Item, index: number, total: number) => void;
+  /** Gives each installation its own cancellation boundary without ending the batch. */
+  runItem?<T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T>;
   deps?: Partial<RegistryFlowDeps>;
 }): Promise<
   | { kind: "done"; result: RegistrySessionResult }
@@ -458,23 +460,26 @@ export async function runRegistryFlow(input: {
       input.signal?.throwIfAborted();
       input.onItemStart?.(item, index, items.length);
       try {
-        const install = () =>
+        const install = (signal = input.signal) =>
           installRegistryItem(input.appRoot, item.address, {
             silent: true,
             prompter: input.prompter,
-            signal: input.signal,
+            signal,
           });
+        const run = () => (input.runItem === undefined ? install() : input.runItem(install));
         const installed = await recoverHumanAction(
-          () => input.prompter.withExclusiveTerminal?.(install) ?? install(),
+          () => input.prompter.withExclusiveTerminal?.(run) ?? run(),
           input.recoverHumanAction,
         );
         if (installed === undefined) throw new WizardCancelledError();
         activeSession.add(label(item), installed.output, installed.setup);
       } catch (error) {
         input.signal?.throwIfAborted();
-        if (error instanceof WizardCancelledError || error instanceof HumanActionRequiredError) {
-          throw error;
+        if (error instanceof WizardCancelledError) {
+          activeSession.addCancellation(label(item));
+          continue;
         }
+        if (error instanceof HumanActionRequiredError) throw error;
         const message = error instanceof Error ? error.message : String(error);
         const failureMessage = message.trim() || "Installation failed.";
         const summary = failureMessage.split("\n").find((line) => line.trim() !== "");
@@ -509,7 +514,8 @@ export async function runRegistryFlow(input: {
   } catch (error) {
     if (error instanceof WizardCancelledError) {
       const settled = session?.result();
-      return settled !== undefined && (settled.items.length > 0 || settled.failures.length > 0)
+      return settled !== undefined &&
+        (settled.items.length > 0 || settled.failures.length > 0 || settled.outcomes !== undefined)
         ? { kind: "done", result: { ...settled, cancelled: true } }
         : { kind: "cancelled" };
     }

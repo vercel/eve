@@ -493,8 +493,16 @@ function renderResult(block: Block, width: number, theme: Theme): string[] {
   // SGR 22 closes bold and dim together, so a result that bolds a span (the
   // /model reply's model name) would drop the rest of the line out of dim;
   // re-open dim after each close so the whole line stays quiet.
-  const dim = (line: string): string =>
-    theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
+  const dim = (line: string): string => {
+    const body = theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
+    if (line.startsWith(`${theme.glyph.success} `)) {
+      return body.replace(theme.glyph.success, theme.colors.green(theme.glyph.success));
+    }
+    if (line.startsWith(`${theme.glyph.error} `)) {
+      return body.replace(theme.glyph.error, theme.colors.red(theme.glyph.error));
+    }
+    return body;
+  };
   return lines.map((line, index) =>
     index === 0 ? `   ${marker}  ${dim(line)}` : `      ${dim(line)}`,
   );

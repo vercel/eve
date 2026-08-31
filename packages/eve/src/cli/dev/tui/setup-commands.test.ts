@@ -4,6 +4,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { RegistryFlowFailedError } from "#setup/flows/registry.js";
 import type { RegistrySessionResult } from "#setup/flows/registry-session.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import {
   runTuiSetupCommand,
@@ -436,7 +437,7 @@ describe("runTuiSetupCommand", () => {
       registryResult({
         items: [{ title: "Agent Browser", facts: [], output: [] }],
       }),
-      "Added Agent Browser\n\nAgent Browser\n  Installed.",
+      "Added Agent Browser\n\n✓ Agent Browser\n  Installed.",
     ],
     ["empty", registryResult(), "No integrations selected."],
     ["deployed", registryResult({ deployed: "production" }), "No integrations selected."],
@@ -476,7 +477,7 @@ describe("runTuiSetupCommand", () => {
     });
 
     await expect(run({ command: "add", flows })).resolves.toMatchObject({
-      message: expect.stringContaining("Couldn't add GitHub"),
+      message: expect.stringContaining("⨯ GitHub"),
       preserveFlowDiagnostics: true,
     });
   });
@@ -491,6 +492,46 @@ describe("runTuiSetupCommand", () => {
     expect(flows.runDeployFlow).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true }),
     );
+  });
+
+  it("limits an installation interrupt to the active registry item", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(
+        async ({ initialScreen, runItem }) => {
+          expect(initialScreen).toBe("integrations");
+          await expect(
+            runItem?.(
+              (signal) =>
+                new Promise((_resolve, reject) => {
+                  signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+                }),
+            ),
+          ).rejects.toBeInstanceOf(WizardCancelledError);
+          return registryResult({
+            items: [
+              { title: "Web Chat", facts: [], output: [] },
+              { title: "Notion", facts: [], output: [] },
+            ],
+            outcomes: [
+              { kind: "installed", title: "Web Chat", facts: [], output: [] },
+              { kind: "cancelled", title: "Slack" },
+              { kind: "installed", title: "Notion", facts: [], output: [] },
+            ],
+          });
+        },
+      ),
+    });
+
+    const result = run({ command: "add", flows, renderer });
+    renderer.fireInterrupt();
+
+    await expect(result).resolves.toEqual({
+      message:
+        "Added Web Chat and Notion\n\n✓ Web Chat\n  Installed.\n\n" +
+        "⨯ Slack\n  Cancelled.\n\n✓ Notion\n  Installed.",
+      preserveFlowDiagnostics: true,
+    });
   });
 
   it("preserves model access refreshes when provider setup is interrupted", async () => {

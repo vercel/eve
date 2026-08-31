@@ -42,7 +42,7 @@ Model and Vercel changes take effect when you complete the Model step. Channel a
 
 Bare `/add` opens the standalone planner on **Integrations**. It does not include model configuration. `/add <item>` preselects the requested item and opens **Review**. The progress rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
 
-Press `Right Arrow` or `Enter` to preserve the current selections and continue. Press `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation still requires `Enter` on **Install and set up** from Review.
+Press `Right Arrow` or `Enter` to preserve the current selections and continue. Press `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation still requires `Enter` on **Install and set up** from Review. During installation, `Esc` cancels only the active item and continues with the remaining selections. The final summary reports installed, cancelled, and failed items separately.
 
 Pass an official item address — `<category>/<name>`, where category is `channel`, `connection`, `extension`, or `instrumentation` — to preselect it in the planner. Product presets and configured registry addresses are also supported:
 
