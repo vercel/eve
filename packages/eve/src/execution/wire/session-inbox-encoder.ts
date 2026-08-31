@@ -2,10 +2,12 @@ import type {
   DeliverHookPayload,
   SessionCommand,
   SessionTimeoutHookPayload,
+  TurnCaller,
 } from "#channel/types.js";
 import {
   encodeSessionCommandV1,
   type SessionInboxWireV1,
+  sessionInboxWireV1Schema,
 } from "#execution/wire/session-inbox-wire.v1.js";
 import {
   encodeSessionCommandV2,
@@ -28,7 +30,7 @@ type LegacySessionInboxWireTarget = Extract<SessionInboxWireTarget, { readonly v
 type VersionedSessionInboxEncoder = (command: SessionInboxCommand) => unknown;
 
 const versionedEncoders = {
-  1: (command: SessionInboxCommand) => encodeSessionCommandV1(withoutActivityObserver(command)),
+  1: (command: SessionInboxCommand) => encodeSessionCommandV1(toV1Command(command)),
   2: encodeSessionCommandV2,
 } satisfies Record<SessionInboxWireVersion, VersionedSessionInboxEncoder>;
 
@@ -52,10 +54,7 @@ function encode(
   target: SessionInboxWireTarget,
 ): SessionInboxWireV1 | SessionInboxWireV2 | Record<string, unknown> {
   if (target.version === 0) {
-    return encodeSessionCommandV0(
-      encodeSessionCommandV1(withoutActivityObserver(command)),
-      target.variant,
-    );
+    return encodeSessionCommandV0(encodeSessionCommandV1(toV1Command(command)), target.variant);
   }
   if (isSessionInboxWireVersion(target.version)) {
     return versionedEncoders[target.version](command) as SessionInboxWireV1 | SessionInboxWireV2;
@@ -65,10 +64,17 @@ function encode(
   );
 }
 
-function withoutActivityObserver(command: SessionInboxCommand): SessionInboxCommand {
-  if (!("caller" in command) || command.caller?.activityObserver === undefined) return command;
-  const { activityObserver: _activityObserver, ...caller } = command.caller;
-  return { ...command, caller };
+const sessionInboxWireV1CallerProjection = sessionInboxWireV1Schema.options[0].shape.caller
+  .unwrap()
+  .strip();
+
+function toV1Command(command: SessionInboxCommand): SessionInboxCommand {
+  if (!("caller" in command) || command.caller === undefined) return command;
+  return { ...command, caller: toV1Caller(command.caller) };
+}
+
+function toV1Caller(caller: TurnCaller) {
+  return sessionInboxWireV1CallerProjection.parse(caller);
 }
 
 /** Server/step-safe producer facade. */
