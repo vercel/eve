@@ -95,6 +95,29 @@ export function shouldPrepareApprovalPolicyTools(input: {
   );
 }
 
+/** Returns whether this invocation can replay a previously approved tool call. */
+export function shouldPrepareApprovalReplayTools(input: {
+  readonly now?: number;
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+}): boolean {
+  if (shouldPrepareApprovalPolicyTools(input)) return true;
+
+  const approvedRequestIds = new Set(
+    [
+      ...(input.stepInput?.attributedInputResponses ?? []).map(({ response }) => response),
+      ...(input.stepInput?.inputResponses ?? []),
+    ]
+      .filter((response) => response.optionId === "approve")
+      .map((response) => response.requestId),
+  );
+  return getPendingInputBatches(input.session.state).some((batch) =>
+    batch.requests.some(
+      (request) => isApprovalRequest(request) && approvedRequestIds.has(request.requestId),
+    ),
+  );
+}
+
 export async function coordinateApprovalDelivery(input: {
   readonly now?: number;
   readonly session: HarnessSession;

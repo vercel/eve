@@ -397,6 +397,62 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
     });
   });
 
+  it("does not resolve removed dynamic tools when an approval is cancelled", async () => {
+    const responder = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, responder);
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: null },
+      sessionId: "generate-approval-resume-session",
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: {
+            closure: { version: "persisted-execute" },
+            stepId: "eve:dynamic-tool//old/execute/0-100",
+          },
+        },
+        description: "Removed shell tool.",
+        entryKey: "bash",
+        inputSchema: { type: "object" },
+        name: "bash",
+        resolverSlug: "removed",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ]);
+    const execute = vi.fn(async () => "/workspace");
+    const prepareStepDynamicTools = vi.fn((input) =>
+      preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [] }),
+    );
+    const runStep = createToolLoopHarness({
+      ...createConfig(createModel(), execute),
+      prepareStepDynamicTools,
+    });
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runStep(createPendingApprovalSession(undefined, true), {
+          attributedInputResponses: [
+            {
+              auth: responder,
+              response: { optionId: "cancel", requestId: approvalRequest.approvalId },
+            },
+          ],
+        }),
+      ),
+    ).resolves.toBeDefined();
+
+    expect(prepareStepDynamicTools).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("executes two approvals delivered together exactly once each", async () => {
     const execute = vi.fn(async (input: unknown) =>
       (input as { command: string }).command === "pwd" ? "/workspace" : "eve",

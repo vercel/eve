@@ -152,6 +152,7 @@ import {
 import {
   coordinateApprovalDelivery,
   shouldPrepareApprovalPolicyTools,
+  shouldPrepareApprovalReplayTools,
 } from "#harness/approval-delivery-coordinator.js";
 import { buildTelemetryRuntimeContext } from "#harness/instrumentation/runtime-context.js";
 import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
@@ -901,7 +902,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     });
     let responseAuthorizationTools = config.tools;
     if (
-      hasPendingApprovalBatch(session) &&
+      shouldPrepareApprovalReplayTools({ session, stepInput: effectiveStepInput }) &&
       approvalContext !== undefined &&
       config.prepareStepDynamicTools !== undefined
     ) {
