@@ -50,15 +50,38 @@ export function registerBuildCommand(input: {
             "Workspace builds do not support --profile or --skip-sandbox-prewarm. Run those options from an individual agent directory.",
           );
         }
-        const { buildAgentWorkspace } = await import("#internal/vercel/build-agent-workspace.js");
-        const outputDir = await buildAgentWorkspace(projectContext.workspace);
-        input.logger.log(
-          renderCliTaggedLine(theme, {
-            message: `built output at ${outputDir}`,
-            tag: "build",
-            tone: "success",
-          }),
+        if (process.env.VERCEL) {
+          const { buildAgentWorkspace } = await import("#internal/vercel/build-agent-workspace.js");
+          const outputDir = await buildAgentWorkspace(projectContext.workspace);
+          input.logger.log(
+            renderCliTaggedLine(theme, {
+              message: `built output at ${outputDir}`,
+              tag: "build",
+              tone: "success",
+            }),
+          );
+          return;
+        }
+
+        const buildApplication =
+          input.buildHost ?? (await import("#internal/nitro/host.js")).buildApplication;
+        const { buildAgentWorkspaceMembers } = await import("#internal/agent-workspace-build.js");
+        const members = await buildAgentWorkspaceMembers(
+          projectContext.workspace,
+          buildApplication,
         );
+        for (const member of members) {
+          input.logger.log(
+            renderCliTaggedLine(theme, {
+              message:
+                member.outputDir === undefined
+                  ? `built agent ${member.name} at ${member.appRoot}`
+                  : `built agent ${member.name} at ${member.outputDir}`,
+              tag: "build",
+              tone: "success",
+            }),
+          );
+        }
         return;
       }
 

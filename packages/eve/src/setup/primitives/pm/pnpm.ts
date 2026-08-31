@@ -173,9 +173,9 @@ function parsePnpmWorkspacePackagePatterns(source: string): string[] | undefined
   const patterns: string[] = [];
   for (const line of lines.slice(packagesIndex + 1)) {
     if (/^\S/u.test(line)) break;
-    const match = /^\s*-\s*(.+?)\s*$/u.exec(line);
+    const match = /^\s*-\s*(.+?)(?:\s+#.*)?\s*$/u.exec(line);
     if (match === null) continue;
-    patterns.push(match[1]!.replace(/^['"]|['"]$/gu, ""));
+    patterns.push(match[1]!.trim().replace(/^['"]|['"]$/gu, ""));
   }
   return patterns;
 }
