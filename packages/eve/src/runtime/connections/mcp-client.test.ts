@@ -764,6 +764,30 @@ describe("resolveHeaders with an active context (principal resolution + cache)",
     expect(cached).toEqual({ linear: { "user:idp:alice": { token: "t-1" } } });
   });
 
+  it("isolates cached tokens for same-named resolved connection instances", async () => {
+    const ctx = ctxWithAuth(userAuth("alice"));
+    const instanceA = makeConnection({
+      authorization: staticToken("token-a"),
+      connectionName: "linear",
+      instanceId: "instance-a",
+    });
+    const instanceB = makeConnection({
+      authorization: staticToken("token-b"),
+      connectionName: "linear",
+      instanceId: "instance-b",
+    });
+
+    await contextStorage.run(ctx, async () => {
+      await expect(resolveHeaders(instanceA)).resolves.toEqual({ Authorization: "Bearer token-a" });
+      await expect(resolveHeaders(instanceB)).resolves.toEqual({ Authorization: "Bearer token-b" });
+    });
+
+    expect(ctx.get(ConnectionAuthorizationTokensKey)).toEqual({
+      "instance-a": { app: { token: "token-a" } },
+      "instance-b": { app: { token: "token-b" } },
+    });
+  });
+
   it("uses separate cache slots for two users on the same connection", async () => {
     const tokens: Record<string, string> = {
       alice: "alice-token",

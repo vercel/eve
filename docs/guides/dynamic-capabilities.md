@@ -1,9 +1,9 @@
 ---
 title: "Dynamic Capabilities"
-description: "Resolve models, subagents, tools, skills, and instructions at runtime with defineDynamic resolver events."
+description: "Resolve models, subagents, connections, tools, skills, and instructions at runtime with defineDynamic resolver events."
 ---
 
-`defineDynamic` resolves the model, subagents, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
+`defineDynamic` resolves the model, subagents, connections, tools, skills, and instructions at runtime from a session event instead of declaring them up front. Reach for it when the right capability isn't known until the session starts, because it hinges on who the caller is, what tenant they belong to, feature flags, or external data. The [subagents](../subagents), [connections](../connections), [tools](../tools), [skills](../skills), and [instructions](../instructions) guides each point here for their dynamic form.
 
 eve evaluates a dynamic definition module once during compilation to classify and validate it, then retains that module as a runtime entry so its event handlers can run. Its top-level code therefore runs in both phases; keep caller-specific work inside the handlers. See [Authored module lifecycle](../reference/typescript-api#authored-module-lifecycle).
 
@@ -20,8 +20,8 @@ full contract.
 
 Dynamic models do not compile a default model or model metadata. When a
 resolver first selects a model, eve normalizes the selection and resolves any
-omitted context-window metadata from the AI Gateway catalog. Dynamic tools,
-skills, instructions, and subagents may return `null` to omit a capability.
+omitted context-window metadata from the AI Gateway catalog. Dynamic connections,
+tools, skills, instructions, and subagents may return `null` to omit a capability.
 
 ### Route image inputs to a vision model
 
@@ -132,6 +132,91 @@ availability as capability composition, not as the only authorization
 boundary: sensitive child tools still need their own authorization and
 approval checks.
 
+## Dynamic connections
+
+Use a dynamic connection when the available MCP servers or OpenAPI services
+depend on the authenticated caller. A handler returns one
+`defineMcpClientConnection(...)` or `defineOpenAPIConnection(...)`, a map of
+connection definitions, or `null`. Wrap every returned connection in its
+protocol helper. Connection resolvers receive `ctx.session` and
+`ctx.channel.kind`; they do not receive conversation messages, delivery
+payloads, tool inputs, model outputs, continuation tokens, or free-form channel
+metadata. Select accounts and endpoints from authenticated session identity or
+application-owned data.
+
+This example exposes one MCP connection for each cloud account enabled for the
+current user:
+
+```ts title="agent/connections/accounts.ts"
+import { defineDynamic, defineMcpClientConnection } from "eve/connections";
+import { listEnabledAccounts, mintAccountToken } from "../lib/accounts";
+
+export default defineDynamic({
+  events: {
+    "session.started": async (_event, ctx) => {
+      const principal = ctx.session.auth.current;
+      if (principal?.principalType !== "user") return null;
+
+      const accounts = await listEnabledAccounts(principal);
+      return Object.fromEntries(
+        accounts.map((account) => [
+          account.slug,
+          defineMcpClientConnection({
+            url: "https://mcp.cloud.example.com",
+            description: `${account.label} (${account.accountId})`,
+            instanceKey: account.accountId,
+            auth: {
+              principalType: "user",
+              getToken: ({ principal }) => mintAccountToken(principal, account),
+            },
+          }),
+        ]),
+      );
+    },
+  },
+});
+```
+
+The returned definitions use the same auth, headers, filtering, provided
+arguments, and approval options as static [MCP](../connections/mcp) and
+[OpenAPI](../connections/openapi) connections. Each resolved connection joins
+the per-step connection registry, appears in `connection_search`, and exposes
+discovered tools as `<connection>__<tool>`.
+
+Set `instanceKey` on every authenticated dynamic connection. Use a stable,
+non-secret account or tenant identifier, and change it whenever the endpoint,
+account, or auth provider changes. eve hashes the value before storing the
+resolved instance identity in durable authorization state. If a parked sign-in
+callback resumes after the resolver selects a different instance, eve rejects
+the callback instead of passing it to the new connection or reusing its token.
+
+### Naming and conflicts
+
+| Return shape                  | File                            | Connection name(s)      |
+| ----------------------------- | ------------------------------- | ----------------------- |
+| single connection definition  | `agent/connections/accounts.ts` | `accounts`              |
+| map `{ production, staging }` | `agent/connections/accounts.ts` | `production`, `staging` |
+
+A map key must be a legal connection name: lowercase ASCII letters, digits,
+and dashes, starting with a letter, up to 64 characters. Map keys are bare;
+eve does not prefix them with the file slug. A dynamic connection overrides a
+same-named static connection. Two effective dynamic resolvers cannot emit the
+same name; namespace one map key to remove the ambiguity.
+
+### Events and recovery
+
+Dynamic connections support `session.started` and `turn.started`. A turn result
+replaces that file's session result for the turn, including when the turn
+handler returns `null`. A throwing or invalid handler fails the lifecycle
+without rebuilding the registry, so a static connection shadowed by the
+dynamic result cannot reappear as a fallback.
+
+eve may run the active session and turn handlers again when a parked turn
+resumes or a durable step retries. This rebuilds live auth, header, approval,
+and provided-argument callbacks without serializing them into workflow state.
+Keep connection resolvers idempotent, and keep external side effects outside
+the handler.
+
 ## Dynamic tools
 
 Pass `defineDynamic` an `events` object whose handlers return either a single `defineTool(...)`, a `Record<string, defineTool(...)>`, or `null` for no tools. Wrap every entry in `defineTool()`. eve records durable descriptors for `execute`, approval request and response policies, and `toModelOutput`, so a parked call can reconstruct the same callbacks in a fresh process.
@@ -189,7 +274,7 @@ A single return produces one tool named after the file slug, identical to a stat
 
 ### Conflicts
 
-A dynamic tool or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a built-in by name. Two **dynamic** resolvers emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
+A dynamic connection, tool, or skill whose name matches an **authored** one **overrides** it — a per-caller resolver can replace a static capability by name. Two **dynamic** resolvers of the same capability type emitting the same name is a genuine ambiguity and throws; namespace one of the keys manually to resolve it.
 
 ### Events
 
@@ -310,6 +395,7 @@ Dynamic system content that changes frequently can reduce provider prompt-cache 
 ## What to read next
 
 - Conditionally expose a specialist → [Subagents](../subagents)
+- Resolve caller-specific external services → [Connections](../connections)
 - The static tool basics this builds on → [Tools](../tools)
 - The built-in tools and how to override them → [Built-in tools](../concepts/built-in-tools)
 - Authenticate a tool or connection to an external service → [Auth & route protection](./auth-and-route-protection)

@@ -22,8 +22,8 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21],
+    current: 22,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22],
     dropped: { 15: "TaskExec replaces stageEffect with send" },
   },
   dynamicTool: {
@@ -42,9 +42,11 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 8,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8],
-    dropped: {},
+    current: 10,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 10],
+    dropped: {
+      9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
+    },
   },
   hook: {
     current: 16,

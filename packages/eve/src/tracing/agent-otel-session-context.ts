@@ -6,7 +6,7 @@ import {
   type InstrumentationTraceContext,
   type InstrumentationTraceSeed,
   type InstrumentationTurnStartedEvent,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -67,7 +67,7 @@ export function createAgentOtelSessionContext(
             "agent.channel.audience": session.channelAudience,
             "agent.name": session.agentName,
             "agent.session.id": session.sessionId,
-            "agent.trace.schema.version": 2,
+            "agent.trace.schema.version": 3,
           },
           root: true,
         });
@@ -94,7 +94,7 @@ export function createAgentOtelSessionContext(
         "agent.channel.audience": session.channelAudience,
         "agent.name": session.agentName,
         "agent.session.id": session.sessionId,
-        "agent.trace.schema.version": 2,
+        "agent.trace.schema.version": 3,
       },
       root: true,
     });
@@ -156,7 +156,7 @@ export function createAgentOtelSessionContext(
     }
 
     const session = await ensureSessionContext({
-      agentName: undefined,
+      agentName: event.agentName,
       channelAudience: "unknown",
       channelKind: undefined,
       idempotencyKey: sessionIdempotencyKey(event.sessionId),
@@ -221,6 +221,9 @@ function resolveSessionTraceDecision(
   }
   if (event.parentTraceContext !== undefined) {
     return resolveTracePolicyDecision(isSampledTrace(event.parentTraceContext), audience);
+  }
+  if (event.agentName === undefined) {
+    return policy === undefined ? resolveTracePolicyDecision(true, audience) : { action: "drop" };
   }
   // The tool loop can evaluate the same policy before this first-session
   // preparation path; the persisted decision removes that window on replay.

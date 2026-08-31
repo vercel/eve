@@ -21,7 +21,7 @@ import type {
 } from "#channel/types.js";
 import { ContextKey } from "#context/key.js";
 import { SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import type { InstrumentationChannelDeliveryRef } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationChannelDeliveryRef } from "#instrumentation/lifecycle.js";
 import type { HandleEventFn } from "#harness/types.js";
 import type { DurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
@@ -85,7 +85,9 @@ export const TurnTaskDeliveryKey = new ContextKey<"none" | "initiating" | "pendi
 export const TurnTaskStateKey = new ContextKey<string>("eve.turnTaskState");
 export interface ActiveChannelDelivery {
   readonly agentName?: string;
+  readonly channelType?: string;
   readonly delivery: InstrumentationChannelDeliveryRef;
+  readonly policyAgentName?: string;
   readonly rootSessionId: string;
   readonly sequence: number;
   readonly sessionId: string;

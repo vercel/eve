@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { context as apiContext } from "@opentelemetry/api";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 
+import {
+  ROOT_CONTEXT,
+  context as otelContext,
+  trace as otelTrace,
+} from "#compiled/@opentelemetry/api/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { attachChannelActivityPresentation } from "#channel/activity-renderer.js";
 import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
@@ -9,15 +16,17 @@ import {
   LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
+  startWorkflowPreferLatest,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
 import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { registerInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
+import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 
 const getHookByTokenMock = vi.fn();
 const getRunMock = vi.fn();
@@ -78,6 +87,42 @@ describe("workflowEntryReference", () => {
     expect(activityCollectorWorkflowReference.workflowId).toBe(
       `workflow//${packageInfo.name}//activityCollectorWorkflow`,
     );
+  });
+});
+
+describe("startWorkflowPreferLatest", () => {
+  it("detaches Workflow telemetry only from marked agent contexts", async () => {
+    const contextManager = new AsyncLocalStorageContextManager().enable();
+    apiContext.setGlobalContextManager(contextManager);
+    const caller = otelTrace.wrapSpanContext({
+      isRemote: false,
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    });
+    const callerContext = otelTrace.setSpan(ROOT_CONTEXT, caller);
+    const observedParents: unknown[] = [];
+    startMock.mockImplementation(async () => {
+      observedParents.push(otelTrace.getSpan(otelContext.active()));
+      return { runId: "run-1" };
+    });
+
+    try {
+      await otelContext.with(callerContext, async () => {
+        expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
+        await startWorkflowPreferLatest(workflowEntryReference, []);
+        expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
+      });
+      await otelContext.with(markAgentTraceContext(callerContext), async () => {
+        expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
+        await startWorkflowPreferLatest(workflowEntryReference, []);
+        expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
+      });
+    } finally {
+      apiContext.disable();
+      contextManager.disable();
+    }
+    expect(observedParents).toEqual([caller, undefined]);
   });
 });
 
@@ -839,7 +884,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
 
   it("allocates a sampled trace seed when the policy is sampled", async () => {
     const idGenerator = new AgentSpanIdGenerator();
-    installAgentOtelRuntime(idGenerator, () => true);
+    const tracePolicy = vi.fn(() => true);
+    installAgentOtelRuntime(idGenerator, tracePolicy);
     mockBundleAndRun();
     startMock.mockResolvedValue({ runId: "driver-run" });
 
@@ -866,6 +912,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed!.traceId).toMatch(/^[0-9a-f]{32}$/u);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
+    expect(tracePolicy).toHaveBeenCalledOnce();
   });
 
   it("passes the channel adapter kind as channelType to the policy", async () => {
@@ -926,7 +973,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
   });
 
   it("inherits the parent trace context for delegated subagents", async () => {
-    installAgentOtelRuntime(new AgentSpanIdGenerator(), () => false);
+    const tracePolicy = vi.fn(() => false);
+    installAgentOtelRuntime(new AgentSpanIdGenerator(), tracePolicy);
     mockBundleAndRun();
 
     const parentTrace = {
@@ -959,6 +1007,7 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     expect(seed).toEqual(parentTrace);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
+    expect(tracePolicy).not.toHaveBeenCalled();
   });
 
   it("does not allocate a seed when no instrumentation runtime is installed", async () => {

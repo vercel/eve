@@ -9,11 +9,9 @@
 // runtime. The event shapes are eve's own vocabulary; deriving the handler map
 // from the union below is what keeps the public contract from drifting away
 // from the bus that feeds it.
-import type {
-  InstrumentationCapture,
-  InstrumentationEvent,
-} from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationEvent } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
+import type { InstrumentationCapture, TraceCapturePolicy } from "#shared/trace-policy.js";
 
 export type { JsonValue } from "#shared/json.js";
 
@@ -25,7 +23,6 @@ export type {
   InstrumentationActionOutput,
   InstrumentationActionStartedEvent,
   InstrumentationAttemptScope,
-  InstrumentationCapture,
   InstrumentationChannelDeliveryInput,
   InstrumentationChannelDeliveryOutcome,
   InstrumentationChannelDeliveryRef,
@@ -65,7 +62,13 @@ export type {
   InstrumentationTurnStartedEvent,
   InstrumentationTurnTerminalEvent,
   InstrumentationUsage,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+export type {
+  InstrumentationCapture,
+  TraceCaptureContext,
+  TraceCapturePolicy,
+  TracePolicyDecision,
+} from "#shared/trace-policy.js";
 
 /**
  * Marks a value as having come from `defineInstrumentation` or a built-in
@@ -151,15 +154,17 @@ export type ProviderEvents = {
  * completion order.
  */
 export interface ProviderDefinition {
-  /**
-   * How much of each event this provider is handed. Defaults to `"metadata"`:
-   * structure, identity, usage, and timing, but not what was said.
-   *
-   * `"content"` adds the prompt, the response, tool arguments, and tool
-   * results. Asking is what makes eve build the projection at all, so a
-   * directory in which nobody asks never serializes a prompt.
-   */
+  /** @deprecated Use `tracePolicy`. Ignored when `tracePolicy` is also set. */
   readonly capture?: InstrumentationCapture;
+  /**
+   * Whether this provider receives events and which content directions they
+   * include. Defaults to emitting every audience, with content only for public
+   * conversations. Boolean `true` uses the same audience-aware content rule;
+   * an explicit emitted decision can authorize either direction independently.
+   * A thrown error disables this provider for the trace. The policy can run
+   * again across durable steps, so it must be deterministic.
+   */
+  readonly tracePolicy?: TraceCapturePolicy;
   readonly events?: ProviderEvents;
   /** Runs once at server startup, before any event is published. */
   readonly setup?: (context: ProviderSetupContext) => void | PromiseLike<void>;

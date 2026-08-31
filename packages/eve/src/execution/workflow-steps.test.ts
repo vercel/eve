@@ -66,6 +66,18 @@ import {
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
 
+const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
+vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#instrumentation/runtime.js")>();
+  return {
+    ...actual,
+    bindSessionInstrumentation(input: Parameters<typeof actual.bindSessionInstrumentation>[0]) {
+      bindSessionInstrumentationSpy(input);
+      return actual.bindSessionInstrumentation(input);
+    },
+  };
+});
+
 vi.mock("./durable-session-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable-session-store.js")>();
   return {
@@ -1878,6 +1890,7 @@ describe("turnStep", () => {
   });
 
   it("uses the selected dynamic subagent model for execution identity", async () => {
+    bindSessionInstrumentationSpy.mockClear();
     const session = createStubSession();
     installSessionStoreMocks([session]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
@@ -1937,6 +1950,9 @@ describe("turnStep", () => {
     expect(buildRuntimeIdentity).toHaveBeenCalledWith(effectiveNode);
     expect(createExecutionNodeStep).toHaveBeenCalledWith(
       expect.objectContaining({ node: effectiveNode }),
+    );
+    expect(bindSessionInstrumentationSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ agentName: TestTurnAgent.id }),
     );
   });
 

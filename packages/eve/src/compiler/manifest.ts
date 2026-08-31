@@ -54,7 +54,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 44;
+export const COMPILED_AGENT_MANIFEST_VERSION = 45;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -219,6 +219,14 @@ export type CompiledWorkspaceResourceRoot = z.infer<typeof compiledWorkspaceReso
  * Normalized authored connection metadata preserved in the compiled manifest.
  */
 export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefinitionSchema>;
+
+/** Dynamic connection resolver source preserved for runtime evaluation. */
+export interface CompiledDynamicConnectionDefinition extends ModuleSourceRef {
+  readonly eventNames: readonly string[];
+  /** Map results from extensions receive this mount namespace. */
+  readonly extensionNamespace?: string;
+  readonly slug: string;
+}
 
 /**
  * Normalized authored tool metadata preserved in the compiled manifest.
@@ -798,6 +806,18 @@ const compiledConnectionDefinitionSchema = z
   })
   .strict();
 
+const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnectionDefinition> = z
+  .object({
+    eventNames: z.array(z.string()).readonly(),
+    exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
+    logicalPath: z.string(),
+    slug: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+  })
+  .strict();
+
 const compiledToolDefinitionSchema = z
   .object({
     description: z.string(),
@@ -896,6 +916,7 @@ const compiledAgentResourceFields = {
   bindings: z.record(z.string(), compiledModuleBindingSchema),
   channelRoutes: compiledChannelRoutePlanSchema,
   connections: z.array(compiledConnectionDefinitionSchema),
+  dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
   diagnosticsSummary: discoverDiagnosticsSummarySchema,
   sourceComposition: agentSourceCompositionSchema,
   workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
@@ -1005,6 +1026,7 @@ export const compiledAgentManifestSchema = z
     channelRoutes: compiledChannelRoutePlanSchema,
     config: compiledAgentConfigSchema,
     connections: z.array(compiledConnectionDefinitionSchema),
+    dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
     sourceComposition: agentSourceCompositionSchema,
     workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
@@ -1035,6 +1057,7 @@ export interface CreateCompiledAgentResourcesInput {
   readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
   readonly channelRoutes: CompiledChannelRoutePlan;
   readonly connections?: readonly CompiledConnectionDefinition[];
+  readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly sourceComposition: AgentSourceComposition;
   readonly workflowTool?: CompiledWorkflowToolDefinition;
@@ -1070,6 +1093,7 @@ export function createCompiledAgentResources(
       shadowed: [...input.channelRoutes.shadowed],
     },
     connections: [...(input.connections ?? [])],
+    dynamicConnections: [...(input.dynamicConnections ?? [])],
     diagnosticsSummary: input.diagnosticsSummary ?? {
       errors: 0,
       warnings: 0,
@@ -1221,6 +1245,7 @@ export function createCompiledAgentManifest(input: {
   readonly channelRoutes: CompiledChannelRoutePlan;
   readonly config: CompiledAgentDefinition;
   readonly connections?: readonly CompiledConnectionDefinition[];
+  readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
   readonly sourceComposition: AgentSourceComposition;
   readonly workflowTool?: CompiledWorkflowToolDefinition;

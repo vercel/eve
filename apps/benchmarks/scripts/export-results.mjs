@@ -16,10 +16,12 @@ import {
 } from "./cost.mjs";
 import {
   authoringTreatments,
+  benchmarkModels,
   findPublishedBenchmarkModel,
   publishedBenchmark,
   publishedBenchmarkModels,
   publishedExperimentId,
+  harnessId,
 } from "../lib/benchmark-config.ts";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -55,6 +57,7 @@ const experimentIds = benchmarks.flatMap((benchmark) =>
   authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
 );
 const stale = staleCells(experimentIds);
+const previousResults = readPreviousResults();
 const results = [];
 
 for (const benchmark of benchmarks) {
@@ -96,7 +99,7 @@ const output = {
   experiments: benchmarks.flatMap((benchmark) =>
     authoringTreatments.map((treatment) => ({
       id: publishedExperimentId(benchmark, treatment),
-      groupId: `${benchmark.id}-opencode`,
+      groupId: `${benchmark.id}-${harnessId(benchmark.harness)}`,
       model: benchmark.model,
       modelDisplayName: benchmark.displayName,
       harness: benchmark.harness,
@@ -104,6 +107,7 @@ const output = {
     })),
   ),
   results,
+  ...(previousResults.length === 0 ? {} : { previouslyMeasured: previousResults }),
 };
 
 const destination =
@@ -111,6 +115,54 @@ const destination =
 mkdirSync(dirname(destination), { recursive: true });
 writeFileSync(destination, `${JSON.stringify(output, null, 2)}\n`);
 console.log(`Exported ${results.length} benchmark cells to ${destination}`);
+
+function readPreviousResults() {
+  const destination =
+    values.output === undefined ? outputPath : resolve(process.cwd(), values.output);
+  if (!existsSync(destination)) return [];
+
+  const previous = JSON.parse(readFileSync(destination, "utf8"));
+  const supersededExperimentIds = new Set(
+    benchmarkModels
+      .filter((benchmark) => benchmark.support === "superseded")
+      .flatMap((benchmark) =>
+        authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
+      ),
+  );
+  const supersededExperiments = (previous.experiments ?? []).filter((experiment) =>
+    supersededExperimentIds.has(experiment.id),
+  );
+  const archivedExperimentIds = new Set(supersededExperiments.map((experiment) => experiment.id));
+  const supersededResults = (previous.results ?? []).filter((result) =>
+    archivedExperimentIds.has(result.experimentId),
+  );
+  const retained = (previous.previouslyMeasured ?? [])
+    .filter(
+      (measurement) => Array.isArray(measurement.experiments) && Array.isArray(measurement.results),
+    )
+    .map((measurement) => {
+      const experiments = measurement.experiments.filter((experiment) =>
+        supersededExperimentIds.has(experiment.id),
+      );
+      const experimentIds = new Set(experiments.map((experiment) => experiment.id));
+      return {
+        ...measurement,
+        experiments,
+        results: measurement.results.filter((result) => experimentIds.has(result.experimentId)),
+      };
+    })
+    .filter((measurement) => measurement.experiments.length > 0);
+  if (supersededExperiments.length === 0) return retained;
+
+  return [
+    ...retained,
+    {
+      suite: previous.suite,
+      experiments: supersededExperiments,
+      results: supersededResults,
+    },
+  ];
+}
 
 function selectedBenchmarks(value) {
   if (value === undefined) return publishedBenchmarkModels;
@@ -176,7 +228,28 @@ function latestValidResult(experimentId, caseId) {
 }
 
 function meanRunMetrics(summaryPath, model) {
-  const runs = readdirSync(dirname(summaryPath), { withFileTypes: true })
+  const performanceRuns = runMetrics(summaryPath);
+  const performanceUsage = performanceRuns.flatMap((run) =>
+    run.usage === null ? [] : [run.usage],
+  );
+  const result = {};
+  const pricing = modelPricing[model];
+  if (pricing !== undefined && performanceUsage.length > 0) {
+    result.meanEstimatedListCostUsd = mean(
+      performanceUsage.map((value) => priceUsage(value, pricing)),
+    );
+  }
+  if (performanceUsage.length > 0) {
+    result.meanTokenConsumption = mean(performanceUsage.map(tokenConsumption));
+  }
+  if (performanceRuns.length > 0) {
+    result.meanToolInvocationCount = mean(performanceRuns.map((run) => run.toolInvocations));
+  }
+  return result;
+}
+
+function runMetrics(summaryPath) {
+  return readdirSync(dirname(summaryPath), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^run-\d+$/u.test(entry.name))
     .flatMap((entry) => {
       const transcriptPath = join(dirname(summaryPath), entry.name, "transcript-raw.jsonl");
@@ -184,19 +257,6 @@ function meanRunMetrics(summaryPath, model) {
       const raw = readFileSync(transcriptPath, "utf8");
       return [{ usage: extractRunUsage(raw), toolInvocations: countToolInvocations(raw) }];
     });
-  const usage = runs.flatMap((run) => (run.usage === null ? [] : [run.usage]));
-  const result = {};
-  const pricing = modelPricing[model];
-  if (pricing !== undefined && usage.length > 0) {
-    result.meanEstimatedListCostUsd = mean(usage.map((value) => priceUsage(value, pricing)));
-  }
-  if (usage.length > 0) {
-    result.meanTokenConsumption = mean(usage.map(tokenConsumption));
-  }
-  if (runs.length > 0) {
-    result.meanToolInvocationCount = mean(runs.map((run) => run.toolInvocations));
-  }
-  return result;
 }
 
 function mean(values) {

@@ -38,13 +38,14 @@ import {
   ChannelRequestIdKey,
   OtelTraceEnabledKey,
   ScheduleIdKey,
+  SessionTraceSeedKey,
   type SessionTraceSeed,
 } from "#context/keys.js";
-import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
-import { isSampledTrace } from "#tracing/sampled-trace.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isNonEmptyString } from "#shared/guards.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { isSampledTrace } from "#tracing/sampled-trace.js";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
@@ -109,7 +110,7 @@ export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unk
 }
 
 export function readSessionTraceId(serializedContext: Record<string, unknown>): string | undefined {
-  const seed = serializedContext["eve.sessionTraceSeed"] as SessionTraceSeed | undefined;
+  const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
   if (seed === undefined || !isSampledTrace(seed)) return undefined;
   return isNonEmptyString(seed.traceId) ? seed.traceId : undefined;
 }

@@ -57,6 +57,7 @@ export function matchAuthorizationCallbacks(
         attemptId: challenge.attemptId,
         callback: callback.callback,
         hookUrl: challenge.hookUrl,
+        instanceId: challenge.instanceId,
         name: challenge.name,
         principal: challenge.principal,
         resume: challenge.resume,

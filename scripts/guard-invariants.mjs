@@ -92,11 +92,10 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
- *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
- *             `harness/instrumentation/lifecycle.ts` must not import from
- *             `ai`: its event payloads are eve's published shape, so deriving
- *             them from the model SDK's callback types would make an SDK
- *             upgrade a breaking change for every provider. Map at the bridge.
+ *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
+ *             harness. The lifecycle contract must not import from `ai`, harness
+ *             code may import only runtime facade types, and execution may use
+ *             only runtime entrypoints and cancellation-state preservation.
  *   rule 38 — Workspace build scripts must not launch a nested
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
@@ -358,7 +357,23 @@ function checkRule35(posix, lines, violations) {
 
 // ---------- Rule 37: instrumentation lifecycle provider boundary ----------
 
-const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation/lifecycle.ts";
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/instrumentation/lifecycle.ts";
+const HARNESS_RUNTIME_IMPORTS = new Map([
+  ["InstrumentationAttempt", "type"],
+  ["InstrumentationStepScope", "type"],
+  ["SessionInstrumentation", "type"],
+]);
+const EXECUTION_INSTRUMENTATION_IMPORTS = new Map([
+  [
+    "#instrumentation/runtime.js",
+    new Map([
+      ["bindSessionInstrumentation", "value"],
+      ["ExecutionInstrumentation", "type"],
+      ["initializeSessionInstrumentation", "value"],
+    ]),
+  ],
+  ["#instrumentation/state.js", new Map([["preserveSerializedInstrumentationState", "value"]])],
+]);
 
 /**
  * @param {string} posix
@@ -366,7 +381,15 @@ const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumenta
  * @param {Violation[]} violations
  */
 function checkRule37(posix, source, violations) {
-  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT) return;
+  const productionHarness =
+    posix.startsWith("packages/eve/src/harness/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  const productionExecution =
+    posix.startsWith("packages/eve/src/execution/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT && !productionHarness && !productionExecution) {
+    return;
+  }
 
   const sourceFile = ts.createSourceFile(
     posix,
@@ -377,7 +400,11 @@ function checkRule37(posix, source, violations) {
   );
   const visit = (node) => {
     const specifier = importSpecifier(node);
-    if (specifier !== undefined && (specifier.text === "ai" || specifier.text.startsWith("ai/"))) {
+    if (
+      posix === INSTRUMENTATION_LIFECYCLE_CONTRACT &&
+      specifier !== undefined &&
+      (specifier.text === "ai" || specifier.text.startsWith("ai/"))
+    ) {
       violations.push({
         rule: 37,
         file: posix,
@@ -385,9 +412,84 @@ function checkRule37(posix, source, violations) {
         message: `imports from "ai". Lifecycle event payloads are eve's own shape, so an AI SDK type reaching them makes an SDK upgrade a breaking change for every provider. Add an eve type here and map to it in ai-sdk-hook-bridge.ts.`,
       });
     }
+    if (
+      productionHarness &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      specifier.text !== "#instrumentation/runtime.js"
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Harness code may consume instrumentation only through the bound SessionInstrumentation facade from "#instrumentation/runtime.js".`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#tracing/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Tracing implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionHarness &&
+      specifier?.text === "#instrumentation/runtime.js" &&
+      !hasOnlyAllowedNamedImports(node, HARNESS_RUNTIME_IMPORTS)
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation runtime bindings. Harness code may use only the SessionInstrumentation, InstrumentationStepScope, and InstrumentationAttempt types.`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#compiled/@opentelemetry/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports OpenTelemetry directly. OTel implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionExecution &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      !hasOnlyAllowedNamedImports(
+        node,
+        EXECUTION_INSTRUMENTATION_IMPORTS.get(specifier.text) ?? new Map(),
+      )
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation bindings from "${specifier.text}". Execution may use only session binding/initialization, the ExecutionInstrumentation type, and cancellation-state preservation.`,
+      });
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+function hasOnlyAllowedNamedImports(node, allowed) {
+  if (!ts.isImportDeclaration(node)) return false;
+  const clause = node.importClause;
+  if (
+    clause === undefined ||
+    clause.name !== undefined ||
+    clause.namedBindings === undefined ||
+    !ts.isNamedImports(clause.namedBindings) ||
+    clause.namedBindings.elements.length === 0
+  ) {
+    return false;
+  }
+  return clause.namedBindings.elements.every((element) => {
+    const imported = element.propertyName?.text ?? element.name.text;
+    const expectedKind = allowed.get(imported);
+    const actualKind = clause.isTypeOnly || element.isTypeOnly ? "type" : "value";
+    return expectedKind === actualKind;
+  });
 }
 
 function importSpecifier(node) {

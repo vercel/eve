@@ -3,7 +3,6 @@ import { callAdapterEventHandler } from "#channel/adapter.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
 import { withContextScope } from "#context/run-step.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
-import { ChannelInstrumentationKey } from "#context/keys.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import {
@@ -28,8 +27,7 @@ import {
 } from "#harness/proxy-input-requests.js";
 import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
 import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { createInstrumentationHandleEvent } from "#harness/instrumentation/native-events.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import {
@@ -66,7 +64,6 @@ export async function settleCancelledTurnStep(input: {
   const adapterCtx = buildAdapterContext(adapter, ctx);
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-  const instrumentation = getInstrumentationRuntime();
 
   let session = hydrateDurableSession({
     compactionOverrides: {
@@ -74,6 +71,12 @@ export async function settleCancelledTurnStep(input: {
     },
     durable: durableSession,
     turnAgent: effectiveAgent.turnAgent,
+  });
+  const instrumentation = bindSessionInstrumentation({
+    agentName: effectiveAgent.turnAgent.id,
+    ctx,
+    rootSessionId: session.rootSessionId ?? session.sessionId,
+    sessionId: session.sessionId,
   });
 
   let emissionState = getHarnessEmissionState(durableSession.state);
@@ -107,12 +110,8 @@ export async function settleCancelledTurnStep(input: {
           });
         };
         const emit =
-          createInstrumentationHandleEvent({
-            agentName: bundle.turnAgent.id,
-            channelKind: ctx.get(ChannelInstrumentationKey)?.kind,
+          instrumentation?.createCancellationHandleEvent({
             handleEvent: baseEmit,
-            hooks: instrumentation?.hooks,
-            sessionId: session.sessionId,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;
         return {
@@ -123,7 +122,7 @@ export async function settleCancelledTurnStep(input: {
       emissionState = scoped.result;
       session = scoped.session;
     } finally {
-      await instrumentation?.forceFlush();
+      await instrumentation?.flush();
       writer.releaseLock();
     }
   }

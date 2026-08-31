@@ -120,6 +120,7 @@ export function registerOtelPipeline(input: {
     autoDetectResources: false,
     idGenerator,
     instrumentations: pipeline.instrumentations ?? [],
+    metricReaders: pipeline.metricReaders,
     propagators: [...(pipeline.propagators ?? ["auto"]), markerPropagator],
     serviceName: input.serviceName,
     spanProcessors: pipeline.spanProcessors.map((processor) =>

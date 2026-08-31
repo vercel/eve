@@ -18,7 +18,10 @@ import {
   defineDynamic as defineDynamicInstructions,
   defineInstructions,
 } from "#public/definitions/instructions.js";
-import { defineInstrumentation } from "#public/definitions/instrumentation.js";
+import {
+  defineInstrumentation,
+  type ProviderDefinition,
+} from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
@@ -304,6 +307,9 @@ function typeOnlyFixtures(): void {
       },
     },
   });
+
+  const providerWithCapture: ProviderDefinition = { capture: "content" };
+  void providerWithCapture;
 
   defineInstrumentation({
     // @ts-expect-error Instrumentation event hooks are authored through `events`.

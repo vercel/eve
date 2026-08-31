@@ -12,7 +12,6 @@ test("publishes only compatibility-validated models", () => {
   assert.deepEqual(
     publishedBenchmarkModels.map((benchmark) => benchmark.id),
     [
-      "claude-sonnet-4-6",
       "kimi-k3",
       "claude-fable-5",
       "grok-4-6",
@@ -20,6 +19,7 @@ test("publishes only compatibility-validated models", () => {
       "gpt-5-6-terra",
       "claude-sonnet-5",
       "glm-5-2",
+      "claude-opus-5",
       "gemini-3-1-pro-preview",
     ],
   );
@@ -35,11 +35,17 @@ test("publishes only compatibility-validated models", () => {
   assert.equal(findPublishedBenchmarkModel("grok-4-6").model, "xai/grok-4.6");
   assert.equal(findPublishedBenchmarkModel("claude-sonnet-5").model, "anthropic/claude-sonnet-5");
   assert.equal(findPublishedBenchmarkModel("glm-5-2").model, "zai/glm-5.2");
+  assert.equal(findPublishedBenchmarkModel("claude-fable-5").harness, "Claude Code");
+  assert.equal(findPublishedBenchmarkModel("claude-sonnet-5").harness, "Claude Code");
+  assert.equal(findPublishedBenchmarkModel("claude-opus-5").harness, "Claude Code");
+  assert.equal(findPublishedBenchmarkModel("kimi-k3").harness, "OpenCode");
 });
 
 test("allows candidate probes and rejects unknown models", () => {
   assert.equal(findBenchmarkModel("gpt-5-6-sol").support, "supported");
   assert.equal(findBenchmarkModel("gpt-5-6-terra").support, "supported");
   assert.equal(findBenchmarkModel("grok-4-6").support, "supported");
+  assert.equal(findBenchmarkModel("claude-sonnet-4-6").support, "superseded");
+  assert.equal(findBenchmarkModel("claude-opus-5").support, "supported");
   assert.throws(() => findBenchmarkModel("unknown"), /Unknown model/u);
 });

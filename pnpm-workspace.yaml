@@ -1,6 +1,7 @@
 packages:
   - apps/*
-  - apps/*/*
+  - apps/fixtures/*
+  - apps/frameworks/*
   - e2e/fixtures/*
   - packages/*
 
@@ -44,7 +45,7 @@ catalog:
   "@vercel/sandbox-delete": "npm:@vercel/sandbox@3.2.0"
   "@vercel/sandbox-drives": "npm:@vercel/sandbox@2.10.0-beta.0"
   "@workflow/world-postgres": "5.0.0-beta.35"
-  ai: "^7.0.58"
+  ai: "^7.0.82"
   better-auth: "1.6.26"
   marked: "17.0.6"
   next: "16.3.0-preview.6"
@@ -55,7 +56,7 @@ catalog:
   streamdown: "2.5.0"
   typescript: "7.0.2"
   vitest: "4.1.10"
-  zod: "4.4.3"
+  zod: "4.5.4"
 
 catalogs:
   docs:
@@ -66,7 +67,9 @@ minimumReleaseAge: 2880 # 2 days
 minimumReleaseAgeExclude:
   - "@linqapp/chat-sdk-adapter"
   - "@linqapp/sdk"
+  - "@supermemory/eve"
   - "@vercel/*"
   - "@workflow/*"
   - nitro
+  - run
   - workflow

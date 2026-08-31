@@ -13,6 +13,7 @@ import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 export { ResolveAgentError } from "#runtime/resolve-helpers.js";
 
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
+import { resolveDynamicConnectionDefinition } from "#runtime/resolve-dynamic-connection.js";
 import { resolveHookDefinition } from "#runtime/resolve-hook.js";
 import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
@@ -66,6 +67,11 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       ),
     ),
   );
+  const resolvedDynamicConnectionResolvers = await Promise.all(
+    input.manifest.dynamicConnections.map((definition) =>
+      resolveDynamicConnectionDefinition(definition, input.moduleMap, input.nodeId),
+    ),
+  );
   const resolvedDynamicInstructionsResolvers = await Promise.all(
     (input.manifest.dynamicInstructions ?? []).map((def) =>
       resolveDynamicInstructionsDefinition(def, input.moduleMap, input.nodeId),
@@ -111,6 +117,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
+    dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
     workflowTool:
       input.manifest.workflowTool === undefined
         ? undefined

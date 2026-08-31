@@ -6,7 +6,7 @@ url: /connections
 
 A connection wires an agent into an external server you don't author, either an MCP server (Linear, GitHub, a warehouse) or any HTTP API with an OpenAPI document. eve handles the parts you'd otherwise hand-roll, discovering the remote tools, surfacing them to the model, and brokering auth. To instead let eve communicate with users through an external service, use a [channel](/docs/channels/overview).
 
-Connections live under `agent/connections/`. The runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
+Connections live under `agent/connections/`. A static connection's runtime name comes from the filename, so `agent/connections/linear.ts` registers as `"linear"`. A dynamic connection file can instead resolve a caller-specific connection set at session or turn boundaries. The model never sees a connection's URL or credentials. It discovers tools through the built-in `connection_search` and calls them by their qualified name, `<connection>__<tool>` (e.g. `linear__list_issues`).
 
 ## MCP connections
 
@@ -19,6 +19,44 @@ Read [MCP connections](/docs/connections/mcp) for `defineMcpClientConnection`, t
 Use an OpenAPI connection when the service exposes an OpenAPI 3.x document. eve turns operations in the document into connection tools, one per operation.
 
 Read [OpenAPI connections](/docs/connections/openapi) for `defineOpenAPIConnection`, `baseUrl`, and operation filters.
+
+## Dynamic connections
+
+Use `defineDynamic` when the connection set depends on the authenticated user,
+tenant, or another runtime lookup. Import it with the connection factories from
+`eve/connections`, then return one connection definition, a map of definitions,
+or `null` from `session.started` or `turn.started`.
+
+```ts title="agent/connections/accounts.ts"
+import { defineDynamic, defineMcpClientConnection } from "eve/connections";
+import { listAccounts } from "../lib/accounts";
+
+export default defineDynamic({
+  events: {
+    "session.started": async (_event, ctx) => {
+      const accounts = await listAccounts(ctx.session.auth.current);
+      return Object.fromEntries(
+        accounts.map((account) => [
+          account.slug,
+          defineMcpClientConnection({
+            url: account.mcpUrl,
+            description: account.description,
+            instanceKey: account.id,
+            auth: account.auth,
+          }),
+        ]),
+      );
+    },
+  },
+});
+```
+
+For a single returned definition, the filename supplies the connection name.
+For a map, each bare map key becomes a connection name. Every entry must use
+`defineMcpClientConnection` or `defineOpenAPIConnection`. Authenticated entries
+must also set `instanceKey` to a stable, non-secret account or tenant identifier.
+See [Dynamic capabilities](/docs/guides/dynamic-capabilities#dynamic-connections)
+for event scope, naming, conflicts, and durable recovery behavior.
 
 ## Static-token auth
 
@@ -245,7 +283,13 @@ export default defineMcpClientConnection({
 
 Drop `resume` when the provider keeps flow state server-side, so nothing has to cross the step boundary.
 
-`displayName` is presentation-only. The connection's path-derived name still keys the authorization flow, token cache, and callback URL. You can also set `displayName` on the `auth` definition itself (e.g. `auth: { ...connect("salesforce/myagent"), displayName: "Salesforce" }`); that definition-level value wins over one the strategy stamps on the challenge, and channels fall back to title-casing the connection name when neither is set.
+`displayName` is presentation-only. The connection's resolved name still keys
+the callback URL, while eve scopes token caching and authorization completion
+to the opaque resolved instance identity. You can also set `displayName` on the
+`auth` definition itself (e.g.
+`auth: { ...connect("salesforce/myagent"), displayName: "Salesforce" }`); that
+definition-level value wins over one the strategy stamps on the challenge, and
+channels fall back to title-casing the connection name when neither is set.
 
 ### Signaling authorization state
 

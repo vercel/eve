@@ -8,6 +8,7 @@ import {
   type CompiledAgentResources,
   type CompiledChannelDefinition,
   type CompiledConnectionDefinition,
+  type CompiledDynamicConnectionDefinition,
   type CompiledDynamicInstructionsDefinition,
   type CompiledDynamicSkillDefinition,
   type CompiledDynamicToolDefinition,
@@ -493,6 +494,7 @@ class AgentGraphCompiler {
     const instructions: CompiledInstructionsDefinition[] = [];
     const dynamicInstructions: CompiledDynamicInstructionsDefinition[] = [];
     const connections: CompiledConnectionDefinition[] = [];
+    const dynamicConnections: CompiledDynamicConnectionDefinition[] = [];
     const memories: CompiledMemoryDefinition[] = [];
     const hooks: CompiledHookDefinition[] = [];
     const schedules: CompiledScheduleDefinition[] = [];
@@ -530,15 +532,18 @@ class AgentGraphCompiler {
           } else channels.push(...result.definitions);
           break;
         }
-        case "connection":
-          connections.push(
-            await compileConnectionDefinition(input.manifest.agentRoot, entry.source, {
-              binding: binding!,
-              loadNamespace,
-            }),
-          );
+        case "connection": {
+          const result = await compileConnectionDefinition(input.manifest.agentRoot, entry.source, {
+            binding: binding!,
+            loadNamespace,
+          });
+          if (result.kind === "connection") connections.push(result.definition);
+          else {
+            dynamicConnections.push(withExtensionNamespace(result.definition, candidate.owner));
+          }
           state.evaluation.requireRuntimeEntry(candidate.sourceId);
           break;
+        }
         case "hook":
           hooks.push(
             await compileHookEntry(entry.source, {
@@ -638,6 +643,7 @@ class AgentGraphCompiler {
     assertUniqueBy(tools, (tool) => tool.name, "tool name");
     assertUniqueBy(dynamicTools, (tool) => tool.slug, "dynamic tool slug");
     assertUniqueBy(connections, (connection) => connection.connectionName, "connection name");
+    assertUniqueBy(dynamicConnections, (connection) => connection.slug, "dynamic connection slug");
     assertUniqueBy(skills, (skill) => skill.name, "skill name");
 
     const channelRoutes = createCompiledChannelRoutePlan({
@@ -667,6 +673,7 @@ class AgentGraphCompiler {
       channelRoutes,
       connections,
       diagnosticsSummary: summarizeCompilerDiagnostics(this.diagnostics),
+      dynamicConnections,
       dynamicInstructions,
       dynamicSkills,
       dynamicTools,

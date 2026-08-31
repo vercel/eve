@@ -64,6 +64,37 @@ describe("authorization callback results", () => {
       expect(consumeAuthorizationResult("linear")).toBeUndefined();
     });
   });
+
+  it("does not confuse same-named tool and connection callbacks", () => {
+    const ctx = new ContextContainer();
+    ctx.set(PendingAuthorizationResultKey, [
+      {
+        callback: { method: "GET", params: { code: "tool-code" } },
+        hookUrl: "https://agent.example.com/tool",
+        name: "linear",
+        principal: { type: "app" },
+      },
+      {
+        callback: { method: "GET", params: { code: "connection-code" } },
+        hookUrl: "https://agent.example.com/connection",
+        instanceId: "connection:linear-account",
+        name: "linear",
+        principal: { type: "app" },
+      },
+    ]);
+
+    contextStorage.run(ctx, () => {
+      expect(() => consumeAuthorizationResult("linear", "connection:other-account")).toThrow(
+        "resolved connection changed while sign-in was pending",
+      );
+      expect(consumeAuthorizationResult("linear")).toMatchObject({
+        callback: { params: { code: "tool-code" } },
+      });
+      expect(consumeAuthorizationResult("linear", "connection:linear-account")).toMatchObject({
+        callback: { params: { code: "connection-code" } },
+      });
+    });
+  });
 });
 
 function candidateChallenge(name: string, candidateId: string) {

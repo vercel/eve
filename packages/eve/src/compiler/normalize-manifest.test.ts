@@ -225,6 +225,20 @@ describe("compileAgentManifest source graph", () => {
         }),
       },
       {
+        logicalPath: "connections/accounts.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "turn.started": () =>
+                defineMcpClientConnection({
+                  description: "Caller account.",
+                  url: "https://mcp.accounts.example",
+                }),
+            },
+          }),
+        }),
+      },
+      {
         logicalPath: "hooks/audit.ts",
         loadNamespace: async () => ({
           default: defineHook({ events: { "session.started": async () => {} } }),
@@ -239,8 +253,16 @@ describe("compileAgentManifest source graph", () => {
       Object.values(compiled.bindings).map((binding) => [binding.logicalPath, binding.usage]),
     );
 
+    expect(compiled.dynamicConnections).toContainEqual(
+      expect.objectContaining({
+        eventNames: ["turn.started"],
+        logicalPath: "connections/accounts.ts",
+        slug: "accounts",
+      }),
+    );
     expect(usageByLogicalPath).toMatchObject({
       "agent.ts": { compile: true, runtimeEntry: false },
+      "connections/accounts.ts": { compile: true, runtimeEntry: true },
       "connections/linear.ts": { compile: true, runtimeEntry: true },
       "hooks/audit.ts": { compile: true, runtimeEntry: true },
       "instructions/dynamic.ts": { compile: true, runtimeEntry: true },
@@ -254,6 +276,37 @@ describe("compileAgentManifest source graph", () => {
       "tools/web_search.ts": { compile: true, runtimeEntry: false },
       "tools/workflow.ts": { compile: true, runtimeEntry: false },
     });
+  });
+
+  it("rejects step-scoped dynamic connections", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "agent.ts",
+        loadNamespace: async () => ({
+          default: defineAgent({ model: "openai/gpt-5.4" }),
+        }),
+      },
+      {
+        logicalPath: "connections/accounts.ts",
+        loadNamespace: async () => ({
+          default: defineDynamic({
+            events: {
+              "step.started": () =>
+                defineMcpClientConnection({
+                  description: "Caller account.",
+                  url: "https://mcp.accounts.example",
+                }),
+            },
+          }),
+        }),
+      },
+    ]);
+
+    await expect(
+      compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] }),
+    ).rejects.toThrow(
+      'Dynamic connections support only "session.started" and "turn.started" handlers.',
+    );
   });
 
   it("projects the root node once and finalizes its filesystem bindings after config", async () => {

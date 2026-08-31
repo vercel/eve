@@ -7,6 +7,7 @@ import {
   type AuthorizationSignal,
   consumeAuthorizationResult,
   createAuthorizationAttempt,
+  getAuthorizationResults,
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
@@ -25,6 +26,7 @@ import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { stampDurableDynamicToolCallbacks } from "#tools/durable-callbacks.js";
 import { writeCachedToken } from "#runtime/connections/authorization-tokens.js";
+import { connectionAuthorizationScope } from "#runtime/connections/instance-identity.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
 import { resolveConnectionAuthorization } from "#runtime/connections/resolve-authorization.js";
 import {
@@ -157,10 +159,11 @@ async function completePendingAuthorizations(
   registry: ConnectionRegistry,
   connections: readonly ResolvedConnectionDefinition[],
 ): Promise<Set<string>> {
+  assertPendingConnectionAuthorizationInstances(registry);
   const ctx = loadContext();
   const completed = new Set<string>();
   for (const conn of connections) {
-    const result = consumeAuthorizationResult(conn.connectionName);
+    const result = consumeAuthorizationResult(conn.connectionName, conn.instanceId);
     if (!result) continue;
     const auth = await resolveInteractiveAuth(registry, conn.connectionName);
     if (!auth) continue;
@@ -174,7 +177,7 @@ async function completePendingAuthorizations(
       resume: result.resume,
       callback: result.callback,
     });
-    writeCachedToken(ctx, conn.connectionName, principalKey(principal), token);
+    writeCachedToken(ctx, connectionAuthorizationScope(conn), principalKey(principal), token);
     completed.add(conn.connectionName);
   }
   return completed;
@@ -252,6 +255,7 @@ async function executeConnectionSearch(
                 name: conn.connectionName,
                 challenge: stampChallengeDisplayName(challenge, auth),
                 hookUrl: callbackUrl,
+                instanceId: conn.instanceId,
                 principal,
                 resume,
               });
@@ -387,13 +391,14 @@ async function executeDiscoveredConnectionTool(
   const conn = registry
     .getConnections()
     .find((candidate) => candidate.connectionName === connectionName);
+  assertPendingConnectionAuthorizationInstances(registry);
   const interactiveAuth = (await resolveInteractiveAuth(registry, connectionName)) as
     | InteractiveAuthorizationDefinition<JsonValue>
     | undefined;
 
   let justCompletedAuth = false;
   if (interactiveAuth) {
-    const authResult = consumeAuthorizationResult(connectionName);
+    const authResult = consumeAuthorizationResult(connectionName, conn?.instanceId);
     if (authResult) {
       justCompletedAuth = true;
       const ctx = loadContext();
@@ -406,7 +411,12 @@ async function executeDiscoveredConnectionTool(
         resume: authResult.resume,
         callback: authResult.callback,
       });
-      writeCachedToken(ctx, connectionName, principalKey(principal), token);
+      writeCachedToken(
+        ctx,
+        conn === undefined ? connectionName : connectionAuthorizationScope(conn),
+        principalKey(principal),
+        token,
+      );
     }
   }
 
@@ -444,10 +454,24 @@ async function executeDiscoveredConnectionTool(
         name: connectionName,
         challenge: stampChallengeDisplayName(challenge, interactiveAuth),
         hookUrl: callbackUrl,
+        instanceId: conn?.instanceId,
         principal,
         resume,
       },
     ]);
+  }
+}
+
+function assertPendingConnectionAuthorizationInstances(registry: ConnectionRegistry): void {
+  const connections = new Map(
+    registry.getConnections().map((connection) => [connection.connectionName, connection]),
+  );
+  for (const result of getAuthorizationResults()) {
+    if (result.instanceId === undefined) continue;
+    if (connections.get(result.name)?.instanceId === result.instanceId) continue;
+    throw new Error(
+      `Authorization for "${result.name}" cannot complete because its resolved connection changed while sign-in was pending. Start sign-in again.`,
+    );
   }
 }
 
@@ -479,7 +503,10 @@ export async function resolveConnectionSearchDynamicTools() {
 
   const connections = registry.getConnections();
   const connectionNames = connections.map((c) => c.connectionName);
-  const discovered = loadContext().get(ConnectionSearchResultsKey) ?? [];
+  const activeConnectionNames = new Set(connectionNames);
+  const discovered = (loadContext().get(ConnectionSearchResultsKey) ?? []).filter((result) =>
+    activeConnectionNames.has(result.connection),
+  );
 
   const tools: Record<string, object> = {};
 

@@ -229,6 +229,16 @@ export const arcanaLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const supermemoryLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <rect width="24" height="24" rx="6" fill="#161616" />
+    <path
+      d="M16.8 7.4c-.9-.8-2.1-1.3-3.6-1.3-2.4 0-4.1 1.2-4.1 3.1 0 1.8 1.5 2.4 3.7 2.9 1.5.3 2.1.6 2.1 1.2 0 .7-.7 1.1-1.8 1.1-1.2 0-2.4-.5-3.4-1.4l-1.6 1.8c1.2 1.2 2.9 1.8 4.9 1.8 2.8 0 4.6-1.3 4.6-3.3 0-1.9-1.4-2.6-3.9-3.1-1.4-.3-2-.6-2-1.1 0-.6.6-1 1.5-1 1 0 2 .4 2.8 1.1l1.8-1.8Z"
+      fill="white"
+    />
+  </svg>
+);
+
 export const hindsightLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 186 139" xmlns="http://www.w3.org/2000/svg" {...props}>
     <g stroke="#078BC2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="8">
@@ -749,6 +759,7 @@ export const logos = {
   kernel: kernelLogo,
   upstash: upstashLogo,
   arcana: arcanaLogo,
+  supermemory: supermemoryLogo,
   hindsight: hindsightLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,

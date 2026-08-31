@@ -49,6 +49,14 @@ export const modelPricing = {
     cacheRead: 0.2,
     cacheWrite: 2.5,
   },
+  "anthropic/claude-opus-5": {
+    effectiveDate: "2026-08-28",
+    source: "https://models.dev/anthropic/claude-opus-5",
+    input: 5,
+    output: 25,
+    cacheRead: 0.5,
+    cacheWrite: 6.25,
+  },
   "anthropic/claude-sonnet-5": {
     effectiveDate: "2026-08-17",
     source: "https://docs.anthropic.com/en/docs/about-claude/pricing",
@@ -97,7 +105,7 @@ export function extractRunUsage(raw) {
       // Ignore malformed transcript lines.
     }
   }
-  return found ? usage : null;
+  return found && tokenConsumption(usage) > 0 ? usage : null;
 }
 
 export function tokenConsumption(usage) {

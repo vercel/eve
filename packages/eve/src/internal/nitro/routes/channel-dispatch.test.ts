@@ -13,7 +13,10 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { trace as vendoredTrace } from "#compiled/@opentelemetry/api/index.js";
+import {
+  context as vendoredContext,
+  trace as vendoredTrace,
+} from "#compiled/@opentelemetry/api/index.js";
 
 import {
   CHANNEL_SENTINEL,
@@ -21,14 +24,13 @@ import {
   setChannelInstrumentationKind,
 } from "#channel/compiled-channel.js";
 import type { RouteHandlerArgs } from "#channel/routes.js";
-import {
-  getInstrumentationConfig,
-  registerInstrumentationConfig,
-} from "#harness/instrumentation/config.js";
+import { registerInstrumentationConfig } from "#instrumentation/config.js";
+import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import type { Runtime } from "#channel/types.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
 import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
+import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import {
   dispatchChannelRequest,
   dispatchChannelWebSocketRequest,
@@ -709,7 +711,6 @@ function slackChannel(
 describe("dispatchChannelRequest tracing", () => {
   let exporter: InMemorySpanExporter;
   let provider: BasicTracerProvider;
-  let priorConfig: ReturnType<typeof getInstrumentationConfig>;
 
   beforeEach(() => {
     exporter = new InMemorySpanExporter();
@@ -718,12 +719,11 @@ describe("dispatchChannelRequest tracing", () => {
     apiPropagation.setGlobalPropagator(w3cPropagator as never);
     apiTrace.setGlobalTracerProvider(provider);
     // Request spans are opt-in; enable them for this suite.
-    priorConfig = getInstrumentationConfig();
     registerInstrumentationConfig({ traceChannelRequests: true }, { agentName: "test" });
   });
 
   afterEach(() => {
-    registerInstrumentationConfig(priorConfig ?? {}, { agentName: "test" });
+    registerInstrumentationConfig({}, { agentName: "test" });
     apiTrace.disable();
     apiContext.disable();
     apiPropagation.disable();
@@ -734,13 +734,40 @@ describe("dispatchChannelRequest tracing", () => {
     return exporter.getFinishedSpans();
   }
 
+  it("uses the semantic request name for the experimental provider layout", async () => {
+    const instrumentationRuntime = getInstrumentationRuntime();
+    if (instrumentationRuntime === undefined)
+      throw new Error("Expected an instrumentation runtime.");
+    Object.defineProperty(instrumentationRuntime, "instrumentationProviders", {
+      configurable: true,
+      value: true,
+    });
+    try {
+      mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+        agentName: "test-agent",
+        channels: [slackChannel(async () => new Response("ok"))],
+        runtime,
+      });
+
+      await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /slack", {} as never);
+
+      const [span] = await finishedSpans();
+      expect(span!.name).toBe("agent.channel.request");
+      expect(span!.attributes["http.route"]).toBe("/slack");
+    } finally {
+      Reflect.deleteProperty(instrumentationRuntime, "instrumentationProviders");
+    }
+  });
+
   it("emits one SERVER span named for the route with method, channel, and status attributes", async () => {
+    let agentContextDuringHandler = false;
     let spansDuringHandler = -1;
     mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
       agentName: "test-agent",
       channels: [
         slackChannel(
           async () => {
+            agentContextDuringHandler = isAgentTraceContext(vendoredContext.active());
             spansDuringHandler = exporter.getFinishedSpans().length;
             return new Response("ok");
           },
@@ -757,6 +784,7 @@ describe("dispatchChannelRequest tracing", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(agentContextDuringHandler).toBe(true);
     // The span had not ended while the handler was still running.
     expect(spansDuringHandler).toBe(0);
 
@@ -1019,7 +1047,6 @@ describe("dispatchChannelRequest tracing", () => {
 describe("dispatchChannelRequest without an OTel provider", () => {
   let exporter: InMemorySpanExporter;
   let provider: BasicTracerProvider;
-  let priorConfig: ReturnType<typeof getInstrumentationConfig>;
 
   beforeEach(() => {
     // Register an exporter to prove nothing reaches it, but leave the global
@@ -1030,12 +1057,11 @@ describe("dispatchChannelRequest without an OTel provider", () => {
     apiTrace.disable();
     apiContext.disable();
     apiPropagation.disable();
-    priorConfig = getInstrumentationConfig();
     registerInstrumentationConfig({ traceChannelRequests: true }, { agentName: "test" });
   });
 
   afterEach(() => {
-    registerInstrumentationConfig(priorConfig ?? {}, { agentName: "test" });
+    registerInstrumentationConfig({}, { agentName: "test" });
     apiTrace.disable();
   });
 
@@ -1063,7 +1089,6 @@ describe("dispatchChannelRequest without an OTel provider", () => {
 describe("dispatchChannelRequest with request tracing not enabled", () => {
   let exporter: InMemorySpanExporter;
   let provider: BasicTracerProvider;
-  let priorConfig: ReturnType<typeof getInstrumentationConfig>;
 
   beforeEach(() => {
     // A live provider proves the opt-in flag — not a missing provider — is what
@@ -1073,12 +1098,11 @@ describe("dispatchChannelRequest with request tracing not enabled", () => {
     apiContext.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
     apiPropagation.setGlobalPropagator(w3cPropagator as never);
     apiTrace.setGlobalTracerProvider(provider);
-    priorConfig = getInstrumentationConfig();
+    registerInstrumentationConfig({}, { agentName: "test" });
   });
 
   afterEach(() => {
-    // Restore the process-global config so the toggle does not leak.
-    registerInstrumentationConfig(priorConfig ?? {}, { agentName: "test" });
+    registerInstrumentationConfig({}, { agentName: "test" });
     apiTrace.disable();
     apiContext.disable();
     apiPropagation.disable();

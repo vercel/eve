@@ -106,6 +106,8 @@ export interface ResolvedConnectionDefinition extends ResolvedModuleSourceRef {
   readonly connectionName: string;
   readonly description: string;
   readonly headers?: Readonly<HeadersDefinition>;
+  /** Opaque identity used to pin authorization and credential state to this resolved instance. */
+  readonly instanceId?: string;
   readonly toolCall?: Readonly<ConnectionToolCallDefinition>;
   /**
    * Wire protocol. Selects the runtime client implementation. `tools`
@@ -372,6 +374,17 @@ export interface ResolvedDynamicToolResolver extends Readonly<ModuleSourceRef> {
   readonly extensionNamespace?: string;
 }
 
+/** Runtime resolver for dynamic connections declared in `agent/connections/`. */
+export interface ResolvedDynamicConnectionResolver extends Readonly<ModuleSourceRef> {
+  readonly slug: string;
+  readonly eventNames: readonly string[];
+  readonly events: Readonly<
+    Record<string, (event: unknown, ctx: unknown) => unknown | Promise<unknown>>
+  >;
+  /** Map results from extensions receive this mount namespace. */
+  readonly extensionNamespace?: string;
+}
+
 export type ResolvedMemoryDefinition = Readonly<
   MemoryDefinition &
     ModuleSourceRef & {
@@ -418,6 +431,7 @@ export interface ResolvedAgent {
   readonly channels: readonly ResolvedChannelDefinition[];
   readonly config?: ResolvedAgentDefinition;
   readonly connections: readonly ResolvedConnectionDefinition[];
+  readonly dynamicConnectionResolvers?: readonly ResolvedDynamicConnectionResolver[];
   /**
    * Configuration for the experimental framework `Workflow` orchestration
    * tool. Present when an authored tool module exports

@@ -149,6 +149,11 @@ describe("writeCompiledArtifactsFiles", () => {
           "const container = globalThis as Record<string, unknown>;",
           "",
           "export default defineInstrumentation({",
+          "  tracePolicy: ({ audience }) => ({",
+          "    emit: true,",
+          '    recordInputs: audience === "public",',
+          "    recordOutputs: false,",
+          "  }),",
           "  setup(context) {",
           "    container.__eveProviderSetups ??= [];",
           `    (container.__eveProviderSetups as string[]).push(\`${slot}:\${context.agentName}\`);`,
@@ -200,14 +205,21 @@ describe("writeCompiledArtifactsFiles", () => {
     // The plugin resolves the registry by absolute path while the assertion
     // resolves it by package alias, so this also proves the globalThis rooting
     // survives two module instances.
-    const { getInstrumentationProviders } =
-      await import("../../src/harness/instrumentation/providers.js");
+    const { getInstrumentationProviders } = await import("../../src/instrumentation/providers.js");
 
     expect((globalThis as Record<string, unknown>).__eveProviderSetups).toEqual([
       "local:compiled-artifacts-providers-test-agent",
       "otel:compiled-artifacts-providers-test-agent",
     ]);
-    expect(getInstrumentationProviders().map((entry) => entry.slot)).toEqual(["local", "otel"]);
+    const providers = getInstrumentationProviders();
+    expect(providers.map((entry) => entry.slot)).toEqual(["local", "otel"]);
+    expect(
+      providers[0]?.provider.tracePolicy?.({ agentName: "weather", audience: "public" }),
+    ).toEqual({
+      emit: true,
+      recordInputs: true,
+      recordOutputs: false,
+    });
     expect(closeHandlers).toHaveLength(1);
     await closeHandlers[0]?.();
   });

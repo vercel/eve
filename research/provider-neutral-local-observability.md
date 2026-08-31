@@ -1,7 +1,7 @@
 ---
 issue: TBD
 status: in-progress
-last_updated: "2026-07-30"
+last_updated: "2026-08-28"
 ---
 
 # Provider-neutral local observability
@@ -37,7 +37,7 @@ events, assigns stable attempt/model-call/tool-call identities, terminalizes ope
 error and abort, and invokes the trusted `runInContext` while calling execution exactly once. AI
 SDK `callId` values are bridge correlation details, not provider run identities.
 
-The bridge does not create spans, export records, apply capture policy, or publish durable
+The bridge does not create spans, export records, apply provider policy, or publish durable
 eve-native events. Session, turn, compaction, suspension, and canonical step-terminal events are
 published by the harness.
 
@@ -75,21 +75,24 @@ or tool more than once.
 
 ```text
 agent.session                              {agent.session.id}
-  +-- agent.turn                           {agent.turn.id, agent.turn.sequence}
+  +-- invoke_agent {agent.name}            {agent.turn.id, agent.turn.sequence}
       +-- agent.step                       {agent.step.index, agent.step.attempt}
           +-- model-provider spans
           +-- agent.action                 {agent.action.kind, name, call_id}
-              +-- tool-provider spans
+              +-- execute_tool {tool.name}
+                  +-- tool-provider spans
 ```
 
-GenAI spans stay nested implementation detail; they do not define the agent run. An `agent.step`
-covers one model call and the actions it requests through their resolution. `agent.action.kind` is
-an open discriminator — `tool` today, with `skill`, `subagent`, and `remote-agent` reserved.
+The durable turn and tool-execution boundaries use the OpenTelemetry GenAI agent conventions so
+backends can recognize agent invocations and tool calls without eve-specific mapping. An
+`agent.step` covers one model call and the actions it requests through their resolution.
+`agent.action.kind` remains an open discriminator for eve's broader durable dispatch boundary.
 
 The `agent.*` namespace carries cheap structural attributes only: session/turn/step/attempt
-identity, action identity, and agent and framework identity. Message content, model output, and tool payloads are optional capture, off by
-default. The OTel provider owns this mapping; the bridge and hooks contain no span names,
-attributes, or parent contexts.
+identity, action identity, and agent and framework identity. Standard `gen_ai.*` attributes describe
+the operation, agent, conversation, and tool. Message content, model output, and tool payloads follow
+each provider's audience-aware `tracePolicy`. The OTel provider owns this mapping; the bridge and
+hooks contain no span names, attributes, or parent contexts.
 
 ### The session root is a real span
 
@@ -107,7 +110,7 @@ author can key a sampler on it.
 
 ### Marker spans
 
-The session root is recorded and ended immediately, as `agent.turn` already is. A session outlives the
+The session root is recorded and ended immediately. A session outlives the
 worker that opened it and a span object cannot cross that boundary, so eve records the root,
 persists its span context, and parents later spans through it.
 
@@ -119,8 +122,8 @@ A real duration would mean emitting the span once at session close, with explici
 span id chosen before the span exists. The ids are reachable — `registerOTel` accepts an
 `idGenerator` — but the close is not: a session that goes idle and never resumes closes on nothing,
 so its root would never be emitted and every span in the trace would reference a parent that never
-arrives. A marker is the only representation that is always emitted. `agent.turn` does have a
-guaranteed close and could carry a real duration; that is tracked separately.
+arrives. A marker is the only representation that is always emitted. A turn does have a guaranteed
+close, so its `invoke_agent` span carries its real duration.
 
 ### Subagents
 

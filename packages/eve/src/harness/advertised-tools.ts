@@ -10,7 +10,6 @@ import {
 } from "#harness/workflow-continuation-security.js";
 import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
-import type { WorkflowSandboxLifecycle } from "#shared/workflow-sandbox.js";
 
 type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "subagentDepth">;
 
@@ -32,10 +31,6 @@ type AdvertisedModelToolsInput = {
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
   readonly workflow?: {
-    readonly lifecycle?: (input: {
-      readonly session: HarnessSession;
-      readonly tools: HarnessToolMap;
-    }) => WorkflowSandboxLifecycle | undefined;
     readonly maxSubagents?: number;
   };
 };
@@ -104,7 +99,6 @@ async function getAdvertisedModelTools(
   const { modelTools } = await applyWorkflowTool({
     continuationSecurity: getWorkflowContinuationSecurity(session),
     harnessTools: workflowHostTools,
-    lifecycle: input.workflow.lifecycle?.({ session, tools: workflowHostTools }),
     maxSubagents: input.workflow.maxSubagents,
     tools: input.modelTools,
   });

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: proposed
-last_updated: "2026-08-20"
+last_updated: "2026-08-28"
 ---
 
 # Audience-aware trace content policy
@@ -32,10 +32,9 @@ The process-wide declaration owns trace creation:
 
 ```ts
 interface TraceCaptureContext {
-  readonly agentName?: string;
+  readonly agentName: string;
   readonly audience: ChannelAudience;
-  readonly rootSessionId: string;
-  readonly sessionId: string;
+  readonly channelType?: string;
 }
 
 type TracePolicyDecision =
@@ -53,13 +52,20 @@ interface OtelOptions {
   readonly tracePolicy?: TraceCapturePolicy;
 }
 
+interface ProviderDefinition {
+  readonly tracePolicy?: TraceCapturePolicy;
+}
+
 declare function otel(options?: OtelOptions): OtelDeclaration;
 ```
 
-The trace decision is a process-wide ceiling. Each delivery is intersected with
-its own audience classification, and destination capture settings may narrow it
-further. A boolean return keeps the existing behavior: `false` drops trace
-production, while `true` records content only where the audience ceiling permits.
+The `otel()` trace decision is a process-wide OTel ceiling. Each delivery is
+intersected with its own audience classification, and destination settings may
+narrow it further. A provider's `defineInstrumentation({ tracePolicy })` decision
+is independent: `false` skips that provider, `true` uses audience-aware content,
+and an explicit emitted decision authorizes its input and output directions even
+for private channels. An omitted provider policy uses the default audience-aware
+behavior.
 
 Agent Runs and local traces expose the managed export policy:
 
@@ -148,11 +154,14 @@ The default authored and production head policy is equivalent to:
 });
 ```
 
-| Audience  | Trace created by default | Content when admitted by a custom trace policy |
-| --------- | ------------------------ | ---------------------------------------------- |
-| `public`  | Yes                      | Yes                                            |
-| `private` | Yes                      | No                                             |
-| `unknown` | Yes                      | No                                             |
+| Audience  | Trace created by default | Content by default |
+| --------- | ------------------------ | ------------------ |
+| `public`  | Yes                      | Yes                |
+| `private` | Yes                      | No                 |
+| `unknown` | Yes                      | No                 |
+
+An explicit provider policy can authorize content for any audience. The OTel
+policy remains subject to its process-wide audience ceiling.
 
 The default policy for local tracing for `eve dev` is equivalent to:
 
@@ -170,12 +179,23 @@ The runtime order is:
 4. Run each managed destination's composed export policies in declaration order. Custom integrations run their declared span processors.
 5. Hand the resulting facade to that destination's processors or exporter.
 
+The lifecycle bus separately evaluates each instrumentation provider's policy
+against the same agent and channel context, skips rejected providers, and applies
+directional content projection before invoking accepted handlers.
+
 There is no implicit content redaction after a custom trace policy admits an audience. Redaction occurs only when the export pipeline includes `redactSpanInputs()` or `redactSpanOutputs()` (or when a retained compatibility option explicitly requests the equivalent redaction).
 
 Policies fail closed at their boundary: a throwing trace policy rejects the trace, a throwing span policy drops the span, a throwing attribute policy drops the attribute, and a throwing content-redaction predicate redacts that content direction. Missing, malformed, or conflicting audience evidence normalizes to `unknown`.
 
 ## Compatibility
 
-The existing `recordInputs` and `recordOutputs` destination options remain accepted as deprecated source-compatible aliases. An explicit `false` prepends the corresponding redaction policy; these options no longer prevent accepted spans from capturing content upstream. `EVE_TRACES_CONTENT=off` similarly prepends both redactors for local traces.
+Instrumentation providers deprecate the experimental `capture` field in favor
+of `tracePolicy`; `"content"` and `"metadata"` are mapped to equivalent fixed
+policies while integrations migrate. The existing OTel destination
+`recordInputs` and `recordOutputs` options remain accepted as deprecated
+source-compatible aliases. An explicit `false` prepends the corresponding
+redaction policy; these options no longer prevent accepted spans from capturing
+content upstream. `EVE_TRACES_CONTENT=off` similarly prepends both redactors for
+local traces.
 
 Filtering remains a span-processor responsibility because local trace persistence and authored processors are processors rather than uniform exporters. Keeping the filtering boundary immediately above each destination prevents one destination's policy from mutating what another destination receives.

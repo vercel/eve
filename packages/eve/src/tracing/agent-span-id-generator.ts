@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 /**
  * Id generator shared by `registerOTel` and the agent OTel provider. A span
- * whose lifetime crosses durable worker boundaries (`agent.turn`) is emitted
+ * whose lifetime crosses durable worker boundaries (`invoke_agent`) is emitted
  * at its terminal; priming the next span id lets that span carry the
  * pre-allocated id its descendants already parented to.
  */

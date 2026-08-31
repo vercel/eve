@@ -7,11 +7,11 @@ import {
   createHarnessDelegationToolDefinition,
 } from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
@@ -74,6 +74,7 @@ export interface CreateExecutionNodeStepInput {
   readonly handleEvent?: HandleEventFn;
   readonly historyProjector?: HistoryViewProjector;
   readonly historyView?: PreparedHistoryView;
+  readonly instrumentation: ExecutionInstrumentation | undefined;
   readonly mode: RunMode;
   readonly modelResolutionScope: RuntimeModelResolutionScope;
   readonly node: ResolvedRuntimeAgentNode;
@@ -98,7 +99,8 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
           input.node.turnAgent.dynamicModel,
         );
   const tools = createNodeHarnessTools({ node: input.node });
-  const instrumentation = getInstrumentationRuntime();
+  const instrumentation = input.instrumentation;
+  const sessionInstrumentation = instrumentation?.prepareExecution();
   const step = createToolLoopHarness({
     abortSignal: input.abortSignal,
     capabilities: input.capabilities,
@@ -110,7 +112,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
-    instrumentation,
+    instrumentation: sessionInstrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
     dispatchDynamicModelEvent: dispatchModelEvent,
@@ -123,7 +125,7 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     try {
       return await step(session, stepInput);
     } finally {
-      await instrumentation.forceFlush();
+      await instrumentation.flush();
     }
   };
 }

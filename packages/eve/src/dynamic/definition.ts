@@ -33,6 +33,10 @@ export const ALLOWED_DYNAMIC_SKILL_EVENTS: ReadonlySet<string> = new Set<Dynamic
   "turn.started",
 ]);
 
+export const ALLOWED_DYNAMIC_CONNECTION_EVENTS: ReadonlySet<string> = new Set<DynamicToolEventName>(
+  ["session.started", "turn.started"],
+);
+
 /**
  * Context passed to a dynamic resolver's event handler.
  *
@@ -95,7 +99,7 @@ export type DynamicSentinel<TResult = unknown> = {
 
 /**
  * Defines a dynamic resolver evaluated at runtime from stream-event
- * handlers. It is shared across tools, skills, and agent definitions;
+ * handlers. It is shared across tools, skills, connections, and agent definitions;
  * the directory it is authored in (not this function) decides what each
  * handler must return and which events are honored. The file's path-derived
  * slug names the single-entry case; a `Record<string, ...>` return names
@@ -106,12 +110,14 @@ export type DynamicSentinel<TResult = unknown> = {
  *   `Record<string, defineTool(...)>`, or `null`.
  * - `agent/skills/`: return a single `defineSkill(...)`, a
  *   `Record<string, defineSkill(...)>`, or `null`.
+ * - `agent/connections/`: return one connection definition, a
+ *   `Record<string, connection definition>`, or `null`.
  * - `agent/subagents/<name>/agent.ts`: return `defineAgent(...)` to configure
  *   and expose the subagent, or `null` to omit it.
  *
  * Per-slot events: tools resolvers run at `session.started`,
- * `turn.started`, and `step.started`. Skills resolvers run only at
- * `session.started` and `turn.started`; the runtime never invokes a
+ * `turn.started`, and `step.started`. Skills and connection resolvers run only
+ * at `session.started` and `turn.started`; the runtime never invokes a
  * handler keyed on `step.started` in that slot. Dynamic subagents run at
  * `session.started` and `turn.started` only.
  *

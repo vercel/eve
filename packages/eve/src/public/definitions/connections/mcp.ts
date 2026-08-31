@@ -53,6 +53,14 @@ export interface McpClientConnectionDefinition {
    */
   auth?: ConnectionAuthDefinition;
   /**
+   * Stable, non-secret identity for the resolved connection instance.
+   *
+   * Authenticated dynamic connections must set this to an account or tenant
+   * identifier that changes whenever the endpoint or auth provider changes.
+   * eve hashes the value before storing it in durable authorization state.
+   */
+  readonly instanceKey?: string;
+  /**
    * Optional per-connection approval gate for connection tool calls.
    *
    * Use the helpers from `eve/tools/approval`:

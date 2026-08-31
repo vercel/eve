@@ -34,6 +34,15 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(typeof authProvider(result.auth).getToken).toBe("function");
     });
 
+    it("preserves a stable connection instance key", () => {
+      const result = normalizeMcpClientConnectionDefinition(
+        validInput({ instanceKey: "account-123" }),
+        MSG,
+      );
+
+      expect(result.instanceKey).toBe("account-123");
+    });
+
     it("preserves the author's getToken reference", () => {
       const getToken = async () => ({ token: "x" });
       const result = normalizeMcpClientConnectionDefinition(
@@ -187,6 +196,14 @@ describe("normalizeMcpClientConnectionDefinition", () => {
       expect(() =>
         normalizeMcpClientConnectionDefinition(validInput({ description: "" }), MSG),
       ).toThrow(/must be a non-empty string/);
+    });
+  });
+
+  describe("instance key validation", () => {
+    it("rejects an empty connection instance key", () => {
+      expect(() =>
+        normalizeMcpClientConnectionDefinition(validInput({ instanceKey: "" }), MSG),
+      ).toThrow(/instanceKey/);
     });
   });
 

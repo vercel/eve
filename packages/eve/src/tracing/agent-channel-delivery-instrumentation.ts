@@ -14,8 +14,8 @@ import type {
   InstrumentationHandlerContext,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
-} from "#harness/instrumentation/lifecycle.js";
-import { sessionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { sessionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
@@ -98,15 +98,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       event.turnId === undefined
         ? undefined
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
-    const parent =
-      turn === undefined
-        ? state.parent
-        : {
-            isRemote: turn.parentIsRemote ?? false,
-            spanId: turn.parentSpanId,
-            traceFlags: turn.context.traceFlags,
-            traceId: turn.context.traceId,
-          };
     const startTimeMs =
       turn === undefined ? state.startTimeMs : Math.max(state.startTimeMs, turn.startTimeMs);
     const requestLink = state.requestTraceContext;
@@ -139,7 +130,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
                 ],
           startTime: startTimeMs,
         },
-        contextFromSpanContext(parent),
+        contextFromSpanContext(state.parent),
       ),
     );
     span.addEvent("channel.delivery.started", undefined, startTimeMs);
@@ -157,6 +148,19 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       recordError(span, event.error);
     }
     span.end();
+    if (
+      turn !== undefined &&
+      event.turnId !== undefined &&
+      turn.parentSpanId === state.parent.spanId &&
+      turn.context.traceId === state.parent.traceId
+    ) {
+      await input.stateStore.updateTurn(event.sessionId, event.turnId, (current) =>
+        current.parentSpanId === state.parent.spanId &&
+        current.context.traceId === state.parent.traceId
+          ? { ...current, parentIsRemote: false, parentSpanId: state.spanId }
+          : current,
+      );
+    }
   };
 
   return {

@@ -390,6 +390,44 @@ describe("connection_search", () => {
     expect(notionCompletions).toBe(0);
   });
 
+  it("does not pass a parked callback to a newly resolved connection instance", async () => {
+    const completeAuthorization = vi.fn(async () => ({ token: "instance-b-token" }));
+    const salesforce: ResolvedConnectionDefinition = {
+      ...connection("salesforce"),
+      authorization: {
+        completeAuthorization,
+        getToken: async () => ({ token: "instance-b-token" }),
+        principalType: "user",
+        startAuthorization: async () => ({ challenge: {} }),
+      },
+      instanceId: "instance-b",
+    };
+    const connectionRegistry = registry({
+      connections: [salesforce],
+      loadTools: { salesforce: async () => [] },
+    });
+
+    await expect(
+      executeConnectionSearch(
+        connectionRegistry,
+        { connection: "salesforce", keywords: "accounts" },
+        (ctx) => {
+          ctx.set(PendingAuthorizationResultKey, [
+            {
+              attemptId: "attempt-a",
+              callback: { method: "GET", params: { code: "code-a" } },
+              hookUrl: "https://agent.example.com/callback",
+              instanceId: "instance-a",
+              name: "salesforce",
+              principal: { id: "user-1", issuer: "test-idp", type: "user" },
+            },
+          ]);
+        },
+      ),
+    ).rejects.toThrow("resolved connection changed while sign-in was pending");
+    expect(completeAuthorization).not.toHaveBeenCalled();
+  });
+
   it("returns an authorization signal when sign-in can be started", async () => {
     const salesforce: ResolvedConnectionDefinition = {
       ...connection("salesforce"),
@@ -403,6 +441,7 @@ describe("connection_search", () => {
           challenge: { url: "https://idp.example.com/authorize" },
         }),
       },
+      instanceId: "salesforce-instance",
     };
     const connectionRegistry = registry({
       connections: [salesforce],
@@ -435,6 +474,7 @@ describe("connection_search", () => {
       {
         name: "salesforce",
         challenge: { url: "https://idp.example.com/authorize" },
+        instanceId: "salesforce-instance",
       },
     ]);
   });
