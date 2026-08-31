@@ -10522,6 +10522,7 @@ describe("createToolLoopHarness", () => {
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
       expect(stepCompleted?.data.usage).toEqual({
+        costSource: "gateway",
         costUsd: 0.0123,
         inputTokens: 1000,
         outputTokens: 50,
@@ -10570,7 +10571,7 @@ describe("createToolLoopHarness", () => {
       await runStep(createTestSession(), { message: "hi" });
 
       const stepCompleted = events.find((e) => e.type === "step.completed");
-      expect(stepCompleted?.data.usage).toEqual({ costUsd: 0.0042 });
+      expect(stepCompleted?.data.usage).toEqual({ costSource: "gateway", costUsd: 0.0042 });
       expect(stepCompleted?.data.providerMetadata).toEqual({
         gateway: { generationId: "gen_cost_only" },
       });

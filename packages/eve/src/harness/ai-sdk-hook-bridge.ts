@@ -20,6 +20,8 @@ import {
   toolCallIdempotencyKey,
 } from "#harness/instrumentation/lifecycle.js";
 import { structuralProviderMetadata } from "#harness/instrumentation/content.js";
+import { resolveModelCallCost } from "#harness/model-cost.js";
+import type { ModelCostEstimate } from "#shared/model-cost.js";
 
 type TelemetryEvent<TKey extends keyof Telemetry> = Parameters<NonNullable<Telemetry[TKey]>>[0];
 
@@ -41,6 +43,7 @@ export function createAiSdkHookBridge(
   hooks: InstrumentationHooks,
   runInContext: InstrumentationContextRunner = directRunInContext,
   runtimeContext?: Readonly<Record<string, unknown>>,
+  costEstimate?: ModelCostEstimate,
 ): Telemetry {
   const state: AttemptState = {
     capturesContent: hooks.capturesContent,
@@ -82,7 +85,7 @@ export function createAiSdkHookBridge(
       const key = state.modelKeys.get(event.callId);
       if (key === undefined) return;
       state.modelKeys.delete(event.callId);
-      const completed = toModelCallCompleted(state, key, event);
+      const completed = toModelCallCompleted(state, key, event, costEstimate);
       await hooks.publish(completed);
     },
     async onStepEnd(event) {
@@ -191,6 +194,7 @@ function toModelCallCompleted(
   state: AttemptState,
   idempotencyKey: string,
   source: TelemetryEvent<"onLanguageModelCallEnd">,
+  costEstimate: ModelCostEstimate | undefined,
 ): InstrumentationModelCallCompletedEvent {
   return Object.freeze({
     content: state.capturesContent ? toContentParts(source.content) : undefined,
@@ -198,12 +202,18 @@ function toModelCallCompleted(
     idempotencyKey,
     scope: state.scope,
     type: "model.call.completed",
-    usage: toUsage(source.usage),
+    usage: toUsage(source.usage, costEstimate),
   });
 }
 
-function toUsage(usage: TelemetryEvent<"onLanguageModelCallEnd">["usage"]): InstrumentationUsage {
+function toUsage(
+  usage: TelemetryEvent<"onLanguageModelCallEnd">["usage"],
+  costEstimate: ModelCostEstimate | undefined,
+): InstrumentationUsage {
+  const cost = resolveModelCallCost({ costEstimate, usage });
   return Object.freeze({
+    costSource: cost?.source,
+    costUsd: cost?.costUsd,
     inputTokenDetails: Object.freeze({
       cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens,
       cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens,

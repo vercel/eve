@@ -47,7 +47,7 @@ describe("createRuntimeModelCatalog", () => {
       maxOutputTokens: 1_000,
       resolvedModelId: "bfl/flux-pro",
     });
-    expect(fetchCatalog).toHaveBeenCalledOnce();
+    expect(fetchCatalog).toHaveBeenCalledTimes(2);
   });
 
   it("does not retain a failed catalog request", async () => {
@@ -63,7 +63,7 @@ describe("createRuntimeModelCatalog", () => {
     await expect(catalog.getByGatewayId("anthropic/claude-opus-4.7")).resolves.toMatchObject({
       resolvedModelId: "anthropic/claude-opus-4.7",
     });
-    expect(fetchCatalog).toHaveBeenCalledTimes(2);
+    expect(fetchCatalog).toHaveBeenCalledTimes(3);
   });
 
   it("keeps authentication and HTTP failures distinct from missing models", async () => {

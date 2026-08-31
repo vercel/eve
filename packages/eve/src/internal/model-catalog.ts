@@ -1,4 +1,5 @@
 import { z } from "#compiled/zod/index.js";
+import type { ModelCostEstimate } from "#shared/model-cost.js";
 
 const THINKING_SUFFIX = "-thinking";
 
@@ -25,12 +26,64 @@ export const modelCatalogResponseSchema = z
   })
   .passthrough();
 
+const gatewayModelListEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    pricing: z.unknown().optional(),
+  })
+  .passthrough();
+
+export const gatewayModelListResponseSchema = z
+  .object({ data: z.array(gatewayModelListEntrySchema) })
+  .passthrough();
+
 export type CatalogModelProvider = z.infer<typeof catalogModelProviderSchema>;
 export type CatalogModel = z.infer<typeof catalogModelSchema>;
+export type GatewayModelListEntry = z.infer<typeof gatewayModelListEntrySchema>;
 
 export interface ModelCatalogLimits {
   readonly contextWindowTokens: number;
   readonly maxOutputTokens?: number;
+}
+
+/** Parses the base per-token rates from the public AI Gateway model listing. */
+export function modelCostEstimateFromGatewayModel(
+  model: GatewayModelListEntry,
+): ModelCostEstimate | undefined {
+  if (!isRecord(model.pricing)) return undefined;
+  const inputUsdPerToken = readUsd(model.pricing.input);
+  const outputUsdPerToken = readUsd(model.pricing.output);
+  if (inputUsdPerToken === undefined || outputUsdPerToken === undefined) return undefined;
+
+  const cacheReadUsdPerToken = readUsd(model.pricing.input_cache_read);
+  const cacheWriteUsdPerToken = readUsd(model.pricing.input_cache_write);
+  return {
+    inputUsdPerToken,
+    outputUsdPerToken,
+    ...(cacheReadUsdPerToken !== undefined && { cacheReadUsdPerToken }),
+    ...(cacheWriteUsdPerToken !== undefined && { cacheWriteUsdPerToken }),
+  };
+}
+
+export function modelCostEstimatesFromGatewayModelList(
+  models: readonly GatewayModelListEntry[],
+): Readonly<Record<string, ModelCostEstimate>> {
+  const estimates: Record<string, ModelCostEstimate> = {};
+  for (const model of models) {
+    const estimate = modelCostEstimateFromGatewayModel(model);
+    if (estimate !== undefined) estimates[model.id] = estimate;
+  }
+  return estimates;
+}
+
+function readUsd(value: unknown): number | undefined {
+  const parsed =
+    typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function normalizeCatalogModelId(modelId: string): string {

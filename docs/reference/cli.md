@@ -294,7 +294,7 @@ eve traces --json          # dump the full trace as JSON
 
 Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need not be running. Accepts a full trace id, an `agent.session.id`, or an unambiguous prefix of either. Malformed segments are skipped without hiding valid spans from the same trace.
 
-Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `ai.toolCall` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
+Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, model cost, and the tool name for `ai.toolCall` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
 A local subagent keeps its own session id but records into the parent trace. Its turn is parented to the `agent.action` span that dispatched it, so the span tree carries the relationship without duplicate lineage attributes; `agent.subagent.name` remains on the child turn as a standalone label. Either session id resolves to that trace. Remote agents propagate the parent trace context over `traceparent`.
 
@@ -304,7 +304,7 @@ Every span carries a real duration except `agent.session`: an idle session never
 
 Model and tool-call spans omit their inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models, plus call arguments and results for tools. Each captured value is capped at 32 KB.
 
-Step spans carry token counts, and cost when Vercel AI Gateway served the call. Both follow the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (`gen_ai.usage.*`), so a third-party backend reads them without mapping.
+Step spans carry token counts and model cost. Vercel AI Gateway cost is authoritative when it served the call. Direct-provider and BYOK calls without Gateway cost metadata may use base public per-token pricing; those values carry `eve.cost.source = "estimated"` and are observability estimates, not billing records. Both follow the [OTel GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) (`gen_ai.usage.*`), so a third-party backend reads them without mapping.
 
 ### Retention
 

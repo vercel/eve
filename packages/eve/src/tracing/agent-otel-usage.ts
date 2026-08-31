@@ -4,6 +4,10 @@ import type { InstrumentationUsage } from "#harness/instrumentation/lifecycle.js
 
 /** Applies eve's structural token usage attributes to an agent span. */
 export function setAgentUsage(span: Span, usage: InstrumentationUsage): void {
+  if (usage.costUsd !== undefined) {
+    span.setAttribute("gen_ai.usage.cost", usage.costUsd);
+    span.setAttribute("eve.cost.source", usage.costSource ?? "estimated");
+  }
   if (usage.inputTokens !== undefined) {
     span.setAttribute("agent.usage.input_tokens", usage.inputTokens);
   }

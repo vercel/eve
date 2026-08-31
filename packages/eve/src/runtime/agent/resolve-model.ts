@@ -3,6 +3,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import type { ContextAccessor } from "#context/key.js";
 import { RuntimeModelMetadataCacheKey, type CachedModelMetadata } from "#context/keys.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
+import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import type {
   RuntimeDynamicModelReference,
@@ -174,6 +175,8 @@ export async function resolveRuntimeModelSelection(input: {
     });
     return {
       reference: {
+        ...(shouldEstimateSelectedModelCost(selectedModel, providerOptions) &&
+          metadata.costEstimate !== undefined && { costEstimate: metadata.costEstimate }),
         id: metadata.resolvedModelId,
         contextWindowTokens: metadata.contextWindowTokens,
         maxOutputTokens: metadata.maxOutputTokens,
@@ -209,12 +212,22 @@ export async function resolveRuntimeModelSelection(input: {
   return {
     model: selectedModel,
     reference: {
+      ...(shouldEstimateSelectedModelCost(selectedModel, providerOptions) &&
+        metadata.costEstimate !== undefined && { costEstimate: metadata.costEstimate }),
       id: metadata.resolvedModelId,
       contextWindowTokens: metadata.contextWindowTokens,
       maxOutputTokens: metadata.maxOutputTokens,
       providerOptions,
     },
   };
+}
+
+function shouldEstimateSelectedModelCost(
+  model: PublicAgentStaticModelDefinition,
+  providerOptions: Record<string, JsonObject> | undefined,
+): boolean {
+  const routing = classifyModelRouting(model, providerOptions);
+  return routing.kind === "external" || routing.byok !== undefined;
 }
 
 const runtimeModelCatalogsByState = new WeakMap<ContextAccessor, RuntimeModelCatalog>();
@@ -239,10 +252,15 @@ async function resolveSelectionMetadata(input: {
   readonly state: ContextAccessor;
 }): Promise<RuntimeModelMetadata> {
   if (input.contextWindowTokens !== undefined) {
-    return {
-      contextWindowTokens: input.contextWindowTokens,
-      resolvedModelId: input.modelLabel,
-    };
+    try {
+      const metadata = await input.load(input.catalog);
+      if (metadata !== null) {
+        return { ...metadata, contextWindowTokens: input.contextWindowTokens };
+      }
+    } catch {
+      // An explicit context limit keeps optional pricing lookup from blocking selection.
+    }
+    return { contextWindowTokens: input.contextWindowTokens, resolvedModelId: input.modelLabel };
   }
 
   const now = Date.now();

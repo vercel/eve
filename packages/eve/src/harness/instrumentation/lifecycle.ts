@@ -3,6 +3,7 @@ import type { InstrumentationStateSlot } from "#harness/instrumentation/state.js
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import type { ModelCostSource } from "#shared/model-cost.js";
 
 /**
  * Stable eve identity for one actual model attempt.
@@ -38,6 +39,8 @@ export interface InstrumentationModelRef {
 
 /** Token usage for one model call. A field is absent when the provider omits it. */
 export interface InstrumentationUsage {
+  readonly costSource?: ModelCostSource;
+  readonly costUsd?: number;
   readonly inputTokenDetails?: {
     readonly cacheReadTokens?: number;
     readonly cacheWriteTokens?: number;

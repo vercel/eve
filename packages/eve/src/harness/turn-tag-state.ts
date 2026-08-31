@@ -43,12 +43,18 @@ export interface TokenUsageTotals {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
   readonly costUsd: number;
+  readonly estimatedCostUsd?: number;
+  readonly gatewayCostUsd?: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly sawCost: boolean;
+  readonly sawEstimatedCost?: boolean;
+  readonly sawGatewayCost?: boolean;
 }
 
-export type TokenUsageDelta = Partial<TokenUsageTotals>;
+export type TokenUsageDelta = Partial<TokenUsageTotals> & {
+  readonly costSource?: "estimated" | "gateway";
+};
 
 /**
  * Rolling token usage for the durable session and the in-flight turn.
@@ -269,9 +275,21 @@ function addTokenUsage(base: TokenUsageTotals, delta: TokenUsageTotals): TokenUs
     cacheReadTokens: base.cacheReadTokens + delta.cacheReadTokens,
     cacheWriteTokens: base.cacheWriteTokens + delta.cacheWriteTokens,
     costUsd: base.costUsd + delta.costUsd,
+    ...((base.sawEstimatedCost === true || delta.sawEstimatedCost === true) && {
+      estimatedCostUsd: (base.estimatedCostUsd ?? 0) + (delta.estimatedCostUsd ?? 0),
+    }),
+    ...((base.sawGatewayCost === true || delta.sawGatewayCost === true) && {
+      gatewayCostUsd: (base.gatewayCostUsd ?? 0) + (delta.gatewayCostUsd ?? 0),
+    }),
     inputTokens: base.inputTokens + delta.inputTokens,
     outputTokens: base.outputTokens + delta.outputTokens,
     sawCost: base.sawCost || delta.sawCost,
+    ...((base.sawEstimatedCost === true || delta.sawEstimatedCost === true) && {
+      sawEstimatedCost: true,
+    }),
+    ...((base.sawGatewayCost === true || delta.sawGatewayCost === true) && {
+      sawGatewayCost: true,
+    }),
   };
 }
 
@@ -286,8 +304,13 @@ function toTokenUsageDelta(usage: TokenUsageDelta | undefined): TokenUsageTotals
     cacheReadTokens: usage.cacheReadTokens ?? 0,
     cacheWriteTokens: usage.cacheWriteTokens ?? 0,
     costUsd: usage.costUsd ?? 0,
+    ...(usage.costSource === "estimated" && { estimatedCostUsd: usage.costUsd ?? 0 }),
+    ...(usage.costSource === "gateway" && { gatewayCostUsd: usage.costUsd ?? 0 }),
     inputTokens,
     outputTokens,
     sawCost: usage.costUsd !== undefined,
+    ...(usage.costSource === "estimated" &&
+      usage.costUsd !== undefined && { sawEstimatedCost: true }),
+    ...(usage.costSource === "gateway" && usage.costUsd !== undefined && { sawGatewayCost: true }),
   };
 }

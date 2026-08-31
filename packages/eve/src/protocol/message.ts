@@ -528,6 +528,7 @@ export interface StepCompletedStreamEvent {
     turnId: string;
     usage?: {
       readonly costUsd?: number;
+      readonly costSource?: "estimated" | "gateway";
       readonly inputTokens?: number;
       readonly outputTokens?: number;
       readonly cacheReadTokens?: number;
@@ -1489,6 +1490,7 @@ export function createStepCompletedEvent(input: {
   readonly turnId: string;
   readonly usage?: {
     readonly costUsd?: number;
+    readonly costSource?: "estimated" | "gateway";
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     readonly cacheReadTokens?: number;

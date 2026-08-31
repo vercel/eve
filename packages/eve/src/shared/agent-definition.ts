@@ -1,6 +1,7 @@
 import type { CallSettings, LanguageModel } from "ai";
 import type { StandardJSONSchemaV1 } from "#compiled/@standard-schema/spec/index.js";
 import type { JsonObject } from "#shared/json.js";
+import type { ModelCostEstimate } from "#shared/model-cost.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
 import {
   isDynamicSentinel,
@@ -44,6 +45,8 @@ export type ModelRouting =
   | { kind: "external"; provider: string };
 
 export type InternalAgentModelDefinition = {
+  /** Framework-derived pricing metadata. Never part of the authored model API. */
+  costEstimate?: ModelCostEstimate;
   id: string;
   contextWindowTokens?: number;
   maxOutputTokens?: number;

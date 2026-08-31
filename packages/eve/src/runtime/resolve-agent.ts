@@ -275,12 +275,14 @@ function createResolvedAgentConfig(
     model:
       model.source === undefined
         ? {
+            costEstimate: model.costEstimate,
             id: model.id,
             contextWindowTokens: model.contextWindowTokens,
             maxOutputTokens: model.maxOutputTokens,
             providerOptions: model.providerOptions,
           }
         : {
+            costEstimate: model.costEstimate,
             contextWindowTokens: model.contextWindowTokens,
             id: model.id,
             maxOutputTokens: model.maxOutputTokens,

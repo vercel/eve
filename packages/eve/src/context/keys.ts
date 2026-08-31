@@ -8,6 +8,7 @@ import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import type { ModelCostEstimate } from "#shared/model-cost.js";
 import type {
   ActivityObserverConfig,
   ChannelDeliveryMetadata,
@@ -151,6 +152,7 @@ export const TurnDynamicModelReferenceKey = new ContextKey<RuntimeModelReference
 );
 
 export interface CachedModelMetadata {
+  readonly costEstimate?: ModelCostEstimate;
   readonly contextWindowTokens: number;
   readonly expiresAt: number;
   readonly maxOutputTokens?: number;

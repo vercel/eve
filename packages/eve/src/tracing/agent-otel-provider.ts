@@ -606,7 +606,10 @@ function readGatewayCost(
   if (!isRecord(gateway)) return undefined;
   const attributes: Record<string, string | number> = {};
   const cost = readUsd(gateway.cost);
-  if (cost !== undefined) attributes["gen_ai.usage.cost"] = cost;
+  if (cost !== undefined) {
+    attributes["eve.cost.source"] = "gateway";
+    attributes["gen_ai.usage.cost"] = cost;
+  }
   const gatewayCost = readUsd(gateway.gatewayCost);
   if (gatewayCost !== undefined) attributes["gen_ai.usage.gateway_cost"] = gatewayCost;
   const inputCost = readUsd(gateway.inputInferenceCost);

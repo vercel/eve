@@ -9,7 +9,6 @@ import {
   type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
-  type ProviderMetadata,
   type SystemModelMessage,
   type Telemetry,
   type TelemetryOptions,
@@ -117,6 +116,7 @@ import {
   setTurnUsageState,
   type TokenUsageDelta,
 } from "#harness/turn-tag-state.js";
+import { resolveModelCallCost } from "#harness/model-cost.js";
 import {
   applySessionLimitContinuation,
   enforceSessionTokenLimit,
@@ -1570,15 +1570,24 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
               turnId: instrumentationTurnId,
             };
       activeAttemptScope = attemptScope;
+      const costEstimate = requireSessionModelReference(session).costEstimate;
       const bridgeIntegration =
         attemptScope === undefined || instrumentationHooks === undefined
           ? undefined
-          : createAiSdkHookBridge(
-              attemptScope,
-              instrumentationHooks,
-              config.instrumentation?.runInContext,
-              telemetryRuntimeContext,
-            );
+          : costEstimate === undefined
+            ? createAiSdkHookBridge(
+                attemptScope,
+                instrumentationHooks,
+                config.instrumentation?.runInContext,
+                telemetryRuntimeContext,
+              )
+            : createAiSdkHookBridge(
+                attemptScope,
+                instrumentationHooks,
+                config.instrumentation?.runInContext,
+                telemetryRuntimeContext,
+                costEstimate,
+              );
 
       const hooks = buildStepHooks({
         auth: ctx?.get(AuthKey) ?? null,
@@ -1681,6 +1690,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             throw new EmptyModelResponseError();
           }
           await emitStepActions(emit, emissionState, stepResult, {
+            costEstimate: requireSessionModelReference(session).costEstimate,
             emittedActionCallIds,
             excludedActionCallIds: invalidInputToolCallIds,
             excludedActionToolNames,
@@ -2013,7 +2023,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       previous: getTurnUsageState(session.state),
       turnId: emissionState.turnId,
       usage: extractTokenUsageDelta({
-        costUsd: extractGatewayCostUsd(result.providerMetadata),
+        cost: resolveModelCallCost({
+          costEstimate: requireSessionModelReference(session).costEstimate,
+          providerMetadata: result.providerMetadata,
+          usage: result.usage,
+        }),
         usage: result.usage,
       }),
     });
@@ -2035,6 +2049,12 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       "$eve.cache_read_tokens": nextTurnUsage.cacheReadTokens,
       "$eve.cache_write_tokens": nextTurnUsage.cacheWriteTokens,
       "$eve.cost_usd": nextTurnUsage.sawCost ? nextTurnUsage.costUsd : undefined,
+      "$eve.estimated_cost_usd": nextTurnUsage.sawEstimatedCost
+        ? nextTurnUsage.estimatedCostUsd
+        : undefined,
+      "$eve.gateway_cost_usd": nextTurnUsage.sawGatewayCost
+        ? nextTurnUsage.gatewayCostUsd
+        : undefined,
       "$eve.tool_count": config.tools.size,
     });
 
@@ -2094,41 +2114,22 @@ function isValidSpanContext(spanContext: SpanContext): boolean {
 }
 
 function extractTokenUsageDelta(input: {
-  readonly costUsd: number | undefined;
+  readonly cost: ReturnType<typeof resolveModelCallCost>;
   readonly usage: HarnessStepResult["usage"] | undefined;
 }): TokenUsageDelta | undefined {
   const usage = input.usage;
-  if (usage === undefined && input.costUsd === undefined) {
+  if (usage === undefined && input.cost === undefined) {
     return undefined;
   }
 
   return {
     cacheReadTokens: usage?.inputTokenDetails?.cacheReadTokens,
     cacheWriteTokens: usage?.inputTokenDetails?.cacheWriteTokens,
-    costUsd: input.costUsd,
+    costSource: input.cost?.source,
+    costUsd: input.cost?.costUsd,
     inputTokens: usage?.inputTokens,
     outputTokens: usage?.outputTokens,
   };
-}
-
-function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): number | undefined {
-  const gateway = readGatewayMetadata(providerMetadata);
-  const cost = gateway?.cost;
-  if (typeof cost === "number" && Number.isFinite(cost)) {
-    return cost;
-  }
-  if (typeof cost === "string") {
-    const parsed = Number(cost);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
-}
-
-function readGatewayMetadata(
-  providerMetadata: ProviderMetadata | undefined,
-): ProviderMetadata[string] | undefined {
-  const gateway = providerMetadata?.gateway;
-  return gateway && typeof gateway === "object" && !Array.isArray(gateway) ? gateway : undefined;
 }
 
 // ---------------------------------------------------------------------------

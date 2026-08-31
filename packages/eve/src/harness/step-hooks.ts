@@ -24,6 +24,7 @@ import {
 } from "#harness/action-result-helpers.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import { emitStepStarted, normalizeAssistantStepFinishReason } from "#harness/emission.js";
+import { resolveModelCallCost } from "#harness/model-cost.js";
 import { extractToolApprovalInputRequests } from "#harness/input-extraction.js";
 import {
   type AnthropicCacheMarker,
@@ -35,6 +36,7 @@ import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { ModelCostEstimate } from "#shared/model-cost.js";
 import {
   type HarnessEmitFn,
   type HarnessSession,
@@ -234,6 +236,7 @@ export async function emitStepActions(
   state: HarnessEmissionState,
   step: HarnessStepResult,
   options: {
+    readonly costEstimate?: ModelCostEstimate;
     readonly emittedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionCallIds?: ReadonlySet<string>;
     readonly excludedActionToolNames: ReadonlySet<string>;
@@ -328,7 +331,11 @@ export async function emitStepActions(
       stepIndex: state.stepIndex,
       turnId: state.turnId,
       usage: extractStepUsage({
-        costUsd: extractGatewayCostUsd(step.providerMetadata),
+        cost: resolveModelCallCost({
+          costEstimate: options.costEstimate,
+          providerMetadata: step.providerMetadata,
+          usage: step.usage,
+        }),
         usage: step.usage,
       }),
     }),
@@ -416,11 +423,12 @@ function extractToolResultParts(messages: readonly ModelMessage[]): ToolResultPa
  * event usage shape. Returns `undefined` when the SDK reports no usage.
  */
 function extractStepUsage(input: {
-  readonly costUsd: number | undefined;
+  readonly cost: ReturnType<typeof resolveModelCallCost>;
   readonly usage: LanguageModelUsage | undefined;
 }):
   | {
       costUsd?: number;
+      costSource?: "estimated" | "gateway";
       inputTokens?: number;
       outputTokens?: number;
       cacheReadTokens?: number;
@@ -429,13 +437,17 @@ function extractStepUsage(input: {
   | undefined {
   const result: {
     costUsd?: number;
+    costSource?: "estimated" | "gateway";
     inputTokens?: number;
     outputTokens?: number;
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
   } = {};
 
-  if (input.costUsd !== undefined) result.costUsd = input.costUsd;
+  if (input.cost !== undefined) {
+    result.costSource = input.cost.source;
+    result.costUsd = input.cost.costUsd;
+  }
 
   const usage = input.usage;
   if (usage === undefined) {
@@ -459,19 +471,6 @@ function extractStepProviderMetadata(
 ): StepCompletedProviderMetadata | undefined {
   const generationId = readGatewayGenerationId(providerMetadata);
   return generationId === undefined ? undefined : { gateway: { generationId } };
-}
-
-function extractGatewayCostUsd(providerMetadata: ProviderMetadata | undefined): number | undefined {
-  const gateway = readGatewayMetadata(providerMetadata);
-  const cost = gateway?.cost;
-  if (typeof cost === "number" && Number.isFinite(cost)) {
-    return cost;
-  }
-  if (typeof cost === "string") {
-    const parsed = Number(cost);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  }
-  return undefined;
 }
 
 function readGatewayGenerationId(
