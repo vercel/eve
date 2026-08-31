@@ -1,4 +1,4 @@
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -30,11 +30,23 @@ interface HeadlessEvent {
 }
 
 function terminateChildTree(child: ReturnType<SpawnLike>, signal: NodeJS.Signals): void {
-  if (process.platform !== "win32" && child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {}
+  if (child.pid !== undefined) {
+    if (process.platform === "win32") {
+      const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+      if (systemRoot !== undefined && systemRoot !== "") {
+        const result = spawnSync(
+          resolve(systemRoot, "System32", "taskkill.exe"),
+          ["/pid", String(child.pid), "/t", ...(signal === "SIGKILL" ? ["/f"] : [])],
+          { stdio: "ignore", windowsHide: true },
+        );
+        if (result.status === 0) return;
+      }
+    } else {
+      try {
+        process.kill(-child.pid, signal);
+        return;
+      } catch {}
+    }
   }
   child.kill(signal);
 }
