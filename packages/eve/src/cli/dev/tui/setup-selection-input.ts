@@ -69,6 +69,7 @@ type SetupSingleSelectInput = SetupSelectInput & {
 type SetupMultiSelectInput = SetupSelectInput & {
   kind: "multi" | "searchable-multi";
   required: boolean;
+  plannerNavigation?: true;
 };
 
 type SetupSelectInputState = SetupSingleSelectInput | SetupMultiSelectInput;
@@ -90,9 +91,16 @@ function updatedSelect(
     select: reduceSelect(input.select, event, {
       options: input.options,
       searchAction: input.searchAction,
-      submitRow: isMultiSelect(input),
+      submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
     }),
   };
+}
+
+function continueSetupSelect(input: SetupMultiSelectInput): SetupSelectInputResult {
+  if (input.required && input.select.selected.size === 0) {
+    return { kind: "error", message: "Select at least one option, then continue." };
+  }
+  return { kind: "submit", values: orderedSelection(input.options, input.select.selected) };
 }
 
 function submitSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
@@ -100,6 +108,7 @@ function submitSetupSelect(input: SetupSelectInputState): SetupSelectInputResult
     ? filterOptions(input.options, input.select.filter, input.searchAction)
     : [...input.options];
   if (isMultiSelect(input)) {
+    if (input.plannerNavigation === true) return continueSetupSelect(input);
     if (input.select.cursor !== submitRowIndex(visible)) {
       return updatedSelect(input, { type: "toggle" });
     }
@@ -134,7 +143,7 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
       const context = {
         options: input.options,
         searchAction: input.searchAction,
-        submitRow: isMultiSelect(input),
+        submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
       };
       for (const char of input.key.value.replaceAll("\n", " ")) {
         if (char >= " " && char !== "\u007f") {

@@ -210,7 +210,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 | `-H, --header <header>`             | string | none               | Request header for a URL target, in `Name: value` form; repeat for multiple headers       |
 | `--no-ui`                           | flag   | UI on              | Start the server without an interactive UI                                                |
 | `--name <name>`                     | string | app folder name    | Title shown in the terminal UI                                                            |
-| `--input <text>`                    | string | none               | Pre-fill the prompt input; bare local `/model` starts onboarding                          |
+| `--input <text>`                    | string | none               | Pre-fill the prompt input                                                                 |
 | `--tools <mode>`                    | enum   | `auto-collapsed`   | Tool-call rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
 | `--reasoning <mode>`                | enum   | `full`             | Reasoning rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`                |
 | `--subagents <mode>`                | enum   | `auto-collapsed`   | Subagent-section rendering: `full` \| `collapsed` \| `auto-collapsed` \| `hidden`         |
@@ -221,7 +221,7 @@ Pass a bare URL and the UI connects to that server instead of booting a local on
 
 `eve acp` reserves stdin and stdout for newline-delimited JSON-RPC and sends diagnostics to stderr. Without a URL, it supervises an isolated local development server. With a URL, it bridges ACP to that server's existing eve HTTP API and accepts the same URL credentials and request headers as `eve dev <url>`. Pass `--scope <team>` when the active Vercel scope does not own the deployment; `EVE_VERCEL_SCOPE` provides the same value for managed harnesses. See [Agent Client Protocol (ACP)](../protocols/acp) for client configuration and capability limits.
 
-A fresh `eve init` passes `--input /model`. That bare local input starts onboarding: the TUI installs the Vercel CLI if needed, asks you to log in if needed, opens `/model`, then offers categorized registry next steps before the first prompt. Other input stays editable in the prompt.
+A fresh `eve init` starts onboarding before the first prompt: the TUI installs the Vercel CLI if needed, asks you to log in if needed, guides you through model configuration, then lets you choose channels and integrations. Other `--input` text stays editable in the prompt.
 
 For a URL target protected by HTTP Basic auth, put the credentials in the URL. eve sends them as a Basic `Authorization` header and strips them from the server URL before connecting:
 

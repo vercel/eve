@@ -138,6 +138,24 @@ describe("createTuiPrompter", () => {
     );
   });
 
+  it("maps a searchable multi-select's stacked hints to stable checklist cards", async () => {
+    const renderer = fakeRenderer({ readSelect: vi.fn(async () => ["option-0"]) });
+    const prompter = createTuiPrompter(renderer);
+
+    await expect(
+      prompter.select({
+        message: "Select channels",
+        multiple: true,
+        search: true,
+        hintLayout: "stacked",
+        options: [{ value: "web", label: "Web Chat", hint: "A built-in chat UI" }],
+      }),
+    ).resolves.toEqual(["web"]);
+    expect(renderer.readSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "searchable-multi", layout: "stacked" }),
+    );
+  });
+
   it("round-trips an inline-edited select value", async () => {
     const renderer = fakeRenderer({
       readEditableSelect: vi.fn(async () => ({

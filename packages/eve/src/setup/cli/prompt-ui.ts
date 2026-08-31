@@ -42,6 +42,11 @@ export interface PromptOption<T extends PromptValue> {
   /** Short inline annotation shown dimmed only while the cursor is on this row. */
   focusHint?: string;
   /**
+   * Longer explanation rendered in the picker's reserved context area while
+   * this row is focused. The stable slot keeps neighboring rows stationary.
+   */
+  focusDescription?: string;
+  /**
    * Longer, display-only explanation for the highlighted option. Its prompt
    * chooses the placement; it is hidden once a choice is submitted.
    */

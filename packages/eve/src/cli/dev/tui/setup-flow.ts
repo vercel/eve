@@ -22,6 +22,9 @@ interface SetupSelectRequestBase {
   metadata?: readonly SelectMetadata[];
   options: readonly SetupPanelOption[];
   notices?: readonly SelectNotice[];
+  plannerNavigation?: true;
+  plannerContinue?: string;
+  plannerBack?: true;
 }
 
 interface SetupSingleSelectRequest extends SetupSelectRequestBase {
@@ -49,6 +52,7 @@ interface SetupMultiSelectRequest extends SetupSelectRequestBase {
 
 interface SetupSearchableMultiSelectRequest extends SetupSelectRequestBase {
   kind: "searchable-multi";
+  layout?: "stacked";
   initialValues?: readonly string[];
   placeholder?: string;
   required: boolean;
@@ -56,8 +60,8 @@ interface SetupSearchableMultiSelectRequest extends SetupSelectRequestBase {
 
 /**
  * A setup select's complete interaction grammar. The discriminant prevents
- * callers from combining incompatible modes such as multi-select plus a
- * single-select layout.
+ * callers from combining incompatible modes; searchable multi-select supports
+ * the stable stacked checklist layout but not single-select task actions.
  */
 export type SetupSelectRequest =
   | SetupSingleSelectRequest

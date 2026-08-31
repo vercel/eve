@@ -36,16 +36,15 @@ function setupSelectRequest<T extends PrompterValue>(
   } = { message: opts.message, options };
   if (opts.description !== undefined) base.description = opts.description;
   if (opts.metadata !== undefined) base.metadata = opts.metadata;
-  const withNotices = <Request extends SetupSelectRequest>(request: Request): Request => {
+  const withNavigation = <Request extends SetupSelectRequest>(request: Request): Request => {
     if (opts.notices !== undefined) request.notices = opts.notices;
+    if (opts.plannerNavigation === true) request.plannerNavigation = true;
+    if (opts.plannerContinue !== undefined) request.plannerContinue = opts.plannerContinue;
+    if (opts.plannerBack === true) request.plannerBack = true;
     return request;
   };
 
   if (opts.multiple === true) {
-    if (opts.hintLayout !== undefined) {
-      throw new Error("Multi-select setup questions do not support a hint layout.");
-    }
-
     let request: SetupSelectRequest;
     if (opts.search === true) {
       request = {
@@ -53,6 +52,10 @@ function setupSelectRequest<T extends PrompterValue>(
         kind: "searchable-multi",
         required: opts.required ?? false,
       };
+      if (opts.hintLayout === "stacked") request.layout = "stacked";
+      if (opts.hintLayout === "inline") {
+        throw new Error("Multi-select setup questions do not support inline hint layout.");
+      }
       if (opts.placeholder !== undefined) request.placeholder = opts.placeholder;
     } else {
       request = {
@@ -64,7 +67,7 @@ function setupSelectRequest<T extends PrompterValue>(
     if (opts.initialValues !== undefined) {
       request.initialValues = opts.initialValues.map(encode);
     }
-    return withNotices(request);
+    return withNavigation(request);
   }
 
   if (opts.search === true && opts.hintLayout === "stacked") {
@@ -89,7 +92,7 @@ function setupSelectRequest<T extends PrompterValue>(
     request = { ...base, kind };
   }
   if (opts.initialValue !== undefined) request.initialValue = encode(opts.initialValue);
-  return withNotices(request);
+  return withNavigation(request);
 }
 
 /**

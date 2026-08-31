@@ -40,6 +40,11 @@ export interface SelectOption<T extends PrompterValue> {
   /** Short inline annotation shown dimmed only while the cursor is on this row. */
   focusHint?: string;
   /**
+   * Longer explanation rendered in the picker's reserved context area while
+   * this row is focused. The stable slot keeps neighboring rows stationary.
+   */
+  focusDescription?: string;
+  /**
    * Longer, display-only explanation shown dimmed alongside the option while it
    * is highlighted during navigation. Hidden once a choice is submitted.
    */
@@ -120,14 +125,20 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   /**
    * How option hints are laid out in the dev TUI panel (the CLI prompter ignores
    * it and keeps its default inline, unnumbered rendering). "stacked" renders
-   * each hint on its own line below the label with a blank line between options —
-   * for small action menus whose hints carry current values. "inline" keeps hints
-   * on the label row, suppresses numeric shortcuts, and separates the trailing
-   * completion action (e.g. the `/add` task list).
+   * each hint on its own line below the label with a blank line between options;
+   * it works for both action menus and checklists. "inline" keeps hints on the
+   * label row, suppresses numeric shortcuts, and separates a trailing completion
+   * action.
    */
   hintLayout?: "stacked" | "inline";
   /** Outcome lines from earlier laps of a looping menu. */
   notices?: readonly SelectNotice[];
+  /** Batch-planner checklist navigation: Space toggles, Enter continues, Left/Esc goes back. */
+  plannerNavigation?: true;
+  /** Destination named beside Enter in a batch-planner checklist footer. */
+  plannerContinue?: string;
+  /** Batch-planner review navigation: Enter selects, Left/Esc goes back. */
+  plannerBack?: true;
 }
 
 /** A selectable action appended after local matches for a non-empty query. */
