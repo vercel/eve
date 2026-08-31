@@ -7,7 +7,11 @@ import {
   getDynamicSubagentSelection,
   refreshDynamicSessionSubagentsForRuntimeRevision,
 } from "#context/dynamic-subagent-lifecycle.js";
-import { SessionDynamicSubagentRuntimeRevisionKey, SessionIdKey } from "#context/keys.js";
+import {
+  SessionDynamicSubagentRuntimeRevisionKey,
+  SessionIdKey,
+  TurnDynamicSubagentSelectionsKey,
+} from "#context/keys.js";
 import { defineAgent } from "#public/definitions/agent.js";
 import { defineRemoteAgent } from "#public/definitions/remote-agent.js";
 import { createSessionStartedEvent, createTurnStartedEvent } from "#protocol/message.js";
@@ -295,6 +299,98 @@ describe("dynamic subagent lifecycle", () => {
     });
 
     expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
+  });
+
+  it("exposes every remote entry in a dynamic subagent map with a keyed identity", async () => {
+    const ctx = createContext();
+    const created = createResolver();
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: {
+        "session.started": () => ({
+          review: defineRemoteAgent({
+            description: "Reviews the request.",
+            url: "https://review.example.com",
+          }),
+          triage: defineRemoteAgent({
+            description: "Classifies the request.",
+            url: "https://triage.example.com",
+          }),
+        }),
+      },
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(buildDynamicSubagentTools(ctx)).toMatchObject([
+      {
+        name: "researcher__review",
+        runtimeAction: {
+          kind: "remote-agent-call",
+          nodeId: "subagents/researcher#review",
+          remoteAgentName: "researcher__review",
+        },
+      },
+      {
+        name: "researcher__triage",
+        runtimeAction: {
+          kind: "remote-agent-call",
+          nodeId: "subagents/researcher#triage",
+          remoteAgentName: "researcher__triage",
+        },
+      },
+    ]);
+    expect(getDynamicSubagentSelection(ctx, "subagents/researcher#triage")).toMatchObject({
+      kind: "remote",
+      remoteAgent: { url: "https://triage.example.com" },
+    });
+    expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeUndefined();
+  });
+
+  it("lets a turn map replace every session entry from the same resolver", async () => {
+    const ctx = createContext();
+    const created = createResolver({ eventNames: ["session.started", "turn.started"] });
+    const resolver: ResolvedDynamicSubagentResolver = {
+      ...created.resolver,
+      events: {
+        "session.started": () => ({
+          triage: defineRemoteAgent({
+            description: "Classifies.",
+            url: "https://triage.example.com",
+          }),
+          review: defineRemoteAgent({ description: "Reviews.", url: "https://review.example.com" }),
+        }),
+        "turn.started": () => ({
+          review: defineRemoteAgent({
+            description: "Reviews deeply.",
+            url: "https://deep-review.example.com",
+          }),
+        }),
+      },
+    };
+
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createSessionStartedEvent(),
+      messages: [],
+      resolvers: [resolver],
+    });
+    await dispatchDynamicSubagentEvent({
+      ctx,
+      event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(ctx.get(TurnDynamicSubagentSelectionsKey)).toBeDefined();
+    expect(buildDynamicSubagentTools(ctx).map((tool) => tool.name)).toEqual(["researcher__review"]);
+    expect(getDynamicSubagentSelection(ctx, "subagents/researcher#triage")).toBeUndefined();
+    expect(getDynamicSubagentSelection(ctx, "subagents/researcher#review")?.kind).toBe("remote");
   });
 
   it("omits an invalid non-null result", async () => {
