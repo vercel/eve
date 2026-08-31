@@ -1,5 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npx --yes pnpm@12.1.0 install --frozen-lockfile",
+  "installCommand": "pnpm_bin=\"$(command -v pnpm)\" && pnpm_package=\"@pnpm/exe.linux-$(node -p process.arch)\" && npm install --global \"${pnpm_package}@12.1.0\" && cp \"$(npm root -g)/${pnpm_package}/pnpm\" \"$pnpm_bin\" && pnpm install --frozen-lockfile",
   "buildCommand": "tmp=\"$(mktemp -d)\" && npx --yes pnpm@12.1.0 --filter ../../packages/eve pack --pack-destination \"$tmp\" && mkdir -p public && cp \"$tmp\"/eve-*.tgz public/eve.tgz && npx --yes pnpm@12.1.0 build"
 }
