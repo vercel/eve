@@ -268,12 +268,16 @@ export type DurableDynamicSubagentSelection =
     }
   | null;
 
+export type DurableDynamicSubagentResolverSelection =
+  | DurableDynamicSubagentSelection
+  | Readonly<Record<string, DurableDynamicSubagentSelection>>;
+
 export const SessionDynamicSubagentSelectionsKey = new ContextKey<
-  Readonly<Record<string, DurableDynamicSubagentSelection>>
+  Readonly<Record<string, DurableDynamicSubagentResolverSelection>>
 >("eve.sessionDynamicSubagentSelections");
 
 export const TurnDynamicSubagentSelectionsKey = new ContextKey<
-  Readonly<Record<string, DurableDynamicSubagentSelection>>
+  Readonly<Record<string, DurableDynamicSubagentResolverSelection>>
 >("eve.turnDynamicSubagentSelections");
 
 export const SessionDynamicSubagentRuntimeRevisionKey = new ContextKey<string>(

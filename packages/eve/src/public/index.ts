@@ -16,6 +16,7 @@ export {
   type DefinedAgent,
   type DynamicSubagentDefinition,
   type DynamicLocalSubagentDefinition,
+  type DynamicRemoteSubagentMap,
   defineAgent,
   defineDynamic,
 } from "#public/definitions/agent.js";

@@ -55,7 +55,13 @@ export type DynamicLocalSubagentDefinition = Extract<
 > & { readonly description: string };
 
 /** Definition a dynamic subagent resolver may select at runtime. */
-export type DynamicSubagentDefinition = DynamicLocalSubagentDefinition | RemoteAgentDefinition;
+export type DynamicRemoteSubagentMap = Readonly<Record<string, RemoteAgentDefinition>>;
+
+/** Definition a dynamic subagent resolver may select at runtime. */
+export type DynamicSubagentDefinition =
+  | DynamicLocalSubagentDefinition
+  | RemoteAgentDefinition
+  | DynamicRemoteSubagentMap;
 
 type DynamicEventHandler<TEvents extends DynamicEvents> = Extract<
   NonNullable<TEvents[keyof TEvents]>,

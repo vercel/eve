@@ -443,7 +443,9 @@ export function resolveRemoteAgentForAction(input: {
   const registered = input.registry.get(input.nodeId);
   const definition = registered?.definition;
   if (input.dynamicRemoteAgent !== undefined) {
-    if (definition === undefined) {
+    const dynamicResolverDefinition =
+      definition ?? input.registry.get(input.nodeId.split("#", 1)[0]!)?.definition;
+    if (dynamicResolverDefinition === undefined) {
       throw new Error(`Missing remote agent "${input.remoteAgentName}" in runtime registry.`);
     }
     const credentials = resolveDynamicRemoteAgentCredentials(input.dynamicRemoteAgent);
@@ -465,12 +467,12 @@ export function resolveRemoteAgentForAction(input: {
     } = {
       description: config.description,
       kind: "remote",
-      logicalPath: definition.logicalPath,
+      logicalPath: dynamicResolverDefinition.logicalPath,
       name: input.remoteAgentName,
       nodeId: input.nodeId,
       outputSchema: config.outputSchema,
       path: config.path,
-      sourceId: definition.sourceId,
+      sourceId: dynamicResolverDefinition.sourceId,
       sourceKind: "module",
       url: config.url,
     };
