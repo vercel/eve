@@ -108,6 +108,7 @@ export async function prepareDevelopmentApplicationHost(
  */
 export async function prepareProductionApplicationHost(
   workspace: ApplicationBuildWorkspace,
+  compileWorkspace?: import("#compiler/workspace-context.js").CompileWorkspaceContext,
 ): Promise<PreparedApplicationHost> {
   const compileResult = await compileAgentInWorkspace({
     artifactLocations: {
@@ -115,6 +116,7 @@ export async function prepareProductionApplicationHost(
       writeRoot: workspace.compiler.artifactsDir,
     },
     startPath: workspace.appRoot,
+    workspace: compileWorkspace,
   });
   const schedules = await resolveSchedules({ manifest: compileResult.manifest });
 
