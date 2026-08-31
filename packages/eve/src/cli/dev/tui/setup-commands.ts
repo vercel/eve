@@ -8,7 +8,11 @@ import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
 import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
-import { RegistryFlowFailedError, runRegistryFlow } from "#setup/flows/registry.js";
+import {
+  RegistryFlowFailedError,
+  runRegistryFlow,
+  type RegistryPlannerContext,
+} from "#setup/flows/registry.js";
 import type { Prompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
@@ -39,10 +43,13 @@ export const SETUP_FLOW_CONFIG = {
 
 /** The prompter surface plus the working-state interrupt trap a command races against. */
 export type TuiSetupCommandRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor" | "waitForInterrupt">;
+  Pick<
+    SetupFlowRenderer,
+    "readProviderPicker" | "readModelEditor" | "setNavigation" | "waitForInterrupt"
+  >;
 
 type MuteableSetupRenderer = TuiPrompterRenderer &
-  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor">;
+  Pick<SetupFlowRenderer, "readProviderPicker" | "readModelEditor" | "setNavigation">;
 
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
@@ -54,6 +61,8 @@ export interface TuiSetupCommandInput {
   initialModelStep?: "provider";
   /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
+  /** Presentation and navigation supplied by an enclosing setup journey. */
+  registryPlannerContext?: RegistryPlannerContext;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   chatGptAccountLabel?: string;
   /** Suspends development runtime artifacts while registry installation and setup mutate them. */
@@ -75,6 +84,8 @@ export interface TuiSetupFlows {
 
 export interface TuiSetupCommandResult {
   message: string;
+  /** The user dismissed this setup step without completing it. */
+  cancelled?: true;
   /** Keep settled batch results instead of replacing them with an interrupt notice. */
   partial?: true;
   /** Promotes an outcome to a top-level status. */
@@ -111,6 +122,9 @@ function muteableRenderer(
       isMuted()
         ? { choice: Promise.resolve(undefined), close: () => {} }
         : renderer.readChoice(options),
+    setNavigation: (navigation) => {
+      if (!isMuted()) renderer.setNavigation?.(navigation);
+    },
     setStatus: (text) => {
       if (!isMuted()) renderer.setStatus(text);
     },
@@ -149,9 +163,9 @@ export async function runTuiSetupCommand(
   const renderer = muteableRenderer(input.renderer, () => interrupted, input.withExclusiveTerminal);
   const prompter = (input.createPrompter ?? createTuiPrompter)(renderer);
 
+  const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
   const interrupt = input.renderer.waitForInterrupt();
   const INTERRUPTED = Symbol("interrupted");
-  const execution = executeSetupCommand(input, prompter, renderer, controller.signal);
   try {
     const outcome = await Promise.race([execution, interrupt.promise.then(() => INTERRUPTED)]);
     if (outcome !== INTERRUPTED) return outcome as TuiSetupCommandResult;
@@ -210,7 +224,16 @@ async function executeSetupCommand(
           deps: {
             pickModelSettings: (request) => renderer.readModelEditor(request),
             runProviderFlow: (providerInput) =>
-              runProviderFlow({ ...providerInput, picker: pickProvider }),
+              runProviderFlow({
+                ...providerInput,
+                picker: pickProvider,
+                recoverHumanAction: (error) =>
+                  recoverVercelHumanAction(error, flows, {
+                    appRoot,
+                    prompter,
+                    signal,
+                  }),
+              }),
           },
         };
         if (input.initialModelStep !== undefined) {
@@ -225,6 +248,7 @@ async function executeSetupCommand(
               result.discardedDraft === true
                 ? "/model dismissed. Drafted changes were discarded; Done commits them."
                 : "/model dismissed.",
+            cancelled: true,
             preserveFlowDiagnostics: false,
           };
         }
@@ -253,10 +277,11 @@ async function executeSetupCommand(
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
+          plannerContext: input.registryPlannerContext,
           onItemStart: registryItemProgress(renderer),
         });
         if (flow.kind === "cancelled") {
-          return { message: "/add dismissed.", preserveFlowDiagnostics: true };
+          return { message: "/add dismissed.", cancelled: true, preserveFlowDiagnostics: true };
         }
         const result = flow.result;
         const outcome: TuiSetupCommandResult = {
@@ -304,6 +329,7 @@ async function executeSetupCommand(
     if (error instanceof WizardCancelledError) {
       return {
         message: `/${command} dismissed.`,
+        cancelled: true,
         preserveFlowDiagnostics: command !== "model",
       };
     }
@@ -333,6 +359,81 @@ async function executeSetupCommand(
       preserveFlowDiagnostics: true,
     };
   }
+}
+
+async function recoverVercelHumanAction(
+  error: HumanActionRequiredError,
+  flows: TuiSetupFlows,
+  input: { appRoot: string; prompter: Prompter; signal: AbortSignal },
+): Promise<"retry" | "cancel"> {
+  const action = error.action.kind;
+  if (
+    action !== "vercel-cli-missing" &&
+    action !== "vercel-cli-upgrade" &&
+    action !== "vercel-login" &&
+    action !== "vercel-forbidden"
+  ) {
+    throw error;
+  }
+
+  const repair =
+    action === "vercel-cli-missing"
+      ? { label: "Install Vercel CLI", message: "The Vercel CLI is required. Install it now?" }
+      : action === "vercel-cli-upgrade"
+        ? {
+            label: "Upgrade Vercel CLI",
+            message: "Your Vercel CLI needs an update. Upgrade it now?",
+          }
+        : {
+            label:
+              action === "vercel-forbidden" ? "Re-authenticate with Vercel" : "Log in to Vercel",
+            message:
+              action === "vercel-forbidden"
+                ? "Vercel denied access to that team. Re-authenticate and continue?"
+                : "You need to log in to Vercel to continue.",
+          };
+
+  let choice: "repair" | "cancel";
+  try {
+    choice = await input.prompter.select({
+      message: repair.message,
+      options: [
+        { value: "repair", label: `${repair.label} and continue` },
+        { value: "cancel", label: "Choose another option" },
+      ],
+      initialValue: "repair",
+    });
+  } catch {
+    return "cancel";
+  }
+  if (choice === "cancel") return "cancel";
+
+  if (action === "vercel-cli-missing" || action === "vercel-cli-upgrade") {
+    const result = await flows.runInstallVercelCliFlow({
+      appRoot: input.appRoot,
+      prompter: input.prompter,
+      signal: input.signal,
+      upgrade: action === "vercel-cli-upgrade",
+    });
+    if (result.kind === "installed" || result.kind === "already") return "retry";
+    input.prompter.log.warning(
+      result.kind === "failed" && result.reason !== undefined
+        ? `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI: ${result.reason}`
+        : `Couldn't ${action === "vercel-cli-upgrade" ? "upgrade" : "install"} the Vercel CLI.`,
+    );
+    return "cancel";
+  }
+
+  const login = await flows.runLoginFlow({
+    appRoot: input.appRoot,
+    prompter: input.prompter,
+    signal: input.signal,
+    force: action === "vercel-forbidden",
+  });
+  // Device-login output belongs only to the login attempt. Clear it before
+  // either linking or the provider picker resumes.
+  input.prompter.replaceContent?.();
+  return login.kind === "logged-in" || login.kind === "already" ? "retry" : "cancel";
 }
 
 function withRegistryResults(

@@ -202,6 +202,8 @@ export type FlowPanelContent =
 export interface FlowPanelState {
   /** The invoked command, e.g. "/deploy". Empty renders no title row. */
   title: string;
+  /** Progress owned by an enclosing journey, visible through nested questions and waits. */
+  navigation?: PlannerNavigation;
   lines: readonly FlowPanelLine[];
   content: FlowPanelContent;
 }
@@ -310,6 +312,9 @@ export function renderFlowPanel(state: FlowPanelState, theme: Theme, width: numb
     rows.push(`  ${c.bold(state.title)}`);
   }
   rows.push("");
+  if (state.navigation?.kind === "planner") {
+    rows.push(...plannerStepRows(state.navigation, undefined, theme));
+  }
 
   const recent = state.lines.slice(-FLOW_PANEL_LINE_CAP);
   for (const line of recent) {
@@ -450,10 +455,13 @@ function plannerStepRows(
   const labels = navigation.steps.map((step, index) => {
     const resolvedCount = index === navigation.activeStep ? activeCount : step.count;
     const count = resolvedCount === undefined || resolvedCount === 0 ? "" : ` (${resolvedCount})`;
-    const text = `${step.label}${count}`;
+    const complete = step.complete === true ? `${theme.glyph.success} ` : "";
+    const text = `${complete}${step.label}${count}`;
     return index === navigation.activeStep
       ? theme.colors.inverse(theme.colors.blue(theme.colors.bold(` ${text} `)))
-      : theme.colors.dim(text);
+      : step.complete === true
+        ? theme.colors.green(text)
+        : theme.colors.dim(text);
   });
   const progress = labels.flatMap((label, index) => {
     if (index === labels.length - 1) return [label];

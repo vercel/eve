@@ -115,7 +115,7 @@ export interface PlannerNavigation {
   activeStep: number;
   /** Earliest step reachable with Left Arrow; defaults to the first step. */
   firstNavigableStep?: number;
-  steps: readonly { label: string; count?: number }[];
+  steps: readonly { label: string; count?: number; complete?: boolean }[];
 }
 
 /** Options common to every {@link Prompter.select} call. */

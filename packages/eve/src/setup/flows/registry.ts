@@ -19,6 +19,14 @@ type PlannerScreen = Section | "review";
 
 const PLANNER_STEPS = ["Channels", "Integrations", "Review"] as const;
 
+export interface RegistryPlannerContext {
+  /** Steps owned by an enclosing journey, rendered before the registry steps. */
+  prefixSteps?: readonly { label: string; complete?: boolean }[];
+  reviewMessage?: string;
+  primaryActionLabel?: string;
+  emptyActionLabel?: string;
+}
+
 export interface RegistryFlowDeps {
   browseRegistryCatalog: (typeof import("#cli/commands/registry.js"))["browseRegistryCatalog"];
   installRegistryItem: (typeof import("#cli/commands/registry.js"))["installRegistryItem"];
@@ -40,7 +48,13 @@ const SECTIONS = {
   channels: {
     title: "Where should people reach your agent?",
     description: "You can add more later with /add.",
-    featured: ["channel/web", "channel/slack", "channel/github", "channel/linear-agent"],
+    featured: [
+      "channel/web",
+      "channel/slack",
+      "channel/github",
+      "channel/linear-agent",
+      "channel/photon-imessage",
+    ],
     includes: (item: Item) => item.name.startsWith("channel/"),
   },
   integrations: {
@@ -66,6 +80,8 @@ function isPlannerItem(section: Section, item: Item): boolean {
 }
 
 function orderedSectionItems(section: Section, catalog: readonly Item[]): Item[] {
+  // Product-level presets are installed as one item when explicitly requested;
+  // the bare planner presents their independently installable components.
   const matching = catalog.filter((item) => isPlannerItem(section, item));
   const featured = SECTIONS[section].featured
     .map((name) => matching.find((item) => item.name === name))
@@ -101,17 +117,26 @@ function plannerNavigation(
   input: {
     catalog: readonly Item[];
     selected: ReadonlySet<string>;
+    plannerContext?: RegistryPlannerContext;
   },
 ): NonNullable<MultiSelectOptions<string>["navigation"]> {
+  const prefix = (input.plannerContext?.prefixSteps ?? []).map((step) => ({
+    label: step.label,
+    complete: step.complete,
+  }));
   return {
     kind: "planner",
-    activeStep,
-    steps: PLANNER_STEPS.map((label, index) => {
-      if (index === 2) return { label };
-      const section = index === 0 ? "channels" : "integrations";
-      const count = selectedInSection(section, input.catalog, input.selected).length;
-      return count === 0 ? { label } : { label, count };
-    }),
+    activeStep: prefix.length + activeStep,
+    firstNavigableStep: prefix.length,
+    steps: [
+      ...prefix,
+      ...PLANNER_STEPS.map((label, index) => {
+        if (index === 2) return { label };
+        const section = index === 0 ? "channels" : "integrations";
+        const count = selectedInSection(section, input.catalog, input.selected).length;
+        return count === 0 ? { label } : { label, count };
+      }),
+    ],
   };
 }
 
@@ -168,6 +193,7 @@ async function editPlan(input: {
   itemsByAddress: ReadonlyMap<string, Item>;
   selected: Set<string>;
   notices?: readonly SelectNotice[];
+  plannerContext?: RegistryPlannerContext;
 }): Promise<"install" | "cancelled"> {
   let screen: PlannerScreen = "channels";
   let notices = input.notices;
@@ -194,22 +220,32 @@ async function editPlan(input: {
 
     try {
       const hasSelections = input.selected.size > 0;
+      const selectedItems = [...input.selected].map((address) => {
+        const item = input.itemsByAddress.get(address);
+        if (item === undefined)
+          throw new Error(`Registry item "${address}" is no longer available.`);
+        return item;
+      });
+      const channels = selectedItems.filter((item) => item.name.startsWith("channel/"));
+      const integrations = selectedItems.filter((item) => !item.name.startsWith("channel/"));
+      const selectionMetadata = [
+        ...(channels.length === 0
+          ? []
+          : [{ label: "Channels", value: channels.map(label).join(", ") }]),
+        ...(integrations.length === 0
+          ? []
+          : [{ label: "Integrations", value: integrations.map(label).join(", ") }]),
+      ];
       const request: SingleSelectOptions<"install" | "back"> = {
-        message: "Review your agent",
-        metadata: [...input.selected].map((address) => {
-          const item = input.itemsByAddress.get(address);
-          if (item === undefined)
-            throw new Error(`Registry item "${address}" is no longer available.`);
-          return {
-            label: item.name.startsWith("channel/") ? "Channel" : "Integration",
-            value: label(item),
-          };
-        }),
+        message: input.plannerContext?.reviewMessage ?? "Review additions",
+        metadata: selectionMetadata,
         navigation: plannerNavigation(2, input),
         options: [
           {
             value: "install",
-            label: hasSelections ? "Install and set up" : "Finish without adding",
+            label: hasSelections
+              ? (input.plannerContext?.primaryActionLabel ?? "Install and set up")
+              : (input.plannerContext?.emptyActionLabel ?? "Finish without adding"),
           },
           { value: "back", label: "Back" },
         ],
@@ -238,6 +274,7 @@ export async function runRegistryFlow(input: {
   signal?: AbortSignal;
   /** Registry item supplied by `/add <item>`, confirmed and installed directly. */
   initialAddress?: string;
+  plannerContext?: RegistryPlannerContext;
   onItemStart?: (item: Item, index: number, total: number) => void;
   deps?: Partial<RegistryFlowDeps>;
 }): Promise<{ kind: "done"; result: RegistrySessionResult } | { kind: "cancelled" }> {
@@ -269,17 +306,15 @@ export async function runRegistryFlow(input: {
         text: `${error.registry}: ${error.message}`,
       }));
       const itemsByAddress = new Map(catalog.map((item) => [item.address, item]));
-      if (
-        (await editPlan({
-          prompter: input.prompter,
-          catalog,
-          itemsByAddress,
-          selected,
-          notices,
-        })) !== "install"
-      ) {
-        return { kind: "cancelled" };
-      }
+      const plan = await editPlan({
+        prompter: input.prompter,
+        catalog,
+        itemsByAddress,
+        selected,
+        notices,
+        plannerContext: input.plannerContext,
+      });
+      if (plan !== "install") return { kind: "cancelled" };
       items = [...selected].map((address) => {
         const item = itemsByAddress.get(address);
         if (item === undefined)
@@ -296,6 +331,7 @@ export async function runRegistryFlow(input: {
       (await import("#setup/project-resolution.js")).detectDeployment;
     const runDeployFlow = input.deps?.runDeployFlow ?? (await import("./deploy.js")).runDeployFlow;
     session = createRegistrySession({ detectDeployment, runDeployFlow });
+    const activeSession = session;
     for (const [index, item] of items.entries()) {
       input.signal?.throwIfAborted();
       input.onItemStart?.(item, index, items.length);
@@ -307,7 +343,7 @@ export async function runRegistryFlow(input: {
             signal: input.signal,
           });
         const installed = await (input.prompter.withExclusiveTerminal?.(install) ?? install());
-        session.add(label(item), installed.output, installed.setup);
+        activeSession.add(label(item), installed.output, installed.setup);
       } catch (error) {
         input.signal?.throwIfAborted();
         if (error instanceof WizardCancelledError || error instanceof HumanActionRequiredError) {
@@ -316,7 +352,7 @@ export async function runRegistryFlow(input: {
         const message = error instanceof Error ? error.message : String(error);
         const failureMessage = message.trim() || "Installation failed.";
         const summary = failureMessage.split("\n").find((line) => line.trim() !== "");
-        session.addFailure(label(item), failureMessage);
+        activeSession.addFailure(label(item), failureMessage);
         const request: SingleSelectOptions<"skip" | "cancel"> = {
           message: `Couldn't add ${label(item)}`,
           options: [
@@ -327,13 +363,13 @@ export async function runRegistryFlow(input: {
         if (summary !== undefined) request.description = summary;
         const action = await input.prompter.select(request);
         if (action === "cancel") {
-          return { kind: "done", result: { ...session.result(), cancelled: true } };
+          return { kind: "done", result: { ...activeSession.result(), cancelled: true } };
         }
       }
     }
     return {
       kind: "done",
-      result: await session.continueAfterInstall({
+      result: await activeSession.continueAfterInstall({
         appRoot: input.appRoot,
         prompter: input.prompter,
         signal: input.signal,

@@ -109,7 +109,8 @@ export function createPromptCommandHandler(
       }
       const { runTuiSetupCommand, SETUP_FLOW_CONFIG } = setupCommands;
       const flowConfig = SETUP_FLOW_CONFIG[command.name];
-      flow.begin(flowConfig.title, flowConfig.indicator);
+      flow.begin(context.setupFlowTitle ?? flowConfig.title, flowConfig.indicator);
+      flow.setNavigation?.(context.setupFlowNavigation);
       let preserveFlowDiagnostics = true;
       try {
         const commandInput: TuiSetupCommandInput = {
@@ -122,16 +123,17 @@ export function createPromptCommandHandler(
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
         }
-        // `/add <item>` confirms and installs that address; bare `/add` opens the planner.
+        if (context.registryPlannerContext !== undefined) {
+          commandInput.registryPlannerContext = context.registryPlannerContext;
+        }
+        // `/add <item>` preselects that registry item; bare `/add` starts empty.
         if (command.name === "add" && command.argument.length > 0) {
           commandInput.initialRegistryAddress = command.argument;
         }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;
-        const outcome: PromptCommandOutcome = { message: result.message };
-        if (result.tone !== undefined) outcome.tone = result.tone;
-        if (result.effect !== undefined) outcome.effect = result.effect;
+        const { preserveFlowDiagnostics: _preserve, partial: _partial, ...outcome } = result;
         return outcome;
       } finally {
         if (context.keepSetupFlowOpen !== true) {

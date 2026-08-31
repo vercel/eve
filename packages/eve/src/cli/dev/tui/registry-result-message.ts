@@ -7,14 +7,13 @@ export function registryItemProgress(renderer: {
     headline: string;
     facts: readonly { label: string; value: string }[];
   }): void;
+  setNavigation?(navigation: undefined): void;
   setStatus(status: string | undefined): void;
 }): (item: RegistryCatalogItem, index: number, total: number) => void {
   return (item, index, total) => {
-    renderer.replaceContent?.({
-      headline: `Adding ${item.title ?? item.name} · ${index + 1} of ${total}`,
-      facts: [],
-    });
-    renderer.setStatus("Installing files and dependencies…");
+    renderer.setNavigation?.(undefined);
+    renderer.replaceContent?.();
+    renderer.setStatus(`Adding ${item.title ?? item.name} · ${index + 1} of ${total}`);
   };
 }
 

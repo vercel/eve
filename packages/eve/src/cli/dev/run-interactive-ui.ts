@@ -46,6 +46,7 @@ export async function runInteractiveDevelopmentUi(input: {
   const tuiInput: RunDevelopmentTuiInput = {
     target,
     initialInput: input.options.input,
+    onboard: input.options.onboard,
     onBootProgress: input.report,
     lifecycle: input.lifecycle,
     ...display,
