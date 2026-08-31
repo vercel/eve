@@ -584,7 +584,11 @@ describe("startRemoteAgentSession — forwarded principal", () => {
           traceFlags: 1,
           traceId: "1".repeat(32),
         },
-        remote: { ...createRemoteAgent(), forwardPrincipal: true },
+        remote: {
+          ...createRemoteAgent(),
+          forwardPrincipal: true,
+          headers: { baggage: "vendor=value,eve.audience=private" },
+        },
         session: createSession(),
       }),
     ).resolves.toEqual({ sessionId: "remote-session" });
@@ -593,9 +597,11 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       current: CURRENT_AUTH,
       initiator: INITIATOR_AUTH,
     });
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedTracePolicy).toEqual({
-      audience: "public",
-      decision: { action: "record", recordInputs: true, recordOutputs: false },
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
+      "forwardedTracePolicy",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      baggage: "vendor=value,eve.audience=public",
     });
   });
 
@@ -635,7 +641,13 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: null,
         callbackBaseUrl: "https://caller.example.com",
+        channelAudience: "public",
         initiatorAuth: null,
+        parentTraceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
         remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
       }),
@@ -644,6 +656,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
       "forwardedPrincipal",
     );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("baggage");
   });
 
   it("does not forward when forwardPrincipal is unset even with auth in scope", async () => {
@@ -664,8 +677,17 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
+        channelAudience: "public",
         initiatorAuth: INITIATOR_AUTH,
-        remote: createRemoteAgent(),
+        parentTraceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+        remote: {
+          ...createRemoteAgent(),
+          headers: { baggage: "vendor=value,eve.audience=public" },
+        },
         session: createSession(),
       }),
     ).resolves.toEqual({ sessionId: "remote-session" });
@@ -673,6 +695,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
       "forwardedPrincipal",
     );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
   });
 });
 

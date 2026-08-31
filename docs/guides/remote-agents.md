@@ -145,7 +145,7 @@ A receiver on an eve version that predates all principal forwarding may instead 
 
 ## Preserving trace content
 
-Remote dispatch always propagates W3C `traceparent` plus the parent channel audience and trace-capture decision. The receiver ignores the asserted policy by default. To preserve public trace content across a trusted remote hop, allowlist the transport-authenticated caller with `trustedForwarders`:
+When `forwardPrincipal: true` forwards an authenticated principal for a sampled public parent trace, remote dispatch also writes `eve.audience=public` into [W3C Baggage](https://www.w3.org/TR/baggage/). The receiver ignores that member unless it accepts the transport-authenticated caller with `trustedForwarders`:
 
 ```ts title="agent/channels/eve.ts"
 import { eveChannel } from "eve/channels/eve";
@@ -158,7 +158,9 @@ export default eveChannel({
 });
 ```
 
-The policy is accepted only on callback-bound requests with a valid `traceparent`. eve intersects it with the receiving deployment's own trace policy and channel audience ceiling, so the parent can preserve or narrow capture but cannot enable content that the receiver forbids. Direct sessions and untrusted remote calls continue to classify the receiving HTTP channel independently. The field is top-level and additive, so older receivers ignore it and retain their existing metadata-only behavior.
+eve reads the baggage member only when the request body includes a callback, `traceparent` is valid, and the forwarded principal was accepted. The callback and headers are caller-supplied; they identify the protocol shape but do not prove parentage. `trustedForwarders` is the authorization boundary.
+
+An accepted public audience is fixed when the remote session is created. With the default trace policy, it records model and tool inputs and outputs; process and provider trace policies on the receiver may narrow or drop capture. Continuations do not re-evaluate the parent audience. Direct sessions, untrusted calls, malformed baggage, older senders, and calls without principal forwarding retain the receiving HTTP channel's `unknown` classification. Older receivers ignore the baggage member.
 
 ## How remote dispatch and callbacks work
 

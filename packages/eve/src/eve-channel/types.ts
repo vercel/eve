@@ -96,7 +96,7 @@ export interface EveChannelInput {
   readonly auth: AuthFn<Request> | readonly AuthFn<Request>[];
   /**
    * The trusted-forwarders policy: which transport-authenticated callers may
-   * assert a forwarded principal or callback-bound trace policy. The predicate
+   * assert a forwarded principal or callback-marked public trace audience. The predicate
    * receives the *verified* route-auth principal of the forwarder — who is
    * asserting, never what is asserted — and must match it precisely (for example
    * `(forwarder) => forwarder.subject === vercelSubject({ teamSlug, projectName })`).
@@ -108,9 +108,9 @@ export interface EveChannelInput {
    * `session.auth.initiator`. On continuation, only `session.auth.current`
    * changes; the initiator remains pinned to the session's creator. The
    * forwarder is recorded on accepted contexts as the `eve:forwarded-by`
-   * attribute. Callback-bound trace policy is intersected with this
-   * deployment's local trace policy. Omit the option to reject forwarded
-   * principals with 403 and ignore forwarded trace policy.
+   * attribute. An accepted public audience is evaluated by this deployment's
+   * trace policies; the default records model and tool content. Omit the option
+   * to reject forwarded principals with 403 and ignore forwarded audience.
    */
   readonly trustedForwarders?: TrustedForwarders;
   /**

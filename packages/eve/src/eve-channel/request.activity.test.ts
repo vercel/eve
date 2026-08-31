@@ -64,17 +64,4 @@ describe("parseCreateBody activity relay", () => {
     expect(response).toBeInstanceOf(Response);
     expect((response as Response).status).toBe(400);
   });
-
-  it("ignores additive forwarded trace policy fields", () => {
-    const parsed = parseCreateBody({
-      forwardedTracePolicy: {
-        audience: "public",
-        decision: { action: "record", recordInputs: true, recordOutputs: true },
-      },
-      message: "research this",
-    });
-
-    expect(parsed).not.toBeInstanceOf(Response);
-    expect(parsed).not.toHaveProperty("forwardedTracePolicy");
-  });
 });

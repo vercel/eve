@@ -9,7 +9,6 @@ import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { TaskView } from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
@@ -89,12 +88,6 @@ export interface SessionTraceContext {
   readonly spanId: string;
   readonly traceFlags: number;
   readonly traceId: string;
-}
-
-/** Trace policy asserted by a transport-authenticated remote parent. */
-export interface ForwardedTracePolicy {
-  readonly audience: ChannelAudience;
-  readonly decision?: InstrumentationDecision;
 }
 
 /** Framework-owned identity for one inbound channel operation. */
@@ -504,8 +497,6 @@ export interface RunInput {
    * because trace state is scoped to one session's context.
    */
   readonly parentTraceContext?: SessionTraceContext;
-  /** Trusted remote-parent policy to intersect with this deployment's local trace policy. */
-  readonly forwardedTracePolicy?: ForwardedTracePolicy;
   /**
    * Runtime-supplied session limits. Delegated local subagents use this to
    * carry the parent's remaining quota and delegation caps with the same limit

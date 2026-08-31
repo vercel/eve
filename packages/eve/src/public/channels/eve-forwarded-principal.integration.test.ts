@@ -25,6 +25,7 @@ import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/p
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},
@@ -105,8 +106,11 @@ function createEveCreateHandler(input: EveChannelInput) {
 
 describe("eveChannel forwarded principal → runtime principal", () => {
   it("seeds the forwarded principal into the run context and resolves a user Connect principal", async () => {
+    const trustedForwarders = vi.fn(
+      (caller: SessionAuthContext) => caller.principalId === ROUTER_CALLER.principalId,
+    );
     const handler = createEveCreateHandler({
-      trustedForwarders: (caller) => caller.principalId === ROUTER_CALLER.principalId,
+      trustedForwarders,
       auth: () => ROUTER_CALLER,
     });
 
@@ -116,10 +120,6 @@ describe("eveChannel forwarded principal → runtime principal", () => {
           forwardedPrincipal: {
             current: FORWARDED_CURRENT,
             initiator: FORWARDED_INITIATOR,
-          },
-          forwardedTracePolicy: {
-            audience: "public",
-            decision: { action: "record", recordInputs: true, recordOutputs: false },
           },
           callback: {
             callId: "call-1",
@@ -132,6 +132,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
         }),
         headers: {
           "content-type": "application/json",
+          baggage: "vendor=value,eve.audience=public",
           traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
         },
         method: "POST",
@@ -154,10 +155,9 @@ describe("eveChannel forwarded principal → runtime principal", () => {
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("public");
-    expect(options.forwardedTracePolicy).toEqual({
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata).toMatchObject({
       audience: "public",
-      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
     });
     expect(ctx.get(ParentTraceContextKey)).toEqual({
       isRemote: true,
@@ -191,6 +191,95 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     });
     // The audit attribute never enters Connect token-cache keying.
     expect(principalKey(principal)).toBe("user:slack:slack:U123");
+    expect(trustedForwarders).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps non-public forwarded audience baggage metadata-only", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          forwardedPrincipal: { current: FORWARDED_CURRENT },
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
+          message: "check my dashboards",
+          mode: "task",
+        }),
+        headers: {
+          "content-type": "application/json",
+          baggage: "eve.audience=private",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+    );
+
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
+    const ctx = buildRunContext({
+      bundle: EMPTY_SKILL_BUNDLE,
+      run: {
+        adapter: { kind: "eve" },
+        channelName: "eve",
+        ...options,
+      },
+    });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+  });
+
+  it("ignores public audience baggage without an accepted forwarded principal", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
+          message: "check my dashboards",
+          mode: "task",
+        }),
+        headers: {
+          "content-type": "application/json",
+          baggage: "eve.audience=public",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+    );
+
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
+    const ctx = buildRunContext({
+      bundle: EMPTY_SKILL_BUNDLE,
+      run: {
+        adapter: { kind: "eve" },
+        channelName: "eve",
+        ...options,
+      },
+    });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata).not.toHaveProperty(
+      FORWARDED_AUDIENCE_SOURCE_KEY,
+    );
   });
 
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {
@@ -251,15 +340,12 @@ describe("eveChannel forwarded principal → runtime principal", () => {
           forwardedPrincipal: {
             current: FORWARDED_CURRENT,
           },
-          forwardedTracePolicy: {
-            audience: "public",
-            decision: { action: "record", recordInputs: true, recordOutputs: true },
-          },
           message: "check my dashboards",
           mode: "task",
         }),
         headers: {
           "content-type": "application/json",
+          baggage: "eve.audience=public",
           traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
         },
         method: "POST",

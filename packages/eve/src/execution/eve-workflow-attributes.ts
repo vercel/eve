@@ -28,6 +28,7 @@
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
  * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
  * - `$eve.is_otel_trace_enabled` — whether hosted Agent Runs OTEL is enabled for the run
+ * - `$eve.trace_audience_source` — trusted source of an inherited channel audience
  * - `$eve.trace_id` — trace id of the `agent.session` span, read from the pre-allocated
  *   trace seed in the serialized context. Present only when the trace is sampled;
  *   absence means no exported OTEL trace exists.
@@ -36,6 +37,7 @@
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import {
   ChannelRequestIdKey,
+  ChannelInstrumentationKey,
   OtelTraceEnabledKey,
   ScheduleIdKey,
   SessionTraceSeedKey,
@@ -46,6 +48,7 @@ import { isNonEmptyString } from "#shared/guards.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
@@ -63,6 +66,10 @@ export interface SessionIdentitySummary {
 interface SerializedChannelAdapter {
   readonly kind?: unknown;
   readonly audience?: unknown;
+}
+
+interface SerializedChannelInstrumentation {
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 /** Untyped session parent snapshot as it survives serialization. */
@@ -102,7 +109,23 @@ export function isWorkflowTraceContentVisible(serializedContext: Record<string, 
   const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | SerializedChannelAdapter
     | undefined;
-  return shouldCaptureInstrumentationContent(normalizeChannelAudience(channel?.audience));
+  const instrumentation = serializedContext[ChannelInstrumentationKey.name] as
+    | SerializedChannelInstrumentation
+    | undefined;
+  return shouldCaptureInstrumentationContent(
+    normalizeChannelAudience(instrumentation?.metadata?.audience ?? channel?.audience),
+  );
+}
+
+export function readTraceAudienceSource(
+  serializedContext: Record<string, unknown>,
+): string | undefined {
+  const instrumentation = serializedContext[ChannelInstrumentationKey.name] as
+    | SerializedChannelInstrumentation
+    | undefined;
+  return instrumentation?.metadata?.[FORWARDED_AUDIENCE_SOURCE_KEY] === FORWARDED_AUDIENCE_SOURCE
+    ? "trusted_forwarder"
+    : undefined;
 }
 
 export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {
@@ -259,6 +282,7 @@ export function buildSessionAttributes(input: {
     "$eve.is_otel_trace_enabled": isOtelTraceEnabled,
     "$eve.is_trace_content_visible": isTraceContentVisible,
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
+    "$eve.trace_audience_source": readTraceAudienceSource(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
     "$eve.title": deriveSessionTitle(input.inputMessage),
@@ -287,6 +311,7 @@ export function buildSubagentRootAttributes(input: {
     "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
     "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
     "$eve.trace_id": readSessionTraceId(input.serializedContext),
+    "$eve.trace_audience_source": readTraceAudienceSource(input.serializedContext),
     "$eve.type": "subagent",
     "$eve.parent": input.parentSessionId,
     "$eve.parent_call": input.parentCallId,

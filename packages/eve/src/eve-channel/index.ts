@@ -1,7 +1,6 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
-import { resolveForwardedTracePolicy } from "#channel/forwarded-trace-policy.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import {
   handleConnectionCallbackRequest,
@@ -47,6 +46,11 @@ import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
+import {
+  FORWARDED_AUDIENCE_SOURCE,
+  FORWARDED_AUDIENCE_SOURCE_KEY,
+  readForwardedAudienceBaggage,
+} from "#protocol/baggage.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, GET, HEAD, POST } from "#public/definitions/channel.js";
@@ -144,14 +148,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           body.callback === undefined
             ? undefined
             : parseTraceparent(req.headers.get("traceparent"));
-        const forwardedTracePolicy =
-          parsedParentTraceContext === undefined
-            ? undefined
-            : await resolveForwardedTracePolicy({
-                forwarder: authResult,
-                payload,
-                trustedForwarders: input.trustedForwarders,
-              });
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -185,6 +181,28 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           }
         }
 
+        const forwardedAudienceBaggage =
+          parsedParentTraceContext === undefined
+            ? "absent"
+            : readForwardedAudienceBaggage(req.headers.get("baggage"));
+        const acceptsForwardedAudience =
+          forwarded.accepted && forwardedAudienceBaggage === "public";
+        if (forwardedAudienceBaggage === "malformed") {
+          log.warn("ignoring malformed forwarded audience baggage", {
+            forwarder: authResult.principalId,
+          });
+        } else if (forwardedAudienceBaggage === "public") {
+          if (forwarded.accepted) {
+            log.info("accepted forwarded public audience", {
+              forwarder: authResult.principalId,
+            });
+          } else {
+            log.warn("ignoring forwarded audience without an accepted principal", {
+              forwarder: authResult.principalId,
+            });
+          }
+        }
+
         const messageResult = await resolveOnMessage({
           auth: forwarded.auth,
           config: input,
@@ -208,10 +226,15 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
-            channelMetadata:
-              forwardedTracePolicy === undefined
-                ? undefined
-                : { kind: "eve", metadata: { audience: forwardedTracePolicy.audience } },
+            channelMetadata: !acceptsForwardedAudience
+              ? undefined
+              : {
+                  kind: "eve",
+                  metadata: {
+                    audience: "public",
+                    [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
+                  },
+                },
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(
@@ -223,7 +246,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               body.context,
             ),
             mode: body.mode ?? "conversation",
-            forwardedTracePolicy,
             parentTraceContext: parsedParentTraceContext,
             title: messageResult.title,
           });

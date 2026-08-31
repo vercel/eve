@@ -7,7 +7,6 @@ import {
   ParentTraceContextKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
-import type { ForwardedTracePolicy } from "#channel/types.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
@@ -21,6 +20,7 @@ import {
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
+import { FORWARDED_AUDIENCE_SOURCE, FORWARDED_AUDIENCE_SOURCE_KEY } from "#protocol/baggage.js";
 
 const boundSession = {
   agentName: "test-agent",
@@ -71,11 +71,15 @@ beforeEach(() => {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
 });
 
-function initializeRemoteSession(
-  tracePolicy: TraceCapturePolicy,
-  forwardedTracePolicy: ForwardedTracePolicy,
-): ContextContainer {
+function initializeRemoteSession(tracePolicy: TraceCapturePolicy): ContextContainer {
   const ctx = createContext("public");
+  ctx.set(ChannelInstrumentationKey, {
+    kind: "channel:test",
+    metadata: {
+      audience: "public",
+      [FORWARDED_AUDIENCE_SOURCE_KEY]: FORWARDED_AUDIENCE_SOURCE,
+    },
+  });
   registerInstrumentationRuntime({
     ...createRuntime({ capturesContent: true, publish: vi.fn() }, tracePolicy),
     idGenerator: new AgentSpanIdGenerator(),
@@ -84,7 +88,6 @@ function initializeRemoteSession(
   initializeSessionInstrumentation({
     agentName: "remote-agent",
     ctx,
-    forwardedTracePolicy,
     parentTraceContext: {
       spanId: "c".repeat(16),
       traceFlags: 1,
@@ -95,14 +98,12 @@ function initializeRemoteSession(
 }
 
 describe("initializeSessionInstrumentation", () => {
-  it("intersects a forwarded remote decision with the receiver trace policy", () => {
-    const ctx = initializeRemoteSession(
-      () => ({ emit: true, recordInputs: false, recordOutputs: true }),
-      {
-        audience: "public",
-        decision: { action: "record", recordInputs: true, recordOutputs: true },
-      },
-    );
+  it("applies the receiver trace policy to a forwarded public audience", () => {
+    const ctx = initializeRemoteSession(() => ({
+      emit: true,
+      recordInputs: false,
+      recordOutputs: true,
+    }));
 
     expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
       decision: { action: "record", recordInputs: false, recordOutputs: true },
@@ -110,21 +111,28 @@ describe("initializeSessionInstrumentation", () => {
     });
   });
 
-  it("retains full capture for a sampled public remote trace", () => {
-    const ctx = initializeRemoteSession(() => true, { audience: "public" });
+  it("retains full capture for a sampled public remote trace", async () => {
+    const ctx = initializeRemoteSession(() => true);
 
     expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
       decision: { action: "record", recordInputs: true, recordOutputs: true },
       traceFlags: 1,
     });
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
+    expect(
+      await readTelemetry(
+        bindSessionInstrumentation({
+          agentName: "remote-agent",
+          ctx,
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+        }),
+      ),
+    ).toMatchObject({ recordInputs: true, recordOutputs: true });
   });
 
   it("does not let a forwarded policy override a receiver drop decision", () => {
-    const ctx = initializeRemoteSession(() => false, {
-      audience: "public",
-      decision: { action: "record", recordInputs: true, recordOutputs: true },
-    });
+    const ctx = initializeRemoteSession(() => false);
 
     expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
       decision: { action: "drop" },
@@ -134,6 +142,32 @@ describe("initializeSessionInstrumentation", () => {
       decision: { action: "drop" },
       traceFlags: 0,
     });
+  });
+
+  it("preserves sampled flags for a non-forwarded parent decision", () => {
+    const ctx = createContext("public");
+    ctx.set(ParentTraceContextKey, {
+      decision: { action: "drop" },
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
+    });
+    registerInstrumentationRuntime({
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }, () => false),
+      idGenerator: new AgentSpanIdGenerator(),
+      prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
+    });
+    initializeSessionInstrumentation({
+      agentName: "local-subagent",
+      ctx,
+      parentTraceContext: ctx.get(ParentTraceContextKey),
+    });
+
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "drop" },
+      traceFlags: 1,
+    });
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
   });
 });
 

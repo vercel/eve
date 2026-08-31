@@ -11,7 +11,6 @@ import {
 import type {
   ActivityObserverConfig,
   CancelTurnResult,
-  ForwardedTracePolicy,
   SessionAuthContext,
   SessionTraceContext,
 } from "#channel/types.js";
@@ -34,6 +33,7 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
+import { writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -84,7 +84,6 @@ export async function startRemoteAgentSession(input: {
   }
 
   const forwardedPrincipal = buildForwardedPrincipalField(input);
-  const forwardedTracePolicy = buildForwardedTracePolicy(input);
   const requestBody: {
     capabilities: {};
     callback: {
@@ -96,7 +95,6 @@ export async function startRemoteAgentSession(input: {
     };
     activityObserver?: ActivityObserverConfig;
     forwardedPrincipal?: ForwardedPrincipal;
-    forwardedTracePolicy?: ForwardedTracePolicy;
     message: string;
     mode: "conversation" | "task";
     operationId?: string;
@@ -125,9 +123,6 @@ export async function startRemoteAgentSession(input: {
   if (forwardedPrincipal !== undefined) {
     requestBody.forwardedPrincipal = forwardedPrincipal;
   }
-  if (forwardedTracePolicy !== undefined) {
-    requestBody.forwardedTracePolicy = forwardedTracePolicy;
-  }
   if (input.operationId !== undefined) {
     requestBody.operationId = input.operationId;
   }
@@ -135,11 +130,19 @@ export async function startRemoteAgentSession(input: {
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
   const traceparent = formatTraceparent(input.parentTraceContext);
   if (traceparent !== undefined) {
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === "traceparent") delete headers[key];
-    }
-    headers["traceparent"] = traceparent;
+    setHeader(headers, "traceparent", traceparent);
   }
+  const baggage = writeForwardedAudienceBaggage(
+    readHeader(headers, "baggage"),
+    forwardedPrincipal !== undefined &&
+      input.channelAudience === "public" &&
+      input.parentTraceContext !== undefined &&
+      (input.parentTraceContext.traceFlags & 1) === 1 &&
+      traceparent !== undefined
+      ? "public"
+      : "unknown",
+  );
+  setHeader(headers, "baggage", baggage);
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify(requestBody),
     headers: {
@@ -315,20 +318,6 @@ function buildForwardedPrincipalField(input: {
   return field;
 }
 
-function buildForwardedTracePolicy(input: {
-  readonly channelAudience?: ChannelAudience;
-  readonly parentTraceContext?: SessionTraceContext;
-}): ForwardedTracePolicy | undefined {
-  if (input.channelAudience === undefined || input.parentTraceContext === undefined)
-    return undefined;
-  return {
-    audience: input.channelAudience,
-    ...(input.parentTraceContext.decision === undefined
-      ? {}
-      : { decision: input.parentTraceContext.decision }),
-  };
-}
-
 export async function cancelRemoteAgentTurn(input: {
   readonly headers?: Record<string, string>;
   readonly remote: Pick<ResolvedRuntimeRemoteAgentNode, "auth" | "headers" | "name" | "url">;
@@ -377,6 +366,18 @@ export async function cancelRemoteAgentTurn(input: {
   return result.data.status === "accepted"
     ? { sessionId: result.data.sessionId, status: "accepted" }
     : { status: "no_active_turn" };
+}
+
+function readHeader(headers: Record<string, string>, name: string): string | undefined {
+  const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === name);
+  return key === undefined ? undefined : headers[key];
+}
+
+function setHeader(headers: Record<string, string>, name: string, value: string | undefined): void {
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === name) delete headers[key];
+  }
+  if (value !== undefined) headers[name] = value;
 }
 
 /** Retires one exact remote child session through eve's authenticated reset route. */
