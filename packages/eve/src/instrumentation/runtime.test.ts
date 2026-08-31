@@ -89,6 +89,30 @@ describe("bindInstrumentationRuntime", () => {
     });
   });
 
+  it("binds provider hooks to the step-entry agent and channel", async () => {
+    const boundHooks: InstrumentationHooks = { capturesContent: false, publish: vi.fn() };
+    const forTrace = vi.fn(() => boundHooks);
+    const ctx = createContext("private");
+    ctx.set(ChannelInstrumentationKey, {
+      channelType: "slack",
+      kind: "channel:test",
+      metadata: { audience: "private" },
+    });
+    const instrumentation = bindInstrumentationRuntime(
+      createRuntime({ capturesContent: false, forTrace, publish: vi.fn() }),
+      ctx,
+      { ...boundSession, agentName: "Weather Display Name" },
+    );
+
+    await readTelemetry(instrumentation);
+
+    expect(forTrace).toHaveBeenCalledExactlyOnceWith({
+      agentName: "Weather Display Name",
+      audience: "private",
+      channelType: "slack",
+    });
+  });
+
   it("keeps the step-entry audience for the rest of the step", async () => {
     const ctx = createContext("private");
     const instrumentation = bindInstrumentationRuntime(

@@ -11184,7 +11184,11 @@ describe("createToolLoopHarness", () => {
       await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
 
       expect(attemptCompleted).toHaveBeenCalledOnce();
-      expect(mockCreateAiSdkHookBridge.mock.calls[0]?.[1]).toBe(hooks);
+      expect(mockCreateAiSdkHookBridge.mock.calls[0]?.[1]).toMatchObject({
+        capturesContent: true,
+        capturesInputs: true,
+        capturesOutputs: true,
+      });
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         telemetry?: { integrations?: unknown[] };
       };
@@ -11215,7 +11219,11 @@ describe("createToolLoopHarness", () => {
 
       await runStep(createTestSession(), { message: "private" });
 
-      expect(mockCreateAiSdkHookBridge.mock.calls[0]?.[1]).toBe(hooks);
+      expect(mockCreateAiSdkHookBridge.mock.calls[0]?.[1]).toMatchObject({
+        capturesContent: true,
+        capturesInputs: true,
+        capturesOutputs: true,
+      });
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
       };
@@ -11447,7 +11455,11 @@ describe("createToolLoopHarness", () => {
           stepIndex: 0,
           turnId: "turn_0",
         }),
-        hooks,
+        expect.objectContaining({
+          capturesContent: false,
+          capturesInputs: false,
+          capturesOutputs: false,
+        }),
         runInContext,
         {},
       );

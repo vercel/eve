@@ -63,6 +63,20 @@ describe("resolveTracePolicyDecision", () => {
     ).toEqual({ action: "drop" });
   });
 
+  it("fails closed when policy error reporting also throws", () => {
+    expect(
+      resolveTracePolicy(
+        () => {
+          throw new Error("policy failed");
+        },
+        { audience: "public" },
+        () => {
+          throw new Error("reporting failed");
+        },
+      ),
+    ).toEqual({ action: "drop" });
+  });
+
   it.each([
     ["public", true],
     ["private", false],

@@ -181,7 +181,7 @@ export interface ExecutionInstrumentation {
   readonly flush: () => Promise<void>;
   readonly instrumentChannelDelivery: (
     input:
-      | Omit<ChannelDeliveryStartInstrumentation, "hooks">
+      | Omit<ChannelDeliveryStartInstrumentation, "hooks" | "policyAgentName">
       | Omit<ChannelDeliveryTerminalInstrumentation, "hooks">,
   ) => Promise<void>;
   readonly prepareExecution: () => SessionInstrumentation;
@@ -194,7 +194,7 @@ export function bindInstrumentationRuntime(
   boundSession: BoundInstrumentationSession,
 ): ExecutionInstrumentation | undefined {
   if (runtime === undefined) return undefined;
-  const hooks = runtime.hooks;
+  const baseHooks = runtime.hooks;
   const readSessionContext = () => {
     const context = contextStorage.getStore() ?? ctx;
     return {
@@ -205,6 +205,16 @@ export function bindInstrumentationRuntime(
       parentTraceContext: context.get(ParentTraceContextKey),
       traceSeed: context.get(SessionTraceSeedKey),
     };
+  };
+  const bindHooks = (sessionContext: ReturnType<typeof readSessionContext>) => {
+    const channel = sessionContext.instrumentation;
+    return (
+      baseHooks.forTrace?.({
+        agentName: boundSession.agentName,
+        audience: normalizeChannelAudience(channel?.metadata.audience),
+        channelType: channel?.channelType,
+      }) ?? baseHooks
+    );
   };
   const captureExecutionRuntime = () => {
     const otelSettings = runtime.otelSettings;
@@ -240,6 +250,7 @@ export function bindInstrumentationRuntime(
     return {
       runStep: async (input, execute) => {
         const policyContext = readSessionContext();
+        const hooks = bindHooks(policyContext);
         const settings = executionRuntime.otelSettings;
         const decision = resolveStepInstrumentationDecision(
           settings,
@@ -435,17 +446,24 @@ export function bindInstrumentationRuntime(
     };
   };
   return {
-    createCancellationHandleEvent: (input) =>
-      createInstrumentationHandleEvent({
+    createCancellationHandleEvent: (input) => {
+      const sessionContext = readSessionContext();
+      return createInstrumentationHandleEvent({
         agentName: boundSession.agentName,
-        channelKind: readSessionContext().instrumentation?.kind,
+        channelKind: sessionContext.instrumentation?.kind,
         handleEvent: input.handleEvent,
-        hooks,
+        hooks: bindHooks(sessionContext),
         sessionId: boundSession.sessionId,
         turnId: input.turnId,
-      }),
+      });
+    },
     flush: runtime.forceFlush,
-    instrumentChannelDelivery: (input) => instrumentChannelDelivery({ ...input, hooks }),
+    instrumentChannelDelivery: (input) =>
+      instrumentChannelDelivery({
+        ...input,
+        hooks: baseHooks,
+        policyAgentName: boundSession.agentName,
+      }),
     prepareExecution,
     preparePreamble: (input) => preparePreamble(input, readSessionContext()),
   };

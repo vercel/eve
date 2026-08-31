@@ -11,7 +11,11 @@ import {
   type InstrumentationRuntime,
 } from "#instrumentation/runtime.js";
 
-function bindHooks(hooks: InstrumentationRuntime["hooks"], ctx: ContextContainer) {
+function bindHooks(
+  hooks: InstrumentationRuntime["hooks"],
+  ctx: ContextContainer,
+  agentName?: string,
+) {
   return bindInstrumentationRuntime(
     {
       forceFlush: async () => undefined,
@@ -21,7 +25,7 @@ function bindHooks(hooks: InstrumentationRuntime["hooks"], ctx: ContextContainer
       shutdown: async () => undefined,
     },
     ctx,
-    { rootSessionId: "session-1", sessionId: "session-1" },
+    { agentName, rootSessionId: "session-1", sessionId: "session-1" },
   );
 }
 
@@ -157,9 +161,10 @@ describe("channel delivery instrumentation", () => {
       kind: "channel:slack",
       metadata: { audience: "public" },
     });
+    const instrumentation = bindHooks(hooks, ctx, "Weather Display Name");
 
     await contextStorage.run(ctx, async () => {
-      await instrumentChannelDelivery({
+      await instrumentation?.instrumentChannelDelivery({
         agentName: "weather",
         ctx,
         delivery: {
@@ -174,16 +179,18 @@ describe("channel delivery instrumentation", () => {
           kind: "deliver",
           payloads: [{ message: "hello" }],
         },
-        hooks,
-        policyAgentName: "Weather Display Name",
         rootSessionId: "session-1",
         sequence: 0,
         sessionId: "session-1",
         turnId: "turn_0",
       });
-      await instrumentChannelDelivery({
+      ctx.set(ChannelInstrumentationKey, {
+        channelType: "slack",
+        kind: "channel:slack",
+        metadata: { audience: "private" },
+      });
+      await instrumentation?.instrumentChannelDelivery({
         ctx,
-        hooks: hooks.forTrace!({ audience: "private" }),
         includeTurn: true,
         outcome: "completed",
       });

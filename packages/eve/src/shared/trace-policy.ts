@@ -56,7 +56,9 @@ export function resolveTracePolicy(
       trace.audience,
     );
   } catch (error) {
-    onError?.(error);
+    try {
+      onError?.(error);
+    } catch {}
     return DROP_INSTRUMENTATION;
   }
 }
