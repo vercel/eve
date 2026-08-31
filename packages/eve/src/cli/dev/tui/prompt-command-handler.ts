@@ -122,7 +122,10 @@ export function createPromptCommandHandler(
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
         }
-        // `/add <item>` opens that registry item directly; bare `/add` browses.
+        if (context.initialRegistryScreen !== undefined) {
+          commandInput.initialRegistryScreen = context.initialRegistryScreen;
+        }
+        // `/add <item>` preselects that registry item; bare `/add` starts empty.
         if (command.name === "add" && command.argument.length > 0) {
           commandInput.initialRegistryAddress = command.argument;
         }

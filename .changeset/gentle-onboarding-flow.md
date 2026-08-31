@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Guide newly created agents through model configuration and channel or integration selection before the first chat prompt. Setup results now preserve installed-item facts and skipped installation errors in the TUI transcript.
+Guide newly created agents through model configuration and a channel and integration planner before the first chat prompt. `/add` now installs multiple selections as one batch and reports each result.

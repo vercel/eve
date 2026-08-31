@@ -1,6 +1,5 @@
 import type { Prompter } from "#setup/prompter.js";
 import { detectDeployment } from "#setup/project-resolution.js";
-import { mergeRegistrySetupCompletions } from "#setup/registry-setup-completion.js";
 import type { RegistrySetupCompletion, RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 
 import { runDeployFlow } from "./deploy.js";
@@ -11,7 +10,6 @@ export interface RegistrySessionDeps {
 }
 
 export interface RegistrySessionItemResult {
-  address: string;
   title: string;
   facts: readonly RegistrySetupFact[];
   output: readonly string[];
@@ -19,33 +17,23 @@ export interface RegistrySessionItemResult {
 
 /** An item the user chose to skip after its installation could not complete. */
 export interface RegistrySessionItemFailure {
-  address: string;
   title: string;
-  /** Concise error shown while the setup panel asks whether to skip the item. */
+  /** User-facing installation error, including any actionable follow-up lines. */
   message: string;
-  /** Full diagnostic preserved for the permanent setup report. */
-  detail: string;
 }
 
 export interface RegistrySessionResult {
-  kind: "done";
-  addedItems: readonly string[];
   items: readonly RegistrySessionItemResult[];
   /** Installation failures retained when a user skips an item. */
   failures: readonly RegistrySessionItemFailure[];
-  facts: readonly RegistrySetupFact[];
-  output: readonly string[];
+  /** Setup stopped after preserving already-settled item results. */
+  cancelled?: true;
   deployed?: "production";
 }
 
 export interface RegistrySession {
-  add(
-    item: string,
-    title: string,
-    output: readonly string[],
-    setup?: RegistrySetupCompletion,
-  ): void;
-  addFailure(item: string, title: string, message: string, detail: string): void;
+  add(title: string, output: readonly string[], setup?: RegistrySetupCompletion): void;
+  addFailure(title: string, message: string): void;
   result(deployed?: "production"): RegistrySessionResult;
   continueAfterInstall(input: {
     appRoot: string;
@@ -56,52 +44,34 @@ export interface RegistrySession {
 
 /** Owns the accumulated output and deployment decision for one `/add` session. */
 export function createRegistrySession(deps: RegistrySessionDeps): RegistrySession {
-  const addedItems: string[] = [];
   const items: RegistrySessionItemResult[] = [];
   const failures: RegistrySessionItemFailure[] = [];
-  const output: string[] = [];
-  let completion: RegistrySetupCompletion = { facts: [] };
-  let currentItem = "";
-  let currentFacts: readonly RegistrySetupFact[] = [];
+  let deploymentRequired = false;
 
   function result(deployed?: "production"): RegistrySessionResult {
-    const session: RegistrySessionResult = {
-      kind: "done",
-      addedItems,
-      items,
-      failures,
-      facts: completion.facts,
-      output,
-    };
+    const session: RegistrySessionResult = { items, failures };
     if (deployed !== undefined) session.deployed = deployed;
     return session;
   }
 
   return {
-    add(item, title, itemOutput, setup = { facts: [] }) {
-      addedItems.push(item);
-      items.push({ address: item, title, facts: setup.facts, output: itemOutput });
-      output.push(...itemOutput);
-      currentItem = title;
-      currentFacts = setup.facts;
-      completion = mergeRegistrySetupCompletions(completion, setup);
+    add(title, itemOutput, setup = { facts: [] }) {
+      items.push({ title, facts: setup.facts, output: itemOutput });
+      deploymentRequired ||= setup.deploymentRequired === true;
     },
 
-    addFailure(item, title, message, detail) {
-      failures.push({ address: item, title, message, detail });
+    addFailure(title, message) {
+      failures.push({ title, message });
     },
 
     result,
 
     async continueAfterInstall(input) {
-      if (completion.deploymentRequired !== true) return result();
+      if (!deploymentRequired) return result();
 
       const deployment = await deps.detectDeployment(input.appRoot, { signal: input.signal });
       const canDeploy = deployment.state === "linked" || deployment.state === "deployed";
-      input.prompter.replaceContent?.({
-        headline: `Added ${currentItem}`,
-        facts: currentFacts,
-      });
+      input.prompter.replaceContent?.();
       while (true) {
         const action = await input.prompter.select<"deploy" | "finish">({
           message: "What would you like to do next?",

@@ -27,7 +27,7 @@ import {
   type SearchActionOption,
   type SelectState,
 } from "#setup/cli/select-state.js";
-import type { SelectMetadata, SelectNotice } from "#setup/prompter.js";
+import type { PlannerNavigation, SelectMetadata, SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest } from "#setup/flows/model.js";
 
 import {
@@ -63,12 +63,8 @@ interface SetupQuestionPanelBase {
   error?: string;
   /** Outcome lines from earlier menu laps, shown beneath the options. */
   notices?: readonly SelectNotice[];
-  /** Batch-planner checklist navigation: Space toggles, Enter continues, Left/Esc goes back. */
-  plannerNavigation?: true;
-  /** Destination named beside Enter in a batch-planner checklist footer. */
-  plannerContinue?: string;
-  /** Batch-planner review navigation: Enter selects, Left/Esc goes back. */
-  plannerBack?: true;
+  /** Optional batch-planner navigation grammar. */
+  navigation?: PlannerNavigation;
 }
 
 interface SetupSelectPanelBase extends SetupQuestionPanelBase {
@@ -435,6 +431,22 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
   }
 }
 
+function plannerStepRows(
+  navigation: Extract<SetupQuestionPanelBase["navigation"], { kind: "planner" }>,
+  activeCount: number | undefined,
+  theme: Theme,
+): string[] {
+  const labels = navigation.steps.map((step, index) => {
+    const resolvedCount = index === navigation.activeStep ? activeCount : step.count;
+    const count = resolvedCount === undefined || resolvedCount === 0 ? "" : ` (${resolvedCount})`;
+    const text = `${step.label}${count}`;
+    return index === navigation.activeStep
+      ? theme.colors.inverse(theme.colors.blue(theme.colors.bold(` ${text} `)))
+      : theme.colors.dim(text);
+  });
+  return [`  ${labels.join(theme.colors.dim("  ·  "))}`, ""];
+}
+
 function selectMessageRows(message: string, layout: SelectLayout, theme: Theme): string[] {
   if (message === "") return [];
 
@@ -751,8 +763,6 @@ function selectFooterHints(
   visible: readonly SetupPanelOption[],
   cursor: number,
   plannerNavigation: boolean,
-  plannerContinue: string | undefined,
-  plannerBack: boolean,
 ): string[] {
   const hints: string[] = [];
   let cancelHint = "esc to cancel";
@@ -772,14 +782,15 @@ function selectFooterHints(
   if (presentation.filter !== undefined) hints.push("type to filter");
   hints.push("↑/↓ move");
   if (plannerNavigation) {
-    hints.push("space toggle");
-    hints.push(`enter ${plannerContinue ?? "continue"}`);
-    hints.push("← / esc back");
+    if (presentation.selection === "multiple") hints.push("space toggle");
+    hints.push(presentation.selection === "multiple" ? "enter / → next" : "enter to select");
+    hints.push("← back");
+    hints.push(cancelHint);
     return hints;
   }
   hints.push(presentation.selection === "multiple" ? "space to toggle" : "enter to select");
   if (presentation.selection === "multiple") hints.push("enter on Submit to confirm");
-  hints.push(plannerBack ? "← / esc back" : cancelHint);
+  hints.push(cancelHint);
   return hints;
 }
 
@@ -825,15 +836,22 @@ export function renderSelectQuestion(
   const visible = presentation.filter
     ? filterOptions(state.options, state.select.filter, state.searchAction)
     : state.options;
-  const plannerNavigation = state.plannerNavigation === true;
-  const plannerContinue = state.plannerContinue;
-  const plannerBack = state.plannerBack === true;
+  const plannerNavigation = state.navigation?.kind === "planner";
   const submitIndex =
     presentation.selection === "multiple" && !plannerNavigation ? submitRowIndex(visible) : -1;
   const cursor = state.select.cursor;
 
   const railed = isRailedSearch(presentation);
-  const rows = selectMessageRows(state.message, presentation.layout, theme);
+  const rows = [
+    ...(state.navigation?.kind === "planner"
+      ? plannerStepRows(
+          state.navigation,
+          presentation.selection === "multiple" ? state.select.selected.size : undefined,
+          theme,
+        )
+      : []),
+    ...selectMessageRows(state.message, presentation.layout, theme),
+  ];
   if (state.description !== undefined || state.metadata !== undefined) {
     if (rows.at(-1) === "") rows.pop();
     if (state.description !== undefined) {
@@ -905,7 +923,7 @@ export function renderSelectQuestion(
     theme,
   });
   appendSubmitRow(rows, cursor, submitIndex, theme);
-  if (plannerNavigation) {
+  if (plannerNavigation && presentation.selection === "multiple") {
     const count = state.select.selected.size;
     rows.push("", `  ${c.dim(`${count} selected`)}`);
   }
@@ -928,14 +946,7 @@ export function renderSelectQuestion(
     ...questionFooter(
       railed
         ? ["esc to cancel"]
-        : selectFooterHints(
-            presentation,
-            visible,
-            cursor,
-            plannerNavigation,
-            plannerContinue,
-            plannerBack,
-          ),
+        : selectFooterHints(presentation, visible, cursor, plannerNavigation),
       theme,
     ),
   );

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { RegistryFlowFailedError } from "#setup/flows/registry.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 
 import {
@@ -47,29 +48,19 @@ function fakePanelRenderer(): TuiSetupCommandRenderer & {
 
 function registryResult(
   overrides: Partial<{
-    addedItems: readonly string[];
     items: readonly {
-      address: string;
       title: string;
       facts: readonly never[];
       output: readonly string[];
     }[];
     failures: readonly never[];
-    facts: readonly never[];
+    cancelled: true;
     deployed: "production";
   }> = {},
 ) {
   return {
     kind: "done" as const,
-    result: {
-      kind: "done" as const,
-      addedItems: [],
-      items: [],
-      failures: [],
-      facts: [],
-      output: [],
-      ...overrides,
-    },
+    result: { items: [], failures: [], ...overrides },
   };
 }
 
@@ -98,6 +89,8 @@ function run(input: {
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
+  initialRegistryScreen?: "channels" | "integrations";
+  useDefaultPrompter?: boolean;
   upgradeChoice?: "upgrade" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
 }) {
@@ -109,11 +102,14 @@ function run(input: {
     command: input.command,
     appRoot: APP_ROOT,
     renderer: input.renderer ?? fakePanelRenderer(),
-    createPrompter: () => fake.prompter,
     flows: input.flows,
   };
+  if (input.useDefaultPrompter !== true) commandInput.createPrompter = () => fake.prompter;
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
+  }
+  if (input.initialRegistryScreen !== undefined) {
+    commandInput.initialRegistryScreen = input.initialRegistryScreen;
   }
   if (input.withExclusiveTerminal !== undefined) {
     commandInput.withExclusiveTerminal = input.withExclusiveTerminal;
@@ -128,7 +124,39 @@ describe("runTuiSetupCommand", () => {
 
     await run({ command: "add", flows: fakeFlows({ runRegistryFlow }), renderer });
 
+    expect(runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ initialScreen: "integrations" }),
+    );
     expect(renderer.waitForInterrupt).toHaveBeenCalledWith();
+  });
+
+  it("uses the requested initial registry screen and suspends the runtime during installation", async () => {
+    const calls: string[] = [];
+    const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async (input) => {
+      await input.prompter.withExclusiveTerminal?.(async () => {
+        calls.push("install");
+      });
+      return registryResult();
+    });
+    const withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
+      calls.push("suspend");
+      const result = await task();
+      calls.push("resume");
+      return result;
+    };
+
+    await run({
+      command: "add",
+      flows: fakeFlows({ runRegistryFlow }),
+      initialRegistryScreen: "channels",
+      useDefaultPrompter: true,
+      withExclusiveTerminal,
+    });
+
+    expect(runRegistryFlow).toHaveBeenCalledWith(
+      expect.objectContaining({ initialScreen: "channels" }),
+    );
+    expect(calls).toEqual(["suspend", "install", "resume"]);
   });
 
   it("describes dependency installation while adding an item", async () => {
@@ -329,6 +357,7 @@ describe("runTuiSetupCommand", () => {
 
     await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
       message: "Upgraded the Vercel CLI. Retry /model.",
+      tone: "error",
       preserveFlowDiagnostics: false,
     });
     expect(flows.runInstallVercelCliFlow).toHaveBeenCalledWith(
@@ -352,6 +381,7 @@ describe("runTuiSetupCommand", () => {
 
     await expect(run({ command: "model", flows, upgradeChoice: "later" })).resolves.toEqual({
       message: "The Vercel CLI needs an update — run `vercel upgrade`, then retry /model.",
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
     expect(flows.runInstallVercelCliFlow).not.toHaveBeenCalled();
@@ -374,6 +404,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
       message:
         "Couldn't upgrade the Vercel CLI (package manager failed) — run `vercel upgrade`, then retry /model.",
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
   });
@@ -396,6 +427,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "model", flows, upgradeChoice: "upgrade" })).resolves.toEqual({
       message:
         "Couldn't upgrade the Vercel CLI (ERR_PNPM_NO_GLOBAL_BIN_DIR Unable to find the global bin directory) — run `vercel upgrade`, then retry /model.",
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
   });
@@ -404,10 +436,9 @@ describe("runTuiSetupCommand", () => {
     [
       "added",
       registryResult({
-        addedItems: ["extension/browser"],
-        items: [{ address: "extension/browser", title: "Agent Browser", facts: [], output: [] }],
+        items: [{ title: "Agent Browser", facts: [], output: [] }],
       }),
-      "Added Agent Browser",
+      "Added Agent Browser\n\nAgent Browser\n  Installed.",
     ],
     ["empty", registryResult(), "No integrations selected."],
     ["deployed", registryResult({ deployed: "production" }), "No integrations selected."],
@@ -429,11 +460,8 @@ describe("runTuiSetupCommand", () => {
       runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async () => ({
         kind: "done",
         result: {
-          kind: "done",
-          addedItems: ["channel/photon-imessage"],
           items: [
             {
-              address: "channel/photon-imessage",
               title: "Photon iMessage",
               output: [],
               facts: [{ label: "Agent phone number", value: "+15551234567" }],
@@ -441,14 +469,10 @@ describe("runTuiSetupCommand", () => {
           ],
           failures: [
             {
-              address: "channel/github",
               title: "GitHub",
               message: "Refusing to overwrite github.ts",
-              detail: "Refusing to overwrite github.ts",
             },
           ],
-          output: [],
-          facts: [],
         },
       })),
     });
@@ -470,6 +494,40 @@ describe("runTuiSetupCommand", () => {
     expect(flows.runDeployFlow).toHaveBeenCalledWith(
       expect.objectContaining({ interactive: true }),
     );
+  });
+
+  it("preserves settled registry results when batch setup is interrupted", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(
+        ({ signal }) =>
+          new Promise((resolve) => {
+            signal?.addEventListener(
+              "abort",
+              () =>
+                resolve(
+                  registryResult({
+                    items: [{ title: "Web Chat", facts: [], output: [] }],
+                    cancelled: true,
+                  }),
+                ),
+              { once: true },
+            );
+          }),
+      ),
+    });
+
+    const result = run({ command: "add", flows, renderer });
+    renderer.fireInterrupt();
+
+    await expect(result).resolves.toEqual({
+      message:
+        "Added Web Chat\n\nWeb Chat\n  Installed.\n\n" +
+        "Setup cancelled before the remaining selections were added.",
+      partial: true,
+      tone: "error",
+      preserveFlowDiagnostics: true,
+    });
   });
 
   it("preserves model access refreshes when provider setup is interrupted", async () => {
@@ -545,19 +603,25 @@ describe("runTuiSetupCommand", () => {
     });
   });
 
-  it("routes a vercel-login action error to /vc:login instead of a raw failure", async () => {
+  it("routes a vercel-login action error without dropping completed registry items", async () => {
+    const cause = new HumanActionRequiredError({
+      kind: "vercel-login",
+      command: "vercel login",
+      reason: "Provisioning requires Vercel authentication.",
+    });
     const flows = fakeFlows({
-      runDeployFlow: vi.fn<TuiSetupFlows["runDeployFlow"]>(async () => {
-        throw new HumanActionRequiredError({
-          kind: "vercel-login",
-          command: "vercel login",
-          reason: "Provisioning a Vercel project requires you to be logged in to Vercel.",
+      runRegistryFlow: vi.fn(async () => {
+        throw new RegistryFlowFailedError(cause, {
+          items: [{ title: "Web Chat", facts: [], output: [] }],
+          failures: [],
         });
       }),
     });
-    await expect(run({ command: "deploy", flows })).resolves.toEqual({
-      message: "You're not logged in to Vercel — run /vc:login, then retry /deploy.",
-      preserveFlowDiagnostics: true,
+
+    await expect(run({ command: "add", flows })).resolves.toMatchObject({
+      message: expect.stringMatching(/^Added Web Chat[\s\S]*run \/vc:login/),
+      partial: true,
+      tone: "error",
     });
   });
 
@@ -574,6 +638,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message:
         "Vercel denied access to that team — run /vc:login to re-authenticate (for example to complete SSO), or pick a team you can access, then retry /deploy.",
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
   });
@@ -606,6 +671,7 @@ describe("runTuiSetupCommand", () => {
     await expect(run({ command: "deploy", flows })).resolves.toEqual({
       message:
         "The Vercel CLI isn't installed — run /vc:install to install it, then retry /deploy.",
+      tone: "error",
       preserveFlowDiagnostics: true,
     });
   });

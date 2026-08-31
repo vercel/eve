@@ -40,11 +40,6 @@ export interface SelectOption<T extends PrompterValue> {
   /** Short inline annotation shown dimmed only while the cursor is on this row. */
   focusHint?: string;
   /**
-   * Longer explanation rendered in the picker's reserved context area while
-   * this row is focused. The stable slot keeps neighboring rows stationary.
-   */
-  focusDescription?: string;
-  /**
    * Longer, display-only explanation shown dimmed alongside the option while it
    * is highlighted during navigation. Hidden once a choice is submitted.
    */
@@ -101,6 +96,26 @@ export interface SelectMetadata {
   value: string;
 }
 
+/** Directional transition requested from a batch-planner step. */
+export class PlannerNavigationError extends Error {
+  readonly direction: "back" | "forward";
+  readonly values: readonly PrompterValue[];
+
+  constructor(direction: "back" | "forward", values: readonly PrompterValue[]) {
+    super(`Planner requested ${direction} navigation.`);
+    this.name = "PlannerNavigationError";
+    this.direction = direction;
+    this.values = values;
+  }
+}
+
+/** Progress rail and directional controls for a multi-step picker. */
+export interface PlannerNavigation {
+  kind: "planner";
+  activeStep: number;
+  steps: readonly { label: string; count?: number }[];
+}
+
 /** Options common to every {@link Prompter.select} call. */
 export interface SelectCommonOptions<T extends PrompterValue> {
   message: string;
@@ -133,12 +148,8 @@ export interface SelectCommonOptions<T extends PrompterValue> {
   hintLayout?: "stacked" | "inline";
   /** Outcome lines from earlier laps of a looping menu. */
   notices?: readonly SelectNotice[];
-  /** Batch-planner checklist navigation: Space toggles, Enter continues, Left/Esc goes back. */
-  plannerNavigation?: true;
-  /** Destination named beside Enter in a batch-planner checklist footer. */
-  plannerContinue?: string;
-  /** Batch-planner review navigation: Enter selects, Left/Esc goes back. */
-  plannerBack?: true;
+  /** Optional batch-planner navigation grammar. */
+  navigation?: PlannerNavigation;
 }
 
 /** A selectable action appended after local matches for a non-empty query. */
