@@ -686,7 +686,7 @@ function isWeatherPayload(value: unknown): value is {
   readonly summary: string;
   readonly temperatureF: number;
 } {
-  return bootstrapWeatherPayloadSchema.safeParse(value).success;
+  return z.validate(bootstrapWeatherPayloadSchema, value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

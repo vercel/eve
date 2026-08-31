@@ -466,7 +466,7 @@
     "vite": "^8.1.5",
     "vitest": "catalog:",
     "vue": "^3.5.0",
-    "zod": "catalog:",
+    "zod": "4.5.4",
     "zod-validation-error": "5.0.0"
   },
   "peerDependencies": {

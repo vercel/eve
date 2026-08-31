@@ -62,6 +62,22 @@ function rewriteDeclarationImports(
 }
 
 describe("compiled vendor assets", () => {
+  it("lazily compiles schemas created by the vendored Zod runtime", async () => {
+    const zodUrl = pathToFileURL(join(COMPILED_VENDOR_ROOT, "zod", "index.js")).href;
+    const { z } = await import(zodUrl);
+    const schema = z.object({
+      id: z.string(),
+      nested: z.array(z.object({ active: z.boolean(), count: z.number() })),
+    });
+
+    expect(schema._zod.bag.validator).toBeUndefined();
+    expect(schema.parse({ id: "agent", nested: [{ active: true, count: 1 }] })).toEqual({
+      id: "agent",
+      nested: [{ active: true, count: 1 }],
+    });
+    expect(schema._zod.bag.validator).toBeTypeOf("function");
+  });
+
   it("stamps the Nitro-resolved Rolldown version", async () => {
     const stamp = JSON.parse(
       await readFile(join(COMPILED_VENDOR_ROOT, ".vendor-stamp.json"), "utf8"),
