@@ -23,8 +23,8 @@ export interface ConnectionSetup {
 export const setupKey = (protocol: ConnectionProtocol, auth: AuthMode): string =>
   `${protocol}:${auth}`;
 
-const connectorOf = (slug: string, spec: ConnectionSpec, auth?: AuthMode): string =>
-  (auth === undefined ? undefined : spec.connectors?.[auth]) ?? spec.connector ?? slug;
+const connectorOf = (slug: string, spec: ConnectionSpec, auth: AuthMode): string =>
+  (auth === "apiKey" ? undefined : spec.connectors?.[auth]?.uid) ?? slug;
 
 /** The TypeScript connection file for one (protocol, auth) combination. */
 const buildSnippet = (
@@ -138,11 +138,8 @@ const buildConfigureVariant = (integration: Integration, auth: AuthMode): string
 
   if (auth !== "apiKey") {
     const connector = connectorOf(integration.slug, spec, auth);
-    const modeService = spec.connectorServices?.[auth];
-    const connectorService = modeService ?? spec.connectorService ?? connector;
-    const namedConnector =
-      !spec.defaultConnectorName &&
-      (modeService !== undefined || spec.connectorService !== undefined);
+    const connectorSpec = spec.connectors?.[auth];
+    const connectorService = connectorSpec?.service ?? connector;
     sections.push(
       [
         "Link your project, create the connector, and pull OIDC locally:",
@@ -150,7 +147,7 @@ const buildConfigureVariant = (integration: Integration, auth: AuthMode): string
         "```bash",
         "vercel link",
         `vercel connect create ${connectorService}${
-          namedConnector ? ` --name ${integration.slug}` : ""
+          connectorSpec?.name ? ` --name ${connectorSpec.name}` : ""
         }`,
         "vercel env pull",
         "```",
@@ -221,18 +218,16 @@ export const buildConnectionInstall = (integration: Integration): string => {
   ].join("\n");
 };
 
-/** Generated Configure markdown for a connection. */
-export const buildConnectionConfigure = (integration: Integration): string => {
-  const setup = buildConnectionSetup(integration);
-  return setup.protocols
+/** Render every protocol and auth variant as agent-readable markdown. */
+export const renderConnectionVariants = (
+  setup: ConnectionSetup,
+  variants: Record<string, string>,
+): string =>
+  setup.protocols
     .flatMap((protocol) =>
       setup.authModes.map((auth) => {
-        const content = setup.configureVariants[setupKey(protocol, auth)] ?? "";
+        const content = variants[setupKey(protocol, auth)] ?? "";
         return `### ${protocolLabel[protocol]} · ${authModeLabel[auth]}\n\n${content}`;
       }),
     )
     .join("\n\n");
-};
-
-/** Human label for an auth-mode switcher button. */
-export const authModeButtonLabel = (auth: AuthMode): string => authModeLabel[auth];
