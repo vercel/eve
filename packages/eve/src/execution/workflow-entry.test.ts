@@ -141,6 +141,11 @@ interface AuthHookConfig {
   readonly return?: () => Promise<IteratorResult<HookPayload>>;
 }
 
+interface TurnControlHookConfig {
+  readonly dispose?: () => void;
+  readonly return?: () => Promise<IteratorResult<TurnControlPayload>>;
+}
+
 describe("workflowEntry", () => {
   beforeEach(() => {
     vi.stubEnv("VERCEL_PROJECT_PRODUCTION_URL", "");
@@ -886,6 +891,108 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("overlaps prior turn-control cleanup with parked-turn settlement and joins both", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+
+    let releaseCleanup: (() => void) | undefined;
+    const cleanupGate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const disposePriorControl = vi.fn(async () => await cleanupGate);
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [
+            { kind: "send", payload: { message: "follow up" } },
+            { kind: "session-timeout" },
+          ],
+        },
+      ],
+      turnControlHooks: [{ dispose: disposePriorControl }, {}],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({
+          action: "park",
+          sessionState,
+          settled: { output: "settled follow-up" },
+        }),
+      ],
+    });
+
+    let completed = false;
+    const result = workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext(),
+    }).finally(() => {
+      completed = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(disposePriorControl).toHaveBeenCalledOnce();
+      expect(notifyTurnCallerStep).toHaveBeenCalledWith(
+        expect.objectContaining({ lifecycle: "parked", settled: { output: "settled follow-up" } }),
+      );
+    });
+    expect(disposePriorControl.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(notifyTurnCallerStep).mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(completed).toBe(false);
+    expect(emitTerminalSessionCompletionStep).not.toHaveBeenCalled();
+
+    releaseCleanup?.();
+    await expect(result).resolves.toEqual({ output: "" });
+  });
+
+  it("keeps prior turn-control cleanup failure authoritative after overlapping settlement", async () => {
+    const sessionState = createBaseSessionState();
+    const cleanupError = new Error("prior turn-control cleanup failed");
+    const settlementError = new Error("parent settlement failed");
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(notifyTurnCallerStep).mockRejectedValueOnce(settlementError);
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "send", payload: { message: "follow up" } }],
+        },
+      ],
+      turnControlHooks: [
+        {
+          dispose: vi.fn(async () => {
+            throw cleanupError;
+          }),
+        },
+        {},
+      ],
+      turnControls: [
+        turnResult({ action: "park", sessionState }),
+        turnResult({
+          action: "park",
+          sessionState,
+          settled: { output: "settled follow-up" },
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello there" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toThrow("Agent workflow failed");
+
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith(
+      expect.objectContaining({ lifecycle: "parked", settled: { output: "settled follow-up" } }),
+    );
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ message: cleanupError.message }),
+      }),
+    );
+  });
+
   it("supplies a requested public delivery to the active turn inbox", async () => {
     const sessionState = createBaseSessionState();
     vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
@@ -1583,9 +1690,11 @@ function installHookMocks(input: {
   readonly deliveryHooks?: readonly DeliveryHookConfig[];
   readonly stableHook?: Omit<DeliveryHookConfig, "token">;
   readonly symbolDispose?: () => void;
+  readonly turnControlHooks?: readonly TurnControlHookConfig[];
   readonly turnControls: readonly TurnControlPayload[];
 }): void {
   const turnControls = [...input.turnControls];
+  const turnControlHooks = [...(input.turnControlHooks ?? [])];
   const deliveryHooks = [...(input.deliveryHooks ?? [])];
 
   vi.mocked(createHook).mockImplementation((options?: { readonly token?: string }) => {
@@ -1593,7 +1702,10 @@ function installHookMocks(input: {
 
     if (token === undefined || isTurnCompletionToken(token)) {
       const value = turnControls.shift();
+      const config = turnControlHooks.shift();
       return createMockHook({
+        dispose: config?.dispose,
+        return: config?.return,
         token: token ?? "turn-control",
         values: value === undefined ? [] : [value],
       }) as never;

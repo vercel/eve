@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-01"
 ---
 
 # Turn performance and Workflow overhead
@@ -275,7 +275,22 @@ and crash-cleanup behavior remains on the existing path.
 This is the lowest-risk structural change. Prove exact step-count reduction and no change to root,
 subagent, task, failure, and cancellation results.
 
-### 3. Remove observability-only writes from each step
+### 3. Overlap retired control cleanup with parent settlement
+
+After turn N+1 publishes its terminal result, turn N's deferred control hook is safe to retire.
+Start that cleanup immediately, overlap it with turn N+1's independent parent settlement
+(continuation rekey, cancellation settlement, caller notification, or terminal finalization), and
+join both before the driver publishes `session.waiting`, starts another turn, or returns. Preserve
+the existing cleanup-first error precedence if both operations fail. This can hide one durable
+hook-disposal boundary on warm turns without detaching work or changing hook ownership.
+
+Do not apply the same overlap inside the active child turn. Its cancellation hook must be disposed
+before terminal control is published: that control wakes the driver, which can immediately start a
+successor that claims the next cancellation surface. Starting both writes concurrently would
+reintroduce a claim/teardown race and could weaken cancellation. Workflow bodies also expose no
+request `waitUntil` lifetime; all durable cleanup remains joined.
+
+### 4. Remove observability-only writes from each step
 
 `setEveAttributes` is awaited after every model attempt. Inside a Workflow step the SDK writes an
 attribute event to the world, so best-effort error handling does not make it non-blocking. First
@@ -286,7 +301,7 @@ Likewise measure the 8–9 individually awaited protocol stream writes in a simp
 and tool output streaming immediate, but prototype coalescing adjacent lifecycle-only events into
 2–3 flushes. Event order and the final response boundary must remain identical.
 
-### 4. Reduce child startup and control handshakes
+### 5. Reduce child startup and control handshakes
 
 Measure child-created → first-step-start in production before choosing a design. Then prototype,
 in increasing order of risk:
@@ -304,7 +319,7 @@ The third option is only viable if it retains latest-deployment routing. Running
 inside the pinned driver would improve latency by silently disabling live upgrades, which is not
 an acceptable trade.
 
-### 5. Bound replay and state growth
+### 6. Bound replay and state growth
 
 Measure event-log entries/bytes and state payloads at every target history depth. Full history is
 currently embedded in each session snapshot, passed into the child, returned by `turnStep`, sent
@@ -323,7 +338,7 @@ snapshot transport/replay. The successor-run option is the most promising struct
 because it can replace both the replay-growing driver and per-turn child, but it needs an atomic
 handoff protocol.
 
-### 6. Move new-session readiness off the caller path
+### 7. Move new-session readiness off the caller path
 
 The workflow run id exists as soon as `start()` resolves, yet `createSession()` waits until the
 workflow owns its command hook. Test two compatible improvements:
@@ -338,7 +353,7 @@ The first can improve both. The benchmark reports acceptance, readiness, and fir
 separately so the result cannot be presented as a turn-speed improvement when it only moves the
 wait.
 
-### 7. Budget extension and per-step work
+### 8. Budget extension and per-step work
 
 After the fixed topology is addressed, fit the incremental cost of tool cycles and authored
 extensions. Time adapter delivery, memory lifecycle, stream hooks, dynamic model/connections/

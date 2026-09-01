@@ -26,6 +26,7 @@ import {
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
+import { RetiredTurnControlCleanup } from "#execution/retired-turn-control-cleanup.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
@@ -51,7 +52,6 @@ import { attachClientContext, readClientContext } from "#internal/client-context
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
-
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
 // Error logging happens inside `emitTerminalSessionFailureStep`.
@@ -382,9 +382,8 @@ async function runDriverLoop(input: {
       }
     }
   };
-  // Fast descendant resumes can start the next turn before the prior
-  // control hook disposal is persisted by the Workflow SDK, so each
-  // turn needs its own session-scoped token.
+  // Fast descendant resumes can precede persisted control-hook disposal,
+  // so every turn needs a session-scoped token.
   let turnDispatchIndex = 0;
   const nextTurnControlToken = (): string =>
     `${input.sessionState.sessionId}:turn-control:${String(turnDispatchIndex++)}`;
@@ -410,16 +409,14 @@ async function runDriverLoop(input: {
           token: stableCommandToken,
         });
 
-  // Durable state accumulated across turns and the parked waits between
-  // them. Turn results and settle/routing steps are adopted here, so the
-  // loop never threads `serializedContext`/`sessionState` pairs by hand.
   const stateCursor = new SessionStateCursor({
     serializedContext: input.serializedContext,
     sessionState: input.sessionState,
   });
 
-  // Control-hook disposal is deferred one turn — see DispatchedTurn.
   let disposeSettledTurnControl: (() => Promise<void>) | undefined;
+  const retiredTurnControlCleanup = new RetiredTurnControlCleanup();
+
   const runTurn = async (delivery: HookPayload): Promise<TurnDriverAction> => {
     const caller = input.crashCleanupState.caller;
     if (caller?.taskId !== undefined) {
@@ -448,7 +445,9 @@ async function runDriverLoop(input: {
       seenTaskDeliveries,
       sessionState: stateCursor.sessionState,
     });
-    await disposeSettledTurnControl?.();
+    if (disposeSettledTurnControl !== undefined) {
+      retiredTurnControlCleanup.begin(disposeSettledTurnControl);
+    }
     disposeSettledTurnControl = turn.dispose;
     stateCursor.adoptState(turn.action);
     input.crashCleanupState.lastSessionState = stateCursor.sessionState;
@@ -476,60 +475,66 @@ async function runDriverLoop(input: {
       if (action.kind === "done") {
         return {
           kind: "result",
-          result: await finalizeDone({
-            action,
-            caller: input.crashCleanupState.caller,
-            mode: input.mode,
-          }),
+          result: await retiredTurnControlCleanup.join(
+            finalizeDone({
+              action,
+              caller: input.crashCleanupState.caller,
+              mode: input.mode,
+            }),
+          ),
         };
       }
 
       if (action.kind !== "park") {
-        // Turn-owned turns resolve runtime actions in-line and only ever
-        // report `done`/`park`. The driver-owned `dispatch-*` arms exist
-        // solely for pre-change pinned drivers, which run their own code.
+        // Only pre-change pinned drivers can report another action.
+        await retiredTurnControlCleanup.join(Promise.resolve());
         throw new Error(`Driver received unexpected turn action "${action.kind}".`);
       }
 
-      if (action.cancelled === true) {
-        const settled = await settleCancelledTurnStep({
-          parentWritable: input.driverWritable,
-          serializedContext: stateCursor.serializedContext,
-          sessionState: stateCursor.sessionState,
-        });
-        stateCursor.adoptState(settled);
-        const cancelledCaller = {
-          caller: input.crashCleanupState.caller,
-          sessionId: stateCursor.sessionState.sessionId,
-        };
-        await notifyCancelledTaskCallerStep(
-          settled.usage === undefined
-            ? cancelledCaller
-            : { ...cancelledCaller, usage: settled.usage },
-        );
-        input.crashCleanupState.lastSessionState = stateCursor.sessionState;
-      }
+      const parkedAction = action;
+      await retiredTurnControlCleanup.join(
+        (async () => {
+          if (parkedAction.cancelled === true) {
+            const settled = await settleCancelledTurnStep({
+              parentWritable: input.driverWritable,
+              serializedContext: stateCursor.serializedContext,
+              sessionState: stateCursor.sessionState,
+            });
+            stateCursor.adoptState(settled);
+            const cancelledCaller = {
+              caller: input.crashCleanupState.caller,
+              sessionId: stateCursor.sessionState.sessionId,
+            };
+            await notifyCancelledTaskCallerStep(
+              settled.usage === undefined
+                ? cancelledCaller
+                : { ...cancelledCaller, usage: settled.usage },
+            );
+            input.crashCleanupState.lastSessionState = stateCursor.sessionState;
+          }
 
-      // Channel-created sessions may rekey their dynamic alias. Sessions
-      // without one remain reachable through the stable command inbox only.
-      if (stateCursor.sessionState.continuationToken) {
-        await commandInbox.rekeyContinuation(stateCursor.sessionState.continuationToken);
-      }
+          // Channel-created sessions may rekey their dynamic alias. Sessions
+          // without one remain reachable through the stable command inbox only.
+          if (stateCursor.sessionState.continuationToken) {
+            await commandInbox.rekeyContinuation(stateCursor.sessionState.continuationToken);
+          }
 
-      // `settled` rides the typed park arm exclusively; `run-step` preserves
-      // the full StepResult so no state-key fallback exists anymore.
-      const settled = action.settled;
-      if (action.cancelled !== true && settled !== undefined) {
-        await notifyTurnCallerStep({
-          caller: input.crashCleanupState.caller,
-          lifecycle: "parked",
-          sessionId: stateCursor.sessionState.sessionId,
-          settled,
-        });
-        input.crashCleanupState.caller = undefined;
-      } else if (action.cancelled === true) {
-        input.crashCleanupState.caller = undefined;
-      }
+          // `settled` rides the typed park arm exclusively; `run-step` preserves
+          // the full StepResult so no state-key fallback exists anymore.
+          const settled = parkedAction.settled;
+          if (parkedAction.cancelled !== true && settled !== undefined) {
+            await notifyTurnCallerStep({
+              caller: input.crashCleanupState.caller,
+              lifecycle: "parked",
+              sessionId: stateCursor.sessionState.sessionId,
+              settled,
+            });
+            input.crashCleanupState.caller = undefined;
+          } else if (parkedAction.cancelled === true) {
+            input.crashCleanupState.caller = undefined;
+          }
+        })(),
+      );
 
       // An open authorization challenge must not wedge the session:
       // ordinary deliveries keep starting normal turns while the challenge
@@ -538,7 +543,7 @@ async function runDriverLoop(input: {
       // intervening turns because every park re-derives
       // `authorizationAttemptIds` from durable session state.
       const next = await nextParkedActivity({
-        expectedAttemptIds: action.authorizationAttemptIds ?? [],
+        expectedAttemptIds: parkedAction.authorizationAttemptIds ?? [],
       });
       input.crashCleanupState.lastSessionState = stateCursor.sessionState;
 
@@ -593,7 +598,7 @@ async function runDriverLoop(input: {
         // Re-enter with `settled` cleared: the parked answer was already
         // delivered to its caller before this wait, so the next iteration
         // must not treat it as a fresh settlement.
-        action = { ...action, settled: undefined };
+        action = { ...parkedAction, settled: undefined };
         input.crashCleanupState.caller = undefined;
         input.crashCleanupState.lastSessionState = stateCursor.sessionState;
         continue;
