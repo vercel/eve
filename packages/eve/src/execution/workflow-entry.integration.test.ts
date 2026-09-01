@@ -699,6 +699,7 @@ describe("workflowEntry integration", () => {
       ]);
 
       const stream = captureTurnEvents(run);
+      let completed = false;
       const hook = await waitForHook(
         { runId: run.runId },
         {
@@ -744,9 +745,17 @@ describe("workflowEntry integration", () => {
               event.data.message?.includes("follow up") === true,
           ),
         ).toBe(true);
+
+        await workflowRuntime.dispatchSession({
+          command: { kind: "reset", reason: "Test step inventory" },
+          sessionId: run.runId,
+        });
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+        completed = true;
+        expect(await listCallerStepNames(run.runId)).toEqual([]);
       } finally {
         stream.dispose();
-        await run.cancel();
+        if (!completed) await run.cancel();
       }
     });
   });
@@ -978,6 +987,13 @@ describe("workflowEntry integration", () => {
             },
           ],
         });
+        expect(await listCallerStepNames(child.runId)).toEqual([
+          "bindTurnCallerContextStep",
+          "bindTurnCallerContextStep",
+          "notifyTurnCallerStep",
+          "notifyTurnCallerStep",
+          "resolveInitialTurnCallerStep",
+        ]);
       } finally {
         stream.dispose();
         await child.cancel();
@@ -1303,6 +1319,25 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+const CALLER_STEP_NAMES = new Set([
+  "bindTurnCallerContextStep",
+  "notifyTurnCallerStep",
+  "resolveInitialTurnCallerStep",
+]);
+
+async function listCallerStepNames(runId: string): Promise<string[]> {
+  const world = await getWorld();
+  const steps = await world.steps.list({
+    pagination: { limit: 1_000 },
+    resolveData: "none",
+    runId,
+  });
+  return steps.data
+    .map((step) => step.stepName.split("//").at(-1) ?? "")
+    .filter((name) => CALLER_STEP_NAMES.has(name))
+    .sort();
+}
 
 interface CapturedEventStream {
   dispose(): void;

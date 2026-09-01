@@ -48,6 +48,8 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import type { TokenUsage } from "#shared/token-usage.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { CHANNEL_CONTEXT_KEY_NAME, SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -102,13 +104,14 @@ type DriverLoopOutcome =
 interface CrashCleanupState {
   // The caller whose awaited reply is still unsettled, so the catch can
   // reject it with the error instead of leaving it parked forever.
-  // Populated for every session; only conversation-mode paths read it.
+  // Root sessions leave it undefined; only conversation-mode paths read it.
   caller: TurnCaller | undefined;
-  // Whether `resolveInitialTurnCallerStep` has run. `caller: undefined` is
-  // ambiguous on its own: it also means "resolved and later cleared because
-  // its reply settled". This flag lets the crash path tell that apart from
-  // "crashed before the caller was ever resolved", where a delegated caller
-  // may still be parked on this session's reply.
+  // Whether initial lineage has been classified, either by proving it is a
+  // root session or by resolving its caller. `caller: undefined` is ambiguous
+  // on its own: it also means "resolved and later cleared because its reply
+  // settled". This flag lets the crash path tell that apart from "crashed
+  // before lineage was classified", where a delegated caller may still be
+  // parked on this session's reply.
   callerResolved: boolean;
   // The latest snapshot the driver has received, so the catch can
   // terminate children adopted after turn 1. Honest staleness window: the
@@ -179,12 +182,11 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       taskOwned: isTaskOwnedSerializedContext(input.serializedContext),
     });
     crashCleanupState.lastSessionState = sessionState;
-    // Resolved for every session so the cell's population never depends
-    // on session shape: the step returns undefined for root sessions,
-    // and every reader is mode-gated.
-    crashCleanupState.caller = await resolveInitialTurnCallerStep({
-      serializedContext: input.serializedContext,
-    });
+    if (!hasGuaranteedRootLineage(input.serializedContext)) {
+      crashCleanupState.caller = await resolveInitialTurnCallerStep({
+        serializedContext: input.serializedContext,
+      });
+    }
     crashCleanupState.callerResolved = true;
 
     const outcome = await runDriverLoop({
@@ -263,12 +265,15 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
         serializedContext: input.serializedContext,
       });
     } else {
-      await notifyTurnCallerStep({
-        caller: await resolveCallerForCrash(crashCleanupState, input.serializedContext),
-        lifecycle: "terminal",
-        sessionId,
-        settled: { isError: true, output: error },
-      });
+      const caller = await resolveCallerForCrash(crashCleanupState, input.serializedContext);
+      if (caller !== undefined) {
+        await notifyTurnCallerStep({
+          caller,
+          lifecycle: "terminal",
+          sessionId,
+          settled: { isError: true, output: error },
+        });
+      }
     }
     throw createSafeOuterWorkflowError();
   }
@@ -278,11 +283,11 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
  * Caller to reject from the crash path. Normally the resolved cell value —
  * including `undefined` after a settled reply cleared it, when there is
  * nothing left to notify. When the crash happened before
- * `resolveInitialTurnCallerStep` ever ran (e.g. `createSessionStep` threw),
- * the cell is empty even though a delegated caller may be parked on this
- * session's reply, so the caller is re-resolved from the serialized context
- * — which needs nothing from the failed steps. Best-effort: when resolution
- * fails again there is no reachable caller to notify.
+ * initial lineage was classified (e.g. `createSessionStep` threw), the cell is
+ * empty even though a delegated caller may be parked on this session's reply,
+ * so the caller is resolved from the serialized context — which needs nothing
+ * from the failed steps. Best-effort: when resolution fails there is no
+ * reachable caller to notify.
  */
 async function resolveCallerForCrash(
   state: CrashCleanupState,
@@ -302,6 +307,18 @@ function createSafeOuterWorkflowError(): Error {
   const error = new Error(SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE);
   error.name = "EveWorkflowFailure";
   return error;
+}
+
+/** Root lineage has no turn caller to resolve, bind, or notify. */
+function hasGuaranteedRootLineage(serializedContext: Record<string, unknown>): boolean {
+  if (serializedContext[SESSION_CALLBACK_CONTEXT_KEY_NAME] !== undefined) return false;
+  if (serializedContext["eve.parentSession"] !== undefined) return false;
+  if (serializedContext["eve.subagentDepth"] !== undefined) return false;
+
+  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME];
+  if (channel === null || typeof channel !== "object") return false;
+  const kind = Reflect.get(channel, "kind");
+  return typeof kind === "string" && kind !== SUBAGENT_ADAPTER_KIND;
 }
 
 async function runDriverLoop(input: {
@@ -430,10 +447,13 @@ async function runDriverLoop(input: {
         childTurnId: activeTurnId(stateCursor.sessionState.emissionState),
       });
     }
-    const serializedContext = await bindTurnCallerContextStep({
-      caller,
-      serializedContext: stateCursor.serializedContext,
-    });
+    const serializedContext =
+      caller === undefined
+        ? stateCursor.serializedContext
+        : await bindTurnCallerContextStep({
+            caller,
+            serializedContext: stateCursor.serializedContext,
+          });
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls,
@@ -520,12 +540,14 @@ async function runDriverLoop(input: {
       // the full StepResult so no state-key fallback exists anymore.
       const settled = action.settled;
       if (action.cancelled !== true && settled !== undefined) {
-        await notifyTurnCallerStep({
-          caller: input.crashCleanupState.caller,
-          lifecycle: "parked",
-          sessionId: stateCursor.sessionState.sessionId,
-          settled,
-        });
+        if (input.crashCleanupState.caller !== undefined) {
+          await notifyTurnCallerStep({
+            caller: input.crashCleanupState.caller,
+            lifecycle: "parked",
+            sessionId: stateCursor.sessionState.sessionId,
+            settled,
+          });
+        }
         input.crashCleanupState.caller = undefined;
       } else if (action.cancelled === true) {
         input.crashCleanupState.caller = undefined;
@@ -638,12 +660,14 @@ async function finalizeExpiredSession(input: {
       serializedContext: input.serializedContext,
     });
   } else {
-    await notifyTurnCallerStep({
-      caller: input.caller,
-      lifecycle: "terminal",
-      sessionId: input.sessionState.sessionId,
-      settled: { output: "" },
-    });
+    if (input.caller !== undefined) {
+      await notifyTurnCallerStep({
+        caller: input.caller,
+        lifecycle: "terminal",
+        sessionId: input.sessionState.sessionId,
+        settled: { output: "" },
+      });
+    }
   }
   return { output: "" };
 }
@@ -684,12 +708,14 @@ async function finalizeDone(input: {
     if (failed) {
       settled.isError = true;
     }
-    await notifyTurnCallerStep({
-      caller: input.caller,
-      lifecycle: "terminal",
-      sessionId: input.action.sessionState.sessionId,
-      settled,
-    });
+    if (input.caller !== undefined) {
+      await notifyTurnCallerStep({
+        caller: input.caller,
+        lifecycle: "terminal",
+        sessionId: input.action.sessionState.sessionId,
+        settled,
+      });
+    }
   }
   return { output };
 }
