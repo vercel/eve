@@ -256,8 +256,19 @@ export function createWorkflowRuntime(config: {
       }
 
       try {
+        const stableCommandReady = waitForOwnedCommandHook(
+          sessionCommandHookToken(run.runId),
+          run.runId,
+        );
         if (input.continuationToken) {
-          const owner = await waitForCommandHookOwner(input.continuationToken);
+          const [ownerResult, stableCommandResult] = await Promise.allSettled([
+            waitForCommandHookOwner(input.continuationToken),
+            stableCommandReady,
+          ]);
+          // Preserve the previous ownership-first error precedence while
+          // joining both readiness checks so no poll escapes this request.
+          if (ownerResult.status === "rejected") throw ownerResult.reason;
+          const owner = ownerResult.value;
           if (owner.runId !== run.runId) {
             throw new RuntimeSessionOwnershipConflictError({
               continuationToken: input.continuationToken,
@@ -265,8 +276,10 @@ export function createWorkflowRuntime(config: {
               sessionId: run.runId,
             });
           }
+          if (stableCommandResult.status === "rejected") throw stableCommandResult.reason;
+        } else {
+          await stableCommandReady;
         }
-        await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
       } catch (error) {
         await cancelActivityCollector(collectorRunId);
         throw error;

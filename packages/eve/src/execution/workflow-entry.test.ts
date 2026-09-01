@@ -138,6 +138,7 @@ interface DeliveryHookConfig {
 
 interface AuthHookConfig {
   readonly dispose?: () => void;
+  readonly getConflict?: () => Promise<{ readonly runId: string } | null>;
   readonly return?: () => Promise<IteratorResult<HookPayload>>;
 }
 
@@ -211,6 +212,94 @@ describe("workflowEntry", () => {
       serializedContext: expect.any(Object),
       sessionState,
     });
+  });
+
+  it("claims stable and authorization inbox hooks concurrently before the first turn", async () => {
+    const sessionState = createBaseSessionState();
+    let resolveStable: ((value: null) => void) | undefined;
+    let resolveAuthorization: ((value: null) => void) | undefined;
+    const stableConflict = vi.fn(
+      async () =>
+        await new Promise<null>((resolve) => {
+          resolveStable = resolve;
+        }),
+    );
+    const authorizationConflict = vi.fn(
+      async () =>
+        await new Promise<null>((resolve) => {
+          resolveAuthorization = resolve;
+        }),
+    );
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      authHook: { getConflict: authorizationConflict },
+      stableHook: { getConflict: stableConflict },
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    const result = workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext({ "eve.continuationToken": "" }),
+    });
+
+    await vi.waitFor(() => {
+      expect(stableConflict).toHaveBeenCalledOnce();
+      expect(authorizationConflict).toHaveBeenCalledOnce();
+    });
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+
+    resolveStable?.(null);
+    await Promise.resolve();
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+
+    resolveAuthorization?.(null);
+    await expect(result).resolves.toEqual({ output: "ok" });
+    expect(dispatchTurnStep).toHaveBeenCalledOnce();
+  });
+
+  it("joins the sibling hook claim before surfacing a claim rejection", async () => {
+    const sessionState = createBaseSessionState();
+    const failure = new Error("stable hook claim failed");
+    const stableDispose = vi.fn();
+    const authorizationDispose = vi.fn();
+    let resolveAuthorization: ((value: null) => void) | undefined;
+    const authorizationConflict = vi.fn(
+      async () =>
+        await new Promise<null>((resolve) => {
+          resolveAuthorization = resolve;
+        }),
+    );
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      authHook: { dispose: authorizationDispose, getConflict: authorizationConflict },
+      stableHook: {
+        dispose: stableDispose,
+        getConflict: vi.fn(async () => {
+          throw failure;
+        }),
+      },
+      turnControls: [],
+    });
+
+    let settled = false;
+    const result = workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext({ "eve.continuationToken": "" }),
+    }).finally(() => {
+      settled = true;
+    });
+
+    await vi.waitFor(() => {
+      expect(authorizationConflict).toHaveBeenCalledOnce();
+      expect(stableDispose).toHaveBeenCalledOnce();
+    });
+    expect(settled).toBe(false);
+    expect(authorizationDispose).not.toHaveBeenCalled();
+
+    resolveAuthorization?.(null);
+    await expect(result).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+    expect(authorizationDispose).toHaveBeenCalledOnce();
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
   });
 
   it("finalizes children when the durable command inbox closes", async () => {
@@ -1602,6 +1691,7 @@ function installHookMocks(input: {
     if (token.endsWith(":auth")) {
       return createMockHook({
         dispose: input.authHook?.dispose,
+        getConflict: input.authHook?.getConflict,
         return: input.authHook?.return,
         token,
         values: [],

@@ -395,13 +395,6 @@ async function runDriverLoop(input: {
   const seenTaskDeliveries = new Set<string>();
   const commandInbox = createSessionCommandInbox();
   const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
-  await commandInbox.claimStable(stableCommandToken);
-  // Per-session authorization-callback hook. Claimed before any turns so it
-  // exists when authorization.required events trigger OAuth callbacks;
-  // getHookUrl() builds callback URLs with this token (see authHookToken —
-  // inlined here because the workflow driver body cannot import the
-  // harness module).
-  await commandInbox.claimAuthorization(`${input.sessionState.sessionId}:auth`);
   const sessionTimeout =
     input.sessionTimeoutDeadline === undefined
       ? undefined
@@ -456,6 +449,16 @@ async function runDriverLoop(input: {
   };
 
   try {
+    // Authorization callbacks use this per-session token, so both inbox
+    // sources must be owned before the first turn can request OAuth.
+    const [stableClaim, authorizationClaim] = await Promise.allSettled([
+      commandInbox.claimStable(stableCommandToken),
+      commandInbox.claimAuthorization(`${input.sessionState.sessionId}:auth`),
+    ]);
+    // Joining prevents cleanup from racing a sibling claim; preserve stable's error precedence.
+    if (stableClaim.status === "rejected") throw stableClaim.reason;
+    if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
+
     if (input.sessionState.continuationToken) {
       try {
         await commandInbox.rekeyContinuation(input.sessionState.continuationToken);

@@ -572,23 +572,136 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
+  it("waits for continuation ownership and stable command readiness concurrently", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+    let resolveContinuation: ((value: { runId: string }) => void) | undefined;
+    let resolveStable: ((value: { runId: string }) => void) | undefined;
+    getHookByTokenMock.mockImplementation(
+      (token: string) =>
+        new Promise<{ runId: string }>((resolve) => {
+          if (token === "slack:thread") {
+            resolveContinuation = resolve;
+          } else if (token === sessionCommandHookToken("driver-run")) {
+            resolveStable = resolve;
+          } else {
+            throw new Error(`Unexpected hook token ${JSON.stringify(token)}.`);
+          }
+        }),
+    );
+
+    let settled = false;
+    const result = buildRuntime(compiledArtifactsSource)
+      .createSession({
+        adapter,
+        auth: null,
+        continuationToken: "slack:thread",
+        input: { message: "hello" },
+        mode: "conversation",
+      })
+      .finally(() => {
+        settled = true;
+      });
+
+    await vi.waitFor(() => {
+      expect(getHookByTokenMock).toHaveBeenCalledWith("slack:thread");
+      expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("driver-run"));
+    });
+
+    resolveContinuation?.({ runId: "driver-run" });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveStable?.({ runId: "driver-run" });
+    await expect(result).resolves.toMatchObject({ sessionId: "driver-run" });
+  });
+
+  it("joins stable command readiness before surfacing continuation lookup rejection", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock
+      .mockResolvedValueOnce({ runId: "collector-run" })
+      .mockResolvedValueOnce({ runId: "driver-run" });
+    const failure = new Error("continuation lookup failed");
+    let resolveStable: ((value: { runId: string }) => void) | undefined;
+    getHookByTokenMock.mockImplementation((token: string) => {
+      if (token === "slack:thread") return Promise.reject(failure);
+      if (token === sessionCommandHookToken("driver-run")) {
+        return new Promise<{ runId: string }>((resolve) => {
+          resolveStable = resolve;
+        });
+      }
+      throw new Error(`Unexpected hook token ${JSON.stringify(token)}.`);
+    });
+
+    let settled = false;
+    const result = buildRuntime(compiledArtifactsSource)
+      .createSession({
+        adapter: activityAdapter(),
+        auth: null,
+        continuationToken: "slack:thread",
+        input: { message: "hello" },
+        mode: "conversation",
+      })
+      .finally(() => {
+        settled = true;
+      });
+
+    await vi.waitFor(() => {
+      expect(getHookByTokenMock).toHaveBeenCalledWith("slack:thread");
+      expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("driver-run"));
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(cancelRunMock).not.toHaveBeenCalled();
+
+    resolveStable?.({ runId: "driver-run" });
+    await expect(result).rejects.toBe(failure);
+    expect(cancelRunMock).toHaveBeenCalledWith("world", "collector-run", {
+      cancelReason: "Root session creation did not complete",
+    });
+  });
+
   it("cancels the collector when continuation ownership rejects the root candidate", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock
       .mockResolvedValueOnce({ runId: "collector-run" })
       .mockResolvedValueOnce({ runId: "driver-run" });
-    getHookByTokenMock.mockResolvedValue({ runId: "other-run" });
+    let resolveStable: ((value: { runId: string }) => void) | undefined;
+    getHookByTokenMock.mockImplementation((token: string) => {
+      if (token === "slack:thread") return Promise.resolve({ runId: "other-run" });
+      if (token === sessionCommandHookToken("driver-run")) {
+        return new Promise<{ runId: string }>((resolve) => {
+          resolveStable = resolve;
+        });
+      }
+      throw new Error(`Unexpected hook token ${JSON.stringify(token)}.`);
+    });
 
-    await expect(
-      buildRuntime(compiledArtifactsSource).createSession({
+    let settled = false;
+    const result = buildRuntime(compiledArtifactsSource)
+      .createSession({
         adapter: activityAdapter(),
         auth: null,
         continuationToken: "slack:thread",
         input: { message: "hello" },
         mode: "conversation",
-      }),
-    ).rejects.toBeInstanceOf(RuntimeSessionOwnershipConflictError);
+      })
+      .finally(() => {
+        settled = true;
+      });
+
+    await vi.waitFor(() => {
+      expect(getHookByTokenMock).toHaveBeenCalledWith("slack:thread");
+      expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("driver-run"));
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    resolveStable?.({ runId: "driver-run" });
+    await expect(result).rejects.toBeInstanceOf(RuntimeSessionOwnershipConflictError);
 
     expect(cancelRunMock).toHaveBeenCalledWith("world", "collector-run", {
       cancelReason: "Root session creation did not complete",
