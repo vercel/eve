@@ -25,7 +25,7 @@ import {
   normalizeRequestedOutputSchema,
 } from "#execution/subagent-invocation.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import type { DynamicRemoteAgentConfig } from "#runtime/subagents/dynamic-remote-agent-config.js";
 import type { CompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -57,7 +57,7 @@ class RemoteAgentCancelRequestError extends Error {
 }
 
 export async function startRemoteAgentSession(input: {
-  readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly action: RuntimeRemoteAgentDispatchRequest;
   /** The dispatching turn's session principal, forwarded when `remote.forwardPrincipal` is set. */
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
@@ -75,6 +75,7 @@ export async function startRemoteAgentSession(input: {
   readonly parentTraceContext?: SessionTraceContext;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
+  readonly taskId?: string;
 }): Promise<RemoteAgentSessionCoordinates> {
   const callbackToken = input.callbackToken ?? input.session.continuationToken;
   if (!callbackToken) {
@@ -105,7 +106,7 @@ export async function startRemoteAgentSession(input: {
     callback: {
       callId: input.action.callId,
       subagentName: input.action.remoteAgentName,
-      taskId: readTaskIdFromInboxToken(callbackToken),
+      taskId: input.taskId ?? readTaskIdFromInboxToken(callbackToken),
       token: callbackToken,
       url: createWorkflowCallbackUrl(
         input.callbackBaseUrl,
@@ -628,7 +629,7 @@ async function resolveRemoteAgentRequestHeaders(
 }
 
 function formatRemoteAgentCallInputMessage(input: {
-  readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
 }): string {
   const message = typeof input.action.input.message === "string" ? input.action.input.message : "";

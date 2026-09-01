@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 
 import { jsonValuesEqual, parseJsonObject, parseJsonValue } from "#shared/json.js";
@@ -60,6 +61,12 @@ describe("parseJsonValue", () => {
     });
   });
 
+  it("preserves plain objects from another JavaScript realm", () => {
+    const value = runInNewContext('({ city: "Brooklyn", nested: { active: true } })');
+
+    expect(parseJsonValue(value)).toEqual({ city: "Brooklyn", nested: { active: true } });
+  });
+
   it("rejects arrays with undefined entries", () => {
     expect(() => parseJsonValue(["brooklyn", undefined])).toThrow(
       "Expected a JSON-serializable value.",
@@ -90,6 +97,14 @@ describe("parseJsonValue", () => {
     expect(() => parseJsonValue(new Set(["Brooklyn"]))).toThrow(
       "Expected a JSON-serializable value.",
     );
+  });
+
+  it("rejects class instances", () => {
+    class City {
+      name = "Brooklyn";
+    }
+
+    expect(() => parseJsonValue(new City())).toThrow("Expected a JSON-serializable value.");
   });
 
   it("rejects non-JSON scalars", () => {

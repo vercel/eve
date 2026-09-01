@@ -5,7 +5,6 @@ import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { buildToolSet } from "#harness/tools.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 describe("getAdvertisedTools", () => {
@@ -147,7 +146,7 @@ describe("getAdvertisedTools for definition arrays", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
   });
 
-  it("keeps only task_update in delegated sessions", () => {
+  it("keeps task controls in task-enabled delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["task_cancel", createTaskControlTool("task_cancel")],
@@ -160,7 +159,7 @@ describe("getAdvertisedTools for definition arrays", () => {
       tools,
     });
 
-    expect([...advertisedTools.keys()]).toEqual(["add", "task_update"]);
+    expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel", "task_update"]);
   });
 
   it("removes task_update from sessions without a delegated caller", () => {
@@ -186,43 +185,25 @@ function createTool(name: string): HarnessToolDefinition {
 function createSubagentTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
-    behavior: {
-      availability: [],
-      handling: {
-        kind: "dispatch",
-        target: { kind: "subagent-call", nodeId: "workers", subagentName: name },
-      },
+    task: {
+      resultKind: "subagent",
+      workflowId: "workflow//eve//subagentToolExecuteWorkflow",
     },
+    workflowCallable: true,
   };
 }
 
 function createBuiltInAgentTool(): HarnessToolDefinition {
   return {
     ...createSubagentTool("agent"),
-    behavior: {
-      availability: ["root-session"],
-      handling: {
-        kind: "dispatch",
-        target: {
-          kind: "self-agent-call",
-          nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-          subagentName: "agent",
-        },
-      },
-    },
+    rootOnly: true,
   };
 }
 
 function createTaskControlTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
-    behavior: {
-      availability: [name === "task_update" ? "delegated-task-child" : "root-session"],
-      handling: {
-        kind: "dispatch",
-        target: { kind: name === "task_update" ? "task-update" : "task-cancel" },
-      },
-    },
+    runtimeAction: { kind: "task-control" },
   };
 }
 

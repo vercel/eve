@@ -18,7 +18,7 @@ import type {
   ResolvedStepInput,
 } from "#harness/hitl/pending-input-resolution.js";
 import { resolveQuestionOnlyInputBatches } from "#harness/hitl/question-input-requests.js";
-import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
+import { resolveToolCallInputObject } from "#harness/coordination.js";
 import {
   clearPendingSessionLimitPrompt,
   isSessionLimitInputBatch,

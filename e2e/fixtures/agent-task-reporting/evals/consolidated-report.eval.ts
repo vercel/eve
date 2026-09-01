@@ -8,7 +8,7 @@ const COMPLETION = /Background task (task_[a-z0-9]+) \([^)]+\) is completed\./gi
 function reportingEval() {
   return defineEval({
     description:
-      "A stock Eve agent acknowledges accepted background work, keeps partial wakes silent, and reports once after settlement.",
+      "A stock eve agent acknowledges accepted background work, keeps partial wakes silent, and reports once after settlement.",
     tags: ["real-model"],
     async test(t) {
       const started =

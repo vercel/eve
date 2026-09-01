@@ -17,39 +17,25 @@ function orchestrationTools(): HarnessToolMap {
     [
       "researcher",
       {
-        behavior: {
-          availability: [],
-          handling: {
-            kind: "dispatch",
-            target: {
-              kind: "subagent-call",
-              nodeId: "subagents/researcher",
-              subagentName: "researcher",
-            },
-          },
-        },
         description: "Delegate to the researcher subagent.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "researcher",
+        task: {
+          resultKind: "subagent",
+          workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+        },
       },
     ],
     [
       "remote_reviewer",
       {
-        behavior: {
-          availability: [],
-          handling: {
-            kind: "dispatch",
-            target: {
-              kind: "remote-agent-call",
-              nodeId: "subagents/remote-reviewer.ts",
-              remoteAgentName: "remote_reviewer",
-            },
-          },
-        },
         description: "Delegate to the remote reviewer.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "remote_reviewer",
+        task: {
+          resultKind: "subagent",
+          workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+        },
       },
     ],
     [
@@ -73,7 +59,7 @@ describe("applyWorkflowTool", () => {
     expect(resolveWorkflowSandboxBridgeRequestLimit(300)).toBe(301);
   });
 
-  it("adds only agent runtime actions to the sandbox", async () => {
+  it("adds only agent workflow tasks to the sandbox", async () => {
     const harnessTools = orchestrationTools();
     const flatTools = buildToolSet({ tools: harnessTools });
     const { hostTools, modelTools } = await applyWorkflowTool({
@@ -116,7 +102,7 @@ describe("applyWorkflowTool", () => {
     });
   });
 
-  it("does not add Workflow when no agent runtime actions exist", async () => {
+  it("does not add Workflow when no agent workflow tasks exist", async () => {
     const harnessTools: HarnessToolMap = new Map([
       [
         "bash",

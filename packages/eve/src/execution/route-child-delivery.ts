@@ -6,14 +6,14 @@ import {
   type RoutedDeliverResult,
 } from "#execution/proxied-deliver-step.js";
 import {
-  emitRecordedTaskAuthorizationEventStep,
   emitRecordedTaskInputRequestStep,
+  runProxySubagentEventStep,
 } from "#execution/subagent-event-proxy-step.js";
 import {
-  acceptTaskAuthorizationEventStep,
+  acceptTaskAgentEventStep,
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
-} from "#execution/tasks/parent/hitl-proxy-steps.js";
+} from "#execution/task-hitl-proxy-steps.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -44,16 +44,14 @@ export async function routeDeliverToChildren(input: {
 
   for (const request of payload.task?.inputRequests ?? []) {
     const recorded = await recordTaskInputRequestStep({
-      hookPayload: request.hookPayload,
-      serializedContext,
+      request,
       sessionState,
-      taskId: request.taskId,
     });
     sessionState = recorded.sessionState;
     if (!recorded.accepted) continue;
     const emitted = await emitRecordedTaskInputRequestStep({
-      hookPayload: recorded.hookPayload,
       parentWritable: input.parentWritable,
+      request: recorded.request,
       serializedContext,
       sessionState,
     });
@@ -61,15 +59,14 @@ export async function routeDeliverToChildren(input: {
     sessionState = emitted.sessionState;
   }
 
-  for (const request of payload.task?.authorizationEvents ?? []) {
-    const accepted = await acceptTaskAuthorizationEventStep({
-      hookPayload: request.hookPayload,
+  for (const effect of payload.task?.effects ?? []) {
+    const accepted = await acceptTaskAgentEventStep({
+      effect,
       sessionState,
-      taskId: request.taskId,
     });
-    if (!accepted) continue;
-    const emitted = await emitRecordedTaskAuthorizationEventStep({
-      hookPayload: request.hookPayload,
+    if (!accepted.accepted) continue;
+    const emitted = await runProxySubagentEventStep({
+      hookPayload: accepted.hookPayload,
       parentWritable: input.parentWritable,
       serializedContext,
       sessionState,

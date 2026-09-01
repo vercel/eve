@@ -1,6 +1,6 @@
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/state-key.js";
-import type { AgentHandle } from "#harness/handles/store.js";
+import type { AgentHandle, AgentHandleStore } from "#harness/handles/store.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 /** A handle with one outstanding operation and a confirmed child address. */
@@ -9,11 +9,9 @@ export type RunningAgentHandle = Extract<AgentHandle, { phase: "running" }>;
 /**
  * Schema-free read of the agent handles from session state.
  *
- * Trust boundary: every write to this key goes through `writeHandles` in
- * transitions.ts, which runs the strict zod store schema at persist time and
- * refuses to write an invalid store. This driver-side query trusts that
- * invariant instead of re-validating, so the workflow driver bundle stays
- * free of the compiled zod runtime.
+ * Trust boundary: every source store was validated by a handle transition.
+ * Driver-side reads and ownership merges trust that invariant instead of
+ * re-validating, so the workflow driver bundle stays free of compiled zod.
  */
 function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHandle[] {
   const raw = state?.[AGENT_HANDLES_STATE_KEY];
@@ -22,6 +20,70 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
   }
   const handles = (raw as { handles?: unknown }).handles;
   return Array.isArray(handles) ? (handles as readonly AgentHandle[]) : [];
+}
+
+/**
+ * Rebases task-owned handle mutations accepted by the session driver while a
+ * turn was running onto that turn's returned state.
+ *
+ * The turn owns `starting`/`running`/`parked`; stable-inbox commands own
+ * `reserved`/`claimed`/`available`. Replacing only the latter prevents the
+ * turn's older snapshot from erasing a concurrently accepted task lease while
+ * preserving any ordinary handle transition the turn itself committed.
+ */
+export function mergeTaskOwnedAgentHandlesIntoTurnState(input: {
+  readonly driverState: SessionStateMap | undefined;
+  readonly turnState: SessionStateMap | undefined;
+}): SessionStateMap | undefined {
+  const driverStore = readAgentHandleStore(input.driverState);
+  if (driverStore === undefined) return input.turnState;
+
+  const taskHandles = new Map(
+    driverStore.handles
+      .filter(isTaskOwnedAgentHandle)
+      .map((handle) => [handle.identity.id, handle] as const),
+  );
+  const merged: AgentHandle[] = [];
+  for (const handle of readAgentHandles(input.turnState)) {
+    if (isTaskOwnedAgentHandle(handle)) {
+      const current = taskHandles.get(handle.identity.id);
+      if (current !== undefined) {
+        merged.push(current);
+        taskHandles.delete(handle.identity.id);
+      }
+      continue;
+    }
+    if (taskHandles.has(handle.identity.id)) {
+      throw new Error(
+        `Agent handle "${handle.identity.id}" changed ownership while its turn was running.`,
+      );
+    }
+    merged.push(handle);
+  }
+  for (const handle of taskHandles.values()) {
+    if (merged.some((candidate) => candidate.identity.id === handle.identity.id)) {
+      throw new Error(
+        `Agent handle "${handle.identity.id}" changed ownership while its turn was running.`,
+      );
+    }
+    merged.push(handle);
+  }
+
+  return {
+    ...input.turnState,
+    [AGENT_HANDLES_STATE_KEY]: { handles: merged } satisfies AgentHandleStore,
+  };
+}
+
+function readAgentHandleStore(state: SessionStateMap | undefined): AgentHandleStore | undefined {
+  if (state?.[AGENT_HANDLES_STATE_KEY] === undefined) return undefined;
+  return { handles: readAgentHandles(state) };
+}
+
+function isTaskOwnedAgentHandle(
+  handle: AgentHandle,
+): handle is Extract<AgentHandle, { phase: "available" | "claimed" | "reserved" }> {
+  return handle.phase === "available" || handle.phase === "claimed" || handle.phase === "reserved";
 }
 
 /**

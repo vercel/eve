@@ -1,13 +1,13 @@
 import { REMOTE_AGENT_START_FAILED } from "#harness/agent-handle-errors.js";
 import type {
-  RuntimeRemoteAgentCallActionRequest,
-  RuntimeSubagentCallActionRequest,
+  RuntimeRemoteAgentDispatchRequest,
+  RuntimeSubagentDispatchRequest,
   RuntimeSubagentDispatchFailure,
 } from "#shared/action-types.js";
 import { toErrorMessage } from "#shared/errors.js";
 
 export function createUnavailableDynamicSubagentResult(
-  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+  action: RuntimeSubagentDispatchRequest | RuntimeRemoteAgentDispatchRequest,
 ): RuntimeSubagentDispatchFailure {
   const subagentName = getSubagentName(action);
   return {
@@ -24,13 +24,13 @@ export function createUnavailableDynamicSubagentResult(
 }
 
 export function getSubagentName(
-  action: RuntimeSubagentCallActionRequest | RuntimeRemoteAgentCallActionRequest,
+  action: RuntimeSubagentDispatchRequest | RuntimeRemoteAgentDispatchRequest,
 ): string {
   return action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
 }
 
 export function createRemoteAgentStartFailureResult(input: {
-  readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly error: unknown;
 }): RuntimeSubagentDispatchFailure {
   return {
@@ -47,7 +47,7 @@ export function createRemoteAgentStartFailureResult(input: {
 }
 
 export function createRecursiveAgentRootOnlyResult(
-  action: RuntimeSubagentCallActionRequest,
+  action: RuntimeSubagentDispatchRequest,
 ): RuntimeSubagentDispatchFailure {
   return {
     callId: action.callId,

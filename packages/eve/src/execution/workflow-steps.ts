@@ -28,7 +28,6 @@ import {
   ModeKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicToolRuntimeRevisionKey,
-  TasksEnabledKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -52,10 +51,7 @@ import { observeSessionActivity } from "#execution/session-activity-projection.j
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
-import {
-  getRuntimeActionKeysFromWorkflowInterrupt,
-  isWorkflowRuntimeActionInterrupt,
-} from "#harness/workflow-runtime-action-state.js";
+import { getWorkflowTaskCallIds, isWorkflowTaskInterrupt } from "#harness/workflow-task-state.js";
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
 import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn-tag-state.js";
@@ -82,7 +78,6 @@ import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema
 import { createDurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
 import type { TurnStepInput } from "#execution/durable-session-migrations/turn-workflow.js";
 import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-step.js";
-import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
 import {
   resolveInitiatingTaskContext,
   resolveTaskDeliveryContext,
@@ -90,7 +85,7 @@ import {
 import {
   readRetainedBackgroundToolResult,
   runBackgroundStep,
-} from "#execution/tasks/parent/tool-execution.js";
+} from "#execution/background-tool-execution.js";
 import {
   isTaskOwnedSerializedContext,
   TASK_UPDATE_SESSION_INSTRUCTION,
@@ -136,12 +131,9 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   }
   const adapter = ctx.require(ChannelKey);
   const bundle = ctx.require(BundleKey);
-  const tasksEnabled = bundle.resolvedAgent.config?.experimental?.tasks === true;
-  ctx.set(TasksEnabledKey, tasksEnabled);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const taskUpdatesEnabled =
     isTaskOwnedSerializedContext(input.serializedContext) &&
-    tasksEnabled &&
     effectiveAgent.turnAgent.tools.some(
       (tool) =>
         tool.kind === "authored-tool" &&
@@ -282,7 +274,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     }
   }
 
-  if (tasksEnabled && ctx.get(TurnTaskDeliveryKey) === "none") {
+  if (ctx.get(TurnTaskDeliveryKey) === "none") {
     const taskContext = resolveInitiatingTaskContext({
       state: durableSession.state,
       turnId: activeTurnId(initialEmissionState),
@@ -321,7 +313,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...derivePendingState(rekeyed),
       serializedContext: nextSerializedContext,
       sessionState: nextState,
-      tasksEnabled,
     };
   }
 
@@ -529,9 +520,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
           turnAgent: effectiveAgent.turnAgent,
         });
-        const modelSession = tasksEnabled
-          ? await appendTaskAgentAnnouncement(refreshedSession, history.messages(refreshedSession))
-          : refreshedSession;
+        const modelSession = refreshedSession;
 
         const step = createExecutionNodeStep({
           abortSignal: input.abortSignal,
@@ -637,16 +626,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     writer.releaseLock();
 
     const workflowInterrupt = getPendingWorkflowInterrupt(stepResult.session.state);
-    if (
-      workflowInterrupt !== undefined &&
-      isWorkflowRuntimeActionInterrupt(workflowInterrupt.interrupt)
-    ) {
+    if (workflowInterrupt !== undefined && isWorkflowTaskInterrupt(workflowInterrupt.interrupt)) {
       return {
-        action: "dispatch-workflow-runtime-actions",
+        action: "dispatch-workflow-tasks",
         ...backgroundTransition,
-        pendingRuntimeActionKeys: getRuntimeActionKeysFromWorkflowInterrupt(
-          workflowInterrupt.interrupt,
-        ),
+        pendingTaskCallIds: getWorkflowTaskCallIds(workflowInterrupt.interrupt),
         ...sleepTransition,
         serializedContext: nextSerializedContext,
         sessionState: nextState,
@@ -673,7 +657,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           isError: stepResult.settledTurn.isError,
           usage: delta,
         },
-        tasksEnabled,
       };
     }
 
@@ -684,7 +667,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
-      tasksEnabled,
     };
   }
 

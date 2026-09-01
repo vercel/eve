@@ -7,6 +7,7 @@ import type {
 import type { JsonObject } from "#shared/json.js";
 import { serializeInputSchema } from "#tools/schema.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
+import { subagentToolExecuteWorkflowReference } from "#execution/tools/subagent/workflow-reference.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -73,7 +74,10 @@ export function createRuntimeSubagentRegistry(input: {
     let registeredSubagent: RuntimeRegisteredSubagent;
     const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
     if (dynamic === undefined) {
-      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
+      const prepared = createPreparedRuntimeSubagentTool(
+        subagentDefinition,
+        SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
+      );
       registeredSubagent = {
         definition: subagentDefinition,
         prepared,
@@ -138,6 +142,7 @@ export function createPreparedRuntimeSubagentTool(
       },
     },
     description: definition.description,
+    execution: "background",
     inputSchema,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
@@ -145,5 +150,10 @@ export function createPreparedRuntimeSubagentTool(
     nodeId: definition.nodeId,
     outputSchema: definition.kind === "remote" ? definition.outputSchema : undefined,
     sourceId: definition.sourceId,
+    task: {
+      nodeId: definition.nodeId,
+      resultKind: "subagent",
+      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+    },
   };
 }

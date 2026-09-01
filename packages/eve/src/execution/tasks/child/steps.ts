@@ -1,27 +1,24 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
-import type {
-  ActivityObserverConfig,
-  SessionAuthContext,
-  SessionCommand,
-  SubagentAuthorizationEventHookPayload,
-  SubagentInputRequestHookPayload,
-} from "#channel/types.js";
-import { submitActivity } from "#execution/submit-activity.js";
+import type { SessionAuthContext, SessionCommand } from "#channel/types.js";
+import {
+  isWorkflowToolEffectRequest,
+  type WorkflowToolRunRequestMessage,
+} from "#execution/tools/workflow/messages.js";
+import { isAgentInvocationEvent } from "#execution/tools/subagent/invocation.js";
+import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
-import { resumeToolRunAnswers } from "#execution/tool-run/answer.js";
+import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
-import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
-  taskAuthorizationRequestId,
   TASK_VIEW_STREAM_NAMESPACE,
   type TaskInboundAnswerInput,
-  type TaskInboundAuthorizationEvent,
-  type TaskInboundInputRequest,
   type TaskInboundUpdate,
+  type TaskEffectDelivery,
+  type TaskInputRequestDelivery,
   type TaskView,
 } from "#tasks/types.js";
 
@@ -32,10 +29,7 @@ const log = createLogger("execution.tasks.run");
  * stream. Only the task run workflow calls this, which is what makes
  * the run the single writer readers can trust without re-validating.
  */
-export async function appendTaskViewStep(input: {
-  readonly activityObserver?: ActivityObserverConfig;
-  readonly view: TaskView;
-}): Promise<void> {
+export async function appendTaskViewStep(input: { readonly view: TaskView }): Promise<void> {
   "use step";
 
   const writable = getWritable<TaskView>({ namespace: TASK_VIEW_STREAM_NAMESPACE });
@@ -44,77 +38,6 @@ export async function appendTaskViewStep(input: {
     await writer.write(input.view);
   } finally {
     writer.releaseLock();
-  }
-
-  const events = projectTaskActivitySettlement({
-    activityObserver: input.activityObserver,
-    settledAt: new Date().toISOString(),
-    view: input.view,
-  });
-  void submitActivity({ events, sink: input.activityObserver?.sink });
-}
-
-export function projectTaskActivitySettlement(input: {
-  readonly activityObserver: ActivityObserverConfig | undefined;
-  readonly settledAt: string;
-  readonly view: TaskView;
-}): readonly ActivityEventV1[] {
-  const work = input.activityObserver?.workIdentity;
-  const status = input.view.status;
-  if (
-    work === undefined ||
-    (status !== "completed" && status !== "failed" && status !== "cancelled")
-  )
-    return [];
-  return [
-    {
-      eventId: `${work.id}:settled:${status}`,
-      kind: "work.settled",
-      outcome: status,
-      settledAt: input.settledAt,
-      workId: work.id,
-    },
-  ];
-}
-
-/** Re-emits a task-owned child authorization event through the parent channel. */
-export async function wakeTaskAuthorizationParentStep(input: {
-  readonly request: TaskInboundAuthorizationEvent;
-  readonly taskId: string;
-  readonly token: string;
-}): Promise<void> {
-  "use step";
-
-  const hookPayload: SubagentAuthorizationEventHookPayload = {
-    callId: input.request.callId,
-    childSessionId: input.request.childSessionId,
-    event: input.request.event,
-    kind: "subagent-authorization-event",
-    subagentName: input.request.subagentName,
-  };
-  const data = input.request.event.data;
-  const payload: {
-    message?: string;
-    task: {
-      authorizationEvents: {
-        hookPayload: SubagentAuthorizationEventHookPayload;
-        taskId: string;
-      }[];
-    };
-  } = { task: { authorizationEvents: [{ hookPayload, taskId: input.taskId }] } };
-  if (input.request.event.type === "authorization.required") {
-    payload.message = `Background task ${input.taskId} needs authorization.`;
-  }
-  const command: SessionCommand = {
-    kind: "send",
-    payload,
-    taskDeliveryId: `${input.taskId}:authorization:${input.request.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(input.request.event)}`,
-  };
-  try {
-    await resumeSessionInbox(input.token, command);
-  } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return;
-    throw error;
   }
 }
 
@@ -178,9 +101,52 @@ export async function wakeTaskUpdateParentStep(input: {
   }
 }
 
-/** Sends an exact local-task HITL batch to the parent's pre-model router. */
-export async function wakeTaskInputRequestParentStep(input: {
-  readonly request: TaskInboundInputRequest;
+/** Forwards one agent HITL event to the parent channel proxy. */
+export async function wakeTaskAgentEventParentStep(input: {
+  readonly request: WorkflowToolRunRequestMessage;
+  readonly taskId: string;
+  readonly token: string;
+}): Promise<void> {
+  "use step";
+
+  const effect = input.request.request;
+  if (!isWorkflowToolEffectRequest(effect) || effect.name !== "agent.event") {
+    throw new Error(
+      `Unsupported task agent event "${isWorkflowToolEffectRequest(effect) ? effect.name : "input"}".`,
+    );
+  }
+  if (
+    !isAgentInvocationEvent(effect.input) ||
+    effect.input.kind !== "subagent-authorization-event"
+  ) {
+    throw new Error("Unsupported task agent event payload.");
+  }
+  const command: SessionCommand = {
+    kind: "send",
+    payload: {
+      task: {
+        effects: [
+          {
+            input: effect.input as unknown as TaskEffectDelivery["input"],
+            name: effect.name,
+            replyTo: input.request.replyTo,
+            taskId: input.taskId,
+          },
+        ],
+      },
+    },
+    taskDeliveryId: `${input.taskId}:effect:${input.request.from.runId}:${effect.invocationId ?? effect.name}`,
+  };
+  try {
+    await resumeSessionInbox(input.token, command);
+  } catch (error) {
+    if (!isTaskWorkflowTargetGone(error)) throw error;
+  }
+}
+
+/** Sends a workflow-body question to the owning parent's pre-model router. */
+export async function wakeWorkflowTaskInputRequestParentStep(input: {
+  readonly request: WorkflowToolRunTaskInputRequest;
   readonly taskId: string;
   readonly token: string;
 }): Promise<void> {
@@ -192,19 +158,22 @@ export async function wakeTaskInputRequestParentStep(input: {
       task: {
         inputRequests: [
           {
-            hookPayload: input.request as SubagentInputRequestHookPayload,
+            replyTo: input.request.replyTo,
+            request: input.request.request,
+            sequence: input.request.sequence,
+            stepIndex: input.request.stepIndex,
             taskId: input.taskId,
-          },
+            turnId: input.request.turnId,
+          } satisfies TaskInputRequestDelivery,
         ],
       },
     },
-    taskDeliveryId: `${input.taskId}:input:${input.request.event.turnId}:${input.request.event.stepIndex}:${input.request.event.sequence}`,
+    taskDeliveryId: `${input.taskId}:input:${input.request.turnId}:${input.request.stepIndex}:${input.request.sequence}`,
   };
   try {
     await resumeSessionInbox(input.token, command);
   } catch (error) {
-    if (isTaskWorkflowTargetGone(error)) return;
-    throw error;
+    if (!isTaskWorkflowTargetGone(error)) throw error;
   }
 }
 
@@ -247,7 +216,7 @@ export async function deliverTaskInputResponsesStep(input: {
       if (!response.ok)
         throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
     } else if (input.answerHook !== undefined) {
-      await resumeToolRunAnswers(
+      await resumeWorkflowToolRunAnswers(
         input.answer.childContinuationToken,
         command.payload.inputResponses,
       );

@@ -37,6 +37,9 @@ function createMockInbox(reads: readonly ScriptedRead[], authorizationReady = fa
     async claimAuthorization() {},
     async claimStable() {},
     consumeNext() {},
+    async handleAgentHandleCommand() {
+      return false;
+    },
     hasReadyAuthorization() {
       return authorizationReady;
     },
@@ -247,6 +250,7 @@ describe("nextTurnDelivery routing", () => {
       claimAuthorization: vi.fn(),
       claimStable: vi.fn(),
       consumeNext: vi.fn(),
+      handleAgentHandleCommand: vi.fn(async () => false),
       hasReadyAuthorization: vi.fn(() => false),
       next: vi.fn(async () => ({ done: false as const, value: commands.shift()! })),
       nextWithSource: vi.fn(async () => ({

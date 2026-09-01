@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
@@ -373,5 +375,22 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.workflowManifest.workflows?.[filename]?.turnWorkflow?.workflowId).toBe(
       "workflow//eve//turnWorkflow",
     );
+  });
+
+  it("keeps the session command inbox factory visible in workflow driver builds", async () => {
+    const eveRoot = resolvePackageRoot();
+    const filename = "src/execution/session-command-inbox.ts";
+    const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
+    const transformed = await applyWorkflowTransform(
+      filename,
+      source,
+      "workflow",
+      resolvePackageSourceFilePath(filename),
+      eveRoot,
+    );
+
+    expect(transformed.code).toContain("export function createSessionCommandInbox");
+    expect(transformed.code).toContain("session-command-inbox-agent-handles");
+    expect(transformed.code).not.toContain("WORKFLOW_USE_STEP");
   });
 });

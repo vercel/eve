@@ -13,14 +13,14 @@ import type {
   SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
 import type { JsonObject } from "#shared/json.js";
 
 /**
- * Pending runtime-action batch event metadata needed for child run lineage.
+ * Pending task batch event metadata needed for child run lineage.
  */
 interface BatchEventMetadata {
   readonly sequence: number;
@@ -71,7 +71,7 @@ export interface SubagentSandboxGraph {
  * Builds the {@link RunInput} for one delegated subagent child run.
  */
 export function buildSubagentRunInput(input: {
-  readonly action: RuntimeSubagentCallActionRequest;
+  readonly action: RuntimeSubagentDispatchRequest;
   readonly auth: SessionAuthContext | null;
   readonly batchEvent: BatchEventMetadata;
   /**
@@ -103,6 +103,8 @@ export function buildSubagentRunInput(input: {
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
+  /** Owning task when this child starts from a background workflow tool. */
+  readonly taskId?: string;
 }): SubagentRunInputBuild {
   const {
     action,
@@ -138,6 +140,7 @@ export function buildSubagentRunInput(input: {
     parentSessionId: session.sessionId,
     subagentName: action.subagentName,
   };
+  if (input.taskId !== undefined) adapterState.taskId = input.taskId;
   const sharesSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
       .inheritsParent === true || input.selfAgent;
@@ -190,7 +193,7 @@ export function buildSubagentRunInput(input: {
  * Formats the synthesized child input message for one delegated subagent call.
  */
 function formatSubagentCallInputMessage(input: {
-  readonly action: Pick<RuntimeSubagentCallActionRequest, "input" | "subagentName">;
+  readonly action: Pick<RuntimeSubagentDispatchRequest, "input" | "subagentName">;
   readonly source: SubagentInputSource;
 }): string {
   const { message } = input.action.input as { message: string };

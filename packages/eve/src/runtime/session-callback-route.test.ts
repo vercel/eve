@@ -16,7 +16,7 @@ describe("session callback route", () => {
     resumeHookMock.mockReset();
   });
 
-  it("forwards remote task turn-start identity to the task hook", async () => {
+  it("rejects removed direct task turn-start callbacks", async () => {
     resumeHookMock.mockResolvedValue(undefined);
     const response = await handleSessionCallbackRequest(
       new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {
@@ -33,16 +33,11 @@ describe("session callback route", () => {
       createRouteContext({ token: TASK_TOKEN }),
     );
 
-    expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
-      childSessionId: "child-session",
-      childTurnId: "turn_child_7",
-      kind: "turn-started",
-      taskId: TASK_ID,
-    });
+    expect(response.status).toBe(410);
+    expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it("forwards remote task input requests to the owning task hook", async () => {
+  it("rejects removed direct task input callbacks", async () => {
     resumeHookMock.mockResolvedValue(undefined);
     const event = {
       requests: [
@@ -84,8 +79,43 @@ describe("session callback route", () => {
       createRouteContext({ token: TASK_TOKEN }),
     );
 
+    expect(response.status).toBe(410);
+    expect(resumeHookMock).not.toHaveBeenCalled();
+  });
+
+  it("routes remote task input through an invocation reply hook", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const event = {
+      requests: [
+        {
+          action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "ask" },
+          kind: "question",
+          prompt: "Continue?",
+          requestId: "request-1",
+        },
+      ],
+      sequence: 3,
+      stepIndex: 2,
+      turnId: "turn-child",
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/invocation-reply", {
+        body: JSON.stringify({
+          callId: "call-task",
+          childContinuationToken: "remote-child-token",
+          childSessionId: "child-session",
+          event,
+          kind: "task.input-requested",
+          subagentName: "research",
+          taskId: TASK_ID,
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "invocation-reply" }),
+    );
+
     expect(response.status).toBe(202);
-    expect(resumeHookMock).toHaveBeenCalledWith(TASK_TOKEN, {
+    expect(resumeHookMock).toHaveBeenCalledWith("invocation-reply", {
       callId: "call-task",
       childContinuationToken: "remote-child-token",
       childSessionId: "child-session",
@@ -95,7 +125,46 @@ describe("session callback route", () => {
     });
   });
 
-  it("forwards remote task updates to the owning task hook", async () => {
+  it("routes remote task authorization through an invocation reply hook", async () => {
+    resumeHookMock.mockResolvedValue(undefined);
+    const event = {
+      data: {
+        description: "Authorize Linear",
+        name: "linear",
+        sequence: 3,
+        stepIndex: 2,
+        turnId: "turn-child",
+        url: "https://linear.example/authorize",
+      },
+      type: "authorization.required",
+    };
+    const response = await handleSessionCallbackRequest(
+      new Request("https://app.example.com/eve/v1/callback/invocation-reply", {
+        body: JSON.stringify({
+          callId: "call-task",
+          childContinuationToken: "remote-child-token",
+          childSessionId: "child-session",
+          event,
+          kind: "task.authorization",
+          subagentName: "research",
+          taskId: TASK_ID,
+        }),
+        method: "POST",
+      }),
+      createRouteContext({ token: "invocation-reply" }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(resumeHookMock).toHaveBeenCalledWith("invocation-reply", {
+      callId: "call-task",
+      childSessionId: "child-session",
+      event,
+      kind: "subagent-authorization-event",
+      subagentName: "research",
+    });
+  });
+
+  it("retains the generic task progress callback", async () => {
     resumeHookMock.mockResolvedValue(undefined);
     const response = await handleSessionCallbackRequest(
       new Request(`https://app.example.com/eve/v1/callback/${TASK_TOKEN}`, {

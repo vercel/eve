@@ -1,17 +1,19 @@
 import {
-  AGENT_HANDLES_STATE_KEY,
-  assertPersistableAgentHandleStore,
   formatAgentStatus,
   getAgentHandleStore,
+  setAgentHandleStore,
   type AgentAddress,
   type AgentHandle,
+  type AgentHandleStore,
+  type AgentHandleStoreCommand,
+  type AgentHandleStoreCommandResult,
   type AgentIdentity,
   type ContinueOperation,
   type StartOperation,
+  type TaskOwnedAgentHandle,
 } from "#harness/handles/store.js";
-import type { HarnessSession, SessionStateMap } from "#harness/types.js";
+import type { HarnessSession } from "#harness/types.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
-import { jsonValuesEqual } from "#shared/json.js";
 
 /**
  * Records intent to start a fresh child. Must be applied to the step's
@@ -168,90 +170,6 @@ export function confirmAgentStarted(
   );
 }
 
-/** Confirms a task-mode child as a persistent identity/address record. */
-export function confirmTaskAgentAddress(
-  session: HarnessSession,
-  input: {
-    readonly operationId: string;
-    readonly address: AgentAddress;
-  },
-): HarnessSession {
-  const handles = getAgentHandleStore(session.state)?.handles ?? [];
-  const existing = findActiveHandle(handles, input.operationId);
-  if (existing === undefined) {
-    throw new Error(`No prepared agent handle for operation "${input.operationId}".`);
-  }
-  if (existing.phase === "running") {
-    throw new Error(
-      `Task agent operation "${input.operationId}" was confirmed as a running handle.`,
-    );
-  }
-
-  return writeHandles(
-    session,
-    handles.map((handle) =>
-      handle === existing
-        ? {
-            address: input.address,
-            identity: existing.identity,
-            phase: "addressed" as const,
-          }
-        : handle,
-    ),
-  );
-}
-
-/**
- * Records a task-mode child's persistent address from its durable executor
- * binding, applied when the parent step that delegated the task commits.
- *
- * Replay-idempotent: a record identical to the stored handle is a no-op
- * (a resumed child, or a replayed commit). A different record under the
- * same id throws — ids derive from unique operations, so a collision
- * means corrupted derivation, not a replay.
- */
-export function recordTaskAgentAddress(
-  session: HarnessSession,
-  input: {
-    readonly address: AgentAddress;
-    readonly identity: AgentIdentity;
-  },
-): HarnessSession {
-  const handles = getAgentHandleStore(session.state)?.handles ?? [];
-  const record: AgentHandle = {
-    address: input.address,
-    identity: input.identity,
-    phase: "addressed",
-  };
-  const existing = handles.find((handle) => handle.identity.id === input.identity.id);
-  if (existing !== undefined) {
-    if (jsonValuesEqual(existing, record)) return session;
-    throw new Error(`Agent handle "${input.identity.id}" already exists with different content.`);
-  }
-  return writeHandles(session, [...handles, record]);
-}
-
-/** Removes a task-mode address after permanent delivery failure. */
-export function removeTaskAgentAddress(session: HarnessSession, agentId: string): HarnessSession {
-  return { ...session, state: removeTaskAgentAddressFromState(session.state, agentId) };
-}
-
-/** State-only variant used while consuming a terminal task wake. */
-export function removeTaskAgentAddressFromState(
-  state: SessionStateMap | undefined,
-  agentId: string,
-): SessionStateMap {
-  const handles = getAgentHandleStore(state)?.handles ?? [];
-  return {
-    ...state,
-    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore({
-      handles: handles.filter(
-        (handle) => !(handle.phase === "addressed" && handle.identity.id === agentId),
-      ),
-    }),
-  };
-}
-
 /**
  * Resolves a dispatch that definitively failed.
  *
@@ -399,78 +317,132 @@ export function settleAgentTurn(
   };
 }
 
-/**
- * Rebases the handle delta one dispatch produced (`base` → `next`) onto a
- * working session that other concurrently staged effects may have advanced
- * past `base`.
- *
- * Per handle id:
- *
- * - deleted by the dispatch → deleted from the working session.
- * - added by the dispatch → appended. If the working session already holds
- *   the id with different content, throws: ids derive from unique
- *   operations, so a collision means corrupted derivation.
- * - changed in place by the dispatch → the dispatched copy replaces the
- *   working copy while that copy still matches `base`. A working copy that
- *   diverged from both throws instead of silently dropping either change.
- * - untouched by the dispatch → the working copy is kept.
- *
- * A delta the working session already contains is a no-op, so replaying an
- * effect is safe.
- */
-export function rebaseAgentHandles(
-  session: HarnessSession,
-  input: {
-    readonly base: SessionStateMap | undefined;
-    readonly next: SessionStateMap | undefined;
-  },
-): HarnessSession {
-  const baseById = handlesById(input.base);
-  const nextById = handlesById(input.next);
-  const currentHandles = getAgentHandleStore(session.state)?.handles ?? [];
-  const currentIds = new Set(currentHandles.map((handle) => handle.identity.id));
-
-  let changed = false;
-  const rebased: AgentHandle[] = [];
-  for (const current of currentHandles) {
-    const id = current.identity.id;
-    const base = baseById.get(id);
-    const next = nextById.get(id);
-    if (base !== undefined && next === undefined) {
-      changed = true;
-      continue;
+/** Applies one atomic task lease command to the shared agent handle store. */
+export function applyAgentHandleStoreCommand(
+  store: AgentHandleStore,
+  command: AgentHandleStoreCommand,
+): {
+  readonly result: AgentHandleStoreCommandResult;
+  readonly store: AgentHandleStore;
+} {
+  switch (command.kind) {
+    case "read":
+      return { result: { kind: "ready" }, store };
+    case "reserve": {
+      const existing = store.handles.find((handle) => handle.identity.id === command.identity.id);
+      if (existing !== undefined) {
+        return (existing.phase === "reserved" || existing.phase === "claimed") &&
+          existing.operationId === command.operationId &&
+          existing.taskId === command.taskId
+          ? { result: { handle: existing, kind: "ready" }, store }
+          : { result: { handle: existing, kind: "busy" }, store };
+      }
+      const handle: TaskOwnedAgentHandle = {
+        identity: command.identity,
+        operationId: command.operationId,
+        phase: "reserved",
+        taskId: command.taskId,
+      };
+      return {
+        result: { handle, kind: "ready" },
+        store: { handles: [...store.handles, handle] },
+      };
     }
-    if (base === undefined && next !== undefined && !jsonValuesEqual(current, next)) {
-      throw new Error(
-        `Agent handle "${id}" added by a dispatch already exists with different content.`,
+    case "confirm": {
+      const existing = store.handles.find(
+        (
+          handle,
+        ): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "claimed" | "reserved" }> =>
+          (handle.phase === "claimed" || handle.phase === "reserved") &&
+          handle.operationId === command.operationId &&
+          handle.taskId === command.taskId,
       );
-    }
-    if (base !== undefined && next !== undefined && !jsonValuesEqual(base, next)) {
-      if (jsonValuesEqual(current, base)) {
-        rebased.push(next);
-        changed = true;
-        continue;
+      if (existing === undefined) return { result: { kind: "unknown" }, store };
+      if (existing.phase === "claimed") {
+        return { result: { handle: existing, kind: "ready" }, store };
       }
-      if (!jsonValuesEqual(current, next)) {
-        throw new Error(
-          `Agent handle "${id}" was changed by a dispatch and concurrently by another effect.`,
-        );
-      }
+      const handle: TaskOwnedAgentHandle = {
+        address: command.address,
+        identity: existing.identity,
+        operationId: existing.operationId,
+        phase: "claimed",
+        taskId: existing.taskId,
+      };
+      return replaceHandle(store, existing, handle);
     }
-    rebased.push(current);
+    case "claim": {
+      const existing = store.handles.find((handle) => handle.identity.id === command.agentId);
+      if (existing === undefined) return { result: { kind: "unknown" }, store };
+      if (
+        existing.phase === "starting" ||
+        existing.phase === "running" ||
+        existing.phase === "parked" ||
+        existing.identity.name !== command.invokedName ||
+        (existing.phase !== "reserved" &&
+          (existing.address.kind === "agent/remote") !== (command.expectedTarget === "remote"))
+      ) {
+        return { result: { handle: existing, kind: "mismatch" }, store };
+      }
+      if (existing.phase === "claimed") {
+        return existing.operationId === command.operationId && existing.taskId === command.taskId
+          ? { result: { handle: existing, kind: "ready" }, store }
+          : { result: { handle: existing, kind: "busy" }, store };
+      }
+      if (existing.phase === "reserved") {
+        return { result: { handle: existing, kind: "busy" }, store };
+      }
+      const handle: TaskOwnedAgentHandle = {
+        address: existing.address,
+        identity: existing.identity,
+        operationId: command.operationId,
+        phase: "claimed",
+        taskId: command.taskId,
+      };
+      return replaceHandle(store, existing, handle);
+    }
+    case "remove": {
+      const existing = store.handles.find((handle) => handle.identity.id === command.agentId);
+      if (existing === undefined) return { result: { kind: "ready" }, store };
+      if (existing.phase === "claimed" && existing.taskId !== command.taskId) {
+        return { result: { handle: existing, kind: "busy" }, store };
+      }
+      return {
+        result: { kind: "ready" },
+        store: { handles: store.handles.filter((handle) => handle !== existing) },
+      };
+    }
+    case "release-task": {
+      const handles = store.handles.flatMap((handle): readonly AgentHandle[] => {
+        if (handle.phase === "reserved" && handle.taskId === command.taskId) return [];
+        if (handle.phase !== "claimed" || handle.taskId !== command.taskId) return [handle];
+        return [{ address: handle.address, identity: handle.identity, phase: "available" }];
+      });
+      return {
+        result: { kind: "ready" },
+        store: handlesEqual(store.handles, handles) ? store : { handles },
+      };
+    }
   }
-  const added = [...nextById.values()].filter(
-    (handle) => !baseById.has(handle.identity.id) && !currentIds.has(handle.identity.id),
-  );
-  if (!changed && added.length === 0) {
-    return session;
-  }
-  return writeHandles(session, [...rebased, ...added]);
 }
 
-function handlesById(state: SessionStateMap | undefined): ReadonlyMap<string, AgentHandle> {
-  const handles = getAgentHandleStore(state)?.handles ?? [];
-  return new Map(handles.map((handle) => [handle.identity.id, handle]));
+function replaceHandle(
+  store: AgentHandleStore,
+  existing: AgentHandle,
+  handle: TaskOwnedAgentHandle,
+): {
+  readonly result: AgentHandleStoreCommandResult;
+  readonly store: AgentHandleStore;
+} {
+  return {
+    result: { handle, kind: "ready" },
+    store: {
+      handles: store.handles.map((candidate) => (candidate === existing ? handle : candidate)),
+    },
+  };
+}
+
+function handlesEqual(left: readonly AgentHandle[], right: readonly AgentHandle[]): boolean {
+  return left.length === right.length && left.every((handle, index) => handle === right[index]);
 }
 
 /**
@@ -483,9 +455,6 @@ function handlesById(state: SessionStateMap | undefined): ReadonlyMap<string, Ag
 function writeHandles(session: HarnessSession, handles: readonly AgentHandle[]): HarnessSession {
   return {
     ...session,
-    state: {
-      ...session.state,
-      [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore({ handles }),
-    },
+    state: setAgentHandleStore(session.state, { handles }),
   };
 }

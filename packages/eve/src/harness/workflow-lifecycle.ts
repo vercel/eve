@@ -2,7 +2,7 @@ import type { ToolSet, TypedToolCall } from "ai";
 
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
-import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
+import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import {
   createActionResultEvent,
@@ -10,6 +10,36 @@ import {
   type UnstampedMessageStreamEvent,
 } from "#protocol/message.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
+import {
+  getWorkflowSandboxInterrupt,
+  type WorkflowSandboxContinuationSecurity,
+} from "#shared/workflow-sandbox.js";
+
+export function createWorkflowLifecycle(input: {
+  readonly emit: EmitWorkflowLifecycleEvent;
+  readonly emissionState: HarnessEmissionState;
+  readonly skipReplayed?: boolean;
+  readonly tools: HarnessToolMap;
+}): {
+  onAfterExecute?: (input: { readonly result: unknown }) => Promise<void>;
+} {
+  return {
+    async onAfterExecute(result) {
+      if (input.skipReplayed) return;
+      const interrupt = await getWorkflowSandboxInterrupt(
+        result.result,
+        {} as WorkflowSandboxContinuationSecurity,
+      );
+      if (interrupt === undefined) return;
+      await emitWorkflowActionsRequested({
+        emit: input.emit,
+        emissionState: input.emissionState,
+        interrupts: [interrupt],
+        tools: input.tools,
+      });
+    },
+  };
+}
 
 type EmitWorkflowLifecycleEvent = (event: UnstampedMessageStreamEvent) => Promise<void>;
 

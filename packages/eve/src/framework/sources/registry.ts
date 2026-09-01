@@ -54,6 +54,14 @@ const localDefaults = defineProgrammaticAgentSource({
       loadNamespace: () => import("#tools/framework/ask-question.js"),
     },
     {
+      logicalPath: "tools/task_update.ts",
+      loadNamespace: () => import("#tools/framework/task-update.js"),
+    },
+    {
+      logicalPath: "tools/task_cancel.ts",
+      loadNamespace: () => import("#tools/framework/task-cancel.js"),
+    },
+    {
       logicalPath: "tools/web_search.ts",
       loadNamespace: () => import("#tools/provided/web-search.js"),
     },
@@ -67,14 +75,6 @@ const rootDefaults = defineProgrammaticAgentSource({
     {
       logicalPath: "tools/agent.ts",
       loadNamespace: () => import("#tools/framework/agent.js"),
-    },
-    {
-      logicalPath: "tools/task_update.ts",
-      loadNamespace: () => import("#tools/framework/task-update.js"),
-    },
-    {
-      logicalPath: "tools/task_cancel.ts",
-      loadNamespace: () => import("#tools/framework/task-cancel.js"),
     },
     {
       logicalPath: "channels/eve.ts",

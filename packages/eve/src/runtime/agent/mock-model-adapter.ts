@@ -258,7 +258,7 @@ function createParallelAuthoredToolCallsResult(
 /**
  * Emits one built-in `agent` tool call when the current user message uses
  * the explicit directive `Delegate to a subagent: <message>`, letting
- * tests exercise a real runtime-action wait. Fires only before the
+ * tests exercise a real coordination wait. Fires only before the
  * delegated call resolves; then the reply path takes over.
  */
 function createSubagentDelegationResult(

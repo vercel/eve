@@ -13,7 +13,7 @@ import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
-import type { TaskView } from "#tasks/types.js";
+import type { TaskEffectDelivery, TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -174,15 +174,9 @@ export interface DeliverPayload {
   /** Framework-only task envelopes consumed before adapter/model delivery. */
   readonly task?: {
     /** Task HITL input-request batches for the parent's pre-model router. */
-    readonly inputRequests?: readonly {
-      readonly hookPayload: SubagentInputRequestHookPayload;
-      readonly taskId: string;
-    }[];
-    /** Task authorization events projected through the parent channel. */
-    readonly authorizationEvents?: readonly {
-      readonly hookPayload: SubagentAuthorizationEventHookPayload;
-      readonly taskId: string;
-    }[];
+    readonly inputRequests?: readonly TaskInputRequestDelivery[];
+    /** Task workflow effects projected through the parent channel. */
+    readonly effects?: readonly TaskEffectDelivery[];
     /** Terminal views cached before task-run retention expires. */
     readonly views?: readonly TaskView[];
   };

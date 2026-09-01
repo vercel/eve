@@ -64,7 +64,7 @@ You don't write workflow code directly. Workflow primitives (`start()`, `resumeH
 
 ## Parked work
 
-Some work has to wait, including a human approving a [tool](../tools), an interactive OAuth sign-in for a [connection](../connections), or a long-running [subagent](../subagents). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives (a click, a callback, a child completing), even if that's much later. When it does, the conversation picks up exactly where it left off.
+Some work has to wait, including a human approving a [tool](../tools) or an interactive OAuth sign-in for a [connection](../connections). At those points the turn parks durably. The workflow suspends and holds no compute until the input it's waiting on arrives, even if that's much later. When it does, the conversation picks up exactly where it left off. Background tools and subagents return a task receipt instead, so the turn continues and later task notifications deliver progress or the outcome.
 
 ## Message delivery and steering
 

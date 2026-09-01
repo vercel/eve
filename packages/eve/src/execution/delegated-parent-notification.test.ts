@@ -2,13 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
-import { ActivityObserverKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
+import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import {
   bindTurnCallerContextStep,
   notifyDelegatedParentStep,
-  notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#execution/delegated-parent-notification.js";
@@ -47,7 +46,9 @@ function createSuccessResult(): RuntimeSubagentChildResult {
   };
 }
 
-function createSerializedContext(): Record<string, unknown> {
+function createSerializedContext(
+  adapterState: Record<string, unknown> = {},
+): Record<string, unknown> {
   const bundle = {
     adapterRegistry: {
       adaptersByKind: new Map([[SUBAGENT_ADAPTER_KIND, SUBAGENT_ADAPTER]]),
@@ -67,6 +68,7 @@ function createSerializedContext(): Record<string, unknown> {
       parentContinuationToken: "parent-tok",
       parentSessionId: "parent-session",
       subagentName: "research",
+      ...adapterState,
     },
   });
   return serializeContext(ctx);
@@ -185,47 +187,19 @@ describe("turn caller notification", () => {
     expect(resumeHookMock).not.toHaveBeenCalled();
   });
 
-  it("binds a local task hook to the exact child turn before execution", async () => {
-    await notifyTaskTurnStartedStep({
-      caller: {
-        callId: "call-task",
-        replyTo: { kind: "hook", token: "task-token" },
-        subagentName: "research",
+  it("restores task ownership from a local adapter with an opaque reply hook", async () => {
+    const caller = await resolveInitialTurnCallerStep({
+      serializedContext: createSerializedContext({
+        parentContinuationToken: "invocation-reply-hook",
         taskId: "task-1",
-      },
-      childSessionId: "child-session",
-      childTurnId: "turn_child_7",
+      }),
     });
 
-    expect(resumeHookMock).toHaveBeenCalledWith("task-token", {
-      childSessionId: "child-session",
-      childTurnId: "turn_child_7",
-      kind: "turn-started",
+    expect(caller).toEqual({
+      callId: "call-1",
+      replyTo: { kind: "hook", token: "invocation-reply-hook" },
+      subagentName: "research",
       taskId: "task-1",
-    });
-  });
-
-  it("posts the same task turn identity through a remote callback", async () => {
-    await notifyTaskTurnStartedStep({
-      caller: {
-        callId: "call-task",
-        replyTo: {
-          kind: "callback",
-          token: "task-token",
-          url: "https://parent.example/eve/v1/callback/task-token",
-        },
-        subagentName: "research",
-        taskId: "task-1",
-      },
-      childSessionId: "child-session",
-      childTurnId: "turn_child_7",
-    });
-
-    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
-      kind: "turn.started",
-      sessionId: "child-session",
-      taskId: "task-1",
-      turnId: "turn_child_7",
     });
   });
 
@@ -474,17 +448,6 @@ describe("turn caller binding", () => {
     await expect(
       bindTurnCallerContextStep({
         caller: {
-          activityObserver: {
-            sink: { url: "https://parent.example/eve/v1/activity/opaque-token", version: 1 },
-            workIdentity: {
-              callId: "call-new",
-              id: "work:new",
-              kind: "subagent",
-              name: "research",
-              rootSessionId: "root",
-              rootTurnId: "root-turn",
-            },
-          },
           callId: "call-new",
           replyTo: { kind: "hook", token: "turn-new" },
           subagentName: "research",
@@ -497,16 +460,20 @@ describe("turn caller binding", () => {
               parentContinuationToken: "turn-old",
               parentSessionId: "parent",
               subagentName: "research",
+              taskId: "task-old",
             },
           },
         },
       }),
-    ).resolves.toMatchObject({
-      [ActivityObserverKey.name]: {
-        workIdentity: { id: "work:new" },
-      },
+    ).resolves.toEqual({
       [ChannelKey.name]: {
-        state: { callId: "call-new", parentContinuationToken: "turn-new" },
+        kind: SUBAGENT_ADAPTER_KIND,
+        state: {
+          callId: "call-new",
+          parentContinuationToken: "turn-new",
+          parentSessionId: "parent",
+          subagentName: "research",
+        },
       },
     });
   });
@@ -560,7 +527,7 @@ describe("turn caller binding", () => {
       }),
     ).resolves.toMatchObject({
       [ChannelKey.name]: {
-        state: { callId: "call-new", parentContinuationToken: "task-new" },
+        state: { callId: "call-new", parentContinuationToken: "task-new", taskId: "task-new" },
       },
     });
   });

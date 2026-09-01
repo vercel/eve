@@ -1,17 +1,17 @@
 import { type EveEvalTurn } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
-import { parseToolErrorOutput, requireTaskView, waitForCompletedTask } from "./shared.js";
+import { requireTaskView, waitForCompletedTask, waitForTaskStatus } from "./shared.js";
 import { defineTaskEval } from "./task-transition.js";
 
 const FIRST_CALL_ID = "task-d6-success-first";
 const FAILED_CALL_ID = "task-d6-failure-middle";
 const THIRD_CALL_ID = "task-d6-success-third";
 
-/** A failed middle dispatch does not stop later siblings or enter the task index. */
+/** A failed middle dispatch does not stop later siblings from completing. */
 export default defineTaskEval({
   description:
-    "An ordered success/failure/success fanout admits both siblings and excludes the failed start.",
+    "An ordered success/failure/success fanout admits every sibling and records the unreachable child as failed.",
   transition: {
     primary: "task.dispatch-batch.start.accepted-partial-failure",
     dimensions: { transport: "mixed", parentPhase: "active" },
@@ -41,54 +41,21 @@ export default defineTaskEval({
       receipts,
       satisfies(
         (values: readonly BackgroundReceipt[]) =>
-          values.length === 2 &&
+          values.length === 3 &&
           values.some(({ callId }) => callId === FIRST_CALL_ID) &&
+          values.some(({ callId }) => callId === FAILED_CALL_ID) &&
           values.some(({ callId }) => callId === THIRD_CALL_ID) &&
-          new Set(values.map(({ taskId }) => taskId)).size === 2,
-        "first and third entries return distinct working task receipts",
+          new Set(values.map(({ taskId }) => taskId)).size === 3,
+        "every fanout entry returns a distinct working task receipt",
       ),
     );
     const firstTaskId = requireReceiptTaskId(receipts, FIRST_CALL_ID);
+    const failedTaskId = requireReceiptTaskId(receipts, FAILED_CALL_ID);
     const thirdTaskId = requireReceiptTaskId(receipts, THIRD_CALL_ID);
-    started.eventsSatisfy(
-      "failed middle start has no task id, receipt, or index admission",
-      (events) => {
-        const failed = events.filter(
-          (event) =>
-            event.type === "action.result" &&
-            event.data.result.kind === "tool-result" &&
-            event.data.result.callId === FAILED_CALL_ID,
-        );
-        const event = failed[0];
-        if (event?.type !== "action.result") return false;
-        const result = event.data.result;
-        if (result.kind !== "tool-result") return false;
-        const output = parseToolErrorOutput(result.output);
-        return (
-          failed.length === 1 &&
-          event.data.status === "failed" &&
-          result.isError === true &&
-          output !== null &&
-          typeof output === "object" &&
-          Reflect.get(output, "code") === "REMOTE_AGENT_START_FAILED" &&
-          !Object.hasOwn(output, "taskId") &&
-          !events.some(
-            (event) => event.type === "subagent.called" && event.data.callId === FAILED_CALL_ID,
-          ) &&
-          !events.some(
-            (event) =>
-              event.type === "subagent.completed" &&
-              event.data.callId === FAILED_CALL_ID &&
-              event.data.backgroundTask !== undefined,
-          )
-        );
-      },
-    );
     started.event("subagent.completed", {
-      count: 1,
+      count: 2,
       data: {
-        backgroundTask: { status: "working", taskId: thirdTaskId },
-        callId: THIRD_CALL_ID,
+        backgroundTask: { status: "working" },
         subagentName: "busy-worker",
       },
     });
@@ -107,6 +74,14 @@ export default defineTaskEval({
       thirdTaskId,
     );
     assertCompletedBusyWorker(thirdCompleted, thirdTaskId, "TASK-D6-THIRD-SUCCESS");
+    const failed = await waitForTaskStatus(
+      t,
+      t,
+      "TASK-D6-PARTIAL-FANOUT-UNKNOWN",
+      failedTaskId,
+      "failed",
+    );
+    assertFailedUnstartableWorker(failed, failedTaskId);
   },
 });
 
@@ -146,5 +121,26 @@ function assertCompletedBusyWorker(turn: EveEvalTurn, taskId: string, marker: st
     !String(Reflect.get(lastOutput, "data")).includes(marker)
   ) {
     throw new Error(`Task ${taskId} did not complete with marker ${marker}.`);
+  }
+}
+
+function assertFailedUnstartableWorker(turn: EveEvalTurn, taskId: string): void {
+  turn.expectOk();
+  turn.messageIncludes("TASK-D6-UNKNOWN");
+  const view = requireTaskView(turn.requireToolCall("task_cancel").output, taskId);
+  const metadata = Reflect.get(view, "metadata");
+  const lastOutput = Reflect.get(view, "lastOutput");
+  if (
+    Reflect.get(view, "status") !== "failed" ||
+    metadata === null ||
+    typeof metadata !== "object" ||
+    Reflect.get(metadata, "kind") !== "subagent" ||
+    Reflect.get(metadata, "mode") !== "remote" ||
+    Reflect.get(metadata, "name") !== "unstartable-worker" ||
+    lastOutput === null ||
+    typeof lastOutput !== "object" ||
+    Reflect.get(lastOutput, "type") !== "error"
+  ) {
+    throw new Error(`Task ${taskId} did not fail with unstartable-worker metadata.`);
   }
 }

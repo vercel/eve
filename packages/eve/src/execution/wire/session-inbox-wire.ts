@@ -14,9 +14,15 @@ import {
 } from "#execution/wire/session-inbox-contract.js";
 import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
+import { sessionInboxWireV1Schema } from "#execution/wire/session-inbox-wire.v1.js";
 import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
 import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.v2.migration.js";
+import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";
 import { sessionInboxWireV2Migration } from "#execution/wire/session-inbox-wire.v3.migration.js";
+import { sessionInboxWireV3Schema } from "#execution/wire/session-inbox-wire.v3.js";
+import { sessionInboxWireV3Migration } from "#execution/wire/session-inbox-wire.v4.migration.js";
+import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox-wire.v4.js";
+import { formatValidationError } from "#runtime/validation.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -45,6 +51,7 @@ const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
   sessionInboxWireV2Migration,
+  sessionInboxWireV3Migration,
 ];
 
 /**
@@ -64,6 +71,20 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(`${WIRE_LABEL}: value has no numeric "version" field.`);
   }
   const normalized = normalizeSessionInboxWireV2(value);
+  if (declaredVersion === 1 || declaredVersion === 2 || declaredVersion === 3) {
+    const schema =
+      declaredVersion === 1
+        ? sessionInboxWireV1Schema
+        : declaredVersion === 2
+          ? sessionInboxWireV2Schema
+          : sessionInboxWireV3Schema;
+    const declared = schema.safeParse(normalized);
+    if (!declared.success) {
+      throw new SessionInboxWireError(
+        `${WIRE_LABEL} does not match wire version ${declaredVersion}: ${formatValidationError(declared.error)}`,
+      );
+    }
+  }
   let migrated: unknown;
   try {
     migrated = runMigrationChain({
@@ -77,7 +98,13 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
   }
 
-  const wire = normalizeSessionInboxWireV2(migrated) as Partial<SessionInboxWire>;
+  const parsed = sessionInboxWireV4Schema.safeParse(migrated);
+  if (!parsed.success) {
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} does not match its declared wire contract: ${formatValidationError(parsed.error)}`,
+    );
+  }
+  const wire = parsed.data as SessionInboxWire;
   if (wire.version !== SESSION_INBOX_WIRE_VERSION) {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
@@ -93,7 +120,7 @@ function decode(value: unknown): DecodedSessionInbox {
       `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
     );
   }
-  return normalizeWire(wire as SessionInboxWire);
+  return normalizeWire(wire);
 }
 
 /** Workflow-safe consumer facade. */

@@ -61,4 +61,40 @@ describe("coalesceDeliverPayloads", () => {
       preservedAdapterMetadata: { source: "synthetic-callback" },
     });
   });
+
+  it("preserves task effects across queued payloads", () => {
+    const effects = [
+      {
+        input: {
+          callId: "call-1",
+          childSessionId: "child-1",
+          event: { data: { index: 1 }, type: "authorization.required" },
+          kind: "subagent-authorization-event" as const,
+          subagentName: "first",
+        },
+        name: "agent.event",
+        replyTo: "agent-reply-1",
+        taskId: "task-1",
+      },
+      {
+        input: {
+          callId: "call-2",
+          childSessionId: "child-2",
+          event: { data: { index: 2 }, type: "authorization.required" },
+          kind: "subagent-authorization-event" as const,
+          subagentName: "second",
+        },
+        name: "agent.event",
+        replyTo: "agent-reply-2",
+        taskId: "task-2",
+      },
+    ];
+
+    expect(
+      coalesceDeliverPayloads([
+        { task: { effects: [effects[0]!] } },
+        { task: { effects: [effects[1]!] } },
+      ]),
+    ).toEqual({ task: { effects } });
+  });
 });

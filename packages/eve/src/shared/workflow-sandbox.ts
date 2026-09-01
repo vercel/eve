@@ -44,8 +44,8 @@ export async function createWorkflowSandboxTool(input: {
 }
 
 export async function requestWorkflowSandboxInterrupt(input: {
-  readonly dispatchTarget: unknown;
   readonly kind: string;
+  readonly task: unknown;
   readonly toolInput: unknown;
   readonly toolName: string;
 }): Promise<unknown> {

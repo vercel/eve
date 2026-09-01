@@ -34,7 +34,7 @@ export default defineTaskEval({
             (event) =>
               event.type === "message.received" &&
               messageText(event.data.message).includes(
-                `Background task ${taskId} (agent) update: ${UPDATE}`,
+                `Background task ${taskId} (update-worker) update: ${UPDATE}`,
               ),
           ),
         "parent receives the child update with its owning task identity",

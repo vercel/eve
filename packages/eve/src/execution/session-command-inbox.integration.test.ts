@@ -7,7 +7,6 @@ import { midCohortSessionDeliveryWorkflow } from "#internal/testing/mid-cohort-s
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
 import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 describe("session command inbox integration", () => {
@@ -88,9 +87,7 @@ describe("session command inbox integration", () => {
         const hook = (await getHookByToken(token)) as {
           metadata?: { sessionInboxWireVersion?: unknown };
         };
-        expect(hook.metadata?.sessionInboxWireVersion, `hook ${token}`).toBe(
-          SESSION_INBOX_WIRE_VERSION,
-        );
+        expect(hook.metadata?.sessionInboxWireVersion, `hook ${token}`).toBe(2);
       }
     } finally {
       const status = await run.status;

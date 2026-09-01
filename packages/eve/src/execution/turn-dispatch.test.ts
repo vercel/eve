@@ -305,7 +305,7 @@ describe("dispatchAndAwaitTurn", () => {
       action: "park" as const,
       hasPendingAuthorization: false,
       hasPendingInputBatch: false,
-      pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+      pendingCoordinationCallIds: ["call-1"],
       serializedContext: { state: "pending" },
       sessionState: state,
     };
@@ -427,6 +427,7 @@ function createCommandInbox(overrides: Partial<SessionCommandInbox> = {}): Sessi
     claimAuthorization: vi.fn(),
     claimStable: vi.fn(),
     consumeNext: vi.fn(),
+    handleAgentHandleCommand: vi.fn(async () => false),
     hasReadyAuthorization: vi.fn(() => false),
     next: vi.fn(() => new Promise<IteratorResult<SessionInboxPayload>>(() => {})),
     nextWithSource: vi.fn(() =>

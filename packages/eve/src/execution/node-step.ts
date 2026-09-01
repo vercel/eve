@@ -2,20 +2,14 @@ import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
-import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
-import {
-  createBackgroundSubagentHarnessDefinition,
-  createHarnessDelegationToolDefinition,
-} from "#execution/delegation-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
+import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HandleEventFn, HarnessToolMap, StepFn } from "#harness/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { createLogger } from "#internal/logging.js";
 import type { RuntimeIdentity } from "#protocol/message.js";
-import type { PreparedDispatchTarget } from "#tools/behavior.js";
-import type { ToolExecution } from "#tools/definition.js";
 import { UNSPECIFIED_INPUT_SCHEMA } from "#tools/schema.js";
 import type { RunMode } from "#shared/run-mode.js";
 import {
@@ -23,6 +17,7 @@ import {
   type RuntimeModelResolutionScope,
 } from "#runtime/agent/resolve-model.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
+import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
@@ -30,7 +25,11 @@ import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { createWorkflowToolBackgroundExecute } from "#execution/tool-run/background.js";
+import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
+import {
+  createPreparedWorkflowToolHarnessDefinition,
+  createWorkflowToolHarnessDefinition,
+} from "#execution/tools/workflow/background.js";
 
 const log = createLogger("execution.node-step");
 
@@ -104,18 +103,13 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     compactOnly: input.compactOnly,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
+    webSearchProvider: input.node.agent.webSearchProvider,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
-    tasksEnabled: input.node.agent.config?.experimental?.tasks === true,
     onCompaction: preserveFrameworkStateOnCompaction,
-    prepareStepDynamicTools: (prepareInput) =>
-      preparePersistedStepDynamicToolMetadata({
-        ...prepareInput,
-        resolvers: input.node.agent.dynamicToolResolvers ?? [],
-      }),
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
@@ -186,20 +180,17 @@ function createRuntimeDynamicModelEventDispatcher(
  * Resolves unified {@link HarnessToolDefinition}s from the node's registries.
  *
  * For authored tools: copies all lifecycle fields from the resolved definition.
- * For subagent tools: selects the existing runtime-action definition or the
- * background `defineTool` definition from the node's `experimental.tasks` setting.
+ * Prepared workflow-task tools share the workflow-tool harness path.
  * Tools without `execute` (provider-managed) get entries with schema but no execute.
  */
 export function createNodeHarnessTools(input: {
   readonly node: ResolvedRuntimeAgentNode;
 }): HarnessToolMap {
   const tools = new Map<string, HarnessToolDefinition>();
-  const tasksEnabled = input.node.agent.config?.experimental?.tasks === true;
 
   for (const tool of input.node.turnAgent.tools) {
     const definition = resolveHarnessToolDefinition({
       node: input.node,
-      tasksEnabled,
       tool,
     });
 
@@ -213,16 +204,22 @@ export function createNodeHarnessTools(input: {
 
 function resolveHarnessToolDefinition(input: {
   readonly node: ResolvedRuntimeAgentNode;
-  readonly tasksEnabled: boolean;
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
-  if (input.tool.kind === "subagent" || input.tool.kind === "remote") {
-    return input.tasksEnabled
-      ? createBackgroundSubagentHarnessDefinition(input.tool)
-      : createHarnessDelegationToolDefinition(input.tool);
-  }
-
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);
+
+  if (isPreparedRuntimeWorkflowTool(input.tool)) {
+    if (registeredTool === null) {
+      return createPreparedWorkflowToolHarnessDefinition(input.tool);
+    }
+    return createWorkflowToolHarnessDefinition({
+      definition: createRegisteredHarnessToolDefinition({
+        definition: registeredTool.definition,
+        rootOnly: input.tool.rootOnly,
+      }),
+      ...input.tool.task,
+    });
+  }
 
   if (registeredTool === null) {
     // Declared on the graph but absent from the registry (failed import, renamed export).
@@ -233,49 +230,61 @@ function resolveHarnessToolDefinition(input: {
     return null;
   }
 
-  const def = registeredTool.definition;
-  const dispatchTarget =
-    input.tool.behavior?.handling?.kind === "dispatch"
-      ? input.tool.behavior.handling.target
-      : undefined;
-  if (
-    !input.tasksEnabled &&
-    (dispatchTarget?.kind === "task-cancel" || dispatchTarget?.kind === "task-update")
-  ) {
-    return null;
-  }
-  if (dispatchTarget?.kind === "self-agent-call" && input.tasksEnabled) {
-    const behavior = input.tool.behavior;
-    if (behavior === undefined) {
-      throw new Error(`Self-agent tool "${input.tool.name}" has no prepared behavior.`);
+  return createRegisteredHarnessToolDefinition({
+    definition: registeredTool.definition,
+    rootOnly: input.tool.rootOnly,
+  });
+}
+
+type PreparedRuntimeWorkflowTool = PreparedRuntimeTool & {
+  readonly task: NonNullable<PreparedRuntimeTool["task"]>;
+};
+
+function isPreparedRuntimeWorkflowTool(
+  tool: PreparedRuntimeTool,
+): tool is PreparedRuntimeWorkflowTool {
+  return tool.task !== undefined;
+}
+
+function createRegisteredHarnessToolDefinition(input: {
+  readonly definition: ResolvedToolDefinition;
+  readonly rootOnly?: boolean;
+}): HarnessToolDefinition {
+  const def = input.definition;
+  if (def.owner.kind === "framework") {
+    const taskDefinition = createTaskToolHarnessDefinitions().find(
+      (definition) => definition.name === def.name,
+    );
+    if (taskDefinition !== undefined) {
+      return taskDefinition;
     }
-    return createBackgroundSubagentHarnessDefinition({
-      behavior,
-      description: input.tool.description,
-      inputSchema: input.tool.inputSchema,
-      name: input.tool.name,
-      outputSchema: input.tool.outputSchema,
-    });
   }
   const rawExecute = def.execute;
+  const isFrameworkRequestInput =
+    def.owner.kind === "framework" && def.name === ASK_QUESTION_TOOL_NAME;
 
-  return {
-    behavior: input.tool.behavior,
+  const definition: HarnessToolDefinition = {
     approvalKey: def.approvalKey,
     description: def.description,
     execution: def.execution,
-    execute: resolveAuthoredExecute({
-      dispatchTarget,
-      execution: def.execution,
-      rawExecute,
-      scope: def.name,
-    }),
+    execute: isFrameworkRequestInput
+      ? undefined
+      : resolveAuthoredExecute({
+          rawExecute,
+          scope: def.name,
+        }),
+    frameworkAction:
+      def.owner.kind === "framework" && def.name === LOAD_SKILL_TOOL_NAME
+        ? "load-skill"
+        : undefined,
     inputSchema: def.inputSchema ?? UNSPECIFIED_INPUT_SCHEMA,
     name: def.name,
     approval: def.approval,
     outputSchema: def.outputSchema,
+    rootOnly: input.rootOnly,
     toModelOutput: def.toModelOutput,
   };
+  return definition;
 }
 
 /**
@@ -285,24 +294,12 @@ function resolveHarnessToolDefinition(input: {
  *   which builds a token-aware context. Providers passed to
  *   `ctx.getToken(provider)` use tool-qualified auth scopes.
  * - Tools without `execute` (provider-managed) stay `undefined`.
- * - A workflow body never runs inside the model step: a background one is
- *   started from the harness, a waiting one is dispatched by the turn.
  */
 function resolveAuthoredExecute(input: {
-  readonly dispatchTarget: PreparedDispatchTarget | undefined;
-  readonly execution: ToolExecution | undefined;
   readonly rawExecute: ResolvedToolDefinition["execute"];
   readonly scope: string;
 }): HarnessToolDefinition["execute"] {
   const { rawExecute, scope } = input;
-  if (input.dispatchTarget?.kind === "workflow-tool-call") {
-    return input.execution === "background"
-      ? createWorkflowToolBackgroundExecute({
-          toolName: scope,
-          workflowId: input.dispatchTarget.workflowId,
-        })
-      : undefined;
-  }
   if (rawExecute === undefined) {
     return undefined;
   }

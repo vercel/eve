@@ -17,6 +17,11 @@ import {
 } from "#execution/durable-session-store.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
 import { hydrateDurableSession } from "#execution/session.js";
+import {
+  emitTurnEpilogue,
+  getHarnessEmissionState,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
 import { emitProxiedInputRequest } from "#execution/subagent-hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
@@ -25,6 +30,8 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
+import type { RunMode } from "#shared/run-mode.js";
+import type { TaskInputRequestDelivery } from "#tasks/types.js";
 
 type SubagentEventHookPayload =
   | SubagentAuthorizationEventHookPayload
@@ -61,7 +68,7 @@ export async function runProxySubagentEventStep(input: {
 
 /** Emits a task request whose proxy routes were committed by a prior step. */
 export async function emitRecordedTaskInputRequestStep(input: {
-  readonly hookPayload: SubagentInputRequestHookPayload;
+  readonly request: TaskInputRequestDelivery;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -70,30 +77,22 @@ export async function emitRecordedTaskInputRequestStep(input: {
 
   const durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
-  return emitProxiedSubagentEvent({
+  return await emitProxiedSubagentEvent({
     ctx,
     durableSession,
-    hookPayload: input.hookPayload,
-    parentWritable: input.parentWritable,
-    recordProxyInputRequests: false,
-  });
-}
-
-/** Emits a task authorization event after its ownership was validated. */
-export async function emitRecordedTaskAuthorizationEventStep(input: {
-  readonly hookPayload: SubagentAuthorizationEventHookPayload;
-  readonly parentWritable: WritableStream<Uint8Array>;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}): Promise<ProxySubagentEventResult> {
-  "use step";
-
-  const durableSession = await readDurableSession(input.sessionState);
-  const ctx = await deserializeContext(input.serializedContext);
-  return emitProxiedSubagentEvent({
-    ctx,
-    durableSession,
-    hookPayload: input.hookPayload,
+    hookPayload: {
+      callId: input.request.taskId,
+      childContinuationToken: input.request.replyTo,
+      childSessionId: input.request.taskId,
+      event: {
+        requests: [input.request.request as never],
+        sequence: input.request.sequence,
+        stepIndex: input.request.stepIndex,
+        turnId: input.request.turnId,
+      },
+      kind: "subagent-input-request",
+      subagentName: input.request.taskId,
+    },
     parentWritable: input.parentWritable,
     recordProxyInputRequests: false,
   });
@@ -135,7 +134,15 @@ export async function emitProxiedSubagentEvent(input: {
     const scopeResult = await withContextScope(ctx, session, async (enrichedSession) => {
       if (input.hookPayload.kind === "subagent-authorization-event") {
         await emit(input.hookPayload.event);
-        return { result: undefined, session: enrichedSession };
+        return {
+          result: undefined,
+          session: await closeStandaloneAuthorizationEvent({
+            emit,
+            eventType: input.hookPayload.event.type,
+            mode: ctx.require(ModeKey),
+            session: enrichedSession,
+          }),
+        };
       }
 
       const proxyResult = await emitProxiedInputRequest({
@@ -176,4 +183,22 @@ export async function emitProxiedSubagentEvent(input: {
     serializedContext: serializeContext(ctx),
     sessionState: createDurableSessionState({ session: nextSession }),
   };
+}
+
+async function closeStandaloneAuthorizationEvent(input: {
+  readonly emit: (event: UnstampedMessageStreamEvent) => Promise<void>;
+  readonly eventType: SubagentAuthorizationEventHookPayload["event"]["type"];
+  readonly mode: RunMode;
+  readonly session: HarnessSession;
+}): Promise<HarnessSession> {
+  if (
+    input.mode !== "conversation" ||
+    (input.eventType !== "authorization.required" && input.eventType !== "authorization.completed")
+  ) {
+    return input.session;
+  }
+
+  const state = getHarnessEmissionState(input.session.state);
+  const nextState = await emitTurnEpilogue(input.emit, state, input.mode);
+  return setHarnessEmissionState(input.session, nextState);
 }

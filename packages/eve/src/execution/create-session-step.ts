@@ -55,7 +55,6 @@ export async function createSessionStep(input: {
   );
   const taskUpdatesEnabled =
     input.taskOwned === true &&
-    bundle.resolvedAgent.config?.experimental?.tasks === true &&
     effectiveAgent.turnAgent.tools.some(
       (tool) =>
         tool.kind === "authored-tool" &&

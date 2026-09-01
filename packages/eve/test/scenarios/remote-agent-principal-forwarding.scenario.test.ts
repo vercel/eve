@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "../../src/channel/types.js";
 import { startRemoteAgentSession } from "../../src/execution/remote-agent-dispatch.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "../../src/shared/action-types.js";
+import type { RuntimeRemoteAgentDispatchRequest } from "../../src/shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "../../src/runtime/types.js";
 import {
   type ScenarioAppDescriptor,
@@ -127,7 +127,7 @@ describe("remote agent auth forwarding", () => {
   );
 });
 
-function createAction(): RuntimeRemoteAgentCallActionRequest {
+function createAction(): RuntimeRemoteAgentDispatchRequest {
   return {
     callId: "call-forwarded",
     description: "Runtime action event description.",

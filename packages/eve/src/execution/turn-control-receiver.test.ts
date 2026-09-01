@@ -319,6 +319,7 @@ function createCommandInbox(
     claimAuthorization: vi.fn(),
     claimStable: vi.fn(),
     consumeNext: vi.fn(),
+    handleAgentHandleCommand: vi.fn(async () => false),
     hasReadyAuthorization: vi.fn(() => false),
     next: vi.fn(() => {
       const value = queue.shift();

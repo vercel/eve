@@ -180,10 +180,6 @@ function normalizeExperimentalDefinition(
     compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
   }
 
-  if (experimental.tasks !== undefined) {
-    compiledExperimental.tasks = experimental.tasks;
-  }
-
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
       world: experimental.workflow.world,

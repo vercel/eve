@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { buildSubagentRunInput } from "#execution/subagent-tool.js";
 
 type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
@@ -21,7 +21,7 @@ function makeSession(): HarnessSession {
   };
 }
 
-function makeAction(): RuntimeSubagentCallActionRequest {
+function makeAction(): RuntimeSubagentDispatchRequest {
   return {
     callId: "call-1",
     description: "Delegate to linear.",
@@ -116,6 +116,23 @@ describe("buildSubagentRunInput", () => {
 
     expect(runInput.adapter.state).toMatchObject({
       parentContinuationToken: "turn-inbox",
+    });
+  });
+
+  it("retains a background task identity beside an opaque parent reply hook", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      parentContinuationToken: "invocation-reply-hook",
+      session: makeSession(),
+      taskId: "task-1",
+    });
+
+    expect(runInput.adapter.state).toMatchObject({
+      parentContinuationToken: "invocation-reply-hook",
+      taskId: "task-1",
     });
   });
 
@@ -229,7 +246,7 @@ describe("buildSubagentRunInput", () => {
 
   it("threads outputSchema from action input to RunInput", () => {
     const schema = { type: "object", properties: { result: { type: "string" } } };
-    const action: RuntimeSubagentCallActionRequest = {
+    const action: RuntimeSubagentDispatchRequest = {
       ...makeAction(),
       input: { message: "do something", outputSchema: schema },
     };
@@ -328,7 +345,7 @@ describe("buildSubagentRunInput", () => {
   });
 
   it("does not pass the built-in agent tool description into the child message", () => {
-    const action: RuntimeSubagentCallActionRequest = {
+    const action: RuntimeSubagentDispatchRequest = {
       ...makeAction(),
       description: "Delegate a focused subtask to a fresh copy of yourself.",
       name: "agent",
@@ -385,7 +402,7 @@ describe("buildSubagentRunInput", () => {
   });
 
   it("treats an empty outputSchema as absent", () => {
-    const action: RuntimeSubagentCallActionRequest = {
+    const action: RuntimeSubagentDispatchRequest = {
       ...makeAction(),
       input: { message: "do something", outputSchema: {} },
     };
@@ -403,7 +420,7 @@ describe("buildSubagentRunInput", () => {
   it("includes parentSandboxState and sandboxSessionId for self-delegation", () => {
     const sandboxState = { initialized: true, session: null };
     const session = { ...makeSession(), sandboxState };
-    const action: RuntimeSubagentCallActionRequest = {
+    const action: RuntimeSubagentDispatchRequest = {
       ...makeAction(),
       subagentName: "agent",
     };

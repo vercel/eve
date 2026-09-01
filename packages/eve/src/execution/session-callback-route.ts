@@ -2,19 +2,18 @@ import { resumeHook } from "#internal/workflow/runtime.js";
 import { z } from "#compiled/zod/index.js";
 import { REMOTE_AGENT_FAILED } from "#harness/agent-handle-errors.js";
 import type { RouteContext } from "#public/definitions/channel.js";
-import type { SubagentAuthorizationEvent } from "#channel/types.js";
+import type {
+  SubagentAuthorizationEvent,
+  SubagentAuthorizationEventHookPayload,
+  SubagentInputRequestHookPayload,
+} from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { agentTurnOutcomeSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { JsonValue } from "#shared/json.js";
 import { isInputRequest } from "#shared/input.js";
 import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
-import type {
-  TaskInboundAuthorizationEvent,
-  TaskInboundInputRequest,
-  TaskInboundTurnStarted,
-  TaskInboundUpdate,
-} from "#tasks/types.js";
+import type { TaskInboundUpdate } from "#tasks/types.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const ZERO_TOKEN_USAGE: TokenUsage = {
@@ -45,7 +44,7 @@ const authorizationChallengeSchema = z.looseObject({
  * remaining keys through unchanged (loose objects): the parent re-emits
  * the event, so a newer child extending an event is never rejected here.
  */
-const taskInputEventSchema: z.ZodType<TaskInboundInputRequest["event"]> = z.looseObject({
+const taskInputEventSchema = z.looseObject({
   requests: z.array(jsonValueSchema.refine(isInputRequest)).min(1),
   sequence: eventCoordinateSchema,
   stepIndex: eventCoordinateSchema,
@@ -199,7 +198,7 @@ export async function handleSessionCallbackRequest(
     return Response.json({ ok: true }, { status: 202 });
   }
 
-  const started = projectTaskTurnStarted(body, token);
+  const started = rejectDirectTaskTurnStarted(body, token);
   if (started instanceof Response) return started;
   if (started !== undefined) {
     try {
@@ -235,7 +234,7 @@ function callbackKind(value: unknown): unknown {
 function projectTaskEvent(
   value: unknown,
   token: string,
-): TaskInboundInputRequest | TaskInboundAuthorizationEvent | Response | undefined {
+): SubagentAuthorizationEventHookPayload | SubagentInputRequestHookPayload | Response | undefined {
   const kind = callbackKind(value);
   if (kind !== "task.input-requested" && kind !== "task.authorization") return undefined;
   const parsed = taskEventCallbackSchema.safeParse(value);
@@ -243,31 +242,33 @@ function projectTaskEvent(
     return Response.json({ error: "Invalid task event callback.", ok: false }, { status: 400 });
   }
   const payload = parsed.data;
-  const tokenRejection = rejectMismatchedTaskToken(token, payload.taskId);
-  if (tokenRejection !== undefined) return tokenRejection;
-  if (payload.kind === "task.input-requested") {
-    return {
-      callId: payload.callId,
-      childContinuationToken: payload.childContinuationToken,
-      childSessionId: payload.childSessionId,
-      event: payload.event,
-      kind: "subagent-input-request",
-      subagentName: payload.subagentName,
-    };
+  if (readTaskIdFromInboxToken(token) !== undefined) {
+    const tokenRejection = rejectMismatchedTaskToken(token, payload.taskId);
+    if (tokenRejection !== undefined) return tokenRejection;
+    return Response.json(
+      { error: "Direct subagent task events are no longer accepted.", ok: false },
+      { status: 410 },
+    );
   }
-  return {
-    callId: payload.callId,
-    childSessionId: payload.childSessionId,
-    event: payload.event,
-    kind: "authorization-event",
-    subagentName: payload.subagentName,
-  };
+  return payload.kind === "task.input-requested"
+    ? {
+        callId: payload.callId,
+        childContinuationToken: payload.childContinuationToken,
+        childSessionId: payload.childSessionId,
+        event: payload.event,
+        kind: "subagent-input-request",
+        subagentName: payload.subagentName,
+      }
+    : {
+        callId: payload.callId,
+        childSessionId: payload.childSessionId,
+        event: payload.event,
+        kind: "subagent-authorization-event",
+        subagentName: payload.subagentName,
+      };
 }
 
-function projectTaskTurnStarted(
-  value: unknown,
-  token: string,
-): TaskInboundTurnStarted | Response | undefined {
+function rejectDirectTaskTurnStarted(value: unknown, token: string): Response | undefined {
   if (callbackKind(value) !== "turn.started") return undefined;
   const parsed = taskTurnStartedCallbackSchema.safeParse(value);
   if (!parsed.success) {
@@ -278,12 +279,10 @@ function projectTaskTurnStarted(
   }
   const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
   if (tokenRejection !== undefined) return tokenRejection;
-  return {
-    childSessionId: parsed.data.sessionId,
-    childTurnId: parsed.data.turnId,
-    kind: "turn-started",
-    taskId: parsed.data.taskId,
-  };
+  return Response.json(
+    { error: "Direct subagent task turn callbacks are no longer accepted.", ok: false },
+    { status: 410 },
+  );
 }
 
 function projectTaskUpdate(
@@ -295,8 +294,10 @@ function projectTaskUpdate(
   if (!parsed.success) {
     return Response.json({ error: "Invalid task update callback.", ok: false }, { status: 400 });
   }
-  const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
-  if (tokenRejection !== undefined) return tokenRejection;
+  if (readTaskIdFromInboxToken(token) !== undefined) {
+    const tokenRejection = rejectMismatchedTaskToken(token, parsed.data.taskId);
+    if (tokenRejection !== undefined) return tokenRejection;
+  }
   return {
     callId: parsed.data.callId,
     kind: "task-update",

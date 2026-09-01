@@ -1,4 +1,8 @@
 import { CHANNEL_CONTEXT_KEY_NAME, SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import {
+  isSubagentAdapterState,
+  SUBAGENT_ADAPTER_KIND,
+} from "#execution/subagent-adapter-state.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 export const TASK_UPDATE_SESSION_INSTRUCTION =
@@ -18,6 +22,13 @@ export function isTaskOwnedSerializedContext(serializedContext: Record<string, u
   if (channel === null || typeof channel !== "object") return false;
   const state = Reflect.get(channel, "state");
   if (state === null || typeof state !== "object") return false;
+  if (
+    Reflect.get(channel, "kind") === SUBAGENT_ADAPTER_KIND &&
+    isSubagentAdapterState(state) &&
+    state.taskId !== undefined
+  ) {
+    return true;
+  }
   const token = Reflect.get(state, "parentContinuationToken");
   return typeof token === "string" && readTaskIdFromInboxToken(token) !== undefined;
 }

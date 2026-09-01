@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
-import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
-import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import {
+  createSessionCommandInbox,
+  type SessionInboxPayload,
+} from "#execution/session-command-inbox.js";
 
 const createHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+  getWritable: vi.fn(),
 }));
 
 describe("createSessionCommandInbox", () => {
@@ -31,6 +33,38 @@ describe("createSessionCommandInbox", () => {
     await expect(inbox.next()).resolves.toEqual(resolved(send("by id")));
     inbox.consumeNext();
     await expect(inbox.next()).resolves.toEqual(resolved({ kind: "clear" }));
+    inbox.consumeNext();
+    await inbox.dispose();
+  });
+
+  it("delegates handle commands from the stable inbox to the session-state owner", async () => {
+    const command = {
+      command: {
+        identity: { id: "agent-1", name: "research", nodeId: "subagents/research" },
+        kind: "reserve" as const,
+        operationId: "operation-1",
+        taskId: "task-1",
+      },
+      commandId: "command-1",
+      kind: "agent-handle-command" as const,
+    };
+    installHooks(
+      createMockHook({
+        reads: [Promise.resolve(resolved(command)), Promise.resolve(resolved(send("next")))],
+        token: "stable",
+      }),
+    );
+    const handleAgentHandleCommand = vi.fn(async () => {});
+    const inbox = createSessionCommandInbox({ handleAgentHandleCommand });
+
+    await inbox.claimStable("stable");
+
+    const internal = await inbox.next();
+    expect(internal).toEqual(resolved(command));
+    inbox.consumeNext();
+    await expect(inbox.handleAgentHandleCommand(command)).resolves.toBe(true);
+    expect(handleAgentHandleCommand).toHaveBeenCalledWith(command);
+    await expect(inbox.next()).resolves.toEqual(resolved(send("next")));
     inbox.consumeNext();
     await inbox.dispose();
   });
@@ -121,7 +155,7 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionInboxWireVersion: SESSION_INBOX_WIRE_VERSION },
+      metadata: { sessionInboxWireVersion: 2 },
       token: "stable",
     });
     await inbox.dispose();

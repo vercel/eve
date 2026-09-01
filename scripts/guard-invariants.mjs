@@ -109,6 +109,16 @@
  *             are append-only protocol history: change the contract by adding a
  *             version and migration, never by updating historical data and its
  *             snapshot together.
+ *   rule 41 — The task kernel must stay executor-neutral. Files under
+ *             `src/tasks/**` and `src/execution/tasks/**` must not name
+ *             subagents, agent ids, child sessions, or local/remote agent
+ *             transports. Executors translate their own protocol before it
+ *             reaches tasks and own their control effects outside this tree.
+ *   rule 42 — The shared subagent workflow body is framework-authored
+ *             userspace. It must not import task, harness, or context
+ *             internals or recover private state through `Symbol.for`.
+ *             Privileged dispatch belongs in ordinary step-backed APIs that
+ *             the workflow body consumes through a public contract.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -205,6 +215,8 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
+ *   rule41: Violation[];
+ *   rule42: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -234,7 +246,70 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
+    checkRule41(posix, lines, state.rule41);
+    checkRule42(posix, lines, state.rule42);
   }
+}
+
+// ---------- Rule 41: executor-neutral task kernel ----------
+
+const TASK_EXECUTOR_CONCEPT_RE =
+  /subagent|agentId|childSession|childTurn|agent\/(?:local|remote)|\b(?:local|remote)\b/i;
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule41(posix, lines, violations) {
+  const inTaskKernel =
+    posix.startsWith("packages/eve/src/tasks/") ||
+    posix.startsWith("packages/eve/src/execution/tasks/");
+  if (!inTaskKernel) return;
+
+  lines.forEach((line, idx) => {
+    if (!TASK_EXECUTOR_CONCEPT_RE.test(line)) return;
+    violations.push({
+      rule: 41,
+      file: posix,
+      line: idx + 1,
+      message:
+        "task-kernel code names an agent-specific executor concept. Translate executor events and implement commit, cancellation, input delivery, and cleanup outside src/tasks and src/execution/tasks.",
+    });
+  });
+}
+
+// ---------- Rule 42: userspace subagent workflow ----------
+
+const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/execution/tools/subagent/workflow.ts";
+const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
+  /["']#(?:tasks(?:\/|\.js)|execution(?:\/|\.js)|harness(?:\/|\.js)|context(?:\/|\.js)|shared(?:\/|\.js))/;
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ */
+function checkRule42(posix, lines, violations) {
+  if (posix !== SUBAGENT_WORKFLOW_PATH) return;
+
+  lines.forEach((line, idx) => {
+    if (
+      !SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) &&
+      !line.includes("Symbol.for(") &&
+      !line.includes('from "eve/workflow"') &&
+      !line.includes('from "eve/tools"')
+    )
+      return;
+    if (line.includes('from "eve/workflow"') || line.includes('from "eve/tools"')) return;
+    violations.push({
+      rule: 42,
+      file: posix,
+      line: idx + 1,
+      message:
+        "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
+    });
+  });
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1487,6 +1562,8 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
+    rule41: /** @type {Violation[]} */ ([]),
+    rule42: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1591,6 +1668,12 @@ async function main() {
 
   // Rule 40
   violations.push(...(await checkRule40WireContracts()));
+
+  // Rule 41
+  violations.push(...state.rule41);
+
+  // Rule 42
+  violations.push(...state.rule42);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

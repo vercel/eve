@@ -24,7 +24,6 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   if (request.userMessages.some((entry) => entry.includes("TASK-UPDATE-PROGRESS"))) {
     return "TASK-UPDATE-RECEIVED";
   }
-  if (message.includes("TASK-UPDATE-CHILD")) return sendTaskUpdate(request);
   if (message.includes("TASK-FANOUT-INTERACTIVE-CHECK")) return "TASK-FANOUT-INTERACTIVE-OK";
   if (message.includes("TASK-CANCEL-NOW")) return cancelWorkerTask(request);
   if (message.includes("CHILD-TASK-EXCLUSIVITY-RACE")) return raceBusyWorker(request);
@@ -169,7 +168,7 @@ function startTaskUpdateChild(request: MockModelRequest): MockModelResponse | st
         {
           id: "task-update-child",
           input: { message: "TASK-UPDATE-CHILD" },
-          name: "agent",
+          name: "update-worker",
         },
       ],
     };
@@ -238,29 +237,6 @@ function latestTaskState(messages: readonly string[]): TaskState | undefined {
     throw new Error("Invalid task state supplied to the model.");
   }
   return parsed as TaskState;
-}
-
-function sendTaskUpdate(request: MockModelRequest): MockModelResponse | string {
-  const result = resultById(request, "task-update-progress");
-  if (result === undefined) {
-    return {
-      toolCalls: [
-        {
-          id: "task-update-progress",
-          input: { message: "TASK-UPDATE-PROGRESS" },
-          name: "task_update",
-        },
-      ],
-    };
-  }
-  if (
-    result.output === null ||
-    typeof result.output !== "object" ||
-    Reflect.get(result.output, "status") !== "sent"
-  ) {
-    throw new Error("task_update did not confirm delivery.");
-  }
-  return "TASK-UPDATE-CHILD-DONE";
 }
 
 function fanoutTasks(request: MockModelRequest, size: number): MockModelResponse | string {
@@ -651,7 +627,6 @@ const base = e2eAgentConfig();
 
 export default defineAgent({
   ...base,
-  experimental: { ...base.experimental, tasks: true },
   // These evals target orchestration, not model planning. Keep every suite
   // deterministic while retaining the workflow-world override from `base`.
   model: mockModel(respond),

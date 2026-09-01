@@ -12,8 +12,8 @@ value when the run ends.
 
 Inside the tool, everything is the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`,
 `"use step"`, `createHook`, `createWebhook`, `sleep`, retries, replay. eve adds `ask` from
-`eve/workflow` — a question the human on the session's channel answers — and treats each `yield` as
-a durable progress report.
+`eve/workflow` — a question the human on the session's channel answers — and `agent` for delegating
+from a background workflow. eve treats each `yield` as a durable progress report.
 
 ## Write one
 
@@ -122,6 +122,25 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
 and can only show the model's input. Both compose: `approval` before the run, `ask` inside it.
+
+## Delegate work: `agent`
+
+Background workflow tools can call a visible subagent and wait for its result:
+
+```ts
+import { agent } from "eve/workflow";
+
+const result = await agent(ctx, {
+  key: "security-review",
+  target: "reviewer",
+  message: "Review the deployment plan for security risks.",
+});
+```
+
+`key` is required, non-empty, and unique within the workflow run. It makes the invocation identity
+stable across replay, so use a fixed key for each logical call site. Parallel calls must use distinct
+keys. `target` is the model-visible subagent name; pass `agentId` to continue an existing child and
+`outputSchema` to require structured output.
 
 ## Report progress: `yield`
 

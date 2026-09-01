@@ -187,6 +187,10 @@ async function waitForNextSessionAction(input: {
       return { delivery: null, kind: "delivery" };
     }
 
+    if (await input.commandInbox.handleAgentHandleCommand(first.value)) {
+      continue;
+    }
+
     // Runtime-action results use the active turn's private inbox. A late value
     // can still surface through an old session alias, where the driver has
     // always ignored it rather than treating it as a session command.

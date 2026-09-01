@@ -154,5 +154,5 @@ export function isJsonObjectValue(value: JsonValue | undefined): value is JsonOb
 
 function isPlainObject(value: object): value is Record<string, unknown> {
   const prototype = Object.getPrototypeOf(value);
-  return prototype === null || prototype === Object.prototype;
+  return prototype === null || Object.getPrototypeOf(prototype) === null;
 }

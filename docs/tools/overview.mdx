@@ -56,15 +56,16 @@ history or `toModelOutput`; only the final yield does. Treat snapshots as
 last-write-wins by tool call id, not append-only progress. The durable runtime
 can retry a step and replay overlapping snapshots.
 
-### Experimental background execution
+### Background execution
 
 `defineTool({ execution: "background" })` receives a third `task` argument. Returning a normal
 value completes the durable task with that value. Returning `task.delegated({ executor, receipt })`
-returns a `working` receipt immediately while an external executor continues the task.
-The root agent must enable `experimental.tasks`; eve rejects background tools at build time otherwise.
+returns a `working` receipt immediately while an external executor continues the task. Background
+tools are a normal execution mode and need no root-agent flag.
 
-This contract currently supports framework-owned task executors, including local and remote
-subagents when `experimental.tasks` is enabled. After delegating, an in-process executor reports
+Built-in, declared local, and remote subagents use this background task lifecycle automatically.
+After delegating, an
+in-process executor reports
 progress with `task.send({ kind: "update", message })` and the terminal result with
 `task.send({ kind: "complete", data })` (or `fail` / `cancel`). `send` is not restart-safe — an
 in-memory callback dies with the process — so the cross-process executor wire remains

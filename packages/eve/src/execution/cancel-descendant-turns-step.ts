@@ -7,9 +7,9 @@ import {
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
 } from "#execution/remote-agent-dispatch.js";
-import { cancelToolRun } from "#execution/tool-run/cancel.js";
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { getToolRuns, type ToolRunRecord } from "#harness/tool-runs.js";
+import { getWorkflowToolRuns, type WorkflowToolRunRecord } from "#harness/workflow-tool-runs.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
@@ -37,13 +37,13 @@ export async function cancelDescendantTurnsStep(input: {
   "use step";
 
   let running: readonly RunningAgentHandle[];
-  let toolRuns: readonly ToolRunRecord[];
+  let workflowToolRuns: readonly WorkflowToolRunRecord[];
   try {
     const session = await readDurableSession(input.sessionState);
     running = (getAgentHandleStore(session.state)?.handles ?? []).filter(
       (handle): handle is RunningAgentHandle => handle.phase === "running",
     );
-    toolRuns = getToolRuns(session.state);
+    workflowToolRuns = getWorkflowToolRuns(session.state);
   } catch (error) {
     logError(log, "failed to read pending descendants during cancellation", error, {
       sessionId: input.sessionState.sessionId,
@@ -52,7 +52,9 @@ export async function cancelDescendantTurnsStep(input: {
   }
 
   await Promise.all(
-    toolRuns.map((record) => cancelToolRun(record, "The turn that called the tool was cancelled.")),
+    workflowToolRuns.map((record) =>
+      cancelWorkflowToolRun(record, "The turn that called the tool was cancelled."),
+    ),
   );
   if (running.length === 0) return;
 

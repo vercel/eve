@@ -3,7 +3,7 @@ import { z } from "#compiled/zod/index.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
-import { sameTaskMetadata, type DurableTaskMetadata, type TaskView } from "#tasks/types.js";
+import { sameTaskMetadata, type TaskMetadata, type TaskView } from "#tasks/types.js";
 
 /**
  * Session-state key for the parent's live-task index.
@@ -15,6 +15,7 @@ import { sameTaskMetadata, type DurableTaskMetadata, type TaskView } from "#task
  * executors must update tasks without holding the current snapshot.
  */
 export const SESSION_TASKS_STATE_KEY = "eve.tasks";
+const SESSION_TASKS_STATE_VERSION = 2;
 
 /**
  * One task owned by this session. Immutable model-safe metadata keeps the
@@ -34,22 +35,15 @@ export interface SessionTaskIndexEntry {
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
   readonly executor?: TaskExecutorBinding;
-  readonly metadata: DurableTaskMetadata;
-  readonly operationId?: string;
+  readonly metadata: TaskMetadata;
 }
 
-const taskMetadataSchema: z.ZodType<DurableTaskMetadata> = z.union([
-  z.strictObject({
-    agentId: z.string().min(1),
-    kind: z.literal("subagent"),
-    mode: z.enum(["local", "remote"]),
-    name: z.string().min(1),
-  }),
-  z.strictObject({
-    kind: z.string().min(1),
-    name: z.string().min(1),
-  }),
-]);
+const taskMetadataSchema: z.ZodType<TaskMetadata> = z.strictObject({
+  agentId: z.string().min(1).optional(),
+  kind: z.string().min(1),
+  mode: z.enum(["local", "remote"]).optional(),
+  name: z.string().min(1),
+});
 
 const taskViewBaseShape = {
   executor: z
@@ -60,9 +54,6 @@ const taskViewBaseShape = {
           kind: z.string().min(1),
         })
         .optional(),
-      childSessionId: z.string().min(1).optional(),
-      childTurnId: z.string().min(1).optional(),
-      lifecycle: z.enum(["parked", "terminal"]).optional(),
     })
     .optional(),
   metadata: taskMetadataSchema,
@@ -108,7 +99,6 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
     })
     .optional(),
   metadata: taskMetadataSchema,
-  operationId: z.string().min(1).optional(),
   taskId: z.string().min(1),
   taskRunId: z.string().min(1),
   terminalView: taskViewSchema.optional(),
@@ -117,6 +107,7 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
 const sessionTaskIndexSchema = z
   .strictObject({
     tasks: z.array(sessionTaskIndexEntrySchema),
+    version: z.literal(SESSION_TASKS_STATE_VERSION),
   })
   .refine(
     (index) => new Set(index.tasks.map((entry) => entry.taskId)).size === index.tasks.length,
@@ -137,6 +128,7 @@ const sessionTaskIndexSchema = z
 
 interface SessionTaskIndex {
   readonly tasks: readonly SessionTaskIndexEntry[];
+  readonly version: typeof SESSION_TASKS_STATE_VERSION;
 }
 
 /**
@@ -151,6 +143,12 @@ export function getSessionTaskIndex(
   const raw = state?.[SESSION_TASKS_STATE_KEY];
   if (raw === undefined) {
     return [];
+  }
+  const version = typeof raw === "object" && raw !== null ? Reflect.get(raw, "version") : undefined;
+  if (version !== SESSION_TASKS_STATE_VERSION) {
+    throw new Error(
+      `Unsupported task index version ${JSON.stringify(version)} under session state key "${SESSION_TASKS_STATE_KEY}"; expected version ${SESSION_TASKS_STATE_VERSION}.`,
+    );
   }
   const parsed = sessionTaskIndexSchema.safeParse(raw);
   if (!parsed.success) {
@@ -177,7 +175,10 @@ export function cacheTerminalTaskView(
   }
   const tasks = [...entries];
   tasks[index] = { ...tasks[index]!, terminalView: view };
-  return { ...state, [SESSION_TASKS_STATE_KEY]: { tasks } };
+  return {
+    ...state,
+    [SESSION_TASKS_STATE_KEY]: { tasks, version: SESSION_TASKS_STATE_VERSION },
+  };
 }
 
 function isValidTerminalView(view: TaskView): boolean {
@@ -217,7 +218,10 @@ export function recordSessionTask(
     ...session,
     state: {
       ...session.state,
-      [SESSION_TASKS_STATE_KEY]: { tasks } satisfies SessionTaskIndex,
+      [SESSION_TASKS_STATE_KEY]: {
+        tasks,
+        version: SESSION_TASKS_STATE_VERSION,
+      } satisfies SessionTaskIndex,
     },
   };
 }

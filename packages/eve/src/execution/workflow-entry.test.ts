@@ -87,7 +87,6 @@ vi.mock("./delegated-parent-notification.js", () => ({
     .mockImplementation(async ({ serializedContext }) => serializedContext),
   notifyCancelledTaskCallerStep: vi.fn().mockResolvedValue(undefined),
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
-  notifyTaskTurnStartedStep: vi.fn().mockResolvedValue(undefined),
   notifyTurnCallerStep: vi.fn().mockResolvedValue(undefined),
   resolveInitialTurnCallerStep: vi.fn().mockResolvedValue(undefined),
 }));

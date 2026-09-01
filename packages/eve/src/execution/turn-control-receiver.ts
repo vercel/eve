@@ -167,6 +167,9 @@ export class TurnControlReceiver {
         throw new Error("Session command inbox closed before the active turn settled.");
       }
       this.commandInbox.consumeNext();
+      if (await this.commandInbox.handleAgentHandleCommand(winner.value.value)) {
+        return await this.nextControlOrCommand();
+      }
       // Runtime-action results belong to the active turn's private inbox. A
       // late value on a retired session alias stays ignorable, but it is not
       // part of the versioned session-command wire family.
@@ -240,6 +243,9 @@ export class TurnControlReceiver {
       }
 
       this.commandInbox.consumeNext();
+      if (await this.commandInbox.handleAgentHandleCommand(winner.value.value)) {
+        continue;
+      }
       if (winner.value.value.kind === "runtime-action-result") {
         continue;
       }

@@ -1,16 +1,10 @@
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
-import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
-import type { RuntimeActionResult } from "#shared/action-types.js";
-import type { TaskControlInvocation } from "#shared/dispatch-action.js";
+import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import { taskViewsToJson } from "#tasks/json.js";
-import {
-  findSessionTaskEntry,
-  getSessionTaskIndex,
-  type SessionTaskIndexEntry,
-} from "#tasks/session-index.js";
-import { readSubagentTaskMetadata, type TaskView } from "#tasks/types.js";
+import { findSessionTaskEntry, type SessionTaskIndexEntry } from "#tasks/session-index.js";
+import type { TaskView } from "#tasks/types.js";
 
 /**
  * Result and lookup helpers shared by the task-control executors
@@ -73,44 +67,9 @@ function createPendingTaskView(entry: SessionTaskIndexEntry): TaskView {
   return { ...view, executor: { binding: entry.executor } };
 }
 
-/** Finds the persistent address record for one task-owned agent. */
-export function findTaskAgentAddress(
-  session: RuntimeSession,
-  agentId: string,
-): Extract<AgentHandle, { phase: "addressed" }> | undefined {
-  const handles = getAgentHandleStore(session.state)?.handles ?? [];
-  return handles.find(
-    (candidate): candidate is Extract<AgentHandle, { phase: "addressed" }> =>
-      candidate.phase === "addressed" && candidate.identity.id === agentId,
-  );
-}
-
-/** Returns the one nonterminal task owning an agent, if any. */
-export async function findActiveTaskForAgent(
-  session: RuntimeSession,
-  agentId: string,
-  parentTurnId?: string,
-  parentStepIndex?: number,
-): Promise<{ readonly entry: SessionTaskIndexEntry; readonly view: TaskView } | undefined> {
-  const entries = getSessionTaskIndex(session.state).filter(
-    (entry) => readSubagentTaskMetadata(entry)?.agentId === agentId,
-  );
-  const views = await readTaskViews(entries);
-  const active = entries.flatMap((entry, index) => {
-    const view = views[index];
-    return view !== undefined &&
-      ((entry.createdByTurnId === parentTurnId && entry.createdByStepIndex === parentStepIndex) ||
-        view.status === "working" ||
-        view.status === "input_required")
-      ? [{ entry, view }]
-      : [];
-  });
-  return active[0];
-}
-
 /** One successful task-control result carrying full task views. */
 export function createTaskViewsResult(
-  action: TaskControlInvocation,
+  action: RuntimeToolCallActionRequest,
   views: readonly TaskView[],
 ): RuntimeActionResult {
   return {
@@ -123,7 +82,7 @@ export function createTaskViewsResult(
 
 /** One task-control error the model can act on. */
 export function createTaskControlError(
-  action: TaskControlInvocation,
+  action: RuntimeToolCallActionRequest,
   message: string,
 ): RuntimeActionResult {
   return {
@@ -137,7 +96,7 @@ export function createTaskControlError(
 
 /** The ownership error for ids outside this session's task index. */
 export function createUnknownTasksError(
-  action: TaskControlInvocation,
+  action: RuntimeToolCallActionRequest,
   unknown: readonly string[],
 ): RuntimeActionResult {
   return createTaskControlError(

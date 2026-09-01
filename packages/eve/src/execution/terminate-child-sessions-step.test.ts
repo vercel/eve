@@ -432,12 +432,9 @@ function indexedTask(taskId: string): SessionTaskIndexEntry {
     taskInboxToken: `${taskId}:inbox`,
     createdByTurnId: "turn-1",
     metadata: {
-      agentId: "ag_local:1",
-      kind: "subagent",
-      mode: "local",
+      kind: "tool",
       name: "research",
     },
-    operationId: `op-${taskId}`,
     taskId,
     taskRunId: `run-${taskId}`,
   };
@@ -466,7 +463,10 @@ function makeSessionState(
         state:
           tasks.length === 0
             ? { [AGENT_HANDLES_STATE_KEY]: { handles } }
-            : { [AGENT_HANDLES_STATE_KEY]: { handles }, [SESSION_TASKS_STATE_KEY]: { tasks } },
+            : {
+                [AGENT_HANDLES_STATE_KEY]: { handles },
+                [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 },
+              },
       },
       version: 1,
     },

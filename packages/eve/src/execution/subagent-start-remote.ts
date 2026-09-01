@@ -6,14 +6,8 @@ import {
   resolveRemoteAgentForAction,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
-import {
-  confirmAgentStarted,
-  confirmTaskAgentAddress,
-  prepareAgentStart,
-  rejectAgentEffect,
-} from "#harness/handles/transitions.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 
@@ -21,7 +15,7 @@ const log = createLogger("execution.subagent-start-remote");
 
 /** Starts one remote subagent after dispatch planning has selected its target. */
 export async function startRemoteSubagent(input: {
-  readonly action: RuntimeRemoteAgentCallActionRequest;
+  readonly action: RuntimeRemoteAgentDispatchRequest;
   readonly auth: Parameters<typeof startRemoteAgentSession>[0]["auth"];
   readonly batchEvent: { readonly sequence: number; readonly turnId: string };
   readonly bundle: CompiledBundle;
@@ -36,7 +30,7 @@ export async function startRemoteSubagent(input: {
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
-  readonly taskOwned: boolean;
+  readonly taskId?: string;
 }): Promise<DispatchOutcome> {
   const { action } = input;
   const activityObserver = deriveChildActivityObserverConfig({
@@ -76,7 +70,7 @@ export async function startRemoteSubagent(input: {
     };
   }
 
-  const { identity, operation } = mintStartOperation({
+  const { operation } = mintStartOperation({
     callId: action.callId,
     name: action.remoteAgentName,
     nodeId: action.nodeId,
@@ -89,12 +83,6 @@ export async function startRemoteSubagent(input: {
         ? action.nodeId
         : input.dynamicRemoteAgent.credentialsStepId,
   };
-  const preparedSession = prepareAgentStart(input.currentSession, {
-    identity,
-    operation,
-    target: { callbackBaseUrl, credentialResolver, kind: "agent/remote", url: resolvedRemote.url },
-  });
-
   try {
     const child = await startRemoteAgentSession({
       action,
@@ -108,6 +96,7 @@ export async function startRemoteSubagent(input: {
       activityObserver,
       remote: resolvedRemote,
       session: input.session,
+      taskId: input.taskId,
     });
     const address = {
       callbackBaseUrl,
@@ -121,9 +110,7 @@ export async function startRemoteSubagent(input: {
       callId: action.callId,
       kind: "called",
       name: action.name,
-      session: input.taskOwned
-        ? confirmTaskAgentAddress(preparedSession, { address, operationId: operation.id })
-        : confirmAgentStarted(preparedSession, { address, operationId: operation.id }),
+      session: input.currentSession,
       toolName: action.remoteAgentName,
     };
   } catch (error) {
@@ -135,10 +122,7 @@ export async function startRemoteSubagent(input: {
     return {
       kind: "error",
       result: createRemoteAgentStartFailureResult({ action, error }),
-      session: rejectAgentEffect(preparedSession, {
-        disposition: "dead",
-        operationId: operation.id,
-      }),
+      session: input.currentSession,
     };
   }
 }

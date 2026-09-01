@@ -3,7 +3,7 @@ import { z } from "#compiled/zod/index.js";
 
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessToolMap } from "#harness/types.js";
-import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
+import { WORKFLOW_TASK_INTERRUPT_KIND } from "#harness/workflow-task-state.js";
 import { DEFAULT_WORKFLOW_MAX_SUBAGENTS } from "#harness/workflow-subagent-limit.js";
 import { workflowToolDescription } from "#harness/workflow-tool-description.js";
 import {
@@ -31,7 +31,7 @@ const workflowInputSchema = z.strictObject({
 
 /**
  * Adds the dynamic `Workflow` tool while leaving every ordinary model tool
- * untouched. Only subagent and remote-agent runtime actions enter the sandbox.
+ * untouched. Only workflow-callable delegation tasks enter the sandbox.
  */
 export async function applyWorkflowTool(input: {
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
@@ -95,22 +95,15 @@ function createWorkflowHostTools(tools: HarnessToolMap, names: Iterable<string>)
 
   for (const name of names) {
     const tool = tools.get(name);
-    if (tool === undefined) continue;
-    const target =
-      tool.behavior?.handling?.kind === "dispatch" ? tool.behavior.handling.target : undefined;
-    if (
-      target?.kind === "self-agent-call" ||
-      target?.kind === "subagent-call" ||
-      target?.kind === "remote-agent-call"
-    ) {
-      hostTools[name] = createWorkflowRuntimeActionHostTool(tool);
+    if (tool?.task !== undefined) {
+      hostTools[name] = createWorkflowTaskHostTool(tool);
     }
   }
 
   return hostTools as ToolSet;
 }
 
-function createWorkflowRuntimeActionHostTool(harnessTool: HarnessToolDefinition): ToolSet[string] {
+function createWorkflowTaskHostTool(harnessTool: HarnessToolDefinition): ToolSet[string] {
   return {
     description: harnessTool.description,
     inputSchema: harnessTool.inputSchema,
@@ -119,11 +112,13 @@ function createWorkflowRuntimeActionHostTool(harnessTool: HarnessToolDefinition)
       if (resolution !== undefined) return resolution;
 
       return requestWorkflowSandboxInterrupt({
-        dispatchTarget:
-          harnessTool.behavior?.handling?.kind === "dispatch"
-            ? harnessTool.behavior.handling.target
-            : undefined,
-        kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
+        kind: WORKFLOW_TASK_INTERRUPT_KIND,
+        task: {
+          executeInput: harnessTool.task?.executeInput?.(toolInput),
+          nodeId: harnessTool.task?.nodeId,
+          resultKind: harnessTool.task?.resultKind,
+          workflowId: harnessTool.task?.workflowId,
+        },
         toolInput,
         toolName: harnessTool.name,
       });

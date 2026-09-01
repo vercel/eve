@@ -96,17 +96,17 @@ export type AgentAddress =
 /**
  * Durable ownership record for one delegated child.
  *
- * Outside tasks mode, the store owns the full nonterminal lifecycle:
- *
  * - `starting` — the parent committed intent to start; the child may or
  *   may not exist yet.
  * - `running` — one identified child turn is outstanding.
  * - `parked` — the child is idle and resumable; only this phase is
  *   model-visible.
+ * - `reserved` — a background task owns a fresh identity before start.
+ * - `claimed` — a background task owns the addressed child turn.
+ * - `available` — the addressed child is idle between background tasks.
  *
- * A terminal child has no legacy handle: settlement deletes it. Tasks mode
- * instead keeps an `addressed` record whose availability is derived from the
- * tasks bound to its persistent child session.
+ * A terminal child has no handle: settlement deletes it. Every execution
+ * policy uses this store; task-owned phases carry the task lease explicitly.
  */
 export type AgentHandle =
   | {
@@ -128,10 +128,22 @@ export type AgentHandle =
       readonly lastStatus: string;
     }
   | {
-      /** Persistent task-mode identity and routing, with no execution claim. */
-      readonly phase: "addressed";
+      readonly phase: "reserved";
+      readonly identity: AgentIdentity;
+      readonly operationId: string;
+      readonly taskId: string;
+    }
+  | {
+      readonly phase: "available";
       readonly identity: AgentIdentity;
       readonly address: AgentAddress;
+    }
+  | {
+      readonly phase: "claimed";
+      readonly identity: AgentIdentity;
+      readonly operationId: string;
+      readonly address: AgentAddress;
+      readonly taskId: string;
     };
 
 /** Lifecycle phase of a delegated agent handle. */
@@ -141,6 +153,46 @@ export type AgentHandlePhase = AgentHandle["phase"];
 export interface AgentHandleStore {
   readonly handles: readonly AgentHandle[];
 }
+
+/** Task-owned phases within the shared session agent handle store. */
+export type TaskOwnedAgentHandle = Extract<
+  AgentHandle,
+  { readonly phase: "available" | "claimed" | "reserved" }
+>;
+
+export const EMPTY_AGENT_HANDLE_STORE: AgentHandleStore = { handles: [] };
+
+/** One serialized task-lease mutation against the shared agent handle store. */
+export type AgentHandleStoreCommand =
+  | { readonly kind: "read" }
+  | {
+      readonly identity: AgentIdentity;
+      readonly kind: "reserve";
+      readonly operationId: string;
+      readonly taskId: string;
+    }
+  | {
+      readonly address: AgentAddress;
+      readonly kind: "confirm";
+      readonly operationId: string;
+      readonly taskId: string;
+    }
+  | {
+      readonly agentId: string;
+      readonly expectedTarget: "local" | "remote";
+      readonly invokedName: string;
+      readonly kind: "claim";
+      readonly operationId: string;
+      readonly taskId: string;
+    }
+  | { readonly agentId: string; readonly kind: "remove"; readonly taskId: string }
+  | { readonly kind: "release-task"; readonly taskId: string };
+
+export type AgentHandleStoreCommandResult =
+  | { readonly kind: "ready"; readonly handle?: TaskOwnedAgentHandle }
+  | { readonly kind: "busy"; readonly handle: AgentHandle }
+  | { readonly kind: "mismatch"; readonly handle: AgentHandle }
+  | { readonly kind: "unknown" };
 
 const nonEmptyString = z.string().min(1);
 
@@ -216,9 +268,22 @@ const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("phase", 
     phase: z.literal("parked"),
   }),
   z.strictObject({
+    identity: identitySchema,
+    operationId: nonEmptyString,
+    phase: z.literal("reserved"),
+    taskId: nonEmptyString,
+  }),
+  z.strictObject({
     address: addressSchema,
     identity: identitySchema,
-    phase: z.literal("addressed"),
+    phase: z.literal("available"),
+  }),
+  z.strictObject({
+    address: addressSchema,
+    identity: identitySchema,
+    operationId: nonEmptyString,
+    phase: z.literal("claimed"),
+    taskId: nonEmptyString,
   }),
 ]);
 
@@ -278,4 +343,15 @@ export function getAgentHandleStore(
     );
   }
   return parsed.data;
+}
+
+/** Writes the validated agent handle store under its single session-state key. */
+export function setAgentHandleStore(
+  state: SessionStateMap | undefined,
+  store: AgentHandleStore,
+): SessionStateMap {
+  return {
+    ...state,
+    [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore(store),
+  };
 }

@@ -177,8 +177,8 @@ module map: those sources are compiled into the workflow driver and the step reg
 ## Boundaries
 
 ```
-turn / task (owner)                          tool run
-  inbox hook ──────── starts ───────────────▶ toolRunWorkflow(execute)
+turn / task (owner)                          workflow tool run
+  inbox hook ──────── starts ───────────────▶ workflowToolRunWorkflow(execute)
   <inbox>:report  ◀── yield ─────────────────   body
   <inbox>:request ◀── ask (replyTo = answer) ─   body
   <inbox>:outcome ◀── return / throw / cancel   body
@@ -215,7 +215,7 @@ self-agent tools take, so the harness parks the turn instead of calling `execute
   vendored copy everywhere authored code is bundled, and ships the types as `eve/workflow-modules`,
   an ambient declaration listed in the scaffolded tsconfig's `types`. An installed `workflow`
   package takes precedence for types if an application adds one.
-- The run-to-owner protocol (three owner hooks, `RunRef`, message shapes) stayed internal. Nothing
+- The run-to-owner protocol (three owner hooks, `WorkflowToolRunRef`, message shapes) stayed internal. Nothing
   authored needs to construct those messages.
 
 ## Open questions

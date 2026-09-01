@@ -26,8 +26,8 @@ import {
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
-import { clearPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { clearToolRuns } from "#harness/tool-runs.js";
+import { clearPendingCoordinationBatch } from "#harness/coordination.js";
+import { clearWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { getTurnUsageState, toUsage } from "#harness/turn-tag-state.js";
 import { clearPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
@@ -48,7 +48,7 @@ export interface CancelledTurnSettleResult {
 
 /**
  * Settles one cancelled turn: emits `turn.cancelled` → `session.waiting`,
- * drops pending runtime-action state, and persists the between-turns
+ * drops pending coordination state, and persists the between-turns
  * session. Runs in the *driver* run, whose wake sources exclude the
  * cancel hook, so a queued cancel wake cannot re-dispatch it.
  */
@@ -145,8 +145,10 @@ export async function settleCancelledTurnStep(input: {
       clearPendingSessionLimitPrompt(
         clearAllProxyInputRequests(
           clearPendingWorkflowInterrupt(
-            clearPendingRuntimeActionBatch(
-              clearToolRuns(abandonRunningAgentTurns({ ...session, outputSchema: undefined })),
+            clearPendingCoordinationBatch(
+              clearWorkflowToolRuns(
+                abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
+              ),
             ),
           ),
         ),

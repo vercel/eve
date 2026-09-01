@@ -12,7 +12,7 @@ import {
   resolveRemoteAgentStreamHeaders,
   startRemoteAgentSession,
 } from "#execution/remote-agent-dispatch.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 
 describe("resolveRemoteAgentForAction", () => {
@@ -271,6 +271,42 @@ describe("startRemoteAgentSession", () => {
       ].join("\n"),
       capabilities: {},
       mode: "conversation",
+    });
+  });
+
+  it("binds a task id to an opaque invocation callback token", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      callbackToken: "invocation-reply",
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+      taskId: "task-1",
+    });
+
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toMatchObject({
+      callback: {
+        taskId: "task-1",
+        token: "invocation-reply",
+        url: "https://caller.example.com/eve/v1/callback/invocation-reply",
+      },
     });
   });
 
@@ -1138,7 +1174,7 @@ describe("resetRemoteAgentSession", () => {
   });
 });
 
-function createAction(): RuntimeRemoteAgentCallActionRequest {
+function createAction(): RuntimeRemoteAgentDispatchRequest {
   return {
     callId: "call-remote",
     description: "Runtime action event description.",

@@ -2,12 +2,19 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
-import type { PreparedToolBehavior } from "#tools/behavior.js";
+import type { AgentView } from "#harness/handles/prompt.js";
+import type { JsonValue } from "#shared/json.js";
 
 export interface BackgroundExecutableTool {
-  readonly behavior?: PreparedToolBehavior;
   readonly execute: (input: unknown, options: ToolExecuteOptions, task: TaskExec) => unknown;
   readonly name: string;
+  /** Present when the execute body runs in the task-owned durable workflow. */
+  readonly task?: {
+    readonly executeInput?: (input: unknown) => JsonValue;
+    readonly nodeId?: string;
+    readonly resultKind?: "subagent" | "tool";
+    readonly workflowId: string;
+  };
 }
 
 export interface BackgroundToolCall {
@@ -27,6 +34,7 @@ export interface BackgroundToolCallBatch {
 }
 
 export interface BackgroundToolExecutor {
+  readAgentViews?(): Promise<readonly AgentView[]>;
   execute(input: {
     readonly batch: BackgroundToolCallBatch;
     readonly definition: BackgroundExecutableTool;
@@ -36,9 +44,8 @@ export interface BackgroundToolExecutor {
 }
 
 // A ContextKey rather than a direct import of the task runtime, for three reasons:
-// 1. The executor is per-step state, not a module export — each task-runtime step
-//    installs a fresh instance whose commit/rollback rides that step's transaction,
-//    so the correct instance can only be resolved at call time.
+// 1. The executor is per-step state, not a module export, so the correct
+//    transaction and session-owned agent handle store can only be resolved at call time.
 // 2. Importing the implementation from `execution/` would make the harness ↔
 //    execution dependency bidirectional; the key keeps it one-way (harness declares
 //    the contract, execution installs it).

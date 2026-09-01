@@ -67,7 +67,7 @@ import {
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
-  TOOL_RUN_WORKFLOW_NAME,
+  WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
@@ -119,9 +119,11 @@ export const activityCollectorWorkflowReference = {
 };
 
 /** Stable workflow reference for authored workflow tool runs. */
-export const toolRunWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${TOOL_RUN_WORKFLOW_NAME}`,
+export const workflowToolRunWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
 };
+
+export { subagentToolExecuteWorkflowReference } from "#execution/tools/subagent/workflow-reference.js";
 
 /**
  * Creates a workflow-backed runtime whose long-lived driver owns the

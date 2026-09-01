@@ -1,32 +1,12 @@
-/**
- * Continuation dispatch for stored agent handles.
- *
- * Owns the `agentId` leg of the runtime-action dispatch step: resolving a
- * model-supplied agentId against the session's handle store via
- * `prepareAgentContinuation`, delivering the follow-up message to the
- * address the running handle records, and resolving delivery failures as
- * dead (handle deleted) or retryable (handle restored to `parked`).
- */
+/** Continuation delivery for task-owned agent sessions. */
 
-import type { ActivityObserverConfig, SessionAuthContext } from "#channel/types.js";
-import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
-import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
-import {
-  getAgentHandleStore,
-  type AgentAddress,
-  type AgentHandle,
-  type AgentIdentity,
-  type ContinueOperation,
-} from "#harness/handles/store.js";
-import {
-  prepareAgentContinuation,
-  rejectAgentEffect,
-  removeTaskAgentAddress,
-} from "#harness/handles/transitions.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
+import type { AgentAddress, AgentIdentity } from "#harness/handles/store.js";
 import type {
-  RuntimeActionRequest,
-  RuntimeRemoteAgentCallActionRequest,
-  RuntimeSubagentCallActionRequest,
+  RuntimeAgentDispatchRequest,
+  RuntimeRemoteAgentDispatchRequest,
+  RuntimeSubagentDispatchRequest,
   RuntimeSubagentDispatchFailure,
 } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
@@ -45,17 +25,18 @@ import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { err, ok, type Result } from "#shared/result.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
+import type { TaskOwnedAgentHandle } from "#harness/handles/store.js";
 
 const log = createLogger("execution.agent-handle-dispatch");
 
-/** Runtime action kinds that may address an agent handle via `agentId`. */
+/** Agent-task requests that may address an agent handle via `agentId`. */
 export type RuntimeAgentHandleAction =
-  | RuntimeRemoteAgentCallActionRequest
-  | RuntimeSubagentCallActionRequest;
+  | RuntimeRemoteAgentDispatchRequest
+  | RuntimeSubagentDispatchRequest;
 
 /** Narrows an action to the kinds that may carry an `agentId` continuation. */
 export function isAgentHandleAction(
-  action: RuntimeActionRequest,
+  action: RuntimeAgentDispatchRequest,
 ): action is RuntimeAgentHandleAction {
   return action.kind === "subagent-call" || action.kind === "remote-agent-call";
 }
@@ -64,8 +45,8 @@ export function isAgentHandleAction(
 export type RuntimeSession = ReturnType<typeof hydrateDurableSession>;
 
 /**
- * Outcome of dispatching one planned runtime action: an adopted child ready
- * for the `subagent.called` emission tail, or a per-action error result.
+ * Outcome of dispatching one planned agent task: an adopted child ready for
+ * the `subagent.called` emission tail, or a per-task error result.
  * Either way the (possibly updated) session snapshot rides along.
  *
  * `address` is the same confirmed {@link AgentAddress} recorded on the
@@ -84,125 +65,46 @@ export type DispatchOutcome =
     }
   | {
       readonly deliveryAmbiguous?: boolean;
+      readonly deliveryPermanent?: boolean;
       readonly kind: "error";
       readonly result: RuntimeSubagentDispatchFailure;
       readonly session: RuntimeSession;
     };
 
-/**
- * Delivers one `agentId` continuation to the child the handle names.
- *
- * Planning converts initially unknown ids into fresh starts, so an id that
- * matches no handle here disappeared mid-batch and reports
- * `AGENT_UNREACHABLE`. Name mismatches and busy handles report
- * `AGENT_MISMATCH` / `AGENT_BUSY` without touching the store. Delivery
- * failures report `AGENT_UNREACHABLE`: permanent ones resolve the handle as
- * dead, transient ones restore it to `parked` so the model can retry the
- * same agentId.
- */
-export async function dispatchToAgentHandle(input: {
+/** Delivers a continuation after the session handle store atomically claimed it for one task. */
+export async function dispatchToTaskAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
-  readonly activityObserver?: ActivityObserverConfig;
-  readonly agentId: string;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
   readonly parentToken: string;
-  readonly parentTurnId: string;
+  readonly handle: Extract<TaskOwnedAgentHandle, { phase: "claimed" }>;
+  readonly taskId: string;
 }): Promise<DispatchOutcome> {
-  const { action, agentId, bundle } = input;
-  const invokedName =
-    action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
-  const operation: ContinueOperation = {
-    callId: action.callId,
-    id: deriveAgentOperationId({
-      callId: action.callId,
-      parentSessionId: input.currentSession.sessionId,
-      parentTurnId: input.parentTurnId,
-    }),
-    kind: "continue",
-    parentTurnId: input.parentTurnId,
-    // Placeholder: prepareAgentContinuation records the handle's actual
-    // pre-delivery status so a retryable rejection can restore it.
-    previousStatus: "",
-  };
-  // Prepared against the in-progress session so a handle resolved earlier in
-  // this batch is already gone.
-  const prepared = prepareAgentContinuation(input.currentSession, {
-    agentId,
-    invokedName,
-    operation,
-  });
+  const { action, handle } = input;
+  const agentId = handle.identity.id;
 
-  switch (prepared.kind) {
-    case "unknown":
-      // Planning resolved this id against the store, so the handle was
-      // deleted by an earlier action in this batch; no retry can reach it.
-      return {
-        kind: "error",
-        result: createAgentErrorResult({
-          action,
-          code: AGENT_UNREACHABLE,
-          message: `Agent with id "${agentId}" is no longer reachable.`,
-        }),
-        session: input.currentSession,
-      };
-    case "mismatch":
-      return {
-        kind: "error",
-        result: createAgentErrorResult({
-          action,
-          code: AGENT_MISMATCH,
-          message: `Agent "${agentId}" from the <agents> list does not belong to "${invokedName}".`,
-        }),
-        session: input.currentSession,
-      };
-    case "busy":
-      return {
-        kind: "error",
-        result: createAgentErrorResult({
-          action,
-          code: AGENT_BUSY,
-          message: `Agent "${agentId}" is still working on its previous request. Wait for its result before continuing it.`,
-        }),
-        session: input.currentSession,
-      };
-    case "ready":
-      break;
-  }
-
-  const { handle } = prepared;
-  // Not exactly-once: `prepareAgentContinuation` only moved the handle to
-  // `running` on the step's working snapshot, which durably commits when the
-  // enclosing dispatch step's result commits. If delivery succeeds and the
-  // step dies before that commit, replay starts from `parked` and delivers
-  // the same operation again — the same start-effect/step-commit window
-  // accepted for child starts. The callee has no receiver-side dedup for
-  // this; `prepareAgentContinuation` treating the recorded operation as a
-  // replay only makes the parent-side transition idempotent.
   const delivery = await deliverToAgentAddress({
     action,
-    activityObserver: input.activityObserver,
     address: handle.address,
     auth: input.auth,
-    bundle,
+    bundle: input.bundle,
     identity: handle.identity,
     parentToken: input.parentToken,
+    taskId: input.taskId,
   });
   if (!delivery.ok) {
     const { cause, permanent } = delivery.error;
-    logError(log, "agent delivery failed", cause, {
+    logError(log, "task agent delivery failed", cause, {
       agentId,
       callId: action.callId,
       nodeId: handle.identity.nodeId,
       permanent,
       subagentName: handle.identity.name,
     });
-    // Only permanent failures resolve the handle as dead (forfeiting the
-    // child's accumulated conversation); a transiently unreachable agent is
-    // restored to `parked` so the model can retry the same agentId.
     return {
       deliveryAmbiguous: delivery.error.deliveryAmbiguous,
+      deliveryPermanent: permanent,
       kind: "error",
       result: createAgentErrorResult({
         action,
@@ -211,10 +113,7 @@ export async function dispatchToAgentHandle(input: {
           ? `Agent "${handle.identity.name}" with id "${agentId}" is no longer reachable.`
           : `Agent "${handle.identity.name}" with id "${agentId}" is temporarily unreachable. Try again.`,
       }),
-      session: rejectAgentEffect(prepared.session, {
-        disposition: permanent ? "dead" : "retryable",
-        operationId: operation.id,
-      }),
+      session: input.currentSession,
     };
   }
 
@@ -223,92 +122,8 @@ export async function dispatchToAgentHandle(input: {
     callId: action.callId,
     kind: "called",
     name: action.name,
-    session: prepared.session,
-    toolName: handle.identity.name,
-  };
-}
-
-/** Delivers a tasks-mode continuation without creating a second lifecycle claim. */
-export async function dispatchToTaskAgentAddress(input: {
-  readonly action: RuntimeAgentHandleAction;
-  readonly activityObserver?: ActivityObserverConfig;
-  readonly agentId: string;
-  readonly auth: SessionAuthContext | null;
-  readonly bundle: CompiledBundle;
-  readonly currentSession: RuntimeSession;
-  readonly parentToken: string;
-}): Promise<DispatchOutcome> {
-  const { action, agentId } = input;
-  const invokedName =
-    action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName;
-  const record = (getAgentHandleStore(input.currentSession.state)?.handles ?? []).find(
-    (handle): handle is Extract<AgentHandle, { phase: "addressed" }> =>
-      handle.phase === "addressed" && handle.identity.id === agentId,
-  );
-  if (record === undefined) {
-    return {
-      kind: "error",
-      result: createAgentErrorResult({
-        action,
-        code: AGENT_UNREACHABLE,
-        message: `Agent with id "${agentId}" is no longer reachable.`,
-      }),
-      session: input.currentSession,
-    };
-  }
-  if (record.identity.name !== invokedName) {
-    return {
-      kind: "error",
-      result: createAgentErrorResult({
-        action,
-        code: AGENT_MISMATCH,
-        message: `Agent "${agentId}" from the <agents> list does not belong to "${invokedName}".`,
-      }),
-      session: input.currentSession,
-    };
-  }
-
-  const delivery = await deliverToAgentAddress({
-    action,
-    activityObserver: input.activityObserver,
-    address: record.address,
-    auth: input.auth,
-    bundle: input.bundle,
-    identity: record.identity,
-    parentToken: input.parentToken,
-  });
-  if (!delivery.ok) {
-    const { cause, permanent } = delivery.error;
-    logError(log, "task agent delivery failed", cause, {
-      agentId,
-      callId: action.callId,
-      nodeId: record.identity.nodeId,
-      permanent,
-      subagentName: record.identity.name,
-    });
-    return {
-      deliveryAmbiguous: delivery.error.deliveryAmbiguous,
-      kind: "error",
-      result: createAgentErrorResult({
-        action,
-        code: AGENT_UNREACHABLE,
-        message: permanent
-          ? `Agent "${record.identity.name}" with id "${agentId}" is no longer reachable.`
-          : `Agent "${record.identity.name}" with id "${agentId}" is temporarily unreachable. Try again.`,
-      }),
-      session: permanent
-        ? removeTaskAgentAddress(input.currentSession, agentId)
-        : input.currentSession,
-    };
-  }
-
-  return {
-    address: record.address,
-    callId: action.callId,
-    kind: "called",
-    name: action.name,
     session: input.currentSession,
-    toolName: record.identity.name,
+    toolName: handle.identity.name,
   };
 }
 
@@ -324,12 +139,12 @@ export async function dispatchToTaskAgentAddress(input: {
  */
 async function deliverToAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
-  readonly activityObserver?: ActivityObserverConfig;
   readonly address: AgentAddress;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
   readonly parentToken: string;
+  readonly taskId?: string;
 }): Promise<
   Result<
     void,
@@ -353,12 +168,11 @@ async function deliverToAgentAddress(input: {
     }
     try {
       await continueRemoteAgentSession({
-        activityObserver: input.activityObserver,
         auth: input.auth,
         callback: {
           callId: action.callId,
           subagentName: identity.name,
-          taskId: readTaskIdFromInboxToken(input.parentToken),
+          taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
           token: input.parentToken,
           url: createWorkflowCallbackUrl(
             address.callbackBaseUrl,
@@ -389,11 +203,10 @@ async function deliverToAgentAddress(input: {
       command: {
         auth: input.auth,
         caller: {
-          activityObserver: input.activityObserver,
           callId: action.callId,
           replyTo: { kind: "hook", token: input.parentToken },
           subagentName: identity.name,
-          taskId: readTaskIdFromInboxToken(input.parentToken),
+          taskId: input.taskId ?? readTaskIdFromInboxToken(input.parentToken),
         },
         kind: "send",
         payload: {

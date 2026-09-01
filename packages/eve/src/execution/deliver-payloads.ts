@@ -19,13 +19,13 @@ export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): De
 
   const merged: Record<string, unknown> = {};
   const inputRequests: NonNullable<TaskEnvelope["inputRequests"]>[number][] = [];
-  const authorizationEvents: NonNullable<TaskEnvelope["authorizationEvents"]>[number][] = [];
+  const effects: NonNullable<TaskEnvelope["effects"]>[number][] = [];
   const views: NonNullable<TaskEnvelope["views"]>[number][] = [];
   let turnInput: StepInput = {};
 
   for (const payload of payloads) {
     inputRequests.push(...(payload.task?.inputRequests ?? []));
-    authorizationEvents.push(...(payload.task?.authorizationEvents ?? []));
+    effects.push(...(payload.task?.effects ?? []));
     views.push(...(payload.task?.views ?? []));
     for (const [key, value] of Object.entries(payload)) {
       if (value !== undefined) {
@@ -41,7 +41,7 @@ export function coalesceDeliverPayloads(payloads: readonly DeliverPayload[]): De
 
   const task: Record<string, unknown> = {};
   if (inputRequests.length > 0) task.inputRequests = inputRequests;
-  if (authorizationEvents.length > 0) task.authorizationEvents = authorizationEvents;
+  if (effects.length > 0) task.effects = effects;
   if (views.length > 0) task.views = views;
   if (Object.keys(task).length > 0) merged.task = task;
 

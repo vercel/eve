@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 
 /**
- * Derives the stable task id for one originating subagent call.
+ * Derives the stable task id for one originating background call.
  *
  * Reuses the agent-handle operation-id derivation —
  * `hash(parentSessionId, parentTurnId, callId)` — so replayed creation

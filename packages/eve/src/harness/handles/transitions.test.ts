@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
-  AGENT_HANDLES_STATE_KEY,
+  EMPTY_AGENT_HANDLE_STORE,
   deriveAgentId,
   getAgentHandleStore,
   type AgentAddress,
@@ -10,17 +10,15 @@ import {
   type AgentIdentity,
   type ContinueOperation,
   type StartOperation,
+  type TaskOwnedAgentHandle,
 } from "#harness/handles/store.js";
 import {
   abandonRunningAgentTurns,
+  applyAgentHandleStoreCommand,
   confirmAgentStarted,
-  confirmTaskAgentAddress,
   prepareAgentContinuation,
   prepareAgentStart,
-  rebaseAgentHandles,
-  recordTaskAgentAddress,
   rejectAgentEffect,
-  removeTaskAgentAddress,
   settleAgentTurn,
 } from "#harness/handles/transitions.js";
 import type { HarnessSession } from "#harness/types.js";
@@ -145,48 +143,6 @@ describe("confirmAgentStarted", () => {
     expect(() =>
       confirmAgentStarted(createSession(), { address, operationId: "op_unprepared" }),
     ).toThrow("op_unprepared");
-  });
-});
-
-describe("task agent addresses", () => {
-  it("confirms a persistent address without an execution phase", () => {
-    const addressed = confirmTaskAgentAddress(preparedSession(), {
-      address,
-      operationId: startOperation.id,
-    });
-
-    expect(handlesOf(addressed)).toEqual([{ address, identity, phase: "addressed" }]);
-  });
-
-  it("removes only the addressed task agent", () => {
-    const addressed = confirmTaskAgentAddress(preparedSession(), {
-      address,
-      operationId: startOperation.id,
-    });
-
-    expect(handlesOf(removeTaskAgentAddress(addressed, identity.id))).toEqual([]);
-  });
-});
-
-describe("recordTaskAgentAddress", () => {
-  it("appends an addressed handle from a delegated task's executor binding", () => {
-    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
-    expect(handlesOf(recorded)).toEqual([{ address, identity, phase: "addressed" }]);
-  });
-
-  it("is a replay no-op when the identical handle is already stored", () => {
-    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
-    expect(recordTaskAgentAddress(recorded, { address, identity })).toBe(recorded);
-  });
-
-  it("throws when the id already exists with different content", () => {
-    const recorded = recordTaskAgentAddress(createSession(), { address, identity });
-    expect(() =>
-      recordTaskAgentAddress(recorded, {
-        address: { ...address, continuationToken: "continuation_divergent" },
-        identity,
-      }),
-    ).toThrow(identity.id);
   });
 });
 
@@ -335,104 +291,6 @@ describe("abandonRunningAgentTurns", () => {
   });
 });
 
-describe("rebaseAgentHandles", () => {
-  const otherHandle: AgentHandle = {
-    address: {
-      continuationToken: "continuation_other",
-      kind: "agent/local",
-      sessionId: "session_other",
-    },
-    identity: { id: "ag_writer:aaaaaaaaaaaa", name: "writer", nodeId: "node_writer" },
-    lastStatus: "",
-    phase: "parked",
-  };
-  const continueOperation: ContinueOperation = {
-    callId: "call_2",
-    id: "op_continue",
-    kind: "continue",
-    parentTurnId: "turn_2",
-    previousStatus: "",
-  };
-
-  function withHandles(handles: readonly AgentHandle[]): HarnessSession {
-    return createSession({ [AGENT_HANDLES_STATE_KEY]: { handles } });
-  }
-
-  function inPlaceChange(): { base: HarnessSession; next: HarnessSession } {
-    const base = parkedSession();
-    const prepared = prepareAgentContinuation(base, {
-      agentId: identity.id,
-      invokedName: "research",
-      operation: continueOperation,
-    });
-    if (prepared.kind !== "ready") {
-      throw new Error("expected ready");
-    }
-    return { base, next: prepared.session };
-  }
-
-  it("appends a handle the dispatch added onto a diverged working session", () => {
-    const next = preparedSession();
-    const current = withHandles([otherHandle]);
-    const rebased = rebaseAgentHandles(current, {
-      base: createSession().state,
-      next: next.state,
-    });
-    expect(handlesOf(rebased)).toEqual([otherHandle, ...handlesOf(next)]);
-  });
-
-  it("applies a removal the dispatch made", () => {
-    const base = confirmTaskAgentAddress(preparedSession(), {
-      address,
-      operationId: startOperation.id,
-    });
-    const current = withHandles([...handlesOf(base), otherHandle]);
-    const rebased = rebaseAgentHandles(current, {
-      base: base.state,
-      next: removeTaskAgentAddress(base, identity.id).state,
-    });
-    expect(handlesOf(rebased)).toEqual([otherHandle]);
-  });
-
-  it("applies an in-place change the dispatch made", () => {
-    const { base, next } = inPlaceChange();
-    const current = withHandles([...handlesOf(base), otherHandle]);
-    const rebased = rebaseAgentHandles(current, { base: base.state, next: next.state });
-    expect(handlesOf(rebased)).toEqual([...handlesOf(next), otherHandle]);
-  });
-
-  it("throws when the dispatch and another effect changed the same handle differently", () => {
-    const { base, next } = inPlaceChange();
-    const current = withHandles([{ address, identity, lastStatus: "diverged", phase: "parked" }]);
-    expect(() => rebaseAgentHandles(current, { base: base.state, next: next.state })).toThrow(
-      identity.id,
-    );
-  });
-
-  it("throws when an added id already exists with different content", () => {
-    const current = withHandles([
-      {
-        identity,
-        operation: startOperation,
-        phase: "starting",
-        target: { continuationToken: "continuation_divergent", kind: "agent/local" },
-      },
-    ]);
-    expect(() =>
-      rebaseAgentHandles(current, {
-        base: createSession().state,
-        next: preparedSession().state,
-      }),
-    ).toThrow(identity.id);
-  });
-
-  it("returns the working session unchanged when it already contains the delta", () => {
-    const { base, next } = inPlaceChange();
-    const current = withHandles(handlesOf(next));
-    expect(rebaseAgentHandles(current, { base: base.state, next: next.state })).toBe(current);
-  });
-});
-
 describe("settleAgentTurn", () => {
   it("parks the handle with a truncated status on a parked outcome", () => {
     const settled = settleAgentTurn(runningSession(), {
@@ -496,5 +354,106 @@ describe("settleAgentTurn", () => {
         },
       }),
     ).toEqual({ kind: "ignored", reason: "unknown-operation" });
+  });
+});
+
+describe("agent handle store task leases", () => {
+  it("reserves and confirms a task-owned start, then releases it for another task", () => {
+    const reserved = applyAgentHandleStoreCommand(EMPTY_AGENT_HANDLE_STORE, {
+      identity,
+      kind: "reserve",
+      operationId: "operation-1",
+      taskId: "task-1",
+    });
+    expect(reserved.result).toMatchObject({ handle: { phase: "reserved" }, kind: "ready" });
+
+    const confirmed = applyAgentHandleStoreCommand(reserved.store, {
+      address,
+      kind: "confirm",
+      operationId: "operation-1",
+      taskId: "task-1",
+    });
+    expect(confirmed.result).toEqual({
+      kind: "ready",
+      handle: {
+        address,
+        identity,
+        operationId: "operation-1",
+        phase: "claimed",
+        taskId: "task-1",
+      },
+    });
+
+    const released = applyAgentHandleStoreCommand(confirmed.store, {
+      kind: "release-task",
+      taskId: "task-1",
+    });
+    expect(released.store.handles).toEqual([{ address, identity, phase: "available" }]);
+  });
+
+  it("allows only one task to claim an available session agent", () => {
+    const available: TaskOwnedAgentHandle = { address, identity, phase: "available" };
+    const claimed = applyAgentHandleStoreCommand(
+      { handles: [available] },
+      {
+        agentId: identity.id,
+        expectedTarget: "local",
+        invokedName: identity.name,
+        kind: "claim",
+        operationId: "operation-2",
+        taskId: "task-2",
+      },
+    );
+    expect(claimed.result).toMatchObject({ handle: { phase: "claimed" }, kind: "ready" });
+
+    const competing = applyAgentHandleStoreCommand(claimed.store, {
+      agentId: identity.id,
+      expectedTarget: "local",
+      invokedName: identity.name,
+      kind: "claim",
+      operationId: "operation-3",
+      taskId: "task-3",
+    });
+    expect(competing.result).toMatchObject({ handle: { taskId: "task-2" }, kind: "busy" });
+    expect(competing.store).toBe(claimed.store);
+  });
+
+  it("rejects a name or target mismatch without changing the store", () => {
+    const available: TaskOwnedAgentHandle = { address, identity, phase: "available" };
+
+    for (const command of [
+      { expectedTarget: "local" as const, invokedName: "writer" },
+      { expectedTarget: "remote" as const, invokedName: identity.name },
+    ]) {
+      const result = applyAgentHandleStoreCommand(
+        { handles: [available] },
+        {
+          agentId: identity.id,
+          ...command,
+          kind: "claim",
+          operationId: "operation-2",
+          taskId: "task-2",
+        },
+      );
+      expect(result.result).toMatchObject({ kind: "mismatch" });
+      expect(result.store.handles).toEqual([available]);
+    }
+  });
+
+  it("does not let one task remove another task's claimed agent", () => {
+    const claimed: TaskOwnedAgentHandle = {
+      address,
+      identity,
+      operationId: "operation-1",
+      phase: "claimed",
+      taskId: "task-1",
+    };
+    const result = applyAgentHandleStoreCommand(
+      { handles: [claimed] },
+      { agentId: identity.id, kind: "remove", taskId: "task-2" },
+    );
+
+    expect(result.result).toEqual({ handle: claimed, kind: "busy" });
+    expect(result.store.handles).toEqual([claimed]);
   });
 });

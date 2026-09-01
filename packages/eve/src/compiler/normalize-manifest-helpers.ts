@@ -34,11 +34,6 @@ export function assertRootOnlyConfig(
       `Workflow runtime configuration is only supported on the root agent config. Remove "experimental.workflow" from "${agentId}".`,
     );
   }
-  if (config.experimental?.tasks !== undefined) {
-    throw new Error(
-      `Background tasks are only supported on the root agent config. Remove "experimental.tasks" from "${agentId}".`,
-    );
-  }
 }
 
 export function assertApplicationOverlayCanApplyToAllNodes(logicalPaths: readonly string[]): void {

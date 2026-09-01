@@ -43,12 +43,6 @@ const parkedHandle: AgentHandle = {
   phase: "parked",
 };
 
-const addressedHandle: AgentHandle = {
-  address,
-  identity,
-  phase: "addressed",
-};
-
 describe("deriveAgentOperationId / deriveAgentId", () => {
   it("is deterministic on parent-controlled inputs and independent of the child session", () => {
     const again = deriveAgentOperationId({
@@ -111,8 +105,8 @@ describe("getAgentHandleStore", () => {
 
 describe("assertPersistableAgentHandleStore", () => {
   it("returns a valid store unchanged in shape", () => {
-    expect(assertPersistableAgentHandleStore({ handles: [addressedHandle] })).toEqual({
-      handles: [addressedHandle],
+    expect(assertPersistableAgentHandleStore({ handles: [parkedHandle] })).toEqual({
+      handles: [parkedHandle],
     });
   });
 

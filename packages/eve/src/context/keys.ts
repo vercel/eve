@@ -250,9 +250,6 @@ export const StepDynamicToolMetadataKey = new ContextKey<readonly PersistedDynam
   "eve.stepDynamicToolMetadata",
 );
 
-/** Whether this turn executes subagent definitions as durable background tools. */
-export const TasksEnabledKey = new ContextKey<boolean>("eve.tasksEnabled");
-
 export type DurableDynamicSubagentSelection =
   | {
       readonly agentConfig: DynamicSubagentAgentConfig;

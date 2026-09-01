@@ -1,4 +1,4 @@
-import type { PendingDispatchAction } from "#shared/dispatch-action.js";
+import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
 
 /**
  * Default maximum number of subagent (and remote-agent) calls one `Workflow`
@@ -7,13 +7,13 @@ import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 export const DEFAULT_WORKFLOW_MAX_SUBAGENTS = 100;
 
 /**
- * Partition of one workflow interrupt's pending runtime actions against the
- * invocation's subagent budget. `allowed` actions may dispatch; `blocked`
- * actions must resolve with an error result instead of starting a child.
+ * Partition of one workflow interrupt's pending tasks against the invocation's
+ * subagent budget. Allowed tasks may dispatch; blocked tasks resolve with an
+ * error result instead of starting a child.
  */
 export type WorkflowSubagentDispatchPlan = {
-  readonly allowed: readonly PendingDispatchAction[];
-  readonly blocked: readonly PendingDispatchAction[];
+  readonly allowed: readonly RuntimeWorkflowTaskRequest[];
+  readonly blocked: readonly RuntimeWorkflowTaskRequest[];
   readonly maxSubagents: number;
   readonly usedCalls: number;
 };
@@ -25,7 +25,7 @@ export type WorkflowSubagentDispatchPlan = {
  * program's call order.
  */
 export function planWorkflowSubagentDispatch(input: {
-  readonly actions: readonly PendingDispatchAction[];
+  readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly maxSubagents?: number;
   readonly usedCalls: number;
 }): WorkflowSubagentDispatchPlan {
@@ -34,8 +34,8 @@ export function planWorkflowSubagentDispatch(input: {
   const remaining = Math.max(0, maxSubagents - usedCalls);
 
   return {
-    allowed: input.actions.slice(0, remaining),
-    blocked: input.actions.slice(remaining),
+    allowed: input.tasks.slice(0, remaining),
+    blocked: input.tasks.slice(remaining),
     maxSubagents,
     usedCalls,
   };

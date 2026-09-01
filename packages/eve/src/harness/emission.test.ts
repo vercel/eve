@@ -481,20 +481,13 @@ describe("emitStreamContent action requests", () => {
       [
         "delegate",
         {
-          behavior: {
-            availability: [],
-            handling: {
-              kind: "dispatch",
-              target: {
-                kind: "subagent-call",
-                nodeId: "subagents/researcher",
-                subagentName: "researcher",
-              },
-            },
-          },
           description: "Delegate work to a subagent.",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
+          task: {
+            resultKind: "subagent",
+            workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+          },
         },
       ],
     ]);
@@ -619,6 +612,61 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
+  });
+
+  it("marks a background subagent receipt on subagent.completed", async () => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "delegate",
+        {
+          description: "Delegate work to a subagent.",
+          execution: "background",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "delegate",
+          task: {
+            resultKind: "subagent",
+            workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+          },
+        },
+      ],
+    ]);
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: { message: "research the release" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+        {
+          output: { status: "working", taskId: "task-1" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-result",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual([
+      "actions.requested",
+      "subagent.completed",
+      "action.result",
+    ]);
+    expect(events[1]).toMatchObject({
+      data: {
+        backgroundTask: { status: "working", taskId: "task-1" },
+        callId: "call-delegate",
+        subagentName: "delegate",
+      },
+      type: "subagent.completed",
+    });
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {

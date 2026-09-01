@@ -1,4 +1,6 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
+import { mergeTaskOwnedAgentHandlesIntoTurnState } from "#harness/handles/query.js";
 
 /** A durable-state transition; absent fields keep the cursor's current value. */
 export interface SessionStateTransition {
@@ -38,4 +40,33 @@ export class SessionStateCursor {
     this.currentSerializedContext = transition.serializedContext ?? this.currentSerializedContext;
     this.currentSessionState = transition.sessionState ?? this.currentSessionState;
   }
+}
+
+/** Preserves handle leases accepted by the driver against a turn's older snapshot. */
+export function rebaseTaskAgentHandleMutations(
+  action: TurnDriverAction,
+  driverState: DurableSessionState,
+): TurnDriverAction {
+  const snapshot = action.sessionState.snapshot;
+  if (snapshot === undefined) {
+    throw new Error(
+      "Cannot merge task-owned agent handles into a session state without a snapshot.",
+    );
+  }
+  return {
+    ...action,
+    sessionState: {
+      ...action.sessionState,
+      snapshot: {
+        ...snapshot,
+        session: {
+          ...snapshot.session,
+          state: mergeTaskOwnedAgentHandlesIntoTurnState({
+            driverState: driverState.snapshot?.session.state,
+            turnState: snapshot.session.state,
+          }),
+        },
+      },
+    },
+  };
 }
