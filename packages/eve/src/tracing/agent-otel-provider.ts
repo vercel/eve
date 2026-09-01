@@ -36,6 +36,11 @@ import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  resolveForwardedTraceSeed,
+} from "#shared/forwarded-trace-policy.js";
+import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
@@ -143,10 +148,15 @@ export function createAgentOtelInstrumentation(
     const audience = audienceForEvent(event, session?.channelAudience);
     const eventSeed = "traceSeed" in event ? event.traceSeed : undefined;
     const contextSeed = contextStorage.getStore()?.get(SessionTraceSeedKey);
+    const contextTraceState = resolveForwardedTraceSeed(contextSeed);
+    const eventTraceState = resolveForwardedTraceSeed(
+      eventSeed,
+      contextTraceState?.forwardedTracePolicy,
+    );
     const decision =
-      eventSeed?.decision ??
-      contextSeed?.decision ??
-      session?.decision ??
+      eventTraceState?.decision ??
+      contextTraceState?.decision ??
+      readInstrumentationDecision(session?.decision) ??
       (eventSeed !== undefined
         ? resolveTracePolicyDecision(isSampledTrace(eventSeed), audience)
         : contextSeed !== undefined
@@ -155,16 +165,32 @@ export function createAgentOtelInstrumentation(
             ? resolveTracePolicyDecision(isSampledTrace(session.context), audience)
             : undefined);
     if (decision === undefined) return withoutInstrumentationContent(event);
-    return instrumentationEventForTraceDecision(
-      event,
-      decision.action === "drop"
-        ? decision
+    const normalizedEvent =
+      eventTraceState === undefined || !("traceSeed" in event) || event.traceSeed === undefined
+        ? event
         : {
-            action: "record",
-            recordInputs: recordInputs && decision.recordInputs,
-            recordOutputs: recordOutputs && decision.recordOutputs,
-          },
+            ...event,
+            traceSeed: {
+              ...event.traceSeed,
+              decision: eventTraceState.decision,
+              traceFlags: eventTraceState.traceFlags,
+            },
+          };
+    return instrumentationEventForTraceDecision(
+      normalizedEvent,
+      applyLiveDeliveryAudienceCeiling(
+        decision.action === "drop"
+          ? decision
+          : {
+              action: "record",
+              recordInputs: recordInputs && decision.recordInputs,
+              recordOutputs: recordOutputs && decision.recordOutputs,
+            },
+        audience,
+        eventTraceState?.forwardedTracePolicy ?? contextTraceState?.forwardedTracePolicy,
+      ),
       audience,
+      { applyAudienceCeiling: false },
     );
   };
 
@@ -233,8 +259,6 @@ export function createAgentOtelInstrumentation(
     attemptScopes.delete(event.scope.attemptId);
     const attempt = steps.get(scope);
     if (attempt === undefined) return;
-    // The span event drops the `attempt` segment: this span *is* one attempt,
-    // and `agent.step.attempt` on it already says which.
     attempt.span.addEvent(
       event.type === "step.attempt.completed" ? "step.completed" : "step.failed",
     );

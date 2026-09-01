@@ -6,7 +6,6 @@
 
 import type { LanguageModel, ModelMessage, SystemModelMessage } from "ai";
 
-import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type {
   ActivityObserverConfig,
   ChannelDeliveryMetadata,
@@ -107,17 +106,13 @@ export const ActiveChannelDeliveriesKey = new ContextKey<readonly ActiveChannelD
 export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationProjection>(
   "eve.channelInstrumentation",
 );
+/** Trace ceiling and immutable origin accepted from a trusted forwarding deployment. */
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
 export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 
-export interface SessionTraceSeed {
-  readonly decision?: InstrumentationDecision;
-  readonly traceId: string;
-  readonly spanId: string;
-  readonly traceFlags: number;
-}
+export type SessionTraceSeed = SessionTraceContext;
 export const SessionTraceSeedKey = new ContextKey<SessionTraceSeed>("eve.sessionTraceSeed");
 export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled");
 

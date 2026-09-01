@@ -12,8 +12,10 @@ export function instrumentationEventForTraceDecision(
   event: InstrumentationEvent,
   decision: InstrumentationDecision,
   audience: ChannelAudience,
+  options: { readonly applyAudienceCeiling?: boolean } = {},
 ): InstrumentationEvent {
-  const effective = applyAudienceCeiling(decision, audience);
+  const effective =
+    options.applyAudienceCeiling === false ? decision : applyAudienceCeiling(decision, audience);
   return effective.action === "drop"
     ? withoutInstrumentationContent(event)
     : withInstrumentationDecision(event, effective);

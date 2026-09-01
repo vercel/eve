@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: proposed
-last_updated: "2026-08-28"
+last_updated: "2026-08-31"
 ---
 
 # Audience-aware trace content policy
@@ -22,7 +22,7 @@ type ChannelAudience = "public" | "private" | "unknown";
 
 The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
 
-The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. Remote agents classify their receiving channel independently rather than trusting opaque metadata across deployment boundaries.
+The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. A remote agent with principal forwarding propagates the immutable origin audience and the current hop's effective directional ceiling through one `eve.audience` W3C Baggage member. The receiver accepts it only with the same `trustedForwarders` decision that admitted the principal, then intersects it with its own process policy. Every later hop forwards that intersection; malformed and mixed-version assertions become metadata-only.
 
 ## Public tracing API
 
@@ -59,9 +59,11 @@ interface ProviderDefinition {
 declare function otel(options?: OtelOptions): OtelDeclaration;
 ```
 
-The `otel()` trace decision is a process-wide OTel ceiling. Each delivery is
-intersected with its own audience classification, and destination settings may
-narrow it further. A provider's `defineInstrumentation({ tracePolicy })` decision
+The `otel()` trace decision is a process-wide OTel ceiling. Each local delivery is
+intersected with its own audience classification. An accepted remote ceiling is
+instead intersected with the receiver policy evaluated against the immutable origin
+audience, permitting private content only when both sides explicitly approve it.
+Destination settings may narrow the result further. A provider's `defineInstrumentation({ tracePolicy })` decision
 is independent: `false` skips that provider, `true` uses audience-aware content,
 and an explicit emitted decision authorizes its input and output directions even
 for private channels. An omitted provider policy uses the default audience-aware

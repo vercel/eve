@@ -148,6 +148,29 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.channelMetadata).toBeUndefined();
   });
 
+  it("preserves accepted forwarded trace policy through local subagents", () => {
+    const parentTraceContext = {
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "private",
+      },
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    } as const;
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      parentTraceContext,
+      session: makeSession(),
+    });
+
+    expect(runInput.parentTraceContext).toEqual(parentTraceContext);
+  });
+
   it("propagates an existing rootSessionId through a nested subagent chain", () => {
     const nestedSession: HarnessSession = {
       ...makeSession(),

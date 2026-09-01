@@ -14,6 +14,7 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionTraceSeedKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
@@ -882,6 +883,127 @@ describe("createAgentOtelInstrumentation", () => {
     await expect(runtime.projectEvent(modelStartedEvent("session-policy"))).resolves.toMatchObject({
       input: undefined,
     });
+  });
+
+  it("preserves a private decision already intersected with a forwarded ceiling", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    stateStore.setSession("session-forwarded-private", {
+      channelAudience: "private",
+      context: spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      rootSessionId: "session-forwarded-private",
+    });
+    const runtime = createRuntime(stateStore, null);
+    const ctx = new ContextContainer();
+    ctx.set(SessionTraceSeedKey, {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
+    });
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runtime.projectEvent(modelStartedEvent("session-forwarded-private")),
+      ),
+    ).resolves.toMatchObject({ input: { instructions: "private prompt" } });
+  });
+
+  it("applies a fail-closed forwarded ceiling to event-carried trace seeds", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+    const ctx = new ContextContainer();
+    const traceSeed = {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      forwardedTracePolicy: { originAudience: "public" },
+    } as never;
+    ctx.set(SessionTraceSeedKey, traceSeed);
+    const event = {
+      delivery: {
+        channelAudience: "public" as const,
+        channelKind: "channel:slack",
+        channelName: "slack",
+        deliveryId: "delivery-malformed-seed",
+      },
+      idempotencyKey: "channel-delivery:session-1:delivery-malformed-seed",
+      input: { message: "private" },
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      traceSeed,
+      type: "channel.delivery.started" as const,
+    };
+
+    await expect(contextStorage.run(ctx, () => runtime.projectEvent(event))).resolves.toMatchObject(
+      { input: undefined },
+    );
+  });
+
+  it("caps forwarded content for an explicitly private delivery", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+    const ctx = new ContextContainer();
+    const traceSeed = {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: true },
+        originAudience: "public",
+      },
+    } as const;
+    ctx.set(SessionTraceSeedKey, traceSeed);
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runtime.projectEvent({
+          delivery: {
+            channelAudience: "private",
+            channelKind: "channel:slack",
+            channelName: "slack",
+            deliveryId: "delivery-private",
+          },
+          idempotencyKey: "channel-delivery:session-1:delivery-private",
+          input: { message: "private" },
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+          traceSeed,
+          type: "channel.delivery.started",
+        }),
+      ),
+    ).resolves.toMatchObject({ input: undefined });
+  });
+
+  it("normalizes an event-carried drop before opening its session span", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+    const ctx = new ContextContainer();
+    const traceSeed = {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: "yes", recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: true },
+        originAudience: "public",
+      },
+    } as never;
+    ctx.set(SessionTraceSeedKey, traceSeed);
+
+    await contextStorage.run(ctx, () =>
+      runtime.hooks.publish({
+        delivery: {
+          channelAudience: "public",
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: "delivery-malformed-decision",
+        },
+        idempotencyKey: "channel-delivery:session-1:delivery-malformed-decision",
+        input: { message: "private" },
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        traceSeed,
+        type: "channel.delivery.started",
+      }),
+    );
+    await runtime.provider.forceFlush();
+    expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(0);
   });
 
   it("reconstructs a sampled public session decision when persisted policy is absent", async () => {

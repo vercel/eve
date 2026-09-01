@@ -14,6 +14,7 @@ import type {
   SessionAuthContext,
   SessionTraceContext,
 } from "#channel/types.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
 import type { HeadersValue } from "#client/types.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -32,6 +33,8 @@ import type { ResolvedRuntimeRemoteAgentNode } from "#runtime/types.js";
 import { expectFunction, expectObjectRecord } from "#internal/authored-module.js";
 import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
+import { writeForwardedAudienceBaggage } from "#protocol/baggage.js";
+import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
 
 const CreateSessionResponseSchema = z.object({
   ok: z.literal(true),
@@ -59,6 +62,7 @@ export async function startRemoteAgentSession(input: {
   readonly auth?: SessionAuthContext | null;
   readonly callbackBaseUrl: string | undefined;
   readonly callbackToken?: string;
+  readonly originAudience?: ChannelAudience;
   readonly activityObserver?: ActivityObserverConfig;
   /** The root initiator's principal, forwarded alongside {@link auth}. */
   readonly initiatorAuth?: SessionAuthContext | null;
@@ -127,11 +131,18 @@ export async function startRemoteAgentSession(input: {
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
   const traceparent = formatTraceparent(input.parentTraceContext);
   if (traceparent !== undefined) {
-    for (const key of Object.keys(headers)) {
-      if (key.toLowerCase() === "traceparent") delete headers[key];
-    }
-    headers["traceparent"] = traceparent;
+    setHeader(headers, "traceparent", traceparent);
   }
+  const baggage = writeForwardedAudienceBaggage(
+    readHeader(headers, "baggage"),
+    buildForwardedTraceAssertion({
+      forwardedPrincipal,
+      originAudience: input.originAudience,
+      parentTraceContext: input.parentTraceContext,
+      traceparent,
+    }),
+  );
+  setHeader(headers, "baggage", baggage);
   const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
     body: JSON.stringify(requestBody),
     headers: {
@@ -164,6 +175,28 @@ export async function startRemoteAgentSession(input: {
   }
 
   return { sessionId: parsed.data.sessionId };
+}
+
+function buildForwardedTraceAssertion(input: {
+  readonly forwardedPrincipal: ForwardedPrincipal | undefined;
+  readonly originAudience: ChannelAudience | undefined;
+  readonly parentTraceContext: SessionTraceContext | undefined;
+  readonly traceparent: string | undefined;
+}) {
+  const ceiling = decisionToTraceContentCeiling(input.parentTraceContext?.decision);
+  if (
+    input.forwardedPrincipal === undefined ||
+    input.parentTraceContext === undefined ||
+    (input.parentTraceContext.traceFlags & 1) !== 1 ||
+    input.traceparent === undefined ||
+    ceiling === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ceiling,
+    originAudience: input.originAudience ?? "unknown",
+  };
 }
 
 /** Continues one remote-agent session by its immutable session ID. */
@@ -355,6 +388,18 @@ export async function cancelRemoteAgentTurn(input: {
   return result.data.status === "accepted"
     ? { sessionId: result.data.sessionId, status: "accepted" }
     : { status: "no_active_turn" };
+}
+
+function readHeader(headers: Record<string, string>, name: string): string | undefined {
+  const key = Object.keys(headers).find((candidate) => candidate.toLowerCase() === name);
+  return key === undefined ? undefined : headers[key];
+}
+
+function setHeader(headers: Record<string, string>, name: string, value: string | undefined): void {
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === name) delete headers[key];
+  }
+  if (value !== undefined) headers[name] = value;
 }
 
 /** Retires one exact remote child session through eve's authenticated reset route. */

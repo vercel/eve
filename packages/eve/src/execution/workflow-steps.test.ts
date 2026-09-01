@@ -12,6 +12,7 @@ import { ContextKey } from "#context/key.js";
 import {
   ActivityObserverKey,
   AuthKey,
+  ChannelInstrumentationKey,
   ContinuationTokenKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
@@ -22,6 +23,7 @@ import {
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
   SessionIdKey,
+  SessionTraceSeedKey,
   TurnTaskDeliveryKey,
   TurnTaskStateKey,
 } from "#context/keys.js";
@@ -3401,7 +3403,10 @@ describe("runProxySubagentEventStep", () => {
    * `deserializeContext` round-trip resolves the adapter by kind
    * against the bundle's adapter registry.
    */
-  function buildSerializedContextForAdapter(adapter: ChannelAdapter): Record<string, unknown> {
+  function buildSerializedContextForAdapter(
+    adapter: ChannelAdapter,
+    options: { readonly acceptedForwardedTracePolicy?: boolean } = {},
+  ): Record<string, unknown> {
     const bundle = {
       adapterRegistry: {
         adaptersByKind: new Map([[adapter.kind, adapter]]),
@@ -3431,6 +3436,18 @@ describe("runProxySubagentEventStep", () => {
     ctx.set(AuthKey, null);
     ctx.set(BundleKey, bundle);
     ctx.set(ChannelKey, adapter);
+    if (options.acceptedForwardedTracePolicy) {
+      ctx.set(SessionTraceSeedKey, {
+        decision: { action: "record", recordInputs: false, recordOutputs: true },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: false, recordOutputs: true },
+          originAudience: "private",
+        },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      });
+    }
     ctx.set(ContinuationTokenKey, "http:proxy-test");
     ctx.set(ModeKey, "conversation");
     ctx.set(SessionIdKey, "parent-session");
@@ -3503,7 +3520,9 @@ describe("runProxySubagentEventStep", () => {
     const result = await runProxySubagentEventStep({
       hookPayload: buildHookPayload(),
       parentWritable: createTestWritable(),
-      serializedContext: buildSerializedContextForAdapter(cachingAdapter),
+      serializedContext: buildSerializedContextForAdapter(cachingAdapter, {
+        acceptedForwardedTracePolicy: true,
+      }),
       sessionState,
     });
 
@@ -3521,6 +3540,18 @@ describe("runProxySubagentEventStep", () => {
     expect(channel.state.pendingRequests?.[0]).toMatchObject({
       turnId: "child-turn",
       requests: [expect.objectContaining({ requestId: "req-1" })],
+    });
+    expect(result.serializedContext[SessionTraceSeedKey.name]).toMatchObject({
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "private",
+      },
+    });
+    expect(result.serializedContext[ChannelInstrumentationKey.name]).toMatchObject({
+      metadata: {
+        audience: "unknown",
+      },
     });
 
     // And the parent session's proxy-entry map is reflected on the
