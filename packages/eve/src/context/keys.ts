@@ -74,6 +74,15 @@ export const InitiatorAuthKey = new ContextKey<SessionAuthContext | null>("eve.i
 export const SessionIdKey = new ContextKey<string>("eve.sessionId");
 export const ContinuationTokenKey = new ContextKey<string>("eve.continuationToken");
 export const ChannelRequestIdKey = new ContextKey<string>("eve.channelRequestId");
+/** Parent-verified local client provenance, valid only for the current dev host secret. */
+export interface LocalDevRequestProvenance {
+  readonly address: string;
+  readonly interactiveClient: boolean;
+  readonly signature: string;
+}
+export const LocalDevRequestKey = new ContextKey<LocalDevRequestProvenance>(
+  "eve.internal.localDevRequest",
+);
 /** Authored schedule whose dispatch created this session. */
 export const ScheduleIdKey = new ContextKey<string>("eve.scheduleId");
 export const ChannelDeliveryKey = new ContextKey<ChannelDeliveryMetadata>("eve.channelDelivery");

@@ -546,6 +546,11 @@ export class EveTUIRunner {
   readonly #pendingInputRequests = new Map<string, InputRequest>();
   /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
   #idleInputResult?: AgentTUIStreamResult;
+  /** Registry setups queued by tool results on root or child streams. */
+  readonly #pendingRegistrySetups: string[] = [];
+  #activeRegistrySetup?: string;
+  /** True only while the idle prompt owns terminal input. */
+  #readingPrompt = false;
   /**
    * callId → live state for one subagent dispatch. Persists across turn
    * boundaries because a subagent dispatched in one turn may not emit
@@ -591,6 +596,12 @@ export class EveTUIRunner {
     const pumpOptions: SubagentPumpOptions = { formatActionResultError };
     if (this.#client !== undefined) pumpOptions.client = this.#client;
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
+    if (options.appRoot !== undefined) {
+      pumpOptions.onToolCompleted = async (toolName, output) => {
+        const address = registryHandoffAddress(toolName, output);
+        if (address !== undefined) this.#queueRegistrySetup(address);
+      };
+    }
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
     this.#headerTip = options.startup?.headerTip ?? pickAgentHeaderTip();
@@ -774,6 +785,24 @@ export class EveTUIRunner {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
         return;
       }
+      const pendingRegistrySetup = this.#pendingRegistrySetups[0];
+      if (
+        pendingRegistrySetup !== undefined &&
+        pendingInputResponses === undefined &&
+        this.#idleInputResult === undefined
+      ) {
+        this.#pendingRegistrySetups.shift();
+        this.#activeRegistrySetup = pendingRegistrySetup;
+        try {
+          await this.#openRegistrySetup(pendingRegistrySetup);
+        } finally {
+          this.#activeRegistrySetup = undefined;
+        }
+        followCurrentSession = false;
+        streamWithoutPrompt = false;
+        prompt = undefined;
+        continue;
+      }
       if (!streamWithoutPrompt) {
         if (prompt == null) {
           if (!this.#renderer.readPrompt) {
@@ -793,17 +822,26 @@ export class EveTUIRunner {
           }
 
           try {
+            this.#readingPrompt = true;
             prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
-              if (this.#idleInputResult === undefined) return;
+              if (this.#idleInputResult === undefined && this.#pendingRegistrySetups.length === 0) {
+                return;
+              }
               streamWithoutPrompt = true;
               prompt = "";
             } else {
               throw error;
             }
+          } finally {
+            this.#readingPrompt = false;
           }
 
+          if (this.#pendingRegistrySetups.length > 0 && this.#idleInputResult === undefined) {
+            prompt = undefined;
+            continue;
+          }
           if (prompt == null && this.#idleInputResult === undefined) {
             return;
           }
@@ -1511,6 +1549,10 @@ export class EveTUIRunner {
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
+        onRegistryHandoff:
+          this.#appRoot === undefined
+            ? undefined
+            : async (address) => this.#queueRegistrySetup(address),
         onTerminalFailure: () => {
           this.#failedSession = sourceSession;
         },
@@ -1518,6 +1560,22 @@ export class EveTUIRunner {
       }),
       turnState,
     };
+  }
+
+  #queueRegistrySetup(address: string): void {
+    if (this.#activeRegistrySetup === address || this.#pendingRegistrySetups.includes(address)) {
+      return;
+    }
+    this.#pendingRegistrySetups.push(address);
+    if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
+  }
+
+  async #openRegistrySetup(address: string): Promise<void> {
+    await this.#executeExtensionCommand(
+      { type: "extension", name: "add", argument: address },
+      "Add to your agent",
+      { trigger: "command" },
+    );
   }
 
   async #renderSetupIssues(info: AgentInfoResult | undefined): Promise<void> {
@@ -1977,6 +2035,8 @@ type EveStreamTranslatorInput = {
   onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
+  /** Opens a setup-bearing registry item in the existing `/add` flow. */
+  onRegistryHandoff?: (address: string) => Promise<void>;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
   /**
    * Replaces a failure's structured hint with a surface-local one (the
@@ -1985,6 +2045,22 @@ type EveStreamTranslatorInput = {
    */
   failureHintOverride?: (event: FailureStreamEvent) => string | undefined;
 };
+
+const SELFMOD_REGISTRY_ADD_TOOL = "selfmod__registry_add";
+
+/** Returns the registry address carried by a self-modification terminal handoff. */
+export function registryHandoffAddress(
+  toolName: string | undefined,
+  output: unknown,
+): string | undefined {
+  if (toolName !== SELFMOD_REGISTRY_ADD_TOOL || typeof output !== "object" || output === null) {
+    return undefined;
+  }
+  const result = output as { address?: unknown; status?: unknown };
+  return result.status === "needs-terminal" && typeof result.address === "string"
+    ? result.address
+    : undefined;
+}
 
 /**
  * Reduces one eve session-stream turn into renderer-native TUI events.
@@ -2004,11 +2080,13 @@ async function* eveEventsToTUIStream(
     onTurnCancelled,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
+    onRegistryHandoff,
     onTerminalFailure,
     failureHintOverride,
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
+  const toolNames = new Map<string, string>();
   // Dropping re-delivered events here means every case below is a new emission.
   const seenEvents = createEventDeduper();
   // Counts `step.started` events. The harness reuses `stepIndex` across the
@@ -2196,6 +2274,7 @@ async function* eveEventsToTUIStream(
         if (actions.length === 0) break;
 
         for (const action of actions) {
+          toolNames.set(action.callId, action.toolName);
           if (knownToolCalls.has(action.callId)) continue;
           knownToolCalls.add(action.callId);
           yield {
@@ -2215,6 +2294,7 @@ async function* eveEventsToTUIStream(
 
         for (const request of requests) {
           const toolCallId = request.action.callId;
+          toolNames.set(toolCallId, request.action.toolName);
 
           // The session-limit continuation is harness-authored — no model
           // tool call exists behind it, so fabricating a transcript entry
@@ -2262,13 +2342,17 @@ async function* eveEventsToTUIStream(
           break;
         }
         switch (resultEvent.data.status) {
-          case "completed":
+          case "completed": {
+            const output = resultEvent.data.result.output;
             yield {
               type: "tool-result",
               toolCallId: callId,
-              output: resultEvent.data.result.output,
+              output,
             };
+            const address = registryHandoffAddress(toolNames.get(callId), output);
+            if (address !== undefined) await onRegistryHandoff?.(address);
             break;
+          }
           case "failed":
             yield {
               type: "tool-error",

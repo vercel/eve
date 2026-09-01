@@ -19,10 +19,12 @@ import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 import {
   EveTUIRunner,
   parsePromptCommand,
+  registryHandoffAddress,
   type AgentTUIAgentHeader,
   type AgentTUIRenderer,
   type AgentTUISessionOptions,
   type AgentTUIStreamEvent,
+  type PromptCommand,
   type PromptCommandOutcome,
 } from "./runner.js";
 import { createPromptCommandHandler } from "./prompt-command-handler.js";
@@ -43,6 +45,372 @@ const REMOTE_VERIFIED_TARGET = await resolveTestVercelTarget({
 });
 const VERCEL_SSO_URL =
   "https://vercel.com/sso-api?url=https%3A%2F%2Fvpoke.playground-vercel.tools&nonce=test";
+
+describe("registryHandoffAddress", () => {
+  it("accepts only a terminal handoff from the self-modification registry tool", () => {
+    expect(
+      registryHandoffAddress("selfmod__registry_add", {
+        status: "needs-terminal",
+        address: "channel/slack",
+      }),
+    ).toBe("channel/slack");
+    expect(
+      registryHandoffAddress("selfmod__registry_add", {
+        status: "installed",
+        address: "extension/browserbase",
+      }),
+    ).toBeUndefined();
+    expect(
+      registryHandoffAddress("other_tool", {
+        status: "needs-terminal",
+        address: "channel/slack",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("opens every distinct registry handoff in result order", async () => {
+    const handledCommands: Array<Extract<PromptCommand, { type: "extension" }>> = [];
+    const handle = vi.fn(async (command: Extract<PromptCommand, { type: "extension" }>) => {
+      handledCommands.push(command);
+      return { message: "done" };
+    });
+    const renderer = fakeRenderer({
+      readPrompt: vi
+        .fn()
+        .mockResolvedValueOnce("add integrations")
+        .mockResolvedValueOnce(undefined),
+      renderStream: vi.fn(async (result) => {
+        for await (const _event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          // Consume the turn so both handoffs reach the runner queue.
+        }
+      }),
+    });
+
+    await new EveTUIRunner({
+      session: sessionYielding([
+        {
+          type: "actions.requested",
+          data: {
+            actions: [
+              {
+                callId: "slack-add",
+                input: { address: "channel/slack" },
+                kind: "tool-call",
+                toolName: "selfmod__registry_add",
+              },
+              {
+                callId: "linear-add",
+                input: { address: "connection/linear" },
+                kind: "tool-call",
+                toolName: "selfmod__registry_add",
+              },
+            ],
+          },
+        },
+        {
+          type: "action.result",
+          data: {
+            result: {
+              callId: "slack-add",
+              kind: "tool-result",
+              output: { status: "needs-terminal", address: "channel/slack" },
+            },
+            status: "completed",
+          },
+        },
+        {
+          type: "action.result",
+          data: {
+            result: {
+              callId: "linear-add",
+              kind: "tool-result",
+              output: { status: "needs-terminal", address: "connection/linear" },
+            },
+            status: "completed",
+          },
+        },
+        { type: "session.completed" },
+      ]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      promptCommandHandler: { handle },
+    }).run();
+
+    expect(handledCommands).toEqual([
+      { type: "extension", name: "add", argument: "channel/slack" },
+      { type: "extension", name: "add", argument: "connection/linear" },
+    ]);
+  });
+
+  it("submits a parallel approval response before opening queued setup", async () => {
+    const order: string[] = [];
+    const session = stubSession();
+    vi.spyOn(session, "send").mockResolvedValueOnce(
+      messageResponseOf([
+        {
+          type: "actions.requested",
+          data: {
+            actions: [
+              {
+                callId: "registry-add",
+                input: { address: "channel/slack" },
+                kind: "tool-call",
+                toolName: "selfmod__registry_add",
+              },
+            ],
+          },
+        },
+        {
+          type: "action.result",
+          data: {
+            result: {
+              callId: "registry-add",
+              kind: "tool-result",
+              output: { status: "needs-terminal", address: "channel/slack" },
+            },
+            status: "completed",
+          },
+        },
+        {
+          type: "input.requested",
+          data: {
+            requests: [
+              {
+                action: {
+                  callId: "write-file",
+                  input: { path: "agent.ts" },
+                  kind: "tool-call",
+                  toolName: "write_file",
+                },
+                display: "confirmation",
+                kind: "tool-approval",
+                options: [
+                  { id: "approve", label: "Approve" },
+                  { id: "cancel", label: "Cancel" },
+                ],
+                prompt: "Approve write_file",
+                requestId: "approval-1",
+              },
+            ],
+          },
+        },
+        { type: "session.waiting" },
+      ]),
+    );
+    vi.spyOn(session, "respond").mockImplementationOnce(async () => {
+      order.push("respond");
+      return messageResponseOf([{ type: "session.completed" }]);
+    });
+    const handle = vi.fn(async () => {
+      order.push("setup");
+      return { message: "done" };
+    });
+
+    await new EveTUIRunner({
+      session,
+      renderer: fakeRenderer({
+        readPrompt: vi.fn().mockResolvedValueOnce("add slack").mockResolvedValueOnce(undefined),
+        readToolApproval: vi.fn(async () => ({ approved: true })),
+        renderStream: vi.fn(async (result) => {
+          for await (const _event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+            // Consume each continuation to its boundary.
+          }
+        }),
+      }),
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      promptCommandHandler: { handle },
+    }).run();
+
+    expect(order).toEqual(["respond", "setup"]);
+    expect(session.respond).toHaveBeenCalledWith(
+      [{ requestId: "approval-1", optionId: "approve" }],
+      expect.any(Object),
+    );
+  });
+
+  it("suspends the idle prompt before opening a subagent registry handoff", async () => {
+    const idlePromptStarted = createDeferred<void>();
+    const promptSuspended = createDeferred<void>();
+    const handle = vi.fn(async () => ({
+      message: "Slack setup completed.",
+      tone: "success" as const,
+    }));
+    const client = stubClient();
+    const fetchChild = vi
+      .spyOn(client, "fetch")
+      .mockResolvedValueOnce(
+        messageStreamResponseOf([
+          stampTestEvent(
+            {
+              type: "actions.requested",
+              data: {
+                actions: [
+                  {
+                    callId: "registry-add",
+                    input: { address: "channel/slack" },
+                    kind: "tool-call",
+                    toolName: "selfmod__registry_add",
+                  },
+                ],
+                sequence: 1,
+                stepIndex: 0,
+                turnId: "child-turn",
+              },
+            } as UnstampedMessageStreamEvent,
+            0,
+          ),
+          stampTestEvent(
+            {
+              type: "input.requested",
+              data: {
+                requests: [
+                  {
+                    action: {
+                      callId: "registry-add",
+                      input: { address: "channel/slack" },
+                      kind: "tool-call",
+                      toolName: "selfmod__registry_add",
+                    },
+                    display: "confirmation",
+                    kind: "tool-approval",
+                    options: [
+                      { id: "approve", label: "Approve" },
+                      { id: "cancel", label: "Cancel" },
+                    ],
+                    prompt: "Approve tool call: selfmod__registry_add",
+                    requestId: "approval-1",
+                  },
+                ],
+                sequence: 2,
+                stepIndex: 0,
+                turnId: "child-turn",
+              },
+            } as UnstampedMessageStreamEvent,
+            1,
+          ),
+          stampTestEvent(
+            {
+              type: "session.waiting",
+              data: { continuationToken: "child-session", wait: "next-user-message" },
+            } as UnstampedMessageStreamEvent,
+            2,
+          ),
+        ]),
+      )
+      .mockImplementationOnce(async () => {
+        await idlePromptStarted.promise;
+        return messageStreamResponseOf([
+          stampTestEvent(
+            {
+              type: "actions.requested",
+              data: {
+                actions: [
+                  {
+                    callId: "registry-add",
+                    input: { address: "channel/slack" },
+                    kind: "tool-call",
+                    toolName: "selfmod__registry_add",
+                  },
+                ],
+                sequence: 3,
+                stepIndex: 0,
+                turnId: "child-turn",
+              },
+            } as UnstampedMessageStreamEvent,
+            3,
+          ),
+          stampTestEvent(
+            {
+              type: "action.result",
+              data: {
+                result: {
+                  callId: "registry-add",
+                  kind: "tool-result",
+                  output: { status: "needs-terminal", address: "channel/slack" },
+                  toolName: "selfmod__registry_add",
+                },
+                sequence: 4,
+                status: "completed",
+                stepIndex: 0,
+                turnId: "child-turn",
+              },
+            } as UnstampedMessageStreamEvent,
+            4,
+          ),
+          stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 5),
+        ]);
+      });
+    const renderer = fakeRenderer({
+      readPrompt: vi
+        .fn()
+        .mockResolvedValueOnce("add slack")
+        .mockImplementationOnce(async () => {
+          idlePromptStarted.resolve();
+          await promptSuspended.promise;
+          return undefined;
+        }),
+      renderStream: vi.fn(async (result) => {
+        for await (const _event of result.events as AsyncIterable<AgentTUIStreamEvent>) {
+          // Consume the parent stream while the child pump follows its session.
+        }
+      }),
+      suspendPromptForInput: () => promptSuspended.resolve(),
+      subagents: {
+        begin: vi.fn(),
+        background: vi.fn(),
+        upsertStep: vi.fn(),
+        upsertTool: vi.fn(),
+        removeTool: vi.fn(),
+        complete: vi.fn(),
+        markChildToolCallId: vi.fn(),
+      },
+    });
+
+    await new EveTUIRunner({
+      client,
+      session: sessionYielding([
+        {
+          type: "subagent.called",
+          data: {
+            callId: "selfmod-call",
+            childSessionId: "child-session",
+            childStreamPath: "/eve/v1/session/child-session/stream",
+            name: "self-modification",
+            sequence: 0,
+            turnId: "parent-turn",
+          },
+        },
+        { type: "turn.completed", data: { sequence: 1, turnId: "parent-turn" } },
+        {
+          type: "session.waiting",
+          data: { continuationToken: "parent-session", wait: "next-user-message" },
+        },
+      ]),
+      renderer,
+      name: "Weather Agent",
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      detectProjectIdentity: vi.fn(async () => undefined),
+      promptCommandHandler: { handle },
+    }).run();
+
+    expect(fetchChild).toHaveBeenNthCalledWith(
+      2,
+      "/eve/v1/session/child-session/stream?startIndex=3",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(handle).toHaveBeenCalledWith(
+      { type: "extension", name: "add", argument: "channel/slack" },
+      expect.objectContaining({ title: "Add to your agent" }),
+    );
+  });
+});
 
 /**
  * Real `Client` whose network-touching methods are replaced by vi spies.

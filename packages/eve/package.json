@@ -266,6 +266,11 @@
       "import": "./dist/src/internal/programmatic-source-loader.js",
       "default": "./dist/src/internal/programmatic-source-loader.js"
     },
+    "./local-dev": {
+      "types": "./dist/src/public/local-dev.d.ts",
+      "import": "./dist/src/public/local-dev.js",
+      "default": "./dist/src/public/local-dev.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",

@@ -31,6 +31,7 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  type LocalDevRequestProvenance,
   SessionIdKey,
   SessionKey,
 } from "#context/keys.js";
@@ -317,6 +318,29 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       ],
     });
     expect(writes).toHaveLength(1);
+  });
+
+  it("carries verified local-dev provenance into a local child start", async () => {
+    const session = createStartSession({ kind: "local" });
+    const localDevRequest: LocalDevRequestProvenance = {
+      address: "127.0.0.1",
+      interactiveClient: true,
+      signature: "parent-signed",
+    };
+    installContext(session, undefined, false, null, localDevRequest);
+    mocks.createSession.mockImplementation(async () => {
+      expect(loadContext().localDevRequest).toEqual(localDevRequest);
+      return { sessionId: CHILD_SESSION_ID };
+    });
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.createSession).toHaveBeenCalledOnce();
   });
 
   it("opens a shared parent sandbox with session context and durable backend tags", async () => {
@@ -1287,6 +1311,7 @@ function installContext(
   remote?: { readonly definition: unknown; readonly nodeId: string },
   tasks = false,
   auth: SessionAuthContext | null = null,
+  localDevRequest?: LocalDevRequestProvenance,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1316,6 +1341,9 @@ function installContext(
     [ChannelKey, ADAPTER],
   ]);
   mocks.deserializeContext.mockResolvedValue({
+    get localDevRequest() {
+      return localDevRequest;
+    },
     get: (key: unknown) => values.get(key),
     require: (key: unknown) => {
       if (!values.has(key)) throw new Error("missing context key");

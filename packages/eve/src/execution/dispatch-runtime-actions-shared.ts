@@ -21,6 +21,7 @@ import {
   ChannelInstrumentationKey,
   InitiatorAuthKey,
   SandboxKey,
+  type LocalDevRequestProvenance,
 } from "#context/keys.js";
 import { type AlsContext, ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
@@ -158,6 +159,7 @@ export interface PreparedRuntimeActionDispatch {
    */
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: ActivityObserverConfig & {
     readonly workIdentity: ActivityWorkIdentityV1;
@@ -287,6 +289,7 @@ async function prepareActionDispatch(input: {
       input.fanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
+    localDevRequest: ctx.localDevRequest,
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
     activityObserver: resolvePreparedActivity(
@@ -581,6 +584,7 @@ export async function startSubagent(input: {
   readonly currentSession: RuntimeSession;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: ActivityObserverConfig & {
@@ -613,6 +617,7 @@ export async function startSubagent(input: {
         dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
         fanoutSize: input.fanoutSize,
         initiatorAuth: input.initiatorAuth,
+        localDevRequest: input.localDevRequest,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
         activityObserver: input.activityObserver,

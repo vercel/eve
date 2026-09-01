@@ -12,6 +12,7 @@ import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js"
 import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
+import { installRegistryItemTransaction } from "./registry-install-transaction.js";
 import { runDeclaredSetups } from "./registry-declared-setups.js";
 import {
   errorMessage,
@@ -543,15 +544,23 @@ export async function runAddCommand(
     if (address === itemAddress("channel/web")) {
       await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
     }
-    await addRegistryItems([address], {
-      config,
-      cwd: appRoot,
-      overwrite: options.overwrite,
-      silent: options.silent,
+    await installRegistryItemTransaction({
+      appRoot,
+      item,
+      registryItem,
+      nonInteractive: options.nonInteractive,
+      logger,
+      install: async () => {
+        await addRegistryItems([address], {
+          config,
+          cwd: appRoot,
+          overwrite: options.overwrite,
+          silent: options.silent,
+        });
+      },
     });
     if (eveMetadata?.setup === undefined)
       return reportCompletion(logger, item, { facts: [] }, options);
-
     const interactive =
       dependencies.hasInteractiveTerminal?.() ??
       defaultAddCommandDependencies.hasInteractiveTerminal!();
@@ -630,7 +639,6 @@ function reportCompletion(
     nonInteractive: options.nonInteractive,
   });
 }
-
 /** Adds registry namespace mappings to the project's package.json. */
 export async function runRegistryAddCommand(
   logger: RegistryCommandLogger,
@@ -650,7 +658,6 @@ export async function runRegistryAddCommand(
     }
   });
 }
-
 /** Lists registry items from every configured source or one selected source. */
 export async function runRegistryListCommand(
   logger: RegistryCommandLogger,
@@ -662,7 +669,6 @@ export async function runRegistryListCommand(
     browseRegistryItems(logger, appRoot, undefined, source, options),
   );
 }
-
 /** Searches registry items across every configured source or one selected source. */
 export async function runRegistrySearchCommand(
   logger: RegistryCommandLogger,
@@ -678,7 +684,6 @@ export async function runRegistrySearchCommand(
     }),
   );
 }
-
 /** Inspects one official, configured, or URL-addressed registry item. */
 export async function runRegistryViewCommand(
   logger: RegistryCommandLogger,

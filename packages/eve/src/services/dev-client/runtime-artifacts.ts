@@ -40,20 +40,24 @@ export async function readDevelopmentRuntimeArtifactsRevision(input: {
 }
 
 export async function suspendDevelopmentRuntimeArtifacts(input: {
+  readonly leaseId: string;
   readonly serverUrl: string;
 }): Promise<boolean> {
   return await changeDevelopmentRuntimeArtifacts(
     input.serverUrl,
     EVE_DEV_RUNTIME_ARTIFACTS_SUSPEND_ROUTE_PATH,
+    input.leaseId,
   );
 }
 
 export async function resumeDevelopmentRuntimeArtifacts(input: {
+  readonly leaseId: string;
   readonly serverUrl: string;
   readonly silent?: boolean;
 }): Promise<string | undefined> {
   try {
     const url = new URL(EVE_DEV_RUNTIME_ARTIFACTS_RESUME_ROUTE_PATH, input.serverUrl);
+    url.searchParams.set("lease", input.leaseId);
     if (input.silent === true) url.searchParams.set("silent", "1");
     const response = await fetch(url, { method: "POST" });
     return await parseDevelopmentRuntimeArtifactsRevision(response);
@@ -65,9 +69,12 @@ export async function resumeDevelopmentRuntimeArtifacts(input: {
 async function changeDevelopmentRuntimeArtifacts(
   serverUrl: string,
   path: string,
+  leaseId: string,
 ): Promise<boolean> {
   try {
-    const response = await fetch(new URL(path, serverUrl), { method: "POST" });
+    const url = new URL(path, serverUrl);
+    url.searchParams.set("lease", leaseId);
+    const response = await fetch(url, { method: "POST" });
     return response.ok;
   } catch {
     return false;

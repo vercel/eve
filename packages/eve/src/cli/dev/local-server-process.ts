@@ -100,7 +100,10 @@ export function createDevelopmentServer(
       {
         cwd: appRoot,
         detached: true,
-        env: { ...shellEnvironment, [EVE_DEV_ENV_FLAG]: "1" },
+        env: {
+          ...shellEnvironment,
+          [EVE_DEV_ENV_FLAG]: "1",
+        },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       },
     );

@@ -272,6 +272,127 @@ describe("SubagentPump background receipts", () => {
 });
 
 describe("SubagentPump child stream transport", () => {
+  it("resumes from the prior cursor when a conversation subagent is called again", async () => {
+    const client = new Client({ host: "http://localhost:3000" });
+    const fetch = vi
+      .spyOn(client, "fetch")
+      .mockResolvedValueOnce(responseOf([boundaryEvent(0)]))
+      .mockResolvedValueOnce(
+        responseOf([
+          stampTestEvent(
+            {
+              type: "actions.requested",
+              data: {
+                actions: [
+                  {
+                    callId: "registry-add",
+                    input: { address: "channel/slack" },
+                    kind: "tool-call",
+                    toolName: "selfmod__registry_add",
+                  },
+                ],
+                sequence: 1,
+                stepIndex: 0,
+                turnId: "child-turn-2",
+              },
+            } as UnstampedMessageStreamEvent,
+            1,
+          ),
+          stampTestEvent(
+            {
+              type: "action.result",
+              data: {
+                result: {
+                  callId: "registry-add",
+                  kind: "tool-result",
+                  output: { status: "needs-terminal", address: "channel/slack" },
+                  toolName: "selfmod__registry_add",
+                },
+                sequence: 2,
+                status: "completed",
+                stepIndex: 0,
+                turnId: "child-turn-2",
+              },
+            } as UnstampedMessageStreamEvent,
+            2,
+          ),
+          stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 3),
+        ]),
+      );
+    const onToolCompleted = vi.fn(async () => {});
+    const view = fakeView();
+    const pump = new SubagentPump({
+      client,
+      view,
+      formatActionResultError: () => "failed",
+      onToolCompleted,
+    });
+    const first = subagentCalled("call-1");
+    first.data.childSessionId = "conversation-child";
+    const second = subagentCalled("call-2", "turn-2");
+    second.data.childSessionId = "conversation-child";
+
+    pump.begin(first);
+    await vi.waitFor(() =>
+      expect(view.complete).toHaveBeenCalledWith({ authoritative: true, callId: "call-1" }),
+    );
+    pump.begin(second);
+    await vi.waitFor(() => expect(onToolCompleted).toHaveBeenCalledOnce());
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/eve/v1/children/call-2/stream?startIndex=1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(onToolCompleted).toHaveBeenCalledWith("selfmod__registry_add", {
+      status: "needs-terminal",
+      address: "channel/slack",
+    });
+  });
+
+  it("does not let a repeated call consume the previous call's trailing boundary", async () => {
+    const firstStream = pushableChildStream();
+    const client = new Client({ host: "http://localhost:3000" });
+    const fetch = vi
+      .spyOn(client, "fetch")
+      .mockImplementationOnce(async (_path, init) =>
+        firstStream.response(init?.signal ?? undefined),
+      )
+      .mockResolvedValueOnce(
+        responseOf([
+          reasoningEvent("second turn", 1),
+          stampTestEvent({ type: "session.completed" } as UnstampedMessageStreamEvent, 2),
+        ]),
+      );
+    const view = fakeView();
+    const pump = new SubagentPump({ client, view, formatActionResultError: () => "failed" });
+    const first = subagentCalled("call-1");
+    first.data.childSessionId = "conversation-child";
+    const second = subagentCalled("call-2", "turn-2");
+    second.data.childSessionId = "conversation-child";
+
+    pump.begin(first);
+    await settleAsyncWork();
+    pump.settle("call-1");
+    pump.begin(second);
+    await settleAsyncWork();
+
+    expect(fetch).toHaveBeenCalledOnce();
+
+    firstStream.push(boundaryEvent(0));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(view.upsertStep).toHaveBeenCalledWith(
+        expect.objectContaining({ callId: "call-2", reasoning: "second turn" }),
+      ),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "/eve/v1/children/call-2/stream?startIndex=1",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it("leaves connection authorization events to the parent runner", async () => {
     const client = new Client({ host: "http://localhost:3000" });
     vi.spyOn(client, "fetch").mockResolvedValue(

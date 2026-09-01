@@ -25,6 +25,7 @@ const {
   isEveProject,
   readFile,
   resolveInstalledPackageInfo,
+  unlink,
   searchRegistries,
   writeFile,
 } = vi.hoisted(() => ({
@@ -34,6 +35,7 @@ const {
   isEveProject: vi.fn(),
   readFile: vi.fn(),
   resolveInstalledPackageInfo: vi.fn(() => ({ name: "eve", version: "0.27.8" })),
+  unlink: vi.fn(),
   searchRegistries: vi.fn(),
   writeFile: vi.fn(),
 }));
@@ -47,7 +49,7 @@ vi.mock("#compiled/shadcn-registry/index.js", () => ({
 vi.mock("#setup/scaffold/index.js", () => ({ isEveProject }));
 vi.mock("#setup/scaffold/workspace-root.js", () => ({ applyPackageManagerWorkspaceConfiguration }));
 vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
-vi.mock("node:fs/promises", () => ({ readFile, writeFile }));
+vi.mock("node:fs/promises", () => ({ readFile, unlink, writeFile }));
 
 function createLogger(): RegistryCommandLogger & { errors: string[]; logs: string[] } {
   const errors: string[] = [];
@@ -140,6 +142,60 @@ describe("registry commands", () => {
       item: "extension/browser",
       completedItems: ["extension/browser"],
     });
+  });
+
+  it("rolls back project files and reports a sanitized headless install failure", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "extension/browser",
+        type: "registry:item",
+        files: [{ target: "agent/extensions/browser.ts" }],
+      },
+    ]);
+    addRegistryItems.mockRejectedValueOnce(
+      new Error("ERR_PNPM_IGNORED_BUILDS token=secret-child-output"),
+    );
+
+    await runAddCommand(logger, "/project", "extension/browser", { nonInteractive: true });
+
+    expect(JSON.parse(logger.logs[0]!)).toEqual({
+      version: 1,
+      type: "failed",
+      item: "extension/browser",
+      completedItems: [],
+      message:
+        "Dependency installation stopped because pnpm requires build-script decisions. Run `pnpm approve-builds`, then retry the eve add command.",
+      failureCode: "pnpm_build_policy",
+      rolledBack: true,
+    });
+    expect(logger.logs.join("\n")).not.toContain("secret-child-output");
+    expect(writeFile).toHaveBeenCalledWith("/project/package.json", expect.any(String));
+    expect(logger.errors).toEqual([
+      "Dependency installation stopped because pnpm requires build-script decisions. Run `pnpm approve-builds`, then retry the eve add command.",
+    ]);
+  });
+
+  it("reports only paths that rollback could not restore", async () => {
+    const logger = createLogger();
+    getRegistryItems.mockResolvedValue([{ name: "extension/browser", type: "registry:item" }]);
+    addRegistryItems.mockRejectedValueOnce(new Error("arbitrary secret stderr"));
+    writeFile.mockRejectedValueOnce(new Error("disk full"));
+
+    await runAddCommand(logger, "/project", "extension/browser", { nonInteractive: true });
+
+    expect(JSON.parse(logger.logs[0]!)).toEqual({
+      version: 1,
+      type: "failed",
+      item: "extension/browser",
+      completedItems: [],
+      message:
+        "Dependency installation failed. Retry the eve add command in a terminal for details.",
+      failureCode: "dependency_install",
+      rolledBack: false,
+      changed: ["package.json"],
+    });
+    expect(logger.logs.join("\n")).not.toContain("arbitrary secret stderr");
   });
 
   it("suggests matching registry items when an item is not found", async () => {

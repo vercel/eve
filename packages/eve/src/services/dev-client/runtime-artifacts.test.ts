@@ -54,19 +54,21 @@ describe("development runtime artifact suspension", () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ revision: "rev-3" })));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(suspendDevelopmentRuntimeArtifacts({ serverUrl: SERVER_URL })).resolves.toBe(true);
-    await expect(resumeDevelopmentRuntimeArtifacts({ serverUrl: SERVER_URL })).resolves.toBe(
-      "rev-3",
-    );
+    await expect(
+      suspendDevelopmentRuntimeArtifacts({ leaseId: "setup", serverUrl: SERVER_URL }),
+    ).resolves.toBe(true);
+    await expect(
+      resumeDevelopmentRuntimeArtifacts({ leaseId: "setup", serverUrl: SERVER_URL }),
+    ).resolves.toBe("rev-3");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      new URL("/eve/v1/dev/runtime-artifacts/suspend", SERVER_URL),
+      new URL("/eve/v1/dev/runtime-artifacts/suspend?lease=setup", SERVER_URL),
       expect.objectContaining({ method: "POST" }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      new URL("/eve/v1/dev/runtime-artifacts/resume", SERVER_URL),
+      new URL("/eve/v1/dev/runtime-artifacts/resume?lease=setup", SERVER_URL),
       expect.objectContaining({ method: "POST" }),
     );
   });
