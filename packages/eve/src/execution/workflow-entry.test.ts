@@ -26,6 +26,8 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { turnStep } from "#execution/workflow-steps.js";
+import { attachClientContext } from "#internal/client-context.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -85,6 +87,10 @@ vi.mock("./terminate-child-sessions-step.js", () => ({
 
 vi.mock("./dispatch-turn-step.js", () => ({
   dispatchTurnStep: vi.fn().mockImplementation(async () => ({ runId: "turn-run" })),
+}));
+
+vi.mock("./workflow-steps.js", () => ({
+  turnStep: vi.fn(),
 }));
 
 vi.mock("./terminal-session-failure-step.js", () => ({
@@ -404,6 +410,56 @@ describe("workflowEntry", () => {
       lifecycle: "terminal",
       sessionId: "wrun_test_123",
       settled: { output: "" },
+    });
+  });
+
+  it("runs marked simple root turns without a child workflow handshake", async () => {
+    const sessionState = createBaseSessionState();
+    const settledState = createBaseSessionState({
+      emissionState: { sequence: 5, sessionStarted: true, stepIndex: 1, turnId: "turn-1" },
+    });
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      serializedContext: { "eve.sessionId": "wrun_test_123" },
+      sessionState: settledState,
+      settled: { output: "ok" },
+    });
+    installHookMocks({
+      stableHook: { values: [{ kind: "session-timeout" }] },
+      turnControls: [],
+    });
+
+    await expect(
+      workflowEntry({
+        input: attachClientContext({ message: "hello there" }, [
+          "Client context:\n__evePerfInlineTurn",
+        ]),
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(turnStep).toHaveBeenCalledWith({
+      input: expect.objectContaining({
+        kind: "deliver",
+        payloads: [
+          expect.objectContaining({
+            message: "hello there",
+          }),
+        ],
+      }),
+      parentWritable: expect.any(WritableStream),
+      serializedContext: expect.any(Object),
+      sessionState,
+    });
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
+      caller: undefined,
+      lifecycle: "parked",
+      sessionId: "wrun_test_123",
+      settled: { output: "ok" },
     });
   });
 

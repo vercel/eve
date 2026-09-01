@@ -25,6 +25,7 @@ import {
 } from "#execution/delegated-parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
+import type { DurableStepResult } from "#execution/next-driver-action.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
@@ -48,9 +49,11 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 import type { TokenUsage } from "#shared/token-usage.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { turnStep } from "#execution/workflow-steps.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
+const INLINE_TURN_EXPERIMENT_MARKER = "Client context:\n__evePerfInlineTurn";
 
 // workflow-entry.ts is the durable workflow body — the bundler rejects
 // node built-ins here, so `internal/logging.ts` cannot be imported.
@@ -434,20 +437,27 @@ async function runDriverLoop(input: {
       caller,
       serializedContext: stateCursor.serializedContext,
     });
-    const turn = await dispatchAndAwaitTurn({
-      bufferedDeliveries,
-      bufferedSessionControls,
-      cancelledTaskIds,
-      capabilities: input.capabilities,
-      commandInbox,
-      controlToken: nextTurnControlToken(),
-      delivery,
-      mode: input.mode,
-      parentWritable: input.driverWritable,
-      serializedContext,
-      seenTaskDeliveries,
-      sessionState: stateCursor.sessionState,
-    });
+    const turn = shouldRunInlineTurnExperiment(delivery, input.mode, caller)
+      ? await runInlineTurnExperiment({
+          delivery,
+          parentWritable: input.driverWritable,
+          serializedContext,
+          sessionState: stateCursor.sessionState,
+        })
+      : await dispatchAndAwaitTurn({
+          bufferedDeliveries,
+          bufferedSessionControls,
+          cancelledTaskIds,
+          capabilities: input.capabilities,
+          commandInbox,
+          controlToken: nextTurnControlToken(),
+          delivery,
+          mode: input.mode,
+          parentWritable: input.driverWritable,
+          serializedContext,
+          seenTaskDeliveries,
+          sessionState: stateCursor.sessionState,
+        });
     await disposeSettledTurnControl?.();
     disposeSettledTurnControl = turn.dispose;
     stateCursor.adoptState(turn.action);
@@ -609,6 +619,76 @@ async function runDriverLoop(input: {
     await sessionTimeout?.dispose();
     await commandInbox.dispose();
   }
+}
+
+function shouldRunInlineTurnExperiment(
+  delivery: HookPayload,
+  mode: RunMode,
+  caller: TurnCaller | undefined,
+): boolean {
+  if (mode !== "conversation" || caller !== undefined || delivery.kind !== "deliver") return false;
+  return delivery.payloads.some((payload) =>
+    readClientContext(payload)?.includes(INLINE_TURN_EXPERIMENT_MARKER),
+  );
+}
+
+async function runInlineTurnExperiment(input: {
+  readonly delivery: HookPayload;
+  readonly parentWritable: WritableStream<Uint8Array>;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}): Promise<{ readonly action: TurnDriverAction; dispose(): Promise<void> }> {
+  const result = await turnStep({
+    input: input.delivery,
+    parentWritable: input.parentWritable,
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  });
+
+  return {
+    action: inlineDriverAction(result),
+    async dispose() {},
+  };
+}
+
+function inlineDriverAction(result: DurableStepResult): TurnDriverAction {
+  if (
+    result.backgroundTaskState !== undefined ||
+    result.backgroundTasks !== undefined ||
+    ("sleepDurationMs" in result && result.sleepDurationMs !== undefined)
+  ) {
+    throw new Error("Inline turn experiment does not support background or sleeping work.");
+  }
+
+  if (result.action === "done") {
+    return {
+      isError: result.isError,
+      kind: "done",
+      output: result.output ?? "",
+      serializedContext: result.serializedContext,
+      sessionState: result.sessionState,
+      usage: result.usage,
+      usageDelta: result.usageDelta,
+    };
+  }
+
+  if (
+    result.action === "park" &&
+    result.pendingRuntimeActionKeys === undefined &&
+    result.hasPendingAuthorization === false &&
+    result.hasPendingInputBatch === false
+  ) {
+    return {
+      authorizationAttemptIds: result.authorizationAttemptIds,
+      authorizationNames: result.authorizationNames,
+      kind: "park",
+      serializedContext: result.serializedContext,
+      sessionState: result.sessionState,
+      settled: result.settled,
+    };
+  }
+
+  throw new Error(`Inline turn experiment cannot handle action "${result.action}".`);
 }
 
 async function finalizeExpiredSession(input: {
