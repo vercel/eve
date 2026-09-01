@@ -1,6 +1,7 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type { FetchFileContext, FetchFileResult } from "#channel/adapter.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import {
   resolveSlackBotToken,
@@ -180,15 +181,21 @@ export function createSlackFetchFile(input: {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!response.ok) {
-      throw new Error(`Slack file fetch returned HTTP ${response.status} for ${url}.`);
+      throw new EveAttachmentError({
+        adapterKind: "slack",
+        kind: "resolver-threw",
+        message: `Slack file fetch returned HTTP ${response.status}.`,
+      });
     }
     const mediaType = response.headers.get("content-type") ?? undefined;
     const normalizedMediaType = mediaType?.split(";", 1)[0]?.trim().toLowerCase();
     if (normalizedMediaType === "text/html") {
-      throw new Error(
-        `Slack file fetch returned an HTML sign-in page instead of file bytes for ${url}. ` +
-          "The bot token may be missing the files:read scope. Add the scope, reinstall the Slack app, and retry.",
-      );
+      throw new EveAttachmentError({
+        adapterKind: "slack",
+        kind: "resolver-threw",
+        message:
+          "Slack returned an HTML sign-in page instead of file bytes. The bot token may be missing the files:read scope. Add the scope, reinstall the Slack app, and retry.",
+      });
     }
     return {
       bytes: Buffer.from(await response.arrayBuffer()),

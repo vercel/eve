@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { turnIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { sessionIdempotencyKey, turnIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
@@ -71,6 +71,7 @@ describe("installInstrumentationRuntime", () => {
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
     expect(runtime.instrumentationProviders).toBe(true);
+    expect(runtime.ownsAgentSpans).toBe(true);
     expect(runtime.otelSettings).toEqual({
       functionId: undefined,
       recordInputs: true,
@@ -80,6 +81,37 @@ describe("installInstrumentationRuntime", () => {
     expect(shutdown).toHaveBeenCalledOnce();
     expect(providerShutdown).toHaveBeenCalledOnce();
   });
+
+  it.each(["session.completed", "session.failed"] as const)(
+    "releases local trace liveness after %s",
+    async (type) => {
+      const releaseSession = vi.fn(async () => true);
+      const processor = {
+        forceFlush: vi.fn(async () => undefined),
+        onEnd: vi.fn(),
+        onStart: vi.fn(),
+        releaseSession,
+        shutdown: vi.fn(async () => undefined),
+      };
+      const runtime = installInstrumentationRuntime({
+        collected: collectOtelPipeline([otelIntegration({ spanProcessors: [processor] })]),
+        frameworkVersion: "test",
+        providers: [],
+        serviceName: "weather",
+      });
+      const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
+      const event = {
+        idempotencyKey: sessionIdempotencyKey("session-1"),
+        sessionId: "session-1",
+        type,
+        ...(type === "session.failed" ? { error: new Error("failed") } : undefined),
+      };
+
+      await contextStorage.run(new ContextContainer(), () => hooks.publish(event));
+
+      expect(releaseSession).toHaveBeenCalledExactlyOnceWith("session-1");
+    },
+  );
 
   it("isolates authored state from an internal provider with the same name", async () => {
     const authoredTerminalState = vi.fn();

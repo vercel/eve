@@ -19,10 +19,23 @@ import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
+const createOwnerHookMock = vi.fn();
 const sleepMock = vi.fn(async (_duration: unknown) => {});
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+  defineHook: () => ({
+    create: (options?: { readonly token?: string }) => {
+      createOwnerHookMock(options?.token);
+      return {
+        [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+        dispose: async () => {},
+        getConflict: async () => null,
+        token: options?.token ?? "hook",
+      };
+    },
+    resume: async () => null,
+  }),
   getWorkflowMetadata: vi.fn(() => ({ url: "https://eve.example.com" })),
   sleep: (duration: unknown) => sleepMock(duration),
 }));
@@ -68,6 +81,7 @@ describe("turnWorkflow", () => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
     createHookMock.mockReset();
+    createOwnerHookMock.mockReset();
     sleepMock.mockClear();
   });
 
@@ -98,6 +112,8 @@ describe("turnWorkflow", () => {
       },
       kind: "turn-result",
     });
+    // A turn that starts no workflow tool run never opens run channels.
+    expect(createOwnerHookMock).not.toHaveBeenCalled();
   });
 
   it("migrates a pre-version (unversioned) input and runs the first turn step", async () => {

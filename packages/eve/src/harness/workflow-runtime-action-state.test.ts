@@ -15,12 +15,12 @@ function concurrentWorkflowInterrupt(): WorkflowSandboxInterrupt {
       input: { message },
       interruptId: `${toolCallId}:interrupt`,
       payload: {
-        kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
-        runtimeAction: {
+        dispatchTarget: {
           kind: "subagent-call" as const,
           nodeId: "subagents/echo-marker",
           subagentName: "echo-marker",
         },
+        kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
         toolInput: { message },
         toolName: "echo-marker",
       },
@@ -77,14 +77,12 @@ describe("workflow runtime action state", () => {
       {
         callId: "echo-marker_workflow-call_tool-1_interrupt",
         input: { message: "alpha" },
-        kind: "subagent-call",
-        subagentName: "echo-marker",
+        target: { kind: "subagent-call", subagentName: "echo-marker" },
       },
       {
         callId: "echo-marker_workflow-call_tool-2_interrupt",
         input: { message: "beta" },
-        kind: "subagent-call",
-        subagentName: "echo-marker",
+        target: { kind: "subagent-call", subagentName: "echo-marker" },
       },
     ]);
     expect(getRuntimeActionKeysFromWorkflowInterrupt(interrupt)).toEqual([

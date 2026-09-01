@@ -104,7 +104,6 @@ import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
-import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -142,8 +141,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     effectiveAgent.turnAgent.tools.some(
       (tool) =>
         tool.kind === "authored-tool" &&
-        tool.owner.kind === "framework" &&
-        tool.name === TASK_UPDATE_TOOL_NAME,
+        tool.behavior?.handling?.kind === "dispatch" &&
+        tool.behavior.handling.target.kind === "task-update",
     );
 
   // Populate the callback base URL so getHookUrl() works during tool

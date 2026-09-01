@@ -1,5 +1,39 @@
 # eve
 
+## 0.47.7
+
+### Patch Changes
+
+- b0799b3: Preserve built-in tool behavior through compiled and runtime descriptors, so authored replacements, delegation, task controls, request input, and provider tools use the selected source instead of name-based runtime inference. Replacing bundled artifacts now invalidates resolved-agent caches so redeploys expose newly compiled skills consistently.
+- b9eb1b2: Keep `eve/next` from claiming a host application's Workflow world, so `withEve` can coexist with `withWorkflow` in one Next.js app.
+- 0a1ad48: Resume sessions with dynamic tools persisted by older eve versions without crashing during callback restoration.
+- aafcb34: Keep `clientContext` scoped to its model call so earlier client context no longer accumulates in later session turns.
+- f2c96a1: Spans held for a parent that never ends are no longer lost or buffered without bound: eve's span-filtering processor now drains them to destinations on `forceFlush` and `shutdown`, and caps how many a stuck parent can hold.
+- 7a7da6d: Reconstructed durable spans — `invoke_agent`, `agent.channel.delivery`, and `agent.approval` — now carry their channel audience on the parent context, so destination export policies see the real audience instead of `unknown` and apply the correct export and redaction decisions.
+- 6a8340f: Skip durable caller bookkeeping steps for root session turns that have no delegated caller.
+- ee5e4c7: Headless registry setup continuation commands now preserve answers supplied in earlier steps, so multi-question setup flows can resume without looping.
+- c72dc2e: Adds `eve/local-dev`, whose `getLocalDevCapability()` gives authored code the
+  authored application root and a lease-based way to pause the authored-source
+  watcher while mutating that tree. The capability is scoped to executions
+  initiated by same-machine requests to `eve dev` and remains available across
+  durable workflow steps and local subagents; deployed runtimes and
+  remote-attached clients receive `undefined`.
+- 6a8340f: Workflow run attributes now persist in parallel with turn-result delivery while remaining joined to the durable step, removing the observability write from the user-visible settlement path.
+- 1982202: Pre-allocated session trace seeds now consult the configured OTel sampler, so `$eve.trace_id` workflow attributes are only stamped for traces the sampler will actually record. Previously an `always_off`, ratio, or custom sampler could leave links to traces that were never exported.
+- b7ac284: The self-modification subagent can now install items from the configured eve
+  registry. A new `selfmod__registry_add` tool runs `eve add <address>
+--non-interactive --skip-setup` in the application root under `eve dev`,
+  pausing the authored-source watcher for the whole install and reporting the
+  item's declared environment variables that are still unset. Failed dependency
+  installs restore tracked project files and return a sanitized, structured reason
+  instead of implying the project was untouched. Items that declare a setup flow
+  or multiple components are never partially installed: the local dev TUI now
+  opens their existing setup panel automatically, while headless development
+  reports the command that finishes them, so no setup question is answered by the
+  model.
+- 7a415bf: Emit one framework-owned agent trace tree from managed OpenTelemetry runtimes. Legacy instrumentation keeps its existing span hierarchy, and authored AI SDK telemetry integrations continue to compose with eve's structural spans.
+- bc2a1f6: Add readline-style Ctrl+B/F and Alt+B/F cursor movement to editable fields in the eve TUI, including common modified-arrow terminal sequences.
+
 ## 0.47.6
 
 ### Patch Changes

@@ -10,6 +10,17 @@ const APPLICATION_OWNER = { kind: "application" } as const;
 
 function createFrameworkAgentTool(): PreparedRuntimeTool {
   return {
+    behavior: {
+      availability: ["root-session"],
+      handling: {
+        kind: "dispatch",
+        target: {
+          kind: "self-agent-call",
+          nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+          subagentName: AGENT_TOOL_NAME,
+        },
+      },
+    },
     description: "Message a persistent agent.",
     inputSchema: null,
     kind: "authored-tool",

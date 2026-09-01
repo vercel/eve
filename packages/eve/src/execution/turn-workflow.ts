@@ -1,4 +1,5 @@
 import { isInboxSubagentResultFromRunningHandle } from "#harness/handles/query.js";
+import { isInboxToolResultFromRecordedRun } from "#harness/tool-runs.js";
 import {
   createHook,
   getWorkflowMetadata,
@@ -22,6 +23,21 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { emitRunReportStep } from "#execution/tool-run/emit-run-report-step.js";
+import {
+  type ChannelReader,
+  createChannelReader,
+  raceChannelReads,
+} from "#execution/tool-run/owner-channels.js";
+import {
+  openRunOwnerChannels,
+  type RunOwnerChannels,
+  type RunOwnerReaders,
+} from "#execution/tool-run/owner.js";
+import {
+  runOutcomeToToolResult,
+  runRequestToInputRequestPayload,
+} from "#execution/tool-run/owner-inbox.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -64,7 +80,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
   // Hook promises and iterators share one durable cursor. Create the iterator before
   // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
-  const iterator = inbox[Symbol.asyncIterator]();
+  const inboxReader = createChannelReader("inbox", inbox);
   const cursor = new TurnExecutionCursor({
     controlToken: input.completionToken,
     parentWritable: input.stepInput.parentWritable,
@@ -80,6 +96,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   let nextStepInput = input.stepInput.input;
   let ownsInbox = false;
+  let runChannels: RunOwnerChannels | undefined;
   let cancellation: TurnCancellationControl | undefined;
 
   try {
@@ -193,6 +210,11 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // runs `experimental.tasks`.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
+        // Opened before the dispatch step suspends, so the hooks exist when
+        // the first run reports; a turn that starts no run never pays for them.
+        if (result.action === "park" && result.startsWorkflowToolRuns === true) {
+          runChannels ??= openRunOwnerChannels(inbox.token);
+        }
         const hasPendingTasks = result.action === "park" && result.tasksEnabled;
         let dispatch;
         if (result.action === "dispatch-workflow-runtime-actions") {
@@ -220,8 +242,9 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           inboxToken: inbox.token,
           initialAcceptedAtMs,
           initialResults: dispatchResult.results,
-          iterator,
           nextDeliveryRequestId,
+          readers:
+            runChannels === undefined ? [inboxReader] : [...runChannels.readers, inboxReader],
           pendingActionKeys,
         });
         if (results === "cancelled") {
@@ -273,9 +296,14 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     // terminal result publishes so the next turn's claim never races this
     // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
+    if (runChannels !== undefined) await runChannels.dispose();
     if (ownsInbox) await disposeHook(inbox);
   }
 }
+
+type TurnReaders =
+  | readonly [...RunOwnerReaders, ChannelReader<"inbox", TurnInboxPayload>]
+  | readonly [ChannelReader<"inbox", TurnInboxPayload>];
 
 async function finishCancelledTurn(input: {
   readonly bufferedDeliveries: readonly DeliverHookPayload[];
@@ -318,9 +346,9 @@ async function waitForRuntimeActionResults(input: {
   readonly inboxToken: string;
   readonly initialAcceptedAtMs: number | undefined;
   readonly initialResults: readonly RuntimeActionResult[];
-  readonly iterator: AsyncIterator<TurnInboxPayload>;
   readonly nextDeliveryRequestId: () => string;
   readonly pendingActionKeys: readonly string[];
+  readonly readers: TurnReaders;
 }): Promise<AcceptedRuntimeActionBatch | "cancelled" | "cancel-turn"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
@@ -366,15 +394,10 @@ async function waitForRuntimeActionResults(input: {
       });
     }
 
-    const nextPromise = input.iterator.next();
-    // When a cancel wins the race, the dangling inbox `next()` is dropped
-    // by disposal in teardown; pre-attach a handler so a late rejection
-    // never surfaces as unhandled.
-    nextPromise.catch(() => {});
-    const next = await (input.cancellation === undefined
-      ? nextPromise
-      : Promise.race([nextPromise, input.cancellation.requested]));
-    if (next === "cancel") {
+    // A read that loses to a cancel stays pending and is dropped by disposal
+    // in teardown.
+    const read = await raceChannelReads(input.readers, input.cancellation?.requested);
+    if (read === "cancel") {
       if (pendingDeliveryRequest !== undefined) {
         // Release the raced public input back to the driver so it stays
         // available for the next turn.
@@ -385,21 +408,52 @@ async function waitForRuntimeActionResults(input: {
       }
       return "cancelled";
     }
-    if (next.done) throw new Error("Turn inbox closed before runtime actions completed.");
+    if (read.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
-    const value = next.value;
+    if (read.channel === "outcome") {
+      const result = runOutcomeToToolResult(read.next.value);
+      const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
+      if (isInboxToolResultFromRecordedRun(sessionSnapshotState, result)) {
+        const acceptedAtMs = Date.now();
+        results.push(result);
+        acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
+      }
+      continue;
+    }
+    if (read.channel === "request") {
+      const proxyResult = await runProxySubagentEventStep({
+        answerHook: { runId: read.next.value.from.runId },
+        hookPayload: runRequestToInputRequestPayload(read.next.value),
+        parentWritable: input.cursor.parentWritable,
+        serializedContext: input.cursor.serializedContext,
+        sessionState: input.cursor.sessionState,
+      });
+      await input.cursor.adopt(proxyResult);
+      continue;
+    }
+    if (read.channel === "report") {
+      await emitRunReportStep({
+        from: read.next.value.from,
+        parentWritable: input.cursor.parentWritable,
+        update: read.next.value.update,
+      });
+      continue;
+    }
+
+    const value = read.next.value;
     if (value.kind === "runtime-action-result") {
       // The inbox token is shared by every callee in the batch, so an inbox
-      // subagent result must bind to a running agent handle in the adopted
-      // session snapshot: its callId on the handle's operation and, when it
-      // claims a sessionId, that session on the handle's address (older eve
-      // deployments claim none and bind by callId alone). Anything else — a
-      // callee settling a sibling's call, or a result for a callId whose
-      // dispatch failed — is dropped; the genuine child's result (or the
-      // dispatch error already in `results`) still resolves the wait.
+      // result must bind to the adopted session snapshot: a subagent result
+      // to a running agent handle carrying its callId, a tool result to the
+      // tool run recorded for its callId. Anything else — a callee settling a
+      // sibling's call, or a result for a callId whose dispatch failed — is
+      // dropped; the genuine result (or the dispatch error already in
+      // `results`) still resolves the wait.
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
       const accepted = value.results.filter((result) =>
-        isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
+        result.kind === "tool-result"
+          ? isInboxToolResultFromRecordedRun(sessionSnapshotState, result)
+          : isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
       );
       if (accepted.length > 0) {
         const acceptedAtMs = Date.now();

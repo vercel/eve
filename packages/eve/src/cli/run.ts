@@ -1,4 +1,9 @@
-import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import {
+  Command,
+  CommanderError,
+  InvalidArgumentError,
+  Option,
+} from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
@@ -335,7 +340,8 @@ function createCliProgram(
     )
     .option("--no-ui", "Start the server without an interactive UI")
     .option("--name <name>", "Title shown in the terminal UI (defaults to the app folder name)")
-    .option("--input <text>", "Pre-fill the prompt input, or start onboarding with /model")
+    .option("--input <text>", "Pre-fill the prompt input")
+    .addOption(new Option("--onboard", "Start fresh-agent onboarding").hideHelp())
     .option(
       "--tools <mode>",
       "How tool calls render: full | collapsed | auto-collapsed | hidden",
@@ -449,7 +455,7 @@ function createCliProgram(
 
       let tuiStartup: DevelopmentTuiStartup | undefined;
       const tuiStartupPromise =
-        mode === "tui" && runtime.runDevelopmentTui === undefined
+        mode === "tui" && options.onboard !== true && runtime.runDevelopmentTui === undefined
           ? loadDevelopmentTuiModule().then((module) => {
               onBootProgress({ type: "before-first-paint" });
               return module.startDevelopmentTuiStartup({

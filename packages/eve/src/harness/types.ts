@@ -2,7 +2,11 @@ import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
 import type { AlsContext } from "#context/container.js";
-import type { UnstampedMessageStreamEvent, RuntimeIdentity } from "#protocol/message.js";
+import type {
+  RuntimeIdentity,
+  StepStartedStreamEvent,
+  UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
@@ -11,7 +15,6 @@ import type { SandboxState } from "#sandbox/state.js";
 import type { JsonObject } from "#shared/json.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import type { InternalToolDefinition } from "#tools/definition.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { SessionInstrumentation } from "#instrumentation/runtime.js";
@@ -299,8 +302,6 @@ export interface ToolLoopHarnessConfig {
    * {@link import("#harness/workflow-subagent-limit.js").DEFAULT_WORKFLOW_MAX_SUBAGENTS}.
    */
   readonly workflowMaxSubagents?: number;
-  /** AI Gateway provider selected for the framework `web_search` tool. */
-  readonly webSearchProvider?: WebSearchProvider;
   readonly handleEvent?: HandleEventFn;
   /** Projects raw durable history before it crosses a message-bearing boundary. */
   readonly historyProjector?: HistoryViewProjector;
@@ -319,6 +320,8 @@ export interface ToolLoopHarnessConfig {
    * for terminal assistant text inside the current invocation.
    */
   readonly mode: RunMode;
+  /** Whether this node enables framework background-task behavior. */
+  readonly tasksEnabled?: boolean;
   /**
    * Called after compaction to let the execution layer re-apply
    * framework-owned state preservation (read-before-write reset, todo
@@ -326,10 +329,10 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
-  /** Resolves step-scoped dynamic tools once for approval policy and model work. */
-  readonly resolveStepDynamicTools?: (input: {
+  /** Prepares persisted step-scoped tools before an approved call is resumed. */
+  readonly prepareStepDynamicTools?: (input: {
     readonly ctx: AlsContext;
-    readonly event: UnstampedMessageStreamEvent;
+    readonly event: StepStartedStreamEvent;
     readonly messages: readonly ModelMessage[];
   }) => Promise<void>;
   readonly dispatchDynamicModelEvent?: (input: {

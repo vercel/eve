@@ -5,6 +5,8 @@ export function createDynamicCapabilityTransformPlugin(
   options: {
     readonly dynamicRemoteAgents?: boolean;
     readonly dynamicTools?: boolean;
+    /** Names of a module's `"use workflow"` functions, when a directive transform ran before this one. */
+    readonly workflowFunctions?: (id: string) => ReadonlySet<string> | undefined;
   } = {},
 ) {
   return {
@@ -20,7 +22,11 @@ export function createDynamicCapabilityTransformPlugin(
       let transformed = code;
       let changed = false;
       if (transformDynamicTools) {
-        const result = await transformDynamicToolExecute(id, transformed);
+        const result = await transformDynamicToolExecute(
+          id,
+          transformed,
+          options.workflowFunctions?.(id),
+        );
         if (result !== null) {
           transformed = result.code;
           changed = true;

@@ -370,29 +370,51 @@ function collectCompositionDiagnostics(manifest: CompiledAgentManifest) {
   };
 }
 
-const KERNEL_EFFECT_BY_SLOT = {
-  "tools/agent": { action: "subagent-call", audience: ["root-session"], kind: "dispatch" },
-  "tools/ask_question": {
-    audience: ["requires-request-input"],
-    kind: "request-input",
-  },
-  "tools/task_cancel": { action: "task-cancel", audience: ["root-session"], kind: "dispatch" },
-  "tools/task_update": {
-    action: "task-update",
-    audience: ["delegated-task-child"],
-    kind: "dispatch",
-  },
-  "tools/web_search": { audience: [], kind: "provider-tool" },
-} as const;
+function projectPreparedKernelEffects(
+  manifest: CompiledAgentManifest,
+): AgentInfoResponse["kernelEffects"] {
+  const effects: AgentInfoResponse["kernelEffects"][number][] = [];
+  for (const tool of manifest.tools) {
+    const behavior = tool.behavior;
+    const handling = behavior?.handling;
+    if (behavior === undefined || handling === undefined) continue;
 
-function projectPreparedKernelEffects(manifest: CompiledAgentManifest) {
-  return manifest.tools.flatMap((tool) => {
-    const binding = manifest.bindings[tool.sourceId];
-    const slot = tool.logicalPath.replace(/\.(?:[cm]?[jt]sx?)$/, "");
-    const effect = KERNEL_EFFECT_BY_SLOT[slot as keyof typeof KERNEL_EFFECT_BY_SLOT];
-    const isAuthoredWebSearch =
-      slot === "tools/web_search" && manifest.webSearchProvider !== undefined;
-    if (binding?.owner.kind !== "framework" && !isAuthoredWebSearch) return [];
-    return effect === undefined ? [] : [{ ...effect, sourceId: tool.sourceId }];
-  });
+    switch (handling.kind) {
+      case "dispatch":
+        effects.push({
+          action: handling.action === "self-agent" ? "subagent-call" : handling.action,
+          audience: [...behavior.availability],
+          kind: "dispatch",
+          sourceId: tool.sourceId,
+        });
+        break;
+      case "provider-tool":
+        effects.push({
+          audience: [...behavior.availability],
+          kind: "provider-tool",
+          sourceId: tool.sourceId,
+        });
+        break;
+      case "request-input":
+        effects.push({
+          audience: [...behavior.availability],
+          kind: "request-input",
+          sourceId: tool.sourceId,
+        });
+        break;
+      case "workflow-tool":
+        effects.push({
+          action: "workflow-tool-call",
+          audience: [...behavior.availability],
+          kind: "dispatch",
+          sourceId: tool.sourceId,
+        });
+        break;
+      default: {
+        const _exhaustive: never = handling;
+        throw new Error(`Unsupported compiled tool handling: ${String(_exhaustive)}`);
+      }
+    }
+  }
+  return effects;
 }

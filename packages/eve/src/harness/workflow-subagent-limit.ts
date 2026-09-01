@@ -1,4 +1,4 @@
-import type { RuntimeActionRequest } from "#shared/action-types.js";
+import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 
 /**
  * Default maximum number of subagent (and remote-agent) calls one `Workflow`
@@ -12,8 +12,8 @@ export const DEFAULT_WORKFLOW_MAX_SUBAGENTS = 100;
  * actions must resolve with an error result instead of starting a child.
  */
 export type WorkflowSubagentDispatchPlan = {
-  readonly allowed: readonly RuntimeActionRequest[];
-  readonly blocked: readonly RuntimeActionRequest[];
+  readonly allowed: readonly PendingDispatchAction[];
+  readonly blocked: readonly PendingDispatchAction[];
   readonly maxSubagents: number;
   readonly usedCalls: number;
 };
@@ -25,7 +25,7 @@ export type WorkflowSubagentDispatchPlan = {
  * program's call order.
  */
 export function planWorkflowSubagentDispatch(input: {
-  readonly actions: readonly RuntimeActionRequest[];
+  readonly actions: readonly PendingDispatchAction[];
   readonly maxSubagents?: number;
   readonly usedCalls: number;
 }): WorkflowSubagentDispatchPlan {

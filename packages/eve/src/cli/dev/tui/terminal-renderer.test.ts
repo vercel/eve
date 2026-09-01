@@ -1657,6 +1657,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderCommandResult(
       "Authentication was refreshed, but example.vercel.app is unavailable: Access denied.\n\n" +
         "TRUSTED_SOURCES_ENVIRONMENT_MISMATCH",
+      "error",
     );
     renderer.shutdown();
 
@@ -3764,9 +3765,110 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("toggles a multi-select with space and confirms from the Submit row", async () => {
-    const { input, renderer } = makeRenderer();
+  it("returns from a planner review with Left Arrow instead of selecting an action", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      navigation: {
+        kind: "planner",
+        activeStep: 2,
+        steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+      },
+      message: "Review your agent",
+      options: [
+        { value: "install", label: "Install and set up" },
+        { value: "back", label: "Back" },
+      ],
+    });
 
+    expect(screen.snapshot()).toContain("enter to select · ← back · esc to cancel");
+    input.left();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "back",
+      values: [],
+    });
+    renderer.shutdown();
+  });
+
+  it("ignores arrow navigation before the first navigable planner step", async () => {
+    const { input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      navigation: {
+        kind: "planner",
+        activeStep: 0,
+        firstNavigableStep: 1,
+        steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+      },
+      message: "Choose a model",
+      options: [{ value: "model", label: "Use recommended model" }],
+    });
+
+    input.left();
+    input.right();
+    input.enter();
+    await expect(answer).resolves.toEqual(["model"]);
+    renderer.shutdown();
+  });
+
+  it("ignores Left Arrow on the first navigable planner step", async () => {
+    const { input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "searchable-multi",
+      navigation: {
+        kind: "planner",
+        activeStep: 1,
+        firstNavigableStep: 1,
+        steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+      },
+      message: "Where should people reach your agent?",
+      options: [{ value: "web", label: "Web Chat" }],
+      required: false,
+    });
+
+    input.left();
+    input.enter();
+    input.right();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "forward",
+      values: ["web"],
+    });
+    renderer.shutdown();
+  });
+
+  it("proceeds from a planner checklist with Right Arrow and preserves its selections", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "searchable-multi",
+      navigation: {
+        kind: "planner",
+        activeStep: 0,
+        steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+      },
+      message: "Where should people reach your agent?",
+      options: [
+        { value: "web", label: "Web Chat" },
+        { value: "slack", label: "Slack" },
+      ],
+      required: false,
+    });
+
+    expect(screen.snapshot()).not.toContain("Channels (1)");
+    input.enter();
+    expect(screen.snapshot()).toContain("Channels (1)");
+    input.right();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "forward",
+      values: ["web"],
+    });
+    renderer.shutdown();
+  });
+
+  it("confirms selected entries from a multi-select's Submit row", async () => {
+    const { input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({
       kind: "multi",
       message: "Select channels",
@@ -4411,6 +4513,32 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.shutdown();
   });
 
+  it("clears the completed item and install status before the batch follow-up", async () => {
+    const { screen, input, renderer } = makeRenderer();
+
+    renderer.setupFlow.begin("Set up your agent");
+    renderer.setupFlow.replaceContent?.({ headline: "Adding GitHub · 2 of 3", facts: [] });
+    renderer.setupFlow.setStatus("Installing files and dependencies…");
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      message: "What would you like to do next?",
+      options: [
+        { value: "deploy", label: "Deploy" },
+        { value: "finish", label: "Start chatting" },
+      ],
+    });
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).not.toContain("Adding GitHub · 2 of 3");
+    expect(snapshot).not.toContain("Installing files and dependencies");
+    expect(snapshot).toContain("What would you like to do next?");
+
+    input.enter();
+    await expect(answer).resolves.toEqual(["deploy"]);
+    renderer.setupFlow.end({ preserveDiagnostics: false });
+    renderer.shutdown();
+  });
+
   it("keeps enter on a completed setup row as a no-op", async () => {
     const { input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({
@@ -4479,7 +4607,7 @@ describe("TerminalRenderer setup flow session", () => {
     renderer.setupFlow.setStatus("Creating a Slackbot through Vercel Connect...");
 
     input.ctrlC();
-    await expect(interrupt.promise).resolves.toBeUndefined();
+    await expect(interrupt.promise).resolves.toBe("ctrl-c");
 
     renderer.setupFlow.end();
     renderer.shutdown();

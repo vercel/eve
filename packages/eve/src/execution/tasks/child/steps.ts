@@ -9,6 +9,8 @@ import type {
 import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeToolRunAnswers } from "#execution/tool-run/answer.js";
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
 import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
@@ -217,6 +219,7 @@ export async function wakeTaskInputRequestParentStep(input: {
  */
 export async function deliverTaskInputResponsesStep(input: {
   readonly answer: TaskInboundAnswerInput;
+  readonly answerHook?: AnswerHookRoute;
   readonly requestIds: readonly string[];
 }): Promise<"delivered" | "unreachable"> {
   "use step";
@@ -243,6 +246,11 @@ export async function deliverTaskInputResponsesStep(input: {
       if (response.status === 404) return "unreachable";
       if (!response.ok)
         throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
+    } else if (input.answerHook !== undefined) {
+      await resumeToolRunAnswers(
+        input.answer.childContinuationToken,
+        command.payload.inputResponses,
+      );
     } else {
       await resumeSessionInbox(input.answer.childContinuationToken, command);
     }

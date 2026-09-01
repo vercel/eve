@@ -1,6 +1,5 @@
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
 import {
   type CompiledAgentDefinition,
   type CompiledAgentManifest,
@@ -502,7 +501,6 @@ class AgentGraphCompiler {
     let sandbox: CompiledSandboxDefinition | undefined;
     let instrumentation: ModuleSourceRef | undefined;
     let workflowTool: CompiledWorkflowToolDefinition | undefined;
-    let webSearchProvider: WebSearchProvider | undefined;
     const selectedSourceIds = collectSelectedSourceIds(state.composed);
     const loadNamespace = state.evaluation.loadNamespace;
 
@@ -620,7 +618,9 @@ class AgentGraphCompiler {
             selectedSourceIds.delete(candidate.sourceId);
           } else if (result.kind === "tool") {
             tools.push(result.definition);
-            state.evaluation.requireRuntimeEntry(candidate.sourceId);
+            if (result.definition.hasExecute) {
+              state.evaluation.requireRuntimeEntry(candidate.sourceId);
+            }
           } else if (result.kind === "dynamic-tool") {
             dynamicTools.push(withExtensionNamespace(result.definition, candidate.owner));
             state.evaluation.requireRuntimeEntry(candidate.sourceId);
@@ -630,7 +630,6 @@ class AgentGraphCompiler {
           } else {
             assertNonExtensionSpecialTool(candidate as AgentModuleCandidate, "Web search");
             tools.push(result.definition);
-            webSearchProvider = result.provider;
           }
           break;
         }
@@ -693,7 +692,6 @@ class AgentGraphCompiler {
       skills,
       sourceComposition: state.composed.composition,
       tools,
-      webSearchProvider,
       workflowTool,
     });
   }

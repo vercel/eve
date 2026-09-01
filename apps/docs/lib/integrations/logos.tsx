@@ -230,11 +230,10 @@ export const arcanaLogo = (props: LogoProps) => (
 );
 
 export const supermemoryLogo = (props: LogoProps) => (
-  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
-    <rect width="24" height="24" rx="6" fill="#161616" />
+  <svg fill="none" viewBox="0 0 39.467 32" xmlns="http://www.w3.org/2000/svg" {...props}>
     <path
-      d="M16.8 7.4c-.9-.8-2.1-1.3-3.6-1.3-2.4 0-4.1 1.2-4.1 3.1 0 1.8 1.5 2.4 3.7 2.9 1.5.3 2.1.6 2.1 1.2 0 .7-.7 1.1-1.8 1.1-1.2 0-2.4-.5-3.4-1.4l-1.6 1.8c1.2 1.2 2.9 1.8 4.9 1.8 2.8 0 4.6-1.3 4.6-3.3 0-1.9-1.4-2.6-3.9-3.1-1.4-.3-2-.6-2-1.1 0-.6.6-1 1.5-1 1 0 2 .4 2.8 1.1l1.8-1.8Z"
-      fill="white"
+      d="M39.126 12.632H24.606V.01h-4.692v13.695c0 1.454.574 2.851 1.595 3.88l11.856 11.958 3.318-3.346-8.758-8.831h11.204v-4.732ZM2.446 5.822l8.757 8.832H0v4.731h14.52v12.623h4.692V18.312c0-1.453-.573-2.847-1.595-3.88L5.764 2.476 2.446 5.822Z"
+      fill="currentColor"
     />
   </svg>
 );
@@ -404,6 +403,15 @@ export const naturalLogo = (props: LogoProps) => (
     <path
       d="M0.773438 17.7891H16.6289C17.1211 17.7891 17.4023 17.543 17.4023 17.0156V0.914062C17.4023 0.421875 17.1211 0.140625 16.6289 0.140625H0.773438C0.246094 0.140625 0 0.421875 0 0.914062V17.0156C0 17.543 0.246094 17.7891 0.773438 17.7891Z"
       fill="currentColor"
+    />
+  </svg>
+);
+
+export const neonLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M24 0V24l-9.365-8.045V24H0V0ZM2.942 21.087h8.751V9.563l9.365 8.204V2.919L2.942 2.914Z"
+      fill="#34D59A"
     />
   </svg>
 );
@@ -778,6 +786,7 @@ export const logos = {
   miro: miroLogo,
   mixpanel: mixpanelLogo,
   natural: naturalLogo,
+  neon: neonLogo,
   netlify: netlifyLogo,
   oreilly: oreillyLogo,
   planetscale: planetscaleLogo,

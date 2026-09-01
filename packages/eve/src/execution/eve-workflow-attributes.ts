@@ -46,6 +46,7 @@ import { isNonEmptyString } from "#shared/guards.js";
 import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
@@ -99,6 +100,14 @@ export function readChannelKind(serializedContext: Record<string, unknown>): str
 }
 
 export function isWorkflowTraceContentVisible(serializedContext: Record<string, unknown>): boolean {
+  const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
+  if (seed !== undefined) {
+    const traceState = resolveForwardedTraceSeed(seed)!;
+    if (traceState.forwardedTracePolicy !== undefined) {
+      const decision = traceState.decision;
+      return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
+    }
+  }
   const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
     | SerializedChannelAdapter
     | undefined;
@@ -111,7 +120,9 @@ export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unk
 
 export function readSessionTraceId(serializedContext: Record<string, unknown>): string | undefined {
   const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
-  if (seed === undefined || !isSampledTrace(seed)) return undefined;
+  if (seed === undefined) return undefined;
+  const traceState = resolveForwardedTraceSeed(seed)!;
+  if (!isSampledTrace(traceState)) return undefined;
   return isNonEmptyString(seed.traceId) ? seed.traceId : undefined;
 }
 

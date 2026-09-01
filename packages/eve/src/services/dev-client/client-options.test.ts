@@ -48,6 +48,21 @@ describe("resolveDevelopmentClientOptions", () => {
     });
   });
 
+  it("marks requests from an attached local TUI as interactive", async () => {
+    const options = resolveLocalDevelopmentClientOptions({
+      headers: { "x-eve-dev-interactive-client": "0" },
+      interactiveClient: true,
+      serverUrl: "http://127.0.0.1:3000",
+      token: async () => "user-oidc-token",
+    });
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null));
+    await new Client(options).fetch("/eve/v1/info");
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("x-eve-dev-interactive-client")).toBe("1");
+  });
+
   it("does not override explicit local authorization with the linked Vercel bearer", async () => {
     const token = vi.fn(async () => "user-oidc-token");
 

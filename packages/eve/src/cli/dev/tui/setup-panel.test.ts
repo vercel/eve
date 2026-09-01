@@ -20,6 +20,11 @@ const OPTIONS = [
   { value: "new", label: "Create a new project", hint: "fastest" },
   { value: "link", label: "Link an existing project" },
 ];
+const PLANNER_NAVIGATION = {
+  kind: "planner" as const,
+  activeStep: 0,
+  steps: [{ label: "Channels" }, { label: "Integrations" }, { label: "Review" }],
+};
 
 describe("renderFlowPanel", () => {
   it("aligns the base-foreground title, progress, and question content", () => {
@@ -856,6 +861,158 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain("✓ Link an existing project");
     expect(text).toContain("Submit");
     expect(text).toContain("space to toggle");
+  });
+
+  it("shows beyond featured planner choices in its initial compact viewport", () => {
+    const options = [
+      { value: "web", label: "Web Chat", featured: true },
+      { value: "slack", label: "Slack", featured: true },
+      { value: "github", label: "GitHub", featured: true },
+      { value: "linear-agent", label: "Linear Agent", featured: true },
+      { value: "discord", label: "Discord" },
+      { value: "telegram", label: "Telegram" },
+    ];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: PLANNER_NAVIGATION,
+        message: "Where should people reach your agent?",
+        options,
+        placeholder: "Search channels",
+        select: initialSelectState({ options }),
+      },
+      theme,
+      100,
+    ).join("\n");
+
+    expect(text).toContain("Linear Agent");
+    expect(text).toContain("Discord");
+    expect(text).toContain("Telegram");
+  });
+
+  it("renders planner progress and navigation without a Submit row", () => {
+    const options = [{ value: "web", label: "Web Chat", hint: "Built-in chat UI" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: PLANNER_NAVIGATION,
+        message: "Where should people reach your agent?",
+        options,
+        select: initialSelectState({ options, initialValues: ["web"] }),
+      },
+      colorTheme,
+      80,
+    ).join("\n");
+    const plain = stripAnsi(text);
+
+    expect(text).toContain(
+      colorTheme.colors.inverse(colorTheme.colors.blue(colorTheme.colors.bold(" Channels (1) "))),
+    );
+    expect(plain).toContain("Channels (1)   →  Integrations  ·  Review");
+    expect(plain).toContain("1 selected");
+    expect(plain).toContain("space/enter toggle · → next");
+    expect(plain).not.toContain("← back");
+    expect(plain).not.toContain("Submit");
+  });
+
+  it("keeps the planner rail width stable as the active step changes", () => {
+    const options = [{ value: "next", label: "Continue" }];
+    const widths = PLANNER_NAVIGATION.steps.map((_, activeStep) => {
+      const [rail] = renderSelectQuestion(
+        {
+          kind: "single",
+          navigation: { ...PLANNER_NAVIGATION, activeStep },
+          message: "Continue setup",
+          options,
+          select: initialSelectState({ options }),
+        },
+        colorTheme,
+        80,
+      );
+      return stripAnsi(rail ?? "").length;
+    });
+
+    expect(new Set(widths)).toEqual(new Set([40]));
+  });
+
+  it("advertises only available planner directions", () => {
+    const options = [{ value: "install", label: "Install and set up" }];
+    const review = renderSelectQuestion(
+      {
+        kind: "single",
+        navigation: { ...PLANNER_NAVIGATION, activeStep: 2 },
+        message: "Review additions",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
+    const integrations = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: { ...PLANNER_NAVIGATION, activeStep: 1 },
+        message: "Select integrations",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(review).toContain("Channels  ·  Integrations  ←   Review ");
+    expect(review).toContain("enter to select · ← back");
+    expect(review).not.toContain("→ next");
+    expect(integrations).toContain("Channels  ←   Integrations   →  Review");
+    expect(integrations).toContain("space/enter toggle · ←/→ steps");
+  });
+
+  it("does not advertise arrows before planner navigation becomes available", () => {
+    const options = [{ value: "model", label: "Use recommended model" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "single",
+        navigation: {
+          kind: "planner",
+          activeStep: 0,
+          firstNavigableStep: 1,
+          steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+        },
+        message: "Choose a model",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain(" Model   ·  Channels  ·  Integrations");
+    expect(text).toContain("enter to select · esc to cancel");
+    expect(text).not.toContain("→ next");
+  });
+
+  it("does not advertise navigation into completed prefix steps", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: {
+          kind: "planner",
+          activeStep: 1,
+          firstNavigableStep: 1,
+          steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+        },
+        message: "Select channels",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("Model  ·   Channels   →  Integrations");
+    expect(text).toContain("space/enter toggle · → next");
+    expect(text).not.toContain("← back");
   });
 
   it("windows the railed list to five rows with an Esc-only footer", () => {

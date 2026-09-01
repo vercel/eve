@@ -13,6 +13,8 @@ import {
 
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
   readonly fingerprint: string;
+  /** Identity of the authored sources the workflow driver and step registrations are built from. */
+  readonly workflowSourceFingerprint?: string;
 }
 
 interface DevelopmentGenerationPruneState {
@@ -37,10 +39,13 @@ export async function stageDevelopmentGeneration(
       runtimeAppRoot: snapshot.runtimeAppRoot,
     });
 
-    return {
-      ...snapshot,
-      fingerprint: materialized.fingerprint,
-    };
+    return prepared.workflowSourceFingerprint === undefined
+      ? { ...snapshot, fingerprint: materialized.fingerprint }
+      : {
+          ...snapshot,
+          fingerprint: materialized.fingerprint,
+          workflowSourceFingerprint: prepared.workflowSourceFingerprint,
+        };
   } catch (error) {
     try {
       await rm(snapshot.snapshotRoot, { force: true, recursive: true });

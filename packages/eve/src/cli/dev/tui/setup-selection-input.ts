@@ -69,6 +69,7 @@ type SetupSingleSelectInput = SetupSelectInput & {
 type SetupMultiSelectInput = SetupSelectInput & {
   kind: "multi" | "searchable-multi";
   required: boolean;
+  plannerNavigation?: true;
 };
 
 type SetupSelectInputState = SetupSingleSelectInput | SetupMultiSelectInput;
@@ -90,7 +91,7 @@ function updatedSelect(
     select: reduceSelect(input.select, event, {
       options: input.options,
       searchAction: input.searchAction,
-      submitRow: isMultiSelect(input),
+      submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
     }),
   };
 }
@@ -100,6 +101,7 @@ function submitSetupSelect(input: SetupSelectInputState): SetupSelectInputResult
     ? filterOptions(input.options, input.select.filter, input.searchAction)
     : [...input.options];
   if (isMultiSelect(input)) {
+    if (input.plannerNavigation === true) return updatedSelect(input, { type: "toggle" });
     if (input.select.cursor !== submitRowIndex(visible)) {
       return updatedSelect(input, { type: "toggle" });
     }
@@ -134,7 +136,7 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
       const context = {
         options: input.options,
         searchAction: input.searchAction,
-        submitRow: isMultiSelect(input),
+        submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
       };
       for (const char of input.key.value.replaceAll("\n", " ")) {
         if (char >= " " && char !== "\u007f") {

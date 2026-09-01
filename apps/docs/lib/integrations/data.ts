@@ -1926,6 +1926,16 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     configureNote:
       "Natural moves real money. Add an approval gate or tool filters before allowing unattended payment actions.",
   },
+  neon: {
+    logo: "neon",
+    docsHref: "https://neon.com/docs/ai/neon-mcp-server",
+    keywords: ["mcp", "postgres", "databases", "branches", "sql", "oauth", "connect"],
+    authModes: ["app"],
+    connector: "neon/neon",
+    connectorService: "neon",
+    configureNote:
+      "Neon's MCP server can modify projects and databases. Use a development or test project, review tool calls, and append `?readonly=true` or `?projectId=<project-id>` to scope access.",
+  },
   netlify: {
     logo: "netlify",
     docsHref: "/docs/connections/mcp",

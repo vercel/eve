@@ -576,8 +576,19 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
+        originAudience: "private",
         initiatorAuth: INITIATOR_AUTH,
-        remote: { ...createRemoteAgent(), forwardPrincipal: true },
+        parentTraceContext: {
+          decision: { action: "record", recordInputs: true, recordOutputs: false },
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+        remote: {
+          ...createRemoteAgent(),
+          forwardPrincipal: true,
+          headers: { baggage: "vendor=value,eve.audience=private" },
+        },
         session: createSession(),
       }),
     ).resolves.toEqual({ sessionId: "remote-session" });
@@ -586,6 +597,68 @@ describe("startRemoteAgentSession — forwarded principal", () => {
       current: CURRENT_AUTH,
       initiator: INITIATOR_AUTH,
     });
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
+      "forwardedTracePolicy",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      baggage: "vendor=value,eve.audience=private;ceiling=i1o0",
+    });
+  });
+
+  it("serializes the current delivery-effective decision as the next ceiling", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      auth: CURRENT_AUTH,
+      callbackBaseUrl: "https://caller.example.com",
+      initiatorAuth: INITIATOR_AUTH,
+      originAudience: "public",
+      parentTraceContext: {
+        decision: { action: "record", recordInputs: false, recordOutputs: false },
+        spanId: "2".repeat(16),
+        traceFlags: 1,
+        traceId: "1".repeat(32),
+      },
+      remote: { ...createRemoteAgent(), forwardPrincipal: true },
+      session: createSession(),
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      baggage: "eve.audience=public;ceiling=i0o0",
+    });
+  });
+
+  it("uses unsampled trace flags as the only propagated drop signal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      auth: CURRENT_AUTH,
+      callbackBaseUrl: "https://caller.example.com",
+      initiatorAuth: INITIATOR_AUTH,
+      originAudience: "private",
+      parentTraceContext: {
+        decision: { action: "drop" },
+        spanId: "2".repeat(16),
+        traceFlags: 0,
+        traceId: "1".repeat(32),
+      },
+      remote: {
+        ...createRemoteAgent(),
+        forwardPrincipal: true,
+        headers: { baggage: "vendor=value,eve.audience=public;ceiling=i1o1" },
+      },
+      session: createSession(),
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty(
+      "baggage",
+      expect.stringContaining("drop"),
+    );
   });
 
   it("omits the initiator when the dispatching turn has none", async () => {
@@ -624,7 +697,13 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: null,
         callbackBaseUrl: "https://caller.example.com",
+        originAudience: "public",
         initiatorAuth: null,
+        parentTraceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
         remote: { ...createRemoteAgent(), forwardPrincipal: true },
         session: createSession(),
       }),
@@ -633,6 +712,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
       "forwardedPrincipal",
     );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("baggage");
   });
 
   it("does not forward when forwardPrincipal is unset even with auth in scope", async () => {
@@ -653,8 +733,17 @@ describe("startRemoteAgentSession — forwarded principal", () => {
         action: createAction(),
         auth: CURRENT_AUTH,
         callbackBaseUrl: "https://caller.example.com",
+        originAudience: "public",
         initiatorAuth: INITIATOR_AUTH,
-        remote: createRemoteAgent(),
+        parentTraceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+        remote: {
+          ...createRemoteAgent(),
+          headers: { baggage: "vendor=value,eve.audience=public" },
+        },
         session: createSession(),
       }),
     ).resolves.toEqual({ sessionId: "remote-session" });
@@ -662,6 +751,7 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).not.toHaveProperty(
       "forwardedPrincipal",
     );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({ baggage: "vendor=value" });
   });
 });
 

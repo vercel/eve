@@ -1,446 +1,405 @@
-import { z } from "#compiled/zod/index.js";
 import type { RegistryCatalogItem } from "#cli/commands/registry.js";
+import { HumanActionRequiredError } from "#setup/human-action.js";
+import { PlannerNavigationError } from "#setup/prompter.js";
 import type {
+  MultiSelectOptions,
   Prompter,
-  SelectMetadata,
   SelectNotice,
   SelectOption,
   SingleSelectOptions,
 } from "#setup/prompter.js";
-import { runDeployFlow } from "#setup/flows/deploy.js";
-import { detectDeployment } from "#setup/project-resolution.js";
-import type { RegistrySetupFact } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { withSpinner } from "#setup/with-spinner.js";
 
-import { createRegistrySession, type RegistrySession } from "./registry-session.js";
+import { createRegistrySession, type RegistrySessionResult } from "./registry-session.js";
 
-const ADDRESS_PREFIX = "address:";
-const BACK = "action:back";
-const DONE = "action:done";
-const ALL = "category:all";
+type Item = RegistryCatalogItem;
+type Section = keyof typeof SECTIONS;
+type PlannerScreen = Section | "review";
 
-type RegistryRow = string;
-type RegistryCategory = "channel" | "connection" | "extension" | "instrumentation" | "memory";
+const PLANNER_STEPS = ["Channels", "Integrations", "Review"] as const;
 
-const REGISTRY_CATEGORIES: ReadonlyArray<{
-  value: `category:${RegistryCategory}`;
-  prefix: `${RegistryCategory}/`;
-  label: string;
-  hint: string;
-  browseLabel: string;
-}> = [
-  {
-    value: "category:channel",
-    prefix: "channel/",
-    label: "Channels",
-    hint: "Where people talk to your agent — Web, Slack, Discord, Teams",
-    browseLabel: "Browse channels",
-  },
-  {
-    value: "category:connection",
-    prefix: "connection/",
-    label: "MCP connections",
-    hint: "Connect services like Linear, Notion, GitHub, and Vercel",
-    browseLabel: "Browse MCP connections",
-  },
-  {
-    value: "category:extension",
-    prefix: "extension/",
-    label: "Extensions",
-    hint: "Add browser automation, memory, and developer tools",
-    browseLabel: "Browse extensions",
-  },
-  {
-    value: "category:memory",
-    prefix: "memory/",
-    label: "Memory providers",
-    hint: "Retain and recall scoped context across sessions",
-    browseLabel: "Browse memory providers",
-  },
-  {
-    value: "category:instrumentation",
-    prefix: "instrumentation/",
-    label: "Observability",
-    hint: "Trace, evaluate, and monitor your agent",
-    browseLabel: "Browse observability integrations",
-  },
-];
+export interface RegistryPlannerContext {
+  /** Steps owned by an enclosing journey, rendered before the registry steps. */
+  prefixSteps?: readonly { label: string; complete?: boolean }[];
+  /** Facts owned by the enclosing journey, rendered before registry selections. */
+  reviewMetadata?: readonly { label: string; value: string }[];
+  reviewMessage?: string;
+  primaryActionLabel?: string;
+  emptyActionLabel?: string;
+}
 
 export interface RegistryFlowDeps {
   browseRegistryCatalog: (typeof import("#cli/commands/registry.js"))["browseRegistryCatalog"];
-  detectDeployment: typeof detectDeployment;
-  getRegistryItemManifest: (typeof import("#cli/commands/registry.js"))["getRegistryItemManifest"];
   installRegistryItem: (typeof import("#cli/commands/registry.js"))["installRegistryItem"];
-  runDeployFlow: typeof runDeployFlow;
+  detectDeployment: (typeof import("#setup/project-resolution.js"))["detectDeployment"];
+  runDeployFlow: (typeof import("./deploy.js"))["runDeployFlow"];
 }
 
-export type RegistryFlowResult =
-  | {
-      kind: "done";
-      addedItems: readonly string[];
-      items: readonly import("./registry-session.js").RegistrySessionItemResult[];
-      facts: readonly RegistrySetupFact[];
-      output?: readonly string[];
-      deployed?: "production";
-    }
-  | { kind: "cancelled" };
-
 export class RegistryFlowFailedError extends Error {
-  readonly completed: Extract<RegistryFlowResult, { kind: "done" }>;
+  readonly completed: RegistrySessionResult;
 
-  constructor(error: unknown, completed: Extract<RegistryFlowResult, { kind: "done" }>) {
+  constructor(error: unknown, completed: RegistrySessionResult) {
     super(error instanceof Error ? error.message : String(error), { cause: error });
     this.name = "RegistryFlowFailedError";
     this.completed = completed;
   }
 }
 
-function itemLabel(item: RegistryCatalogItem): string {
-  if (item.title !== undefined) return item.title;
-  const name = item.name.split("/").at(-1) ?? item.name;
-  return name
-    .split("-")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+const SECTIONS = {
+  channels: {
+    title: "Where should people reach your agent?",
+    description: "You can add more later with /add.",
+    featured: [
+      "channel/web",
+      "channel/slack",
+      "channel/github",
+      "channel/linear-agent",
+      "channel/photon-imessage",
+    ],
+    includes: (item: Item) => item.name.startsWith("channel/"),
+  },
+  integrations: {
+    title: "What should your agent be able to work with?",
+    featured: [
+      "extension/github-tools",
+      "connection/linear",
+      "connection/notion",
+      "connection/vercel",
+      "extension/agent-browser",
+    ],
+    includes: (item: Item) =>
+      !item.name.startsWith("channel/") && !item.name.startsWith("experimental/"),
+  },
+} as const;
+
+function label(item: Item): string {
+  return item.title ?? item.name.split("/").at(-1) ?? item.name;
 }
 
-function itemRows(items: readonly RegistryCatalogItem[]): SelectOption<RegistryRow>[] {
-  return items.map((item, index) => ({
-    value: `item:${index}`,
-    label: itemLabel(item),
-    hint: item.description ?? item.type,
+function isPlannerItem(section: Section, item: Item): boolean {
+  return item.name.includes("/") && SECTIONS[section].includes(item);
+}
+
+function orderedSectionItems(section: Section, catalog: readonly Item[]): Item[] {
+  const matching = catalog.filter((item) => isPlannerItem(section, item));
+  const featured = SECTIONS[section].featured
+    .map((name) => matching.find((item) => item.name === name))
+    .filter((item): item is Item => item !== undefined);
+  const featuredAddresses = new Set(featured.map((item) => item.address));
+  return [...featured, ...matching.filter((item) => !featuredAddresses.has(item.address))];
+}
+
+function plannerLabel(item: Item): string {
+  return item.name === "connection/linear" ? "Linear MCP" : label(item);
+}
+
+function sectionRows(section: Section, catalog: readonly Item[]): SelectOption<string>[] {
+  return orderedSectionItems(section, catalog).map((item) => ({
+    value: item.address,
+    label: plannerLabel(item),
+    hint: item.description,
   }));
 }
 
-function categoryRows(): SelectOption<RegistryRow>[] {
-  return [
-    ...REGISTRY_CATEGORIES.map((category) => ({
-      value: category.value,
-      label: category.label,
-      hint: category.hint,
-    })),
-    {
-      value: ALL,
-      label: "Browse all",
-      hint: "Search every integration or enter an item address",
-    },
-    { value: DONE, label: "Return to chat", trailingAction: true },
-  ];
+function selectedInSection(
+  section: Section,
+  catalog: readonly Item[],
+  selected: ReadonlySet<string>,
+): string[] {
+  return catalog
+    .filter((item) => isPlannerItem(section, item) && selected.has(item.address))
+    .map((item) => item.address);
 }
 
-function categoryFor(selectedCategory: RegistryRow) {
-  return REGISTRY_CATEGORIES.find((entry) => entry.value === selectedCategory);
-}
-
-function itemsForCategory(
-  items: readonly RegistryCatalogItem[],
-  selectedCategory: RegistryRow,
-): readonly RegistryCatalogItem[] {
-  if (selectedCategory === ALL) return items;
-  const category = categoryFor(selectedCategory);
-  return category === undefined
-    ? items
-    : items.filter(
-        (item) => item.address.startsWith(category.prefix) || item.name.startsWith(category.prefix),
-      );
-}
-
-function stringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : [];
-}
-
-function itemSource(address: string): string {
-  if (address.startsWith("@")) return address.split("/")[0] ?? address;
-  if (/^https?:\/\//u.test(address)) {
-    try {
-      return new URL(address).host;
-    } catch {
-      return address;
-    }
-  }
-  return "Vercel";
-}
-
-function manifestRecord(manifest: unknown): Record<string, unknown> {
-  return typeof manifest === "object" && manifest !== null && !Array.isArray(manifest)
-    ? (manifest as Record<string, unknown>)
-    : {};
-}
-
-const RegistryDocumentationSchema = z.object({
-  meta: z
-    .object({
-      eve: z.object({ docs: z.string().min(1).optional() }).optional(),
-    })
-    .optional(),
-});
-
-function documentationLink(manifest: Record<string, unknown>): string | undefined {
-  const docs = RegistryDocumentationSchema.safeParse(manifest).data?.meta?.eve?.docs;
-  if (docs === undefined) return undefined;
-  return docs.startsWith("/") ? `https://eve.dev${docs}` : docs;
-}
-
-function summarizeDetails(values: readonly string[], limit = 3): string {
-  const visible = values.slice(0, limit);
-  const remaining = values.length - visible.length;
-  return remaining > 0 ? `${visible.join(", ")} … (+${remaining} more)` : visible.join(", ");
-}
-
-function environmentVariables(manifest: Record<string, unknown>): string[] {
-  const envVars = manifest.envVars;
-  return typeof envVars === "object" && envVars !== null && !Array.isArray(envVars)
-    ? Object.keys(envVars)
-    : [];
-}
-
-function itemDetails(
-  item: RegistryCatalogItem,
-  manifest: Record<string, unknown>,
-): SelectMetadata[] {
-  const details: SelectMetadata[] = [{ label: "Source", value: item.source }];
-  const dependencies = [
-    ...stringArray(manifest.dependencies),
-    ...stringArray(manifest.devDependencies),
-    ...stringArray(manifest.registryDependencies),
-  ];
-  if (dependencies.length > 0)
-    details.push({ label: "Packages", value: summarizeDetails(dependencies) });
-  const environment = environmentVariables(manifest);
-  if (environment.length > 0) {
-    details.push({ label: "Environment", value: summarizeDetails(environment) });
-  }
-  const files = Array.isArray(manifest.files) ? manifest.files : [];
-  const targets = files.flatMap((file) => {
-    if (typeof file !== "object" || file === null || Array.isArray(file)) return [];
-    const target = (file as Record<string, unknown>).target;
-    return typeof target === "string" ? [target] : [];
-  });
-  if (targets.length > 0) details.push({ label: "Files", value: summarizeDetails(targets) });
-  return details;
-}
-
-async function inspectItem(
-  prompter: Prompter,
-  deps: RegistryFlowDeps,
-  appRoot: string,
-  item: RegistryCatalogItem,
-  resolvedManifest?: Record<string, unknown>,
-  signal?: AbortSignal,
-): Promise<
-  | {
-      kind: "added";
-      output: readonly string[];
-      documentation?: string;
-      environment?: readonly string[];
-      setup?: Awaited<ReturnType<RegistryFlowDeps["installRegistryItem"]>>["setup"];
-    }
-  | { kind: "back" }
-> {
-  const manifest =
-    resolvedManifest ??
-    manifestRecord(
-      await withSpinner(prompter, "Loading registry item…", () =>
-        deps.getRegistryItemManifest(appRoot, item.address),
-      ),
-    );
-  while (true) {
-    const request: SingleSelectOptions<string> = {
-      message: typeof manifest.title === "string" ? manifest.title : item.name,
-      metadata: itemDetails(item, manifest),
-      options: [
-        { value: "add", label: "Add to project" },
-        { value: "back", label: "Back" },
-      ],
-    };
-    const description =
-      typeof manifest.description === "string" ? manifest.description : item.description;
-    if (description !== undefined) request.description = description;
-    const action = await prompter.select(request);
-    if (action === "back") return { kind: "back" };
-    const spinner = prompter.log.spinner?.(`Installing ${itemLabel(item)} and dependencies…`);
-    try {
-      spinner?.stop();
-      const install = () =>
-        deps.installRegistryItem(appRoot, item.address, {
-          silent: true,
-          prompter,
-          signal,
-        });
-      const result = await (prompter.withExclusiveTerminal?.(install) ?? install());
-      return {
-        kind: "added",
-        documentation: documentationLink(manifest),
-        environment: environmentVariables(manifest),
-        ...result,
-      };
-    } finally {
-      spinner?.stop();
-    }
-  }
-}
-
-async function resolveAddressItem(
-  prompter: Prompter,
-  deps: RegistryFlowDeps,
-  appRoot: string,
-  address: string,
-): Promise<{ item: RegistryCatalogItem; manifest: Record<string, unknown> }> {
-  const manifest = await withSpinner(prompter, "Loading registry item…", () =>
-    deps.getRegistryItemManifest(appRoot, address),
-  );
-  const record = manifestRecord(manifest);
-  const item: RegistryCatalogItem = {
-    address,
-    name: typeof record.name === "string" ? record.name : address,
-    source: itemSource(address),
+function plannerNavigation(
+  activeStep: number,
+  input: {
+    catalog: readonly Item[];
+    selected: ReadonlySet<string>;
+    plannerContext?: RegistryPlannerContext;
+  },
+): NonNullable<MultiSelectOptions<string>["navigation"]> {
+  const prefix = (input.plannerContext?.prefixSteps ?? []).map((step) => ({
+    label: step.label,
+    complete: step.complete,
+  }));
+  return {
+    kind: "planner",
+    activeStep: prefix.length + activeStep,
+    firstNavigableStep: prefix.length,
+    steps: [
+      ...prefix,
+      ...PLANNER_STEPS.map((label, index) => {
+        if (index === 2) return { label };
+        const section = index === 0 ? "channels" : "integrations";
+        const count = selectedInSection(section, input.catalog, input.selected).length;
+        return count === 0 ? { label } : { label, count };
+      }),
+    ],
   };
-  if (typeof record.type === "string") item.type = record.type;
-  if (typeof record.description === "string") item.description = record.description;
-  return { item, manifest: record };
 }
 
-/**
- * Confirms, installs, and settles one resolved item. `undefined` means the flow
- * keeps browsing — the user backed out of the item, or asked to add more.
- */
-async function offerItem(
-  input: { appRoot: string; prompter: Prompter; signal?: AbortSignal },
-  deps: RegistryFlowDeps,
-  session: RegistrySession,
-  item: RegistryCatalogItem,
-  manifest?: Record<string, unknown>,
-): Promise<RegistryFlowResult | undefined> {
-  const inspected = await inspectItem(
-    input.prompter,
-    deps,
-    input.appRoot,
-    item,
-    manifest,
-    input.signal,
+function replaceSectionSelection(input: {
+  section: Section;
+  catalog: readonly Item[];
+  selected: Set<string>;
+  addresses: readonly string[];
+}): void {
+  for (const item of input.catalog) {
+    if (isPlannerItem(input.section, item)) input.selected.delete(item.address);
+  }
+  for (const address of input.addresses) input.selected.add(address);
+}
+
+async function editSection(input: {
+  section: Section;
+  prompter: Prompter;
+  catalog: readonly Item[];
+  selected: Set<string>;
+  notices?: readonly SelectNotice[];
+}): Promise<"back" | "forward"> {
+  const { section, catalog, prompter, selected } = input;
+  const request: MultiSelectOptions<string> = {
+    message: SECTIONS[section].title,
+    multiple: true,
+    search: true,
+    placeholder: section === "channels" ? "Search channels" : "Search integrations",
+    navigation: plannerNavigation(section === "channels" ? 0 : 1, input),
+    initialValues: selectedInSection(section, catalog, selected),
+    options: sectionRows(section, catalog),
+  };
+  if (section === "channels") request.description = SECTIONS.channels.description;
+  if (input.notices !== undefined) request.notices = input.notices;
+  try {
+    const addresses = await prompter.select(request);
+    replaceSectionSelection({ section, catalog, selected, addresses });
+    return "forward";
+  } catch (error) {
+    if (!(error instanceof PlannerNavigationError)) throw error;
+    const addresses = error.values.map((value) => {
+      if (typeof value !== "string")
+        throw new Error("Registry planner returned a non-string item.");
+      return value;
+    });
+    replaceSectionSelection({ section, catalog, selected, addresses });
+    return error.direction;
+  }
+}
+
+async function editPlan(input: {
+  prompter: Prompter;
+  catalog: readonly Item[];
+  itemsByAddress: ReadonlyMap<string, Item>;
+  selected: Set<string>;
+  notices?: readonly SelectNotice[];
+  plannerContext?: RegistryPlannerContext;
+}): Promise<"install" | "cancelled"> {
+  let screen: PlannerScreen = "channels";
+  let notices = input.notices;
+  while (true) {
+    if (screen !== "review") {
+      try {
+        const direction = await editSection({
+          ...input,
+          section: screen,
+          notices,
+        });
+        notices = undefined;
+        if (direction === "back") {
+          if (screen === "integrations") screen = "channels";
+        } else {
+          screen = screen === "channels" ? "integrations" : "review";
+        }
+      } catch (error) {
+        if (!(error instanceof WizardCancelledError)) throw error;
+        return "cancelled";
+      }
+      continue;
+    }
+
+    try {
+      const hasSelections = input.selected.size > 0;
+      const selectedItems = [...input.selected].map((address) => {
+        const item = input.itemsByAddress.get(address);
+        if (item === undefined)
+          throw new Error(`Registry item "${address}" is no longer available.`);
+        return item;
+      });
+      const channels = selectedItems.filter((item) => item.name.startsWith("channel/"));
+      const integrations = selectedItems.filter((item) => !item.name.startsWith("channel/"));
+      const selectionMetadata = [
+        ...(channels.length === 0
+          ? []
+          : [{ label: "Channels", value: channels.map(label).join(", ") }]),
+        ...(integrations.length === 0
+          ? []
+          : [{ label: "Integrations", value: integrations.map(label).join(", ") }]),
+      ];
+      const request: SingleSelectOptions<"install" | "back"> = {
+        message: input.plannerContext?.reviewMessage ?? "Review additions",
+        metadata: [...(input.plannerContext?.reviewMetadata ?? []), ...selectionMetadata],
+        navigation: plannerNavigation(2, input),
+        options: [
+          {
+            value: "install",
+            label: hasSelections
+              ? (input.plannerContext?.primaryActionLabel ?? "Install and set up")
+              : (input.plannerContext?.emptyActionLabel ?? "Finish without adding"),
+          },
+          { value: "back", label: "Back" },
+        ],
+      };
+      if (!hasSelections) request.description = "No channels or integrations selected.";
+      if (notices !== undefined) request.notices = notices;
+      const review = await input.prompter.select(request);
+      notices = undefined;
+      if (review === "install") return "install";
+    } catch (error) {
+      if (error instanceof PlannerNavigationError && error.direction === "back") {
+        screen = "integrations";
+        continue;
+      }
+      if (!(error instanceof WizardCancelledError)) throw error;
+      return "cancelled";
+    }
+    screen = "integrations";
+  }
+}
+
+function hasSettledOutcomes(
+  result: RegistrySessionResult | undefined,
+): result is RegistrySessionResult {
+  return (
+    result !== undefined &&
+    (result.items.length > 0 || result.failures.length > 0 || result.outcomes !== undefined)
   );
-  if (inspected.kind !== "added") return undefined;
-  const output = [...inspected.output];
-  if (inspected.environment !== undefined && inspected.environment.length > 0) {
-    output.push(`Environment: ${inspected.environment.join(", ")}`);
-  }
-  if (inspected.documentation !== undefined) {
-    output.push(`Setup: ${inspected.documentation}`);
-  }
-  session.add(item.address, itemLabel(item), output, inspected.setup);
-  const next = await session.continueAfterInstall({
-    appRoot: input.appRoot,
-    prompter: input.prompter,
-    signal: input.signal,
-  });
-  return next === "add-more" ? undefined : next;
 }
 
-/**
- * Runs the categorized interactive registry catalog used by the dev TUI's
- * `/add`. `initialAddress` — `/add channel/slack` — skips the category and
- * search screens and opens that item's confirmation directly; backing out of it
- * lands on the same category hub the browser starts from.
- */
+/** Collects a channel and integration plan, then installs every chosen item in order. */
 export async function runRegistryFlow(input: {
   appRoot: string;
   prompter: Prompter;
   signal?: AbortSignal;
+  /** Registry item supplied by `/add <item>`, confirmed and installed directly. */
   initialAddress?: string;
+  plannerContext?: RegistryPlannerContext;
+  onItemStart?: (item: Item, index: number, total: number) => void;
+  /** Gives each installation its own cancellation boundary without ending the batch. */
+  runItem?<T>(task: (signal?: AbortSignal) => Promise<T>): Promise<T>;
   deps?: Partial<RegistryFlowDeps>;
-}): Promise<RegistryFlowResult> {
-  let loaded: typeof import("#cli/commands/registry.js") | undefined;
-  if (
-    input.deps?.browseRegistryCatalog === undefined ||
-    input.deps.getRegistryItemManifest === undefined ||
-    input.deps.installRegistryItem === undefined
-  ) {
-    loaded = await import("#cli/commands/registry.js");
-  }
-  const deps: RegistryFlowDeps = {
-    browseRegistryCatalog: input.deps?.browseRegistryCatalog ?? loaded!.browseRegistryCatalog,
-    detectDeployment: input.deps?.detectDeployment ?? detectDeployment,
-    getRegistryItemManifest: input.deps?.getRegistryItemManifest ?? loaded!.getRegistryItemManifest,
-    installRegistryItem: input.deps?.installRegistryItem ?? loaded!.installRegistryItem,
-    runDeployFlow: input.deps?.runDeployFlow ?? runDeployFlow,
-  };
-  let notices: SelectNotice[] = [];
-  const session = createRegistrySession(deps);
-  const initialAddress = input.initialAddress?.trim();
-  let pendingAddress = initialAddress === "" ? undefined : initialAddress;
-
+}): Promise<{ kind: "done"; result: RegistrySessionResult } | { kind: "cancelled" }> {
+  let session: ReturnType<typeof createRegistrySession> | undefined;
   try {
-    while (true) {
-      input.signal?.throwIfAborted();
-      if (pendingAddress !== undefined) {
-        const address = pendingAddress;
-        pendingAddress = undefined;
-        const resolved = await resolveAddressItem(input.prompter, deps, input.appRoot, address);
-        const settled = await offerItem(input, deps, session, resolved.item, resolved.manifest);
-        if (settled !== undefined) return settled;
-        continue;
-      }
-      const catalog = await withSpinner(input.prompter, "Loading registry…", () =>
-        deps.browseRegistryCatalog(input.appRoot),
+    const initialAddress = input.initialAddress?.trim();
+    let items: Item[];
+    if (initialAddress !== undefined && initialAddress !== "") {
+      const confirmed = await input.prompter.select({
+        message: `Add ${initialAddress}?`,
+        options: [
+          { value: "install" as const, label: "Install and set up" },
+          { value: "cancel" as const, label: "Cancel" },
+        ],
+      });
+      if (confirmed === "cancel") return { kind: "cancelled" };
+      items = [{ address: initialAddress, name: initialAddress, source: "Registry" }];
+    } else {
+      const browseRegistryCatalog =
+        input.deps?.browseRegistryCatalog ??
+        (await import("#cli/commands/registry.js")).browseRegistryCatalog;
+      const catalogResult = await withSpinner(input.prompter, "Loading registry…", () =>
+        browseRegistryCatalog(input.appRoot),
       );
-      notices = [
-        ...notices,
-        ...catalog.errors.map((error) => ({
-          tone: "warning" as const,
-          text: `${error.registry}: ${error.message}`,
-        })),
-      ];
-      const selectedCategory = await input.prompter.select<RegistryRow>({
-        message: "Add an integration",
-        options: categoryRows(),
-        hintLayout: "inline",
+      const catalog = [...catalogResult.items];
+      const selected = new Set<string>();
+      const notices = catalogResult.errors.map((error) => ({
+        tone: "warning" as const,
+        text: `${error.registry}: ${error.message}`,
+      }));
+      const itemsByAddress = new Map(catalog.map((item) => [item.address, item]));
+      const plan = await editPlan({
+        prompter: input.prompter,
+        catalog,
+        itemsByAddress,
+        selected,
         notices,
+        plannerContext: input.plannerContext,
       });
-      notices = [];
-      if (selectedCategory === DONE) return session.result();
-
-      const categoryItems = itemsForCategory(catalog.items, selectedCategory);
-      const rows = itemRows(categoryItems);
-      rows.push({ value: BACK, label: "Back", trailingAction: true });
-      const selected = await input.prompter.select<RegistryRow>({
-        message: categoryFor(selectedCategory)?.browseLabel ?? "Browse integrations",
-        options: rows,
-        search: true,
-        placeholder: "Search integrations or enter an item address",
-        searchAction: {
-          label: (query) => `Add “${query}”`,
-          value: (query) => `${ADDRESS_PREFIX}${query.trim()}`,
-        },
-        hintLayout: "inline",
+      if (plan !== "install") return { kind: "cancelled" };
+      items = [...selected].map((address) => {
+        const item = itemsByAddress.get(address);
+        if (item === undefined)
+          throw new Error(`Registry item "${address}" is no longer available.`);
+        return item;
       });
-      if (selected === BACK) continue;
-      const resolved = selected.startsWith(ADDRESS_PREFIX)
-        ? await resolveAddressItem(
-            input.prompter,
-            deps,
-            input.appRoot,
-            selected.slice(ADDRESS_PREFIX.length),
-          )
-        : { item: categoryItems[Number(selected.slice("item:".length))] };
-      if (resolved.item === undefined) {
-        throw new Error("The selected registry item is no longer available.");
-      }
-      const settled = await offerItem(
-        input,
-        deps,
-        session,
-        resolved.item,
-        "manifest" in resolved ? resolved.manifest : undefined,
-      );
-      if (settled !== undefined) return settled;
     }
+
+    const installRegistryItem =
+      input.deps?.installRegistryItem ??
+      (await import("#cli/commands/registry.js")).installRegistryItem;
+    const detectDeployment =
+      input.deps?.detectDeployment ??
+      (await import("#setup/project-resolution.js")).detectDeployment;
+    const runDeployFlow = input.deps?.runDeployFlow ?? (await import("./deploy.js")).runDeployFlow;
+    session = createRegistrySession({ detectDeployment, runDeployFlow });
+    const activeSession = session;
+    for (const [index, item] of items.entries()) {
+      input.signal?.throwIfAborted();
+      input.onItemStart?.(item, index, items.length);
+      try {
+        const install = (signal = input.signal) =>
+          installRegistryItem(input.appRoot, item.address, {
+            silent: true,
+            prompter: input.prompter,
+            signal,
+          });
+        const run = () => (input.runItem === undefined ? install() : input.runItem(install));
+        const installed = await (input.prompter.withExclusiveTerminal?.(run) ?? run());
+        activeSession.add(label(item), installed.output, installed.setup);
+      } catch (error) {
+        input.signal?.throwIfAborted();
+        if (error instanceof WizardCancelledError) {
+          activeSession.addCancellation(label(item));
+          continue;
+        }
+        if (error instanceof HumanActionRequiredError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const failureMessage = message.trim() || "Installation failed.";
+        const summary = failureMessage.split("\n").find((line) => line.trim() !== "");
+        activeSession.addFailure(label(item), failureMessage);
+        const request: SingleSelectOptions<"skip" | "cancel"> = {
+          message: `Couldn't add ${label(item)}`,
+          options: [
+            { value: "skip", label: `Skip ${label(item)}` },
+            { value: "cancel", label: "Cancel setup" },
+          ],
+        };
+        if (summary !== undefined) request.description = summary;
+        const action = await input.prompter.select(request);
+        if (action === "cancel") {
+          return { kind: "done", result: { ...activeSession.result(), cancelled: true } };
+        }
+      }
+    }
+    return {
+      kind: "done",
+      result: await activeSession.continueAfterInstall({
+        appRoot: input.appRoot,
+        prompter: input.prompter,
+        signal: input.signal,
+      }),
+    };
   } catch (error) {
-    if (error instanceof WizardCancelledError) return { kind: "cancelled" };
-    const completed = session.result();
-    if (completed.addedItems.length > 0) throw new RegistryFlowFailedError(error, completed);
+    if (error instanceof WizardCancelledError) {
+      const settled = session?.result();
+      return hasSettledOutcomes(settled)
+        ? { kind: "done", result: { ...settled, cancelled: true } }
+        : { kind: "cancelled" };
+    }
+    const settled = session?.result();
+    if (hasSettledOutcomes(settled)) {
+      throw new RegistryFlowFailedError(error, settled);
+    }
     throw error;
   }
 }

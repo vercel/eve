@@ -45,16 +45,26 @@ export function readTrustedDevelopmentClientAddress(
 ): string | undefined {
   const address = headers.get(DEVELOPMENT_CLIENT_ADDRESS_HEADER);
   const signature = headers.get(DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER);
-  if (
-    address === null ||
-    signature === null ||
-    secret === undefined ||
-    secret.length === 0 ||
-    !timingSafeEqualStrings(signature, signClientAddress(address, secret))
-  ) {
-    return undefined;
-  }
-  return address;
+  return address !== null &&
+    signature !== null &&
+    isTrustedDevelopmentClientAddress(address, signature, secret)
+    ? address
+    : undefined;
+}
+
+/** Verifies parent-stamped client provenance carried beyond the original request. */
+export function isTrustedDevelopmentClientAddress(
+  address: string,
+  signature: string,
+  secret: string | undefined,
+): boolean {
+  return (
+    address.length > 0 &&
+    signature.length > 0 &&
+    secret !== undefined &&
+    secret.length > 0 &&
+    timingSafeEqualStrings(signature, signClientAddress(address, secret))
+  );
 }
 
 /**

@@ -1,6 +1,11 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
 import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  type DurableSession,
+  type DurableSessionState,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
+import { readWorkflowToolExecutor } from "#execution/tool-run/background.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
@@ -9,10 +14,14 @@ import {
   toProxyInputRequestEntries,
   upsertProxyInputRequestState,
 } from "#harness/proxy-input-requests.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
+import { type AgentHandle, getAgentHandleStore } from "#harness/handles/store.js";
 import { removeTaskAgentAddressFromState } from "#harness/handles/transitions.js";
 import { isInputRequest } from "#shared/input.js";
-import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
+import {
+  cacheTerminalTaskView,
+  findSessionTaskEntry,
+  type SessionTaskIndexEntry,
+} from "#tasks/session-index.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { isTerminalTaskStatus, readSubagentTaskMetadata, type TaskView } from "#tasks/types.js";
 
@@ -34,24 +43,10 @@ export async function recordTaskInputRequestStep(input: {
 
   const durableSession = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.taskId);
-  const entryMetadata = entry === undefined ? undefined : readSubagentTaskMetadata(entry);
-  const handle = (getAgentHandleStore(durableSession.state)?.handles ?? []).find(
-    (candidate) =>
-      candidate.phase === "addressed" && candidate.identity.id === entryMetadata?.agentId,
-  );
-  if (
-    entry === undefined ||
-    handle?.phase !== "addressed" ||
-    handle.address.sessionId !== input.hookPayload.childSessionId
-  ) {
+  if (entry === undefined) {
     return { accepted: false, sessionState: input.sessionState };
   }
-  // Remote creates are ID-addressed and return no continuation token, so
-  // provenance rests on the sessionId match above plus the strict view
-  // checks below; the child-advertised token is only used as the answer
-  // route, never as an identity anchor.
   const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-  const viewMetadata = view === undefined ? undefined : readSubagentTaskMetadata(view);
   const eventRequestIds = input.hookPayload.event.requests.map((request) => request.requestId);
   const viewRequestIds =
     view?.inputRequests?.map((request) =>
@@ -62,14 +57,33 @@ export async function recordTaskInputRequestStep(input: {
   if (
     view?.status !== "input_required" ||
     !input.hookPayload.event.requests.every(isInputRequest) ||
-    viewMetadata?.mode !== (handle.address.kind === "agent/remote" ? "remote" : "local") ||
-    viewMetadata.agentId !== entryMetadata?.agentId ||
-    view.executor?.childSessionId !== input.hookPayload.childSessionId ||
     new Set(eventRequestIds).size !== eventRequestIds.length ||
     eventRequestIds.length !== viewRequestIds.length ||
     eventRequestIds.some((requestId, index) => requestId !== viewRequestIds[index])
   ) {
     return { accepted: false, sessionState: input.sessionState };
+  }
+
+  // The child-advertised token is an answer route, not an identity anchor: a
+  // tool run is identified by its run id, a subagent child by its addressed handle.
+  const toolRun = readWorkflowToolExecutor(view.executor?.binding);
+  if (toolRun !== undefined && toolRun.runId !== input.hookPayload.childSessionId) {
+    return { accepted: false, sessionState: input.sessionState };
+  }
+  const handle =
+    toolRun === undefined ? findAddressedTaskHandle(durableSession.state, entry) : undefined;
+  if (toolRun === undefined) {
+    const entryMetadata = readSubagentTaskMetadata(entry);
+    const viewMetadata = readSubagentTaskMetadata(view);
+    if (
+      handle === undefined ||
+      handle.address.sessionId !== input.hookPayload.childSessionId ||
+      viewMetadata?.mode !== (handle.address.kind === "agent/remote" ? "remote" : "local") ||
+      viewMetadata.agentId !== entryMetadata?.agentId ||
+      view.executor?.childSessionId !== input.hookPayload.childSessionId
+    ) {
+      return { accepted: false, sessionState: input.sessionState };
+    }
   }
 
   const hookPayload = namespaceTaskInputRequests(input.hookPayload, input.taskId);
@@ -85,7 +99,7 @@ export async function recordTaskInputRequestStep(input: {
       ] as const;
     },
   );
-  if (handle.address.kind === "agent/remote") {
+  if (handle?.address.kind === "agent/remote") {
     const childResponseUrl = createRemoteTaskInputCallbackUrl(
       handle.address.url,
       createEveTaskInputRoutePath(
@@ -113,6 +127,18 @@ export async function recordTaskInputRequestStep(input: {
       },
     },
   };
+}
+
+function findAddressedTaskHandle(
+  state: DurableSession["state"],
+  entry: SessionTaskIndexEntry,
+): Extract<AgentHandle, { phase: "addressed" }> | undefined {
+  const agentId = readSubagentTaskMetadata(entry)?.agentId;
+  if (agentId === undefined) return undefined;
+  return (getAgentHandleStore(state)?.handles ?? []).find(
+    (candidate): candidate is Extract<AgentHandle, { phase: "addressed" }> =>
+      candidate.phase === "addressed" && candidate.identity.id === agentId,
+  );
 }
 
 function namespaceTaskInputRequests(

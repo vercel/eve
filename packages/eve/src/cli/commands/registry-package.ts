@@ -94,7 +94,12 @@ async function selectComponents(
         installed: false,
         completedItems: [],
         question: wireQuestion,
-        next: headlessSetupContinuation({ item, installed: false, question: wireQuestion }),
+        next: headlessSetupContinuation({
+          item,
+          installed: false,
+          answers: options.answers,
+          question: wireQuestion,
+        }),
       }),
     );
     process.exitCode = 2;

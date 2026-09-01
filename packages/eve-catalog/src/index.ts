@@ -330,7 +330,8 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     slug: "supermemory",
     name: "Supermemory",
     kind: "memory",
-    tagline: "Recall relevant context, capture completed turns, and manage durable memory.",
+    tagline:
+      "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -631,6 +632,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       description:
         "Natural: agentic payments — send and request payments, check balances, and move funds.",
       mcp: { url: "https://mcp.natural.com/mcp" },
+    },
+  },
+  {
+    slug: "neon",
+    name: "Neon",
+    kind: "connection",
+    tagline: "Manage Neon projects, run queries, and make schema changes.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Neon: manage projects, run queries, and make schema changes.",
+      mcp: { url: "https://mcp.neon.tech/mcp" },
     },
   },
   {

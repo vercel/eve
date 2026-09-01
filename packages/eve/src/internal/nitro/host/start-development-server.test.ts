@@ -603,6 +603,33 @@ describe("createDevelopmentServer", () => {
     await server.close();
   });
 
+  it("passes an acquisition lease through suspend and resume control requests", async () => {
+    const startDevelopmentServer = await loadStartDevelopmentServer();
+    const server = await startDevelopmentServer("/tmp/eve-test");
+
+    await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts/suspend?lease=install-1",
+      { method: "POST" },
+    );
+    await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts/resume?lease=install-1",
+      { method: "POST" },
+    );
+
+    expect(mocks.authoredSourceWatcher.suspend).toHaveBeenCalledWith("install-1");
+    expect(mocks.authoredSourceWatcher.resume).toHaveBeenCalledWith("install-1", {
+      silent: false,
+    });
+
+    const missingLease = await callControlHandler(
+      "http://localhost/eve/v1/dev/runtime-artifacts/suspend",
+      { method: "POST" },
+    );
+    expect(missingLease?.status).toBe(400);
+
+    await server.close();
+  });
+
   it("registers a host-owned runtime rebuild handler that forces the live watcher", async () => {
     const startDevelopmentServer = await loadStartDevelopmentServer();
     const server = await startDevelopmentServer("/tmp/eve-test");

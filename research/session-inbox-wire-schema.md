@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
 status: proposed
-last_updated: "2026-08-18"
+last_updated: "2026-08-31"
 ---
 
 # Versioned wire schema for the session inbox
@@ -79,6 +79,12 @@ Normative rules:
   `VersionMigration`, freeze the new shape. Historic versions live on as
   executable migrations plus frozen payload fixtures (the turn-workflow
   precedent), not as retained schemas.
+- **Protocol data and migration policy stay separate.** A `*.vN.ts` module
+  owns the immutable schema and version-bound encoder. A
+  `*.vN.migration.ts` module is a pure data transform with no normalization or
+  version-selection dependencies. The encoder and decoder facades own mutable
+  policy: selecting a target, assembling the chain, and normalizing values
+  received from another Workflow VM realm.
 - **The complete transported value is validated once, at encode.** The
   schema owns the envelope and every eve-owned `DeliverPayload` field,
   composing the existing strict `inputResponseSchema` and
@@ -194,6 +200,10 @@ mechanical guard in the existing CI lint job (`pnpm guard:invariants`):
   TypeScript requires an encoder for every registered stamped version. The
   required unit tier then encodes and decodes every registry entry, while each
   version's frozen contract pins its exact shape and backwards migration.
+- Rule 40 also freezes pure `*.vN.migration.ts` modules with their tests and
+  rejects policy imports from those transforms. A one-time historical rewrite
+  is represented by exact old/new Git blob hashes, so the exception expires as
+  soon as the approved rewrite reaches `main`.
 - Exact current-version bytes stay in the unit contract, where the encoded
   object can be asserted without decoding workflow-owned serde. The
   deterministic registry checks cover future stamped-version changes. The

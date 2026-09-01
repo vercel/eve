@@ -65,12 +65,16 @@ describe("runIntegrationConnect", () => {
       appRoot: "/project",
       slug: "agentcard",
       service: "mcp.agentcard.sh/mcp",
-      options: { creationType: "agentcard", connectionMethod: "mcp" },
+      options: { creationType: "agentcard", connectionMethod: "mcp", principalType: "app" },
       dependencies: deps,
     });
 
     expect(deps.setupConnectionConnector).toHaveBeenCalledWith(
-      expect.objectContaining({ creationType: "agentcard", connectionMethod: "mcp" }),
+      expect.objectContaining({
+        creationType: "agentcard",
+        connectionMethod: "mcp",
+        principalType: "app",
+      }),
     );
   });
 

@@ -32,9 +32,12 @@ export interface RemoteAgentDefinition {
    * session's initiator pinned. Defaults to `false` — forwarding identity to
    * another deployment is an explicit decision, never ambient.
    *
-   * Only principal metadata crosses the wire, never tokens or credentials —
-   * {@link auth} keeps authenticating *this* deployment to the remote. The
-   * receiver must opt in with `eveChannel({ trustedForwarders })`;
+   * When the parent trace is sampled and its audience is public, the same
+   * option adds `eve.audience=public` to W3C Baggage. A receiver that accepts
+   * this deployment through `eveChannel({ trustedForwarders })` uses that
+   * audience for its own trace policy. Only principal and public-audience
+   * metadata cross the wire, never tokens or credentials — {@link auth} keeps
+   * authenticating *this* deployment to the remote.
    * a receiver that refuses the forwarder (or accepts no forwarded principal
    * at all) rejects with 403 and the dispatch fails.
    */

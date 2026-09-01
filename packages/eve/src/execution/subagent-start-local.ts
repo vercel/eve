@@ -1,4 +1,6 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import type { LocalDevRequestProvenance } from "#context/keys.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
@@ -34,10 +36,12 @@ export async function startLocalSubagent(input: {
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
+  readonly selfAgent: boolean;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
   readonly taskOwned: boolean;
@@ -69,6 +73,7 @@ export async function startLocalSubagent(input: {
     parentTraceContext: input.parentTraceContext,
     activityObserver,
     sandboxSessionId: input.sandboxSessionId,
+    selfAgent: input.selfAgent,
     session: input.session,
     source,
   });
@@ -94,7 +99,10 @@ export async function startLocalSubagent(input: {
 
   let childSessionId: string;
   try {
-    const handle = await childRuntime.createSession(runInput);
+    const handle = await contextStorage.run(
+      new ContextContainer({ localDevRequest: input.localDevRequest }),
+      () => childRuntime.createSession(runInput),
+    );
     childSessionId = handle.sessionId;
   } catch (error) {
     if (!isRuntimeSessionOwnershipConflictError(error)) {

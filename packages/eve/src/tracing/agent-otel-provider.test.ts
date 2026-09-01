@@ -4,6 +4,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
   type ReadableSpan,
+  type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
 
@@ -13,6 +14,7 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionTraceSeedKey } from "#context/keys.js";
 import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import {
@@ -37,6 +39,7 @@ import {
   type InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import {
   actionIdempotencyKey,
@@ -69,12 +72,13 @@ function createRuntime(
     recordInputs: true,
     recordOutputs: true,
   }),
+  extraSpanProcessors: readonly SpanProcessor[] = [],
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
   const provider = new BasicTracerProvider({
     idGenerator,
-    spanProcessors: [new SimpleSpanProcessor(exporter)],
+    spanProcessors: [new SimpleSpanProcessor(exporter), ...extraSpanProcessors],
   });
   const tracer = provider.getTracer("eve.agent");
   const agentOtelInput: Omit<AgentOtelInstrumentationInput, "tracePolicy"> & {
@@ -881,6 +885,127 @@ describe("createAgentOtelInstrumentation", () => {
     });
   });
 
+  it("preserves a private decision already intersected with a forwarded ceiling", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    stateStore.setSession("session-forwarded-private", {
+      channelAudience: "private",
+      context: spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      rootSessionId: "session-forwarded-private",
+    });
+    const runtime = createRuntime(stateStore, null);
+    const ctx = new ContextContainer();
+    ctx.set(SessionTraceSeedKey, {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
+    });
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runtime.projectEvent(modelStartedEvent("session-forwarded-private")),
+      ),
+    ).resolves.toMatchObject({ input: { instructions: "private prompt" } });
+  });
+
+  it("applies a fail-closed forwarded ceiling to event-carried trace seeds", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+    const ctx = new ContextContainer();
+    const traceSeed = {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      forwardedTracePolicy: { originAudience: "public" },
+    } as never;
+    ctx.set(SessionTraceSeedKey, traceSeed);
+    const event = {
+      delivery: {
+        channelAudience: "public" as const,
+        channelKind: "channel:slack",
+        channelName: "slack",
+        deliveryId: "delivery-malformed-seed",
+      },
+      idempotencyKey: "channel-delivery:session-1:delivery-malformed-seed",
+      input: { message: "private" },
+      rootSessionId: "session-1",
+      sessionId: "session-1",
+      traceSeed,
+      type: "channel.delivery.started" as const,
+    };
+
+    await expect(contextStorage.run(ctx, () => runtime.projectEvent(event))).resolves.toMatchObject(
+      { input: undefined },
+    );
+  });
+
+  it("caps forwarded content for an explicitly private delivery", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+    const ctx = new ContextContainer();
+    const traceSeed = {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: true },
+        originAudience: "public",
+      },
+    } as const;
+    ctx.set(SessionTraceSeedKey, traceSeed);
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runtime.projectEvent({
+          delivery: {
+            channelAudience: "private",
+            channelKind: "channel:slack",
+            channelName: "slack",
+            deliveryId: "delivery-private",
+          },
+          idempotencyKey: "channel-delivery:session-1:delivery-private",
+          input: { message: "private" },
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+          traceSeed,
+          type: "channel.delivery.started",
+        }),
+      ),
+    ).resolves.toMatchObject({ input: undefined });
+  });
+
+  it("normalizes an event-carried drop before opening its session span", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+    const ctx = new ContextContainer();
+    const traceSeed = {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: "yes", recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: true },
+        originAudience: "public",
+      },
+    } as never;
+    ctx.set(SessionTraceSeedKey, traceSeed);
+
+    await contextStorage.run(ctx, () =>
+      runtime.hooks.publish({
+        delivery: {
+          channelAudience: "public",
+          channelKind: "channel:slack",
+          channelName: "slack",
+          deliveryId: "delivery-malformed-decision",
+        },
+        idempotencyKey: "channel-delivery:session-1:delivery-malformed-decision",
+        input: { message: "private" },
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        traceSeed,
+        type: "channel.delivery.started",
+      }),
+    );
+    await runtime.provider.forceFlush();
+    expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(0);
+  });
+
   it("reconstructs a sampled public session decision when persisted policy is absent", async () => {
     const stateStore = new InMemoryAgentTraceStateStore();
     stateStore.setSession("session-sampled", {
@@ -1341,6 +1466,153 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.turn.id": "turn-1",
     });
     expect(nanos(approval.duration)).toBeGreaterThan(0n);
+  });
+
+  it("carries the channel audience on reconstructed durable span contexts", async () => {
+    // Destination export policies read the audience from the parent context at
+    // onStart; a bare wrapped span context would surface "unknown" and let a
+    // policy apply the wrong export or redaction decision.
+    const audiences = new Map<string, ChannelAudience>();
+    const recorder: SpanProcessor = {
+      forceFlush: async () => {},
+      onEnd: () => {},
+      onStart: (span, parentContext) => {
+        audiences.set(span.name, channelAudienceFromContext(parentContext));
+      },
+      shutdown: async () => {},
+    };
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), undefined, [recorder]);
+    const ctx = new ContextContainer();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn-1:0:0",
+      attemptIndex: 0,
+      channelAudience: "private",
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    const actionKey = actionIdempotencyKey("session-1", "turn-1", "tool-1");
+    const inputKey = inputIdempotencyKey("session-1", "turn-1", "approval-1");
+    const delivery = {
+      channelAudience: "private" as const,
+      channelKind: "channel:slack",
+      channelName: "slack",
+      deliveryId: "delivery-1",
+      requestId: "iad1::request-1",
+    };
+
+    await contextStorage.run(ctx, async () => {
+      await publishTurnStarted({
+        channelAudience: "private",
+        hooks: runtime.hooks,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        turnSequence: 0,
+      });
+      await runtime.hooks.publish({
+        agentName: "weather",
+        delivery,
+        idempotencyKey: "channel-delivery:session-1:delivery-1",
+        input: { message: "hi" },
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        type: "channel.delivery.started",
+      });
+      await runtime.hooks.publish({
+        callId: "tool-1",
+        idempotencyKey: actionKey,
+        input: { city: "SF" },
+        kind: "tool-call",
+        name: "weather",
+        scope,
+        type: "action.started",
+      });
+      await runtime.hooks.publish({
+        action: { callId: "tool-1", name: "weather" },
+        idempotencyKey: inputKey,
+        kind: "tool-approval",
+        request: { prompt: "Approve weather?" },
+        requestId: "approval-1",
+        scope,
+        type: "input.requested",
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: inputKey,
+        kind: "tool-approval",
+        outcome: "approved",
+        requestId: "approval-1",
+        scope,
+        type: "input.resolved",
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: actionKey,
+        outcome: "completed",
+        output: { output: { temperature: 72 }, type: "result" },
+        scope,
+        type: "action.completed",
+      });
+      await runtime.hooks.publish({
+        agentName: "weather",
+        delivery,
+        idempotencyKey: "channel-delivery:session-1:delivery-1",
+        outcome: "completed",
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "channel.delivery.completed",
+      });
+      await completeTurn(runtime.hooks, "session-1", "turn-1");
+    });
+
+    expect(audiences.get("agent.approval")).toBe("private");
+    expect(audiences.get("agent.channel.delivery")).toBe("private");
+    expect(audiences.get("invoke_agent weather")).toBe("private");
+  });
+
+  it("carries the channel audience on the tool execution context", async () => {
+    const runtime = createRuntime();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn-1:0:0",
+      attemptIndex: 0,
+      channelAudience: "private",
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    await publishTurnStarted({
+      channelAudience: "private",
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      callId: "tool-1",
+      idempotencyKey: "tool:session-1:turn-1:tool-1",
+      input: { city: "SF" },
+      scope,
+      toolName: "weather",
+      type: "tool.call.started",
+    });
+
+    const withSpy = vi.spyOn(context, "with");
+    await runtime.runInContext(
+      { idempotencyKey: "tool:session-1:turn-1:tool-1", scope, type: "tool.call" },
+      async () => undefined,
+    );
+
+    expect(withSpy).toHaveBeenCalledOnce();
+    expect(channelAudienceFromContext(withSpy.mock.calls[0]![0])).toBe("private");
+    withSpy.mockRestore();
   });
 
   it("does not create approval spans for other input requests", async () => {
@@ -2056,6 +2328,30 @@ describe("createAgentOtelInstrumentation", () => {
     const turn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
     expect(turn.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
     expect(turn.attributes["error.type"]).toBe("TypeError");
+  });
+
+  it("marks an active invocation failed from the terminal session event", async () => {
+    const runtime = createRuntime();
+    const error = new TypeError("workflow failed");
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      error,
+      idempotencyKey: sessionIdempotencyKey("session-1"),
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "session.failed",
+    });
+    await runtime.provider.forceFlush();
+
+    const turn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
+    expect(turn.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
+    expect(turn.attributes["error.type"]).toBe("TypeError");
+    expect(turn.events.map((event) => event.name)).toContain("turn.failed");
   });
 });
 

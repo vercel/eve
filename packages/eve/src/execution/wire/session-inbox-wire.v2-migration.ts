@@ -1,18 +1,4 @@
-import type { VersionMigration } from "#execution/durable-session-migrations/chain.js";
 import { isObject } from "#shared/guards.js";
-
-export const sessionInboxWireV1Migration: VersionMigration = {
-  from: 1,
-  migrate(prior) {
-    const normalized = normalizeSessionInboxWireV2(prior) as Record<string, unknown>;
-    return {
-      ...normalized,
-      ...(normalized.kind === "deliver" && !("payload" in normalized) ? { payload: {} } : {}),
-      version: 2,
-    };
-  },
-  to: 2,
-};
 
 /** Converts Workflow-VM records into this realm before wire consumption. */
 export function normalizeSessionInboxWireV2(value: unknown, arrayFallback = false): unknown {
