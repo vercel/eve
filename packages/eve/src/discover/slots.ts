@@ -1,6 +1,5 @@
-import type { Dirent } from "node:fs";
-
 import { getSupportedModuleBaseName } from "#discover/filesystem.js";
+import type { ProjectSourceEntry } from "#discover/project-source.js";
 
 /**
  * Candidate authored sources for one flat slot such as `system` or `agent`.
@@ -22,7 +21,7 @@ interface NamedSlotCandidates extends FlatSlotCandidates {
  * Collects markdown and module candidates for one flat slot in one directory.
  */
 export function collectFlatSlotCandidates(
-  entries: readonly Pick<Dirent<string>, "isFile" | "name">[],
+  entries: readonly Pick<ProjectSourceEntry, "isFile" | "name">[],
   input: {
     markdownFileName?: string;
     moduleBaseName?: string;
@@ -62,7 +61,7 @@ export function collectFlatSlotCandidates(
  * Groups markdown and module candidates for directory-backed named slots.
  */
 export function collectNamedSlotCandidates(
-  entries: readonly Pick<Dirent<string>, "isFile" | "name">[],
+  entries: readonly Pick<ProjectSourceEntry, "isFile" | "name">[],
   input: {
     allowMarkdown: boolean;
     allowModules: boolean;
