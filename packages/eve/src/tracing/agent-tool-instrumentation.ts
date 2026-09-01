@@ -214,6 +214,8 @@ function toolAttributes(event: InstrumentationToolCallStartedEvent): Record<stri
     "gen_ai.tool.call.id": event.callId,
     "gen_ai.tool.name": event.toolName,
     "gen_ai.tool.type": "function",
+    "operation.name": "execute_tool",
+    "resource.name": `execute_tool ${event.toolName}`,
   };
 }
 

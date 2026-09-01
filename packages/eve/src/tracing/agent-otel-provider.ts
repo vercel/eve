@@ -267,9 +267,10 @@ export function createAgentOtelInstrumentation(
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
           const agentName = session?.agentName ?? turn.subagentName;
+          const spanName = agentSpanName(agentName);
           const span = input.idGenerator.withSpanId(turn.context.spanId, () =>
             input.tracer.startSpan(
-              agentSpanName(agentName),
+              spanName,
               {
                 attributes: {
                   "agent.framework.name": "eve",
@@ -282,6 +283,8 @@ export function createAgentOtelInstrumentation(
                   "gen_ai.agent.name": agentName,
                   "gen_ai.conversation.id": event.sessionId,
                   "gen_ai.operation.name": "invoke_agent",
+                  "operation.name": "invoke_agent",
+                  "resource.name": spanName,
                 },
                 kind: SpanKind.INTERNAL,
                 startTime: turn.startTimeMs,

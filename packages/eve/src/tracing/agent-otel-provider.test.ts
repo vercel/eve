@@ -740,6 +740,8 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.attributes).toMatchObject({
       "gen_ai.conversation.id": "remote-session",
       "gen_ai.operation.name": "invoke_agent",
+      "operation.name": "invoke_agent",
+      "resource.name": "invoke_agent",
     });
     expect(turn.attributes).not.toHaveProperty("gen_ai.agent.name");
   });
@@ -820,6 +822,8 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.operation.name": "invoke_agent",
       "gen_ai.usage.input_tokens": 10,
       "gen_ai.usage.output_tokens": 5,
+      "operation.name": "invoke_agent",
+      "resource.name": "invoke_agent weather",
     });
     expect(nanos(turn.startTime)).toBeLessThanOrEqual(nanos(step.startTime));
     expect(nanos(turn.endTime)).toBeGreaterThanOrEqual(nanos(step.endTime) - 1_000_000n);
@@ -843,6 +847,8 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.tool.call.id": "tool-1",
       "gen_ai.tool.name": "weather",
       "gen_ai.tool.type": "function",
+      "operation.name": "execute_tool",
+      "resource.name": "execute_tool weather",
     });
     expect(tool.attributes).not.toHaveProperty("gen_ai.agent.name");
   });
