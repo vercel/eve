@@ -12,7 +12,7 @@ import {
   type ProxyInputRequest,
 } from "#harness/proxy-input-requests.js";
 import { isInputRequest } from "#shared/input.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
+import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
 import {

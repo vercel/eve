@@ -1,7 +1,7 @@
 import {
   isInboxSubagentResultFromRunningHandle,
   isResultBoundToRunningHandle,
-} from "#harness/handles/query.js";
+} from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -12,13 +12,13 @@ import {
   resolveToolCallInputObject,
   setPendingCoordinationBatch,
 } from "#harness/coordination.js";
-import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
-import { deriveAgentId, getAgentHandleStore } from "#harness/handles/store.js";
+import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { deriveAgentId, getAgentHandleStore } from "#subagents/handles/store.js";
 import {
   confirmAgentStarted,
   prepareAgentContinuation,
   prepareAgentStart,
-} from "#harness/handles/transitions.js";
+} from "#subagents/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getWorkflowToolRuns, recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { toolOutput } from "#tools/model-output.js";

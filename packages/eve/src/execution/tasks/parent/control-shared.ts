@@ -1,4 +1,4 @@
-import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";

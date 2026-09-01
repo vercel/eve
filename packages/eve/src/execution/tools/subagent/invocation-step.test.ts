@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { dispatchAgentInvocation } from "#execution/tools/subagent/invocation-step.js";
-import { dispatchToTaskAgentAddress } from "#execution/agent-handle-dispatch.js";
+import { dispatchToTaskAgentAddress } from "#subagents/handle-dispatch.js";
 import { startSubagent } from "#execution/coordination-dispatch-shared.js";
 import {
   readAgentHandleStoreStep,
@@ -9,11 +9,11 @@ import {
 } from "#execution/session-command-inbox.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invocation-preparation.js";
 
-vi.mock("#execution/agent-handle-dispatch.js", async (importOriginal) => ({
+vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal()),
   dispatchToTaskAgentAddress: vi.fn(),
 }));
-vi.mock("#execution/agent-continuation-bundle.js", () => ({
+vi.mock("#subagents/continuation-bundle.js", () => ({
   createAgentContinuationBundle: vi.fn(() => ({ nodeId: "child" })),
 }));
 vi.mock("#execution/coordination-dispatch-shared.js", () => ({

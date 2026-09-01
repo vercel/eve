@@ -1,6 +1,6 @@
 import type { ContextContainer } from "#context/container.js";
 import { ContinuationTokenKey, SessionCallbackKey, SessionIdKey } from "#context/keys.js";
-import { fireTaskEventCallbackStep } from "#execution/session-callback-step.js";
+import { fireTaskEventCallbackStep } from "#subagents/callback-step.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**

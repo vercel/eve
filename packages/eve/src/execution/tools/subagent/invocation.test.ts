@@ -268,7 +268,9 @@ describe("background agent invocation routing", () => {
       from,
       replyTo: "agent-reply",
       request: {
-        input: expect.objectContaining({ kind: "subagent-authorization-event" }),
+        input: expect.objectContaining({
+          kind: "subagent-authorization-event",
+        }),
         invocationId: "call-1:research:event:0",
         kind: "effect",
         name: "agent.event",

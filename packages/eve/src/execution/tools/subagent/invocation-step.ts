@@ -2,8 +2,8 @@ import {
   createAgentErrorResult,
   dispatchToTaskAgentAddress,
   type DispatchOutcome,
-} from "#execution/agent-handle-dispatch.js";
-import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
+} from "#subagents/handle-dispatch.js";
+import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
 import { startSubagent } from "#execution/coordination-dispatch-shared.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invocation-preparation.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -12,15 +12,15 @@ import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { createSubagentCalledEvent } from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
-import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
 import {
   readAgentHandleStoreStep,
   sendAgentHandleCommandStep,
   type AgentHandleCommandResponse,
 } from "#execution/session-command-inbox.js";
-import type { TaskOwnedAgentHandle } from "#harness/handles/store.js";
-import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
+import type { TaskOwnedAgentHandle } from "#subagents/handles/store.js";
+import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 
 export interface AgentInvocationDispatchResult {
   readonly agentId?: string;

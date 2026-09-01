@@ -30,7 +30,7 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
-import { AGENT_HANDLES_STATE_KEY, getAgentHandleStore } from "#harness/handles/store.js";
+import { AGENT_HANDLES_STATE_KEY, getAgentHandleStore } from "#subagents/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
@@ -54,7 +54,7 @@ import { buildRuntimeIdentity, createExecutionNodeStep } from "#execution/node-s
 import { defineTool } from "#tools/definition.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
-import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";

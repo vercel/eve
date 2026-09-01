@@ -1,8 +1,5 @@
 import { CHANNEL_CONTEXT_KEY_NAME, SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import {
-  isSubagentAdapterState,
-  SUBAGENT_ADAPTER_KIND,
-} from "#execution/subagent-adapter-state.js";
+import { isSubagentAdapterState, SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 export const TASK_UPDATE_SESSION_INSTRUCTION =

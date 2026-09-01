@@ -12,9 +12,9 @@ import { SessionCallbackKey, SessionIdKey } from "#context/keys.js";
 import {
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
-} from "#execution/delegated-parent-notification.js";
-import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
-import { startRemoteAgentSession } from "#execution/remote-agent-dispatch.js";
+} from "#subagents/parent-notification.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
+import { startRemoteAgentSession } from "#subagents/remote-dispatch.js";
 import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { authHookToken, CallbackBaseUrlKey, getHookUrl } from "#harness/authorization.js";
 import {

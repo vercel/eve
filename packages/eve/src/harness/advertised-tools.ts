@@ -1,6 +1,6 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { resolveSubagentDepth } from "#subagents/depth.js";
 import {
   TASK_CANCEL_TOOL_NAME,
   TASK_TOOL_NAMES,

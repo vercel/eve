@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CHANNEL_CONTEXT_KEY_NAME, SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
+import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
 
 describe("isTaskOwnedSerializedContext", () => {

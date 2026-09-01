@@ -7,8 +7,8 @@ import {
   getChannelActivityPresentation,
 } from "#channel/activity-renderer.js";
 import { SCHEDULE_ADAPTER, SCHEDULE_ADAPTER_KIND } from "#channel/schedule.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
-import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
+import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import { RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";
 import {

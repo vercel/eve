@@ -6,7 +6,7 @@ import {
   recordTaskInputRequestStep,
 } from "#execution/task-hitl-proxy-steps.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { setAgentHandleStore } from "#harness/handles/store.js";
+import { setAgentHandleStore } from "#subagents/handles/store.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
 
 vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));

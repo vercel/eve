@@ -31,7 +31,7 @@ import {
 } from "#tools/task.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskInboundUpdate } from "#tasks/types.js";
-import type { AgentView } from "#harness/handles/prompt.js";
+import type { AgentView } from "#subagents/handles/prompt.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
   beginBackgroundTask,
@@ -56,8 +56,8 @@ import { parseJsonObject } from "#shared/json.js";
 import { deriveWorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import { createWorkflowToolExecutorBinding } from "#execution/tools/workflow/types.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
-import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
-import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
+import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
+import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
 import type { AgentHandleCommandResponse } from "#execution/session-command-inbox.js";
 
 type SubagentReceiptIdentity = ReturnType<typeof createSubagentReceiptIdentity>;
@@ -186,7 +186,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     return execution;
   }
 
-  async readAgentViews(): Promise<readonly import("#harness/handles/prompt.js").AgentView[]> {
+  async readAgentViews(): Promise<readonly import("#subagents/handles/prompt.js").AgentView[]> {
     const store = await readAgentHandleStoreStep({
       sessionId: this.initialSession.sessionId,
     });

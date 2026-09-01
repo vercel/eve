@@ -119,6 +119,12 @@
  *             internals or recover private state through `Symbol.for`.
  *             Privileged dispatch belongs in ordinary step-backed APIs that
  *             the workflow body consumes through a public contract.
+ *   rule 43 — The execution and harness core must stay executor-neutral.
+ *             Files under `src/execution/**` and `src/harness/**`, excluding
+ *             executor-owned subagent trees, must not name subagent or
+ *             agent-transport concepts. Executors translate their protocol
+ *             at neutral core seams. Pre-existing violations are ratcheted
+ *             through the baseline until the rule can become absolute.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -217,6 +223,7 @@ function isTsLike(relPath) {
  *   rule37: Violation[];
  *   rule41: Violation[];
  *   rule42: Violation[];
+ *   rule43: { baseline: Record<string, number>; current: Map<string, number> };
  *   symlinks: string[];
  * }} state
  */
@@ -248,6 +255,7 @@ async function scanRepo(state) {
     checkRule37(posix, content, state.rule37);
     checkRule41(posix, lines, state.rule41);
     checkRule42(posix, lines, state.rule42);
+    checkRule43(posix, lines, state.rule43);
   }
 }
 
@@ -255,6 +263,9 @@ async function scanRepo(state) {
 
 const TASK_EXECUTOR_CONCEPT_RE =
   /subagent|agentId|childSession|childTurn|agent\/(?:local|remote)|\b(?:local|remote)\b/i;
+
+const EXECUTION_CORE_EXECUTOR_CONCEPT_RE =
+  /subagent|agentId|childSession|childTurn|agent\/(?:local|remote)|remote-agent/i;
 
 /**
  * @param {string} posix
@@ -310,6 +321,26 @@ function checkRule42(posix, lines, violations) {
         "the shared subagent workflow reaches into task, harness, or context internals. Keep the body userspace-shaped and call a public workflow-safe agent API instead.",
     });
   });
+}
+
+// ---------- Rule 43: executor-neutral execution and harness core ----------
+
+/**
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {{ baseline: Record<string, number>; current: Map<string, number> }} state
+ */
+function checkRule43(posix, lines, state) {
+  const inCore =
+    posix.startsWith("packages/eve/src/execution/") ||
+    posix.startsWith("packages/eve/src/harness/");
+  const inSubagentExecutor =
+    posix.startsWith("packages/eve/src/execution/tools/subagent/") ||
+    posix.startsWith("packages/eve/src/subagents/");
+  if (!inCore || inSubagentExecutor) return;
+
+  const count = lines.filter((line) => EXECUTION_CORE_EXECUTOR_CONCEPT_RE.test(line)).length;
+  if (count > 0) state.current.set(posix, count);
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1564,6 +1595,7 @@ async function main() {
     rule37: /** @type {Violation[]} */ ([]),
     rule41: /** @type {Violation[]} */ ([]),
     rule42: /** @type {Violation[]} */ ([]),
+    rule43: { baseline: baseline.rule43_executorConceptByFile ?? {}, current: new Map() },
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1674,6 +1706,15 @@ async function main() {
 
   // Rule 42
   violations.push(...state.rule42);
+
+  // Rule 43
+  for (const { file, was, now } of diffCounts(state.rule43.current, state.rule43.baseline)) {
+    violations.push({
+      rule: 43,
+      file,
+      message: `${now} executor-specific concept${now === 1 ? "" : "s"} detected (baseline: ${was}). Move subagent behavior to src/subagents or src/execution/tools/subagent, or replace the dependency with an executor-neutral core contract.`,
+    });
+  }
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");

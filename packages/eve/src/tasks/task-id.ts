@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 
 /**
  * Derives the stable task id for one originating background call.

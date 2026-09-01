@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cancelOwnedTask, executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
-import { fireTaskUpdateCallbackStep } from "#execution/session-callback-step.js";
+import { fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
 import { forwardLocalTaskUpdateStep } from "#execution/task-update-proxy-step.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 
@@ -10,7 +10,7 @@ vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
-vi.mock("#execution/session-callback-step.js", () => ({ fireTaskUpdateCallbackStep: vi.fn() }));
+vi.mock("#subagents/callback-step.js", () => ({ fireTaskUpdateCallbackStep: vi.fn() }));
 vi.mock("#execution/task-update-proxy-step.js", () => ({ forwardLocalTaskUpdateStep: vi.fn() }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({

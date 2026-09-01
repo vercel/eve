@@ -68,7 +68,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingCoordinationBatch } from "#harness/coordination.js";
-import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
+import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";

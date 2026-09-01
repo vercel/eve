@@ -12,10 +12,10 @@ import {
   notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
-} from "#execution/delegated-parent-notification.js";
+} from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
-import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import {
   createSessionTimeoutControl,
@@ -81,7 +81,7 @@ vi.mock("./route-child-delivery.js", () => ({
     })),
 }));
 
-vi.mock("./delegated-parent-notification.js", () => ({
+vi.mock("../subagents/parent-notification.js", () => ({
   bindTurnCallerContextStep: vi
     .fn()
     .mockImplementation(async ({ serializedContext }) => serializedContext),
@@ -139,7 +139,7 @@ function createSessionStepResultForMock(state: DurableSessionState) {
   };
 }
 
-vi.mock("./session-callback-step.js", () => ({
+vi.mock("../subagents/callback-step.js", () => ({
   fireSessionCallbackStep: vi.fn().mockResolvedValue(undefined),
 }));
 

@@ -8,7 +8,7 @@ import {
 import {
   emitRecordedTaskInputRequestStep,
   runProxySubagentEventStep,
-} from "#execution/subagent-event-proxy-step.js";
+} from "#subagents/event-proxy-step.js";
 import {
   acceptTaskAgentEventStep,
   recordTerminalTaskViewsStep,

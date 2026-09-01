@@ -1,6 +1,6 @@
 import type { Runtime } from "#channel/types.js";
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
-import { resolveRemoteAgentStreamHeaders } from "#execution/remote-agent-dispatch.js";
+import { resolveRemoteAgentStreamHeaders } from "#subagents/remote-dispatch.js";
 import type { RemoteAgentStreamHeadersResolver } from "#internal/nitro/routes/channel-route-context.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";

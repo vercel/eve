@@ -8,10 +8,10 @@ import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
-} from "#execution/remote-agent-dispatch.js";
+} from "#subagents/remote-dispatch.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
-import { cancelBackgroundAgentTask } from "#execution/subagent-task-cancel.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
+import { cancelBackgroundAgentTask } from "#subagents/task-cancel.js";
+import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";

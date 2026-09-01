@@ -1,7 +1,7 @@
 import {
   findRunningAgentHandle,
   isInboxSubagentResultFromRunningHandle,
-} from "#harness/handles/query.js";
+} from "#subagents/handles/query.js";
 import {
   isInboxSubagentResultFromRecordedWorkflowToolRun,
   isInboxToolResultFromRecordedWorkflowToolRun,
@@ -27,7 +27,7 @@ import {
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import {
   type ChannelReader,

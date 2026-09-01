@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { applyAgentHandleCommandStep } from "#execution/session-command-inbox.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
+import { getAgentHandleStore } from "#subagents/handles/store.js";
 
 const write = vi.fn();
 const releaseLock = vi.fn();

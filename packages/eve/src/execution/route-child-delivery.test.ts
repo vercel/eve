@@ -4,7 +4,7 @@ import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import {
   emitRecordedTaskInputRequestStep,
   runProxySubagentEventStep,
-} from "#execution/subagent-event-proxy-step.js";
+} from "#subagents/event-proxy-step.js";
 import {
   acceptTaskAgentEventStep,
   recordTaskInputRequestStep,
@@ -12,7 +12,7 @@ import {
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 
-vi.mock("#execution/subagent-event-proxy-step.js", () => ({
+vi.mock("#subagents/event-proxy-step.js", () => ({
   emitRecordedTaskInputRequestStep: vi.fn(),
   runProxySubagentEventStep: vi.fn(),
 }));

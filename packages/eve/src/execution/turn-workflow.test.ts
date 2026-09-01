@@ -7,7 +7,7 @@ import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.
 import { dispatchWorkflowTasksStep } from "#execution/workflow-task-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
+import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
   TURN_WORKFLOW_INPUT_VERSION,
@@ -15,7 +15,7 @@ import {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import { turnStep } from "#execution/workflow-steps.js";
-import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
+import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
 import { recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 
@@ -63,7 +63,7 @@ vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
 
-vi.mock("./subagent-event-proxy-step.js", () => ({
+vi.mock("../subagents/event-proxy-step.js", () => ({
   runProxySubagentEventStep: vi.fn(),
 }));
 

@@ -32,8 +32,8 @@ import {
   isAgentHandleAction,
   type RuntimeAgentHandleAction,
   type RuntimeSession,
-} from "#execution/agent-handle-dispatch.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
+} from "#subagents/handle-dispatch.js";
+import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
@@ -67,15 +67,15 @@ import {
   createUnavailableDynamicSubagentResult,
   getSubagentName,
 } from "#execution/dispatch-action-failures.js";
-import { startLocalSubagent } from "#execution/subagent-start-local.js";
-import { startRemoteSubagent } from "#execution/subagent-start-remote.js";
+import { startLocalSubagent } from "#subagents/start-local.js";
+import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
+import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { toError } from "#shared/errors.js";
 import { readSessionTraceContext } from "#tracing/agent-trace-context-store.js";
-import { resolveSubagentDepth } from "#harness/subagent-depth.js";
+import { resolveSubagentDepth } from "#subagents/depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";

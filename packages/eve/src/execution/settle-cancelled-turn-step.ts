@@ -25,7 +25,7 @@ import {
   getProxyInputRequests,
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
-import { abandonRunningAgentTurns } from "#harness/handles/transitions.js";
+import { abandonRunningAgentTurns } from "#subagents/handles/transitions.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
 import { clearWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
 import { bindSessionInstrumentation } from "#instrumentation/runtime.js";

@@ -9,7 +9,7 @@ import {
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
-import { cancelBackgroundAgentTask } from "#execution/subagent-task-cancel.js";
+import { cancelBackgroundAgentTask } from "#subagents/task-cancel.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export async function dispatchCoordinationStep(

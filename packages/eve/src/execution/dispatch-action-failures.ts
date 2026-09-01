@@ -1,4 +1,4 @@
-import { REMOTE_AGENT_START_FAILED } from "#harness/agent-handle-errors.js";
+import { REMOTE_AGENT_START_FAILED } from "#subagents/agent-handle-errors.js";
 import type {
   RuntimeRemoteAgentDispatchRequest,
   RuntimeSubagentDispatchRequest,

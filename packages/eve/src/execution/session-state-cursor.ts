@@ -1,6 +1,6 @@
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
-import { mergeTaskOwnedAgentHandlesIntoTurnState } from "#harness/handles/query.js";
+import { mergeTaskOwnedAgentHandlesIntoTurnState } from "#subagents/handles/query.js";
 
 /** A durable-state transition; absent fields keep the cursor's current value. */
 export interface SessionStateTransition {

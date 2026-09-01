@@ -15,7 +15,7 @@ import type {
   AgentHandleStore,
   AgentHandleStoreCommand,
   AgentHandleStoreCommandResult,
-} from "#harness/handles/store.js";
+} from "#subagents/handles/store.js";
 
 export {
   applyAgentHandleCommandStep,

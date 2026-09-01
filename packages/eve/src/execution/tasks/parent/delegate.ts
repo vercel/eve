@@ -3,7 +3,7 @@
  * Task-run transport (start/command/view) lives in `run-parent.ts`, which
  * Callers compose these primitives around their own executor policy.
  */
-import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import type { RuntimeSession } from "#subagents/handle-dispatch.js";
 import {
   readLatestTaskView,
   sendTaskCommand,

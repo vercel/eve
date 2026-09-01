@@ -10,8 +10,8 @@ import type {
 } from "#shared/action-types.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
-import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#harness/handles/query.js";
-import { settleAgentTurn } from "#harness/handles/transitions.js";
+import { findRunningAgentHandle, isResultBoundToRunningHandle } from "#subagents/handles/query.js";
+import { settleAgentTurn } from "#subagents/handles/transitions.js";
 import {
   clearProxyInputRequestsForChild,
   clearProxyInputRequestsWhere,

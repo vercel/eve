@@ -65,8 +65,8 @@ import {
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { projectParkedAgentHandles, resolveAgentsAnnouncement } from "#harness/handles/prompt.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
+import { projectParkedAgentHandles, resolveAgentsAnnouncement } from "#subagents/handles/prompt.js";
+import { getAgentHandleStore } from "#subagents/handles/store.js";
 import {
   getWorkflowTaskInterrupts,
   isWorkflowTaskInterrupt,
@@ -145,10 +145,7 @@ import {
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
-import {
-  isSubagentAdapterState,
-  SUBAGENT_ADAPTER_KIND,
-} from "#execution/subagent-adapter-state.js";
+import { isSubagentAdapterState, SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,

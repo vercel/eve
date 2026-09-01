@@ -5,13 +5,13 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
-import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,
   deriveAgentId,
   getAgentHandleStore,
   type AgentHandle,
-} from "#harness/handles/store.js";
+} from "#subagents/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());

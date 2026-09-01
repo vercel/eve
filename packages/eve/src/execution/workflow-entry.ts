@@ -16,11 +16,10 @@ import {
   bindTurnCallerContextStep,
   notifyCancelledTaskCallerStep,
   notifyDelegatedParentStep,
-  notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
-} from "#execution/delegated-parent-notification.js";
-import { createDelegatedSubagentErrorResult } from "#execution/delegated-parent-result.js";
+} from "#subagents/parent-notification.js";
+import { createDelegatedSubagentErrorResult } from "#subagents/parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
@@ -33,7 +32,7 @@ import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { finalizeTerminalSession } from "#execution/finalize-terminal-session.js";
-import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
 import {
   createSessionCommandInbox,
@@ -44,7 +43,7 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
-import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
+import { readSerializedSubagentDepth } from "#subagents/depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
@@ -507,11 +506,6 @@ async function runDriverLoop(input: {
     const caller = input.crashCleanupState.caller;
     if (caller?.taskId !== undefined) {
       seenTaskDeliveries.add(caller.taskId);
-      await notifyTaskTurnStartedStep({
-        caller,
-        childSessionId: stateCursor.sessionState.sessionId,
-        childTurnId: activeTurnId(stateCursor.sessionState.emissionState),
-      });
     }
     const serializedContext =
       caller === undefined

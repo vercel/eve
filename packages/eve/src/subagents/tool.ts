@@ -1,0 +1,217 @@
+import { SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
+import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/invocation.js";
+import type {
+  ActivityObserverConfig,
+  ChannelInstrumentationProjection,
+  RunInput,
+  RunSessionLimits,
+  SessionAuthContext,
+  SessionCapabilities,
+  SessionTraceContext,
+} from "#channel/types.js";
+import type { HarnessSession } from "#harness/types.js";
+import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
+import { mintSubagentContinuationToken } from "#execution/session.js";
+import { resolveSubagentDepth } from "#subagents/depth.js";
+import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
+import type { JsonObject } from "#shared/json.js";
+
+/**
+ * Pending task batch event metadata needed for child run lineage.
+ */
+interface BatchEventMetadata {
+  readonly sequence: number;
+  readonly turnId: string;
+}
+
+export type SubagentInputSource =
+  | {
+      readonly description: string;
+      readonly outputSchema?: JsonObject;
+      readonly type: "local";
+    }
+  | {
+      readonly outputSchema?: JsonObject;
+      readonly type: "runtime";
+    };
+
+/**
+ * Result of {@link buildSubagentRunInput}.
+ *
+ * Exposes the derived `childContinuationToken` alongside the
+ * {@link RunInput} so dispatch sites never re-derive the token from
+ * `(callId, parentSessionId)` on their own.
+ */
+export interface SubagentRunInputBuild {
+  readonly childContinuationToken: string;
+  readonly runInput: RunInput;
+}
+
+/**
+ * Runtime graph shape needed to answer sandbox-inheritance questions for
+ * one declared child node. Partial test bundles may omit the graph.
+ */
+export interface SubagentSandboxGraph {
+  readonly nodesByNodeId: ReadonlyMap<
+    string,
+    {
+      readonly sandboxRegistry: {
+        readonly sandbox: {
+          readonly definition: { readonly inheritsParent?: boolean };
+        } | null;
+      };
+    }
+  >;
+}
+
+/**
+ * Builds the {@link RunInput} for one delegated subagent child run.
+ */
+export function buildSubagentRunInput(input: {
+  readonly action: RuntimeSubagentDispatchRequest;
+  readonly auth: SessionAuthContext | null;
+  readonly batchEvent: BatchEventMetadata;
+  /**
+   * Parent's session capabilities. Forwarded verbatim so HITL
+   * readiness flows transparently down through a subagent chain. Undefined
+   * parent capabilities produce an undefined child capability set.
+   */
+  readonly capabilities?: SessionCapabilities;
+  readonly channelMetadata?: ChannelInstrumentationProjection;
+  /**
+   * Number of local subagent calls dispatched in this batch. The parent's
+   * remaining token quota is split evenly across them so parallel children
+   * are collectively, not individually, bounded by it. Remote agents run
+   * under their own deployment's limits and are not counted.
+   */
+  readonly fanoutSize?: number;
+  readonly initiatorAuth: SessionAuthContext | null;
+  /**
+   * Runtime graph used to detect whether this declared child selected the
+   * dispatching parent's sandbox. Absence means no inheritance.
+   */
+  readonly graph?: SubagentSandboxGraph;
+  /** Durable session identity of the sandbox currently used by the parent. */
+  readonly sandboxSessionId?: string;
+  readonly selfAgent: boolean;
+  /** Hook token owned by the workflow currently waiting for this child. */
+  readonly parentContinuationToken?: string;
+  readonly parentTraceContext?: SessionTraceContext;
+  readonly activityObserver?: ActivityObserverConfig;
+  readonly session: HarnessSession;
+  readonly source: SubagentInputSource;
+  /** Owning task when this child starts from a background workflow tool. */
+  readonly taskId?: string;
+}): SubagentRunInputBuild {
+  const {
+    action,
+    auth,
+    batchEvent,
+    capabilities,
+    channelMetadata,
+    initiatorAuth,
+    session,
+    source,
+  } = input;
+
+  const childContinuationToken = mintSubagentContinuationToken(
+    `${session.sessionId}:${action.callId}`,
+  );
+
+  // Denormalize the chain root onto the child's `parent` metadata so
+  // every descendant in a nested dispatch can attribute itself to the
+  // top user-facing session in a single hop. A subagent that itself
+  // dispatches more subagents reads the root from
+  // `session.rootSessionId` here; a top-level session carries no
+  // explicit root, so its own `sessionId` becomes the root for its
+  // children.
+  const rootSessionId = session.rootSessionId ?? session.sessionId;
+  const subagentDepth = resolveSubagentDepth(session);
+  const inheritedLimits: {
+    -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
+  } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
+  const requestedOutputSchema = normalizeRequestedOutputSchema(action.input.outputSchema);
+  const adapterState: Record<string, unknown> = {
+    callId: action.callId,
+    parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
+    parentSessionId: session.sessionId,
+    subagentName: action.subagentName,
+  };
+  if (input.taskId !== undefined) adapterState.taskId = input.taskId;
+  const sharesSandbox =
+    input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
+      .inheritsParent === true || input.selfAgent;
+  if (sharesSandbox) {
+    if (session.sandboxState !== undefined) {
+      adapterState.parentSandboxState = session.sandboxState;
+    }
+    adapterState.sandboxSessionId = input.sandboxSessionId ?? session.sessionId;
+  }
+
+  const runInput: {
+    -readonly [K in keyof RunInput]: RunInput[K];
+  } = {
+    adapter: {
+      kind: SUBAGENT_ADAPTER_KIND,
+      state: adapterState,
+    },
+    auth,
+    capabilities,
+    channelMetadata,
+    continuationToken: childContinuationToken,
+    initiatorAuth,
+    input: {
+      message: formatSubagentCallInputMessage({
+        action,
+        source,
+      }),
+      outputSchema: requestedOutputSchema ?? source.outputSchema,
+    },
+    limits: inheritedLimits,
+    mode: "conversation",
+    parent: {
+      callId: action.callId,
+      rootSessionId,
+      sessionId: session.sessionId,
+      turn: {
+        id: batchEvent.turnId,
+        sequence: batchEvent.sequence,
+      },
+    },
+    parentTraceContext: input.parentTraceContext,
+    activityObserver: input.activityObserver,
+    subagentDepth: subagentDepth.nextChildDepth,
+  };
+
+  return { childContinuationToken, runInput };
+}
+
+/**
+ * Formats the synthesized child input message for one delegated subagent call.
+ */
+function formatSubagentCallInputMessage(input: {
+  readonly action: Pick<RuntimeSubagentDispatchRequest, "input" | "subagentName">;
+  readonly source: SubagentInputSource;
+}): string {
+  const { message } = input.action.input as { message: string };
+
+  switch (input.source.type) {
+    case "local":
+      return formatSubagentInput({
+        description: input.source.description,
+        message,
+        name: input.action.subagentName,
+        type: "local",
+      }).message;
+    case "runtime":
+      return formatSubagentInput({
+        message,
+        name: input.action.subagentName,
+        type: "runtime",
+      }).message;
+    default: {
+      const _exhaustive: never = input.source;
+      return _exhaustive;
+    }
+  }
+}

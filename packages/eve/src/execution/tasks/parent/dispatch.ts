@@ -1,9 +1,6 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import {
-  isSubagentAdapterState,
-  SUBAGENT_ADAPTER_KIND,
-} from "#execution/subagent-adapter-state.js";
+import type { RuntimeSession } from "#subagents/handle-dispatch.js";
+import { isSubagentAdapterState, SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import {
   createTaskControlError,
   createTaskViewsResult,
@@ -17,7 +14,7 @@ import {
   cancelTaskOwnedWork,
   type TaskExecutorCancel,
 } from "#execution/tasks/parent/task-cancel.js";
-import { fireTaskUpdateCallbackStep } from "#execution/session-callback-step.js";
+import { fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
 import { forwardLocalTaskUpdateStep } from "#execution/task-update-proxy-step.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";

@@ -12,7 +12,7 @@ import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
 import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
 import type { TaskCommand, TaskInboundUpdate } from "#tasks/types.js";
-import { SUBAGENT_EXECUTION_FAILED } from "#harness/agent-handle-errors.js";
+import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
 import { parseJsonValue, type JsonValue } from "#shared/json.js";
 
 export function workflowToolRunOutcomeToToolResult(

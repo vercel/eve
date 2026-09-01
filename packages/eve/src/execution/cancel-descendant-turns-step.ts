@@ -6,11 +6,11 @@ import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
-} from "#execution/remote-agent-dispatch.js";
+} from "#subagents/remote-dispatch.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { getWorkflowToolRuns, type WorkflowToolRunRecord } from "#harness/workflow-tool-runs.js";
-import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
+import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";

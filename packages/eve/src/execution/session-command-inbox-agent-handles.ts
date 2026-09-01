@@ -16,8 +16,8 @@ import {
   setAgentHandleStore,
   type AgentHandleStore,
   type AgentHandleStoreCommand,
-} from "#harness/handles/store.js";
-import { applyAgentHandleStoreCommand } from "#harness/handles/transitions.js";
+} from "#subagents/handles/store.js";
+import { applyAgentHandleStoreCommand } from "#subagents/handles/transitions.js";
 import { getRun, resumeHook } from "#internal/workflow/runtime.js";
 
 const AGENT_HANDLE_COMMAND_RESPONSE_STREAM_NAMESPACE = "eve.agent-handle-command-responses";

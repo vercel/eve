@@ -4,7 +4,7 @@ import {
   workflowToolRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
-import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
+import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 
 // Derived from the call alone so a replayed dispatch starts a duplicate that
 // loses the claim and still resolves to the workflow tool run that owns the call.
