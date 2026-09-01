@@ -183,36 +183,337 @@ reinterpreting it.
 
 A manually maintained inventory cannot prevent code from creating a durable
 boundary without registering it. The target invariant is therefore: code cannot
-cross a deployment boundary without supplying a durable contract definition.
-The registry becomes the composition root for those definitions, and the
-manifest becomes an output of the definitions rather than a parallel list.
+use an eve-owned primitive across a deployment boundary without supplying an
+explicit contract or ownership declaration. The registry becomes the composition
+root for those declarations, and the manifest becomes an output rather than a
+parallel list.
 
-A durable workflow definition owns its stable ID, input versions, migrations,
-runtime reference, and manifest entry. The operation that routes a workflow to
-latest accepts only such a definition, not an arbitrary workflow reference:
+#### Problem
+
+The current workflow boundary is assembled from independent pieces: a workflow
+function, a stable reference, an input constructor, a migration call, and a
+registry entry. `startWorkflowPreferLatest` still accepts an arbitrary workflow
+function or metadata reference and untyped argument tuple. A caller can
+therefore create a new cross-deployment boundary while omitting its stable
+identity, versioned input, migration, or manifest declaration. TypeScript sees
+the producer and consumer in one checkout and cannot detect that their deployed
+copies will execute different code.
+
+The proposed `defineDurableWorkflow` is an internal eve API that makes those
+pieces one declaration. It is not an implemented API or a public agent-authoring
+surface. Its purpose is to make the unsafe construction unavailable: a workflow
+cannot route to latest unless it carries the contract needed to cross that
+deployment boundary.
+
+#### Proposed API
+
+The conceptual API separates the durable value contract from the workflow that
+uses it:
 
 ```ts
-const turnWorkflow = defineDurableWorkflow({
+const turnWorkflowInput = defineDurableValue<TurnWorkflowInput>({
+  name: "turnWorkflow.input",
+  canonicalVersion: 1,
+  writeVersion: 1,
+  initialVersion: 0,
+  versions: {
+    0: { decode: decodeTurnWorkflowInputV0, schema: null },
+    1: {
+      decode: decodeTurnWorkflowInputV1,
+      schema: buildOnlySchema(() => import("./turn-workflow-input-v1.schema.js")),
+    },
+  },
+  encoders: {
+    1: encodeTurnWorkflowInputV1,
+  },
+  migrations: {
+    0: turnWorkflowInputV0ToV1,
+  },
+});
+
+async function runTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
+  "use workflow";
+  await runTurn(input);
+}
+
+export const turnWorkflow = defineDurableWorkflow({
   name: "turnWorkflow",
-  input: turnWorkflowInputContract,
-  execute: runTurnWorkflow,
+  input: turnWorkflowInput,
+  result: durableVoid("turnWorkflow.result"),
+  run: runTurnWorkflow,
 });
 
 await turnWorkflow.startLatest(input);
 ```
 
-Durable inboxes and data stores follow the same pattern. An inbox definition
-owns hook creation, target-aware encoding, resume, decode, and its manifest
-entry; a durable data definition owns read, migration, write, and its manifest
-entry. Family-branded hook tokens prevent a task or callback payload from being
-sent to the wrong inbox in typed code, while hook metadata verifies the contract
-and supported version at runtime.
+The intended type-level shape is:
 
-Raw latest-start, hook, stream, and durable-state primitives remain internal to
-these contract-owned facades. A mechanical import guard rejects their use from
-other production modules, with narrow allowlists for the facades and historical
-test fixtures. This closes the bypass that would otherwise make registry
-coverage depend on reviewer memory.
+```ts
+interface DurableValueContract<TCurrent> {
+  readonly acceptedVersions: readonly number[];
+  readonly canonicalVersion: number;
+  readonly encodableVersions: readonly number[];
+  readonly name: string;
+  readonly schemaHashes: Readonly<Record<number, string | null>>;
+  readonly writeVersion: number;
+  decode(value: unknown): TCurrent;
+  encode(value: TCurrent, targetVersion?: number): unknown;
+}
+
+interface DurableWorkflowDefinition<TName extends string, TInput, TResult> {
+  readonly name: TName;
+  readonly input: DurableValueContract<TInput>;
+  readonly result: DurableValueContract<TResult>;
+  readonly run: (input: TInput) => Promise<TResult>;
+}
+
+declare const durableWorkflowBrand: unique symbol;
+
+interface DurableRun<TResult> {
+  readonly runId: string;
+  readonly returnValue: Promise<TResult>;
+}
+
+interface DurableWorkflow<TName extends string, TInput, TResult> {
+  readonly [durableWorkflowBrand]: TName;
+  readonly name: TName;
+  readonly workflowId: string;
+  readonly input: DurableValueContract<TInput>;
+  readonly result: DurableValueContract<TResult>;
+  startLatest(input: TInput, options?: DurableStartOptions): Promise<DurableRun<TResult>>;
+}
+
+declare const exactDeploymentBrand: unique symbol;
+type ExactDeploymentId = string & { readonly [exactDeploymentBrand]: true };
+
+function exactDeploymentId(value: string): ExactDeploymentId;
+
+interface DurableWorkflowTestControl {
+  startOnDeployment<TName extends string, TInput, TResult>(
+    workflow: DurableWorkflow<TName, TInput, TResult>,
+    deploymentId: ExactDeploymentId,
+    input: TInput,
+    options?: DurableStartOptions,
+  ): Promise<DurableRun<TResult>>;
+}
+```
+
+`name` is the immutable contract identity. `defineDurableWorkflow` derives the
+stable Workflow routing ID as `workflow//eve//${name}`. The string is not secret,
+but the latest-start facade accepts only the branded definition created by this
+factory, never a bare ID or generic workflow reference. Changing `name` is
+therefore a durable contract change rejected by the manifest regression gate.
+
+`input` owns the complete value crossing into the workflow. Its
+`canonicalVersion` is the representation delivered to `run`, while
+`writeVersion` is the representation emitted by producers. Separating them
+allows a reader-first release to accept and canonicalize version N+1 while still
+writing version N for rollback safety. `initialVersion` identifies a historical
+unversioned cohort when one exists, `versions` records accepted wire versions
+and canonical schemas, `encoders` defines `encodableVersions` by projecting the
+canonical value into each permitted target version, and `migrations` contains
+one pure forward transform for each step to the canonical representation.
+Accepted versions, encodable versions, and schema hashes are derived from this
+definition rather than repeated manually in the manifest registry.
+
+The schema reference is build-only metadata. The package build imports it to
+produce a canonical fingerprint, while the workflow transformer emits a reduced
+runtime descriptor containing only version numbers, dependency-free decoders,
+encoders, and migrations. Each version's `decode` function performs the runtime
+wire validation needed before migration; Zod and `node:crypto` do not enter the
+workflow bundle.
+
+`result` is required so a workflow cannot accidentally expose an unversioned
+return value. Workflows that communicate only through hooks declare the built-in
+`durableVoid(name)` contract. Other workflows declare a versioned result
+contract, and the returned `DurableRun` decodes the persisted result before
+exposing it to the caller. Direct Workflow results do not expose receiver
+capability negotiation, so their `writeVersion` may advance only when every
+supported caller cohort accepts it. A result that needs per-consumer negotiation
+must instead travel over a durable inbox contract.
+
+Existing workflows bootstrap their historical raw return value as unversioned
+result version 0. Their first result contract must decode that raw shape, retain
+an encoder that reproduces it, and keep `writeVersion: 0` while any legacy caller
+can remain. Frozen historical-result fixtures prove the v0 encoder preserves the
+old bytes and semantics. The contract may emit a versioned result only after all
+legacy callers have rotated or the compatibility horizon has expired.
+
+`run` remains a named top-level workflow function so the existing workflow
+transformer can discover and compile it. `defineDurableWorkflow` associates that
+compiled declaration with its contract; the compiler verifies the directive and
+binding rather than requiring an object-property workflow syntax. The generated
+entry calls `input.decode`, which parses the envelope, selects and validates the
+declared wire version, applies forward migrations, validates the canonical
+shape, and returns only the canonical input to `run`. Any unsupported version or
+failed migration is reported as durable version skew before application logic
+runs.
+
+`startLatest` replaces direct calls to `startWorkflowPreferLatest`. It accepts a
+canonical domain value rather than a raw argument tuple, encodes it at the
+contract's `writeVersion`, and starts the definition's hidden workflow reference.
+It preserves existing routing semantics: production and `eve dev` request the
+latest deployment, preview stays on its serving deployment, and worlds that do
+not implement latest routing fall back to the current deployment.
+The separately exported `DurableWorkflowTestControl` is restricted by the import
+guard to compatibility tests and canaries. Its `startOnDeployment` accepts only a
+validated `ExactDeploymentId`, not an arbitrary string. The guarded
+`exactDeploymentId` constructor rejects empty values and symbolic selectors such
+as `"latest"` at runtime. Exact starts use the same mandatory encoding path. The
+underlying generic reference is not exported from either facade.
+
+The returned definition supplies its workflow ID and named input/result contract
+metadata to the bundler and build manifest. Results are emitted as ordinary data
+contract entries referenced by the workflow entry. A manifest format that
+supports staged reader-first rollout records canonical and write versions
+separately; the existing format-2 `currentVersion` remains their shared bootstrap
+value until that format lands. There is no second workflow ID, version list, or
+schema table for an engineer to keep synchronized.
+
+The next manifest format makes those relationships explicit:
+
+```json
+{
+  "dataContracts": [
+    {
+      "acceptedVersions": [0, 1, 2],
+      "canonicalVersion": 2,
+      "encodableVersions": [1, 2],
+      "name": "turnWorkflow.input",
+      "schemaHashes": { "0": null, "1": "sha256:...", "2": "sha256:..." },
+      "writeVersion": 1
+    },
+    {
+      "acceptedVersions": [0, 1],
+      "canonicalVersion": 1,
+      "encodableVersions": [0, 1],
+      "name": "turnWorkflow.result",
+      "schemaHashes": { "0": null, "1": "sha256:..." },
+      "writeVersion": 0
+    }
+  ],
+  "formatVersion": 3,
+  "workflows": [
+    {
+      "inputContract": "turnWorkflow.input",
+      "name": "turnWorkflow",
+      "resultContract": "turnWorkflow.result",
+      "workflowId": "workflow//eve//turnWorkflow"
+    }
+  ]
+}
+```
+
+For comparison with format 2, the old inline workflow input fields normalize to
+a synthetic `${workflow.name}.input` contract whose canonical and write versions
+both equal the old `inputVersion`. Each historical raw return value normalizes to
+a synthetic `${workflow.name}.result` contract at unversioned version 0. The
+first explicit result definition must use that identity, accept and encode v0,
+and continue writing v0; it cannot replace the bootstrap gap with an unrelated
+versioned envelope. Format 3 validates that every workflow link resolves to a
+declared data contract.
+
+A format-2 contract with `acceptedVersions: null` keeps that unknown support set
+when normalized. Its current version is the only proven encodable and writable
+version. The gate rejects a write-version change until a reader-only release has
+declared a finite accepted set that includes the proposed write version. Unknown
+support therefore blocks an unsafe advance rather than being guessed into a
+format-3 guarantee.
+
+The regression comparator additionally prevents canonical or write version
+decreases, requires the candidate to accept the base build's write version,
+requires the base build to accept the candidate's write version for rollback
+safety, and preserves every previously advertised accepted and encodable version.
+The promotion gate applies the write-version check to every supported production
+cohort, not only the pull request base. The normal schema identity and stable
+workflow ID rules continue to apply.
+
+#### Runtime lifecycle
+
+The definition governs the boundary in both directions:
+
+```text
+producer domain input
+    │ input.encode at writeVersion
+    ▼
+persisted { version, ... }
+    │ Workflow start on an exact resolved deployment
+    ▼
+input.decode: wire validation → forward migrations → canonical validation
+    │
+    ▼
+run(canonical input)
+    │ result.encode at writeVersion
+    ▼
+versioned durable result
+    │ DurableRun decodes
+    ▼
+caller receives canonical result
+```
+
+Forward migrations solve an old-producer-to-new-consumer transition. They do not
+make a new write readable by code that has already been rolled back. A new input
+version therefore follows a reader-first rollout: deploy support for reading the
+new version while still writing the old version, establish that deployment as
+the rollback floor, and only then begin writing the new version. Historical
+dual-write fields such as `continuationToken` and `taskInboxToken` remain an
+explicit bridge where an old target cannot negotiate its version.
+
+#### Which boundaries require a definition
+
+The criterion is not whether a value is important or serialized. Every boundary
+whose producer and consumer may execute different code needs an explicit owner.
+Values interpreted by eve across deployments need a durable contract; opaque
+values may instead declare origin pinning, and Workflow-runtime-owned journals
+remain owned by that runtime. The owner is specialized to the transport:
+
+| Boundary                                                          | Required owner                                                      |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Workflow routed across deployments                                | Durable workflow plus input and result value contracts              |
+| Hook, callback, or inbox resumed by another deployment            | Durable inbox contract with consumer capability negotiation         |
+| Session snapshot or framework state read after a deployment       | Durable value or state contract with forward migrations             |
+| Event stream containing records from multiple deployments         | Durable stream contract with per-event versions and projections     |
+| Attachment or reference interpreted by different deployment code  | Durable value contract                                              |
+| Opaque dependency continuation or executable closure              | Origin-deployment pinning, or an owned adapter and explicit version |
+| In-memory value consumed entirely within one pinned execution     | No durable contract                                                 |
+| Workflow-runtime journal interpreted only by the Workflow runtime | Owned by the Workflow runtime, not duplicated by eve                |
+
+An opaque or executable value does not become safe merely by adding a numeric
+version. If eve cannot define a deterministic data migration, the operation must
+resume on its originating deployment, be invalidated, or cross an explicit epoch
+boundary. The contract system should expose that ownership decision rather than
+claim compatibility it cannot provide.
+
+#### Related durable definitions
+
+`defineDurableWorkflow` covers workflow routing, input, and return values. It
+does not implicitly make every value used by the workflow compatible.
+Turn-control messages, inbox payloads, session state, streams, and attachment
+references are independent boundaries and use sibling definitions:
+
+- A durable inbox definition owns hook creation, target capability inspection,
+  target-aware encoding, resume, decode, and its manifest entry.
+- A durable state definition owns its state key, versions, migrations,
+  validation, reads, writes, and manifest entry.
+- A durable stream definition owns event versions, append encoding, projection,
+  and its manifest entry.
+
+Family-branded workflow and hook handles prevent a task or callback payload from
+being sent to the wrong boundary in typed code. The private brand carries the
+literal contract name, so handles from two definitions are not structurally
+interchangeable even when their payload types match. Persisted metadata verifies
+the contract identity and supported version at runtime, where TypeScript brands
+are no longer present.
+
+#### Construction enforcement
+
+Raw latest-start, hook, stream, durable-state, attachment-reference, and opaque
+continuation primitives remain internal to contract-owned facades. A mechanical
+import guard rejects their use from other production modules, with narrow
+allowlists for the facades, historical test fixtures, and Workflow-runtime-owned
+journals. Origin-pinned values use an ownership declaration with strategy
+`"origin-deployment"` rather than a migration contract. This closes the bypass
+that would otherwise make coverage depend on reviewer memory.
 
 The same definitions drive runtime references, workflow bundling, and manifest
 generation. Build checks reject duplicate identities, missing version steps or
@@ -221,6 +522,15 @@ definitions. An accidental function rename, removed workflow directive, changed
 routing key, stale version declaration, or unregistered latest-routed workflow
 therefore fails before release.
 
+This construction proves that every use of an eve-owned durable primitive has an
+explicit owner. For contract-owned values it also proves that identity, versions,
+migrations, encoders, and generated manifest entries agree. Origin-pinned and
+Workflow-runtime-owned values are checked against their declared ownership
+strategy instead of being required to publish migrations. None of these checks
+prove semantic equivalence of arbitrary JavaScript. A migration can preserve a
+schema while changing the meaning of a pending tool call, so historical
+mixed-version scenarios and suspended-session canaries remain required.
+
 ### Regression gate
 
 The regression gate builds the manifest for both the pull request's base commit
@@ -228,18 +538,20 @@ and candidate commit, then compares the generated artifacts. It does not use a
 checked-in baseline that could be changed in the same pull request to hide a
 breaking change.
 
-The comparison rejects removing a durable contract, changing a stable workflow
-ID, decreasing a current version, removing a previously accepted version, or
-changing or removing the schema fingerprint of an existing version. When a
-contract advances to a new current version, the candidate must continue to
-accept the previous current version.
+The implemented format-2 comparison rejects removing a durable contract,
+changing a stable workflow ID, decreasing `currentVersion`, removing a
+previously accepted version, or changing or removing an existing schema
+fingerprint. When a contract advances, the candidate must continue to accept the
+previous current version. Format 1 remains a bootstrap input, and a candidate may
+fill a previously `null` hash but may not contradict an existing claim.
 
-The comparator accepts the original format-1 manifest as a bootstrap input
-while format 2 adds accepted-version sets and schema fingerprints. A candidate
-may add a fingerprint where none was previously declared, but it may not
-contradict or remove an existing compatibility claim. The manifest gate detects
-structural regressions only; historical fixtures, mixed-version scenarios, and
-suspended-session canaries provide the behavioral checks below.
+The proposed format-3 comparison adds the canonical/write, encoder, rollback,
+referential-integrity, and workflow result rules described above. Format-2
+contracts normalize into format 3 with synthetic input contracts and legacy v0
+result contracts; explicit definitions must preserve those identities and wire
+formats. The manifest gate detects structural regressions only, so historical
+fixtures, mixed-version scenarios, and suspended-session canaries provide the
+behavioral checks below.
 
 ## Admission pipeline
 
