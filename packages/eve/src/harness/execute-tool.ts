@@ -1,7 +1,7 @@
 import type { FlexibleSchema } from "ai";
 
 import type { Approval } from "#approval/definition.js";
-import type { InternalToolLabelDefinition, ToolExecuteOptions } from "#tools/definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
 import type { JsonValue } from "#shared/json.js";
 import type { PreparedToolBehavior } from "#tools/behavior.js";
@@ -20,7 +20,9 @@ export type HarnessRuntimeActionDefinition = { readonly kind: "task-control" };
  * Unified harness-owned tool definition.
  */
 export interface HarnessToolDefinition {
-  readonly label?: InternalToolLabelDefinition;
+  readonly activityLabel?: (input: unknown) => string;
+  readonly activityResult?: (output: unknown) => string;
+  readonly activityUpdate?: (partial: unknown) => string;
   readonly approvalKey?: (toolInput: Readonly<Record<string, unknown>>) => string;
   readonly behavior?: PreparedToolBehavior;
   readonly description: string;

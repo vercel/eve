@@ -1536,7 +1536,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
-  it("replays a label start callback", () => {
+  it("replays activity callbacks", () => {
     const ctx = createCtx();
     const owner = {
       sessionId: ctx.require(SessionIdKey),
@@ -1547,14 +1547,24 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     registerTestCallback("deploy", "execute", () => ({ ok: true }), owner);
     registerTestCallback(
       "deploy",
-      "labelStart",
+      "activityLabel",
       (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
       owner,
+    );
+    registerTestCallback(
+      "deploy",
+      "activityResult",
+      (_closure, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
+    );
+    registerTestCallback("deploy", "activityUpdate", (_closure, partial) =>
+      String((partial as { phase: unknown }).phase),
     );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
         callbacks: {
-          label: { start: { closure: {} } },
+          activityLabel: { closure: {} },
+          activityResult: { closure: {} },
+          activityUpdate: { closure: {} },
           execute: { closure: {} },
         },
         description: "Deploy.",
@@ -1565,9 +1575,12 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       },
     ]);
 
-    expect(buildDynamicTools(ctx)[0]?.label?.start?.({ environment: "preview" })).toBe(
-      "Deploy to preview",
+    const tool = buildDynamicTools(ctx)[0];
+    expect(tool?.activityLabel?.({ environment: "preview" })).toBe("Deploy to preview");
+    expect(tool?.activityResult?.({ url: "preview.example.com" })).toBe(
+      "Deployed to preview.example.com",
     );
+    expect(tool?.activityUpdate?.({ phase: "Uploading" })).toBe("Uploading");
     clearDurableDynamicCallbacks(owner.sessionId);
   });
 

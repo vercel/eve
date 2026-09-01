@@ -165,6 +165,17 @@ describe("normalizeToolDefinition", () => {
         FAILURE_MESSAGE,
       ),
     ).toThrow(FAILURE_MESSAGE);
+    expect(() =>
+      normalizeToolDefinition(
+        {
+          activity: { label: () => "Fetch weather", result: "Done" },
+          description: "Fetch weather.",
+          execute: () => null,
+          inputSchema: { type: "object" },
+        },
+        FAILURE_MESSAGE,
+      ),
+    ).toThrow(FAILURE_MESSAGE);
   });
 
   it("accepts authored tools that declare a `toModelOutput` function", () => {

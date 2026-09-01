@@ -187,7 +187,9 @@ export function validateDurableDynamicToolCallbacks(
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
       key !== "execute" &&
-      key !== "label" &&
+      key !== "activityLabel" &&
+      key !== "activityResult" &&
+      key !== "activityUpdate" &&
       key !== "approvalKey" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
@@ -212,12 +214,26 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.execute,
     required: true,
   })!;
-  const labelStart = validateReference({
+  const activityLabel = validateReference({
     name,
     owner,
-    phase: "labelStart",
-    stamped: raw.label?.start,
+    phase: "activityLabel",
+    stamped: raw.activityLabel,
     required: hasLabelStart,
+  });
+  const activityResult = validateReference({
+    name,
+    owner,
+    phase: "activityResult",
+    stamped: raw.activityResult,
+    required: entry.activity?.result !== undefined,
+  });
+  const activityUpdate = validateReference({
+    name,
+    owner,
+    phase: "activityUpdate",
+    stamped: raw.activityUpdate,
+    required: entry.activity?.update !== undefined,
   });
   const approvalKey = validateReference({
     name,
@@ -250,13 +266,17 @@ export function validateDurableDynamicToolCallbacks(
 
   const callbacks: {
     execute: DurableDynamicCallbackReference;
-    label?: { start?: DurableDynamicCallbackReference };
+    activityLabel?: DurableDynamicCallbackReference;
+    activityResult?: DurableDynamicCallbackReference;
+    activityUpdate?: DurableDynamicCallbackReference;
     approvalKey?: DurableDynamicCallbackReference;
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
   } = { execute };
-  if (labelStart !== undefined) callbacks.label = { start: labelStart };
+  if (activityLabel !== undefined) callbacks.activityLabel = activityLabel;
+  if (activityResult !== undefined) callbacks.activityResult = activityResult;
+  if (activityUpdate !== undefined) callbacks.activityUpdate = activityUpdate;
   if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;

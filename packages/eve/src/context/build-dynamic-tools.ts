@@ -24,8 +24,11 @@ import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
+<<<<<<< HEAD
   type DurableDynamicCallbackReference,
   type DynamicToolCallbackOwner,
+=======
+>>>>>>> c46f4ef0f (feat(eve): project tool partials into activity)
 } from "#tools/durable-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#tools/schema.js";
 
@@ -105,13 +108,26 @@ export function replayDynamicTools(
         : lookupDurableDynamicCallback(owner, "approvalKey");
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(owner, "execute");
-    const labelStart = bindDynamicCallback(entry, owner, "labelStart", entry.callbacks.label?.start);
-    const toModelOutput = bindDynamicCallback(
-      entry,
-      owner,
-      "toModelOutput",
-      entry.callbacks.toModelOutput,
-    );
+    const labelStartReference = entry.callbacks.activityLabel;
+    const activityLabel =
+      labelStartReference === undefined
+        ? undefined
+        : lookupDurableDynamicCallback(owner, "activityLabel");
+    const activityResultReference = entry.callbacks.activityResult;
+    const activityResult =
+      activityResultReference === undefined
+        ? undefined
+        : lookupDurableDynamicCallback(owner, "activityResult");
+    const activityUpdateReference = entry.callbacks.activityUpdate;
+    const activityUpdate =
+      activityUpdateReference === undefined
+        ? undefined
+        : lookupDurableDynamicCallback(owner, "activityUpdate");
+    const toModelOutputReference = entry.callbacks.toModelOutput;
+    const toModelOutput =
+      toModelOutputReference === undefined
+        ? undefined
+        : lookupDurableDynamicCallback(owner, "toModelOutput");
 
     const replayed: {
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
@@ -175,26 +191,44 @@ export function replayDynamicTools(
           }),
       outputSchema: toOutputSchema(entry.outputSchema),
     };
-    if (labelStart !== undefined) {
-      replayed.label = { start: (input: unknown) => labelStart(input) as string };
+    if (labelStartReference !== undefined) {
+      replayed.activityLabel = (input: unknown) => {
+        if (activityLabel === undefined) throw missingCallbackError(entry, "activityLabel");
+        return callDurableDynamicCallback(
+          activityLabel,
+          labelStartReference.closure,
+          input,
+        ) as string;
+      };
     }
-    if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
+    if (activityResultReference !== undefined) {
+      replayed.activityResult = (output: unknown) => {
+        if (activityResult === undefined) throw missingCallbackError(entry, "activityResult");
+        return callDurableDynamicCallback(
+          activityResult,
+          activityResultReference.closure,
+          output,
+        ) as string;
+      };
+    }
+    if (activityUpdateReference !== undefined) {
+      replayed.activityUpdate = (partial: unknown) => {
+        if (activityUpdate === undefined) throw missingCallbackError(entry, "activityUpdate");
+        return callDurableDynamicCallback(
+          activityUpdate,
+          activityUpdateReference.closure,
+          partial,
+        ) as string;
+      };
+    }
+    if (toModelOutputReference !== undefined) {
+      replayed.toModelOutput = (output: unknown) => {
+        if (toModelOutput === undefined) throw missingCallbackError(entry, "toModelOutput");
+        return callDurableDynamicCallback(toModelOutput, toModelOutputReference.closure, output);
+      };
+    }
     return replayed;
   });
-}
-
-function bindDynamicCallback(
-  entry: CurrentDynamicToolMetadata,
-  owner: DynamicToolCallbackOwner,
-  phase: DurableDynamicCallbackPhase,
-  reference: DurableDynamicCallbackReference | undefined,
-): ((...args: unknown[]) => unknown) | undefined {
-  if (reference === undefined) return undefined;
-  const callback = lookupDurableDynamicCallback(owner, phase);
-  return (...args) => {
-    if (callback === undefined) throw missingCallbackError(entry, phase);
-    return callDurableDynamicCallback(callback, reference.closure, ...args);
-  };
 }
 
 function requireCurrentDynamicToolMetadata(
