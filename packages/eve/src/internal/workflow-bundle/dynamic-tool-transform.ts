@@ -305,10 +305,10 @@ function createLiveWrapper(callback: CallbackInfo, hoistedName: string, closure:
   if (callback.isReference) {
     return `(...__args) => ${hoistedName}(${closure}, ...__args)`;
   }
-  const asyncPrefix = callback.isAsync ? "async " : "";
   if (callback.isGenerator) {
-    return `${asyncPrefix}function* (...__args) { yield* ${hoistedName}(${closure}, ...__args); }`;
+    return `(...__args) => ${hoistedName}(${closure}, ...__args)`;
   }
+  const asyncPrefix = callback.isAsync ? "async " : "";
   const awaitPrefix = callback.isAsync ? "await " : "";
   return `${asyncPrefix}(...__args) => ${awaitPrefix}${hoistedName}(${closure}, ...__args)`;
 }

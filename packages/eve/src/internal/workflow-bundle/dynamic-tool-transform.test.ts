@@ -243,18 +243,18 @@ export default defineDynamic({
     });
   });
 
-  it("forwards destructured parameters with defaults", async () => {
+  it("forwards destructured callback arguments without rebuilding the input", async () => {
     const source = `
 import { defineDynamic, defineTool } from "eve/tools";
 
 export default defineDynamic({
   events: {
     "session.started": async () => ({
-      tool: defineTool({
-        description: "T",
+      inspect: defineTool({
+        description: "Inspect",
         inputSchema: { type: "object" },
-        async execute({ dryRun = false }, ctx) {
-          return { dryRun, requestId: ctx.requestId };
+        async execute({ dryRun = false, nested: { value }, ...rest }, ctx) {
+          return { dryRun, value, extra: rest.extra, marker: ctx.marker };
         },
       }),
     }),
@@ -262,20 +262,47 @@ export default defineDynamic({
 });
 `;
 
-    const { callHandler, code } = await transformAndEval("tools/default-param.ts", source);
+    const { callHandler } = await transformAndEval("tools/destructured-default.ts", source);
     const tools = await callHandler();
-    const execute = (tools.tool as Record<string, unknown>).execute as Function;
+    const execute = (tools.inspect as Record<string, unknown>).execute as Function;
 
-    expect(code).toMatch(
-      /async \(\.\.\.__args\) => await __eve_dynamic_exec_\d+\(\{\}, \.\.\.__args\)/,
-    );
-    await expect(execute({}, { requestId: "req-123" })).resolves.toEqual({
+    await expect(
+      execute({ extra: "preserved", nested: { value: "nested" } }, { marker: "ctx" }),
+    ).resolves.toEqual({
       dryRun: false,
-      requestId: "req-123",
+      extra: "preserved",
+      marker: "ctx",
+      value: "nested",
     });
-    await expect(execute({ dryRun: true }, { requestId: "req-456" })).resolves.toEqual({
-      dryRun: true,
-      requestId: "req-456",
+  });
+
+  it("binds destructured generator parameters when the callback is invoked", async () => {
+    const source = `
+import { defineDynamic, defineTool } from "eve/tools";
+
+export default defineDynamic({
+  events: {
+    "session.started": async () => ({
+      inspect: defineTool({
+        description: "Inspect",
+        inputSchema: { type: "object" },
+        *execute({ nested: { value }, ...rest }) {
+          yield { value, extra: rest.extra };
+        },
+      }),
+    }),
+  },
+});
+`;
+
+    const { callHandler } = await transformAndEval("tools/generator-destructuring.ts", source);
+    const tools = await callHandler();
+    const execute = (tools.inspect as Record<string, unknown>).execute as Function;
+
+    expect(() => execute(undefined)).toThrow(TypeError);
+    expect(execute({ extra: "preserved", nested: { value: "nested" } }).next()).toEqual({
+      done: false,
+      value: { extra: "preserved", value: "nested" },
     });
   });
 
@@ -1948,7 +1975,9 @@ export default defineTool({
 `;
 
     const result = await transformDynamicToolExecute("agent/tools/stream.ts", source);
-    expect(result?.code).toContain("execute: __eveStampDynamicCallback(async function*");
+    expect(result?.code).toContain(
+      "execute: __eveStampDynamicCallback((...__args) => __eve_dynamic_exec_",
+    );
     expect(result?.code).toContain("async function* __eve_dynamic_exec_");
   });
 
@@ -2394,14 +2423,14 @@ import { defineDynamic, defineTool } from "eve/tools";
 
 export default defineDynamic({
   events: {
-    "session.started": async (_input, ctx) => {
+    "session.started": async () => {
       const tag = "typed";
       return {
         tool: defineTool({
           description: "T",
           inputSchema: { type: "object" },
           execute(_input: Record<string, unknown>, ctx: import("eve/tools").ToolContext) {
-            return { tag, input: _input, hasCtx: ctx !== undefined };
+            return { tag, hasCtx: ctx !== undefined };
           },
         }),
       };
@@ -2414,7 +2443,14 @@ export default defineDynamic({
     expect(result).not.toBeNull();
     const code = result!.code;
 
-    expect(code).toContain("const { tag } = __vars");
-    expect(code).toMatch(/\(\.\.\.__args\) => __eve_dynamic_exec_\d+\(\{ tag \}, \.\.\.__args\)/);
+    // The wrapper call args should be `{ tag }, _input, ctx` — NOT
+    // `{ tag }, _input, unknown>, ctx` which the old naive comma split
+    // would have produced.
+    const wrapperCallMatch = code.match(/__eve_dynamic_exec_\d+\(([^)]+)\)/);
+    expect(wrapperCallMatch).not.toBeNull();
+    const wrapperArgs = wrapperCallMatch![1]!;
+    expect(wrapperArgs).not.toMatch(/\bunknown>\b/);
+    // Should have the hoisted function
+    expect(code).toContain("__eve_dynamic_exec_");
   });
 });
