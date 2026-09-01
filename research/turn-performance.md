@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-01"
 ---
 
 # Turn performance and Workflow overhead
@@ -381,6 +381,73 @@ If Workflow cannot provide atomic hook ownership transfer, an eve-owned sequence
 necessary. A direct ingress fast path that starts a turn before driver replay is another possible
 prototype, but it has the same serialization and fencing problem and should follow, not precede,
 the successor-run experiment.
+
+### Successor-run feasibility result
+
+The first executable prototype narrows the design space, but it is not a production candidate.
+The Workflow APIs provide two required pieces today:
+
+- explicit recursive `start(..., { deploymentId: "latest" })` creates a bounded successor on the
+  current deployment; and
+- a `WritableStream` can be passed across runs, so successor output can remain on the original
+  session stream.
+
+They do not provide atomic ownership transfer for the stable command hook. Hook tokens have one
+active owner. Disposing the old hook and claiming it in a successor are separate durable writes.
+The integration proof deliberately gates the successor between those writes and observes
+`HookNotFoundError` from both `getHookByToken()` and `resumeHook()`. A direct run-to-run handoff
+would therefore reject a command in that interval and cannot replace the current driver.
+
+The same test contains the narrowest lossless workaround supported by the current API:
+
+```text
+stable public token
+  └─ minimal FIFO sequencer run
+       ├─ active executor N receives commands
+       ├─ executor N asks the sequencer to seal generation N
+       ├─ sequencer forwards a seal, then durably holds later commands
+       ├─ executor N drains every pre-seal command
+       ├─ executor N starts latest-deployment executor N+1 with state + shared stream
+       └─ sequencer activates N+1 and forwards held commands in FIFO order
+```
+
+Six burst deliveries produced six ordered stream records through six owning executor runs. Every
+nonterminal executor persisted exactly five steps regardless of history depth; the terminal
+executor persisted three. The deterministic executor token also fenced a losing duplicate start.
+This proves that one-turn executor histories and stream continuity are possible with current
+Workflow primitives.
+
+It also shows why the workaround should not ship as the performance fix:
+
+- the sequencer is still a long-lived relay whose hook/event log grows with every command;
+- every ingress crosses a sequencer replay plus a forwarding step before the executor wakes;
+- seal, successor start, readiness, and activation add five durable steps per nonterminal turn;
+- the full conversation snapshot still grows once per successor input even though it is no longer
+  copied repeatedly into one driver's event log; and
+- the prototype intentionally omits production cancellation, timeout, authorization, HITL,
+  subagent/task, terminal-caller, and failure-recovery paths.
+
+Consequently there is no hosted stress result for this branch: wiring the prototype into the eve
+runtime would knowingly add overhead and leave required semantics incomplete. The focused test is
+the proof artifact, not a benchmark substitute.
+
+The enabling Workflow primitive is an atomic, replay-idempotent successor handoff. Given a stable
+token, expected owner/generation, handoff id, latest-deployment workflow reference, checkpoint,
+and existing stream, one commit must:
+
+1. fence the old owner at an exact inbox sequence;
+2. start and register the successor on the latest deployment;
+3. preserve or transfer every payload before the fence and route every later payload to the
+   successor;
+4. keep `resumeHook(stableToken, payload)` continuously addressable, never transiently not found;
+5. return the same successor on replay of the handoff id; and
+6. preserve the stable eve session id and original resumable stream.
+
+An eve-owned durable inbox with monotonic sequence numbers and compare-and-swap ownership could
+provide equivalent semantics, but then eve owns a new storage protocol, retry/fencing rules, and a
+stream directory. Prototype that only if Workflow cannot expose the atomic operation. Even with
+either handoff, append-only history revisions or delta snapshots remain a separate requirement to
+remove the growing successor-input payload.
 
 ## Proof of success
 
