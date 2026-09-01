@@ -159,9 +159,36 @@ describe("request ledger extension migration", () => {
     const migrated = setPendingAuthorization(legacy, { challenges: [challenge] });
     expect(migrated).not.toHaveProperty("eve.runtime.pendingAuthorization");
     expect(getPendingAuthorization(migrated)?.challenges).toEqual([challenge]);
-    expect(readRequestLedger(migrated).authorizations).toEqual([
-      { challenge, responseAttemptId: undefined },
-    ]);
+    expect(readRequestLedger(migrated).requests).toContainEqual(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          authorization: challenge,
+          kind: "authorization",
+        }),
+        state: "open",
+      }),
+    );
+    expect(openRequestGroups(migrated)).toEqual([]);
+  });
+
+  it("retains completed Authorization requests as terminal records", async () => {
+    const { clearPendingAuthorization, setPendingAuthorization } =
+      await import("#harness/authorization.js");
+    const challenge = {
+      attemptId: "authorization-1",
+      challenge: { url: "https://example.com" },
+      hookUrl: "https://example.com/callback",
+      name: "linear",
+    } as const;
+    const opened = setPendingAuthorization(undefined, { challenges: [challenge] });
+    const completed = clearPendingAuthorization(opened, ["authorization-1"]);
+
+    expect(readRequestLedger(completed).requests).toContainEqual(
+      expect.objectContaining({
+        request: expect.objectContaining({ kind: "authorization" }),
+        state: "terminal",
+      }),
+    );
   });
 });
 

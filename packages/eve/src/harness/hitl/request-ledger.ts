@@ -4,7 +4,7 @@ import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { DurableResponseAttemptState } from "#harness/hitl/approval-response-attempts.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import type { InputRequest } from "#shared/input.js";
+import { isInputRequest, type InputRequest } from "#shared/input.js";
 
 const KEY = "eve.runtime.hitl.requestLedger";
 const LEGACY_BATCHES_KEY = "eve.runtime.pendingInputBatches";
@@ -12,10 +12,19 @@ const LEGACY_BATCH_KEY = "eve.runtime.pendingInputBatch";
 const LEGACY_APPROVAL_STATE_KEY = "eve.runtime.hitl.approvalState";
 const LEGACY_PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
 
+export interface InternalAuthorizationRequest {
+  readonly authorization: AuthorizationChallenge;
+  readonly kind: "authorization";
+  readonly requestId: string;
+  readonly responseAttemptId?: string;
+}
+
+export type DurableRequest = InputRequest | InternalAuthorizationRequest;
+
 export interface RequestRecord {
-  readonly groupId: string;
+  readonly groupId?: string;
   readonly id: string;
-  readonly request: InputRequest;
+  readonly request: DurableRequest;
   readonly state: "open" | "terminal";
 }
 
@@ -37,7 +46,6 @@ export interface RequestLedgerAuthorizationRecord {
 }
 
 export interface RequestLedger {
-  readonly authorizations?: readonly RequestLedgerAuthorizationRecord[];
   readonly groups: readonly RequestGroup[];
   readonly requests: readonly RequestRecord[];
   readonly responseAttempts?: DurableResponseAttemptState;
@@ -115,37 +123,76 @@ export function writeApprovalAttemptState(
 export function readPendingAuthorizationState(
   state: SessionStateMap | undefined,
 ): readonly RequestLedgerAuthorizationRecord[] | undefined {
-  const ledger = state?.[KEY] as RequestLedger | undefined;
-  if (Array.isArray(ledger?.authorizations)) return ledger.authorizations;
-  const legacy = state?.[LEGACY_PENDING_AUTHORIZATION_KEY] as
-    | { readonly challenges?: readonly AuthorizationChallenge[] }
+  const persisted = state?.[KEY] as
+    | (RequestLedger & { readonly authorizations?: readonly RequestLedgerAuthorizationRecord[] })
     | undefined;
-  return legacy?.challenges?.map((challenge) => ({
-    challenge,
-    responseAttemptId: challenge.candidateId,
-  }));
+  const requests = persisted?.requests
+    .filter(
+      (record): record is RequestRecord & { readonly request: InternalAuthorizationRequest } =>
+        record.state === "open" && record.request.kind === "authorization",
+    )
+    .map((record) => ({
+      challenge: record.request.authorization,
+      responseAttemptId: record.request.responseAttemptId,
+    }));
+  if ((requests?.length ?? 0) > 0) return requests;
+  if (Array.isArray(persisted?.authorizations) && persisted.authorizations.length > 0) {
+    return persisted.authorizations;
+  }
+  return readLegacyAuthorizations(state);
 }
 
 export function writePendingAuthorizationState(
   state: SessionStateMap | undefined,
   authorizations: readonly RequestLedgerAuthorizationRecord[],
 ): SessionStateMap {
-  return writeLedgerExtension(state, { authorizations }, [LEGACY_PENDING_AUTHORIZATION_KEY]);
+  const ledger = readRequestLedger(state);
+  const desired = new Map(
+    authorizations.map((entry) => {
+      const id = authorizationRequestId(entry);
+      return [
+        id,
+        {
+          id,
+          request: {
+            authorization: entry.challenge,
+            kind: "authorization" as const,
+            requestId: id,
+            responseAttemptId: entry.responseAttemptId,
+          },
+          state: "open" as const,
+        } satisfies RequestRecord,
+      ] as const;
+    }),
+  );
+  const requests = ledger.requests.map((record) => {
+    if (record.request.kind !== "authorization") return record;
+    const replacement = desired.get(record.id);
+    if (replacement !== undefined) {
+      desired.delete(record.id);
+      return replacement;
+    }
+    return record.state === "terminal" ? record : { ...record, state: "terminal" as const };
+  });
+  const result: Record<string, unknown> = {
+    ...state,
+    [KEY]: {
+      ...ledger,
+      requests: [...requests, ...desired.values()],
+      version: ledger.version + 1,
+    } satisfies RequestLedger,
+  };
+  delete result[LEGACY_PENDING_AUTHORIZATION_KEY];
+  const persisted = result[KEY] as Record<string, unknown>;
+  delete persisted.authorizations;
+  return result;
 }
 
 export function clearPendingAuthorizationState(
   state: SessionStateMap | undefined,
 ): SessionStateMap | undefined {
   if (readPendingAuthorizationState(state) === undefined) return state;
-  const ledger = readRequestLedger(state);
-  const next = { ...ledger };
-  delete next.authorizations;
-  const result: Record<string, unknown> = {
-    ...state,
-    [KEY]: { ...next, version: ledger.version + 1 },
-  };
-  delete result[LEGACY_PENDING_AUTHORIZATION_KEY];
-  return Object.keys(result).length === 0 ? undefined : result;
+  return writePendingAuthorizationState(state, []);
 }
 
 export function createRequestGroup(input: {
@@ -197,7 +244,7 @@ export function openRequestGroups(
     if (group.completion !== "waiting") return [];
     const open = group.requestIds.flatMap((id) => {
       const record = requests.get(id);
-      return record?.state === "open" ? [record.request] : [];
+      return record?.state === "open" && isInputRequest(record.request) ? [record.request] : [];
     });
     return open.length === 0
       ? []
@@ -232,7 +279,9 @@ export function completeRequestGroups(
       groupIds.has(group.id) ? { ...group, completion: "delivered" } : group,
     ),
     requests: ledger.requests.map((request) =>
-      groupIds.has(request.groupId) ? { ...request, state: "terminal" } : request,
+      request.groupId !== undefined && groupIds.has(request.groupId)
+        ? { ...request, state: "terminal" }
+        : request,
     ),
     session,
   });
@@ -270,19 +319,29 @@ function importLegacyBatches(state: SessionStateMap | undefined): RequestLedger 
       responseMessages: batch.responseMessages,
     };
   });
+  const authorizations = readLegacyAuthorizations(state) ?? [];
+  requests.push(
+    ...authorizations.map((entry): RequestRecord => {
+      const id = authorizationRequestId(entry);
+      return {
+        id,
+        request: {
+          authorization: entry.challenge,
+          kind: "authorization",
+          requestId: id,
+          responseAttemptId: entry.responseAttemptId,
+        },
+        state: "open",
+      };
+    }),
+  );
   assertUniqueRequestIds(requests);
-  return {
-    authorizations: readPendingAuthorizationState(state),
-    groups,
-    requests,
-    responseAttempts: undefined,
-    version: 0,
-  };
+  return { groups, requests, responseAttempts: undefined, version: 0 };
 }
 
 function writeLedgerExtension(
   state: SessionStateMap | undefined,
-  extension: Pick<RequestLedger, "authorizations" | "responseAttempts">,
+  extension: Pick<RequestLedger, "responseAttempts">,
   legacyKeys: readonly string[],
 ): SessionStateMap {
   const ledger = readRequestLedger(state);
@@ -292,6 +351,25 @@ function writeLedgerExtension(
   };
   for (const key of legacyKeys) delete result[key];
   return result;
+}
+
+function readLegacyAuthorizations(
+  state: SessionStateMap | undefined,
+): readonly RequestLedgerAuthorizationRecord[] | undefined {
+  const legacy = state?.[LEGACY_PENDING_AUTHORIZATION_KEY] as
+    | { readonly challenges?: readonly AuthorizationChallenge[] }
+    | undefined;
+  return legacy?.challenges?.map((challenge) => ({
+    challenge,
+    responseAttemptId: challenge.candidateId,
+  }));
+}
+
+function authorizationRequestId(entry: RequestLedgerAuthorizationRecord): string {
+  return `authorization:${JSON.stringify([
+    entry.responseAttemptId ?? null,
+    entry.challenge.attemptId ?? entry.challenge.name,
+  ])}`;
 }
 
 function assertUniqueRequestIds(requests: readonly RequestRecord[]): void {
