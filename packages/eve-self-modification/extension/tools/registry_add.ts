@@ -192,13 +192,22 @@ export async function addRegistryItem(
     };
   }
   if (outcome.kind === "failed") {
+    if (outcome.changed === undefined) {
+      return {
+        address,
+        status: "failed",
+        title: entry.title,
+        reason: outcome.message,
+        message: outcome.message,
+      };
+    }
     return {
       address,
       status: "failed",
       title: entry.title,
       reason: outcome.message,
       message: outcome.message,
-      ...(outcome.changed === undefined ? {} : { changed: outcome.changed }),
+      changed: outcome.changed,
     };
   }
 

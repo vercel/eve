@@ -252,16 +252,14 @@ export async function runEveAdd(input: {
                 /^[\w@+./ -]+$/u.test(path),
             )
           : [];
-        outcome = {
-          kind: "failed",
-          message:
-            event.rolledBack === true
-              ? `${reason} Project files were restored.`
-              : changed.length === 0
-                ? `${reason} The install may have partially changed the project.`
-                : `${reason} The install partially changed: ${changed.join(", ")}. Restore those files, then retry.`,
-          ...(changed.length === 0 ? {} : { changed }),
-        };
+        const message =
+          event.rolledBack === true
+            ? `${reason} Project files were restored.`
+            : changed.length === 0
+              ? `${reason} The install may have partially changed the project.`
+              : `${reason} The install partially changed: ${changed.join(", ")}. Restore those files, then retry.`;
+        outcome =
+          changed.length === 0 ? { kind: "failed", message } : { kind: "failed", message, changed };
       } else {
         outcome = {
           kind: "failed",

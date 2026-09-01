@@ -40,7 +40,11 @@ import {
   type RegistrySearchPresentationSection,
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
-import { reportHeadlessSetupCompletion, serializeHeadlessSetupEvent } from "./setup-headless.js";
+import {
+  reportHeadlessSetupCompletion,
+  serializeHeadlessSetupEvent,
+  type HeadlessSetupEvent,
+} from "./setup-headless.js";
 import {
   addRegistryMappings,
   prepareWebRegistryProject,
@@ -562,18 +566,17 @@ export async function runAddCommand(
       const failureCode = registryInstallFailureCode(error);
       const message = registryInstallFailureMessage(failureCode);
       if (options.nonInteractive) {
-        logger.log(
-          serializeHeadlessSetupEvent({
-            version: 1,
-            type: "failed",
-            item,
-            completedItems: [],
-            message,
-            failureCode,
-            rolledBack: rollback.restored,
-            ...(rollback.changed.length === 0 ? {} : { changed: rollback.changed }),
-          }),
-        );
+        const failureEvent: Extract<HeadlessSetupEvent, { type: "failed" }> = {
+          version: 1,
+          type: "failed",
+          item,
+          completedItems: [],
+          message,
+          failureCode,
+          rolledBack: rollback.restored,
+        };
+        if (rollback.changed.length > 0) failureEvent.changed = rollback.changed;
+        logger.log(serializeHeadlessSetupEvent(failureEvent));
       }
       throw new Error(message, { cause: error });
     }
