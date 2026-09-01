@@ -390,9 +390,10 @@ describe("createNodeHarnessTools", () => {
 });
 
 describe("createExecutionNodeStep", () => {
-  it("builds a usable harness step for the root node", async () => {
+  it("keeps the instrumentation drain on the root harness-step critical path", async () => {
     setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
-    const forceFlush = vi.fn(async () => undefined);
+    const flush = Promise.withResolvers<void>();
+    const forceFlush = vi.fn(() => flush.promise);
     const runtime: InstrumentationRuntime = {
       forceFlush,
       hooks: createInstrumentationHooks([]),
@@ -454,25 +455,35 @@ describe("createExecutionNodeStep", () => {
       turn: { id: "root-turn", sequence: 0 },
     });
 
-    const result = await contextStorage.run(ctx, () =>
-      step(
-        createSession({
-          continuationToken: "test-root",
-          sessionId: "sess-root",
-          turnAgent: rootNode.turnAgent,
-        }),
-        {
-          message: "Run the tool.",
-        },
-      ),
-    );
+    let stepSettled = false;
+    const resultPromise = contextStorage
+      .run(ctx, () =>
+        step(
+          createSession({
+            continuationToken: "test-root",
+            sessionId: "sess-root",
+            turnAgent: rootNode.turnAgent,
+          }),
+          {
+            message: "Run the tool.",
+          },
+        ),
+      )
+      .finally(() => {
+        stepSettled = true;
+      });
+
+    await vi.waitFor(() => expect(forceFlush).toHaveBeenCalledOnce());
+    expect(stepSettled).toBe(false);
+    flush.resolve();
+    const result = await resultPromise;
 
     expect(result.next).toEqual({ done: true, output: "tool-output" });
     expect(resolveRuntimeModelReference).toHaveBeenCalledWith(
       rootNode.turnAgent.model,
       modelResolutionScope,
     );
-    expect(forceFlush).toHaveBeenCalledOnce();
+    expect(stepSettled).toBe(true);
   });
 
   it("records visible subagent tools as pending runtime actions", async () => {
