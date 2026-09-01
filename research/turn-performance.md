@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-01"
 ---
 
 # Turn performance and Workflow overhead
@@ -299,6 +299,27 @@ in increasing order of risk:
    the child path only when cancellation/runtime waits require it;
 4. ask Workflow for a latest-deployment step/child-completion primitive that avoids a second run
    and polling join.
+
+The narrow inbox/cancellation-hook pass found no semantics-preserving lazy claim. The inbox claim
+is the duplicate child-run fence: deferring it until a runtime-action wait would let duplicate
+starts execute the model, tools, and side effects concurrently. The cancellation claim must be
+ready before the first `turnStep`, because an otherwise ordinary one-step turn can be steered or
+cancelled while its model or tool is running.
+
+One hook can demultiplex tagged cancel and runtime-action payloads within a single deployment, but
+it cannot replace the two current tokens safely across deployment versions. Session drivers stay
+pinned while child turns route to latest: old drivers resume `{control}:cancel`, and the shared
+duplicate-run fence must remain `{control}:inbox` so old and new child retries still contend for
+the same owner. A per-turn readiness handshake adds another durable control step, while
+`HookOptions.metadata` makes every inbox resume hydrate the run encryption key; the current
+Workflow SDK explicitly takes that slower path for any metadata-bearing hook. Either choice can
+cost more than the claim it removes, especially on subagent/runtime-action turns.
+
+The required Workflow primitive is one hook entity with atomically registered token aliases (or
+an equivalent public, no-key-lookup protocol capability). Aliasing both `{control}:inbox` and
+`{control}:cancel` to one durable iterator would preserve old-driver cancellation, cross-version
+duplicate fencing, stale-message isolation, and one-claim startup. Until that exists, keep the two
+hooks; there is no safe hosted A/B whose faster result would represent shippable behavior.
 
 The third option is only viable if it retains latest-deployment routing. Running all future turns
 inside the pinned driver would improve latency by silently disabling live upgrades, which is not
