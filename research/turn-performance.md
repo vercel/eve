@@ -422,6 +422,32 @@ show that lifecycle bursts actually miss the existing in-flight group commit. Th
 ordering-barrier, sink-failure/drain, reconnect, rewind, and terminal-`session.waiting` tests are
 the correctness baseline for any later prototype.
 
+#### Narrow coalescing result: blocked on a Workflow primitive
+
+A prototype on benchmark base `57b477dc1` carried cumulative metrics out of each successful
+`turnStep`, retained only the latest totals, and wrote them before `resumeHook` in the existing
+terminal control step. The happy path can collapse repeated writes, but the current Workflow APIs
+do not preserve the required failure and retry semantics:
+
+- Step-body `setAttributes` appends an unguarded, out-of-band `attr_set`. If terminal hook delivery
+  fails after that write and the step retries, it appends another event. Last-write-wins keeps the
+  displayed counters correct, but the promised one-write invariant and its performance cost do
+  not survive retries.
+- The newest metrics exist after the model returns but before harness post-processing finishes.
+  Deferring them until a successful `StepResult` loses that attempt's counters when a stream,
+  hook, memory, or dynamic-extension callback fails in the same step. The current write happens
+  before this failure boundary.
+- Workflow-body `setAttributes` is replay-correlated, but it commits through a suspension and an
+  additional replay. It is neither background work nor part of the terminal control step, and
+  makes observability progress part of workflow progress.
+
+Do not ship this coalescing change on the current SDK. The useful upstream shape is either an
+idempotent attribute update keyed by a stable operation id, or a terminal primitive that commits
+attributes and hook delivery atomically. Workflow exposes no step- or run-scoped `waitUntil`
+today. Such a primitive would help only if Workflow durably joins it before teardown, isolates
+best-effort failures from the run, and deduplicates its side effect across step retries;
+fire-and-forget alone is insufficient.
+
 ### 4. Reduce child startup and control handshakes
 
 Measure child-created → first-step-start in production before choosing a design. Then prototype,
