@@ -8,7 +8,8 @@ export default defineAgent({
   ...e2eAgentConfig(),
   model: mockModel(
     ({ lastUserMessage, userMessageCount }) =>
-      `stress-ack:${userMessageCount}:${lastUserMessage ?? ""}`,
+      // The private experiment marker is rendered as one ephemeral user-context message.
+      `stress-ack:${userMessageCount - 1}:${lastUserMessage ?? ""}`,
   ),
   modelContextWindowTokens: 1_000_000,
 });
