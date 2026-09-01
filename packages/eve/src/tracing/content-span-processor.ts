@@ -1,4 +1,5 @@
 import type { SpanProcessor } from "#compiled/@vercel/otel/index.js";
+import { SpanStatusCode } from "#compiled/@opentelemetry/api/index.js";
 
 import {
   withoutDeclinedContent,
@@ -14,6 +15,8 @@ import {
   type SpanExportPolicy,
 } from "#tracing/span-export-policy.js";
 import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
+
+const REDACTED_ERROR_MESSAGE = "Operation failed";
 
 /**
  * Puts one destination's content policy in front of it.
@@ -283,7 +286,16 @@ function refreshEvents(
   for (const event of source) {
     if (typeof event !== "object" || event === null) continue;
     const record = event as Readonly<Record<string, unknown>>;
-    if (record["name"] === "exception") continue;
+    if (record["name"] === "exception") {
+      destination.push({
+        ...record,
+        attributes: {
+          "exception.message": REDACTED_ERROR_MESSAGE,
+          "exception.type": "Error",
+        },
+      });
+      continue;
+    }
     destination.push({ ...record, attributes: undefined });
   }
 }
@@ -300,5 +312,7 @@ function refreshStatus(
   if (record["code"] !== undefined) destination["code"] = record["code"];
   if (content.recordOutputs && record["message"] !== undefined) {
     destination["message"] = record["message"];
+  } else if (!content.recordOutputs && record["code"] === SpanStatusCode.ERROR) {
+    destination["message"] = REDACTED_ERROR_MESSAGE;
   }
 }

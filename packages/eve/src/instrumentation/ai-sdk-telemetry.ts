@@ -1,4 +1,5 @@
 import { OpenTelemetry } from "#compiled/@ai-sdk/otel/index.js";
+import { trace, type Tracer } from "#compiled/@opentelemetry/api/index.js";
 import { registerTelemetry, type Telemetry } from "ai";
 import { createLogger } from "#internal/logging.js";
 
@@ -21,9 +22,43 @@ export function ensureOtelIntegration(): void {
     return;
   }
   registered = true;
-  eveOtelIntegration = new OpenTelemetry({ runtimeContext: true });
+  eveOtelIntegration = new OpenTelemetry({
+    runtimeContext: true,
+    tracer: datadogGenAiSpanNames(trace.getTracer("gen_ai")),
+  });
   errorSafeEveOtelIntegration = telemetryWithoutErrorContent(eveOtelIntegration);
   registerTelemetry(eveOtelIntegration);
+}
+
+/** Adds Datadog's operation/resource overrides without changing GenAI semantics. @internal */
+export function datadogGenAiSpanNames(tracer: Tracer): Tracer {
+  return new Proxy(tracer, {
+    get(target, property) {
+      if (property !== "startSpan") {
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      const startSpan: Tracer["startSpan"] = (name, options, parentContext) => {
+        const operationName = options?.attributes?.["gen_ai.operation.name"];
+        if (typeof operationName !== "string") {
+          return target.startSpan(name, options, parentContext);
+        }
+        return target.startSpan(
+          name,
+          {
+            ...options,
+            attributes: {
+              ...options?.attributes,
+              "operation.name": operationName,
+              "resource.name": name,
+            },
+          },
+          parentContext,
+        );
+      };
+      return startSpan;
+    },
+  });
 }
 
 /**

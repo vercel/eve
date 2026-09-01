@@ -96,7 +96,7 @@ describe("contentFilteringProcessor", () => {
     });
   });
 
-  it("withholds exception details when outputs are declined", () => {
+  it("replaces exception details when outputs are declined", () => {
     const downstream = recordingProcessor();
     const original = {
       ...(span({ "service.name": "weather" }) as object),
@@ -113,8 +113,14 @@ describe("contentFilteringProcessor", () => {
       events: unknown[];
       status: unknown;
     };
-    expect(visible.events).toEqual([{ attributes: undefined, name: "turn.completed" }]);
-    expect(visible.status).toEqual({ code: 2 });
+    expect(visible.events).toEqual([
+      {
+        attributes: { "exception.message": "Operation failed", "exception.type": "Error" },
+        name: "exception",
+      },
+      { attributes: undefined, name: "turn.completed" },
+    ]);
+    expect(visible.status).toEqual({ code: 2, message: "Operation failed" });
     expect(original.events).toHaveLength(2);
     expect(original.status).toEqual({ code: 2, message: "private failure detail" });
   });
