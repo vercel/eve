@@ -68,13 +68,31 @@ const DRAIN_DESCRIPTOR: ScenarioAppDescriptor = {
   name: "weather-agent-drain",
 };
 
-async function triggerWorkerReplacement(server: RunningEveDev, appRoot: string): Promise<void> {
-  const previousWorkerId = await fetchText(server.url, "/drain/worker-id");
+async function readWorkerId(server: RunningEveDev, agent?: Agent): Promise<string> {
+  if (agent === undefined) {
+    return await fetchText(server.url, "/drain/worker-id");
+  }
+
+  const response = await requestWithAgent(new URL("/drain/worker-id", server.url).href, agent);
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw new Error(
+      `Expected /drain/worker-id to succeed, received ${String(response.statusCode)}.`,
+    );
+  }
+  return response.body;
+}
+
+async function triggerWorkerReplacement(
+  server: RunningEveDev,
+  appRoot: string,
+  agent?: Agent,
+): Promise<void> {
+  const previousWorkerId = await readWorkerId(server, agent);
   await writeFile(join(appRoot, ".env.local"), `EVE_DRAIN_RELOAD=${Date.now()}\n`);
   await waitForCondition(
     async () => {
       try {
-        return (await fetchText(server.url, "/drain/worker-id")) !== previousWorkerId;
+        return (await readWorkerId(server, agent)) !== previousWorkerId;
       } catch {
         return false;
       }
@@ -135,7 +153,9 @@ describe("eve dev drained worker replacement", () => {
         const first = await requestWithAgent(new URL("/drain/worker-id", server.url).href, agent);
         expect(first.localPort).toBeDefined();
 
-        await triggerWorkerReplacement(server, app.appRoot);
+        // Keep the asserted socket active while the replacement builds so the
+        // test does not depend on finishing before Node's idle keep-alive timeout.
+        await triggerWorkerReplacement(server, app.appRoot, agent);
 
         const second = await requestWithAgent(new URL("/drain/worker-id", server.url).href, agent);
         expect(second.localPort).toBe(first.localPort);
