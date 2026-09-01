@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-01"
 ---
 
 # Turn performance and Workflow overhead
@@ -349,6 +349,55 @@ safe turn-end or background boundary where possible.
 Do not combine side-effectful tool cycles into one replayable step unless each tool invocation
 keeps an independent durable idempotency checkpoint. Faster retries that repeat external effects
 are a correctness regression.
+
+#### Instrumentation flush audit
+
+The low-risk audit found a real critical-path await, but no safe detach primitive available to
+eve step code today. `createExecutionNodeStep()` awaits `instrumentation.flush()` in `finally`
+before `turnStep` can derive its next action. The resulting boundaries are:
+
+| Path                                                                   | Awaited drains | Logical boundary                                  |
+| ---------------------------------------------------------------------- | -------------: | ------------------------------------------------- |
+| Ordinary harness result, including `action: "continue"`                |              1 | Model/tool step; session may continue immediately |
+| Harness result that becomes `park`, `done`, or runtime-action dispatch |              1 | Idle, terminal, or durable dispatch boundary      |
+| Adapter consumes a delivery without entering the harness               |              1 | Idle boundary                                     |
+| Adapter failure before the harness                                     |              1 | Error boundary                                    |
+| Harness failure                                                        |              2 | Harness `finally`, then delivery-failure cleanup  |
+| Cancellation thrown by the harness                                     |              2 | Harness `finally`, then cancellation epilogue     |
+
+For the provider-directory layout, each drain starts the OpenTelemetry runtime flush and every
+authored provider `flush()` concurrently, awaits all of them, logs individual failures, and never
+fails the user step. Awaiting the call also prevents flushes from successive iterations of one
+session from overlapping. Detaching the entire operation would therefore change
+authored-provider ordering as well as exporter timing.
+
+This path does not explain the existing Vercel stress baseline. That fixture uses the legacy
+single-file `instrumentation.ts` layout. Its eve runtime installs an async no-op `forceFlush`;
+the optional Datadog `registerOTel()` call made during setup is outside that runtime. The current
+per-step await in the stress fixture therefore drains no network exporter. A regression probe now
+holds a fake drain open and proves structurally that a harness step cannot settle until the drain
+does, without using timing-sensitive assertions.
+
+There is no public, cross-world lifetime primitive that a transformed Workflow step can use to
+move the real provider-directory exporter drain off its response path. Nitro's public
+`event.waitUntil()` exists only at the route boundary, while the step body receives no `H3Event`.
+Workflow's public exports expose no step-scoped equivalent. Its runtime has a private helper that
+loads Vercel Functions' request-scoped `waitUntil`, but importing that private module would couple
+eve to an unsupported implementation detail. Calling Vercel Functions directly is insufficient
+for eve's portable runtime: outside a Vercel request context it silently registers nothing and
+does not report whether the promise gained a lifetime owner, so an await fallback cannot be
+selected reliably.
+
+The required primitive is a public step-scoped operation such as
+`waitUntil(promise): "registered" | "unsupported"` that guarantees the current invocation remains
+alive in hosted, local, and self-hosted worlds, or explicitly reports that eve must await. Once it
+exists, the narrow experiment should keep authored provider flushes awaited, serialize internal
+exporter drains, register only the non-rejecting internal exporter promise in the step lifetime,
+and retain full awaited drains for shutdown. A dedicated provider-directory fixture with a gated
+exporter must prove both that step settlement no longer includes exporter latency and that the
+export completes before invocation teardown. The existing stress fixture should show no expected
+delta from this experiment; it needs a separate exporter diagnostic rather than being presented as
+proof of the change.
 
 ## Structural direction
 
