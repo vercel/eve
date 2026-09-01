@@ -87,10 +87,17 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   // claiming so conflict replay is consumed by getConflict(), not a
   // later iterator read.
   const commandReader = createChannelReader("commands", commands);
-  // Before the claim: the parent hands the token to a run as soon as the claim
-  // lands, and that run may report at once.
-  const runChannels = openRunOwnerChannels(input.taskInboxToken);
-  const readers = [...runChannels.readers, commandReader] as const;
+  // Only a background tool's task can own a workflow tool run. Opened before
+  // the claim: the parent hands the token to the run as soon as the claim
+  // lands, and the run may report at once.
+  const runChannels =
+    input.initialView.metadata.kind === "tool"
+      ? openRunOwnerChannels(input.taskInboxToken)
+      : undefined;
+  const readers =
+    runChannels === undefined
+      ? ([commandReader] as const)
+      : ([...runChannels.readers, commandReader] as const);
   let ownsHook = false;
 
   try {
@@ -253,7 +260,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     // durable read that never settles, leaving this run `running`
     // forever and its hook unswept.
     if (ownsHook) {
-      await runChannels.dispose();
+      await runChannels?.dispose();
       await disposeHook(commands);
     }
   }

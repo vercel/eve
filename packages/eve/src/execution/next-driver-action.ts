@@ -40,6 +40,8 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingRuntimeActionKeys?: readonly string[];
+      /** The batch starts workflow tool runs, which report to the turn's run channels. */
+      readonly startsWorkflowToolRuns?: boolean;
       readonly tasksEnabled?: boolean;
       readonly sleepDurationMs?: number;
       readonly settled?: SettledTurn;

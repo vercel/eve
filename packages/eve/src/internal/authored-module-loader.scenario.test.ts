@@ -46,7 +46,7 @@ describe("loadAuthoredModuleNamespace", () => {
     });
     const manifest = await compileAgentManifest(discovered.manifest);
 
-    const code = await bundleAuthoredModuleMapForGeneration({
+    const { code } = await bundleAuthoredModuleMapForGeneration({
       manifest,
       moduleMapPath: join(app.appRoot, ".eve", "compile", "module-map.mjs"),
     });

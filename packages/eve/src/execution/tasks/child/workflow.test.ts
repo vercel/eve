@@ -183,6 +183,26 @@ describe("taskRunWorkflow", () => {
       "working",
       "completed",
     ]);
+    expect(disposeHook).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens and disposes the run channels only for a background tool's task", async () => {
+    mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
+      { command: { data: "done", kind: "complete" }, kind: "task-command" },
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: {
+        metadata: { kind: "tool", name: "deploy" },
+        status: "working",
+        taskId: "task_abc123",
+      },
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(appendedStatuses()).toEqual(["working", "working", "completed"]);
     expect(disposeHook).toHaveBeenCalledTimes(4);
   });
 
@@ -229,7 +249,7 @@ describe("taskRunWorkflow", () => {
     });
 
     expect(appendedStatuses()).toEqual(["working"]);
-    expect(disposeHook).toHaveBeenCalledTimes(4);
+    expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 
   it("translates a settled child turn from the wire and wakes the parent once ready", async () => {
@@ -298,7 +318,7 @@ describe("taskRunWorkflow", () => {
 
     expect(appendedStatuses()).toEqual(["working", "completed"]);
     expect(wakeTaskParentStep).toHaveBeenCalledTimes(1);
-    expect(disposeHook).toHaveBeenCalledTimes(4);
+    expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 
   it("silently terminates a dispatch rejected before parent indexing", async () => {
@@ -317,7 +337,7 @@ describe("taskRunWorkflow", () => {
 
     expect(appendedStatuses()).toEqual(["working", "failed"]);
     expect(wakeTaskParentStep).not.toHaveBeenCalled();
-    expect(disposeHook).toHaveBeenCalledTimes(4);
+    expect(disposeHook).toHaveBeenCalledTimes(1);
   });
 
   it("releases a fast input request when the readiness barrier arrives", async () => {

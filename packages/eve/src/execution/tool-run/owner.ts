@@ -34,9 +34,7 @@ export function openRunOwnerChannels(inboxToken: string): RunOwnerChannels {
       createChannelReader("outcome", outcome),
     ],
     async dispose() {
-      await disposeHook(report);
-      await disposeHook(request);
-      await disposeHook(outcome);
+      await Promise.all([disposeHook(report), disposeHook(request), disposeHook(outcome)]);
     },
   };
 }

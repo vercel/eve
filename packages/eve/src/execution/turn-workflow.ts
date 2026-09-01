@@ -108,11 +108,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       throw error;
     }
 
-    // Opened after the inbox claim so a losing duplicate never contends for
-    // them; the turn starts no run before this point.
-    runChannels = openRunOwnerChannels(inbox.token);
-    const readers: TurnReaders = [...runChannels.readers, inboxReader];
-
     // Claimed after the inbox claim so a losing duplicate run never
     // contends for the session cancel token.
     if (input.driverCapabilities?.cancelledTurnSettle === true) {
@@ -215,6 +210,11 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       // runs `experimental.tasks`.
       if (pendingActionKeys !== undefined) {
         await cursor.adopt(result);
+        // Opened before the dispatch step suspends, so the hooks exist when
+        // the first run reports; a turn that starts no run never pays for them.
+        if (result.action === "park" && result.startsWorkflowToolRuns === true) {
+          runChannels ??= openRunOwnerChannels(inbox.token);
+        }
         const hasPendingTasks = result.action === "park" && result.tasksEnabled;
         let dispatch;
         if (result.action === "dispatch-workflow-runtime-actions") {
@@ -243,7 +243,8 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           initialAcceptedAtMs,
           initialResults: dispatchResult.results,
           nextDeliveryRequestId,
-          readers,
+          readers:
+            runChannels === undefined ? [inboxReader] : [...runChannels.readers, inboxReader],
           pendingActionKeys,
         });
         if (results === "cancelled") {
@@ -300,7 +301,9 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   }
 }
 
-type TurnReaders = readonly [...RunOwnerReaders, ChannelReader<"inbox", TurnInboxPayload>];
+type TurnReaders =
+  | readonly [...RunOwnerReaders, ChannelReader<"inbox", TurnInboxPayload>]
+  | readonly [ChannelReader<"inbox", TurnInboxPayload>];
 
 async function finishCancelledTurn(input: {
   readonly bufferedDeliveries: readonly DeliverHookPayload[];
