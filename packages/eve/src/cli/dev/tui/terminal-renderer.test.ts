@@ -3790,7 +3790,28 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
-  it("ignores Left Arrow before the first navigable planner step", async () => {
+  it("ignores arrow navigation before the first navigable planner step", async () => {
+    const { input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "single",
+      navigation: {
+        kind: "planner",
+        activeStep: 0,
+        firstNavigableStep: 1,
+        steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+      },
+      message: "Choose a model",
+      options: [{ value: "model", label: "Use recommended model" }],
+    });
+
+    input.left();
+    input.right();
+    input.enter();
+    await expect(answer).resolves.toEqual(["model"]);
+    renderer.shutdown();
+  });
+
+  it("ignores Left Arrow on the first navigable planner step", async () => {
     const { input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({
       kind: "searchable-multi",

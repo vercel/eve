@@ -947,6 +947,30 @@ describe("renderSelectQuestion", () => {
     expect(integrations).toContain("space/enter toggle · ←/→ steps");
   });
 
+  it("does not advertise arrows before planner navigation becomes available", () => {
+    const options = [{ value: "model", label: "Use recommended model" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "single",
+        navigation: {
+          kind: "planner",
+          activeStep: 0,
+          firstNavigableStep: 1,
+          steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+        },
+        message: "Choose a model",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain(" Model   ·  Channels  ·  Integrations");
+    expect(text).toContain("enter to select · esc to cancel");
+    expect(text).not.toContain("→ next");
+  });
+
   it("does not advertise navigation into completed prefix steps", () => {
     const options = [{ value: "web", label: "Web Chat" }];
     const text = renderSelectQuestion(

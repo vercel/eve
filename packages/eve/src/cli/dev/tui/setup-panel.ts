@@ -435,6 +435,13 @@ function canNavigateBack(navigation: PlannerNavigation): boolean {
   return navigation.activeStep > (navigation.firstNavigableStep ?? 0);
 }
 
+function canNavigateForward(navigation: PlannerNavigation): boolean {
+  return (
+    navigation.activeStep >= (navigation.firstNavigableStep ?? 0) &&
+    navigation.activeStep < navigation.steps.length - 1
+  );
+}
+
 function plannerStepRows(
   navigation: Extract<SetupQuestionPanelBase["navigation"], { kind: "planner" }>,
   activeCount: number | undefined,
@@ -451,7 +458,7 @@ function plannerStepRows(
   const progress = labels.flatMap((label, index) => {
     if (index === labels.length - 1) return [label];
     const separator =
-      navigation.activeStep === index
+      navigation.activeStep === index && canNavigateForward(navigation)
         ? " →  "
         : navigation.activeStep === index + 1 && canNavigateBack(navigation)
           ? "  ← "
@@ -797,7 +804,7 @@ function selectFooterHints(
   hints.push("↑/↓ move");
   if (plannerNavigation !== undefined) {
     const canGoBack = canNavigateBack(plannerNavigation);
-    const canGoForward = plannerNavigation.activeStep < plannerNavigation.steps.length - 1;
+    const canGoForward = canNavigateForward(plannerNavigation);
     hints.push(presentation.selection === "multiple" ? "space/enter toggle" : "enter to select");
     if (canGoBack && canGoForward) hints.push("←/→ steps");
     else if (canGoBack) hints.push("← back");

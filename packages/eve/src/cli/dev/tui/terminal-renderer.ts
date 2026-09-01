@@ -1989,6 +1989,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           ? "back"
           : key.type === "right" &&
               plannerStep !== undefined &&
+              plannerStep.activeStep >= (plannerStep.firstNavigableStep ?? 0) &&
               plannerStep.activeStep < plannerStep.steps.length - 1
             ? "forward"
             : undefined;
