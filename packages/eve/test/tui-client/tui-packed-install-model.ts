@@ -128,10 +128,10 @@ void (async () => {
     const runPromise = runner.run();
 
     try {
-      // The provider picker paints before the first prompt only when initial
-      // onboarding and its module graph load — the exact surface the
-      // oxc-parser regression crashed.
-      await screen.waitForText("Configure the agent model", 15_000);
+      // The provider picker paints inside the shared onboarding journey before
+      // the first prompt only when its module graph loads — the exact surface
+      // the oxc-parser regression crashed.
+      await screen.waitForText("Set up Packed install model command", 15_000);
       await screen.waitForText("Which model provider do you want to use?", 15_000);
       console.log(theme.muted("[tui-packed-install] /model opened provider setup"));
 
