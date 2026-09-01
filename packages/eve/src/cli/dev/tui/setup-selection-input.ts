@@ -96,19 +96,12 @@ function updatedSelect(
   };
 }
 
-function continueSetupSelect(input: SetupMultiSelectInput): SetupSelectInputResult {
-  if (input.required && input.select.selected.size === 0) {
-    return { kind: "error", message: "Select at least one option, then continue." };
-  }
-  return { kind: "submit", values: orderedSelection(input.options, input.select.selected) };
-}
-
 function submitSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
   const visible = isSearchableSelect(input)
     ? filterOptions(input.options, input.select.filter, input.searchAction)
     : [...input.options];
   if (isMultiSelect(input)) {
-    if (input.plannerNavigation === true) return continueSetupSelect(input);
+    if (input.plannerNavigation === true) return updatedSelect(input, { type: "toggle" });
     if (input.select.cursor !== submitRowIndex(visible)) {
       return updatedSelect(input, { type: "toggle" });
     }
@@ -134,7 +127,12 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
         ? updatedSelect(input, { type: "backspace" })
         : { kind: "ignore" };
     case "text": {
-      if (input.key.framing === "unframed" && isMultiSelect(input) && input.key.value === " ") {
+      if (
+        input.key.framing === "unframed" &&
+        isMultiSelect(input) &&
+        input.plannerNavigation !== true &&
+        input.key.value === " "
+      ) {
         return updatedSelect(input, { type: "toggle" });
       }
       if (!isSearchableSelect(input)) return { kind: "ignore" };

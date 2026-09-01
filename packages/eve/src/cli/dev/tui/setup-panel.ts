@@ -444,7 +444,17 @@ function plannerStepRows(
       ? theme.colors.inverse(theme.colors.blue(theme.colors.bold(` ${text} `)))
       : theme.colors.dim(text);
   });
-  return [`  ${labels.join(theme.colors.dim("  ·  "))}`, ""];
+  const progress = labels.flatMap((label, index) => {
+    if (index === labels.length - 1) return [label];
+    const separator =
+      navigation.activeStep === index
+        ? " →  "
+        : navigation.activeStep === index + 1
+          ? "  ← "
+          : "  ·  ";
+    return [label, theme.colors.dim(separator)];
+  });
+  return [`  ${progress.join("")}`, ""];
 }
 
 function selectMessageRows(message: string, layout: SelectLayout, theme: Theme): string[] {
@@ -782,12 +792,12 @@ function selectFooterHints(
   if (presentation.filter !== undefined) hints.push("type to filter");
   hints.push("↑/↓ move");
   if (plannerNavigation !== undefined) {
-    if (presentation.selection === "multiple") hints.push("space toggle");
+    const canGoBack = plannerNavigation.activeStep > 0;
     const canGoForward = plannerNavigation.activeStep < plannerNavigation.steps.length - 1;
-    hints.push(
-      presentation.selection === "multiple" && canGoForward ? "enter / → next" : "enter to select",
-    );
-    if (plannerNavigation.activeStep > 0) hints.push("← back");
+    hints.push(presentation.selection === "multiple" ? "enter toggle" : "enter to select");
+    if (canGoBack && canGoForward) hints.push("←/→ steps");
+    else if (canGoBack) hints.push("← back");
+    else if (canGoForward) hints.push("→ next");
     hints.push(cancelHint);
     return hints;
   }

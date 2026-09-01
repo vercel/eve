@@ -36,7 +36,7 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 
 Bare `/add` opens the planner on **Channels**. The tab rail shows selection counts as you move between **Channels**, **Integrations**, and **Review**.
 
-Press `Right Arrow` or `Enter` to preserve the current selections and continue. Press `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation still requires `Enter` on **Install and set up** from the Review tab. If an item fails, you can skip it and continue with the remaining items.
+Press `Enter` to toggle the highlighted item. Press `Right Arrow` to preserve the current selections and continue, `Left Arrow` to preserve them and go back, or `Esc` to cancel. Installation requires `Enter` on **Install and set up** from the Review tab. If an item fails, you can skip it and continue with the remaining items.
 
 Pass an item address to `/add` to confirm and install that exact address without opening the planner:
 

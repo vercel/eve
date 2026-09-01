@@ -3808,7 +3808,7 @@ describe("TerminalRenderer setup panel", () => {
     });
 
     expect(screen.snapshot()).not.toContain("Channels (1)");
-    input.type(" ");
+    input.enter();
     expect(screen.snapshot()).toContain("Channels (1)");
     input.right();
     await expect(answer).resolves.toEqual({

@@ -908,15 +908,16 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain(
       colorTheme.colors.inverse(colorTheme.colors.blue(colorTheme.colors.bold(" Channels (1) "))),
     );
+    expect(plain).toContain("Channels (1)  →  Integrations  ·  Review");
     expect(plain).toContain("1 selected");
-    expect(plain).toContain("enter / → next");
+    expect(plain).toContain("enter toggle · → next");
     expect(plain).not.toContain("← back");
     expect(plain).not.toContain("Submit");
   });
 
   it("advertises only available planner directions", () => {
     const options = [{ value: "install", label: "Install and set up" }];
-    const text = renderSelectQuestion(
+    const review = renderSelectQuestion(
       {
         kind: "single",
         navigation: { ...PLANNER_NAVIGATION, activeStep: 2 },
@@ -927,9 +928,23 @@ describe("renderSelectQuestion", () => {
       theme,
       80,
     ).join("\n");
+    const integrations = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: { ...PLANNER_NAVIGATION, activeStep: 1 },
+        message: "Select integrations",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
 
-    expect(text).toContain("enter to select · ← back");
-    expect(text).not.toContain("→ next");
+    expect(review).toContain("Channels  ·  Integrations  ←  Review ");
+    expect(review).toContain("enter to select · ← back");
+    expect(review).not.toContain("→ next");
+    expect(integrations).toContain("Channels  ←  Integrations  →  Review");
+    expect(integrations).toContain("enter toggle · ←/→ steps");
   });
 
   it("windows the railed list to five rows with an Esc-only footer", () => {
