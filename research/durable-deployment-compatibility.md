@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1765
 status: proposed
-last_updated: "2026-08-26"
+last_updated: "2026-09-01"
 ---
 
 # Durable deployment compatibility
@@ -140,12 +140,14 @@ per-version schema hashes:
 
 ### Manifest guarantees
 
-The manifest is a complete, lexically sorted inventory of the durable contracts
-owned by the build. For each contract, `currentVersion` identifies the version
-the build writes and `acceptedVersions` identifies the historical versions it
-can read. A `null` accepted-version set means that support has not yet been
-modeled as a truthful finite list; it does not mean the contract accepts no
-versions.
+The manifest is a lexically sorted inventory of the durable contracts registered
+by the build. The initial source-controlled registry makes those declarations
+explicit but does not discover unregistered boundaries; structural completeness
+requires the construction rules below. For each registered contract,
+`currentVersion` identifies the version the build writes and `acceptedVersions`
+identifies the historical versions it can read. A `null` accepted-version set
+means that support has not yet been modeled as a truthful finite list; it does
+not mean the contract accepts no versions.
 
 Each accepted version may also have a canonical schema fingerprint. A `null`
 fingerprint means the version is recognized but its schema has not yet been
@@ -177,14 +179,47 @@ interpreting it. An unknown version is reported through the dropped-wire step
 and leaves the authorization challenge pending rather than consuming or
 reinterpreting it.
 
-### Registry enforcement
+### Boundary construction
 
-The durable-contract registry is also the source of truth for stable workflow
-IDs. Runtime references, workflow bundling, and manifest generation all derive
-their IDs from that registry. Tests compile every stable workflow declaration
-and compare its emitted ID with the registered value, so an accidental function
-rename, removed workflow directive, changed routing key, or stale version
-declaration fails before release.
+A manually maintained inventory cannot prevent code from creating a durable
+boundary without registering it. The target invariant is therefore: code cannot
+cross a deployment boundary without supplying a durable contract definition.
+The registry becomes the composition root for those definitions, and the
+manifest becomes an output of the definitions rather than a parallel list.
+
+A durable workflow definition owns its stable ID, input versions, migrations,
+runtime reference, and manifest entry. The operation that routes a workflow to
+latest accepts only such a definition, not an arbitrary workflow reference:
+
+```ts
+const turnWorkflow = defineDurableWorkflow({
+  name: "turnWorkflow",
+  input: turnWorkflowInputContract,
+  execute: runTurnWorkflow,
+});
+
+await turnWorkflow.startLatest(input);
+```
+
+Durable inboxes and data stores follow the same pattern. An inbox definition
+owns hook creation, target-aware encoding, resume, decode, and its manifest
+entry; a durable data definition owns read, migration, write, and its manifest
+entry. Family-branded hook tokens prevent a task or callback payload from being
+sent to the wrong inbox in typed code, while hook metadata verifies the contract
+and supported version at runtime.
+
+Raw latest-start, hook, stream, and durable-state primitives remain internal to
+these contract-owned facades. A mechanical import guard rejects their use from
+other production modules, with narrow allowlists for the facades and historical
+test fixtures. This closes the bypass that would otherwise make registry
+coverage depend on reviewer memory.
+
+The same definitions drive runtime references, workflow bundling, and manifest
+generation. Build checks reject duplicate identities, missing version steps or
+target encoders, and stable workflow declarations that do not match their
+definitions. An accidental function rename, removed workflow directive, changed
+routing key, stale version declaration, or unregistered latest-routed workflow
+therefore fails before release.
 
 ### Regression gate
 
@@ -284,16 +319,18 @@ migrates or terminates every session that can still produce or consume it.
 
 The work proceeds in independently reviewable layers:
 
-1. Inventory stable identities and current versions in a deterministic build
-   manifest.
+1. Move cross-deployment operations behind contract-owned facades and generate
+   the deterministic manifest from their definitions.
 2. Version the remaining stable workflow inputs and formalize driver capability
    negotiation.
 3. Apply declared schemas, migrations, and frozen fixtures to every durable
-   hook family.
-4. Compare candidate manifests with supported production cohorts and run the
+   hook and state family.
+4. Mechanically reject raw durable primitive imports outside the contract
+   facades and historical fixtures.
+5. Compare candidate manifests with supported production cohorts and run the
    mixed-version CI matrix.
-5. Route latest turns through an explicit regression-gated deployment
-   pointer with pre-promotion canaries.
+6. Route latest turns through an explicit regression-gated deployment pointer
+   with pre-promotion canaries.
 
 ## Non-goals
 
