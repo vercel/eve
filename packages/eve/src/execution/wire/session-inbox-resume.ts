@@ -5,7 +5,10 @@ import type {
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
-import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import {
+  isReservedSessionCommandToken,
+  sessionCommandHookToken,
+} from "#execution/session-command-token.js";
 import {
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
   isSessionInboxWireVersion,
@@ -23,9 +26,24 @@ export async function resumeSessionInbox(
   token: string,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): Promise<ResumedSessionInboxHook> {
+  if (isStableInboxFastPathCompatible(token, command)) {
+    return await resumeHook(
+      token,
+      sessionInboxWire.encode(command, { variant: "send", version: 0 }),
+    );
+  }
+
   const hook = await getHookByToken(token);
   const target = await resolveSessionInboxWireTarget(hook);
   return await resumeHook(hook, sessionInboxWire.encode(command, target));
+}
+
+function isStableInboxFastPathCompatible(
+  token: string,
+  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
+): boolean {
+  if (!isReservedSessionCommandToken(token)) return false;
+  return !("caller" in command && command.caller?.activityObserver !== undefined);
 }
 
 type SessionInboxHook = Awaited<ReturnType<typeof getHookByToken>>;

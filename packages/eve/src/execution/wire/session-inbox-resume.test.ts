@@ -75,7 +75,30 @@ describe("session inbox target resolution", () => {
 });
 
 describe("resumeSessionInbox", () => {
-  it("encodes for the resolved consumer and resumes the exact inspected hook", async () => {
+  it("resumes a compatible stable inbox by token without inspecting metadata", async () => {
+    const token = sessionCommandHookToken("session-1");
+    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
+    resumeHookMock.mockResolvedValue(hook);
+
+    await resumeSessionInbox(token, {
+      kind: "send",
+      payload: { message: "follow-up" },
+    });
+
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(token, {
+      auth: undefined,
+      caller: undefined,
+      delivery: undefined,
+      kind: "send",
+      payload: { message: "follow-up" },
+      requestId: undefined,
+      taskDeliveryId: undefined,
+      turnPolicy: undefined,
+    });
+  });
+
+  it("encodes continuation delivery for the resolved consumer and resumes that hook", async () => {
     const hook = sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 1 });
     getHookByTokenMock.mockResolvedValue(hook);
     resumeHookMock.mockResolvedValue(hook);
@@ -95,6 +118,33 @@ describe("resumeSessionInbox", () => {
       requestId: undefined,
       version: 1,
     });
+  });
+
+  it("retains metadata negotiation when a stable delivery needs the current caller wire", async () => {
+    const token = sessionCommandHookToken("session-1");
+    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
+    getHookByTokenMock.mockResolvedValue(hook);
+    resumeHookMock.mockResolvedValue(hook);
+
+    await resumeSessionInbox(token, {
+      caller: {
+        activityObserver: { sink: { url: "https://example.com/activity", version: 1 } },
+        callId: "call-1",
+        replyTo: { kind: "hook", token: "reply-1" },
+        subagentName: "researcher",
+      },
+      kind: "send",
+      payload: { message: "follow-up" },
+    });
+
+    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      hook,
+      expect.objectContaining({
+        caller: expect.objectContaining({ activityObserver: expect.any(Object) }),
+        version: 2,
+      }),
+    );
   });
 });
 
