@@ -309,7 +309,7 @@ describe("compiled vendor assets", () => {
         readFile(join(COMPILED_VENDOR_ROOT, "@workflow/core/runtime/run.d.ts"), "utf8"),
       ]);
 
-    expect(indexDts).toContain("Just the core utilities");
+    expect(indexDts).toContain("Core utilities intended for import by user");
     expect(indexDts).toContain("from '#compiled/@workflow/errors/index.js'");
     expect(createHookDts).toContain("Creates a {@link Hook}");
     expect(workflowDts).toBe(`export * from "./workflow/index.js";\n`);
