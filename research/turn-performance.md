@@ -19,7 +19,7 @@ The fixed cost comes from the durable topology. An ordinary root turn starts a c
 run, crosses five explicit step boundaries for full settlement, creates private hooks, writes
 8–9 stream chunks, resumes the session driver twice, and carries the full session snapshot
 through multiple persisted values. Two of those steps perform no work for a root session. Every
-additional model/tool cycle schedules another `turnStep` and awaits another Workflow attributes
+additional model/tool cycle schedules another `turnStep` and performs another Workflow attributes
 write.
 
 This proposal makes performance measurable before changing the topology, then tests three levels
@@ -34,6 +34,11 @@ The first tracking increment lands with this plan: the existing stress fixture e
 machine-readable samples for sequential and concurrent turns, CI publishes a GitHub job summary,
 and successful runs retain the report and eval artifacts for 30 days. Those measurements are
 informational until paired base/head trials establish the hosted noise floor.
+
+The same increment includes one conservative critical-path change. Best-effort Workflow
+attributes now start in parallel with result settlement, allowing the user-visible terminal event
+to persist first, but the durable step still joins the attribute write before it exits. This
+preserves cumulative-write ordering and identical local and hosted lifetime behavior.
 
 ## Observed baseline
 
@@ -140,7 +145,7 @@ client delivery
         │     ├─ turnStep × model/tool cycles
         │     │  ├─ rebuild context, bundle, harness, and tools
         │     │  ├─ await each protocol stream write
-        │     │  └─ await Workflow attributes update
+        │     │  └─ overlap attributes with result handling, then join
         │     ├─ terminal control-send step
         │     └─ dispose private hooks
         ├─ resume and replay session driver
@@ -248,6 +253,61 @@ The deterministic benchmark should disable external telemetry exporters. A separ
 pass can measure real OTLP/provider flush cost so instrumentation overhead is not hidden inside
 framework overhead.
 
+### Low-risk await audit
+
+`ctx.waitUntil` is not one uniform primitive in this stack. Channel routes collect promises and
+forward a failure-observing aggregate to Nitro's request `waitUntil`, so their response can return
+first. Schedule handlers expose the same authoring name but await all registered work before the
+task completes. Workflow bodies and steps expose no public `ctx.waitUntil`; Workflow's executor
+uses a private host `waitUntil` only for its own tracked stream operations.
+
+Detaching work from a Workflow step therefore moves it outside Workflow durability. The step can
+complete and a successor can run first; a retry can duplicate or reorder the work; a crash,
+timeout, or deployment can lose it; and its failure cannot retry the step. A rejected background
+promise can also become an unhandled rejection unless it is converted to a fulfilled, logged
+result. Only work that tolerates all of those outcomes is eligible.
+
+The hot-path audit produced this disposition:
+
+| Awaited work                                                                                         | Critical property                                                                            | Disposition                                                                                 |
+| ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Per-attempt `$eve.*` attribute write                                                                 | Best-effort metadata, but cumulative writes must stay ordered and precede terminal run state | Overlap with result handling now; keep the join inside the step                             |
+| Instrumentation provider `flush()`                                                                   | Public idle-drain guarantee; authored providers may buffer state                             | Measure, then split exporter drain from authored idle drain before backgrounding anything   |
+| Activity projection callback                                                                         | Best-effort presentation only; already invoked with `void`                                   | Retain lifetime and batch for reliability; there is no await left to remove                 |
+| Stable and authorization hook claims                                                                 | Both are required before the session can serve work, but neither depends on the other        | Start together and await both; preserve partial-failure cleanup                             |
+| Continuation ownership and stable-hook readiness                                                     | Both gate a create result, but can proceed independently after the Workflow starts           | Start together and await both; preserve ownership-conflict behavior                         |
+| Protocol stream write/close                                                                          | Client event order and durable response boundary                                             | Keep awaited; Workflow already batches and background-flushes its tracked stream operations |
+| Adapter delivery, memory, hooks, dynamic extensions, connections                                     | Return values, context mutation, authored failure semantics, or next-step input              | Keep awaited                                                                                |
+| Hook resume/claim/dispose, caller notification, task acknowledgement, cancellation and child cleanup | Ownership, wake ordering, and terminal settlement                                            | Keep awaited                                                                                |
+| Instrumentation event handlers and trace preparation                                                 | Provider ordering, durable context state, and trace parenting                                | Keep awaited                                                                                |
+| Channel route background tasks                                                                       | Post-ack webhook work                                                                        | Already uses the appropriate request `waitUntil` path                                       |
+
+The first code change starts `setEveAttributes()` and `handleStepResult()` together, including the
+terminal `session.waiting` epilogue, then joins the attribute promise before returning from
+`turnStep`. This can hide the attribute round trip behind work already required to settle the
+result without allowing older cumulative counters to overwrite newer ones or racing
+`run_completed`. A focused unit test proves the overlap and join ordering; it does not prove a
+hosted latency win, which still requires the paired benchmark.
+
+The next low-risk trials are:
+
+1. measure attribute-write and instrumentation-flush duration and presence per step;
+2. parallelize independent stable/authorization hook claims and, on operation-id creates,
+   continuation-ownership/stable-hook readiness checks;
+3. if the attribute write remains material, coalesce one final cumulative batch into the existing
+   terminal control step and overlap it with the control resume;
+4. split internal OTel export draining from authored provider idle flushing, then retain only the
+   exporter drain in the host lifetime;
+5. batch activity projections once per step and retain that callback for reliability.
+
+A direct host `waitUntil` comparison belongs in a fault-injection experiment, not the low-risk
+shipping queue. It must measure latency, `$eve.*` tag retention, crash loss, retries, and
+cross-step ordering, and it must not ship until Workflow exposes a supported step-lifetime API.
+
+Do not import Workflow's private `waitUntil` helper. Either use a supported public Workflow
+step-lifetime API when one exists or keep the awaited join. A host-only fallback that silently
+no-ops outside Vercel would make correctness environment-dependent.
+
 ## Experiments
 
 Experiments are ordered by information value and expected risk. Each change gets a paired hosted
@@ -275,12 +335,14 @@ and crash-cleanup behavior remains on the existing path.
 This is the lowest-risk structural change. Prove exact step-count reduction and no change to root,
 subagent, task, failure, and cancellation results.
 
-### 3. Remove observability-only writes from each step
+### 3. Reduce observability-only work in each step
 
 `setEveAttributes` is awaited after every model attempt. Inside a Workflow step the SDK writes an
-attribute event to the world, so best-effort error handling does not make it non-blocking. First
-A/B the stress and 1/2/4/8-step cases with the write disabled. If material, aggregate token/model
-attributes and persist them once at turn settlement, or attach them to an existing durable event.
+attribute event to the world, so best-effort error handling does not make it free. The first
+low-risk change overlaps that write with result handling while still joining it before step exit.
+A/B the stress and 1/2/4/8-step cases against the serialized implementation. If the remaining
+cost is material, compare disabling the write, a host-retained write with measured tag retention,
+and one cumulative write attached to the terminal control step.
 
 Likewise measure the 8–9 individually awaited protocol stream writes in a simple turn. Keep text
 and tool output streaming immediate, but prototype coalescing adjacent lifecycle-only events into
@@ -343,8 +405,9 @@ wait.
 After the fixed topology is addressed, fit the incremental cost of tool cycles and authored
 extensions. Time adapter delivery, memory lifecycle, stream hooks, dynamic model/connections/
 subagents/tools/skills/instructions, tool-wrapper construction, and instrumentation flushes.
-Expose slow-provider diagnostics and move network exporter flush from every model/tool step to a
-safe turn-end or background boundary where possible.
+Expose slow-provider diagnostics. Separate internal network exporter drain from the authored
+provider `flush()` contract, move only the exporter drain to a host-retained boundary, and keep
+authored flush awaited at actual park/done/error transitions.
 
 Do not combine side-effectful tool cycles into one replayable step unless each tool invocation
 keeps an independent durable idempotency checkpoint. Faster retries that repeat external effects

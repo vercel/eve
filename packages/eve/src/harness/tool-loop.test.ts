@@ -113,12 +113,16 @@ vi.mock("ai", () => ({
 const {
   mockCreateAiSdkHookBridge,
   mockGetRegisteredTelemetryIntegrations,
+  mockSetEveAttributes,
   registeredAuthorIntegration,
   registeredOtelIntegration,
 } = vi.hoisted(() => ({
   mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
   mockGetRegisteredTelemetryIntegrations: vi.fn(
     (_options?: { readonly sanitizeEveOtelErrors?: boolean }): unknown[] => [],
+  ),
+  mockSetEveAttributes: vi.fn<(attrs: Record<string, unknown>) => Promise<void>>(
+    async () => undefined,
   ),
   registeredAuthorIntegration: { onStart: vi.fn() },
   registeredOtelIntegration: { onStart: vi.fn() },
@@ -132,6 +136,10 @@ vi.mock("#instrumentation/ai-sdk-telemetry.js", () => ({
   ensureOtelIntegration: vi.fn(),
   getRegisteredTelemetryIntegrations: (options?: { readonly sanitizeEveOtelErrors?: boolean }) =>
     mockGetRegisteredTelemetryIntegrations(options),
+}));
+
+vi.mock("#runtime/attributes/emit.js", () => ({
+  setEveAttributes: (attrs: Record<string, unknown>) => mockSetEveAttributes(attrs),
 }));
 
 let declaredAudience: ChannelAudience = "unknown";
@@ -241,6 +249,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   declareTelemetry(undefined);
   mockGetRegisteredTelemetryIntegrations.mockReturnValue([]);
+  mockSetEveAttributes.mockResolvedValue(undefined);
 });
 
 function createTestSession(overrides?: Partial<HarnessSession>): HarnessSession {
@@ -1988,6 +1997,61 @@ describe("createToolLoopHarness", () => {
       outputTokens: 3,
       sawCost: false,
     });
+  });
+
+  it("emits the terminal result while Workflow attributes persist, then joins", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const attributeWrite = Promise.withResolvers<void>();
+    mockSetEveAttributes.mockReturnValueOnce(attributeWrite.promise);
+    const { emit, events } = createEventCollector();
+    const result = createToolLoopHarness(createTestConfig("conversation", emit))(
+      createTestSession(),
+      { message: "Hi" },
+    );
+
+    try {
+      await vi.waitFor(
+        () => {
+          expect(events.at(-1)?.type).toBe("session.waiting");
+        },
+        { timeout: 1_000 },
+      );
+
+      let settled = false;
+      void result.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+    } finally {
+      attributeWrite.resolve();
+      await result;
+    }
+  });
+
+  it("keeps an unexpected Workflow attribute rejection out of the turn result", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    mockSetEveAttributes.mockRejectedValueOnce(new Error("attribute write rejected"));
+    const { emit, events } = createEventCollector();
+
+    await expect(
+      createToolLoopHarness(createTestConfig("conversation", emit))(createTestSession(), {
+        message: "Hi",
+      }),
+    ).resolves.toMatchObject({ next: null });
+    expect(events.at(-1)?.type).toBe("session.waiting");
   });
 
   it.each([

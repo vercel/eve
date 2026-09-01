@@ -1747,7 +1747,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     } catch {
       modelTag = undefined;
     }
-    await setEveAttributes({
+    const attributeWrite = setEveAttributes({
       "$eve.model": modelTag,
       "$eve.input_tokens": nextTurnUsage.inputTokens,
       "$eve.output_tokens": nextTurnUsage.outputTokens,
@@ -1755,23 +1755,40 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       "$eve.cache_write_tokens": nextTurnUsage.cacheWriteTokens,
       "$eve.cost_usd": nextTurnUsage.sawCost ? nextTurnUsage.costUsd : undefined,
       "$eve.tool_count": config.tools.size,
+    }).catch((error: unknown) => {
+      // `setEveAttributes` owns this best-effort boundary. Keep the overlap
+      // defensive if a future implementation accidentally lets a rejection
+      // escape before result handling reaches the join below.
+      logError(log, "Workflow attribute write failed unexpectedly", error, {
+        sessionId: session.sessionId,
+        turnId: emissionState.turnId,
+      });
     });
 
     // --- Handle result ------------------------------------------------------
 
-    return handleStepResult({
-      config,
-      emit,
-      emissionState,
-      delegatedCaller: taskUpdatesEnabled,
-      durableModelPromptMessageCount:
-        ephemeralContextMessages.length === 0 ? projectedMessages.length : undefined,
-      promptMessages: messages,
-      result,
-      runStep,
-      session,
-      runtimeActionTools: modelCallRuntimeActionTools,
-    });
+    // Overlap the best-effort attribute write with result processing, including
+    // the terminal stream epilogue, but keep it inside this step's lifetime so
+    // cumulative writes cannot reorder or race the workflow's terminal state.
+    let stepResult: StepResult;
+    try {
+      stepResult = await handleStepResult({
+        config,
+        emit,
+        emissionState,
+        delegatedCaller: taskUpdatesEnabled,
+        durableModelPromptMessageCount:
+          ephemeralContextMessages.length === 0 ? projectedMessages.length : undefined,
+        promptMessages: messages,
+        result,
+        runStep,
+        session,
+        runtimeActionTools: modelCallRuntimeActionTools,
+      });
+    } finally {
+      await attributeWrite;
+    }
+    return stepResult;
   }
 
   return runStep;
