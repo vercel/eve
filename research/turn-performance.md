@@ -304,6 +304,33 @@ The third option is only viable if it retains latest-deployment routing. Running
 inside the pinned driver would improve latency by silently disabling live upgrades, which is not
 an acceptable trade.
 
+#### Child return-value result: failed under sustained turns
+
+Branch `barba/perf-exp-child-return` replaced the terminal `resumeHook` with a negotiated child
+workflow return value. New drivers started a durable step that awaited `Run.returnValue` while
+continuing to service nonterminal control messages; older pinned turn workflows retained the
+existing terminal-control protocol. The design preserved latest-deployment child dispatch and
+the turn workflow's cancellation/runtime-wait ownership, so it isolated the completion channel
+rather than deleting the child boundary.
+
+The focused two-turn integration path passed, but the installed
+`@workflow/core@5.0.0-beta.43` implements `Run.returnValue` by polling run state every second from
+a `"use step"` getter and warns that the wait occupies a queue worker. The hosted stress run
+[`33469001202`](https://github.com/vercel/eve/actions/runs/33469001202) then failed the sequential
+case after only two completed turns: turns 1 and 2 took 2.536 and 2.379 seconds, turn 3 never
+settled, and the eval aborted at 600.002 seconds. The concurrent two-turn case completed in 9.651
+seconds, but no performance report was emitted because the sequential gate timed out. The raw
+JUnit evidence is retained in
+[artifact `9786105820`](https://github.com/vercel/eve/actions/runs/33469001202/artifacts/9786105820).
+
+Do not ship the polling join. The sustained-turn stall is consistent with the SDK's documented
+worker-capacity hazard, and replacing one terminal resume with a polling step is not a latency
+optimization even before that failure. A viable upstream primitive must let a workflow subscribe
+to child completion without polling or reserving a worker, replay the terminal value/error
+deterministically, and race safely with hook messages. The beta.47 SDK adds a long-poll path in
+worlds that support it, but its isolated full-package A/B regressed this fixture materially, so
+that package update is not evidence that this design is safe or faster.
+
 ### 5. Bound replay and state growth
 
 Measure event-log entries/bytes and state payloads at every target history depth. Full history is
