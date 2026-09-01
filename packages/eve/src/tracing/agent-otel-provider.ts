@@ -360,7 +360,7 @@ export function createAgentOtelInstrumentation(
     const state = takeSpanState(modelSpans, event.scope, event.idempotencyKey);
     if (state === undefined) return;
     if (event.type === "model.call.failed") {
-      recordModelError(state.span, event.error);
+      recordError(state.span, event.error);
     } else {
       await recordTurnUsage(event);
       setAgentUsage(state.span, event.usage);
@@ -555,7 +555,7 @@ export function createAgentOtelInstrumentation(
 
   function drainOpenSpans(event: InstrumentationStepAttemptTerminalEvent): void {
     for (const state of modelSpans.get(event.scope)?.values() ?? []) {
-      if (event.type === "step.attempt.failed") recordModelError(state.span, event.error);
+      if (event.type === "step.attempt.failed") recordError(state.span, event.error);
       state.span.end();
     }
     modelSpans.delete(event.scope);
@@ -674,9 +674,4 @@ function recordError(span: Span, error: unknown): void {
     span.recordException(error);
     span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
   } else span.setStatus({ code: SpanStatusCode.ERROR });
-}
-
-function recordModelError(span: Span, error: unknown): void {
-  span.setAttribute("gen_ai.response.finish_reasons", ["error"]);
-  recordError(span, error);
 }

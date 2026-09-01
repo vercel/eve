@@ -834,6 +834,7 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.usage.input_tokens": 10,
       "agent.usage.output_tokens": 5,
     });
+    expect(Object.keys(step.attributes).some((key) => key.startsWith("gen_ai.usage."))).toBe(false);
     expect(action.attributes).toMatchObject({
       "agent.action.kind": "tool-call",
       "agent.action.name": "weather",
@@ -1416,9 +1417,6 @@ describe("createAgentOtelInstrumentation", () => {
     for (const name of ["chat claude-test", "agent.action", "execute_tool weather"]) {
       const span = byName(spans, name)[0]!;
       expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
-      if (name === "chat claude-test") {
-        expect(span.attributes["gen_ai.response.finish_reasons"]).toEqual(["error"]);
-      }
       if (name !== "agent.action") expect(span.attributes["error.type"]).toBe("Error");
       expect(span.events).toContainEqual(
         expect.objectContaining({
