@@ -286,12 +286,15 @@ export function createAgentOtelInstrumentation(
                 kind: SpanKind.INTERNAL,
                 startTime: turn.startTimeMs,
               },
-              contextFromSpanContext({
-                isRemote: turn.parentIsRemote ?? false,
-                spanId: turn.parentSpanId,
-                traceFlags: turn.context.traceFlags,
-                traceId: turn.context.traceId,
-              }),
+              withChannelAudience(
+                contextFromSpanContext({
+                  isRemote: turn.parentIsRemote ?? false,
+                  spanId: turn.parentSpanId,
+                  traceFlags: turn.context.traceFlags,
+                  traceId: turn.context.traceId,
+                }),
+                session?.channelAudience,
+              ),
             ),
           );
           setAgentInvocationUsage(span, turn.modelUsage);

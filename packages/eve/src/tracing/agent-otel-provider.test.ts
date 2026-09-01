@@ -4,6 +4,7 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
   type ReadableSpan,
+  type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it, vi } from "vitest";
 
@@ -37,6 +38,7 @@ import {
   type InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { channelAudienceFromContext } from "#tracing/channel-audience-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import {
   actionIdempotencyKey,
@@ -69,12 +71,13 @@ function createRuntime(
     recordInputs: true,
     recordOutputs: true,
   }),
+  extraSpanProcessors: readonly SpanProcessor[] = [],
 ): TestRuntime {
   const exporter = new InMemorySpanExporter();
   const idGenerator = new AgentSpanIdGenerator();
   const provider = new BasicTracerProvider({
     idGenerator,
-    spanProcessors: [new SimpleSpanProcessor(exporter)],
+    spanProcessors: [new SimpleSpanProcessor(exporter), ...extraSpanProcessors],
   });
   const tracer = provider.getTracer("eve.agent");
   const agentOtelInput: Omit<AgentOtelInstrumentationInput, "tracePolicy"> & {
@@ -1341,6 +1344,109 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.turn.id": "turn-1",
     });
     expect(nanos(approval.duration)).toBeGreaterThan(0n);
+  });
+
+  it("carries the channel audience on reconstructed durable span contexts", async () => {
+    // Destination export policies read the audience from the parent context at
+    // onStart; a bare wrapped span context would surface "unknown" and let a
+    // policy apply the wrong export or redaction decision.
+    const audiences = new Map<string, ChannelAudience>();
+    const recorder: SpanProcessor = {
+      forceFlush: async () => {},
+      onEnd: () => {},
+      onStart: (span, parentContext) => {
+        audiences.set(span.name, channelAudienceFromContext(parentContext));
+      },
+      shutdown: async () => {},
+    };
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), undefined, [recorder]);
+    const ctx = new ContextContainer();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn-1:0:0",
+      attemptIndex: 0,
+      channelAudience: "private",
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    const actionKey = actionIdempotencyKey("session-1", "turn-1", "tool-1");
+    const inputKey = inputIdempotencyKey("session-1", "turn-1", "approval-1");
+    const delivery = {
+      channelAudience: "private" as const,
+      channelKind: "channel:slack",
+      channelName: "slack",
+      deliveryId: "delivery-1",
+      requestId: "iad1::request-1",
+    };
+
+    await contextStorage.run(ctx, async () => {
+      await publishTurnStarted({
+        channelAudience: "private",
+        hooks: runtime.hooks,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        turnSequence: 0,
+      });
+      await runtime.hooks.publish({
+        agentName: "weather",
+        delivery,
+        idempotencyKey: "channel-delivery:session-1:delivery-1",
+        input: { message: "hi" },
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        type: "channel.delivery.started",
+      });
+      await runtime.hooks.publish({
+        callId: "tool-1",
+        idempotencyKey: actionKey,
+        input: { city: "SF" },
+        kind: "tool-call",
+        name: "weather",
+        scope,
+        type: "action.started",
+      });
+      await runtime.hooks.publish({
+        action: { callId: "tool-1", name: "weather" },
+        idempotencyKey: inputKey,
+        kind: "tool-approval",
+        request: { prompt: "Approve weather?" },
+        requestId: "approval-1",
+        scope,
+        type: "input.requested",
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: inputKey,
+        kind: "tool-approval",
+        outcome: "approved",
+        requestId: "approval-1",
+        scope,
+        type: "input.resolved",
+      });
+      await runtime.hooks.publish({
+        idempotencyKey: actionKey,
+        outcome: "completed",
+        output: { output: { temperature: 72 }, type: "result" },
+        scope,
+        type: "action.completed",
+      });
+      await runtime.hooks.publish({
+        agentName: "weather",
+        delivery,
+        idempotencyKey: "channel-delivery:session-1:delivery-1",
+        outcome: "completed",
+        rootSessionId: "session-1",
+        sequence: 0,
+        sessionId: "session-1",
+        turnId: "turn-1",
+        type: "channel.delivery.completed",
+      });
+      await completeTurn(runtime.hooks, "session-1", "turn-1");
+    });
+
+    expect(audiences.get("agent.approval")).toBe("private");
+    expect(audiences.get("agent.channel.delivery")).toBe("private");
+    expect(audiences.get("invoke_agent weather")).toBe("private");
   });
 
   it("does not create approval spans for other input requests", async () => {
