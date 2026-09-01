@@ -56,7 +56,7 @@ const mocks = vi.hoisted(() => ({
   resumeHook: vi.fn(),
   createSession: vi.fn(),
   startRemoteAgentSession: vi.fn(),
-  startWorkflowPreferLatest: vi.fn(),
+  startWorkflowOnCurrentDeployment: vi.fn(),
   waitForCommandHookOwner: vi.fn(),
 }));
 
@@ -85,7 +85,7 @@ vi.mock("#execution/workflow-runtime.js", () => ({
     dispatchSession: mocks.dispatchSession,
   }),
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
-  startWorkflowPreferLatest: mocks.startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment: mocks.startWorkflowOnCurrentDeployment,
   taskRunWorkflowReference: { workflowId: "workflow//eve//taskRun" },
   waitForCommandHookOwner: mocks.waitForCommandHookOwner,
 }));
@@ -176,7 +176,7 @@ beforeEach(() => {
   mocks.startRemoteAgentSession.mockResolvedValue({
     sessionId: "remote-session-123456789012",
   });
-  mocks.startWorkflowPreferLatest.mockResolvedValue({ runId: "task-run-1" });
+  mocks.startWorkflowOnCurrentDeployment.mockResolvedValue({ runId: "task-run-1" });
   mocks.resumeHook.mockResolvedValue({ runId: "task-run-1" });
   mocks.hydrateDurableSession.mockImplementation(({ durable }) => durable);
   mocks.createDurableSessionState.mockImplementation(({ session }) => ({
@@ -871,7 +871,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       output: { code: "AGENT_BUSY", message: expect.stringContaining("task_active") },
     });
     expect(mocks.dispatchSession).not.toHaveBeenCalled();
-    expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
+    expect(mocks.startWorkflowOnCurrentDeployment).not.toHaveBeenCalled();
   });
 
   it("passes the active turn principal to a tasks-mode continuation", async () => {

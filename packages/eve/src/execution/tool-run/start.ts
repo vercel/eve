@@ -1,6 +1,6 @@
 import type { ToolRunWorkflowInput } from "#execution/tool-run/types.js";
 import {
-  startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment,
   toolRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
@@ -26,7 +26,7 @@ export async function startToolRun(
     parentTurnId: input.session.turn.id,
   });
   const workflowInput: ToolRunWorkflowInput = { ...input, hookToken };
-  await startWorkflowPreferLatest(toolRunWorkflowReference, [workflowInput]);
+  await startWorkflowOnCurrentDeployment(toolRunWorkflowReference, [workflowInput]);
   const owner = await waitForCommandHookOwner(hookToken);
   return { hookToken, runId: owner.runId };
 }

@@ -5,7 +5,7 @@ import {
 import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import {
-  startWorkflowPreferAcceptedDeployment,
+  startWorkflowOnAcceptedDeployment,
   turnWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -16,7 +16,7 @@ export async function dispatchTurnStep(
 ): Promise<{ readonly runId: string }> {
   "use step";
 
-  const run = await startWorkflowPreferAcceptedDeployment(
+  const run = await startWorkflowOnAcceptedDeployment(
     turnWorkflowReference,
     [createTurnWorkflowInput(input)],
     readAcceptedDeploymentId(input.delivery),

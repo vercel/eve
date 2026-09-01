@@ -13,10 +13,9 @@ import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   createWorkflowRuntime,
-  LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
   activityCollectorWorkflowReference,
   sessionTimeoutWorkflowReference,
-  startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment,
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
@@ -68,10 +67,9 @@ describe("workflowEntryReference", () => {
   it("uses the installed eve package identity for the runtime workflow id", () => {
     const packageInfo = resolveInstalledPackageInfo();
 
-    // The runtime references intentionally omit the `@<pkg.version>`
-    // stamp so cross-deployment routing (`start(ref, args, {
-    // deploymentId: "latest" })`) finds the same workflow on a newer
-    // deployment even when eve itself has been upgraded.
+    // The runtime references intentionally omit the `@<pkg.version>` stamp
+    // so an explicitly targeted deployment finds the same workflow even when
+    // eve itself has been upgraded.
     expect(workflowEntryReference.workflowId).toBe(`workflow//${packageInfo.name}//workflowEntry`);
     expect(workflowEntryReference.workflowId).not.toContain("/src/execution/");
     expect(workflowEntryReference.workflowId).not.toContain("@");
@@ -89,7 +87,7 @@ describe("workflowEntryReference", () => {
   });
 });
 
-describe("startWorkflowPreferLatest", () => {
+describe("startWorkflowOnCurrentDeployment", () => {
   it("detaches Workflow telemetry only from marked agent contexts", async () => {
     const contextManager = new AsyncLocalStorageContextManager().enable();
     apiContext.setGlobalContextManager(contextManager);
@@ -109,12 +107,12 @@ describe("startWorkflowPreferLatest", () => {
     try {
       await otelContext.with(callerContext, async () => {
         expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
-        await startWorkflowPreferLatest(workflowEntryReference, []);
+        await startWorkflowOnCurrentDeployment(workflowEntryReference, []);
         expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
       });
       await otelContext.with(markAgentTraceContext(callerContext), async () => {
         expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
-        await startWorkflowPreferLatest(workflowEntryReference, []);
+        await startWorkflowOnCurrentDeployment(workflowEntryReference, []);
         expect(otelTrace.getSpan(otelContext.active())).toBe(caller);
       });
     } finally {
@@ -394,8 +392,8 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   }
 
-  it("starts workflowEntry on the latest deployment in Vercel production", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+  it("starts workflowEntry on the deployment accepting the request", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: "driver-run" });
@@ -429,7 +427,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
-        deploymentId: "latest",
+        deploymentId: "dpl_current",
       },
     );
   });
@@ -688,7 +686,7 @@ describe("createWorkflowRuntime#createSession", () => {
   });
 
   it("serializes the channel request id into workflow context", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: "driver-run" });
@@ -721,7 +719,7 @@ describe("createWorkflowRuntime#createSession", () => {
           "$eve.trigger": "http",
           "$eve.type": "session",
         },
-        deploymentId: "latest",
+        deploymentId: "dpl_current",
       },
     );
   });
@@ -770,13 +768,10 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
-  it("falls back to the current deployment when latest is unsupported", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+  it("lets the Workflow world provide its current deployment when Vercel has no id", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
-    startMock
-      .mockRejectedValueOnce(new Error(LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE))
-      .mockResolvedValueOnce({ runId: "driver-run" });
+    startMock.mockResolvedValue({ runId: "driver-run" });
 
     await buildRuntime(compiledArtifactsSource).createSession({
       adapter,
@@ -785,18 +780,8 @@ describe("createWorkflowRuntime#createSession", () => {
       mode: "task",
     });
 
-    expect(startMock).toHaveBeenNthCalledWith(1, workflowEntryReference, expect.any(Array), {
-      allowReservedAttributes: true,
-      attributes: {
-        "$eve.is_otel_trace_enabled": "false",
-        "$eve.is_trace_content_visible": "false",
-        "$eve.title": "hello",
-        "$eve.trigger": "http",
-        "$eve.type": "session",
-      },
-      deploymentId: "latest",
-    });
-    expect(startMock).toHaveBeenNthCalledWith(2, workflowEntryReference, expect.any(Array), {
+    expect(startMock).toHaveBeenCalledTimes(1);
+    expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array), {
       allowReservedAttributes: true,
       attributes: {
         "$eve.is_otel_trace_enabled": "false",
@@ -807,43 +792,6 @@ describe("createWorkflowRuntime#createSession", () => {
       },
     });
   });
-
-  it.each(["preview", "development", undefined])(
-    "pins workflowEntry to the current deployment when VERCEL_ENV is %s",
-    async (vercelEnv) => {
-      // Preview and CLI deployments carry no git branch reference, so the
-      // platform cannot resolve "latest" for them (HTTP 400). They must pin
-      // to their own immutable deployment.
-      if (vercelEnv === undefined) {
-        vi.stubEnv("VERCEL_ENV", "");
-        delete process.env.VERCEL_ENV;
-      } else {
-        vi.stubEnv("VERCEL_ENV", vercelEnv);
-      }
-      const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
-      mockBundleAndRun(compiledArtifactsSource);
-      startMock.mockResolvedValue({ runId: "driver-run" });
-
-      await buildRuntime(compiledArtifactsSource).createSession({
-        adapter,
-        auth: null,
-        input: { message: "hello" },
-        mode: "task",
-      });
-
-      expect(startMock).toHaveBeenCalledTimes(1);
-      expect(startMock).toHaveBeenCalledWith(workflowEntryReference, expect.any(Array), {
-        allowReservedAttributes: true,
-        attributes: {
-          "$eve.is_otel_trace_enabled": "false",
-          "$eve.is_trace_content_visible": "false",
-          "$eve.title": "hello",
-          "$eve.trigger": "http",
-          "$eve.type": "session",
-        },
-      });
-    },
-  );
 
   it("does not open the workflow event stream until the events stream is read", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;

@@ -64,11 +64,7 @@ import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
-import {
-  LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE,
-  turnWorkflowReference,
-  workflowEntryReference,
-} from "#execution/workflow-runtime.js";
+import { turnWorkflowReference, workflowEntryReference } from "#execution/workflow-runtime.js";
 
 const bindSessionInstrumentationSpy = vi.hoisted(() => vi.fn());
 vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
@@ -684,8 +680,8 @@ describe("dispatchTurnStep", () => {
     };
   }
 
-  it("starts turn workflows on the latest deployment in Vercel production", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+  it("starts turn workflows on the current driver deployment without an ingress stamp", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
     const input = createTurnInput();
     startMock.mockResolvedValue({ runId: "turn-run" });
 
@@ -704,13 +700,12 @@ describe("dispatchTurnStep", () => {
           "$eve.is_trace_content_visible": "false",
           "$eve.type": "turn",
         },
-        deploymentId: "latest",
+        deploymentId: "dpl_driver",
       },
     );
   });
 
   it("starts on the accepted deployment when the dispatch step runs there", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const baseInput = createTurnInput();
     const input = {
@@ -739,8 +734,7 @@ describe("dispatchTurnStep", () => {
     );
   });
 
-  it("keeps latest routing for mixed accepted deployments", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+  it("stays on the driver deployment for mixed accepted deployments", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
     const baseInput = createTurnInput();
     const input = {
@@ -772,11 +766,11 @@ describe("dispatchTurnStep", () => {
     expect(startMock).toHaveBeenCalledWith(
       turnWorkflowReference,
       [createTurnWorkflowInput(input)],
-      expect.objectContaining({ deploymentId: "latest" }),
+      expect.objectContaining({ deploymentId: "dpl_current" }),
     );
   });
 
-  it("starts turn workflows on the latest promoted generation in local development", async () => {
+  it("lets the development world retain its stamped generation", async () => {
     vi.stubEnv("EVE_DEV", "1");
     const input = createTurnInput();
     startMock.mockResolvedValue({ runId: "turn-run" });
@@ -786,7 +780,17 @@ describe("dispatchTurnStep", () => {
     expect(startMock).toHaveBeenCalledWith(
       turnWorkflowReference,
       [createTurnWorkflowInput(input)],
-      expect.objectContaining({ deploymentId: "latest" }),
+      {
+        allowReservedAttributes: true,
+        attributes: {
+          "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
+          "$eve.parent": "sess-test",
+          "$eve.root": "sess-test",
+          "$eve.is_trace_content_visible": "true",
+          "$eve.type": "turn",
+        },
+      },
     );
   });
 
@@ -815,45 +819,50 @@ describe("dispatchTurnStep", () => {
     );
   });
 
-  it("falls back to the current deployment when latest is unsupported", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
-    const input = createTurnInput();
-    startMock
-      .mockRejectedValueOnce(new Error(LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE))
-      .mockResolvedValueOnce({ runId: "turn-run" });
+  it("targets a stamped accepting deployment even when the driver is older", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
+    const baseInput = createTurnInput();
+    const input = {
+      ...baseInput,
+      delivery: {
+        ...baseInput.delivery,
+        deliveryMetadata: [
+          {
+            acceptedDeploymentId: "dpl_ingress",
+            channelKind: "channel:webhook",
+            channelName: "webhook",
+            deliveryId: "delivery-1",
+            payloadIndex: 0,
+          },
+        ],
+      },
+    };
+    startMock.mockResolvedValue({ runId: "turn-run" });
 
     await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
 
-    const wireInput = createTurnWorkflowInput(input);
-    expect(startMock).toHaveBeenNthCalledWith(1, turnWorkflowReference, [wireInput], {
-      allowReservedAttributes: true,
-      attributes: {
-        "$eve.channel_request_id": "req_turn",
-        "$eve.is_otel_trace_enabled": "false",
-        "$eve.parent": "sess-test",
-        "$eve.root": "sess-test",
-        "$eve.is_trace_content_visible": "false",
-        "$eve.type": "turn",
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      {
+        allowReservedAttributes: true,
+        attributes: {
+          "$eve.channel_request_id": "req_turn",
+          "$eve.is_otel_trace_enabled": "false",
+          "$eve.parent": "sess-test",
+          "$eve.root": "sess-test",
+          "$eve.is_trace_content_visible": "false",
+          "$eve.type": "turn",
+        },
+        deploymentId: "dpl_ingress",
       },
-      deploymentId: "latest",
-    });
-    expect(startMock).toHaveBeenNthCalledWith(2, turnWorkflowReference, [wireInput], {
-      allowReservedAttributes: true,
-      attributes: {
-        "$eve.channel_request_id": "req_turn",
-        "$eve.is_otel_trace_enabled": "false",
-        "$eve.parent": "sess-test",
-        "$eve.root": "sess-test",
-        "$eve.is_trace_content_visible": "false",
-        "$eve.type": "turn",
-      },
-    });
+    );
   });
 });
 
 describe("dispatchRuntimeActionsStep", () => {
   it("preserves a started local child when a later start fails", async () => {
-    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
     const compiledArtifactsSource = {} as never;
     const compiledBundle = {
       adapterRegistry: {
@@ -998,7 +1007,7 @@ describe("dispatchRuntimeActionsStep", () => {
           "$eve.root": "root-session",
           "$eve.type": "subagent",
         }),
-        deploymentId: "latest",
+        deploymentId: "dpl_driver",
       },
     );
     expect(startMock).toHaveBeenCalledWith(

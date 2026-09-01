@@ -160,9 +160,8 @@ describe("applyWorkflowTransform", () => {
   });
 
   it("strips the @<version> stamp for stable workflow names but not for steps", async () => {
-    // Stable workflow ids must match across deployments so
-    // `start(ref, args, { deploymentId: "latest" })` lands on the
-    // same registry key on a newer deployment. Step ids stay
+    // Stable workflow ids must match across deployments so an explicit
+    // deployment target lands on the same registry key. Step ids stay
     // version-stamped because they are per-deployment internal
     // identifiers, not cross-deployment routing keys.
     const transformed = await transformWorkflowDirectives({
