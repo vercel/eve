@@ -226,49 +226,55 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     expect(trustedForwarders).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps malformed ceiling baggage metadata-only", async () => {
-    const handler = createEveCreateHandler({
-      trustedForwarders: () => true,
-      auth: () => ROUTER_CALLER,
-    });
+  it.each(["eve.audience=public;ceiling=i1", "eve.audience=public"])(
+    "keeps malformed or mixed-version baggage metadata-only: %s",
+    async (baggage) => {
+      const handler = createEveCreateHandler({
+        trustedForwarders: () => true,
+        auth: () => ROUTER_CALLER,
+      });
 
-    await handler.fetch(
-      new Request("https://receiver.example.com/eve/v1/session", {
-        body: JSON.stringify({
-          forwardedPrincipal: { current: FORWARDED_CURRENT },
-          callback: {
-            callId: "call-1",
-            subagentName: "site-ops",
-            token: "parent-token",
-            url: "https://caller.example.com/eve/v1/callback/parent-token",
+      await handler.fetch(
+        new Request("https://receiver.example.com/eve/v1/session", {
+          body: JSON.stringify({
+            forwardedPrincipal: { current: FORWARDED_CURRENT },
+            callback: {
+              callId: "call-1",
+              subagentName: "site-ops",
+              token: "parent-token",
+              url: "https://caller.example.com/eve/v1/callback/parent-token",
+            },
+            message: "check my dashboards",
+            mode: "task",
+          }),
+          headers: {
+            "content-type": "application/json",
+            baggage,
+            traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
           },
-          message: "check my dashboards",
-          mode: "task",
+          method: "POST",
         }),
-        headers: {
-          "content-type": "application/json",
-          baggage: "eve.audience=public;ceiling=i1",
-          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
-        },
-        method: "POST",
-      }),
-    );
+      );
 
-    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
-      RunInput,
-      "adapter" | "channelName" | "requestId"
-    >;
-    const ctx = buildRunContext({
-      bundle: EMPTY_SKILL_BUNDLE,
-      run: {
-        adapter: { kind: "eve" },
-        channelName: "eve",
-        ...options,
-      },
-    });
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
-    expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toBeUndefined();
-  });
+      const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+        RunInput,
+        "adapter" | "channelName" | "requestId"
+      >;
+      const ctx = buildRunContext({
+        bundle: EMPTY_SKILL_BUNDLE,
+        run: {
+          adapter: { kind: "eve" },
+          channelName: "eve",
+          ...options,
+        },
+      });
+      expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+      expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
+        ceiling: { recordInputs: false, recordOutputs: false },
+        originAudience: "unknown",
+      });
+    },
+  );
 
   it("ignores a ceiling that disagrees with unsampled trace flags", async () => {
     const handler = createEveCreateHandler({

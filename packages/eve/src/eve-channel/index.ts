@@ -47,7 +47,10 @@ import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
 import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
-import { formatTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
+import {
+  FAIL_CLOSED_FORWARDED_TRACE_ASSERTION,
+  formatTraceContentCeiling,
+} from "#shared/forwarded-trace-policy.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, GET, HEAD, POST } from "#public/definitions/channel.js";
@@ -182,13 +185,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           parsedParentTraceContext === undefined
             ? "absent"
             : readForwardedAudienceBaggage(req.headers.get("baggage"));
-        const acceptedForwardedTracePolicy =
+        const acceptsForwardedTracePolicy =
           forwarded.accepted &&
           parsedParentTraceContext !== undefined &&
-          (parsedParentTraceContext.traceFlags & 1) === 1 &&
-          typeof forwardedTraceAssertion === "object"
+          (parsedParentTraceContext.traceFlags & 1) === 1;
+        const acceptedForwardedTracePolicy = !acceptsForwardedTracePolicy
+          ? undefined
+          : typeof forwardedTraceAssertion === "object"
             ? forwardedTraceAssertion
-            : undefined;
+            : forwardedTraceAssertion === "malformed"
+              ? FAIL_CLOSED_FORWARDED_TRACE_ASSERTION
+              : undefined;
         let parentTraceContext: SessionTraceContext | undefined = parsedParentTraceContext;
         if (acceptedForwardedTracePolicy !== undefined && parsedParentTraceContext !== undefined) {
           parentTraceContext = {
@@ -197,7 +204,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           };
         }
         if (forwardedTraceAssertion === "malformed") {
-          log.warn("ignoring malformed forwarded audience baggage", {
+          log.warn("using metadata-only policy for malformed forwarded audience baggage", {
             forwarder: authResult.principalId,
           });
         } else if (typeof forwardedTraceAssertion === "object") {

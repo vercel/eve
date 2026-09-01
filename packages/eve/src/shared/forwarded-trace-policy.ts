@@ -7,7 +7,7 @@ import {
   readInstrumentationDecision,
 } from "#shared/instrumentation-decision.js";
 
-const FAIL_CLOSED_TRACE_ASSERTION: ForwardedTraceAssertion = {
+export const FAIL_CLOSED_FORWARDED_TRACE_ASSERTION: ForwardedTraceAssertion = {
   ceiling: { recordInputs: false, recordOutputs: false },
   originAudience: "unknown",
 };
@@ -69,7 +69,7 @@ export function applyLiveDeliveryAudienceCeiling(
 export function readForwardedTraceAssertion(value: unknown): ForwardedTraceAssertion | undefined {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    return FAIL_CLOSED_TRACE_ASSERTION;
+    return FAIL_CLOSED_FORWARDED_TRACE_ASSERTION;
   }
   const candidate = value as Partial<ForwardedTraceAssertion>;
   const ceiling = candidate.ceiling;
@@ -79,14 +79,14 @@ export function readForwardedTraceAssertion(value: unknown): ForwardedTraceAsser
     typeof ceiling.recordInputs !== "boolean" ||
     typeof ceiling.recordOutputs !== "boolean"
   ) {
-    return FAIL_CLOSED_TRACE_ASSERTION;
+    return FAIL_CLOSED_FORWARDED_TRACE_ASSERTION;
   }
   if (
     candidate.originAudience !== "public" &&
     candidate.originAudience !== "private" &&
     candidate.originAudience !== "unknown"
   ) {
-    return FAIL_CLOSED_TRACE_ASSERTION;
+    return FAIL_CLOSED_FORWARDED_TRACE_ASSERTION;
   }
   return {
     ceiling: {
