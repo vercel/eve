@@ -261,6 +261,12 @@ export function createAgentOtelInstrumentation(
   const onSessionTransition = async (
     event: InstrumentationSessionTransitionEvent,
   ): Promise<void> => {
+    if (event.type === "session.failed" && event.turnId !== undefined) {
+      await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
+        ...turn,
+        terminal: turn.terminal ?? { error: event.error, type: "turn.failed" },
+      }));
+    }
     if (event.turnId !== undefined) {
       const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
       if (turn !== undefined) {

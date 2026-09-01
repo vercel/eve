@@ -110,7 +110,7 @@ export async function settleCancelledTurnStep(input: {
           });
         };
         const emit =
-          instrumentation?.createCancellationHandleEvent({
+          instrumentation?.createHandleEvent({
             handleEvent: baseEmit,
             turnId: activeTurnId(emissionState),
           }) ?? baseEmit;

@@ -27,7 +27,7 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
-import { finalizeDone, finalizeExpiredSession } from "#execution/workflow-entry-finalization.js";
+import { finalizeDone } from "#execution/workflow-entry-finalization.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
@@ -37,6 +37,7 @@ import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
+import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
@@ -71,7 +72,8 @@ export interface WorkflowEntryResult {
 
 type DriverLoopOutcome =
   | {
-      readonly kind: "expired";
+      readonly kind: "terminal";
+      readonly notifyCaller: boolean;
       readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
@@ -97,6 +99,9 @@ type DriverLoopOutcome =
  * instead of mirroring it here.
  */
 interface CrashCleanupState {
+  // The turn currently owned by `dispatchAndAwaitTurn`, when a crash occurs
+  // before its terminal state returns to the driver.
+  activeTurnId: string | undefined;
   // The caller whose awaited reply is still unsettled, so the catch can
   // reject it with the error instead of leaving it parked forever.
   // Root sessions leave it undefined; only conversation-mode paths read it.
@@ -114,6 +119,12 @@ interface CrashCleanupState {
   // turn that crashed mid-flight are absent from this snapshot and escape
   // crash cleanup.
   lastSessionState: DurableSessionState | undefined;
+  // The latest context adopted from a completed turn, which carries provider
+  // and trace state needed by terminal instrumentation.
+  serializedContext: Record<string, unknown>;
+  // Whether the session already emitted a terminal protocol and instrumentation
+  // event, so later callback or teardown failures cannot contradict it.
+  terminalEmitted: boolean;
 }
 
 /**
@@ -150,9 +161,12 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
 
   const driverWritable = getWritable<Uint8Array>();
   const crashCleanupState: CrashCleanupState = {
+    activeTurnId: undefined,
     caller: undefined,
     callerResolved: false,
     lastSessionState: undefined,
+    serializedContext: input.serializedContext,
+    terminalEmitted: false,
   };
 
   try {
@@ -226,12 +240,14 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     if (outcome.kind === "result") {
       return outcome.result;
     }
-    return await finalizeExpiredSession({
+    return await finalizeTerminalSession({
       caller: crashCleanupState.caller,
       driverWritable,
       mode,
+      notifyCaller: outcome.notifyCaller,
       serializedContext: outcome.serializedContext,
       sessionState: outcome.sessionState,
+      terminalState: crashCleanupState,
     });
   } catch (error) {
     // Safety net for failures the tool-loop harness does not already
@@ -240,34 +256,37 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
     // channel still sees a terminal event.
     if (crashCleanupState.lastSessionState !== undefined) {
       await terminateChildSessionsStep({
-        serializedContext: input.serializedContext,
+        serializedContext: crashCleanupState.serializedContext,
         sessionState: crashCleanupState.lastSessionState,
       });
     }
-    await emitTerminalSessionFailureStep({
-      error: normalizeSerializableError(error),
-      parentWritable: driverWritable,
-      serializedContext: input.serializedContext,
-    });
-    if (mode === "task") {
-      await fireSessionCallbackStep({
+    if (!crashCleanupState.terminalEmitted) {
+      await emitTerminalSessionFailureStep({
         error: normalizeSerializableError(error),
-        serializedContext: input.serializedContext,
-        status: "failed",
+        parentWritable: driverWritable,
+        serializedContext: crashCleanupState.serializedContext,
+        turnId: crashCleanupState.activeTurnId,
       });
-      await notifyDelegatedParentStep({
-        result: createDelegatedSubagentErrorResult(input.serializedContext, error),
-        serializedContext: input.serializedContext,
-      });
-    } else {
-      const caller = await resolveCallerForCrash(crashCleanupState, input.serializedContext);
-      if (caller !== undefined) {
-        await notifyTurnCallerStep({
-          caller,
-          lifecycle: "terminal",
-          sessionId,
-          settled: { isError: true, output: error },
+      if (mode === "task") {
+        await fireSessionCallbackStep({
+          error: normalizeSerializableError(error),
+          serializedContext: input.serializedContext,
+          status: "failed",
         });
+        await notifyDelegatedParentStep({
+          result: createDelegatedSubagentErrorResult(input.serializedContext, error),
+          serializedContext: input.serializedContext,
+        });
+      } else {
+        const caller = await resolveCallerForCrash(crashCleanupState, input.serializedContext);
+        if (caller !== undefined) {
+          await notifyTurnCallerStep({
+            caller,
+            lifecycle: "terminal",
+            sessionId,
+            settled: { isError: true, output: error },
+          });
+        }
       }
     }
     throw createSafeOuterWorkflowError();
@@ -449,6 +468,8 @@ async function runDriverLoop(input: {
             caller,
             serializedContext: stateCursor.serializedContext,
           });
+    const dispatchedTurnId = activeTurnId(stateCursor.sessionState.emissionState);
+    input.crashCleanupState.activeTurnId = dispatchedTurnId;
     const turn = await dispatchAndAwaitTurn({
       bufferedDeliveries,
       bufferedSessionControls,
@@ -463,10 +484,14 @@ async function runDriverLoop(input: {
       seenTaskDeliveries,
       sessionState: stateCursor.sessionState,
     });
+    input.crashCleanupState.activeTurnId =
+      turn.action.kind === "park" && turn.action.cancelled === true ? dispatchedTurnId : undefined;
+    input.crashCleanupState.lastSessionState = turn.action.sessionState;
+    input.crashCleanupState.serializedContext = turn.action.serializedContext;
+    if (turn.action.kind === "done") input.crashCleanupState.terminalEmitted = true;
     await disposeSettledTurnControl?.();
     disposeSettledTurnControl = turn.dispose;
     stateCursor.adoptState(turn.action);
-    input.crashCleanupState.lastSessionState = stateCursor.sessionState;
     return turn.action;
   };
 
@@ -513,6 +538,9 @@ async function runDriverLoop(input: {
           sessionState: stateCursor.sessionState,
         });
         stateCursor.adoptState(settled);
+        input.crashCleanupState.activeTurnId = undefined;
+        input.crashCleanupState.lastSessionState = stateCursor.sessionState;
+        input.crashCleanupState.serializedContext = stateCursor.serializedContext;
         const cancelledCaller = {
           caller: input.crashCleanupState.caller,
           sessionId: stateCursor.sessionState.sessionId,
@@ -522,7 +550,6 @@ async function runDriverLoop(input: {
             ? cancelledCaller
             : { ...cancelledCaller, usage: settled.usage },
         );
-        input.crashCleanupState.lastSessionState = stateCursor.sessionState;
       }
 
       // Channel-created sessions may rekey their dynamic alias. Sessions
@@ -558,6 +585,7 @@ async function runDriverLoop(input: {
         expectedAttemptIds: action.authorizationAttemptIds ?? [],
       });
       input.crashCleanupState.lastSessionState = stateCursor.sessionState;
+      input.crashCleanupState.serializedContext = stateCursor.serializedContext;
 
       if (next.kind === "authorization-resume") {
         action = await runTurn({
@@ -569,18 +597,20 @@ async function runDriverLoop(input: {
 
       if (next.kind === "expired") {
         return {
-          kind: "expired",
+          kind: "terminal",
+          notifyCaller: true,
           serializedContext: stateCursor.serializedContext,
           sessionState: stateCursor.sessionState,
         };
       }
 
       if (next.kind === "reset") {
-        await terminateChildSessionsStep({
+        return {
+          kind: "terminal",
+          notifyCaller: false,
           serializedContext: stateCursor.serializedContext,
           sessionState: stateCursor.sessionState,
-        });
-        return { kind: "result", result: { output: "" } };
+        };
       }
 
       if (next.kind === "clear" || next.kind === "compact") {
@@ -589,11 +619,12 @@ async function runDriverLoop(input: {
       }
 
       if (next.kind === "closed") {
-        await terminateChildSessionsStep({
+        return {
+          kind: "terminal",
+          notifyCaller: false,
           serializedContext: stateCursor.serializedContext,
           sessionState: stateCursor.sessionState,
-        });
-        return { kind: "result", result: { output: "" } };
+        };
       }
 
       if (next.kind === "cancel-turn") {
@@ -613,6 +644,7 @@ async function runDriverLoop(input: {
         action = { ...action, settled: undefined };
         input.crashCleanupState.caller = undefined;
         input.crashCleanupState.lastSessionState = stateCursor.sessionState;
+        input.crashCleanupState.serializedContext = stateCursor.serializedContext;
         continue;
       }
 
@@ -626,4 +658,46 @@ async function runDriverLoop(input: {
     await sessionTimeout?.dispose();
     await commandInbox.dispose();
   }
+}
+
+async function finalizeTerminalSession(input: {
+  readonly caller: TurnCaller | undefined;
+  readonly driverWritable: WritableStream<Uint8Array>;
+  readonly mode: RunMode;
+  readonly notifyCaller: boolean;
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+  readonly terminalState: CrashCleanupState;
+}): Promise<WorkflowEntryResult> {
+  await terminateChildSessionsStep({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  });
+  await emitTerminalSessionCompletionStep({
+    parentWritable: input.driverWritable,
+    serializedContext: input.serializedContext,
+  });
+  input.terminalState.terminalEmitted = true;
+
+  if (!input.notifyCaller) return { output: "" };
+
+  if (input.mode === "task") {
+    await fireSessionCallbackStep({
+      output: "",
+      serializedContext: input.serializedContext,
+      status: "completed",
+    });
+    await notifyDelegatedParentStep({
+      result: createDelegatedSubagentSuccessResult(input.serializedContext, ""),
+      serializedContext: input.serializedContext,
+    });
+  } else {
+    await notifyTurnCallerStep({
+      caller: input.caller,
+      lifecycle: "terminal",
+      sessionId: input.sessionState.sessionId,
+      settled: { output: "" },
+    });
+  }
+  return { output: "" };
 }

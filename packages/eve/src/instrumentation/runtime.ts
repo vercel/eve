@@ -177,9 +177,9 @@ export interface SessionInstrumentation {
 }
 
 export interface ExecutionInstrumentation {
-  readonly createCancellationHandleEvent: (input: {
+  readonly createHandleEvent: (input: {
     readonly handleEvent?: HandleEventFn;
-    readonly turnId: string;
+    readonly turnId?: string;
   }) => HandleEventFn | undefined;
   readonly flush: () => Promise<void>;
   readonly instrumentChannelDelivery: (
@@ -460,7 +460,7 @@ export function bindInstrumentationRuntime(
     };
   };
   return {
-    createCancellationHandleEvent: (input) => {
+    createHandleEvent: (input) => {
       const sessionContext = readSessionContext();
       return createInstrumentationHandleEvent({
         agentName: boundSession.agentName,
