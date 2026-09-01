@@ -18,6 +18,8 @@ import type { TokenUsage } from "#shared/token-usage.js";
 interface DurableStepResultFields {
   readonly backgroundTaskState?: DurableSessionState;
   readonly backgroundTasks?: StepResult["backgroundTasks"];
+  /** The guarded inline step deferred before mutating state. */
+  readonly requiresChildDispatch?: true;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }

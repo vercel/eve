@@ -2,6 +2,7 @@ import {
   createTurnWorkflowInput,
   type TurnWorkflowDispatchInput,
 } from "#execution/durable-session-migrations/turn-workflow.js";
+import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
 import { buildTurnAttributes, readRootSessionId } from "#execution/eve-workflow-attributes.js";
 import {
   startWorkflowPreferAcceptedDeployment,
@@ -33,17 +34,4 @@ export async function dispatchTurnStep(
   );
 
   return { runId: run.runId };
-}
-
-function readAcceptedDeploymentId(
-  input: TurnWorkflowDispatchInput["delivery"],
-): string | undefined {
-  if (input.kind !== "deliver" || input.deliveryMetadata?.length === 0) return undefined;
-  const acceptedDeploymentId = input.deliveryMetadata?.[0]?.acceptedDeploymentId;
-  if (acceptedDeploymentId === undefined || acceptedDeploymentId.length === 0) return undefined;
-  return input.deliveryMetadata?.every(
-    (metadata) => metadata.acceptedDeploymentId === acceptedDeploymentId,
-  )
-    ? acceptedDeploymentId
-    : undefined;
 }

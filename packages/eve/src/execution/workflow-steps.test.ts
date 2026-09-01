@@ -1495,6 +1495,29 @@ describe("dispatchRuntimeActionsStep", () => {
 });
 
 describe("turnStep", () => {
+  it("defers before mutation when an inline step reaches another deployment", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_driver");
+    const sessionState = createStubSessionState();
+    const durableReadsBefore = vi.mocked(readDurableSession).mock.calls.length;
+
+    await expect(
+      turnStep({
+        acceptedDeploymentId: "dpl_ingress",
+        input: { kind: "deliver", payloads: [{ message: "hello" }] },
+        parentWritable: createTestWritable(),
+        serializedContext: { state: "untouched" },
+        sessionState,
+      }),
+    ).resolves.toEqual({
+      action: "continue",
+      requiresChildDispatch: true,
+      serializedContext: { state: "untouched" },
+      sessionState,
+    });
+
+    expect(vi.mocked(readDurableSession).mock.calls).toHaveLength(durableReadsBefore);
+  });
+
   it("prepares resumed-session history before dynamic runtime refresh", async () => {
     const hidden = { content: "HIDE_FROM_RUNTIME_REFRESH", role: "user" as const };
     mockIdentityHistoryViewProjector.mockImplementation(({ messages }) =>

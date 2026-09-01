@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
+import { turnStep } from "#execution/workflow-steps.js";
 
 const createHookMock = vi.fn();
 
@@ -19,6 +21,10 @@ vi.mock("./dispatch-turn-step.js", () => ({
 
 vi.mock("./forward-turn-delivery-step.js", () => ({
   forwardTurnDeliveryStep: vi.fn(),
+}));
+
+vi.mock("./workflow-steps.js", () => ({
+  turnStep: vi.fn(),
 }));
 
 describe("dispatchAndAwaitTurn", () => {
@@ -226,6 +232,194 @@ describe("dispatchAndAwaitTurn", () => {
     await turn.dispose();
     expect(hook.dispose).toHaveBeenCalledOnce();
   });
+
+  it("settles an ordinary same-deployment turn without a child workflow", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "park",
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      serializedContext: { state: "settled" },
+      sessionState: state,
+      settled: { output: "ok" },
+    });
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(turn.action).toMatchObject({ kind: "park", settled: { output: "ok" } });
+    expect(turnStep).toHaveBeenCalledWith(
+      expect.objectContaining({ acceptedDeploymentId: "dpl_current" }),
+    );
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+    expect(createHookMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps ordinary tool-loop continuations inline", async () => {
+    const firstState = createState("http:test:rekeyed");
+    const finalState = createState("http:test:rekeyed");
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "continue",
+        serializedContext: { state: "continued" },
+        sessionState: firstState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "complete",
+        serializedContext: { state: "done" },
+        sessionState: finalState,
+      });
+    const commandInbox = createCommandInbox();
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: createState("http:test"),
+    });
+
+    expect(turn.action).toMatchObject({ kind: "done", output: "complete" });
+    expect(vi.mocked(turnStep).mock.calls[1]?.[0].input).toBeUndefined();
+    expect(commandInbox.rekeyContinuation).toHaveBeenCalledWith("http:test:rekeyed");
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+  });
+
+  it("hands an already-completed complex step to the child workflow", async () => {
+    const state = createState("http:test");
+    const result = {
+      action: "park" as const,
+      hasPendingAuthorization: false,
+      hasPendingInputBatch: false,
+      pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+      serializedContext: { state: "pending" },
+      sessionState: state,
+    };
+    vi.mocked(turnStep).mockResolvedValueOnce(result);
+    installControlHook([
+      {
+        action: { kind: "park", serializedContext: result.serializedContext, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(dispatchTurnStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialStep: {
+          beforeStep: expect.objectContaining({ serializedContext: { state: "start" } }),
+          result,
+        },
+      }),
+    );
+  });
+
+  it("defers a guarded deployment mismatch without consuming the delivery", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "continue",
+      requiresChildDispatch: true,
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+    installControlHook([
+      {
+        action: { kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(dispatchTurnStep).toHaveBeenCalledWith(
+      expect.objectContaining({ initialStep: undefined }),
+    );
+  });
+
+  it("carries inline cancellation into the continued child turn", async () => {
+    const state = createState("http:test");
+    vi.mocked(turnStep).mockImplementationOnce(async (input) => {
+      await vi.waitFor(() => expect(input.abortSignal?.aborted).toBe(true));
+      return {
+        action: "cancelled",
+        serializedContext: { state: "cancelled" },
+        sessionState: state,
+      };
+    });
+    let delivered = false;
+    const commandInbox = createCommandInbox({
+      next: vi.fn(async () => {
+        if (!delivered) {
+          delivered = true;
+          return { done: false as const, value: { kind: "cancel" as const } };
+        }
+        return await new Promise<IteratorResult<SessionInboxPayload>>(() => {});
+      }),
+    });
+    installControlHook([
+      {
+        action: { cancelled: true, kind: "park", serializedContext: {}, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox,
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(dispatchTurnStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialCancellation: {},
+        initialStep: expect.objectContaining({
+          result: expect.objectContaining({ action: "cancelled" }),
+        }),
+      }),
+    );
+    expect(commandInbox.consumeNext).toHaveBeenCalledOnce();
+  });
 });
 
 function createCommandInbox(overrides: Partial<SessionCommandInbox> = {}): SessionCommandInbox {
@@ -274,5 +468,21 @@ function createState(continuationToken: string): DurableSessionState {
     hasProxyInputRequests: false,
     sessionId: "session",
     version: 1,
+  };
+}
+
+function createAcceptedDelivery(): DeliverHookPayload {
+  return {
+    deliveryMetadata: [
+      {
+        acceptedDeploymentId: "dpl_current",
+        channelKind: "channel:test",
+        channelName: "test",
+        deliveryId: "delivery-1",
+        payloadIndex: 0,
+      },
+    ],
+    kind: "deliver",
+    payloads: [{ message: "start" }],
   };
 }

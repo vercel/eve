@@ -97,15 +97,20 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       cancellation = await createTurnCancellationControl({
         controlToken: input.completionToken,
         expectedTurnId: activeTurnId(input.stepInput.sessionState.emissionState),
+        initialPayload: input.initialCancellation,
       });
     }
 
+    let initialStep = input.initialStep;
     while (true) {
-      const beforeStep = {
+      const beforeStep = initialStep?.beforeStep ?? {
         serializedContext: cursor.serializedContext,
         sessionState: cursor.sessionState,
       };
-      const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
+      const result =
+        initialStep?.result ??
+        (await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal)));
+      initialStep = undefined;
       const pendingActionKeys =
         result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
           ? result.pendingRuntimeActionKeys

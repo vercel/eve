@@ -104,6 +104,7 @@ import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
+import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -121,6 +122,9 @@ export type { TurnStepInput };
 /** Runs one atomic harness step inside a durable `"use step"` boundary. */
 export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   "use step";
+
+  const deferred = deferMismatchedInlineTurnStep(rawInput);
+  if (deferred !== undefined) return deferred;
 
   let input = rawInput;
 
