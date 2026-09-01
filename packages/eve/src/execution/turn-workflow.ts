@@ -81,11 +81,13 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   // Hook promises and iterators share one durable cursor. Create the iterator before
   // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
   const inboxReader = createChannelReader("inbox", inbox);
+  let initialStep = input.initialStep;
   const cursor = new TurnExecutionCursor({
     controlToken: input.completionToken,
     parentWritable: input.stepInput.parentWritable,
-    serializedContext: input.stepInput.serializedContext,
-    sessionState: input.stepInput.sessionState,
+    serializedContext:
+      initialStep?.beforeStep.serializedContext ?? input.stepInput.serializedContext,
+    sessionState: initialStep?.beforeStep.sessionState ?? input.stepInput.sessionState,
   });
   // Delivery request ids stay unique across every wait in this turn. A forwarded
   // delivery left unconsumed when one wait resolves would otherwise reuse a later
@@ -113,16 +115,20 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     if (input.driverCapabilities?.cancelledTurnSettle === true) {
       cancellation = await createTurnCancellationControl({
         controlToken: input.completionToken,
-        expectedTurnId: activeTurnId(input.stepInput.sessionState.emissionState),
+        expectedTurnId: activeTurnId(cursor.sessionState.emissionState),
+        initialPayload: input.initialCancellation,
       });
     }
 
     while (true) {
-      const beforeStep = {
+      const beforeStep = initialStep?.beforeStep ?? {
         serializedContext: cursor.serializedContext,
         sessionState: cursor.sessionState,
       };
-      const result = await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal));
+      const result =
+        initialStep?.result ??
+        (await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal)));
+      initialStep = undefined;
       const pendingActionKeys =
         result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
           ? result.pendingRuntimeActionKeys

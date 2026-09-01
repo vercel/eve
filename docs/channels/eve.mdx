@@ -47,6 +47,10 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
+The `202` response means Workflow accepted the durable run. The command inbox may still be
+starting, so an immediate follow-up or control request can report that the session is not active.
+The event-stream client retries the brief window before the new run becomes readable.
+
 Authenticated callers that may retry a create request can pass their own `operationId` for
 create-once semantics. The same operation under the same authenticated principal returns the
 active session it already created instead of dispatching the input again. The first accepted
@@ -72,7 +76,7 @@ curl -X POST https://<deployment>/eve/v1/session/wrun_A \
 
 Follow-up messages use `turnPolicy: "steer"` by default. If a turn is active, eve buffers the message before cooperatively cancelling that turn, then starts the follow-up as a replacement turn with a new turn ID. Set `turnPolicy: "queue"` on `eveChannel(...)` when follow-ups should wait for active turns to finish. `inputResponses` never steer.
 
-Sending a message to an unknown or terminal session ID returns `409` with
+Sending a message to an unknown, terminal, or not-yet-active session ID returns `409` with
 `{"code":"session_not_active","error":"The session is no longer active.","ok":false}`.
 TypeScript clients expose the stable code as `ClientError.code`. The route never
 creates or follows a replacement session.

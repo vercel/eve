@@ -97,6 +97,7 @@ export interface SessionTraceContext {
 
 /** Framework-owned identity for one inbound channel operation. */
 export interface ChannelDeliveryMetadata {
+  readonly acceptedDeploymentId?: string;
   readonly channelKind: string;
   readonly channelName: string;
   readonly deliveryId: string;
@@ -548,8 +549,8 @@ export type RunResult =
   | { readonly status: "waiting" };
 
 /**
- * Handle returned by `runtime.createSession()` once the command inbox is ready,
- * before the step loop completes.
+ * Handle returned by `runtime.createSession()` once the durable run is accepted,
+ * before its command inbox or step loop necessarily starts.
  *
  * Carries the identifiers needed for stream endpoints.
  */

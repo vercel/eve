@@ -177,11 +177,10 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook(sessionCommandHookToken("session-1")),
-      { kind: "clear", version: 1 },
-    );
-    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
+      kind: "clear",
+    });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("preserves the delivery payload through the stable session inbox", async () => {
@@ -194,18 +193,17 @@ describe("createWorkflowRuntime command dispatch", () => {
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
 
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook(sessionCommandHookToken("session-1")),
-      {
-        auth: undefined,
-        caller: undefined,
-        kind: "deliver",
-        payload: { message: "hello" },
-        payloads: [{ message: "hello" }],
-        requestId: undefined,
-        version: 1,
-      },
-    );
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
+      auth: undefined,
+      caller: undefined,
+      delivery: undefined,
+      kind: "send",
+      payload: { message: "hello" },
+      requestId: undefined,
+      taskDeliveryId: undefined,
+      turnPolicy: undefined,
+    });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -248,10 +246,11 @@ describe("createWorkflowRuntime command dispatch", () => {
         sessionId: "session-1",
       }),
     ).resolves.toEqual({ sessionId: "session-1", status: "accepted" });
-    expect(resumeHookMock).toHaveBeenCalledWith(
-      currentSessionHook(sessionCommandHookToken("session-1")),
-      { kind: "cancel", turnId: "turn-2", version: 1 },
-    );
+    expect(resumeHookMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"), {
+      kind: "cancel",
+      turnId: "turn-2",
+    });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
   it("maps missing and terminal targets to 'no_active_turn'", async () => {
@@ -434,6 +433,43 @@ describe("createWorkflowRuntime#createSession", () => {
         deploymentId: "latest",
       },
     );
+  });
+
+  it("returns without waiting for the stable command inbox", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        input: { message: "hello" },
+        mode: "conversation",
+      }),
+    ).resolves.toMatchObject({ sessionId: "driver-run" });
+
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("waits only for continuation ownership when a token is supplied", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+    getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        continuationToken: "slack:thread",
+        input: { message: "hello" },
+        mode: "conversation",
+      }),
+    ).resolves.toMatchObject({ sessionId: "driver-run" });
+
+    expect(getHookByTokenMock).toHaveBeenCalledOnce();
+    expect(getHookByTokenMock).toHaveBeenCalledWith("slack:thread");
   });
 
   it("stores an explicit title alongside the trace-content policy", async () => {

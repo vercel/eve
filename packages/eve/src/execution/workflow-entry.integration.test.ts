@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
@@ -30,6 +30,7 @@ import { toInputSchema } from "#tools/schema.js";
 import { defineHook } from "#public/definitions/hook.js";
 
 function buildSerializedContext(overrides: {
+  acceptedDeploymentId?: string;
   audience?: "public" | "private" | "unknown";
   auth?: Record<string, unknown>;
   channelKind: string;
@@ -59,6 +60,14 @@ function buildSerializedContext(overrides: {
     "eve.channel": channel,
     "eve.mode": overrides.mode,
   };
+  if (overrides.acceptedDeploymentId !== undefined) {
+    context["eve.channelDelivery"] = {
+      acceptedDeploymentId: overrides.acceptedDeploymentId,
+      channelKind: overrides.channelKind,
+      channelName: "test",
+      deliveryId: "delivery-initial",
+    };
+  }
   if (overrides.continuationToken !== undefined) {
     context["eve.continuationToken"] = overrides.continuationToken;
   }
@@ -67,6 +76,10 @@ function buildSerializedContext(overrides: {
   }
   return context;
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 interface WeatherAuthRuntime {
   completeCalls(): number;
@@ -683,6 +696,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("parks in conversation mode and resumes via runtime delivery", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
 
@@ -691,6 +705,7 @@ describe("workflowEntry integration", () => {
         {
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
             channelKind: "http",
             continuationToken,
             mode: "conversation",
@@ -729,7 +744,17 @@ describe("workflowEntry integration", () => {
         });
         await expect(
           workflowRuntime.dispatchContinuation({
-            command: { auth: null, kind: "send", payload: { message: "follow up" } },
+            command: {
+              auth: null,
+              delivery: {
+                acceptedDeploymentId: "dpl_inline",
+                channelKind: "http",
+                channelName: "test",
+                deliveryId: "delivery-followup",
+              },
+              kind: "send",
+              payload: { message: "follow up" },
+            },
             continuationToken,
           }),
         ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
@@ -753,6 +778,9 @@ describe("workflowEntry integration", () => {
         await expect(run.returnValue).resolves.toEqual({ output: "" });
         completed = true;
         expect(await listCallerStepNames(run.runId)).toEqual([]);
+        const stepNames = await listStepNames(run.runId);
+        expect(stepNames.filter((name) => name === "turnStep")).toHaveLength(2);
+        expect(stepNames).not.toContain("dispatchTurnStep");
       } finally {
         stream.dispose();
         if (!completed) await run.cancel();
@@ -1327,16 +1355,17 @@ const CALLER_STEP_NAMES = new Set([
 ]);
 
 async function listCallerStepNames(runId: string): Promise<string[]> {
+  return (await listStepNames(runId)).filter((name) => CALLER_STEP_NAMES.has(name)).sort();
+}
+
+async function listStepNames(runId: string): Promise<string[]> {
   const world = await getWorld();
   const steps = await world.steps.list({
     pagination: { limit: 1_000 },
     resolveData: "none",
     runId,
   });
-  return steps.data
-    .map((step) => step.stepName.split("//").at(-1) ?? "")
-    .filter((name) => CALLER_STEP_NAMES.has(name))
-    .sort();
+  return steps.data.map((step) => step.stepName.split("//").at(-1) ?? "");
 }
 
 interface CapturedEventStream {

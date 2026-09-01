@@ -140,7 +140,9 @@ const buildConfigureVariant = (integration: Integration, auth: AuthMode): string
     const connector = connectorOf(integration.slug, spec, auth);
     const modeService = spec.connectorServices?.[auth];
     const connectorService = modeService ?? spec.connectorService ?? connector;
-    const namedConnector = modeService !== undefined || spec.connectorService !== undefined;
+    const namedConnector =
+      !spec.defaultConnectorName &&
+      (modeService !== undefined || spec.connectorService !== undefined);
     sections.push(
       [
         "Link your project, create the connector, and pull OIDC locally:",

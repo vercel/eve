@@ -229,7 +229,9 @@ function buildRouteArgs(
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
   const requestSpanContext = requestSpan?.spanContext();
+  const acceptedDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
   const deliverySource = {
+    acceptedDeploymentId,
     channelKind,
     channelName,
     requestId,

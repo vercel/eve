@@ -116,6 +116,85 @@ describe("turnWorkflow", () => {
     expect(createOwnerHookMock).not.toHaveBeenCalled();
   });
 
+  it("continues from an inline step result without executing it twice", async () => {
+    const initialState = createSessionState();
+    const finalState = createSessionState({ continuationToken: "http:continued" });
+    installInbox([]);
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState: initialState,
+    });
+
+    await turnWorkflow({
+      ...input,
+      initialStep: {
+        beforeStep: {
+          serializedContext: input.stepInput.serializedContext,
+          sessionState: initialState,
+        },
+        result: {
+          action: "done",
+          output: "already complete",
+          serializedContext: { state: "done" },
+          sessionState: finalState,
+        },
+      },
+    });
+
+    expect(turnStep).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "done", output: "already complete" }),
+        kind: "turn-result",
+      }),
+    );
+  });
+
+  it("keeps earlier inline state when cancellation wins over a completed step", async () => {
+    const initialState = createSessionState({ continuationToken: "http:initial" });
+    const beforeStepState = createSessionState({ continuationToken: "http:inline-checkpoint" });
+    const completedState = createSessionState({ continuationToken: "http:completed" });
+    installInbox([]);
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState: initialState,
+    });
+
+    await turnWorkflow({
+      ...input,
+      initialCancellation: {},
+      initialStep: {
+        beforeStep: {
+          serializedContext: { state: "inline-checkpoint" },
+          sessionState: beforeStepState,
+        },
+        result: {
+          action: "done",
+          output: "must not complete",
+          serializedContext: { state: "done" },
+          sessionState: completedState,
+        },
+      },
+    });
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "inline-checkpoint" },
+      sessionState: beforeStepState,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({
+          cancelled: true,
+          kind: "park",
+          sessionState: beforeStepState,
+        }),
+        kind: "turn-result",
+      }),
+    );
+  });
+
   it("migrates a pre-version (unversioned) input and runs the first turn step", async () => {
     const sessionState = createSessionState();
     const parentWritable = new WritableStream<Uint8Array>();

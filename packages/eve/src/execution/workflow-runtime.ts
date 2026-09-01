@@ -244,8 +244,8 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      try {
-        if (input.continuationToken) {
+      if (input.continuationToken) {
+        try {
           const owner = await waitForCommandHookOwner(input.continuationToken);
           if (owner.runId !== run.runId) {
             throw new RuntimeSessionOwnershipConflictError({
@@ -254,11 +254,10 @@ export function createWorkflowRuntime(config: {
               sessionId: run.runId,
             });
           }
+        } catch (error) {
+          await cancelActivityCollector(collectorRunId);
+          throw error;
         }
-        await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
-      } catch (error) {
-        await cancelActivityCollector(collectorRunId);
-        throw error;
       }
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
@@ -412,17 +411,6 @@ function isInactiveCommandTarget(error: unknown): boolean {
   return false;
 }
 
-async function waitForOwnedCommandHook(token: string, sessionId: string): Promise<void> {
-  const owner = await waitForCommandHookOwner(token);
-  if (owner.runId !== sessionId) {
-    throw new RuntimeSessionOwnershipConflictError({
-      continuationToken: token,
-      ownerSessionId: owner.runId,
-      sessionId,
-    });
-  }
-}
-
 export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
@@ -462,14 +450,7 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
   args: TArgs,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  // Agent parentage is reconstructed from Eve's serialized trace context. Only
-  // remove the ambient span marked by an agent boundary; the marker is not
-  // propagated into Workflow runs, so Workflow-to-Workflow traces stay intact.
-  const activeContext = context.active();
-  const workflowContext = isAgentTraceContext(activeContext)
-    ? trace.deleteSpan(activeContext)
-    : activeContext;
-  return await context.with(workflowContext, async () => {
+  return await withWorkflowStartContext(async () => {
     if (!shouldRouteToLatestDeployment()) {
       return options === undefined
         ? await start(workflow, args)
@@ -488,6 +469,41 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
         : await start(workflow, args, options);
     }
   });
+}
+
+/**
+ * Starts on the deployment that accepted a delivery when this step is running
+ * there, otherwise preserves latest-deployment routing.
+ */
+export async function startWorkflowPreferAcceptedDeployment<TArgs extends unknown[], TResult>(
+  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
+  args: TArgs,
+  acceptedDeploymentId: string | undefined,
+  options?: StartOptionsWithoutDeploymentId,
+): Promise<Run<unknown> | Run<TResult>> {
+  const currentDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+  if (
+    acceptedDeploymentId === undefined ||
+    currentDeploymentId === undefined ||
+    acceptedDeploymentId !== currentDeploymentId
+  ) {
+    return await startWorkflowPreferLatest(workflow, args, options);
+  }
+
+  return await withWorkflowStartContext(
+    async () => await start(workflow, args, { ...options, deploymentId: acceptedDeploymentId }),
+  );
+}
+
+async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult>) {
+  // Agent parentage is reconstructed from Eve's serialized trace context. Only
+  // remove the ambient span marked by an agent boundary; the marker is not
+  // propagated into Workflow runs, so Workflow-to-Workflow traces stay intact.
+  const activeContext = context.active();
+  const workflowContext = isAgentTraceContext(activeContext)
+    ? trace.deleteSpan(activeContext)
+    : activeContext;
+  return await context.with(workflowContext, callback);
 }
 
 /**
