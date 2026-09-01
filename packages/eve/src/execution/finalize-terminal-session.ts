@@ -1,11 +1,8 @@
 import type { TurnCaller } from "#channel/types.js";
-import {
-  notifyDelegatedParentStep,
-  notifyTurnCallerStep,
-} from "#execution/delegated-parent-notification.js";
-import { createDelegatedSubagentSuccessResult } from "#execution/delegated-parent-result.js";
+import { notifyDelegatedParentStep, notifyTurnCallerStep } from "#subagents/parent-notification.js";
+import { createDelegatedSubagentSuccessResult } from "#subagents/parent-result.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import type { RunMode } from "#shared/run-mode.js";
