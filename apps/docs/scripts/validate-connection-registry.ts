@@ -59,6 +59,10 @@ const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
 const CONNECT_METHODS: Readonly<Record<string, "mcp" | "oauth">> = {
   agentcard: "mcp",
 };
+const CONNECT_PRINCIPAL_TYPES: Readonly<Record<string, "app" | "user">> = {
+  neon: "app",
+  tinybird: "app",
+};
 
 if (JSON.stringify(actualSlugs) !== JSON.stringify(expectedSlugs)) {
   throw new Error(
@@ -92,6 +96,7 @@ for (const item of items) {
   if (slug !== "browser-use") {
     const creationType = CONNECT_CREATION_TYPES[slug];
     const connectionMethod = CONNECT_METHODS[slug];
+    const principalType = CONNECT_PRINCIPAL_TYPES[slug];
     const expectedSetup =
       slug === "shopify"
         ? {
@@ -112,6 +117,7 @@ for (const item of items) {
               slug,
               ...(creationType === undefined ? [] : ["--creation-type", creationType]),
               ...(connectionMethod === undefined ? [] : ["--connection-method", connectionMethod]),
+              ...(principalType === undefined ? [] : ["--principal-type", principalType]),
             ],
           };
     if (JSON.stringify(setups) !== JSON.stringify([expectedSetup])) {

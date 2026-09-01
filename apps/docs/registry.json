@@ -862,6 +862,31 @@
       ]
     },
     {
+      "name": "connection/neon",
+      "type": "registry:item",
+      "title": "Neon",
+      "description": "Manage Neon projects, run queries, and make schema changes.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "neon", "neon", "neon", "--principal-type", "app"]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/neon.ts",
+          "type": "registry:file",
+          "target": "agent/connections/neon.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/netlify",
       "type": "registry:item",
       "title": "Netlify",
@@ -1196,7 +1221,15 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "tinybird", "tinybird", "tinybird"]
+            "args": [
+              "integration",
+              "connect",
+              "tinybird",
+              "tinybird",
+              "tinybird",
+              "--principal-type",
+              "app"
+            ]
           },
           "requires": ">=0.29.0"
         }

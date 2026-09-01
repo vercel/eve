@@ -42,6 +42,19 @@ describe("Agentcard connection setup", () => {
   });
 });
 
+describe("Neon connection setup", () => {
+  it("generates the registry install and Vercel Connect configuration", () => {
+    const integration = getIntegration("neon")!;
+    const setup = buildConnectionSetup(integration);
+    const quickStart = setup.variants["mcp:app"];
+
+    expect(buildConnectionInstall(integration)).toContain("eve add connection/neon");
+    expect(quickStart).toContain('url: "https://mcp.neon.tech/mcp"');
+    expect(quickStart).toContain('auth: connect({ connector: "neon/neon", principalType: "app" })');
+    expect(setup.configureVariants["mcp:app"]).toContain("vercel connect create neon --name neon");
+  });
+});
+
 describe("Shopify connection setup", () => {
   it("uses hand-authored sections without generating authentication variants", () => {
     const integration = getIntegration("shopify")!;
