@@ -354,7 +354,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Browser Use",
     kind: "connection",
     tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
-    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description:
         "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
