@@ -10,11 +10,13 @@ import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
   bindSessionInstrumentation,
+  initializeSessionInstrumentation,
   registerInstrumentationRuntime,
   type ExecutionInstrumentation,
   type InstrumentationRuntime,
   type InstrumentationStepScope,
 } from "#instrumentation/runtime.js";
+import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 
@@ -341,5 +343,61 @@ describe("bindSessionInstrumentation", () => {
     });
     expect(policy).toHaveBeenCalledOnce();
     expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
+  });
+});
+
+describe("initializeSessionInstrumentation", () => {
+  function registerSeedRuntime(input: {
+    readonly samplesTrace?: (traceId: string) => boolean;
+    readonly tracePolicy?: TraceCapturePolicy;
+  }): void {
+    registerInstrumentationRuntime({
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }, input.tracePolicy),
+      idGenerator: new AgentSpanIdGenerator(),
+      prepareSessionTrace: async () => ({ spanId: "", traceFlags: 0, traceId: "" }),
+      ...(input.samplesTrace === undefined ? {} : { samplesTrace: input.samplesTrace }),
+    });
+  }
+
+  it("marks the seed unsampled when the installed sampler drops the trace", () => {
+    const samplesTrace = vi.fn(() => false);
+    registerSeedRuntime({ samplesTrace });
+    const ctx = createContext();
+
+    initializeSessionInstrumentation({ agentName: "test-agent", ctx });
+
+    const seed = ctx.get(SessionTraceSeedKey);
+    expect(seed?.traceFlags).toBe(0);
+    expect(seed?.decision).toMatchObject({ action: "record" });
+    expect(samplesTrace).toHaveBeenCalledExactlyOnceWith(seed?.traceId);
+  });
+
+  it("keeps the seed sampled when the sampler admits the trace", () => {
+    registerSeedRuntime({ samplesTrace: () => true });
+    const ctx = createContext();
+
+    initializeSessionInstrumentation({ agentName: "test-agent", ctx });
+
+    expect(ctx.get(SessionTraceSeedKey)?.traceFlags).toBe(1);
+  });
+
+  it("stays sampled when no sampler capability is installed", () => {
+    registerSeedRuntime({});
+    const ctx = createContext();
+
+    initializeSessionInstrumentation({ agentName: "test-agent", ctx });
+
+    expect(ctx.get(SessionTraceSeedKey)?.traceFlags).toBe(1);
+  });
+
+  it("skips the sampler when policy already drops the trace", () => {
+    const samplesTrace = vi.fn(() => true);
+    registerSeedRuntime({ samplesTrace, tracePolicy: () => false });
+    const ctx = createContext();
+
+    initializeSessionInstrumentation({ agentName: "test-agent", ctx });
+
+    expect(ctx.get(SessionTraceSeedKey)?.traceFlags).toBe(0);
+    expect(samplesTrace).not.toHaveBeenCalled();
   });
 });

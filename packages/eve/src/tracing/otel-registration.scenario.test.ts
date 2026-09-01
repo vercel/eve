@@ -70,6 +70,45 @@ describe("registerOtelPipeline", () => {
     ).not.toThrow();
   });
 
+  it("reports the installed sampler's verdict for pre-allocated trace ids", () => {
+    const runtime = registerOtelPipeline({
+      pipeline: { sampler: "always_off", spanProcessors: [] },
+      serviceName: "weather",
+    });
+
+    expect(runtime.samplesTrace(runtime.idGenerator.generateTraceId())).toBe(false);
+  });
+
+  it("passes the pre-allocated trace id to a custom sampler without exporting the probe", async () => {
+    const seen: string[] = [];
+    const sampler = {
+      shouldSample: (_context: unknown, traceId: string) => {
+        seen.push(traceId);
+        return { decision: traceId.startsWith("a") ? 2 : 0 };
+      },
+      toString: () => "test-sampler",
+    };
+    const exporter = new InMemorySpanExporter();
+    const processor = new SimpleSpanProcessor(exporter);
+    const runtime = registerOtelPipeline({
+      pipeline: {
+        sampler: sampler as unknown as NonNullable<
+          Parameters<typeof registerOtelPipeline>[0]["pipeline"]["sampler"]
+        >,
+        spanProcessors: [processor],
+      },
+      serviceName: "weather",
+    });
+
+    expect(runtime.samplesTrace("a".repeat(32))).toBe(true);
+    expect(runtime.samplesTrace("b".repeat(32))).toBe(false);
+    expect(seen).toContain("a".repeat(32));
+    expect(seen).toContain("b".repeat(32));
+
+    await runtime.forceFlush();
+    expect(exporter.getFinishedSpans()).toEqual([]);
+  });
+
   it("fails without replacing another runtime's global propagator", async () => {
     let foreignInjections = 0;
     const shutdown = vi.fn(async () => undefined);

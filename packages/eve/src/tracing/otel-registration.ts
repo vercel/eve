@@ -159,6 +159,7 @@ export function registerOtelPipeline(input: {
   return {
     forceFlush: () => provider.forceFlush!(),
     idGenerator,
+    samplesTrace: (traceId) => samplerAdmitsTrace(idGenerator, traceId),
     shutdown: () => provider.shutdown!(),
   };
 }
@@ -167,7 +168,26 @@ export function registerOtelPipeline(input: {
 export interface RegisteredOtelPipeline {
   readonly forceFlush: () => Promise<void>;
   readonly idGenerator: AgentSpanIdGenerator;
+  /** Whether the installed sampler would record a trace with this id. */
+  readonly samplesTrace: (traceId: string) => boolean;
   readonly shutdown: () => Promise<void>;
+}
+
+/**
+ * Asks the installed sampler whether a trace with this pre-allocated id will
+ * exist. eve stamps `$eve.trace_id` onto workflow attributes before any span
+ * starts, so the sampler must be consulted at allocation time or an
+ * `always_off`, ratio, or custom sampler would leave links to traces that are
+ * never exported. The probe roots a span exactly as `agent.session` does and,
+ * like the ownership probe above, is deliberately never ended so it cannot
+ * export. Trace-id-based and constant samplers are exact; a custom sampler
+ * keyed on span name sees the probe's name rather than `agent.session`.
+ */
+function samplerAdmitsTrace(idGenerator: AgentSpanIdGenerator, traceId: string): boolean {
+  const probe = idGenerator.withTraceId(traceId, () =>
+    trace.getTracer("eve.registration").startSpan(REGISTRATION_SPAN_NAME, { root: true }),
+  );
+  return (probe.spanContext().traceFlags & 1) === 1;
 }
 
 interface RuntimeTracerProvider {
