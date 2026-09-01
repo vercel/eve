@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
-import { settleDirectApprovalResponse } from "#harness/approval-candidates.js";
-import { coordinateApprovalDelivery } from "#harness/approval-delivery-coordinator.js";
+import { settleDirectApprovalResponse } from "#harness/hitl/approval-response-attempts.js";
+import { interpretApprovalResponses } from "#harness/hitl/approval-response-interpreter.js";
 import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
@@ -42,7 +42,7 @@ function parkedSession(): HarnessSession {
   });
 }
 
-describe("coordinateApprovalDelivery", () => {
+describe("interpretApprovalResponses", () => {
   it("recovers an allowed settlement before its synthetic response is consumed", async () => {
     const parked = parkedSession();
     const settled = settleDirectApprovalResponse({
@@ -52,7 +52,7 @@ describe("coordinateApprovalDelivery", () => {
       settledAt: 100,
       state: parked.state,
     });
-    const result = await coordinateApprovalDelivery({
+    const result = await interpretApprovalResponses({
       now: 101,
       session: { ...parked, state: settled.state },
       tools: new Map(),
@@ -72,7 +72,7 @@ describe("coordinateApprovalDelivery", () => {
       settledAt: 100,
       state: parked.state,
     });
-    const result = await coordinateApprovalDelivery({
+    const result = await interpretApprovalResponses({
       now: 101,
       session: { ...parked, state: settled.state },
       tools: new Map(),
@@ -85,7 +85,7 @@ describe("coordinateApprovalDelivery", () => {
 
   it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
     const messageAuth: SessionAuthContext = { ...responder, principalId: "user-2" };
-    const result = await coordinateApprovalDelivery({
+    const result = await interpretApprovalResponses({
       now: 100,
       session: parkedSession(),
       stepInput: {

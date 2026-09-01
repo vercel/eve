@@ -135,11 +135,11 @@ import {
   markApprovalCandidateHistoryEventEmitted,
   markApprovalCandidatePendingEventEmitted,
   markApprovalSettlementEventEmitted,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/approval-response-attempts.js";
 import {
-  coordinateApprovalDelivery,
-  shouldPrepareApprovalPolicyTools,
-} from "#harness/approval-delivery-coordinator.js";
+  interpretApprovalResponses,
+  shouldPrepareApprovalResponsePolicies,
+} from "#harness/hitl/approval-response-interpreter.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
@@ -656,7 +656,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (
       approvalContext !== undefined &&
       config.resolveStepDynamicTools !== undefined &&
-      shouldPrepareApprovalPolicyTools({ session, stepInput: effectiveStepInput })
+      shouldPrepareApprovalResponsePolicies({ session, stepInput: effectiveStepInput })
     ) {
       await config.resolveStepDynamicTools({
         ctx: approvalContext,
@@ -669,7 +669,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: projectHistory(resolvedRuntimeActions.messages, session.state),
       });
     }
-    const coordinated = await coordinateApprovalDelivery({
+    const coordinated = await interpretApprovalResponses({
       session,
       stepInput: effectiveStepInput,
       tools: buildResponseAuthorizationTools({

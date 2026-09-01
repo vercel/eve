@@ -9,7 +9,7 @@ import {
   markApprovalCandidateAuthorizationRequired,
   settleAllowedCandidate,
   settleDirectApprovalResponse,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/approval-response-attempts.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 function responder(principalId: string): SessionAuthContext {

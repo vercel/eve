@@ -117,7 +117,7 @@ describe("request ledger", () => {
 describe("request ledger extension migration", () => {
   it("reads legacy approval-attempt state and removes its key on write", async () => {
     const { getApprovalAuditState, settleDirectApprovalResponse } =
-      await import("#harness/approval-candidates.js");
+      await import("#harness/hitl/approval-response-attempts.js");
     const actor = {
       attributes: {},
       authenticator: "test",

@@ -17,7 +17,7 @@ import {
   settleDirectApprovalResponse,
   type ActiveApprovalCandidate,
   type ApprovalSettlementAuditRecord,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/approval-response-attempts.js";
 import {
   clearPendingAuthorization,
   getAuthorizationResult,
@@ -61,7 +61,7 @@ export interface ApprovalDeliveryResult {
  * commit before lifecycle events are projected by the next stack layer.
  */
 /** Returns whether this invocation should prepare tools for persisted policy work. */
-export function shouldPrepareApprovalPolicyTools(input: {
+export function shouldPrepareApprovalResponsePolicies(input: {
   readonly now?: number;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
@@ -95,7 +95,7 @@ export function shouldPrepareApprovalPolicyTools(input: {
   );
 }
 
-export async function coordinateApprovalDelivery(input: {
+export async function interpretApprovalResponses(input: {
   readonly now?: number;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
