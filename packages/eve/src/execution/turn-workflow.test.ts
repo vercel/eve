@@ -151,12 +151,14 @@ describe("turnWorkflow", () => {
     );
   });
 
-  it("lets cancellation consumed inline win over a completed step result", async () => {
-    const sessionState = createSessionState();
+  it("keeps earlier inline state when cancellation wins over a completed step", async () => {
+    const initialState = createSessionState({ continuationToken: "http:initial" });
+    const beforeStepState = createSessionState({ continuationToken: "http:inline-checkpoint" });
+    const completedState = createSessionState({ continuationToken: "http:completed" });
     installInbox([]);
     const { input } = createInput({
       driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
-      sessionState,
+      sessionState: initialState,
     });
 
     await turnWorkflow({
@@ -164,26 +166,30 @@ describe("turnWorkflow", () => {
       initialCancellation: {},
       initialStep: {
         beforeStep: {
-          serializedContext: { state: "start" },
-          sessionState,
+          serializedContext: { state: "inline-checkpoint" },
+          sessionState: beforeStepState,
         },
         result: {
           action: "done",
           output: "must not complete",
           serializedContext: { state: "done" },
-          sessionState,
+          sessionState: completedState,
         },
       },
     });
 
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
-      serializedContext: { state: "start" },
-      sessionState,
+      serializedContext: { state: "inline-checkpoint" },
+      sessionState: beforeStepState,
     });
     expect(resumeHookMock).toHaveBeenCalledWith(
       "turn-token",
       expect.objectContaining({
-        action: expect.objectContaining({ cancelled: true, kind: "park" }),
+        action: expect.objectContaining({
+          cancelled: true,
+          kind: "park",
+          sessionState: beforeStepState,
+        }),
         kind: "turn-result",
       }),
     );

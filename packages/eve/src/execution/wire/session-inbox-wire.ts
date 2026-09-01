@@ -84,7 +84,8 @@ function decode(value: unknown): DecodedSessionInbox {
     );
   }
   if (
-    (declaredVersion === 2 || declaredVersion === 3) &&
+    typeof declaredVersion === "number" &&
+    declaredVersion >= 2 &&
     wire.kind === "deliver" &&
     !("payload" in wire)
   ) {

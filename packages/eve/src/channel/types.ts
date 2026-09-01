@@ -97,7 +97,6 @@ export interface SessionTraceContext {
 
 /** Framework-owned identity for one inbound channel operation. */
 export interface ChannelDeliveryMetadata {
-  /** Vercel deployment that accepted this delivery, when known. */
   readonly acceptedDeploymentId?: string;
   readonly channelKind: string;
   readonly channelName: string;
