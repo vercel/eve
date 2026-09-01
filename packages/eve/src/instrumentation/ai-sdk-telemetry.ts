@@ -24,14 +24,14 @@ export function ensureOtelIntegration(): void {
   registered = true;
   eveOtelIntegration = new OpenTelemetry({
     runtimeContext: true,
-    tracer: datadogGenAiSpanNames(trace.getTracer("gen_ai")),
+    tracer: genAiSpanIdentityTracer(trace.getTracer("gen_ai")),
   });
   errorSafeEveOtelIntegration = telemetryWithoutErrorContent(eveOtelIntegration);
   registerTelemetry(eveOtelIntegration);
 }
 
-/** Adds Datadog's operation/resource overrides without changing GenAI semantics. @internal */
-export function datadogGenAiSpanNames(tracer: Tracer): Tracer {
+/** Adds operation/resource compatibility aliases without changing GenAI semantics. @internal */
+export function genAiSpanIdentityTracer(tracer: Tracer): Tracer {
   return new Proxy(tracer, {
     get(target, property) {
       if (property !== "startSpan") {

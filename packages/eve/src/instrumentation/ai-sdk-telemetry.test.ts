@@ -13,19 +13,19 @@ vi.mock("#internal/logging.js", () => ({
 }));
 
 import {
-  datadogGenAiSpanNames,
+  genAiSpanIdentityTracer,
   ensureOtelIntegration,
   getRegisteredTelemetryIntegrations,
   telemetryWithoutErrorContent,
 } from "#instrumentation/ai-sdk-telemetry.js";
 
-describe("datadogGenAiSpanNames", () => {
-  it("preserves the detailed resource for AI SDK GenAI spans", async () => {
+describe("genAiSpanIdentityTracer", () => {
+  it("adds operation and resource compatibility aliases to GenAI spans", async () => {
     const exporter = new InMemorySpanExporter();
     const provider = new BasicTracerProvider({
       spanProcessors: [new SimpleSpanProcessor(exporter)],
     });
-    const tracer = datadogGenAiSpanNames(provider.getTracer("test"));
+    const tracer = genAiSpanIdentityTracer(provider.getTracer("test"));
 
     tracer.startSpan("step 1", { attributes: { "gen_ai.operation.name": "agent_step" } }).end();
     tracer.startSpan("plain span").end();
