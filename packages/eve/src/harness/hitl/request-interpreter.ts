@@ -37,6 +37,11 @@ import {
   queueDeferredStepInput,
   removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
+import {
+  listReadyRequestGroupDeliveries,
+  prepareReadyRequestGroupDeliveries,
+  readRequestLedger,
+} from "#harness/hitl/request-ledger.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -50,12 +55,24 @@ import type { InputRequest, InputResponse } from "#shared/input.js";
  */
 export function interpretRequestDelivery(input: {
   readonly deferMessagesWhileApprovalsPending?: boolean;
+  readonly durableGroupCompletionDelivery?: boolean;
   readonly history?: readonly ModelMessage[];
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }): ResolvePendingInputResult {
   const baseHistory = [...(input.history ?? input.session.history)];
+  const readyDelivery =
+    input.durableGroupCompletionDelivery === true
+      ? listReadyRequestGroupDeliveries(input.session.state)[0]
+      : undefined;
+  if (readyDelivery !== undefined) {
+    return {
+      ...(readyDelivery.ownerCompletion as StoredRequestGroupCompletion),
+      groupCompletionDeliveryKey: readyDelivery.deliveryKey,
+      session: input.session,
+    };
+  }
   const batches = getPendingInputBatches(input.session.state);
   if (batches.length === 0) {
     return { outcome: "continue", messages: baseHistory, session: input.session };
@@ -98,6 +115,7 @@ export function interpretRequestDelivery(input: {
 
   const resolverInput = {
     baseHistory,
+    durableGroupCompletionDelivery: input.durableGroupCompletionDelivery,
     batches,
     deferTurnInput,
     resolvedStepInput,
@@ -173,6 +191,7 @@ function resolveApprovalRoute(input: {
   readonly baseHistory: ModelMessage[];
   readonly batches: readonly PendingInputBatch[];
   readonly deferTurnInput: boolean;
+  readonly durableGroupCompletionDelivery?: boolean;
   readonly questionBatches: readonly PendingInputBatch[];
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly resolvedStepInput: ResolvedStepInput | undefined;
@@ -237,22 +256,24 @@ function resolveApprovalRoute(input: {
           }),
   );
 
-  const session = removePendingInputBatches(verdict.session, resolvedBatches);
-
-  return finishResolvedInput({
-    deferTurnInput:
-      resolvedBatches.some((batch) =>
-        batch.requests.some((request) => isApprovalRequest(request)),
-      ) || input.deferTurnInput,
-    leftoverResponses,
-    messages: verdict.messages,
-    rejectedActions: verdict.rejectedActions,
-    resolvedInputs: resolvedBatches.flatMap((batch) => {
-      const resolved = buildResolvedInputBatch(batch, input.responses);
-      return resolved === undefined ? [] : [resolved];
+  return prepareResolvedGroupDelivery({
+    enabled: input.durableGroupCompletionDelivery === true,
+    batches: resolvedBatches,
+    result: finishResolvedInput({
+      deferTurnInput:
+        resolvedBatches.some((batch) =>
+          batch.requests.some((request) => isApprovalRequest(request)),
+        ) || input.deferTurnInput,
+      leftoverResponses,
+      messages: verdict.messages,
+      rejectedActions: verdict.rejectedActions,
+      resolvedInputs: resolvedBatches.flatMap((batch) => {
+        const resolved = buildResolvedInputBatch(batch, input.responses);
+        return resolved === undefined ? [] : [resolved];
+      }),
+      resolvedStepInput: input.resolvedStepInput,
+      session: verdict.session,
     }),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
   });
 }
 
@@ -260,6 +281,7 @@ function resolveQuestionRoute(input: {
   readonly baseHistory: ModelMessage[];
   readonly batches: readonly PendingInputBatch[];
   readonly deferTurnInput: boolean;
+  readonly durableGroupCompletionDelivery?: boolean;
   readonly resolvedStepInput: ResolvedStepInput | undefined;
   readonly responses: readonly InputResponse[];
   readonly session: HarnessSession;
@@ -297,16 +319,19 @@ function resolveQuestionRoute(input: {
       responses: [],
       session: input.session,
     });
-    const session = removePendingInputBatches(verdict.session, [sole]);
-    return {
-      consumedMessage: input.resolvedStepInput.messageConsumed,
-      outcome: "resolved",
-      messages: verdict.messages,
-      resolvedInputs: [buildResolvedInputBatch(sole, [])].filter(
-        (batch): batch is NonNullable<typeof batch> => batch !== undefined,
-      ),
-      session,
-    };
+    return prepareResolvedGroupDelivery({
+      enabled: input.durableGroupCompletionDelivery === true,
+      batches: [sole],
+      result: {
+        consumedMessage: input.resolvedStepInput.messageConsumed,
+        outcome: "resolved",
+        messages: verdict.messages,
+        resolvedInputs: [buildResolvedInputBatch(sole, [])].filter(
+          (batch): batch is NonNullable<typeof batch> => batch !== undefined,
+        ),
+        session: verdict.session,
+      },
+    });
   }
 
   const verdict = reduceRequestVerdicts(
@@ -323,18 +348,20 @@ function resolveQuestionRoute(input: {
         session: state.session,
       }),
   );
-  const session = removePendingInputBatches(verdict.session, resolvedBatches);
-
-  return finishResolvedInput({
-    deferTurnInput: input.deferTurnInput,
-    leftoverResponses,
-    messages: verdict.messages,
-    resolvedInputs: resolvedBatches.flatMap((batch) => {
-      const resolved = buildResolvedInputBatch(batch, input.responses);
-      return resolved === undefined ? [] : [resolved];
+  return prepareResolvedGroupDelivery({
+    enabled: input.durableGroupCompletionDelivery === true,
+    batches: resolvedBatches,
+    result: finishResolvedInput({
+      deferTurnInput: input.deferTurnInput,
+      leftoverResponses,
+      messages: verdict.messages,
+      resolvedInputs: resolvedBatches.flatMap((batch) => {
+        const resolved = buildResolvedInputBatch(batch, input.responses);
+        return resolved === undefined ? [] : [resolved];
+      }),
+      resolvedStepInput: input.resolvedStepInput,
+      session: verdict.session,
     }),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
   });
 }
 
@@ -342,6 +369,7 @@ function resolveSessionLimitRoute(input: {
   readonly baseHistory: ModelMessage[];
   readonly batches: readonly PendingInputBatch[];
   readonly deferTurnInput: boolean;
+  readonly durableGroupCompletionDelivery?: boolean;
   readonly pendingBatch: PendingInputBatch;
   readonly resolvedStepInput: ResolvedStepInput | undefined;
   readonly responses: readonly InputResponse[];
@@ -367,19 +395,63 @@ function resolveSessionLimitRoute(input: {
     responses: input.responses,
     session: input.session,
   });
-  const session = removePendingInputBatches(verdict.session, [input.pendingBatch]);
-
-  return finishResolvedInput({
-    deferTurnInput: input.deferTurnInput || limitBlocked,
-    leftoverResponses,
-    limitContinuation: verdict.limitContinuation,
-    messages: verdict.messages,
-    resolvedInputs: [buildResolvedInputBatch(input.pendingBatch, input.responses)].filter(
-      (batch): batch is NonNullable<typeof batch> => batch !== undefined,
-    ),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
+  return prepareResolvedGroupDelivery({
+    enabled: input.durableGroupCompletionDelivery === true,
+    batches: [input.pendingBatch],
+    result: finishResolvedInput({
+      deferTurnInput: input.deferTurnInput || limitBlocked,
+      leftoverResponses,
+      limitContinuation: verdict.limitContinuation,
+      messages: verdict.messages,
+      resolvedInputs: [buildResolvedInputBatch(input.pendingBatch, input.responses)].filter(
+        (batch): batch is NonNullable<typeof batch> => batch !== undefined,
+      ),
+      resolvedStepInput: input.resolvedStepInput,
+      session: verdict.session,
+    }),
   });
+}
+
+type StoredRequestGroupCompletion = Omit<ResolvePendingInputResult, "session"> & {
+  readonly outcome: "resolved";
+};
+
+function prepareResolvedGroupDelivery(input: {
+  readonly batches: readonly PendingInputBatch[];
+  readonly enabled: boolean;
+  readonly result: ResolvePendingInputResult;
+}): ResolvePendingInputResult {
+  if (input.result.outcome !== "resolved") return input.result;
+  if (!input.enabled) {
+    return {
+      ...input.result,
+      session: removePendingInputBatches(input.result.session, input.batches),
+    };
+  }
+  const requestIds = new Set(
+    input.batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
+  );
+  const ledger = readRequestLedger(input.result.session.state);
+  const groupIds = ledger.groups
+    .filter(
+      (group) =>
+        group.completion === "waiting" && group.requestIds.some((id) => requestIds.has(id)),
+    )
+    .map((group) => group.id);
+  if (groupIds.length === 0) return input.result;
+  const deliveryKey = `request-group-completion:${JSON.stringify(groupIds)}`;
+  const { session: _session, ...ownerCompletion } = input.result;
+  const session = prepareReadyRequestGroupDeliveries({
+    ownerCompletions: new Map(
+      groupIds.map((groupId) => [groupId, { deliveryKey, ownerCompletion }]),
+    ),
+    session: input.result.session,
+  });
+  return {
+    messages: input.result.messages,
+    outcome: "ready",
+    session,
+  };
 }
 
 function reduceRequestVerdicts(

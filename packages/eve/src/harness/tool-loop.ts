@@ -155,6 +155,7 @@ import {
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import { acknowledgeReadyRequestGroupDelivery } from "#harness/hitl/request-ledger.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
@@ -800,12 +801,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     }
 
     const pending = resolvePendingInput({
+      durableGroupCompletionDelivery: config.durableGroupCompletionDelivery,
       deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedRuntimeActions.messages,
       resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
       stepInput: coordinated.stepInput,
     });
+    if (pending.outcome === "ready") {
+      return { next: runStep, session: pending.session };
+    }
     if (pending.outcome === "unresolved") {
       // The runtime-action batch owns the assistant messages. Once that batch
       // resolves, commit its results before the still-pending HITL batch parks.
@@ -878,6 +883,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return { next: null, session: pending.session };
     }
 
+    session = pending.session;
+
     if (pending.resolvedInputs !== undefined) {
       for (const batch of pending.resolvedInputs) {
         await stepInstrumentation?.publishInputResolutions({
@@ -925,6 +932,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
+    if (pending.groupCompletionDeliveryKey !== undefined) {
+      session = acknowledgeReadyRequestGroupDelivery({
+        deliveryKey: pending.groupCompletionDeliveryKey,
+        session,
+      });
+    }
+
     // --- Turn preamble ------------------------------------------------------
 
     const clientContext = readClientContext(effectiveStepInput);
@@ -951,14 +965,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let memoryCommit: ReturnType<typeof drainMemoryCommit> = undefined;
     if (emit && hasStepInput(input)) {
       if (store !== undefined) {
-        prepareDynamicInstructionPreamble(
-          store,
-          projectHistory(pending.session.history, pending.session.state),
-        );
+        prepareDynamicInstructionPreamble(store, projectHistory(session.history, session.state));
         prepareMemoryPreamble(store, {
           history: pending.messages,
           input: [...ephemeralContextMessages, ...preparedTurnInput],
-          state: pending.session.state,
+          state: session.state,
         });
       }
       try {
@@ -974,9 +985,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         instructionMessages = store === undefined ? [] : drainDynamicInstructionUserMessages(store);
         memoryCommit = store === undefined ? undefined : drainMemoryCommit(store);
         session = {
-          ...pending.session,
-          history: [...(memoryCommit?.history ?? pending.session.history), ...instructionMessages],
-          state: memoryCommit?.state ?? pending.session.state,
+          ...session,
+          history: [...(memoryCommit?.history ?? session.history), ...instructionMessages],
+          state: memoryCommit?.state ?? session.state,
         };
         if (!isDynamicModelSelectionError(error)) throw error;
         return failModelSelection(error, {
@@ -992,13 +1003,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       stepInstrumentation?.setTurnId(emissionState.turnId);
     }
 
-    const committedHistory = memoryCommit?.history ?? pending.session.history;
-    const historyLength = pending.session.history.length;
+    const committedHistory = memoryCommit?.history ?? session.history;
+    const historyLength = session.history.length;
     session = setHarnessEmissionState(
       {
-        ...pending.session,
+        ...session,
         history: [...committedHistory, ...instructionMessages],
-        state: memoryCommit?.state ?? pending.session.state,
+        state: memoryCommit?.state ?? session.state,
       },
       emissionState,
     );

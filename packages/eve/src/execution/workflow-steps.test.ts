@@ -34,6 +34,7 @@ import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { readRequestLedger } from "#harness/hitl/request-ledger.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
@@ -1791,8 +1792,24 @@ describe("turnStep", () => {
     );
   });
 
-  it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
-    const session = createStubSession();
+  it("keeps session model selection and force-closes HITL when the first turn is cancelled", async () => {
+    const session = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "call-question",
+            input: {},
+            kind: "tool-call",
+            toolName: "ask_question",
+          },
+          kind: "question",
+          prompt: "Continue?",
+          requestId: "question-1",
+        },
+      ],
+      responseMessages: [],
+      session: createStubSession(),
+    });
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
@@ -1848,6 +1865,9 @@ describe("turnStep", () => {
     expect(result.sessionState.snapshot?.session.history).toEqual([
       { content: "thread=unset; user=cancel this turn", role: "user" },
     ]);
+    expect(
+      readRequestLedger(result.sessionState.snapshot?.session.state).groups[0]?.completion,
+    ).toBe("cancelled");
   });
 
   it("rejects task completion while input requests remain pending", async () => {

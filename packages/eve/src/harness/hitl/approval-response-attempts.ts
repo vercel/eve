@@ -240,6 +240,23 @@ export function finishApprovalCandidate(input: {
   );
 }
 
+export function cancelActiveApprovalResponseAttempts(input: {
+  readonly completedAt: number;
+  readonly state: SessionStateMap | undefined;
+}): SessionStateMap | undefined {
+  let state = input.state;
+  for (const attempt of Object.values(readApprovalState(state).activeResponseAttempts)) {
+    state = finishApprovalCandidate({
+      candidateId: attempt.candidateId,
+      completedAt: input.completedAt,
+      reason: "The waiting request was cancelled.",
+      state,
+      status: "stale",
+    });
+  }
+  return state;
+}
+
 export function expireApprovalCandidates(input: {
   readonly now: number;
   readonly state: SessionStateMap | undefined;

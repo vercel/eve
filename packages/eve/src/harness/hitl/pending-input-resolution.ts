@@ -21,11 +21,13 @@ export type InputDomainResolverInput = {
 
 export type ResolvePendingInputResult = {
   readonly consumedMessage?: boolean;
+  /** Ready Group delivery being applied by the harness owner. */
+  readonly groupCompletionDeliveryKey?: string;
   readonly deferredContext?: boolean;
   readonly deferredMessage?: boolean;
   /** Present when a session-limit continuation prompt was resolved. */
   readonly limitContinuation?: { readonly granted: boolean };
-  readonly outcome: "resolved" | "continue" | "unresolved";
+  readonly outcome: "resolved" | "continue" | "ready" | "unresolved";
   readonly messages: ModelMessage[];
   readonly rejectedActions?: readonly ResolvedInputActionBatch[];
   readonly resolvedInputs?: readonly ResolvedInputBatch[];

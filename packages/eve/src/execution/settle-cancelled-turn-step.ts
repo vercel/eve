@@ -15,6 +15,8 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { emitCancelledTurn } from "#harness/cancelled-turn-emission.js";
 import { clearPendingSessionLimitPrompt } from "#harness/input-requests.js";
+import { cancelIncompleteRequestGroups } from "#harness/hitl/request-ledger.js";
+import { cancelActiveApprovalResponseAttempts } from "#harness/hitl/approval-response-attempts.js";
 import {
   getHarnessEmissionState,
   isHarnessBetweenTurns,
@@ -138,6 +140,13 @@ export async function settleCancelledTurnStep(input: {
   // the cancelled turn's inbox is gone, so a child settlement can never
   // reach this store again. This is the last write that can move those
   // handles out of `running`.
+  const closedSession = cancelIncompleteRequestGroups({
+    ...session,
+    state: cancelActiveApprovalResponseAttempts({
+      completedAt: Date.now(),
+      state: session.state,
+    }),
+  });
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(
@@ -145,7 +154,7 @@ export async function settleCancelledTurnStep(input: {
         clearAllProxyInputRequests(
           clearPendingWorkflowInterrupt(
             clearPendingRuntimeActionBatch(
-              abandonRunningAgentTurns({ ...session, outputSchema: undefined }),
+              abandonRunningAgentTurns({ ...closedSession, outputSchema: undefined }),
             ),
           ),
         ),

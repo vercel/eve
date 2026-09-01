@@ -104,6 +104,8 @@ import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
+import { cancelIncompleteRequestGroups } from "#harness/hitl/request-ledger.js";
+import { cancelActiveApprovalResponseAttempts } from "#harness/hitl/approval-response-attempts.js";
 import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
@@ -583,10 +585,17 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // again after this cancellation settles.
     const interrupted = serializeContext(ctx);
     const retained = readRetainedBackgroundToolResult(ctx);
-    const cancelledSession = await preserveCancelledTurnMessage(
+    const preservedSession = await preserveCancelledTurnMessage(
       retained?.backgroundTaskSession ?? initialSession,
       resolved,
     );
+    const cancelledSession = cancelIncompleteRequestGroups({
+      ...preservedSession,
+      state: cancelActiveApprovalResponseAttempts({
+        completedAt: Date.now(),
+        state: preservedSession.state,
+      }),
+    });
     return {
       action: "cancelled",
       ...(retained === undefined

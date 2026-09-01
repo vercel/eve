@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import {
+  cancelActiveApprovalResponseAttempts,
   createApprovalCandidate,
   expireApprovalCandidates,
   finishApprovalCandidate,
@@ -198,6 +199,27 @@ describe("approval candidate state", () => {
       }),
     ]);
     expect(retry.changed).toBe(true);
+  });
+
+  it("force-closes every active response attempt", () => {
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
+    const second = create({
+      candidateId: "candidate-2",
+      deliveryId: "d2",
+      principalId: "U2",
+      state: first.state,
+    });
+
+    const state = cancelActiveApprovalResponseAttempts({ completedAt: 300, state: second.state });
+    const audit = getApprovalAuditState(state);
+
+    expect(audit.activeCandidates).toEqual([]);
+    expect(audit.candidateHistory).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ candidateId: "candidate-1", status: "stale" }),
+        expect.objectContaining({ candidateId: "candidate-2", status: "stale" }),
+      ]),
+    );
   });
 
   it("expires stale candidates intrinsically before creating another candidate", () => {

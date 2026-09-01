@@ -374,7 +374,10 @@ export function cancelIncompleteRequestGroups(session: HarnessSession): HarnessS
       .filter((group) => group.completion === "waiting" || typeof group.completion === "object")
       .map((group) => group.id),
   );
-  if (groupIds.size === 0) return session;
+  const hasOpenAuthorization = ledger.requests.some(
+    (request) => request.state === "open" && request.request.kind === "authorization",
+  );
+  if (groupIds.size === 0 && !hasOpenAuthorization) return session;
   return writeRequestLedger({
     expectedVersion: ledger.version,
     groups: ledger.groups.map((group) =>

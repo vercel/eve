@@ -8,6 +8,10 @@ import {
   resolvePendingInput,
 } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
+import {
+  listReadyRequestGroupDeliveries,
+  readRequestLedger,
+} from "#harness/hitl/request-ledger.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -157,6 +161,38 @@ describe("current HITL lifecycle conformance", () => {
       ],
       role: "tool",
     });
+  });
+
+  it("checkpoints ready completion before replaying and acknowledging owner delivery", () => {
+    const parked = appendGroup(session(), [question("question-1")]);
+    const input = {
+      durableGroupCompletionDelivery: true,
+      session: parked,
+      stepInput: { inputResponses: [{ text: "later", requestId: "question-1" }] },
+    } as const;
+
+    const prepared = resolvePendingInput(input);
+    expect(prepared.outcome).toBe("ready");
+    expect(listReadyRequestGroupDeliveries(prepared.session.state)).toHaveLength(1);
+    expect(readRequestLedger(prepared.session.state).groups[0]?.completion).toEqual(
+      expect.objectContaining({ status: "ready" }),
+    );
+
+    const delivered = resolvePendingInput({
+      durableGroupCompletionDelivery: true,
+      session: prepared.session,
+    });
+    const retried = resolvePendingInput({
+      durableGroupCompletionDelivery: true,
+      session: prepared.session,
+    });
+
+    expect(delivered.outcome).toBe("resolved");
+    expect(delivered.groupCompletionDeliveryKey).toBeDefined();
+    expect(retried.messages).toEqual(delivered.messages);
+    expect(readRequestLedger(delivered.session.state).groups[0]?.completion).toEqual(
+      expect.objectContaining({ status: "ready" }),
+    );
   });
 
   it("gives an open limit group priority over responses for another group", () => {
