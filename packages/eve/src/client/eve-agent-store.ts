@@ -19,6 +19,7 @@ import { toError } from "#shared/errors.js";
 import type {
   CancelSessionResult,
   ClientAuth,
+  ClientCredentialsPolicy,
   HeadersValue,
   SendTurnPayload,
   ClientSessionState,
@@ -73,7 +74,7 @@ export interface EveAgentStoreCallbacks<TData> {
  * Configuration for constructing an {@link EveAgentStore}.
  *
  * Requires a {@link EveAgentReducer | reducer}, plus either connection options
- * (`host`, `auth`, `headers`, `initialSession`) for a
+ * (`host`, `auth`, `credentials`, `headers`, `initialSession`) for a
  * store-owned session or an existing {@link ClientSession} via `session`.
  *
  * `optimistic` (default `true`) projects submitted user messages before the
@@ -85,6 +86,7 @@ export interface EveAgentStoreCallbacks<TData> {
  */
 export interface EveAgentStoreInit<TData> {
   readonly auth?: ClientAuth;
+  readonly credentials?: ClientCredentialsPolicy;
   readonly headers?: HeadersValue;
   readonly host?: string;
   /** Ordered prefix of the session stream used to rehydrate projected state. */
@@ -156,6 +158,7 @@ export class EveAgentStore<TData> {
       ? undefined
       : new Client({
           auth: init.auth,
+          credentials: init.credentials,
           headers: init.headers,
           host: init.host ?? "",
         });

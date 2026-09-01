@@ -228,6 +228,7 @@ describe("useEveAgent", () => {
 
     function TestComponent() {
       helpers = useEveAgent({
+        credentials: "include",
         onEvent(event) {
           lifecycle.push(`event:${event.type}`);
           seenEvents.push(event);
@@ -260,6 +261,7 @@ describe("useEveAgent", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "include")).toBe(true);
     expect(lifecycle[0]).toBe("session:0");
     expect(seenEvents).toEqual(stampTestEvents(events));
     expect(seenSessions).toEqual([

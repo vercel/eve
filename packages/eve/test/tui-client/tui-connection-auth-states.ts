@@ -43,6 +43,7 @@ class FakeSession extends ClientSession {
     super(
       {
         host: "http://fake.invalid",
+        requestPolicy: {},
         resolveHeaders: async () => new Headers(),
       },
       { sessionId: "fake-session", streamIndex: 0 },

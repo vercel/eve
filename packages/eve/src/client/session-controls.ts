@@ -1,8 +1,8 @@
 import { ClientError } from "#client/client-error.js";
+import { applyClientRequestPolicy, type ClientRequestPolicy } from "#client/request-policy.js";
 import type {
   CancelSessionResult,
   ClearResult,
-  ClientRedirectPolicy,
   CompactResult,
   ResetResult,
 } from "#client/types.js";
@@ -20,7 +20,7 @@ import {
 
 interface SessionControlContext {
   readonly host: string;
-  readonly redirect?: ClientRedirectPolicy;
+  readonly requestPolicy: ClientRequestPolicy;
   resolveHeaders(): Promise<Headers>;
 }
 
@@ -122,13 +122,13 @@ async function postJson(input: {
   headers.set("content-type", "application/json");
   const response = await fetch(
     createClientUrl(input.context.host, input.path),
-    withRedirectPolicy(
+    applyClientRequestPolicy(
       {
         body: input.body === undefined ? undefined : JSON.stringify(input.body),
         headers,
         method: "POST",
       },
-      input.context.redirect,
+      input.context.requestPolicy,
     ),
   );
   const text = await response.text();
@@ -138,8 +138,4 @@ async function postJson(input: {
   } catch {
     throw new Error(`${input.operation} route returned invalid JSON (${response.status}).`);
   }
-}
-
-function withRedirectPolicy(init: RequestInit, redirect?: ClientRedirectPolicy): RequestInit {
-  return redirect === undefined ? init : { ...init, redirect };
 }

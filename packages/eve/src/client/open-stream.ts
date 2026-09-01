@@ -3,8 +3,8 @@ import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import { applyClientRequestPolicy, type ClientRequestPolicy } from "#client/request-policy.js";
 import type {
-  ClientRedirectPolicy,
   ResolvedStreamReconnectPolicy as StreamReconnectPolicyOptions,
   StreamReconnectPolicy,
   StreamReconnectRetryPolicy,
@@ -84,7 +84,7 @@ interface FollowStreamInput {
   /** @internal Test override for reconnecting an open stream that stops producing bytes. */
   readonly streamReadIdleTimeoutMs?: number;
   readonly resolveHeaders: () => Promise<Headers>;
-  readonly redirect?: ClientRedirectPolicy;
+  readonly requestPolicy: ClientRequestPolicy;
   readonly sessionId: string;
   readonly signal?: AbortSignal;
   readonly startIndex: number;
@@ -247,12 +247,17 @@ export async function openStreamBody(
       : connectionController.signal;
     let response: Response;
     try {
-      response = await fetch(url, {
-        cache: "no-store",
-        headers,
-        redirect: input.redirect,
-        signal,
-      });
+      response = await fetch(
+        url,
+        applyClientRequestPolicy(
+          {
+            cache: "no-store",
+            headers,
+            signal,
+          },
+          input.requestPolicy,
+        ),
+      );
     } catch (error) {
       if (
         input.signal?.aborted ||

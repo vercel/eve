@@ -31,6 +31,7 @@ function follow(host: string, options?: { follow?: boolean }) {
   return followStreamIterable({
     follow: options?.follow,
     host,
+    requestPolicy: {},
     resolveHeaders: () => Promise.resolve(new Headers()),
     sessionId: "s",
     startIndex: 0,
@@ -114,6 +115,7 @@ describe("stream following over real sockets", () => {
     const received: string[] = [];
     for await (const event of followStreamIterable({
       host,
+      requestPolicy: {},
       resolveHeaders: () => Promise.resolve(new Headers()),
       sessionId: "s",
       startIndex: 0,

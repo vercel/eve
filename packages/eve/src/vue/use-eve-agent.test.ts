@@ -392,12 +392,13 @@ describe("useEveAgent (Vue composable wiring)", () => {
     ];
 
     const startResponse = createDeferred<Response>();
-    vi.spyOn(globalThis, "fetch")
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
       .mockReturnValueOnce(startResponse.promise)
       .mockResolvedValueOnce(createEagerStreamResponse(events));
 
     const scope = effectScope();
-    const agent = scope.run(() => useEveAgent());
+    const agent = scope.run(() => useEveAgent({ credentials: "include" }));
     if (agent === undefined) throw new Error("effect scope did not run");
 
     expect(agent.status.value).toBe("ready");
@@ -411,6 +412,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     await sendPromise;
 
     expect(agent.status.value).toBe("ready");
+    expect(fetchMock.mock.calls.every(([, init]) => init?.credentials === "include")).toBe(true);
     expect(agent.data.value).toEqual(
       completedTurnData({
         assistantMessage: "Hi there.",
