@@ -56,6 +56,17 @@ function createAcceptedResponse() {
   );
 }
 
+function createSessionNotActiveResponse() {
+  return Response.json(
+    {
+      code: "session_not_active",
+      error: "The session is no longer active.",
+      ok: false,
+    },
+    { status: 409 },
+  );
+}
+
 function createStreamResponse(events: readonly unknown[]) {
   const encoder = new TextEncoder();
   return new Response(
@@ -257,20 +268,65 @@ describe("ClientSession", () => {
     await expect(session.cancel()).rejects.toThrow("Cancel route returned an invalid response");
   });
 
-  it("exposes a typed session_not_active conflict", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json(
-        {
-          code: "session_not_active",
-          error: "The session is no longer active.",
-          ok: false,
-        },
-        { status: 409 },
-      ),
+  it("retries session_not_active with exponential backoff", async () => {
+    let headerResolution = 0;
+    const observedHeaders: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      observedHeaders.push(new Headers(init?.headers).get("x-attempt") ?? "");
+      return fetchMock.mock.calls.length <= 3
+        ? createSessionNotActiveResponse()
+        : createAcceptedResponse();
+    });
+    const session = createSession(
+      { sessionId: "session_1", streamIndex: 0 },
+      {
+        resolveHeaders: async () => new Headers({ "x-attempt": String((headerResolution += 1)) }),
+      },
     );
+
+    vi.useFakeTimers();
+    try {
+      const sent = session.send("ready soon");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(249);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(499);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(sent).resolves.toMatchObject({ sessionId: "session_1" });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(observedHeaders).toEqual(["1", "2", "3", "4"]);
+  });
+
+  it("exposes the typed session_not_active conflict after three retries", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createSessionNotActiveResponse());
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
 
-    const error = await session.send("too late").catch((cause: unknown) => cause);
+    vi.useFakeTimers();
+    let error: unknown;
+    try {
+      const sent = session.send("too late").catch((cause: unknown) => cause);
+      await vi.runAllTimersAsync();
+      error = await sent;
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(error).toBeInstanceOf(ClientError);
     expect(error).toMatchObject({
@@ -278,6 +334,58 @@ describe("ClientSession", () => {
       message: "The session is no longer active.",
       status: 409,
     });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not retry another conflict from send", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        Response.json(
+          { code: "another_conflict", error: "The request conflicts.", ok: false },
+          { status: 409 },
+        ),
+      );
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(session.send("conflict")).rejects.toMatchObject({
+      code: "another_conflict",
+      status: 409,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry session_not_active from respond", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createSessionNotActiveResponse());
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+
+    await expect(
+      session.respond([{ requestId: "approval_1", optionId: "approve" }]),
+    ).rejects.toMatchObject({ code: "session_not_active", status: 409 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("stops session_not_active backoff when send is aborted", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => createSessionNotActiveResponse());
+    const session = createSession({ sessionId: "session_1", streamIndex: 0 });
+    const controller = new AbortController();
+
+    vi.useFakeTimers();
+    try {
+      const sent = session.send("stop", { signal: controller.signal });
+      const assertion = expect(sent).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(0);
+      controller.abort(new DOMException("Aborted", "AbortError"));
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("queues a context clear without clearing the local session cursor", async () => {
