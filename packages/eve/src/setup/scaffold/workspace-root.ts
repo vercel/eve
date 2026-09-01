@@ -198,6 +198,7 @@ export async function applyPackageManagerWorkspaceConfiguration(input: {
   readonly packageManager: PackageManagerKind;
   readonly projectRoot: string;
   readonly workspaceProbeRoot?: string;
+  readonly releaseAgeExceptions?: boolean;
   readonly onWorkspaceRootMutation?: (mutation: WorkspaceRootMutation) => void | Promise<void>;
 }): Promise<{
   filesSkipped: string[];
@@ -213,7 +214,10 @@ export async function applyPackageManagerWorkspaceConfiguration(input: {
         );
   const packageManagerResult = await getPackageManagerStrategy(
     input.packageManager,
-  ).applyProjectConfiguration(input.projectRoot, { workspaceProbeRoot });
+  ).applyProjectConfiguration(input.projectRoot, {
+    releaseAgeExceptions: input.releaseAgeExceptions,
+    workspaceProbeRoot,
+  });
   const filesWritten = [
     ...(workspaceConfigPath === undefined ? [] : [workspaceConfigPath]),
     ...packageManagerResult.filesWritten,

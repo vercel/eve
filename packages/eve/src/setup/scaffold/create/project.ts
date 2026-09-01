@@ -399,6 +399,8 @@ export interface ScaffoldBaseProjectOptions {
    * Defaults to pnpm.
    */
   packageManager?: PackageManagerKind;
+  /** Adds eve's dependencies to pnpm's release-age exclusion list. */
+  releaseAgeExceptions?: boolean;
   targetDirectory?: string;
   overwriteExisting?: boolean;
   onOverwriteFile?: (filePath: string) => void | Promise<void>;
@@ -488,6 +490,7 @@ export async function scaffoldBaseProject(options: ScaffoldBaseProjectOptions): 
   await applyPackageManagerWorkspaceConfiguration({
     packageManager,
     projectRoot: targetRoot,
+    releaseAgeExceptions: options.releaseAgeExceptions,
     workspaceProbeRoot,
     onWorkspaceRootMutation: options.onWorkspaceRootMutation,
   });

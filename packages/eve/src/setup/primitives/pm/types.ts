@@ -21,6 +21,8 @@ export interface PackageManagerConfigurationOptions {
    * before being moved into place.
    */
   readonly workspaceProbeRoot?: string;
+  /** Adds scaffold-specific packages to pnpm's release-age exclusion list. */
+  readonly releaseAgeExceptions?: boolean;
 }
 
 export interface PackageManagerInstallOptions {

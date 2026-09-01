@@ -14,6 +14,18 @@ export const PNPM_WORKSPACE_PATH = "pnpm-workspace.yaml";
 export const PNPM_WORKSPACE_MEMBERSHIP_ARGUMENTS = ["list", "--depth", "-1", "--json"] as const;
 
 const SHARP_BUILD_POLICY = "  sharp: false";
+const RELEASE_AGE_EXCLUSIONS = [
+  "@ai-sdk/*",
+  "@rolldown/*",
+  "@vercel/*",
+  "@workflow/*",
+  "ai",
+  "experimental-ai-sdk-code-mode",
+  "eve",
+  "nitro",
+  "rolldown",
+  "workflow",
+] as const;
 
 export const PNPM_WORKSPACE_CONTENT = [
   "minimumReleaseAgeStrict: true",
@@ -21,6 +33,17 @@ export const PNPM_WORKSPACE_CONTENT = [
   SHARP_BUILD_POLICY,
   "",
 ].join("\n");
+
+function formatReleaseAgeExclusion(exclusion: string): string {
+  return `  - ${exclusion.includes("*") ? JSON.stringify(exclusion) : exclusion}`;
+}
+
+function releaseAgeExclusionName(line: string): string {
+  return line
+    .trim()
+    .replace(/^-\s+/u, "")
+    .replace(/^["']|["']$/gu, "");
+}
 
 function findYamlBlockEnd(lines: readonly string[], startIndex: number): number {
   let blockEnd = startIndex + 1;
@@ -30,6 +53,33 @@ function findYamlBlockEnd(lines: readonly string[], startIndex: number): number 
     blockEnd += 1;
   }
   return blockEnd;
+}
+
+function withReleaseAgeExceptions(source: string): string {
+  const normalized = source.endsWith("\n") ? source : `${source}\n`;
+  const lines = normalized.split("\n");
+  const excludeIndex = lines.findIndex((line) => line === "minimumReleaseAgeExclude:");
+
+  if (excludeIndex < 0) {
+    const prefix = normalized.trim().length === 0 ? "" : `${normalized}\n`;
+    return `${prefix}minimumReleaseAgeExclude:\n${RELEASE_AGE_EXCLUSIONS.map(formatReleaseAgeExclusion).join("\n")}\n`;
+  }
+
+  const blockEnd = findYamlBlockEnd(lines, excludeIndex);
+  const existingExclusions = new Set(
+    lines.slice(excludeIndex + 1, blockEnd).map(releaseAgeExclusionName),
+  );
+  const missingExclusions = RELEASE_AGE_EXCLUSIONS.filter(
+    (exclusion) => !existingExclusions.has(exclusion),
+  );
+  if (missingExclusions.length === 0) return source;
+
+  let insertAt = blockEnd;
+  while (insertAt > excludeIndex + 1 && lines[insertAt - 1] === "") {
+    insertAt -= 1;
+  }
+  lines.splice(insertAt, 0, ...missingExclusions.map(formatReleaseAgeExclusion));
+  return lines.join("\n");
 }
 
 function withPnpmWorkspacePolicy(source: string): string {
@@ -56,14 +106,22 @@ function withPnpmWorkspacePolicy(source: string): string {
   return policyLines.join("\n");
 }
 
-async function ensurePnpmWorkspacePolicy(filePath: string): Promise<"skipped" | "written"> {
+async function ensurePnpmWorkspacePolicy(
+  filePath: string,
+  releaseAgeExceptions: boolean,
+): Promise<"skipped" | "written"> {
   if (!(await pathExists(filePath))) {
-    await writeFile(filePath, PNPM_WORKSPACE_CONTENT, "utf8");
+    const content = releaseAgeExceptions
+      ? withReleaseAgeExceptions(PNPM_WORKSPACE_CONTENT)
+      : PNPM_WORKSPACE_CONTENT;
+    await writeFile(filePath, content, "utf8");
     return "written";
   }
 
   const current = await readFile(filePath, "utf8");
-  const next = withPnpmWorkspacePolicy(current);
+  const next = withPnpmWorkspacePolicy(
+    releaseAgeExceptions ? withReleaseAgeExceptions(current) : current,
+  );
   if (next === current) {
     return "skipped";
   }
@@ -231,7 +289,10 @@ export const pnpmPackageManager = {
     const workspaceMembershipResult = await ensurePnpmWorkspaceIncludesProject(workspaceProbeRoot);
     const workspaceRoot = findClaimingAncestorPnpmWorkspaceRoot(workspaceProbeRoot);
     const filePath = join(workspaceRoot ?? projectRoot, PNPM_WORKSPACE_PATH);
-    const policyResult = await ensurePnpmWorkspacePolicy(filePath);
+    const policyResult = await ensurePnpmWorkspacePolicy(
+      filePath,
+      options?.releaseAgeExceptions === true,
+    );
     const result =
       workspaceMembershipResult === "written" || policyResult === "written" ? "written" : "skipped";
     return result === "written"

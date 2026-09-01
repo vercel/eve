@@ -1,4 +1,9 @@
-import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
+import {
+  Command,
+  CommanderError,
+  InvalidArgumentError,
+  Option,
+} from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
 import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
@@ -227,6 +232,12 @@ function createCliProgram(
     .command("init [target]")
     .description("Create a new eve agent, or add one to an existing project directory.")
     .option("--channel-web-nextjs", "Add the Web Chat application (Next.js)")
+    .addOption(
+      new Option(
+        "--release-age-exceptions",
+        "Add eve dependencies to pnpm's release-age exclusion list",
+      ).hideHelp(),
+    )
     .option("--model <model>", "Set the agent model (provider/model-id)")
     .option(
       "--reasoning <effort>",
@@ -239,6 +250,7 @@ function createCliProgram(
         target: string | undefined,
         options: {
           channelWebNextjs?: boolean;
+          releaseAgeExceptions?: boolean;
           model?: string;
           reasoning?: AgentReasoningDefinition;
           yes?: boolean;
@@ -251,6 +263,7 @@ function createCliProgram(
         const { runInitCommand } = await import("#cli/commands/init.js");
         await runInitCommand(logger, applicationContext.root, target, {
           channelWebNextjs: options.channelWebNextjs,
+          releaseAgeExceptions: options.releaseAgeExceptions,
           model: options.model,
           reasoning: options.reasoning,
         });

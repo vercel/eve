@@ -321,6 +321,7 @@ describe("eve init compatibility flags", () => {
     expect(help).toContain("-y, --yes");
     expect(help).toContain("--model <model>");
     expect(help).toContain("--reasoning <effort>");
+    expect(help).not.toContain("--release-age-exceptions");
   });
 
   it("forwards model settings to the init command", async () => {
@@ -334,8 +335,23 @@ describe("eve init compatibility flags", () => {
 
     expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "my-agent", {
       channelWebNextjs: undefined,
+      releaseAgeExceptions: undefined,
       model: "openai/gpt-5.6-sol",
       reasoning: "high",
+    });
+  });
+
+  it("forwards hidden release-age exceptions to the init command", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    runInitCommand.mockClear();
+
+    await runCli(["init", "my-agent", "--release-age-exceptions"], logger);
+
+    expect(runInitCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), "my-agent", {
+      channelWebNextjs: undefined,
+      releaseAgeExceptions: true,
+      model: undefined,
+      reasoning: undefined,
     });
   });
 

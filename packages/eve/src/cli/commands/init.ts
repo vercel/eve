@@ -64,6 +64,8 @@ export interface InitCommandOptions {
   model?: string;
   /** Reasoning effort written to the root agent config. Set by `--reasoning`. */
   reasoning?: AgentReasoningDefinition;
+  /** Add eve dependencies to pnpm's release-age exclusion list. */
+  releaseAgeExceptions?: boolean;
 }
 
 export interface InitCommandDependencies {
@@ -236,6 +238,7 @@ async function scaffoldProject(
       overwriteExisting,
       workspaceProbeDirectory: projectPath,
       packageManager,
+      releaseAgeExceptions: options.releaseAgeExceptions,
       onWorkspaceRootMutation: (mutation: WorkspaceRootMutation) => {
         workspaceRootMutations.push(mutation);
       },
