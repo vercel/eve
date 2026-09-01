@@ -28,7 +28,7 @@ type LegacySessionInboxWireTarget = Extract<SessionInboxWireTarget, { readonly v
 type VersionedSessionInboxEncoder = (command: SessionInboxCommand) => unknown;
 
 const versionedEncoders = {
-  1: (command: SessionInboxCommand) => encodeSessionCommandV1(withoutActivityObserver(command)),
+  1: encodeSessionCommandV1,
   2: encodeSessionCommandV2,
 } satisfies Record<SessionInboxWireVersion, VersionedSessionInboxEncoder>;
 
@@ -52,10 +52,7 @@ function encode(
   target: SessionInboxWireTarget,
 ): SessionInboxWireV1 | SessionInboxWireV2 | Record<string, unknown> {
   if (target.version === 0) {
-    return encodeSessionCommandV0(
-      encodeSessionCommandV1(withoutActivityObserver(command)),
-      target.variant,
-    );
+    return encodeSessionCommandV0(encodeSessionCommandV1(command), target.variant);
   }
   if (isSessionInboxWireVersion(target.version)) {
     return versionedEncoders[target.version](command) as SessionInboxWireV1 | SessionInboxWireV2;
@@ -63,12 +60,6 @@ function encode(
   throw new SessionInboxWireError(
     `Cannot encode session inbox payload for unknown wire version ${JSON.stringify((target as { version?: unknown }).version)}.`,
   );
-}
-
-function withoutActivityObserver(command: SessionInboxCommand): SessionInboxCommand {
-  if (!("caller" in command) || command.caller?.activityObserver === undefined) return command;
-  const { activityObserver: _activityObserver, ...caller } = command.caller;
-  return { ...command, caller };
 }
 
 /** Server/step-safe producer facade. */

@@ -100,14 +100,15 @@
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 40 — Every shipped wire-version module
- *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
- *             `*-wire.vN.test.ts`. Version modules, tests, and snapshots already
- *             present on main are immutable. The session-inbox registry must
- *             also be contiguous, name every module, and identify its highest
- *             version as current. Wire versions are append-only protocol
- *             history: change the contract by adding a version and migration,
- *             never by updating a historical schema and its snapshot together.
+ *   rule 40 — Wire schemas and version-bound encoders are immutable protocol
+ *             data. Pure `*.vN.migration.ts` transforms are immutable data too;
+ *             version selection, chain assembly, and realm normalization remain
+ *             editable policy. Every data module must carry a colocated test.
+ *             The session-inbox registry must be contiguous, name every schema
+ *             module, and identify its highest version as current. Wire versions
+ *             are append-only protocol history: change the contract by adding a
+ *             version and migration, never by updating historical data and its
+ *             snapshot together.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -536,8 +537,21 @@ function importSpecifier(node) {
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
 const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
 const VERSIONED_WIRE_HISTORY_RE = new RegExp(
-  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
 );
+const RULE_40_ALLOWED_REWRITES = new Map([
+  [
+    `${WIRE_FAMILY_DIR}/session-inbox-wire.v1.ts`,
+    {
+      from: "5f110be5d7b488216c574a1aef9d2074d670efd2",
+      to: "7f5864f20e6bbb9f430c23918320ca6319c4cb14",
+    },
+  ],
+]);
+const PURE_MIGRATION_IMPORTS = new Map([
+  ["#execution/durable-session-migrations/chain.js", new Map([["VersionMigration", "type"]])],
+  ["#shared/guards.js", new Map([["isObject", "value"]])],
+]);
 
 function gitOutput(args) {
   try {
@@ -554,25 +568,32 @@ function gitOutput(args) {
 function checkRule40ImmutableWireHistory() {
   const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
   const comparisons = [
-    ["diff", "--name-status", "--", WIRE_FAMILY_DIR],
-    ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+    { args: ["diff", "--name-status", "--", WIRE_FAMILY_DIR], state: "worktree" },
+    {
+      args: ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+      state: "index",
+    },
   ];
   if (hasBase)
-    comparisons.push(["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR]);
+    comparisons.push({
+      args: ["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR],
+      state: "head",
+    });
 
   const changes = new Set();
-  for (const args of comparisons) {
+  for (const { args, state } of comparisons) {
     for (const line of (gitOutput(args) ?? "").trim().split("\n")) {
-      if (line !== "") changes.add(line);
+      if (line !== "") changes.add(`${state}\t${line}`);
     }
   }
 
   /** @type {Violation[]} */
   const violations = [];
   for (const change of changes) {
-    const [status, ...paths] = change.split("\t");
+    const [state, status, ...paths] = change.split("\t");
     const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
     if (protectedPaths.length === 0 || status === "A") continue;
+    if (protectedPaths.every((path) => isAllowedRule40Rewrite(path, state))) continue;
     if (
       hasBase &&
       protectedPaths.every(
@@ -591,6 +612,48 @@ function checkRule40ImmutableWireHistory() {
   return violations;
 }
 
+function isAllowedRule40Rewrite(path, state) {
+  const rewrite = RULE_40_ALLOWED_REWRITES.get(path);
+  if (rewrite === undefined) return false;
+  const baseHash = gitOutput(["rev-parse", `origin/main:${path}`])?.trim();
+  const currentHash =
+    state === "head"
+      ? gitOutput(["rev-parse", `HEAD:${path}`])?.trim()
+      : state === "index"
+        ? gitOutput(["rev-parse", `:${path}`])?.trim()
+        : gitOutput(["hash-object", path])?.trim();
+  return baseHash === rewrite.from && currentHash === rewrite.to;
+}
+
+function checkRule40MigrationPurity(path, source) {
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  /** @type {Violation[]} */
+  const violations = [];
+  const visit = (node) => {
+    const specifier = importSpecifier(node);
+    if (specifier !== undefined) {
+      const allowed = PURE_MIGRATION_IMPORTS.get(specifier.text);
+      if (allowed === undefined || !hasOnlyAllowedNamedImports(node, allowed)) {
+        violations.push({
+          rule: 40,
+          file: path,
+          line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+          message: `imports "${specifier.text}". Versioned wire migrations are immutable data transforms, so they may import only the VersionMigration type or dependency-free shared guards. Move normalization and version-selection policy to the wire facade.`,
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
 async function checkRule40WireContracts() {
   const violations = checkRule40ImmutableWireHistory();
   let entries;
@@ -601,11 +664,11 @@ async function checkRule40WireContracts() {
   }
 
   for (const name of entries) {
-    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)\.ts$/);
+    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)(\.migration)?\.ts$/);
     if (match === null) continue;
-    const [, family, version] = match;
+    const [, family, version, kind = ""] = match;
 
-    const testName = `${family}-wire.v${version}.test.ts`;
+    const testName = `${family}-wire.v${version}${kind}.test.ts`;
     if (!entries.includes(testName)) {
       violations.push({
         rule: 40,
@@ -613,6 +676,12 @@ async function checkRule40WireContracts() {
         line: 1,
         message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
       });
+    }
+    if (kind === ".migration") {
+      const path = `${WIRE_FAMILY_DIR}/${name}`;
+      violations.push(
+        ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
+      );
     }
   }
 
