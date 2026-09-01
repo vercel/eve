@@ -14,10 +14,11 @@ import {
 } from "#execution/wire/session-inbox-contract.js";
 import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
+import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.v2-migration.js";
 import {
-  normalizeSessionInboxWireV2,
-  sessionInboxWireV1Migration,
-} from "#execution/wire/session-inbox-wire.v2-migration.js";
+  normalizeSessionInboxWireV3,
+  sessionInboxWireV2Migration,
+} from "#execution/wire/session-inbox-wire.v3-migration.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -45,6 +46,7 @@ const WIRE_LABEL = "session inbox payload";
 const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
+  sessionInboxWireV2Migration,
 ];
 
 /**
@@ -72,14 +74,20 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
   }
 
-  const wire = normalizeSessionInboxWireV2(migrated) as Partial<SessionInboxWire>;
+  const wire = normalizeSessionInboxWireV3(migrated) as Partial<SessionInboxWire>;
   if (wire.version !== SESSION_INBOX_WIRE_VERSION) {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
     );
   }
-  if (declaredVersion === 2 && wire.kind === "deliver" && !("payload" in wire)) {
-    throw new SessionInboxWireError(`${WIRE_LABEL} does not match wire version 2.`);
+  if (
+    (declaredVersion === 2 || declaredVersion === 3) &&
+    wire.kind === "deliver" &&
+    !("payload" in wire)
+  ) {
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
+    );
   }
   return normalizeWire(wire as SessionInboxWire);
 }

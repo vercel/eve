@@ -704,6 +704,73 @@ describe("dispatchTurnStep", () => {
     );
   });
 
+  it("starts on the accepted deployment when the dispatch step runs there", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    const baseInput = createTurnInput();
+    const input = {
+      ...baseInput,
+      delivery: {
+        ...baseInput.delivery,
+        deliveryMetadata: [
+          {
+            acceptedDeploymentId: "dpl_current",
+            channelKind: "channel:webhook",
+            channelName: "webhook",
+            deliveryId: "delivery-1",
+            payloadIndex: 0,
+          },
+        ],
+      },
+    };
+    startMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
+
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      expect.objectContaining({ deploymentId: "dpl_current" }),
+    );
+  });
+
+  it("keeps latest routing for mixed accepted deployments", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    const baseInput = createTurnInput();
+    const input = {
+      ...baseInput,
+      delivery: {
+        ...baseInput.delivery,
+        deliveryMetadata: [
+          {
+            acceptedDeploymentId: "dpl_current",
+            channelKind: "channel:webhook",
+            channelName: "webhook",
+            deliveryId: "delivery-1",
+            payloadIndex: 0,
+          },
+          {
+            acceptedDeploymentId: "dpl_other",
+            channelKind: "channel:webhook",
+            channelName: "webhook",
+            deliveryId: "delivery-2",
+            payloadIndex: 1,
+          },
+        ],
+      },
+    };
+    startMock.mockResolvedValue({ runId: "turn-run" });
+
+    await expect(dispatchTurnStep(input)).resolves.toEqual({ runId: "turn-run" });
+
+    expect(startMock).toHaveBeenCalledWith(
+      turnWorkflowReference,
+      [createTurnWorkflowInput(input)],
+      expect.objectContaining({ deploymentId: "latest" }),
+    );
+  });
+
   it("starts turn workflows on the latest promoted generation in local development", async () => {
     vi.stubEnv("EVE_DEV", "1");
     const input = createTurnInput();

@@ -473,14 +473,7 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
   args: TArgs,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  // Agent parentage is reconstructed from Eve's serialized trace context. Only
-  // remove the ambient span marked by an agent boundary; the marker is not
-  // propagated into Workflow runs, so Workflow-to-Workflow traces stay intact.
-  const activeContext = context.active();
-  const workflowContext = isAgentTraceContext(activeContext)
-    ? trace.deleteSpan(activeContext)
-    : activeContext;
-  return await context.with(workflowContext, async () => {
+  return await withWorkflowStartContext(async () => {
     if (!shouldRouteToLatestDeployment()) {
       return options === undefined
         ? await start(workflow, args)
@@ -499,6 +492,41 @@ export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult
         : await start(workflow, args, options);
     }
   });
+}
+
+/**
+ * Starts on the deployment that accepted a delivery when this step is running
+ * there, otherwise preserves latest-deployment routing.
+ */
+export async function startWorkflowPreferAcceptedDeployment<TArgs extends unknown[], TResult>(
+  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
+  args: TArgs,
+  acceptedDeploymentId: string | undefined,
+  options?: StartOptionsWithoutDeploymentId,
+): Promise<Run<unknown> | Run<TResult>> {
+  const currentDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+  if (
+    acceptedDeploymentId === undefined ||
+    currentDeploymentId === undefined ||
+    acceptedDeploymentId !== currentDeploymentId
+  ) {
+    return await startWorkflowPreferLatest(workflow, args, options);
+  }
+
+  return await withWorkflowStartContext(
+    async () => await start(workflow, args, { ...options, deploymentId: acceptedDeploymentId }),
+  );
+}
+
+async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult>) {
+  // Agent parentage is reconstructed from Eve's serialized trace context. Only
+  // remove the ambient span marked by an agent boundary; the marker is not
+  // propagated into Workflow runs, so Workflow-to-Workflow traces stay intact.
+  const activeContext = context.active();
+  const workflowContext = isAgentTraceContext(activeContext)
+    ? trace.deleteSpan(activeContext)
+    : activeContext;
+  return await context.with(workflowContext, callback);
 }
 
 /**
