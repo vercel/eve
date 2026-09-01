@@ -60,6 +60,14 @@ describe("canonicalCommand", () => {
     expect(canonicalCommand(["dev", "https://agent.example"])).toBe("dev");
     expect(canonicalCommand(["registry", "search", "private-query"])).toBe("registry:search");
     expect(canonicalCommand(["logs"])).toBe("logs:show");
+    expect(canonicalCommand(["traces"])).toBe("traces:show");
+  });
+
+  it("records root help and version separately from the default command", () => {
+    expect(canonicalCommand(["--help"])).toBe("help");
+    expect(canonicalCommand(["-h"])).toBe("help");
+    expect(canonicalCommand(["--version"])).toBe("version");
+    expect(canonicalCommand(["-V"])).toBe("version");
   });
 
   it("records supported top-level commands and buckets unknown commands", () => {

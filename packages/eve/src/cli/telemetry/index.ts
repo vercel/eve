@@ -40,48 +40,65 @@ function event(key: string, value: string): EveCliTelemetryEvent {
   return { id: randomUUID(), event_time: Date.now(), key, value };
 }
 
+const CLI_TELEMETRY_COMMANDS = new Map<string, string>([
+  ["acp", "acp"],
+  ["add", "add"],
+  ["build", "build"],
+  ["channels", "channels"],
+  ["channels:list", "channels:list"],
+  ["deploy", "deploy"],
+  ["dev", "dev"],
+  ["eval", "eval"],
+  ["extension", "extension"],
+  ["extension:build", "extension:build"],
+  ["extension:init", "extension:init"],
+  ["info", "info"],
+  ["init", "init"],
+  ["integration", "integration"],
+  ["integration:connect", "integration:connect"],
+  ["integration:setup", "integration:setup"],
+  ["invoke", "invoke"],
+  ["link", "link"],
+  ["logs", "logs:show"],
+  ["logs:ls", "logs:ls"],
+  ["logs:show", "logs:show"],
+  ["registry", "registry"],
+  ["registry:add", "registry:add"],
+  ["registry:list", "registry:list"],
+  ["registry:search", "registry:search"],
+  ["registry:view", "registry:view"],
+  ["set", "set"],
+  ["start", "start"],
+  ["telemetry", "telemetry"],
+  ["telemetry:disable", "telemetry:disable"],
+  ["telemetry:enable", "telemetry:enable"],
+  ["telemetry:status", "telemetry:status"],
+  ["traces", "traces:show"],
+  ["traces:ls", "traces:ls"],
+]);
+
+/** Explicit privacy allowlist for command values emitted by CLI telemetry. */
+export const cliTelemetryCommandPaths = new Set(CLI_TELEMETRY_COMMANDS.keys());
+
+/** Internal command paths that must never emit telemetry. */
+export const internalCliCommandPaths = new Set(["telemetry:flush"]);
+
 /** Returns only an allowlisted command path; it never includes user input. */
 export function canonicalCommand(argv: readonly string[]): string {
-  const command = argv.find((argument) => !argument.startsWith("-"));
+  const firstArgument = argv[0];
+  if (firstArgument === "--help" || firstArgument === "-h") return "help";
+  if (firstArgument === "--version" || firstArgument === "-V") return "version";
+
+  const commandIndex = argv.findIndex((argument) => !argument.startsWith("-"));
+  const command = argv[commandIndex];
   if (command === undefined || /^https?:\/\//.test(command)) return "dev";
 
-  const topLevel = new Set([
-    "acp",
-    "add",
-    "build",
-    "channels",
-    "deploy",
-    "dev",
-    "eval",
-    "extension",
-    "info",
-    "init",
-    "integration",
-    "invoke",
-    "link",
-    "logs",
-    "registry",
-    "set",
-    "start",
-    "telemetry",
-    "traces",
-  ]);
-  if (!topLevel.has(command)) return "unknown";
-
-  const nested = argv
-    .slice(argv.indexOf(command) + 1)
-    .find((argument) => !argument.startsWith("-"));
-  const subcommands: Record<string, ReadonlySet<string>> = {
-    channels: new Set(["list"]),
-    extension: new Set(["build", "init"]),
-    integration: new Set(["connect", "setup"]),
-    logs: new Set(["ls", "show"]),
-    registry: new Set(["add", "list", "search", "view"]),
-    traces: new Set(["ls"]),
-  };
-  const defaults: Record<string, string> = { logs: "show", traces: "show" };
-  if (nested && subcommands[command]?.has(nested)) return `${command}:${nested}`;
-  return defaults[command] ? `${command}:${defaults[command]}` : command;
+  const nested = argv.slice(commandIndex + 1).find((argument) => !argument.startsWith("-"));
+  if (nested !== undefined) {
+    const nestedCommand = CLI_TELEMETRY_COMMANDS.get(`${command}:${nested}`);
+    if (nestedCommand !== undefined) return nestedCommand;
+  }
+  return CLI_TELEMETRY_COMMANDS.get(command) ?? "unknown";
 }
 
 export function createEveCliTelemetry(version: string): EveCliTelemetry {

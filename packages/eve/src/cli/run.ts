@@ -159,7 +159,7 @@ function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function createCliProgram(
+export function createCliProgram(
   logger: CliLogger,
   runtime: CliRuntimeOverrides,
   applicationContext: CliApplicationContext,
