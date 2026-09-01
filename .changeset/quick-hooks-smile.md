@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Reduce new-session startup latency by claiming command hooks while the session initializes. Session creation, stable and authorization readiness, and continuation ownership now complete in parallel before the first turn starts.
+Reduce new-session startup latency by returning the session ID as soon as Workflow accepts the run instead of waiting for its command inbox. Hook claims and session initialization also start together so the first turn can begin sooner.

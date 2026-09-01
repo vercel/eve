@@ -436,6 +436,43 @@ describe("createWorkflowRuntime#createSession", () => {
     );
   });
 
+  it("returns without waiting for the stable command inbox", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        input: { message: "hello" },
+        mode: "conversation",
+      }),
+    ).resolves.toMatchObject({ sessionId: "driver-run" });
+
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("waits only for continuation ownership when a token is supplied", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+    getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
+
+    await expect(
+      buildRuntime(compiledArtifactsSource).createSession({
+        adapter,
+        auth: null,
+        continuationToken: "slack:thread",
+        input: { message: "hello" },
+        mode: "conversation",
+      }),
+    ).resolves.toMatchObject({ sessionId: "driver-run" });
+
+    expect(getHookByTokenMock).toHaveBeenCalledOnce();
+    expect(getHookByTokenMock).toHaveBeenCalledWith("slack:thread");
+  });
+
   it("stores an explicit title alongside the trace-content policy", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
