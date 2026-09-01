@@ -240,13 +240,31 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   if (input.input?.kind === "deliver") {
     const results: StepInput[] = [];
     try {
-      for (const payload of input.input.payloads) {
+      for (const [payloadIndex, payload] of input.input.payloads.entries()) {
         const result = adapter.deliver
           ? await adapter.deliver(payload, adapterCtx)
           : defaultDeliverResult(payload);
 
         if (result !== undefined && result !== null) {
-          results.push(result);
+          const deliveryId = input.input.deliveryMetadata?.find(
+            (entry) => entry.payloadIndex === payloadIndex,
+          )?.deliveryId;
+          results.push({
+            ...result,
+            attributedInputResponses: [
+              ...(result.attributedInputResponses ?? []),
+              ...(result.inputResponses ?? []).map((response) => ({
+                auth: input.input?.kind === "deliver" ? (input.input.auth ?? null) : null,
+                deliveryId,
+                response,
+              })),
+            ],
+            inputResponses: undefined,
+            messageAuth:
+              result.message === undefined
+                ? result.messageAuth
+                : (input.input.auth ?? result.messageAuth ?? null),
+          });
         }
       }
     } catch (error) {

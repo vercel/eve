@@ -7,7 +7,7 @@ import type {
   TurnCaller,
 } from "#channel/types.js";
 import type { InputResponse } from "#shared/input.js";
-import type { StepInput } from "#harness/types.js";
+import type { AttributedInputResponse, StepInput } from "#harness/types.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 /**
@@ -22,6 +22,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     a: a.inputResponses,
     b: b.inputResponses,
   });
+  const attributedInputResponses = coalesceAttributedInputResponses(
+    a.attributedInputResponses,
+    b.attributedInputResponses,
+  );
   const message = coalesceMessage({
     a: a.message,
     b: b.message,
@@ -37,11 +41,17 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
   const result: {
+    attributedInputResponses?: readonly AttributedInputResponse[];
+    context?: readonly string[];
     inputResponses?: readonly InputResponse[];
     message?: string | UserContent;
-    context?: readonly string[];
+    messageAuth?: StepInput["messageAuth"];
     outputSchema?: StepInput["outputSchema"];
   } = {};
+
+  if (attributedInputResponses !== undefined) {
+    result.attributedInputResponses = attributedInputResponses;
+  }
 
   if (inputResponses !== undefined) {
     result.inputResponses = inputResponses;
@@ -49,6 +59,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
 
   if (message !== undefined) {
     result.message = message;
+    result.messageAuth = b.message !== undefined ? b.messageAuth : a.messageAuth;
   }
 
   if (context !== undefined) {
@@ -60,6 +71,14 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   }
 
   return attachClientContext(result, ephemeralContext);
+}
+
+function coalesceAttributedInputResponses(
+  a: readonly AttributedInputResponse[] | undefined,
+  b: readonly AttributedInputResponse[] | undefined,
+): readonly AttributedInputResponse[] | undefined {
+  const responses = [...(a ?? []), ...(b ?? [])];
+  return responses.length === 0 ? undefined : responses;
 }
 
 /**

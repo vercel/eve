@@ -143,6 +143,8 @@ export interface SessionLimits {
  */
 export interface AttributedInputResponse {
   readonly auth: SessionAuthContext | null;
+  /** Durable identity of the channel delivery that carried this response. */
+  readonly deliveryId?: string;
   readonly response: InputResponse;
 }
 
