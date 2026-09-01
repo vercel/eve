@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Store pending Approval, Question, and Limit requests in one versioned request ledger while preserving existing session behavior and migrating legacy pending batches on first write.
+Unify Approval, Question, Limit, and internal Authorization under one durable request ledger and interpreter, including framework approval-gate ownership and migration from legacy pending state.
