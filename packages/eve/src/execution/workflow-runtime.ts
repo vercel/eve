@@ -244,8 +244,8 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
-      try {
-        if (input.continuationToken) {
+      if (input.continuationToken) {
+        try {
           const owner = await waitForCommandHookOwner(input.continuationToken);
           if (owner.runId !== run.runId) {
             throw new RuntimeSessionOwnershipConflictError({
@@ -254,11 +254,10 @@ export function createWorkflowRuntime(config: {
               sessionId: run.runId,
             });
           }
+        } catch (error) {
+          await cancelActivityCollector(collectorRunId);
+          throw error;
         }
-        await waitForOwnedCommandHook(sessionCommandHookToken(run.runId), run.runId);
-      } catch (error) {
-        await cancelActivityCollector(collectorRunId);
-        throw error;
       }
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
@@ -410,17 +409,6 @@ function isInactiveCommandTarget(error: unknown): boolean {
     }
   }
   return false;
-}
-
-async function waitForOwnedCommandHook(token: string, sessionId: string): Promise<void> {
-  const owner = await waitForCommandHookOwner(token);
-  if (owner.runId !== sessionId) {
-    throw new RuntimeSessionOwnershipConflictError({
-      continuationToken: token,
-      ownerSessionId: owner.runId,
-      sessionId,
-    });
-  }
 }
 
 export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {

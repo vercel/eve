@@ -32,8 +32,10 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session \
   -d '{"message":"Summarize the latest forecast."}'
 ```
 
-eve responds right away with the durable `sessionId` in the JSON body and
-`x-eve-session-id` header.
+eve responds with `202` and the durable `sessionId` in the JSON body and
+`x-eve-session-id` header as soon as Workflow accepts the run. The command inbox can still be
+starting at that point. An immediate follow-up can return `409 session_not_active`; wait for
+`session.waiting` before sending the next message.
 
 ## Stream a session
 
