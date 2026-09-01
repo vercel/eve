@@ -10,11 +10,10 @@ import {
   modelCatalogLimitsFromProvider,
   modelCatalogResponseSchema,
   normalizeCatalogModelId,
-  type CatalogModel,
 } from "#internal/model-catalog.js";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_KIND = "eve-model-catalog-cache";
 const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_VERSION = 2;
-const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const COMPILED_RUNTIME_MODEL_CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 export {
   catalogModelProviderSchema,
   catalogModelSchema,
@@ -90,7 +89,7 @@ export function resolveCompiledRuntimeModelCatalogCachePath(appRoot: string): st
 
 /**
  * Creates a per-build loader that caches the AI Gateway model catalog in
- * memory and on disk.
+ * memory and on disk, with stale-on-error fallback.
  */
 export function createCompiledRuntimeModelCatalogLoader(
   appRoot: string,
@@ -126,13 +125,12 @@ export function createCompiledRuntimeModelCatalogLoader(
     }
   };
 
-  const resolveModelsFromCacheOrFetch = async (): Promise<{
-    models: readonly CatalogModel[];
-    providerAliases: Readonly<Record<string, string>>;
-  } | null> => {
+  const resolveModelsFromCacheOrFetch = async (options?: {
+    forceRefresh?: boolean;
+  }): Promise<CompiledRuntimeModelCatalogCache | null> => {
     const cachedCatalog = await getCachedCatalog();
 
-    if (cachedCatalog !== null && isCacheFresh(cachedCatalog)) {
+    if (options?.forceRefresh !== true && cachedCatalog !== null && isCacheFresh(cachedCatalog)) {
       return cachedCatalog;
     }
 
@@ -148,22 +146,28 @@ export function createCompiledRuntimeModelCatalogLoader(
 
   return {
     async getModelLimits(modelId) {
-      const normalizedId = normalizeCatalogModelId(modelId);
-      const builtInLimits = builtInCompiledRuntimeModelLimitsById.get(normalizedId);
+      const builtInLimits =
+        builtInCompiledRuntimeModelLimitsById.get(modelId) ??
+        builtInCompiledRuntimeModelLimitsById.get(normalizeCatalogModelId(modelId));
       if (builtInLimits !== undefined) {
         return builtInLimits;
       }
 
-      const resolved = await resolveModelsFromCacheOrFetch();
+      let resolved = await resolveModelsFromCacheOrFetch();
+      if (resolved === null) return null;
 
-      if (resolved !== null) {
-        const model = findCatalogModelBySlug(resolved.models, normalizedId);
-        if (model) {
-          for (const p of model.providers) {
-            const limits = modelCatalogLimitsFromProvider(p);
-            if (limits !== null) {
-              return limits;
-            }
+      let model = findCatalogModelBySlug(resolved.models, modelId);
+      if (model === undefined) {
+        resolved = await resolveModelsFromCacheOrFetch({ forceRefresh: true });
+        if (resolved === null) return null;
+        model = findCatalogModelBySlug(resolved.models, modelId);
+      }
+
+      if (model !== undefined) {
+        for (const provider of model.providers) {
+          const limits = modelCatalogLimitsFromProvider(provider);
+          if (limits !== null) {
+            return limits;
           }
         }
       }
@@ -172,17 +176,26 @@ export function createCompiledRuntimeModelCatalogLoader(
     },
 
     async getByProviderModelId(provider, providerModelId) {
-      const resolved = await resolveModelsFromCacheOrFetch();
-      if (resolved === null) {
-        return null;
-      }
+      let resolved = await resolveModelsFromCacheOrFetch();
+      if (resolved === null) return null;
 
-      const match = findCatalogModelByProviderModelId({
+      let match = findCatalogModelByProviderModelId({
         models: resolved.models,
         provider,
         providerAliases: resolved.providerAliases,
         providerModelId,
       });
+      if (match === null) {
+        resolved = await resolveModelsFromCacheOrFetch({ forceRefresh: true });
+        if (resolved === null) return null;
+        match = findCatalogModelByProviderModelId({
+          models: resolved.models,
+          provider,
+          providerAliases: resolved.providerAliases,
+          providerModelId,
+        });
+      }
+
       if (match !== null) {
         const limits = modelCatalogLimitsFromProvider(match.provider);
         if (limits !== null) {

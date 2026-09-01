@@ -1,6 +1,6 @@
 import { Command, CommanderError, InvalidArgumentError } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
-import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
@@ -10,6 +10,7 @@ import { eveCliBanner } from "#cli/banner.js";
 import { registerIntegrationCommands } from "#cli/commands/register-integration-commands.js";
 import { registerProjectCommands } from "#cli/commands/register-project-commands.js";
 import { registerRegistryCommands } from "#cli/commands/register-registry-commands.js";
+import { runInteractiveDevelopmentUi } from "#cli/dev/run-interactive-ui.js";
 import { resolveDevUiMode, resolveTuiDisplayOptions } from "#cli/dev/ui-options.js";
 import {
   registerAcpCommand,
@@ -19,13 +20,12 @@ import {
 import {
   FORCED_EXIT_BACKSTOP_MS,
   installShutdownSignal,
-  type CommandLifecycle,
   waitForShutdownSignal,
 } from "#cli/shutdown.js";
 import { waitForServerOrStop, waitForUiOrServer } from "#cli/dev/wait-for-ui.js";
 import { parseDevelopmentHeaderOption, resolveDevelopmentUrlTarget } from "#cli/dev/url-target.js";
 import type { DevelopmentCliOptions, ProductionCliOptions } from "#cli/dev/command-options.js";
-import type { RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
+import type { DevelopmentTuiStartup, RunDevelopmentTuiInput } from "#cli/dev/tui/tui.js";
 import type { EvalCliOptions } from "#evals/cli/eval.js";
 import {
   registerRuntimeInvokeCommand,
@@ -40,11 +40,6 @@ import {
   parseStatsMode,
 } from "#cli/option-parsers.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
-import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
-import {
-  resumeDevelopmentRuntimeArtifacts,
-  suspendDevelopmentRuntimeArtifacts,
-} from "#services/dev-client/runtime-artifacts.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -127,8 +122,8 @@ async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["print
   return (await import("#cli/commands/info.js")).printApplicationInfo;
 }
 
-async function loadRunDevelopmentTui(): Promise<CliRuntimeDependencies["runDevelopmentTui"]> {
-  return (await import("#cli/dev/tui/tui.js")).runDevelopmentTui;
+async function loadDevelopmentTuiModule() {
+  return await import("#cli/dev/tui/tui.js");
 }
 
 async function loadRunEvalCommand(): Promise<CliRuntimeDependencies["runEvalCommand"]> {
@@ -166,9 +161,8 @@ function createCliProgram(
     .showHelpAfterError()
     .exitOverride()
     .hook("preAction", (_program, actionCommand) => {
-      if (["info", "dev", "init"].includes(actionCommand.name())) {
-        logger.log(eveCliBanner());
-      }
+      const { json } = actionCommand.opts<{ json?: boolean }>();
+      if (["info", "init"].includes(actionCommand.name()) && !json) logger.log(eveCliBanner());
     })
     .configureOutput({
       writeErr: (message) => {
@@ -386,6 +380,7 @@ function createCliProgram(
       const remoteServerUrl = remoteTarget?.serverUrl;
       const interactive = hasInteractiveTerminal();
       const mode = resolveDevUiMode({ options, interactive });
+      if (mode === "headless") logger.log(eveCliBanner());
       if (options.input !== undefined && mode === "headless") {
         throw new InvalidArgumentError("--input requires the interactive UI.");
       }
@@ -398,73 +393,12 @@ function createCliProgram(
           serverUrl: remoteServerUrl,
         });
       }
-      const runInteractiveUi = async (
-        input: {
-          readonly appRoot?: string;
-          readonly serverUrl: string;
-        },
-        report?: DevBootProgressReporter,
-        lifecycle?: CommandLifecycle,
-      ): Promise<void> => {
-        const runDevelopmentTui = await devBootPhase(
-          "loading interactive UI",
-          async () => runtime.runDevelopmentTui ?? (await loadRunDevelopmentTui()),
-          report,
-        );
-        const display = resolveTuiDisplayOptions(options);
-        const target: DevelopmentTuiTarget =
-          remoteServerUrl === undefined || existingLocalDevelopmentServer
-            ? {
-                kind: "local",
-                serverUrl: input.serverUrl,
-                workspaceRoot: input.appRoot ?? applicationContext.root,
-              }
-            : {
-                kind: "remote",
-                serverUrl: input.serverUrl,
-                workspaceRoot: applicationContext.root,
-              };
-        const title = resolveTuiTitle({ name: options.name, target });
-        if (title !== undefined) display.name = title;
-        const tuiInput: RunDevelopmentTuiInput = {
-          target,
-          initialInput: options.input,
-          onBootProgress: report,
-          lifecycle,
-          ...display,
-        };
-        if (target.kind === "local") {
-          tuiInput.withExclusiveTerminal = async <T>(task: () => Promise<T>): Promise<T> => {
-            const run = async (): Promise<T> => {
-              if (!(await suspendDevelopmentRuntimeArtifacts({ serverUrl: input.serverUrl }))) {
-                throw new Error("Could not pause the development server for integration setup.");
-              }
-              try {
-                return await task();
-              } finally {
-                await resumeDevelopmentRuntimeArtifacts({
-                  serverUrl: input.serverUrl,
-                  silent: true,
-                });
-              }
-            };
-            return await run();
-          };
-        }
-        if (remoteTarget?.headers !== undefined) {
-          await runDevelopmentTui({ ...tuiInput, headers: remoteTarget.headers });
-        } else {
-          await runDevelopmentTui(tuiInput);
-        }
-      };
-
       if (remoteServerUrl) {
         const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
         loadDevelopmentEnvironmentFiles(applicationContext.root);
         logger.log(
           `↗ ${existingLocalDevelopmentServer ? "local" : "remote"} mode targeting ${theme.info(new URL(remoteServerUrl).host)}`,
         );
-
         if (mode === "headless") {
           logger.log(
             renderCliTaggedLine(theme, {
@@ -479,14 +413,21 @@ function createCliProgram(
         logger.log("");
         const lifecycle = installShutdownSignal({ exitAfterMs: FORCED_EXIT_BACKSTOP_MS });
         try {
-          await runInteractiveUi({ serverUrl: remoteServerUrl }, undefined, lifecycle);
+          await runInteractiveDevelopmentUi({
+            applicationRoot: applicationContext.root,
+            existingLocalServer: existingLocalDevelopmentServer,
+            lifecycle,
+            options,
+            remoteTarget,
+            runDevelopmentTui: runtime.runDevelopmentTui,
+            server: { serverUrl: remoteServerUrl },
+          });
         } finally {
           lifecycle.dispose();
         }
         return;
       }
 
-      if (mode === "tui") logger.log("");
       const buildProgress = mode === "tui" ? startCliLiveRow(logger) : undefined;
       const onBootProgress = createDevBootProgressReporter(buildProgress);
       buildProgress?.update("Building your agent");
@@ -506,6 +447,20 @@ function createCliProgram(
         },
       });
 
+      let tuiStartup: DevelopmentTuiStartup | undefined;
+      const tuiStartupPromise =
+        mode === "tui" && runtime.runDevelopmentTui === undefined
+          ? loadDevelopmentTuiModule().then((module) => {
+              onBootProgress({ type: "before-first-paint" });
+              return module.startDevelopmentTuiStartup({
+                appRoot: applicationContext.root,
+                initialInput: options.input,
+                onExitRequest: lifecycle.requestStop,
+                ...resolveTuiDisplayOptions(options),
+              });
+            })
+          : undefined;
+
       try {
         const startHost = runtime.startHost ?? (await loadStartHost());
         server = startHost(applicationContext.root, {
@@ -514,12 +469,20 @@ function createCliProgram(
           onBootProgress,
           port: options.port,
         });
-        const outcome = await Promise.race([
-          server.start().then((handle) => ({ handle })),
-          lifecycle.stopped.then(() => ({ handle: undefined })),
+        const [outcome, startup] = await Promise.all([
+          Promise.race([
+            server.start().then((handle) => ({ handle })),
+            lifecycle.stopped.then(() => ({ handle: undefined })),
+          ]),
+          tuiStartupPromise,
         ]);
         const handle = outcome.handle;
-        if (handle === undefined) return;
+        if (handle === undefined) {
+          tuiStartup = startup;
+          await tuiStartup?.shutdown();
+          return;
+        }
+        tuiStartup = startup;
 
         if (mode !== "tui") {
           logger.log(
@@ -551,14 +514,23 @@ function createCliProgram(
           lifecycle,
           server,
           runUi: async () =>
-            await runInteractiveUi(
-              { appRoot: handle.appRoot, serverUrl: handle.url },
-              onBootProgress,
+            await runInteractiveDevelopmentUi({
+              applicationRoot: applicationContext.root,
+              existingLocalServer: false,
               lifecycle,
-            ),
+              options,
+              report: onBootProgress,
+              runDevelopmentTui: runtime.runDevelopmentTui,
+              server: { appRoot: handle.appRoot, serverUrl: handle.url },
+              startup: tuiStartup,
+            }),
         });
       } finally {
         buildProgress?.stop();
+        if (tuiStartup === undefined) {
+          tuiStartup = await tuiStartupPromise?.catch(() => undefined);
+          await tuiStartup?.shutdown();
+        }
         await closeServer();
         lifecycle.dispose();
       }

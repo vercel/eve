@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeAuthorizationSpec,
   validateAuthorizationSpec,
-} from "#runtime/connections/validate-authorization.js";
+} from "#shared/validate-authorization.js";
 
 const getToken = async () => ({ token: "abc" });
 const startAuthorization = async () => ({

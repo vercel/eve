@@ -5,7 +5,7 @@ import {
   normalizeInstructionsDefinition,
   normalizeScheduleDefinition,
 } from "#internal/authored-definition/core.js";
-import { defineDynamic } from "#public/definitions/tool.js";
+import { defineDynamic } from "#dynamic/definition.js";
 
 const FAILURE_MESSAGE = "Expected the agent config to match the public eve shape.";
 
@@ -253,32 +253,18 @@ describe("normalizeAgentDefinition", () => {
     ).toThrow('"experimental.workflow.world" must be a non-empty package name');
   });
 
-  it("accepts a boolean subagentPersistentSessions flag", () => {
-    const definition = normalizeAgentDefinition(
-      {
-        model: "openai/gpt-5.5",
-        experimental: {
-          subagentPersistentSessions: true,
-        },
-      },
-      FAILURE_MESSAGE,
-    );
-
-    expect(definition.experimental?.subagentPersistentSessions).toBe(true);
-  });
-
-  it("rejects non-boolean subagentPersistentSessions values", () => {
+  it.each([true, false])("rejects the removed subagentPersistentSessions flag", (value) => {
     expect(() =>
       normalizeAgentDefinition(
         {
           model: "openai/gpt-5.5",
           experimental: {
-            subagentPersistentSessions: "yes",
+            subagentPersistentSessions: value,
           },
         },
         FAILURE_MESSAGE,
       ),
-    ).toThrow('"experimental.subagentPersistentSessions" must be a boolean.');
+    ).toThrow('Unknown key "subagentPersistentSessions"');
   });
 
   it("accepts a boolean tasks flag", () => {

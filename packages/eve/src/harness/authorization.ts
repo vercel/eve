@@ -35,9 +35,9 @@ import { loadContext } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { SessionIdKey } from "#context/keys.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
-import type { AuthorizationCallback, ConnectionPrincipal } from "#runtime/connections/types.js";
-import type { JsonValue } from "#public/types/json.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
+import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connection-types.js";
+import type { JsonValue } from "#shared/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
 
@@ -52,6 +52,8 @@ export interface AuthorizationChallenge {
   /** Opaque identity of this exact authorization attempt. */
   readonly attemptId?: string;
   readonly candidateId?: string;
+  /** Opaque resolved connection identity; omitted for tool-hosted authorization. */
+  readonly instanceId?: string;
   readonly name: string;
   readonly challenge: ConnectionAuthorizationChallenge;
   readonly hookUrl: string;
@@ -80,6 +82,7 @@ export interface AuthorizationPendingModelOutput {
 
 export interface AuthorizationResult {
   readonly attemptId?: string;
+  readonly instanceId?: string;
   readonly resume?: JsonValue;
   readonly callback: AuthorizationCallback;
   readonly hookUrl: string;
@@ -104,12 +107,12 @@ export function requestAuthorization(
 }
 
 /**
- * Returns a copy of `signal` with each challenge's `resume` value stripped.
+ * Returns a model-safe copy of `signal` with runtime-only challenge state stripped.
  *
  * Used for the copy the AI SDK records as a tool output. The shape stays a
  * valid {@link AuthorizationSignal} so every `isAuthorizationSignal` consumer
- * still detects it; the park detector reads the full challenges from the
- * harness's out-of-band stash.
+ * still detects it; the park detector reads the full resume, principal, and
+ * resolved-instance state from the harness's out-of-band stash.
  */
 export function redactSignalResume(signal: AuthorizationSignal): AuthorizationSignal {
   return requestAuthorization(
@@ -137,6 +140,11 @@ export function getAuthorizationResult(name?: string): AuthorizationResult | und
   return results.find((r) => r.name === name);
 }
 
+/** Returns every callback result available to the active step. */
+export function getAuthorizationResults(): readonly NamedAuthorizationResult[] {
+  return loadContext().get(PendingAuthorizationResultKey) ?? [];
+}
+
 /**
  * Removes and returns one authorization callback result.
  *
@@ -144,12 +152,26 @@ export function getAuthorizationResult(name?: string): AuthorizationResult | und
  * before completion prevents a failed or replayed callback from poisoning
  * every later tool call in the same step.
  */
-export function consumeAuthorizationResult(name: string): AuthorizationResult | undefined {
+export function consumeAuthorizationResult(
+  name: string,
+  instanceId?: string,
+): AuthorizationResult | undefined {
   const ctx = loadContext();
   const results = ctx.get(PendingAuthorizationResultKey);
   if (!results || results.length === 0) return undefined;
 
-  const index = results.findIndex((result) => result.name === name);
+  const index = results.findIndex(
+    (result) => result.name === name && result.instanceId === instanceId,
+  );
+  if (
+    index === -1 &&
+    instanceId !== undefined &&
+    results.some((result) => result.name === name && result.instanceId !== undefined)
+  ) {
+    throw new Error(
+      `Authorization for "${name}" cannot complete because its resolved connection changed while sign-in was pending. Start sign-in again.`,
+    );
+  }
   if (index === -1) return undefined;
 
   const result = results[index]!;
@@ -287,17 +309,31 @@ export function setPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   value: PendingAuthorizationState,
 ): Record<string, unknown> {
+  const active = resolveActiveAuthorizationChallenges(value.challenges);
   const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
-  const superseded = getSupersededAuthorizationChallenges(sessionState, value.challenges);
+  const superseded = getSupersededAuthorizationChallenges(sessionState, active);
   return {
     ...sessionState,
     [PENDING_AUTHORIZATION_KEY]: {
-      challenges: [
-        ...previous.filter((challenge) => !superseded.includes(challenge)),
-        ...value.challenges,
-      ],
+      challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
     },
   };
+}
+
+/** Keeps the last challenge for each authorization name and principal scope. */
+export function resolveActiveAuthorizationChallenges(
+  challenges: readonly AuthorizationChallenge[],
+): readonly AuthorizationChallenge[] {
+  return challenges.filter(
+    (candidate, index) =>
+      !challenges
+        .slice(index + 1)
+        .some(
+          (replacement) =>
+            candidate.name === replacement.name &&
+            samePrincipal(candidate.principal, replacement.principal),
+        ),
+  );
 }
 
 /** Existing same-scope attempts replaced by newer attempts for the same principal. */

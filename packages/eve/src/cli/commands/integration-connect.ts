@@ -22,6 +22,8 @@ import type { RegistryCommandLogger } from "./registry.js";
 import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationConnectOptions {
+  creationType?: string;
+  connectionMethod?: "mcp" | "oauth";
   nonInteractive?: boolean;
   signal?: AbortSignal;
 }
@@ -93,6 +95,8 @@ export async function runIntegrationConnect(input: {
     projectRoot: input.appRoot,
     slug: input.slug,
     service: input.service,
+    creationType: input.options?.creationType,
+    connectionMethod: input.options?.connectionMethod,
     canonicalConnectorName: input.canonicalConnectorName ?? input.slug,
     project,
     signal,

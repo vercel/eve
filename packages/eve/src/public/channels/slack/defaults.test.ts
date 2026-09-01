@@ -147,17 +147,17 @@ describe("defaultEvents approval lifecycle", () => {
 
   it("updates the shared card only after settlement", async () => {
     const { channel, request } = buildChannelStub({
+      approvalResponderUsers: { "slack:T1:U777": "U777" },
       pendingApprovalCards: {
         "approval-1": {
           messageBlocks: [
             {
-              actions: [{ action_id: "eve_input:approval-1:button:1" }],
+              actions: [{ action_id: "eve_input:tool-approval:approval-1:button:1" }],
               body: { text: "Approve?", type: "mrkdwn" },
               type: "card",
             },
           ],
           messageTs: "123.456",
-          userId: "U777",
         },
       },
     });
@@ -179,25 +179,29 @@ describe("defaultEvents approval lifecycle", () => {
       "chat.update",
       expect.objectContaining({ channel: "C123", text: "Answered: Approve", ts: "123.456" }),
     );
+    const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
+      blocks?: unknown[];
+    };
+    expect(JSON.stringify(update.blocks)).toContain("Answered by <@U777>");
     expect(channel.state.pendingApprovalCards).toEqual({});
   });
 
-  it("settles the request even when the stored click id differs from its sibling button", async () => {
+  it("settles the request when its buttons carry tool-approval metadata", async () => {
     const { channel, request } = buildChannelStub({
+      approvalResponderUsers: { "slack:T1:U777": "U777" },
       pendingApprovalCards: {
         "approval-1": {
           messageBlocks: [
             {
               actions: [
-                { action_id: "eve_input:approval-1:button:0" },
-                { action_id: "eve_input:approval-1:button:1" },
+                { action_id: "eve_input:tool-approval:approval-1:button:0" },
+                { action_id: "eve_input:tool-approval:approval-1:button:1" },
               ],
               body: { text: "Approve?", type: "mrkdwn" },
               type: "card",
             },
           ],
           messageTs: "123.456",
-          userId: "U777",
         },
       },
     });
@@ -218,7 +222,52 @@ describe("defaultEvents approval lifecycle", () => {
     const update = request.mock.calls.find(([method]) => method === "chat.update")?.[1] as {
       blocks?: unknown[];
     };
-    expect(JSON.stringify(update.blocks)).not.toContain("eve_input:approval-1");
+    expect(JSON.stringify(update.blocks)).not.toContain("eve_input:tool-approval:approval-1");
+  });
+
+  it("keeps earlier grouped cards settled when approvals are answered out of order", async () => {
+    const requestIds = Array.from({ length: 5 }, (_, index) => `approval-${index + 1}`);
+    const messageBlocks = requestIds.map((requestId) => ({
+      actions: [
+        { action_id: `eve_input:tool-approval:${requestId}:button:0` },
+        { action_id: `eve_input:tool-approval:${requestId}:button:1` },
+      ],
+      body: { text: `Approve ${requestId}?`, type: "mrkdwn" },
+      type: "card",
+    }));
+    const { channel, request } = buildChannelStub({
+      approvalResponderUsers: { "slack:T1:U777": "U777" },
+      pendingApprovalCards: Object.fromEntries(
+        requestIds.map((requestId) => [requestId, { messageBlocks, messageTs: "123.456" }]),
+      ),
+    });
+    const settlementOrder = ["approval-5", "approval-2", "approval-1"];
+
+    for (const [index, requestId] of settlementOrder.entries()) {
+      await defaultEvents["approval.settled"]!(
+        {
+          outcome: "approved",
+          requestId,
+          responderPrincipalId: "slack:T1:U777",
+          sequence: index + 1,
+          stepIndex: index,
+          turnId: "turn-1",
+        },
+        channel,
+        sessionCtx,
+      );
+
+      const update = request.mock.calls[index]?.[1] as { blocks?: unknown[] };
+      const rendered = JSON.stringify(update.blocks);
+      for (const settledRequestId of settlementOrder.slice(0, index + 1)) {
+        expect(rendered).not.toContain(`eve_input:tool-approval:${settledRequestId}`);
+      }
+      for (const pendingRequestId of requestIds.filter(
+        (candidate) => !settlementOrder.slice(0, index + 1).includes(candidate),
+      )) {
+        expect(rendered).toContain(`eve_input:tool-approval:${pendingRequestId}`);
+      }
+    }
   });
 });
 

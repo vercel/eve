@@ -65,7 +65,6 @@ export async function materializeWorkspaceResources(input: {
     ...rootAgent,
     kind: input.manifest.kind,
     extensionMounts: input.manifest.extensionMounts,
-    subagentEdges: input.manifest.subagentEdges,
     subagents,
     version: input.manifest.version,
   };

@@ -28,11 +28,9 @@ import {
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond to this approval.";
-const TEXT_APPROVAL_FEEDBACK =
-  "Please use the Approve or Cancel buttons to respond to this approval.";
 const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
 const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 
@@ -142,21 +140,6 @@ export async function coordinateApprovalDelivery(input: {
   );
   const allRequests = batches.flatMap((batch) => batch.requests);
   const requests = new Map(allRequests.map((request) => [request.requestId, request]));
-  if (
-    stepInput?.message !== undefined &&
-    (stepInput.attributedInputResponses?.length ?? 0) === 0 &&
-    (stepInput.inputResponses?.length ?? 0) === 0 &&
-    audit.activeCandidates.length === 0 &&
-    authorizationRequiredRequestIds.size > 0
-  ) {
-    return deliveryResult(
-      session,
-      { ...stepInput, message: undefined, messageAuth: undefined },
-      "park",
-      [],
-      [TEXT_APPROVAL_FEEDBACK],
-    );
-  }
   const challenges: AuthorizationChallenge[] = [];
   const feedback: string[] = [];
   const consumed = new Set<string>();

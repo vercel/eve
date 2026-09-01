@@ -51,16 +51,17 @@ import { theme } from "./lib/theme.ts";
  *      the assistant's `message.completed`. The marker is random per
  *      run and only ever produced by the bearer-gated MCP stub, so its
  *      presence proves the OAuth token reached MCP.
- *   4. A normal channel follow-up on the same anchored thread resumes
- *      the original session after auth completes. This guards the
- *      durable hook state used by Slack-like follow-ups.
+ *   4. A different user on the same anchored thread cannot reuse the
+ *      first user's credential. Their connection call must produce a
+ *      fresh `authorization.required` event in the original session.
+ *      This distinguishes the active turn's `auth.current` from the
+ *      session's original `auth.initiator`.
  *
  * Lifecycle note: `runEnvironment()` keeps the MCP stub and OAuth
  * emulator alive while the agent target runs.
  */
 
 const MARKER_TOKEN = `mcp-user-ok-${randomBytes(4).toString("hex")}`;
-const FOLLOWUP_TOKEN = `auth-followup-ok-${randomBytes(4).toString("hex")}`;
 const EXPECTED_TOOL_NAME = "connection__stub-mcp-user__echo_marker";
 const SEEDED_EMAIL = "alice@example.com";
 const THREAD_ID = `auth-user-${randomBytes(4).toString("hex")}`;
@@ -272,7 +273,11 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       threadId: THREAD_ID,
-      message: `Reply with the exact string ${FOLLOWUP_TOKEN} and nothing else.`,
+      message: [
+        "Use the `stub-mcp-user` connection's `echo_marker` tool again.",
+        `The model-visible tool name is \`${EXPECTED_TOOL_NAME}\`.`,
+        'Call it with `note: "cross-principal-smoke"`. Do not answer without calling the tool.',
+      ].join("\n"),
     }),
   });
   if (!replyResp.ok) {
@@ -285,19 +290,25 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
     );
   }
 
-  let followupTokenEchoed = false;
+  let followupAuthRequired = false;
+  let followupToolCompleted = false;
   let followupBoundary: MessageStreamEvent["type"] | undefined;
   const followupAbort = new AbortController();
   const followupTimer = setTimeout(() => followupAbort.abort(), 60_000);
 
   try {
     for await (const event of session.stream({ signal: followupAbort.signal })) {
+      if (event.type === "authorization.required" && event.data.name === "stub-mcp-user") {
+        followupAuthRequired = true;
+      }
+
       if (
-        event.type === "message.completed" &&
-        typeof event.data.message === "string" &&
-        event.data.message.includes(FOLLOWUP_TOKEN)
+        event.type === "action.result" &&
+        event.data.status === "completed" &&
+        event.data.result.kind === "tool-result" &&
+        event.data.result.toolName.includes("echo_marker")
       ) {
-        followupTokenEchoed = true;
+        followupToolCompleted = true;
       }
 
       if (event.type === "session.failed") {
@@ -314,18 +325,24 @@ runEnvironment("tui-connection-auth-user", async ({ cleanup, target: resolveTarg
   }
 
   if (followupBoundary === undefined) {
+    throw new Error("Cross-principal follow-up stream did not reach a session boundary.");
+  }
+  if (!followupAuthRequired) {
     throw new Error(
-      "Follow-up stream did not reach a session boundary. The session may still be parked on " +
-        "the auth hook instead of the normal continuation hook.",
+      "The second principal did not receive a fresh authorization challenge. " +
+        "The connection may have reused the session initiator's OAuth credential.",
     );
   }
-  if (!followupTokenEchoed) {
-    throw new Error(`Did not see follow-up token ${FOLLOWUP_TOKEN} in assistant output.`);
+  if (followupToolCompleted) {
+    throw new Error(
+      "The second principal completed the bearer-gated MCP call before authorizing. " +
+        "The connection reused another principal's OAuth credential.",
+    );
   }
 
   console.log(
     theme.muted(
-      `[oauth-user] post-auth anchored follow-up resumed original session (${followupBoundary})`,
+      `[oauth-user] second principal received a fresh OAuth challenge in the original session (${followupBoundary})`,
     ),
   );
 });

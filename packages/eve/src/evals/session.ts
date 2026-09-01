@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { basename, extname } from "node:path";
+import { basename } from "node:path";
 
 import { createTextWithFileContent } from "#client/file-parts.js";
 import type { Client } from "#client/client.js";
@@ -19,8 +19,9 @@ import type {
 import { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
 import { EvalRequirementFailed } from "#evals/control-flow.js";
@@ -113,6 +114,10 @@ export class EvalSessionDriver implements EveEvalSession {
 
   get events(): readonly MessageStreamEvent[] {
     return this.#events;
+  }
+
+  get transcript(): string {
+    return formatEvalTranscript(this.#events);
   }
 
   get lastTurn(): EveEvalTurn | undefined {
@@ -680,21 +685,5 @@ function assertRequestHasOption(request: InputRequest, optionId: string): void {
 
   if (!request.options.some((option) => option.id === optionId)) {
     throw new Error(`Input request "${request.requestId}" does not offer option "${optionId}".`);
-  }
-}
-
-function inferMediaType(filePath: string): string {
-  switch (extname(filePath).toLowerCase()) {
-    case ".gif":
-      return "image/gif";
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".png":
-      return "image/png";
-    case ".webp":
-      return "image/webp";
-    default:
-      return "application/octet-stream";
   }
 }

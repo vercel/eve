@@ -19,7 +19,7 @@ import type {
 } from "#public/channels/github/githubChannel.js";
 import { splitGitHubCommentBody } from "#public/channels/github/limits.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 const log = createLogger("github.defaults");
 

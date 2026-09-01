@@ -1,70 +1,48 @@
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
-export function workingTreeSubject(repositoryRoot) {
-  return archiveSubject(repositoryRoot, "working tree", "current", (archivePath, environment) => {
-    git(repositoryRoot, ["read-tree", "HEAD"], environment);
-    git(repositoryRoot, ["add", "-A"], environment);
-    const tree = git(repositoryRoot, ["write-tree"], environment).trim();
-    git(repositoryRoot, ["archive", "--format=tar.gz", `--output=${archivePath}`, tree]);
-    return tree;
-  });
-}
+const PACKAGE_HOST = "https://pkg.eve.dev";
+const IMMUTABLE_PACKAGE_PATH = /^\/([0-9a-f]{40})\/eve\.tgz$/u;
 
-export function revisionSubject(repositoryRoot, requestedRevision, label) {
-  const revision = git(repositoryRoot, [
-    "rev-parse",
-    "--verify",
-    `${requestedRevision}^{commit}`,
-  ]).trim();
-  return archiveSubject(
-    repositoryRoot,
-    revision.slice(0, 12),
+/** Resolves a mutable canary ref to the immutable artifact all runs must share. */
+export function canarySubject(ref, label, resolve = resolveCanaryPackageSpec) {
+  const packageSpec = resolve(ref);
+  const revision = packageRevision(packageSpec);
+  return {
     label,
-    (archivePath) => {
-      const tree = git(repositoryRoot, ["rev-parse", `${revision}^{tree}`]).trim();
-      git(repositoryRoot, ["archive", "--format=tar.gz", `--output=${archivePath}`, revision]);
-      return tree;
-    },
-    { revision },
-  );
+    revision,
+    description: revision.slice(0, 12),
+    packageSpec,
+  };
 }
 
-function archiveSubject(repositoryRoot, description, label, createArchive, details = {}) {
-  const temporaryDirectory = mkdtempSync(join(tmpdir(), "eve-authoring-"));
-  const archivePath = join(temporaryDirectory, "source.tar.gz");
-  const indexPath = join(temporaryDirectory, "index");
+export function resolveCanaryPackageSpec(ref) {
+  const requested = `${PACKAGE_HOST}/${encodeURIComponent(ref)}/eve.tgz`;
+  let resolved;
   try {
-    const digest = createArchive(archivePath, { ...process.env, GIT_INDEX_FILE: indexPath });
-    const archive = readFileSync(archivePath);
-    return {
-      label,
-      description,
-      archive,
-      digest,
-      dependencyDigest: dependencyDigest(archive),
-      ...details,
-    };
-  } finally {
-    rmSync(temporaryDirectory, { recursive: true, force: true });
+    resolved = execFileSync(
+      "curl",
+      ["-fsSL", "-o", "/dev/null", "-w", "%{url_effective}", requested],
+      {
+        encoding: "utf8",
+      },
+    ).trim();
+  } catch {
+    throw new Error(
+      `No eve canary artifact is available for ${JSON.stringify(ref)}. Publish that revision or use a published canary ref such as "main".`,
+    );
   }
+  packageRevision(resolved);
+  return resolved;
 }
 
-function dependencyDigest(archive) {
-  const hash = createHash("sha256");
-  for (const path of [".npmrc", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
-    const content = execFileSync("tar", ["-xOzf", "-", path], {
-      input: archive,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    hash.update(path).update("\0").update(content).update("\0");
+export function packageRevision(packageSpec) {
+  const url = new URL(packageSpec);
+  if (url.origin !== PACKAGE_HOST) {
+    throw new Error(`Eve canary resolved outside ${PACKAGE_HOST}: ${packageSpec}`);
   }
-  return hash.digest("hex");
-}
-
-function git(cwd, args, env = process.env) {
-  return execFileSync("git", args, { cwd, env, encoding: "utf8" });
+  const revision = url.pathname.match(IMMUTABLE_PACKAGE_PATH)?.[1];
+  if (revision === undefined) {
+    throw new Error(`Eve canary did not resolve to an immutable revision: ${packageSpec}`);
+  }
+  return revision;
 }

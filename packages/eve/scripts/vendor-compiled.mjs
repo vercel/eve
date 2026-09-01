@@ -26,6 +26,7 @@ const vendorCompiledDir = join(here, "vendor-compiled");
 // is invalidated and vendoring re-runs.
 const scriptFiles = [
   fileURLToPath(import.meta.url),
+  join(packageRoot, "package.json"),
   join(here, "nitro-rolldown.mjs"),
   join(here, "vendor-warning-log.mjs"),
   ...(await collectFilesRecursively(vendorCompiledDir, [".mjs", ".d.ts"])),

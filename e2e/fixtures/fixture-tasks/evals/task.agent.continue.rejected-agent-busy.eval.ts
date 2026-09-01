@@ -1,6 +1,7 @@
 import { defineTaskEval } from "./task-transition.js";
 import {
   requireBackgroundTaskId,
+  parseToolErrorOutput,
   sendAndFollowQueuedTurn,
   waitForCompletedTask,
 } from "./shared.js";
@@ -29,7 +30,10 @@ export default defineTaskEval({
       "CHILD-TASK-EXCLUSIVITY-VERIFY",
       initialTaskId,
     );
-    const agentId = agentIdFromTaskView(initial.requireToolCall("task_peek").output, initialTaskId);
+    const agentId = agentIdFromTaskView(
+      initial.requireToolCall("task_cancel").output,
+      initialTaskId,
+    );
 
     const race = await sendAndFollowQueuedTurn(t, "CHILD-TASK-EXCLUSIVITY-RACE", t, {
       allowFailedActions: true,
@@ -41,13 +45,13 @@ export default defineTaskEval({
     const admittedTaskId = requireBackgroundTaskId(raced);
     raced.event("action.result", {
       count: 2,
-      data: { result: { kind: "subagent-result", subagentName: "busy-worker" } },
+      data: { result: { kind: "tool-result", toolName: "busy-worker" } },
     });
     raced.calledSubagent("busy-worker", {
       count: 1,
       status: "completed",
     });
-    raced.calledSubagent("busy-worker", {
+    raced.calledTool("busy-worker", {
       count: 1,
       output: (output) => isBusyRejection(output, admittedTaskId),
       status: "failed",
@@ -59,7 +63,7 @@ export default defineTaskEval({
       race.session,
       { allowFailedActions: true },
     );
-    later.turn.calledSubagent("busy-worker", {
+    later.turn.calledTool("busy-worker", {
       count: 1,
       output: (output) => isBusyRejection(output, admittedTaskId),
       status: "failed",
@@ -85,6 +89,7 @@ function agentIdFromTaskView(output: unknown, taskId: string): string {
 }
 
 function isBusyRejection(output: unknown, activeTaskId?: string): boolean {
+  output = parseToolErrorOutput(output);
   if (output === null || typeof output !== "object") return false;
   const message = Reflect.get(output, "message");
   return (

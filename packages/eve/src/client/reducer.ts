@@ -1,5 +1,5 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 
 /**
  * Client-side reducer event emitted before eve confirms a submitted user

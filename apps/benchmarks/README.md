@@ -6,40 +6,69 @@ run in CI or as part of `pnpm test`.
 
 ## Run
 
-The default subject is the current working tree, including uncommitted and untracked files that
-Git does not ignore:
+The default subject is the current `main` canary. The runner resolves that moving alias once to its
+immutable commit URL, then every model, treatment, and repetition uses that same artifact:
 
 ```sh
-pnpm benchmark author-000-imessage
+pnpm benchmark author-001-weather-tool
 pnpm benchmark
-pnpm benchmark author-000-imessage --runs 3
-pnpm benchmark author-000-imessage --dry
-pnpm benchmark author-000-imessage --verbose
+pnpm benchmark author-001-weather-tool --runs 3
+pnpm benchmark author-001-weather-tool --model kimi-k3
+pnpm benchmark author-001-weather-tool --treatment baseline
+pnpm benchmark author-001-weather-tool --dry
+pnpm benchmark author-001-weather-tool --verbose
+pnpm benchmark author-001-weather-tool --keep-failures
+pnpm benchmark author-001-weather-tool --canary main
 ```
 
-Use `--base` to compare a local Git revision with the working tree:
+`--keep-failures` keeps a run the runner judged an infrastructure failure — a stalled turn, a
+sandbox error — as the final result instead of discarding it. Use it while iterating on the
+harness, when the failure itself is what you want to read.
+
+`--canary <ref>` selects another published canary ref. The runner rejects refs without a package
+artifact before it starts an eval. Local working trees, unpublished commits, and revision comparisons
+are not supported by the native runner.
+
+The runner uses agent-eval's native Gateway harnesses: OpenCode for other providers, Claude Code
+for Anthropic models, and Codex for OpenAI models. Each attempt starts an isolated Vercel Sandbox,
+then scaffolds the selected immutable canary with `npx` before the coding agent starts.
+
+Local runs use the `guided` treatment by default, which keeps the `AGENTS.md` and aliases generated
+by `eve init`. Pass `--treatment baseline` to remove those files before the coding agent starts.
+
+Results are written under `apps/benchmarks/results/`. Each run includes the native transcript,
+grader output, summary, copied project files, and validation output. Vercel Sandbox and AI Gateway
+credentials are required.
+
+## Publish canonical results
+
+Canonical publication compares the `baseline` and `guided` treatments with the same immutable eve
+canary, model, harness, cases, and graders. The configured harness reflects the provider: OpenCode
+for other providers, Claude Code for Anthropic, and Codex for OpenAI. Publication requires a clean
+working tree and defaults to `origin/main`:
 
 ```sh
-pnpm benchmark author-000-imessage --base origin/main --runs 3
+pnpm benchmark:publish --dry
+pnpm benchmark:publish
+pnpm benchmark:publish --revision <commit>
+pnpm benchmark:publish --models kimi-k3,gpt-5-6-sol
 ```
 
-Pass `--head` to compare two local revisions instead:
+Pass `--allow-dirty` only for a local, noncanonical run. It bypasses the clean-tree check, so its
+results cannot be reproduced from committed source and should not be committed as published data.
 
-```sh
-pnpm benchmark author-000-imessage \
-  --base origin/main \
-  --head feature-branch \
-  --runs 3
-```
+Without `--models`, publication covers the complete configured model matrix. Use `--models` to
+publish or refresh selected model rows. The published suite currently includes weather-tool,
+new-project, OpenAPI connection, packaged skill, conditional approval, custom channel, and digest
+schedule cases. The iMessage case remains available for local runs but is excluded from the
+published matrix. Each
+cell runs three times. Completed cells are memoized by `@vercel/agent-eval`; pass `--force` only
+when every cell should run again. A successful run writes aggregate results to
+`apps/docs/lib/evals/benchmark-results.json`. The public file contains outcomes and timing, not
+transcripts, generated files, command logs, or synthetic world events.
 
-The runner archives each subject locally and uploads it to the sandbox. Revisions and local-only
-commits do not need to be pushed. Dependency downloads are cached by lockfile, so source-only
-changes reuse the prepared pnpm store. For one eval and one run, `--verbose` streams setup
-phases, assistant text, tool calls, grading, and build progress.
-
-Results are written under `apps/benchmarks/results/`. Each run includes the transcript,
-grader output, summary, and copied project files. Vercel Sandbox and AI Gateway credentials are
-required.
+Changed and newly added cases export as unavailable until they run. The exporter does not carry an
+older measurement forward as current.
 
 ## Add a case
 
@@ -61,6 +90,6 @@ export default defineAuthoringCase({
 });
 ```
 
-Use `simpleProject` for the selected subject's `eve init` output and `emptyProject` for an empty
-directory with the subject CLI installed. Put reusable setup under `lib/setups/`. Prefer source
-and event assertions over an LLM judge.
+Use `simpleProject` for the selected canary's `eve init` output and `emptyProject` for a project
+the coding agent creates. Put reusable setup under `lib/setups/`. Native runs support one-turn
+cases; the iMessage case remains local-only. Prefer source assertions over an LLM judge.

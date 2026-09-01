@@ -68,6 +68,8 @@ export type AgentStartTarget =
       readonly url: string;
       /** Callback base URL stub captured at dispatch; never model-visible. */
       readonly callbackBaseUrl: string;
+      /** Auth/header resolver selected when this child was created; `{}` means none. */
+      readonly credentialResolver?: { readonly resolverId?: string };
     };
 
 /** Confirmed delivery coordinates of a started child. */
@@ -87,6 +89,8 @@ export type AgentAddress =
       readonly sessionId: string;
       readonly url: string;
       readonly callbackBaseUrl: string;
+      /** Auth/header resolver selected when this child was created; `{}` means none. */
+      readonly credentialResolver?: { readonly resolverId?: string };
     };
 
 /**
@@ -166,6 +170,7 @@ const startTargetSchema: z.ZodType<AgentStartTarget> = z.discriminatedUnion("kin
   z.strictObject({ continuationToken: nonEmptyString, kind: z.literal("agent/self") }),
   z.strictObject({
     callbackBaseUrl: z.url(),
+    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     url: z.url(),
   }),
@@ -184,6 +189,7 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     callbackBaseUrl: z.url(),
+    credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
     url: z.url(),

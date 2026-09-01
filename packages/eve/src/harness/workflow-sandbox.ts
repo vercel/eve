@@ -11,7 +11,6 @@ import {
   readWorkflowSandboxResolution,
   requestWorkflowSandboxInterrupt,
   type WorkflowSandboxContinuationSecurity,
-  type WorkflowSandboxLifecycle,
   WORKFLOW_TOOL_NAME,
 } from "#shared/workflow-sandbox.js";
 
@@ -37,7 +36,6 @@ const workflowInputSchema = z.strictObject({
 export async function applyWorkflowTool(input: {
   readonly continuationSecurity: WorkflowSandboxContinuationSecurity;
   readonly harnessTools: HarnessToolMap;
-  readonly lifecycle?: WorkflowSandboxLifecycle;
   readonly maxSubagents?: number;
   readonly tools: ToolSet;
 }): Promise<WorkflowToolSet> {
@@ -51,7 +49,6 @@ export async function applyWorkflowTool(input: {
     bridgeRequestLimit: resolveWorkflowSandboxBridgeRequestLimit(input.maxSubagents),
     continuationSecurity: input.continuationSecurity,
     hostTools,
-    lifecycle: input.lifecycle,
   });
   const generated = typeof workflowTool.description === "string" ? workflowTool.description : "";
   const framing = workflowToolDescription(Object.keys(hostTools), {

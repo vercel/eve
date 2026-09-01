@@ -59,7 +59,7 @@ const sandbox = await ctx.getSandbox();
 const result = await sandbox.run({ command: "npm test" });
 ```
 
-The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned runtime handle can also stop compute while preserving the durable sandbox state. See [Sandbox](../sandbox#using-the-sandbox) for the I/O API and lifecycle.
+The accessor is asynchronous because eve may need to bind or restore the sandbox. A subagent sees its own sandbox, not its parent's. The returned handle also exposes `stop()` and `delete()`; see [Sandbox lifecycle](../sandbox#lifecycle) for their behavior.
 
 ## `ctx.getSkill(identifier)`
 
@@ -82,7 +82,7 @@ Runtime context is available:
 
 - inside `defineTool(...).execute(input, ctx)`;
 - inside connection `auth` and `headers` resolvers;
-- inside channel and hook callbacks that receive `ctx`;
+- inside channel and agent hook callbacks that receive the full runtime `ctx`;
 - after asynchronous boundaries within the same authored execution chain.
 
 Runtime context is not available during top-level module evaluation, build scripts, or discovery. Declare reusable definitions and state handles at module scope, but call their context-dependent methods only from an eve-managed callback.

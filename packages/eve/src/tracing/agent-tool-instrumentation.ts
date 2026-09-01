@@ -1,5 +1,6 @@
 import {
   ROOT_CONTEXT,
+  SpanKind,
   SpanStatusCode,
   type Context,
   type Span,
@@ -12,8 +13,8 @@ import type {
   InstrumentationActionStartedEvent,
   InstrumentationToolCallStartedEvent,
   InstrumentationToolCallTerminalEvent,
-} from "#harness/instrumentation/lifecycle.js";
-import { actionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
@@ -164,9 +165,10 @@ export function createAgentToolInstrumentation(input: {
     if (state.span !== undefined || state.finished === true) return;
     state.span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        "ai.toolCall",
+        `execute_tool ${state.event.toolName}`,
         {
           attributes: toolAttributes(state.event),
+          kind: SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         parent,
@@ -211,6 +213,7 @@ function toolAttributes(event: InstrumentationToolCallStartedEvent): Record<stri
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.call.id": event.callId,
     "gen_ai.tool.name": event.toolName,
+    "gen_ai.tool.type": "function",
   };
 }
 
@@ -219,6 +222,7 @@ function contextFromSpanContext(spanContext: SpanContext): Context {
 }
 
 function recordError(span: Span, error: unknown): void {
+  span.setAttribute("error.type", error instanceof Error ? error.name || "Error" : "_OTHER");
   if (error instanceof Error) {
     span.recordException(error);
     span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });

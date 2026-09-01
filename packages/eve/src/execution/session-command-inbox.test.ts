@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 
 const createHookMock = vi.fn();
 
@@ -119,6 +120,10 @@ describe("createSessionCommandInbox", () => {
       "A session command inbox cannot change its stable token.",
     );
     expect(createHookMock).toHaveBeenCalledOnce();
+    expect(createHookMock).toHaveBeenCalledWith({
+      metadata: { sessionInboxWireVersion: SESSION_INBOX_WIRE_VERSION },
+      token: "stable",
+    });
     await inbox.dispose();
   });
 

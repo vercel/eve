@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentInfoResult } from "#client/index.js";
 import type { LogRecord } from "#internal/logging.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import type { DevDiagnostics } from "../diagnostics.js";
 import { searchActionValue } from "#setup/cli/select-state.js";
 import {
@@ -85,65 +86,17 @@ function agentInfoWithModel(
   endpoint?: StaticAgentInfoModel["endpoint"],
   extras?: Partial<StaticAgentInfoModel>,
 ): AgentInfoResult {
+  const info = createTestAgentInfoResult({ modelId, name: "Weather Agent" });
   return {
+    ...info,
     agent: {
-      agentRoot: "/tmp/weather-agent/agent",
-      appRoot: "/tmp/weather-agent",
+      ...info.agent,
       model: {
         id: modelId,
         endpoint,
         routing: { kind: "gateway" as const, target: modelId.split("/")[0] ?? "openai" },
         ...extras,
       },
-      name: "Weather Agent",
-    },
-    capabilities: {
-      devRoutes: true,
-    },
-    channels: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      framework: [],
-    },
-    connections: [],
-    diagnostics: {
-      discoveryErrors: 0,
-      discoveryWarnings: 0,
-    },
-    hooks: [],
-    instructions: {
-      dynamic: [],
-      static: [],
-    },
-    kind: "eve-agent-info",
-    mode: "development",
-    sandbox: null,
-    schedules: [],
-    skills: {
-      dynamic: [],
-      static: [],
-    },
-    subagents: {
-      local: [],
-      total: 0,
-    },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 2,
-    workflow: {
-      enabled: false,
-      toolName: "Workflow",
-    },
-    workspace: {
-      resourceRoot: null,
-      rootEntries: [],
     },
   };
 }
@@ -218,27 +171,27 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(process.listeners("exit")).toEqual(before);
   });
 
-  it("renders the brand line with the agent name and a tip", () => {
+  it("commits the startup card before the prompt", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       name: "Weather Agent",
       serverUrl: "http://localhost:3000",
-      info: agentInfoWithModel("gpt-5"),
-      tip: "Use eve add to install integrations from the registry.",
+      info: agentInfoWithModel("gpt-5", {
+        kind: "gateway",
+        connected: true,
+        credential: "api-key",
+      }),
+      tip: "Use the /deploy command to deploy your agent.",
     });
     renderer.shutdown();
 
     const snapshot = screen.snapshot();
-    expect(snapshot).toContain("eve Weather Agent");
-    expect(snapshot).toContain("Use eve add to install integrations from the registry.");
-    // The model lives on the status line, not the header; the old config
-    // rows and key hints are gone.
-    expect(snapshot).not.toContain("gpt-5");
+    expect(snapshot).toMatch(/☰eve \(v\d+\.\d+\.\d+\).*Weather Agent/u);
+    expect(snapshot).toContain("Tip: Use the /deploy command to deploy your agent.");
     expect(snapshot).not.toContain("http://localhost:3000");
-    expect(snapshot).not.toContain("Type to chat");
   });
 
-  it("refreshes the committed agent header with the latest model", async () => {
+  it("updates the status model without repeating an unchanged agent card", async () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({
       info: agentInfoWithModel("old-model"),
@@ -263,6 +216,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     const snapshot = screen.snapshot();
     expect(snapshot).toContain("new-model");
     expect(snapshot).not.toContain("old-model");
+    expect(snapshot.match(/☰eve/gu)).toHaveLength(1);
     expect(snapshot).toContain("hello");
     expect(snapshot).toContain("still here");
     renderer.shutdown();
@@ -1572,13 +1526,13 @@ describe("TerminalRenderer (inline scrollback)", () => {
         {
           type: "tool-call",
           input: { taskIds: ["task_123"] },
-          toolCallId: "peek-1",
-          toolName: "task_peek",
+          toolCallId: "cancel-1",
+          toolName: "task_cancel",
         },
         {
           type: "tool-result",
-          output: { tasks: [{ status: "completed", taskId: "task_123" }] },
-          toolCallId: "peek-1",
+          output: { tasks: [{ status: "cancelled", taskId: "task_123" }] },
+          toolCallId: "cancel-1",
         },
         { type: "assistant-delta", id: "wake-1", delta: "Research finished." },
         { type: "assistant-complete", id: "wake-1" },
@@ -2367,6 +2321,64 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("keeps an editable startup draft inert and hands it to the first prompt", async () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const requestStop = vi.fn();
+    const startupRenderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      unicode: true,
+      onExitRequest: requestStop,
+    });
+
+    startupRenderer.beginStartupDraft({
+      initialDraft: "weather",
+      tip: "Use the /help command to see every command.",
+      title: "weather-agent",
+    });
+    expect(screen.snapshot()).toContain("weather-agent");
+    expect(screen.snapshot()).toContain("Tip: Use the /help command");
+    expect(screen.snapshot()).not.toContain("model");
+    expect(screen.snapshot()).not.toContain("loading");
+    expect(screen.snapshot()).toContain("Building your agent");
+    expect(screen.snapshot()).toContain("weather");
+
+    input.type(" tomorrow");
+    input.enter();
+    expect(screen.snapshot()).toContain("weather tomorrow");
+
+    const draft = startupRenderer.finishStartupDraft();
+    expect(draft).toBe("weather tomorrow");
+    const prompt = startupRenderer.readPrompt({ initialDraft: draft });
+    input.enter();
+    await expect(prompt).resolves.toBe("weather tomorrow");
+    expect(requestStop).not.toHaveBeenCalled();
+    startupRenderer.shutdown();
+  });
+
+  it("lets Ctrl-C stop an editing-only startup draft", () => {
+    const screen = new MockScreen({ columns: 80, rows: 30 });
+    const input = new MockUserInput();
+    const requestStop = vi.fn();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: false,
+      onExitRequest: requestStop,
+    });
+
+    renderer.beginStartupDraft({
+      tip: "Use the /help command to see every command.",
+      title: "weather-agent",
+    });
+    input.ctrlC();
+
+    expect(requestStop).toHaveBeenCalledOnce();
+    renderer.shutdown();
+  });
+
   it("seeds the editable buffer with an initial draft without auto-submitting", async () => {
     const { screen, input, renderer } = makeRenderer();
 
@@ -2486,14 +2498,14 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).not.toContain("Enter to select");
     expect(countOccurrences(snapshot, "Esc to")).toBe(1);
 
-    input.down();
+    input.send("j");
     const unselected = screen
       .snapshot()
       .split("\n")
       .find((line) => line.includes("AI Gateway"));
     expect(unselected).toContain("1. AI Gateway");
     expect(unselected).not.toContain("▶");
-    input.up();
+    input.send("k");
 
     input.enter();
     await expect(answer).resolves.toEqual({ optionId: "gateway" });
@@ -3075,6 +3087,51 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.shutdown();
   });
 
+  it("shows delayed build progress and immediate completion when logs are hidden", () => {
+    vi.useFakeTimers();
+    const screen = new MockScreen({ columns: 100, rows: 30 });
+    const input = new MockUserInput();
+    const renderer = new TerminalRenderer({
+      input,
+      output: screen,
+      captureForeignOutput: true,
+      unicode: true,
+    });
+    try {
+      renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
+
+      process.stdout.write(
+        `${formatChangeDetectedLogLine("/app", [
+          { event: "change", path: "/app/agent/instructions.md" },
+        ])}\n`,
+      );
+      expect(renderer.logDisplayMode()).toBe("none");
+      expect(screen.snapshot()).not.toContain("agent/instructions.md changed");
+      expect(screen.snapshot()).not.toContain("○ stdout");
+
+      vi.advanceTimersByTime(250);
+      expect(screen.snapshot()).toContain("▪ agent/instructions.md updating…");
+
+      process.stdout.write(`${AUTHORED_ARTIFACTS_UPDATED_LOG_LINE}\n`);
+      expect(screen.snapshot()).toContain("✓ agent/instructions.md updated");
+
+      vi.advanceTimersByTime(4_000);
+      expect(screen.snapshot()).not.toContain("✓ agent/instructions.md updated");
+
+      process.stdout.write(
+        `${formatChangeDetectedLogLine("/app", [
+          { event: "change", path: "/app/agent/agent.ts" },
+        ])}\n`,
+      );
+      process.stdout.write(`${AUTHORED_ARTIFACTS_UPDATED_LOG_LINE}\n`);
+      expect(screen.snapshot()).toContain("✓ agent/agent.ts updated");
+      expect(screen.snapshot()).not.toContain("agent/agent.ts updating");
+    } finally {
+      renderer.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   it("hides logs by default, then reveals buffered lines at their original positions", () => {
     const screen = new MockScreen({ columns: 80, rows: 30 });
     const input = new MockUserInput();
@@ -3633,25 +3690,6 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(screen.snapshot()).toContain("Session ended — started a new session.");
   });
 
-  it("refreshing the agent header preserves committed transcript and scrollback", () => {
-    const { screen, renderer } = makeRenderer();
-    renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
-    renderer.renderNotice("previous transcript");
-
-    // Dev HMR refresh: a fresh header is committed beneath the transcript —
-    // nothing is cleared or replayed.
-    renderer.renderAgentHeader({ name: "Weather Agent v2", serverUrl: "http://localhost:3000" });
-    renderer.shutdown();
-
-    const snapshot = screen.snapshot();
-    expect(snapshot).toContain("previous transcript");
-    expect(snapshot).toContain("Weather Agent v2");
-    // The refreshed header lands after the prior transcript, not on a wiped screen.
-    expect(snapshot.indexOf("Weather Agent v2")).toBeGreaterThan(
-      snapshot.indexOf("previous transcript"),
-    );
-  });
-
   it("does not repeat the banner when a source reload re-sends an unchanged header", () => {
     const { screen, renderer } = makeRenderer();
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
@@ -3662,7 +3700,7 @@ describe("TerminalRenderer (inline scrollback)", () => {
     renderer.renderAgentHeader({ name: "Weather Agent", serverUrl: "http://localhost:3000" });
     renderer.shutdown();
 
-    expect(countOccurrences(screen.snapshot(), "Weather Agent")).toBe(1);
+    expect(countOccurrences(screen.snapshot(), "☰eve (v")).toBe(1);
   });
 
   it("reset clears committed transcript rows", () => {
@@ -4799,9 +4837,9 @@ describe("TerminalRenderer command typeahead", () => {
     input.type("/");
     input.down();
     input.enter();
-    // Down moved /help → /reset; history recall would have submitted the
+    // Down moved /help → /info; history recall would have submitted the
     // earlier prompt instead.
-    expect(await second).toBe("/reset");
+    expect(await second).toBe("/info");
     renderer.shutdown();
   });
 

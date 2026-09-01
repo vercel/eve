@@ -8,6 +8,7 @@
  * dead (handle deleted) or retryable (handle restored to `parked`).
  */
 
+import type { ActivityObserverConfig, SessionAuthContext } from "#channel/types.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#harness/agent-handle-errors.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import {
@@ -27,7 +28,7 @@ import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
   RuntimeSubagentDispatchFailure,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   continueRemoteAgentSession,
@@ -43,7 +44,7 @@ import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { err, ok, type Result } from "#shared/result.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-id.js";
+import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
 const log = createLogger("execution.agent-handle-dispatch");
 
@@ -101,7 +102,9 @@ export type DispatchOutcome =
  */
 export async function dispatchToAgentHandle(input: {
   readonly action: RuntimeAgentHandleAction;
+  readonly activityObserver?: ActivityObserverConfig;
   readonly agentId: string;
+  readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
   readonly parentToken: string;
@@ -179,7 +182,9 @@ export async function dispatchToAgentHandle(input: {
   // replay only makes the parent-side transition idempotent.
   const delivery = await deliverToAgentAddress({
     action,
+    activityObserver: input.activityObserver,
     address: handle.address,
+    auth: input.auth,
     bundle,
     identity: handle.identity,
     parentToken: input.parentToken,
@@ -226,7 +231,9 @@ export async function dispatchToAgentHandle(input: {
 /** Delivers a tasks-mode continuation without creating a second lifecycle claim. */
 export async function dispatchToTaskAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
+  readonly activityObserver?: ActivityObserverConfig;
   readonly agentId: string;
+  readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
   readonly parentToken: string;
@@ -263,7 +270,9 @@ export async function dispatchToTaskAgentAddress(input: {
 
   const delivery = await deliverToAgentAddress({
     action,
+    activityObserver: input.activityObserver,
     address: record.address,
+    auth: input.auth,
     bundle: input.bundle,
     identity: record.identity,
     parentToken: input.parentToken,
@@ -315,7 +324,9 @@ export async function dispatchToTaskAgentAddress(input: {
  */
 async function deliverToAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
+  readonly activityObserver?: ActivityObserverConfig;
   readonly address: AgentAddress;
+  readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly identity: AgentIdentity;
   readonly parentToken: string;
@@ -342,6 +353,8 @@ async function deliverToAgentAddress(input: {
     }
     try {
       await continueRemoteAgentSession({
+        activityObserver: input.activityObserver,
+        auth: input.auth,
         callback: {
           callId: action.callId,
           subagentName: identity.name,
@@ -374,7 +387,9 @@ async function deliverToAgentAddress(input: {
   try {
     const result = await childRuntime.dispatchSession({
       command: {
+        auth: input.auth,
         caller: {
+          activityObserver: input.activityObserver,
           callId: action.callId,
           replyTo: { kind: "hook", token: input.parentToken },
           subagentName: identity.name,

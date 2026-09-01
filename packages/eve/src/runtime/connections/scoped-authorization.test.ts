@@ -4,7 +4,7 @@ import {
   resolveAuthorizationCallbackUrl,
   stampChallengeDisplayName,
 } from "#runtime/connections/scoped-authorization.js";
-import type { AuthorizationDefinition, TokenResult } from "#runtime/connections/types.js";
+import type { AuthorizationDefinition, TokenResult } from "#shared/connection-types.js";
 
 function interactiveAuth(
   input: { displayName?: string; connector?: string } = {},

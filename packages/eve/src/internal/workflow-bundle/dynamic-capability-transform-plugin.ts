@@ -10,8 +10,7 @@ export function createDynamicCapabilityTransformPlugin(
   return {
     async transform(code: string, id: string) {
       const normalizedId = id.replaceAll("\\", "/");
-      const transformDynamicTools =
-        options.dynamicTools !== false && normalizedId.includes("/tools/");
+      const transformDynamicTools = options.dynamicTools !== false;
       const transformDynamicRemoteAgents =
         options.dynamicRemoteAgents !== false && normalizedId.includes("/subagents/");
       if (!transformDynamicTools && !transformDynamicRemoteAgents) {

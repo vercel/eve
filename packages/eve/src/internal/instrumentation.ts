@@ -1,7 +1,7 @@
 /**
  * Shared instrumentation primitives used by both the channel projection
  * builder (`#channel/instrumentation.ts`) and the harness telemetry
- * builder (`#harness/instrumentation/runtime-context.ts`).
+ * builder (`#instrumentation/runtime-context.ts`).
  *
  * Both layers resolve a user-authored projector callback into a plain
  * record and reason about the same channel-kind vocabulary. Keeping that

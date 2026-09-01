@@ -23,7 +23,7 @@ import {
 } from "#context/keys.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
+import type { DynamicResolveContext } from "#dynamic/definition.js";
 
 function createResolver(
   slug: string,

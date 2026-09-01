@@ -2,10 +2,13 @@ import { readdirSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { stripAnsi } from "#cli/ui/terminal-text.js";
+
 import {
   HANDOFF_SECTIONS,
   initAgentDevHandoff,
   initAgentInstructions,
+  initAgentReadySummary,
   initAgentReplPrompt,
   initExtensionHandoff,
   initExtensionInstructions,
@@ -50,6 +53,17 @@ describe("initAgentInstructions", () => {
     expect(instructions).toContain("@vercel/connect/eve");
     // Both surfaces name the product, so neither path is left to hand-rolled tokens.
     expect(instructions.match(/Vercel Connect/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("initAgentReadySummary", () => {
+  it("reports the model and generated instructions path", () => {
+    expect(stripAnsi(initAgentReadySummary(undefined, "/app"))).toBe(
+      "✓ Model openai/gpt-5.6-luna-fast (eve default)\n✓ Instructions /app/agent/instructions.md",
+    );
+    expect(stripAnsi(initAgentReadySummary("openai/gpt-5.5", "/app"))).toContain(
+      "✓ Model openai/gpt-5.5\n",
+    );
   });
 });
 

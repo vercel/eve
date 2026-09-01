@@ -1,7 +1,10 @@
 import { createPromptCommandOutput, withPhase, type ChannelSetupLog } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { detectPackageManager } from "#setup/package-manager.js";
-import { runPackageManagerInstall } from "#setup/primitives/pm/run.js";
+import {
+  packageManagerInstallSucceeded,
+  runPackageManagerInstall,
+} from "#setup/primitives/pm/run.js";
 import { runVercel } from "#setup/primitives/run-vercel.js";
 
 import {
@@ -155,13 +158,13 @@ export function deployProject(
 
       if (!state.deploymentDependenciesInstalled) {
         const packageManager = await deps.detectPackageManager(projectPath);
-        const installed = await withPhase(
+        const installResult = await withPhase(
           log,
           `Installing project dependencies before deployment (${packageManager.kind} install)...`,
           () =>
             deps.runPackageManagerInstall(packageManager.kind, projectPath, { onOutput, signal }),
         );
-        if (!installed) {
+        if (!packageManagerInstallSucceeded(installResult)) {
           signal?.throwIfAborted();
           throw new Error("Dependency installation failed. Deployment did not start.");
         }

@@ -13,15 +13,15 @@ import {
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { createAiSdkHookBridge } from "#harness/ai-sdk-hook-bridge.js";
+import { createAiSdkHookBridge } from "#instrumentation/ai-sdk-hook-bridge.js";
 import { listLocalTraces } from "#tracing/local-trace-reader.js";
-import type { InstrumentationAttemptScope } from "#harness/instrumentation/lifecycle.js";
+import type { InstrumentationAttemptScope } from "#instrumentation/lifecycle.js";
 import {
   actionIdempotencyKey,
   attemptIdempotencyKey,
   sessionIdempotencyKey,
   turnIdempotencyKey,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
 import { installLocalInstrumentationRuntime } from "#tracing/local-instrumentation-runtime.js";
 import { LocalTraceSpanProcessor } from "#tracing/local-trace-span-processor.js";
 
@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 describe("local instrumentation runtime", () => {
-  it("persists agent, AI, and user spans in one trace", async () => {
+  it("persists the agent trace hierarchy in OTLP segments", async () => {
     const appRoot = await mkdtemp(join(tmpdir(), "eve-local-traces-"));
     temporaryDirectories.push(appRoot);
     // Resolve and cache the public API tracer before eve installs its vendored
@@ -59,16 +59,17 @@ describe("local instrumentation runtime", () => {
     };
     const delivery = runtimeTrace.getTracer("workflow").startSpan("workflow.delivery");
     const activeContext = runtimeTrace.setSpan(COMPILED_ROOT_CONTEXT, delivery);
+    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
 
     const exerciseRuntime = async () => {
-      await runtime.hooks.publish({
+      await hooks.publish({
         agentName: "weather",
         idempotencyKey: sessionIdempotencyKey("session-1"),
         rootSessionId: "session-1",
         sessionId: "session-1",
         type: "session.started",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         rootSessionId: "session-1",
         sequence: 0,
@@ -76,7 +77,7 @@ describe("local instrumentation runtime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      const bridge = createAiSdkHookBridge(scope, runtime.hooks, runtime.runInContext);
+      const bridge = createAiSdkHookBridge(scope, hooks, runtime.runInContext);
       Reflect.apply(bridge.onStart!, bridge, [
         {
           callId: "call-1",
@@ -115,7 +116,7 @@ describe("local instrumentation runtime", () => {
         },
       ]);
       const actionKey = actionIdempotencyKey("session-1", "turn-1", "tool-1");
-      await runtime.hooks.publish({
+      await hooks.publish({
         callId: "tool-1",
         idempotencyKey: actionKey,
         input: {},
@@ -149,26 +150,26 @@ describe("local instrumentation runtime", () => {
           toolOutput: { output: { temperature: 72 }, type: "tool-result" },
         },
       ]);
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: actionKey,
         outcome: "completed",
         output: { output: { temperature: 72 }, type: "result" },
         scope,
         type: "action.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: attemptIdempotencyKey(scope),
         scope,
         type: "step.attempt.completed",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: turnIdempotencyKey("session-1", "turn-1"),
         sessionId: "session-1",
         turnId: "turn-1",
         type: "turn.completed",
       });
       // Settling the turn emits the turn span with the pre-allocated id.
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey: sessionIdempotencyKey("session-1"),
         sessionId: "session-1",
         turnId: "turn-1",
@@ -195,19 +196,16 @@ describe("local instrumentation runtime", () => {
       }),
     );
     const spans = spanGroups.flat();
-    expect(spans.map((span) => span.name)).toEqual(
-      expect.arrayContaining([
-        "agent.turn",
-        "agent.step",
-        "ai.streamText",
-        "chat model-1",
-        "agent.action",
-        "ai.toolCall",
-        "user.model-work",
-        "user.tool-work",
-      ]),
-    );
-    expect(span(spans, "agent.step").parentSpanId).toBe(span(spans, "agent.turn").spanId);
+    expect(formatTraceTree(spans)).toEqual([
+      "agent.session",
+      "  invoke_agent weather",
+      "    agent.step",
+      "      agent.action",
+      "        execute_tool weather",
+      "          user.tool-work",
+      "      chat model-1",
+      "        user.model-work",
+    ]);
     expect(span(spans, "agent.step").links).toEqual([
       expect.objectContaining({
         attributes: expect.arrayContaining([
@@ -220,12 +218,6 @@ describe("local instrumentation runtime", () => {
         traceId: delivery.spanContext().traceId,
       }),
     ]);
-    expect(span(spans, "ai.streamText").parentSpanId).toBe(span(spans, "agent.step").spanId);
-    expect(span(spans, "chat model-1").parentSpanId).toBe(span(spans, "ai.streamText").spanId);
-    expect(span(spans, "user.model-work").parentSpanId).toBe(span(spans, "chat model-1").spanId);
-    expect(span(spans, "agent.action").parentSpanId).toBe(span(spans, "agent.turn").spanId);
-    expect(span(spans, "ai.toolCall").parentSpanId).toBe(span(spans, "agent.action").spanId);
-    expect(span(spans, "user.tool-work").parentSpanId).toBe(span(spans, "ai.toolCall").spanId);
     const listed = await listLocalTraces(appRoot);
     expect(listed).toHaveLength(1);
     expect(listed[0]).toMatchObject({ sessionId: "session-1", traceId });
@@ -279,4 +271,30 @@ interface OtlpRequest {
 
 function span(spans: readonly OtlpSpan[], name: string): OtlpSpan {
   return spans.find((candidate) => candidate.name === name)!;
+}
+
+function formatTraceTree(spans: readonly OtlpSpan[]): string[] {
+  const children = Map.groupBy(spans, (candidate) => candidate.parentSpanId);
+  const lines: string[] = [];
+  const visited = new Set<string>();
+
+  const append = (current: OtlpSpan, depth: number): void => {
+    visited.add(current.spanId);
+    lines.push(`${"  ".repeat(depth)}${current.name}`);
+    for (const child of (children.get(current.spanId) ?? []).toSorted((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      append(child, depth + 1);
+    }
+  };
+
+  for (const root of (children.get(undefined) ?? []).toSorted((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
+    append(root, 0);
+  }
+  for (const orphan of spans.filter((candidate) => !visited.has(candidate.spanId))) {
+    lines.push(`[orphan parent=${orphan.parentSpanId ?? "none"}] ${orphan.name}`);
+  }
+  return lines;
 }

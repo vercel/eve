@@ -1,8 +1,9 @@
 /**
  * Per-step cache of resolved connection authorization tokens.
  *
- * Keyed by `(connectionName, principalKey)` so two users on the same
- * session never share a user-scoped token. Stored as a virtual
+ * Keyed by `(authorizationScope, principalKey)` so two users on the same
+ * session never share a user-scoped token and two resolved connection
+ * instances never share credentials. Stored as a virtual
  * context value and wiped between workflow steps, so bearer tokens
  * are never serialized into the durable step payload. Cross-step
  * reuse is delegated to the upstream authorization provider (for
@@ -15,15 +16,15 @@
 
 import type { AlsContext, ContextContainer } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
-import type { TokenResult } from "#runtime/connections/types.js";
+import type { TokenResult } from "#shared/connection-types.js";
 
 /**
- * Inner map of `principalKey` → {@link TokenResult} for one connection.
+ * Inner map of `principalKey` → {@link TokenResult} for one authorization scope.
  */
 type PrincipalTokenCache = Readonly<Record<string, TokenResult>>;
 
 /**
- * Virtual context key mapping connection name to a per-principal
+ * Virtual context key mapping authorization scope to a per-principal
  * {@link TokenResult} cache.
  *
  * The principal sub-key is produced by
@@ -37,16 +38,16 @@ export const ConnectionAuthorizationTokensKey = new ContextKey<
 
 /**
  * Returns the cached {@link TokenResult} for
- * `(connectionName, principalKey)` when the entry is still valid
+ * `(authorizationScope, principalKey)` when the entry is still valid
  * (not expired). Expired entries are treated as a cache miss so
  * callers re-run the authorization flow.
  */
 export function readCachedToken(
   ctx: AlsContext,
-  connectionName: string,
+  authorizationScope: string,
   principalKey: string,
 ): TokenResult | undefined {
-  const entry = ctx.get(ConnectionAuthorizationTokensKey)?.[connectionName]?.[principalKey];
+  const entry = ctx.get(ConnectionAuthorizationTokensKey)?.[authorizationScope]?.[principalKey];
   if (entry === undefined) return undefined;
   if (entry.expiresAt !== undefined && entry.expiresAt <= Date.now()) {
     return undefined;
@@ -56,28 +57,28 @@ export function readCachedToken(
 
 /**
  * Persists a freshly resolved {@link TokenResult} on the cache under
- * `(connectionName, principalKey)`. Existing entries for other
- * principals on the same connection are left in place.
+ * `(authorizationScope, principalKey)`. Existing entries for other
+ * principals in the same scope are left in place.
  *
  * Writes to the virtual context slot so the bearer is never serialized
  * into the durable step payload. See the module docblock.
  */
 export function writeCachedToken(
   ctx: AlsContext,
-  connectionName: string,
+  authorizationScope: string,
   principalKey: string,
   token: TokenResult,
 ): void {
   const existing = ctx.get(ConnectionAuthorizationTokensKey) ?? {};
-  const perConnection = existing[connectionName] ?? {};
+  const perScope = existing[authorizationScope] ?? {};
   asContainer(ctx).setVirtualContext(ConnectionAuthorizationTokensKey, {
     ...existing,
-    [connectionName]: { ...perConnection, [principalKey]: token },
+    [authorizationScope]: { ...perScope, [principalKey]: token },
   });
 }
 
 /**
- * Drops the cached {@link TokenResult} for `(connectionName, principalKey)`,
+ * Drops the cached {@link TokenResult} for `(authorizationScope, principalKey)`,
  * if present. Used when the remote server rejects an already-resolved
  * bearer (HTTP 401) so the subsequent re-authorization attempt does not
  * re-read the stale token from the per-step cache. No-op when nothing is
@@ -85,18 +86,18 @@ export function writeCachedToken(
  */
 export function evictCachedToken(
   ctx: AlsContext,
-  connectionName: string,
+  authorizationScope: string,
   principalKey: string,
 ): void {
   const existing = ctx.get(ConnectionAuthorizationTokensKey);
-  const perConnection = existing?.[connectionName];
-  if (existing === undefined || perConnection === undefined) return;
-  if (perConnection[principalKey] === undefined) return;
+  const perScope = existing?.[authorizationScope];
+  if (existing === undefined || perScope === undefined) return;
+  if (perScope[principalKey] === undefined) return;
 
-  const { [principalKey]: _removed, ...rest } = perConnection;
+  const { [principalKey]: _removed, ...rest } = perScope;
   asContainer(ctx).setVirtualContext(ConnectionAuthorizationTokensKey, {
     ...existing,
-    [connectionName]: rest,
+    [authorizationScope]: rest,
   });
 }
 

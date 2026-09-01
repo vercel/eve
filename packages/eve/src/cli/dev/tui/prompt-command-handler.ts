@@ -122,6 +122,10 @@ export function createPromptCommandHandler(
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
         }
+        // `/add <item>` opens that registry item directly; bare `/add` browses.
+        if (command.name === "add" && command.argument.length > 0) {
+          commandInput.initialRegistryAddress = command.argument;
+        }
         if (options.flows !== undefined) commandInput.flows = options.flows;
         const result = await runTuiSetupCommand(commandInput);
         preserveFlowDiagnostics = result.preserveFlowDiagnostics;

@@ -6,8 +6,9 @@ import type {
   SessionAuthContext,
   TurnCaller,
 } from "#channel/types.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 /**
  * Merges two {@link StepInput} values into one.
@@ -28,6 +29,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   const context = coalesceContext({
     a: a.context,
     b: b.context,
+  });
+  const ephemeralContext = coalesceContext({
+    a: readClientContext(a),
+    b: readClientContext(b),
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
@@ -54,7 +59,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     result.outputSchema = outputSchema;
   }
 
-  return result;
+  return attachClientContext(result, ephemeralContext);
 }
 
 /**
@@ -79,6 +84,23 @@ export function normalizeUserContent(
     return undefined;
   }
   return parts.length === content.length ? content : parts;
+}
+
+/** Removes blank text blocks that some providers reject from model-bound history. */
+export function normalizeModelMessages(messages: readonly ModelMessage[]): ModelMessage[] {
+  return messages.flatMap((message) => {
+    if (typeof message.content === "string") {
+      return message.content.trim().length > 0 ? [message] : [];
+    }
+
+    const content = message.content.filter(
+      (part) => part.type !== "text" || part.text.trim().length > 0,
+    );
+    if (content.length === 0) return [];
+    return content.length === message.content.length
+      ? [message]
+      : [{ ...message, content } as ModelMessage];
+  });
 }
 
 /**

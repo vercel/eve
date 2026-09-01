@@ -204,14 +204,14 @@ describe("requestPublicUrl", () => {
     expect(fetchDispatcher).toBe(networkMocks.dispatcherInstances[0]);
   });
 
-  it("returns private redirect targets without requesting them", async () => {
+  it("rejects private redirect targets without requesting them", async () => {
     queueResponse({
       headers: { location: "https://169.254.169.254/latest/meta-data" },
       status: 302,
     });
 
     await expect(requestPublicUrl("https://example.com", REQUEST_OPTIONS)).rejects.toThrow(
-      "Request redirected to https://169.254.169.254/latest/meta-data. Call web_fetch again",
+      "URL must not target localhost, private, link-local, or reserved IP addresses",
     );
 
     expect(networkMocks.fetch).toHaveBeenCalledTimes(1);
@@ -234,19 +234,23 @@ describe("requestPublicUrl", () => {
     expect(networkMocks.lookup).toHaveBeenCalledTimes(1);
   });
 
-  it("returns an absolute HTTPS redirect target for agent follow-up", async () => {
-    queueResponse({
-      headers: { location: "/article" },
-      status: 301,
-    });
+  it("follows at most ten relative HTTPS redirects", async () => {
+    for (let index = 1; index <= 11; index++) {
+      queueResponse({
+        headers: { location: `/redirect-${index}` },
+        status: 301,
+      });
+    }
 
-    await expect(requestPublicUrl("https://example.com/start", REQUEST_OPTIONS)).rejects.toThrow(
-      "Request redirected to https://example.com/article. Call web_fetch again with that URL.",
+    const response = await requestPublicUrl("https://example.com/start", REQUEST_OPTIONS);
+
+    expect(response.status).toBe(301);
+    expect(networkMocks.fetch).toHaveBeenCalledTimes(11);
+    expect(networkMocks.agentClose).toHaveBeenCalledTimes(11);
+    expect(networkMocks.lookup).toHaveBeenCalledTimes(11);
+    expect(networkMocks.fetch.mock.calls[10]![0]).toEqual(
+      new URL("https://example.com/redirect-10"),
     );
-
-    expect(networkMocks.fetch).toHaveBeenCalledTimes(1);
-    expect(networkMocks.agentClose).toHaveBeenCalledTimes(1);
-    expect(networkMocks.lookup).toHaveBeenCalledTimes(1);
   });
 
   it("rejects declared and streamed bodies over the response limit", async () => {

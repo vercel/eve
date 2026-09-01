@@ -3,11 +3,12 @@ import type { UserContent } from "ai";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { TaskView } from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
@@ -83,6 +84,7 @@ export interface SessionParent {
  * free of tracing dependencies.
  */
 export interface SessionTraceContext {
+  readonly decision?: InstrumentationDecision;
   readonly spanId: string;
   readonly traceFlags: number;
   readonly traceId: string;
@@ -136,6 +138,7 @@ export type EventEmitFn = (event: UnstampedMessageStreamEvent) => Promise<void>;
 
 /** Framework-internal caller waiting for one delegated conversation turn. */
 export interface TurnCaller {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly callId: string;
   readonly subagentName: string;
   /** Present when this turn is the executor for a durable background task. */
@@ -371,6 +374,16 @@ export type HookPayload =
  * terminal session result. Conversation sessions use this as their first turn's
  * caller; each continuation supplies the caller for that turn.
  */
+export interface ActivitySinkV1 {
+  readonly url: string;
+  readonly version: 1;
+}
+
+export interface ActivityObserverConfig {
+  readonly sink: ActivitySinkV1;
+  readonly workIdentity?: import("#protocol/activity.js").ActivityWorkIdentityV1;
+}
+
 export interface SessionCallback {
   readonly callId: string;
   readonly subagentName: string;
@@ -454,6 +467,8 @@ export interface RunInput {
    * the caller for their own turn.
    */
   readonly callback?: SessionCallback;
+  /** Private collector capability and current work lineage. */
+  readonly activityObserver?: ActivityObserverConfig;
   /**
    * Session continuation token for delivery and hook creation. Channels can
    * re-key the session during the first turn via

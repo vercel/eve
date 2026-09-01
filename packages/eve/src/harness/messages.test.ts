@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   coalesceDeliveries,
   coalesceTurnInputs,
+  normalizeModelMessages,
   normalizeUserContent,
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 function textFilePart(overrides: {
   readonly filename: string;
@@ -107,6 +109,16 @@ describe("coalesceTurnInputs", () => {
         { requestId: "r2", text: "yes" },
       ],
     });
+  });
+
+  it("coalesces ephemeral context without making it durable context", () => {
+    const result = coalesceTurnInputs(
+      attachClientContext({}, ["first"]),
+      attachClientContext({}, ["second"]),
+    );
+
+    expect(readClientContext(result)).toEqual(["first", "second"]);
+    expect(result.context).toBeUndefined();
   });
 
   it("combines messages and inputResponses", () => {
@@ -222,6 +234,26 @@ describe("normalizeUserContent", () => {
     expect(coalesceTurnInputs({ message: [attachment] }, { message: " " }).message).toEqual([
       attachment,
     ]);
+  });
+});
+
+describe("normalizeModelMessages", () => {
+  it("drops blank text without removing meaningful structured content", () => {
+    const toolCall = {
+      input: {},
+      toolCallId: "call-1",
+      toolName: "probe",
+      type: "tool-call" as const,
+    };
+    const visible = { content: "Keep me", role: "user" as const };
+
+    expect(
+      normalizeModelMessages([
+        { content: " ", role: "assistant" },
+        { content: [{ text: "", type: "text" }, toolCall], role: "assistant" },
+        visible,
+      ]),
+    ).toEqual([{ content: [toolCall], role: "assistant" }, visible]);
   });
 });
 

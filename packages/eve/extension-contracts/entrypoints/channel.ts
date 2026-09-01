@@ -1,11 +1,15 @@
 export {
   DELETE,
   GET,
+  HEAD,
+  OPTIONS,
   PATCH,
   POST,
   PUT,
   WS,
   createWebSocketUpgradeServer,
   defineChannel,
+  disableRoute,
   isChannel,
+  isDisabledRouteSentinel,
 } from "../../src/public/channels/index.ts";

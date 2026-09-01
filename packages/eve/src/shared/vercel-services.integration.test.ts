@@ -137,6 +137,32 @@ describe("ensureEveVercelServicesConfig", () => {
     expect(result).toEqual({ mode: "root" });
   });
 
+  it("prefers the host root vercel.json services over the linked project root's", async () => {
+    const projectRoot = await createTempHostRoot();
+    const hostRoot = join(projectRoot, "apps", "web");
+    await mkdir(join(projectRoot, ".vercel"), { recursive: true });
+    await writeFile(join(projectRoot, ".vercel", "project.json"), "{}\n");
+    await mkdir(hostRoot, { recursive: true });
+    await writeFile(join(projectRoot, "vercel.json"), `${JSON.stringify({})}\n`);
+    await writeFile(
+      join(hostRoot, "vercel.json"),
+      `${JSON.stringify({
+        services: {
+          web: { root: ".", framework: "nuxtjs" },
+          eve: { root: "agent", framework: "eve" },
+        },
+      })}\n`,
+    );
+
+    const result = await ensureEveVercelServicesConfig({
+      appRoot: hostRoot,
+      frameworkName: "Test",
+      hostRoot: hostRoot,
+    });
+
+    expect(result).toEqual({ mode: "root" });
+  });
+
   it("generates nothing when vercel.json declares services including eve", async () => {
     const hostRoot = await createTempHostRoot();
     await writeFile(

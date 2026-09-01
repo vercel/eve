@@ -6,6 +6,7 @@ import {
   connectionProtocols as protocolsForIdentity,
   extensionEntries,
   instrumentationEntries,
+  memoryEntries,
 } from "@eve/catalog";
 import type { LogoKey } from "./logos";
 
@@ -18,7 +19,7 @@ import type { LogoKey } from "./logos";
  * keyed by slug.
  */
 
-export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation";
+export type IntegrationType = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
 /** Wire protocol and transport identity types are owned by the shared catalog. */
 export type { ConnectionProtocol, McpTransport, OpenApiTransport } from "@eve/catalog";
@@ -84,8 +85,8 @@ export interface Integration {
   /** Searchable keywords beyond the name. */
   keywords?: string[];
   /**
-   * Channels and extensions author their setup as markdown. Connections leave
-   * these unset and supply a `connection` spec, from which content is generated.
+   * Channels and extensions author their setup as markdown. Connections normally
+   * generate it from `connection`, but may override Quick start and Configure.
    */
   install?: string;
   quickStart?: string;
@@ -110,16 +111,21 @@ interface ChannelPresentation extends Presentation {
   configure: string;
 }
 
-/** Extension overlay with hand-authored package setup. */
-interface ExtensionPresentation extends Presentation {
+/** Extension and memory overlays with hand-authored package setup. */
+interface PackagePresentation extends Presentation {
   install: string;
   quickStart: string;
   configure: string;
 }
 
+type ExtensionPresentation = PackagePresentation;
+type MemoryPresentation = PackagePresentation;
+
 /** Connection overlay: presentation plus Connect auth/config details. */
 interface ConnectionPresentation extends Presentation {
   authModes: AuthMode[];
+  quickStart?: string;
+  configure?: string;
   apiKey?: ApiKeySpec;
   connector?: string;
   connectors?: Partial<Record<AuthMode, string>>;
@@ -266,6 +272,47 @@ TWILIO_ACCOUNT_SID=AC...   # required for default outbound SMS
 TWILIO_AUTH_TOKEN=...      # required for inbound signature verification
 \`\`\``,
     configure: `In the Twilio console, point your number's Messaging webhook at \`/eve/v1/twilio/messages\` and its Voice webhook at \`/eve/v1/twilio/voice\`. Inbound calls are answered with speech gathering, and the transcript feeds the same session SMS uses. See the [Twilio channel docs](/docs/channels/twilio) for dispatch, streaming, and voice specifics.`,
+  },
+  blooio: {
+    logo: "blooio",
+    docsHref: "https://github.com/Blooio/eve-channel-blooio#readme",
+    badge: "Provider official",
+    keywords: [
+      "imessage",
+      "rcs",
+      "sms",
+      "blooio",
+      "tapback",
+      "typing",
+      "read receipt",
+      "poll",
+      "group",
+    ],
+    install: `Add this channel from eve's registry. This writes \`agent/channels/blooio.ts\` and installs the \`eve-channel-blooio\` package:
+
+\`\`\`bash
+eve add channel/blooio
+\`\`\``,
+    quickStart: `Create \`agent/channels/blooio.ts\`:
+
+\`\`\`ts
+// agent/channels/blooio.ts
+import { blooioChannel } from "eve-channel-blooio";
+
+export default blooioChannel();
+\`\`\`
+
+Blooio is a native eve channel built on \`defineChannel\` (not a Chat SDK adapter), so eve owns session dispatch, streaming, and human-in-the-loop directly. See the [eve-channel-blooio README](https://github.com/Blooio/eve-channel-blooio#readme) for the full \`BlooioHandle\` surface: reactions, typing indicators, read receipts, polls, groups, capability checks, and history.`,
+    configure: `Set \`BLOOIO_API_KEY\` (a \`bl_live_...\` key) and \`BLOOIO_WEBHOOK_SECRET\` (\`whsec_...\`), then point a Blooio webhook at \`/eve/v1/blooio\`:
+
+\`\`\`bash
+curl -X POST https://api.blooio.com/v4/webhooks \\
+  -H "Authorization: Bearer $BLOOIO_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "url": "https://your-app.vercel.app/eve/v1/blooio", "event_types": ["*"] }'
+\`\`\`
+
+Blooio signs every delivery with \`X-Blooio-Signature: t=<unix>,v1=<hmac_sha256>\`; the channel verifies it and rejects timestamps older than 5 minutes. Inbound media is re-hosted at servable URLs and forwarded to the model as multimodal file parts.`,
   },
   github: {
     logo: "github",
@@ -495,10 +542,16 @@ export const { bot, channel, send } = chatSdkChannel({
   userName: "My Agent",
   adapters: { x: createXAdapter() },
   state: createMemoryState(),
+  // X buffers replies and posts once rather than editing a streamed message.
+  streaming: false,
 });
 
 bot.onNewMention(async (thread: Thread, message: Message) => {
   await thread.subscribe();
+  await send(message.text, { thread });
+});
+
+bot.onDirectMessage(async (thread: Thread, message: Message) => {
   await send(message.text, { thread });
 });
 
@@ -509,8 +562,8 @@ bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
 export default channel;
 \`\`\`
 
-Credentials come from the \`createXAdapter\` config or the adapter's environment variables; see the [X adapter docs](https://chat-sdk.dev/adapters/official/x).`,
-    configure: `The adapter mounts its webhook at \`/eve/v1/x\`. Point your X account activity webhook at it. The adapter owns provider auth, verification, and delivery, while eve owns session dispatch, streaming, typing, and human-in-the-loop. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for routes, streaming, and state options.`,
+For a DM-only agent, keep \`bot.onDirectMessage\` and remove the \`bot.onNewMention\` and \`bot.onSubscribedMessage\` handlers. Configure the app's credentials and webhook before deploying.`,
+    configure: `Follow the [X adapter documentation](https://chat-sdk.dev/adapters/official/x) to configure authentication, webhook verification, and Activity API subscriptions. Register the deployed agent's \`/eve/v1/x\` route as the X webhook URL. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve route and state options.`,
   },
   "chat-sdk-messenger": {
     logo: "messenger",
@@ -810,50 +863,27 @@ export default channel;
 See the [Liveblocks adapter documentation](https://chat-sdk.dev/adapters/vendor-official/liveblocks) for supported events, capabilities, and credentials.`,
     configure: `Create a Liveblocks webhook, set \`LIVEBLOCKS_SECRET_KEY\` and \`LIVEBLOCKS_WEBHOOK_SECRET\`, and send comment events to \`/eve/v1/liveblocks\`. The adapter maps rooms to channels, comment threads to threads, and comments to messages. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
-  "chat-sdk-linq": {
+  linq: {
     logo: "linq",
-    docsHref: "/docs/channels/chat-sdk",
-    badge: "Provider official",
-    keywords: ["chat sdk", "linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
-    install: `Add this Chat SDK channel from eve's registry. This writes \`agent/channels/linq.ts\` and installs Chat SDK and its adapter dependencies:
+    docsHref: "/docs/channels/linq",
+    badge: "First-party",
+    keywords: ["linq", "imessage", "sms", "apple messages", "tapbacks", "phone"],
+    install: `Add Linq from eve's registry, then follow the guided Connect or portable credential setup:
 
 \`\`\`bash
-eve add channel/chat-sdk-linq
+eve add channel/linq
 \`\`\``,
     quickStart: `Create \`agent/channels/linq.ts\`:
 
 \`\`\`ts
-// agent/channels/linq.ts
-import { createLinqAdapter } from "@linqapp/chat-sdk-adapter";
-import { createMemoryState } from "@chat-adapter/state-memory";
-import type { Message, Thread } from "chat";
-import { chatSdkChannel } from "eve/channels/chat-sdk";
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
 
-export const { bot, channel, send } = chatSdkChannel({
-  userName: "My Agent",
-  adapters: {
-    linq: createLinqAdapter({
-      apiKey: process.env.LINQ_API_KEY!,
-      signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
-    }),
-  },
-  state: createMemoryState(),
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
 });
-
-bot.onNewMention(async (thread: Thread, message: Message) => {
-  await thread.subscribe();
-  await send(message.text, { thread });
-});
-
-bot.onSubscribedMessage(async (thread: Thread, message: Message) => {
-  await send(message.text, { thread });
-});
-
-export default channel;
-\`\`\`
-
-See the [Linq adapter documentation](https://chat-sdk.dev/adapters/vendor-official/linq) for supported events, capabilities, and credentials.`,
-    configure: `Create a Linq account, set \`LINQ_API_KEY\` and \`LINQ_WEBHOOK_SECRET\`, then point its signed webhook at \`/eve/v1/linq\`. Linq supports iMessage and SMS DMs and group chats, media, buffered streaming, and tapbacks. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
+\`\`\``,
+    configure: `The guided setup can provision a managed Linq line with Vercel Connect or collect portable credentials. Connect-backed setup creates a native Linq connector and routes verified triggers to \`/eve/v1/linq\`; with portable credentials, deploy first, then create a signed Linq webhook for that route.`,
   },
   "chat-sdk-kapso": {
     logo: "kapso",
@@ -1157,7 +1187,50 @@ See the [Email (Resend) adapter documentation](https://chat-sdk.dev/adapters/ven
     configure: `Verify a sending domain in Resend, set \`RESEND_API_KEY\`, \`RESEND_WEBHOOK_SECRET\`, and \`RESEND_FROM_ADDRESS\`, then point the Resend inbound webhook at \`/eve/v1/resend\`. This is a vendor-official Chat SDK adapter. See the [Chat SDK channel docs](/docs/channels/chat-sdk) for eve session dispatch, state, streaming, and human-in-the-loop behavior.`,
   },
 };
-const extensionPresentations: Record<string, ExtensionPresentation> = {
+const baseExtensionPresentations: Record<string, ExtensionPresentation> = {
+  blitzreels: {
+    logo: "blitzreels",
+    docsHref: "https://www.npmjs.com/package/@blitzreels/eve",
+    keywords: [
+      "video editing",
+      "long form video",
+      "short clips",
+      "shorts",
+      "vertical video",
+      "visual qa",
+      "media generation",
+      "exports",
+    ],
+    install: `Install the BlitzReels extension for eve:
+
+\`\`\`bash
+eve add extension/blitzreels
+\`\`\`
+
+The extension requires Node.js 24 or later. It wraps the BlitzReels API with typed tools for clipping, project inspection, visual-QA repair, AI media generation, and exports.`,
+    quickStart: `Add a BlitzReels API key to the agent's environment:
+
+\`\`\`bash title=".env.local"
+BLITZREELS_API_KEY=br_live_...
+\`\`\`
+
+Then mount the extension under \`agent/extensions/\`:
+
+\`\`\`ts title="agent/extensions/blitzreels.ts"
+import blitzreels from "@blitzreels/eve";
+
+export default blitzreels({
+  apiKey: process.env.BLITZREELS_API_KEY!,
+});
+\`\`\`
+
+The filename supplies the \`blitzreels\` namespace. The extension adds project, media, clipping, repair, generation, snapshot, and export tools such as \`blitzreels__create_clip_batch\`, \`blitzreels__repair_clip\`, and \`blitzreels__start_export\`. It also ships a clipping skill that teaches the agent the long-form-to-shorts workflow and visual-QA repair loop.`,
+    configure: `Keep the API key in the environment rather than prompts or source control. Keys are environment-bounded: use \`br_live_...\` with the production API, and use \`br_test_...\` only with the matching local or development \`baseUrl\`.
+
+Source imports, clipping, generation, and exports call the configured BlitzReels API. Credit-spending, download, and render tools require eve approval by default, and durable retries reuse the original call receipt instead of spending twice. Override an individual tool from a directory mount when it needs stricter \`always()\` approval, or use \`disableTool()\` to remove it.
+
+See the [BlitzReels extension package](https://www.npmjs.com/package/@blitzreels/eve) for the complete tool list, configuration, approval defaults, error contract, and OAuth-backed MCP alternative.`,
+  },
   browserbase: {
     logo: "browserbase",
     docsHref: "https://www.npmjs.com/package/@browserbasehq/eve",
@@ -1558,6 +1631,61 @@ For a self-hosted server, set \`HINDSIGHT_API_URL\` and pass \`apiKey: null\` to
 
 A bank is one isolated memory store, and both files must use the same bank. Do not share the default bank across untrusted users; use separate agent deployments with distinct \`HINDSIGHT_BANK_ID\` values for separate users or tenants. See the [Hindsight eve integration guide](https://hindsight.vectorize.io/sdks/integrations/eve) for Cloud, self-hosted, and factory configuration.`,
   },
+};
+
+const memoryPresentations: Record<string, MemoryPresentation> = {
+  supermemory: {
+    logo: "supermemory",
+    docsHref: "https://github.com/supermemoryai/eve-supermemory#readme",
+    keywords: [
+      "memory",
+      "long-term memory",
+      "semantic search",
+      "rag",
+      "conversation history",
+      "retrieval",
+      "Supermemory",
+    ],
+    install: `Install the Supermemory provider for eve:
+
+\`\`\`bash
+eve add memory/supermemory
+\`\`\`
+
+This installs \`@supermemory/eve\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.47.3 or later.`,
+    quickStart: `Create a Supermemory API key and add it to the agent's environment:
+
+\`\`\`bash title=".env.local"
+SUPERMEMORY_API_KEY=...
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/supermemory.ts"
+import supermemory from "@supermemory/eve";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: supermemory({
+    apiKey: process.env.SUPERMEMORY_API_KEY!,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`supermemory\` memory slot, so the provider's tools are named \`supermemory__search\`, \`supermemory__remember\`, and \`supermemory__forget\`. The provider uses eve's locked scope key to partition all reads and writes.`,
+    configure: `\`byPrincipal\` keeps memory disabled for anonymous and runtime principals, and shares the local-development scope while you run \`eve dev\`. For a multi-tenant agent, replace it with a scope resolver that derives both tenant and caller identity from verified session context. See [Multi-tenant memory](/docs/patterns/multi-tenant-memory).
+
+Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
+
+Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://github.com/supermemoryai/eve-supermemory#readme) for all options and tool behavior.`,
+  },
+};
+
+const extensionPresentations: Record<string, ExtensionPresentation> = {
+  ...baseExtensionPresentations,
   "agent-browser": {
     logo: "agent-browser",
     docsHref:
@@ -1626,6 +1754,12 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     },
     configureNote:
       "Browser Use runs tasks in managed cloud browsers. Add approval gates or tool filters before allowing unattended browser actions.",
+  },
+  agentcard: {
+    logo: "agentcard",
+    docsHref: "/docs/connections/mcp",
+    keywords: ["mcp", "shopping", "checkout", "payments", "virtual cards", "commerce", "connect"],
+    authModes: ["user"],
   },
   vercel: {
     logo: "vercel",
@@ -1839,6 +1973,57 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "/docs/connections/mcp",
     keywords: ["mcp", "traffic", "market data", "competitive intelligence", "oauth", "connect"],
     authModes: ["user"],
+  },
+  shopify: {
+    logo: "shopify",
+    docsHref: "https://shopify.dev/docs/apps/build/storefront-mcp",
+    keywords: ["mcp", "ucp", "commerce", "products", "carts", "checkouts"],
+    authModes: [],
+    quickStart: `Create \`agent/connections/shopify.ts\`:
+
+\`\`\`ts
+import { defineMcpClientConnection } from "eve/connections";
+
+const SHOPIFY_EXAMPLE_PROFILE =
+  "https://shopify.dev/ucp/agent-profiles/examples/2026-04-08/valid-with-capabilities.json";
+
+// Shopify cannot reach localhost. Use its public profile, or expose this route with a tool like ngrok.
+function agentProfileUrl(): string {
+  if (process.env.EVE_DEV === "1") return SHOPIFY_EXAMPLE_PROFILE;
+
+  return \`https://\${process.env.VERCEL_PROJECT_PRODUCTION_URL}/.well-known/ucp\`;
+}
+
+export default defineMcpClientConnection({
+  url: \`https://\${process.env.SHOPIFY_STORE_DOMAIN!}/api/ucp/mcp\`,
+  description: "Search products and build carts and checkouts on a Shopify storefront.",
+  toolCall: {
+    providedArguments: {
+      meta: ({ callId, session, toolName }) => ({
+        "ucp-agent": {
+          profile: agentProfileUrl(),
+        },
+
+        // Include callId so sibling calls are unique while durable replays reuse the same key.
+        ...(["cancel_cart", "complete_checkout", "cancel_checkout"].includes(toolName)
+          ? {
+              "idempotency-key": \`\${session.id}:\${session.turn.id}:\${toolName}:\${callId}\`,
+            }
+          : {}),
+      }),
+    },
+  },
+});
+\`\`\``,
+    configure: `Set your Shopify storefront domain:
+
+\`\`\`bash
+SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
+\`\`\`
+
+During local development, the connection uses Shopify's public example because Shopify cannot reach localhost. To test your profile locally, expose \`/.well-known/ucp\` with [ngrok](https://ngrok.com/). In production, the connection uses the anonymous profile at \`/.well-known/ucp\`.
+
+See Shopify's [agent profile documentation](https://shopify.dev/docs/agents/profiles) for profile requirements.`,
   },
   stripe: {
     logo: "stripe",
@@ -2259,6 +2444,8 @@ function buildConnection(entry: IntegrationEntry): Integration {
     logo: presentation.logo,
     docsHref: presentation.docsHref,
     keywords: presentation.keywords,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
     connection: spec,
   };
 }
@@ -2274,6 +2461,27 @@ function buildExtension(entry: IntegrationEntry): Integration {
     slug: entry.slug,
     name: entry.name,
     type: "extension",
+    tagline: entry.tagline,
+    logo: presentation.logo,
+    docsHref: presentation.docsHref,
+    keywords: presentation.keywords,
+    install: presentation.install,
+    quickStart: presentation.quickStart,
+    configure: presentation.configure,
+  };
+}
+
+function buildMemory(entry: IntegrationEntry): Integration {
+  const presentation = memoryPresentations[entry.slug];
+  if (presentation === undefined) {
+    throw new Error(
+      `Memory provider "${entry.slug}" is in the catalog gallery but has no docs presentation.`,
+    );
+  }
+  return {
+    slug: entry.slug,
+    name: entry.name,
+    type: "memory",
     tagline: entry.tagline,
     logo: presentation.logo,
     docsHref: presentation.docsHref,
@@ -2317,6 +2525,10 @@ const extensions: Integration[] = extensionEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildExtension);
 
+const memory: Integration[] = memoryEntries()
+  .filter((entry) => entry.surfaces.gallery)
+  .map(buildMemory);
+
 const instrumentation: Integration[] = instrumentationEntries()
   .filter((entry) => entry.surfaces.gallery)
   .map(buildInstrumentation);
@@ -2344,6 +2556,7 @@ export const authModeLabel: Record<AuthMode, string> = {
 export const integrations: Integration[] = [
   ...channels,
   ...extensions,
+  ...memory,
   ...connections,
   ...instrumentation,
 ];

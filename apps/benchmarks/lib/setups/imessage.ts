@@ -6,11 +6,11 @@ const REGISTRY_PORT = 4173;
 const REGISTRY_URL = `http://127.0.0.1:${REGISTRY_PORT}`;
 
 export const imessageSetup: AuthoringSetup = {
-  id: "imessage",
+  id: "imessage-v1",
   ports: [REGISTRY_PORT],
   environment: { EVE_DEV_OFFICIAL_REGISTRY_URL: REGISTRY_URL },
   async onBootstrap({ run, artifactsRoot, write }) {
-    const setupRoot = `${artifactsRoot}/photon-setup`;
+    const setupRoot = `${artifactsRoot}/mock-imessage-setup`;
     await Promise.all(
       ["authoring-world.mjs", "cli.mjs", "package.json"].map((file) =>
         write(
@@ -19,6 +19,10 @@ export const imessageSetup: AuthoringSetup = {
         ),
       ),
     );
+    // `setupRoot` is absolute, so this must not be prefixed with `./`: pnpm
+    // would normalize the result to a relative path, link a directory that does
+    // not exist, and name the dependency after the basename instead of the
+    // package, leaving `eve add` unable to find the setup command.
     await run(`pnpm add ${setupRoot}`);
     await run(`mkdir -p ${artifactsRoot}/registry/channel`);
 
@@ -26,22 +30,22 @@ export const imessageSetup: AuthoringSetup = {
       $schema: "https://ui.shadcn.com/schema/registry-item.json",
       name: "channel/photon-imessage",
       title: "Photon iMessage",
-      description: "Connect an eve agent to iMessage through Photon.",
+      description: "Connect an eve agent to iMessage through a deterministic provider setup flow.",
       files: [
         {
           path: "registry/channels/photon-imessage.ts",
           type: "registry:file",
           target: "agent/channels/imessage.ts",
           content:
-            'import { photonIMessageChannel } from "eve/channels/photon";\n\nexport default photonIMessageChannel({ credentials: async () => ({ projectId: "photon-project", projectSecret: "photon-project-secret" }) });\n',
+            'import { photonIMessageChannel } from "eve/channels/photon";\n\nexport default photonIMessageChannel({ credentials: async () => ({ projectId: "mock-imessage-project", projectSecret: "mock-imessage-secret" }) });\n',
         },
       ],
       meta: {
         eve: {
           setup: {
-            command: "photon-setup",
-            package: "@photon-ai/setup",
-            bin: "photon-setup",
+            command: "mock-imessage-setup",
+            package: "@eve-internal/mock-imessage-setup",
+            bin: "mock-imessage-setup",
             args: [],
           },
         },
@@ -50,7 +54,7 @@ export const imessageSetup: AuthoringSetup = {
     };
     const registry = {
       $schema: "https://ui.shadcn.com/schema/registry.json",
-      name: "eve-official",
+      name: "eve-authoring-eval",
       homepage: REGISTRY_URL,
       items: [
         {

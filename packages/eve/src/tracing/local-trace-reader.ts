@@ -52,15 +52,13 @@ export interface LocalTrace {
   /**
    * Every session recorded in the trace, opener first.
    *
-   * A subagent child records into the window its parent had open, so one
+   * A subagent child records into the trace its parent opened, so one
    * trace can hold several sessions and any of their ids resolves to it.
    */
   readonly sessionIds: readonly string[];
   readonly spans: readonly LocalTraceSpan[];
   readonly startTimeNs: bigint;
   readonly traceId: string;
-  /** Zero-based session window this trace holds, when the spans record one. */
-  readonly window?: number;
 }
 
 /**
@@ -200,7 +198,6 @@ export function assembleLocalTrace(traceId: string, spans: readonly LocalTraceSp
       ordered[0]!.startTimeNs,
     ),
     traceId,
-    window: firstNumberAttribute(attributes, "agent.session.window"),
   };
 }
 
@@ -219,7 +216,7 @@ export function describeLocalTraceSpan(span: LocalTraceSpan): string[] {
   const model =
     stringSpanAttribute(span, "agent.model.id") ??
     stringSpanAttribute(span, "gen_ai.request.model");
-  if (span.name === "agent.turn" && turnId !== undefined) {
+  if (isAgentTurnSpan(span) && turnId !== undefined) {
     details.push(turnId);
   }
   if (span.name === "agent.step" && stepIndex !== undefined) {
@@ -234,6 +231,14 @@ export function describeLocalTraceSpan(span: LocalTraceSpan): string[] {
     details.push(`model ${model}`);
   }
   return details;
+}
+
+export function isAgentTurnSpan(span: LocalTraceSpan): boolean {
+  return (
+    span.name === "agent.turn" ||
+    (stringSpanAttribute(span, "gen_ai.operation.name") === "invoke_agent" &&
+      stringSpanAttribute(span, "agent.turn.id") !== undefined)
+  );
 }
 
 /** Parses one OTLP/JSON segment file into spans belonging to `expectedTraceId`. */
@@ -366,18 +371,6 @@ function firstAttribute(
   for (const values of attributes) {
     const value = values[key];
     if (typeof value === "string" && value.length > 0) return value;
-  }
-  return undefined;
-}
-
-function firstNumberAttribute(
-  attributes: readonly Readonly<Record<string, unknown>>[],
-  key: string,
-): number | undefined {
-  for (const values of attributes) {
-    const value = values[key];
-    if (typeof value === "number") return value;
-    if (typeof value === "bigint") return Number(value);
   }
   return undefined;
 }

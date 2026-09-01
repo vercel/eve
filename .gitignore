@@ -20,6 +20,7 @@ apps/benchmarks/experiments/
 apps/benchmarks/results/
 apps/benchmarks/evals/*/PROMPT.md
 apps/benchmarks/evals/*/package.json
+apps/benchmarks/evals/*/.eve-authoring-bootstrap.json
 .extension-contracts-cache/
 packages/eve/.workflow-vitest/
 packages/eve/.generated/
@@ -51,6 +52,7 @@ Thumbs.db
 
 # IDE/editor
 .codex/
+.githooks/
 .vscode/
 .idea/
 

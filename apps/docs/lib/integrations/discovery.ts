@@ -10,6 +10,7 @@ const typeLabel: Record<Integration["type"], string> = {
   connection: "Connection",
   extension: "Extension",
   instrumentation: "Instrumentation",
+  memory: "Memory provider",
 };
 
 const section = (title: string, content: string): string => `## ${title}\n\n${content}`;
@@ -40,12 +41,10 @@ export const integrationSearchText = (integration: Integration): string =>
 export const integrationMarkdown = (integration: Integration): string => {
   const isConnection = integration.connection !== undefined;
   const install = isConnection ? buildConnectionInstall(integration) : (integration.install ?? "");
-  const quickStart = isConnection
-    ? connectionQuickStart(integration)
-    : (integration.quickStart ?? "");
-  const configure = isConnection
-    ? buildConnectionConfigure(integration)
-    : (integration.configure ?? "");
+  const quickStart =
+    integration.quickStart ?? (isConnection ? connectionQuickStart(integration) : "");
+  const configure =
+    integration.configure ?? (isConnection ? buildConnectionConfigure(integration) : "");
 
   return [
     `${typeLabel[integration.type]} integration for eve. ${integration.tagline}`,
@@ -59,7 +58,7 @@ export const integrationMarkdown = (integration: Integration): string => {
 /** Markdown landing page for agent-readable integration discovery. */
 export const integrationsIndexMarkdown = (): string =>
   [
-    "Browse every third-party service eve connects to, including extensions, messaging channels, and tool connections over MCP or OpenAPI.",
+    "Browse eve integrations, including extensions, messaging channels, memory providers, and tool connections over MCP or OpenAPI.",
     ...integrations.map(
       (integration) =>
         `- [${integration.name}](/integrations/${integration.slug}): ${integration.tagline}`,

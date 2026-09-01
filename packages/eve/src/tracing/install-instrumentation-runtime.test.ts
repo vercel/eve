@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { turnIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+import { turnIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { installInstrumentationRuntime } from "#tracing/install-instrumentation-runtime.js";
 import { otelIntegration, collectOtelPipeline } from "#tracing/otel-declaration.js";
 
@@ -59,6 +59,7 @@ describe("installInstrumentationRuntime", () => {
     const runtime = installInstrumentationRuntime({
       collected: collectOtelPipeline([otelIntegration()]),
       frameworkVersion: "test",
+      instrumentationProviders: true,
       providers: [{ flush: providerFlush, name: "test", shutdown: providerShutdown }],
       serviceName: "weather",
     });
@@ -69,9 +70,11 @@ describe("installInstrumentationRuntime", () => {
 
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
+    expect(runtime.instrumentationProviders).toBe(true);
     expect(runtime.otelSettings).toEqual({
-      recordInputs: false,
-      recordOutputs: false,
+      functionId: undefined,
+      recordInputs: true,
+      recordOutputs: true,
       traceChannelRequests: false,
     });
     expect(shutdown).toHaveBeenCalledOnce();
@@ -96,9 +99,10 @@ describe("installInstrumentationRuntime", () => {
       serviceName: "weather",
     });
     const idempotencyKey = turnIdempotencyKey("session-1", "turn-1");
+    const hooks = runtime.hooks.forTrace!({ agentName: "weather", audience: "unknown" });
 
     await contextStorage.run(new ContextContainer(), async () => {
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey,
         rootSessionId: "session-1",
         sequence: 0,
@@ -106,7 +110,7 @@ describe("installInstrumentationRuntime", () => {
         turnId: "turn-1",
         type: "turn.started",
       });
-      await runtime.hooks.publish({
+      await hooks.publish({
         idempotencyKey,
         sessionId: "session-1",
         turnId: "turn-1",

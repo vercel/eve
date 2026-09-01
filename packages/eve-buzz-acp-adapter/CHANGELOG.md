@@ -1,5 +1,115 @@
 # @eve/buzz-acp-adapter
 
+## 0.0.18
+
+### Patch Changes
+
+- Updated dependencies [a3b23c0]
+- Updated dependencies [52e89ef]
+- Updated dependencies [56514d9]
+- Updated dependencies [41c8286]
+- Updated dependencies [bdb3973]
+- Updated dependencies [fccbf2b]
+  - eve@0.47.0
+
+## 0.0.17
+
+### Patch Changes
+
+- Updated dependencies [47b3e48]
+- Updated dependencies [9c0a138]
+- Updated dependencies [7acb4ec]
+- Updated dependencies [1d79217]
+  - eve@0.46.0
+
+## 0.0.16
+
+### Patch Changes
+
+- Updated dependencies [4a18994]
+- Updated dependencies [d2995e1]
+- Updated dependencies [dfe0d18]
+- Updated dependencies [b3cf8ee]
+- Updated dependencies [6252784]
+- Updated dependencies [659774f]
+- Updated dependencies [fc52796]
+- Updated dependencies [2be67fa]
+- Updated dependencies [7ed4fb1]
+- Updated dependencies [0bc8432]
+- Updated dependencies [3274eee]
+- Updated dependencies [ae83a08]
+- Updated dependencies [f439e3d]
+- Updated dependencies [80571ee]
+- Updated dependencies [7c5a69e]
+- Updated dependencies [f38eaf1]
+- Updated dependencies [cfa90d6]
+- Updated dependencies [d79de0b]
+- Updated dependencies [687c371]
+- Updated dependencies [8e5d9b2]
+- Updated dependencies [7eae011]
+- Updated dependencies [c6f9c85]
+  - eve@0.45.0
+
+## 0.0.15
+
+### Patch Changes
+
+- Updated dependencies [47e8b64]
+- Updated dependencies [beba1a2]
+- Updated dependencies [830dd40]
+- Updated dependencies [4da95bb]
+- Updated dependencies [4ed62a7]
+- Updated dependencies [e43d9cb]
+  - eve@0.44.0
+
+## 0.0.14
+
+### Patch Changes
+
+- Updated dependencies [1c2684a]
+- Updated dependencies [1390675]
+- Updated dependencies [f3f4f4a]
+- Updated dependencies [7de783e]
+- Updated dependencies [3ec0e5b]
+- Updated dependencies [b57c965]
+- Updated dependencies [3811d81]
+- Updated dependencies [be9be27]
+- Updated dependencies [1390675]
+- Updated dependencies [99de091]
+- Updated dependencies [f3f4f4a]
+- Updated dependencies [3811d81]
+  - eve@0.43.0
+
+## 0.0.13
+
+### Patch Changes
+
+- Updated dependencies [f2169fa]
+- Updated dependencies [a43e14f]
+  - eve@0.42.0
+
+## 0.0.12
+
+### Patch Changes
+
+- Updated dependencies [0569638]
+- Updated dependencies [bdf5f63]
+- Updated dependencies [c47350f]
+- Updated dependencies [c47350f]
+- Updated dependencies [9e19fa4]
+  - eve@0.41.0
+
+## 0.0.11
+
+### Patch Changes
+
+- Updated dependencies [e843b4d]
+- Updated dependencies [899e079]
+- Updated dependencies [cda9539]
+- Updated dependencies [2838bb3]
+- Updated dependencies [87c61a1]
+  - eve@0.40.0
+
 ## 0.0.10
 
 ### Patch Changes

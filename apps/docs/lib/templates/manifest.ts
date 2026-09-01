@@ -4,6 +4,7 @@
 export type TemplateCategory = "Chat" | "Collaboration" | "Example" | "Marketing";
 
 export type TemplateIntegration =
+  | "Datadog"
   | "GitHub"
   | "HTTP API"
   | "Linear"
@@ -13,6 +14,7 @@ export type TemplateIntegration =
   | "Sentry"
   | "Slack"
   | "Typefully"
+  | "Vercel"
   | "Web chat";
 
 export type TemplateSource = "GitHub" | "Vercel Templates";
@@ -50,7 +52,6 @@ export const templateManifest: TemplateManifestEntry[] = [
       "Set up the eve chat template in my current workspace using https://github.com/vercel/eve-examples/tree/main/eve-chat-template as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about any required environment variables or manual setup steps.",
     description:
       "A persisted Next.js chat template for eve, built with shadcn/ui, Tailwind CSS, Streamdown, Better Auth, Drizzle, Neon, and Upstash Redis.",
-    demoHref: "https://eve-chat-template.labs.vercel.dev",
     sourceHref: "https://github.com/vercel/eve-examples/tree/main/eve-chat-template",
     category: "Chat",
     model: "anthropic/claude-sonnet-5",
@@ -187,7 +188,6 @@ export const templateManifest: TemplateManifestEntry[] = [
       "I want to build a software factory with the eve framework, using the Foreman template. Read the setup instructions at https://ask-foreman.dev/docs/getting-started and follow them. They cover deploying the template, connecting GitHub and Linear, running it locally, and how the pipeline works overall.",
     description:
       "Foreman, a software factory that takes tasks from GitHub and Linear, runs each through classifier, analyst, implementer, and reviewer stations, and delivers a reviewed draft pull request on your repository.",
-    demoHref: "https://ask-foreman.dev",
     sourceHref: "https://github.com/vercel-labs/eve-software-factory-template/tree/main",
     category: "Collaboration",
     model: "openai/gpt-5.6-terra-fast",
@@ -207,6 +207,34 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/subagents/implementer/agent.ts",
       "agent/subagents/implementer/tools/push_branch.ts",
       "agent/subagents/reviewer/agent.ts",
+    ],
+  },
+  {
+    slug: "eve-sre-agent-template",
+    title: "Incident response",
+    setupPrompt:
+      "I want to set up sre, an incident response agent built with the eve framework. Read the setup instructions at https://github.com/vercel-labs/eve-sre-agent-template/blob/main/docs/setup-for-agents.md and follow them. They cover creating and linking the Vercel project, connecting Slack, GitHub, Datadog, and Vercel, deploying the agent, and verifying it in Slack.",
+    description:
+      "sre, an incident response agent that investigates alerts from Slack or webhooks using live Datadog, GitHub, and Vercel evidence, with read-only access by default.",
+    sourceHref: "https://github.com/vercel-labs/eve-sre-agent-template/tree/main",
+    category: "Collaboration",
+    model: "openai/gpt-5.6-terra",
+    integrations: ["Slack", "Datadog", "GitHub", "Vercel", "HTTP API"],
+    source: "Vercel Templates",
+    github: { owner: "vercel-labs", repo: "eve-sre-agent-template", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/slack.ts",
+      "agent/channels/webhook.ts",
+      "agent/connections/datadog.ts",
+      "agent/connections/vercel.ts",
+      "agent/extensions/github.ts",
+      "agent/instructions/instructions.md",
+      "agent/lib/webhook/route.ts",
+      "agent/skills/deep-investigation/SKILL.md",
+      "agent/skills/hypothesis-validation/SKILL.md",
+      "agent/tools/evidence_record.ts",
+      "agent/tools/watch_slack_channel.ts",
     ],
   },
   {

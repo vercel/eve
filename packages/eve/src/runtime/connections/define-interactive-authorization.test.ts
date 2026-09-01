@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defineInteractiveAuthorization } from "#runtime/connections/types.js";
+import { defineInteractiveAuthorization } from "#shared/connection-types.js";
 
 describe("defineInteractiveAuthorization", () => {
   it("sets principalType to user", () => {

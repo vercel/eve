@@ -8,8 +8,9 @@ import {
   type TextMapGetter,
   trace,
 } from "#compiled/@opentelemetry/api/index.js";
-import { getInstrumentationRuntime } from "#harness/instrumentation/runtime.js";
+import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { recordErrorOnSpan } from "#internal/logging.js";
+import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 
 /**
  * Stable tracer name for every inbound eve channel HTTP request. Kept
@@ -42,12 +43,10 @@ export interface TraceChannelRequestInput {
  *
  * The span is named for the low-cardinality registered `routeKey`
  * (`"POST /eve/v1/session/:sessionId"`), never the concrete URL, while the
- * `http.route` attribute carries only the path template — the OTel HTTP
- * semantic convention reserves `http.route` for the route template alone,
- * with the method in `http.request.method`. The span is started from the
- * context extracted off the incoming request headers so an upstream
- * `traceparent` becomes its parent and nested channel and Workflow spans
- * (`hook.resume` and outgoing HTTP) become its descendants.
+ * `http.route` attribute carries only the path template and
+ * `http.request.method` carries the method. It starts from context extracted
+ * off the incoming request headers so an upstream `traceparent` becomes its
+ * parent and nested channel operations become its descendants.
  *
  * The handler runs inside the span's active context. When it returns, the
  * response status is recorded and a `>= 500` status marks the span as an
@@ -75,14 +74,18 @@ export async function traceChannelRequest<T extends Response>(
 
   const { request, routeKey } = input;
   const parentContext = propagation.extract(context.active(), request.headers, headersGetter);
+  const spanName =
+    getInstrumentationRuntime()?.instrumentationProviders === true
+      ? "agent.channel.request"
+      : routeKey;
   const span = trace
     .getTracer(TRACER_NAME)
     .startSpan(
-      routeKey,
+      spanName,
       { attributes: baseAttributes(request, routeKey), kind: SpanKind.SERVER },
       parentContext,
     );
-  const activeContext = trace.setSpan(parentContext, span);
+  const activeContext = markAgentTraceContext(trace.setSpan(parentContext, span));
 
   try {
     const response = await context.with(activeContext, () => handler(span));

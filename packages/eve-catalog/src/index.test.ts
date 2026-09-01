@@ -8,6 +8,7 @@ import {
   extensionEntries,
   getIntegrationEntry,
   instrumentationEntries,
+  memoryEntries,
 } from "./index.js";
 
 describe("integration catalog", () => {
@@ -21,7 +22,8 @@ describe("integration catalog", () => {
       channelEntries().length +
         connectionEntries().length +
         extensionEntries().length +
-        instrumentationEntries().length,
+        instrumentationEntries().length +
+        memoryEntries().length,
     ).toBe(INTEGRATIONS.length);
   });
 
@@ -58,6 +60,13 @@ describe("integration catalog", () => {
     }
   });
 
+  it("keeps memory providers free of connection identity", () => {
+    expect(memoryEntries().length).toBeGreaterThan(0);
+    for (const entry of memoryEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
   it("looks up entries by slug", () => {
     expect(getIntegrationEntry("linear")?.name).toBe("Linear");
     expect(getIntegrationEntry("nope")).toBeUndefined();
@@ -73,6 +82,13 @@ describe("integration catalog", () => {
 
   it("uses Vercel's streamable HTTP MCP endpoint", () => {
     expect(getIntegrationEntry("vercel")!.connection!.mcp!.url).toBe("https://mcp.vercel.com");
+  });
+
+  it("uses Agentcard's streamable HTTP MCP endpoint", () => {
+    const agentcard = getIntegrationEntry("agentcard")!;
+
+    expect(agentcard.tagline).toBe("let agents buy online");
+    expect(agentcard.connection!.mcp!.url).toBe("https://mcp.agentcard.sh/mcp");
   });
 
   it("uses Linear's streamable HTTP MCP endpoint", () => {
@@ -107,6 +123,11 @@ describe("integration catalog", () => {
   it("exposes Hindsight as an extension", () => {
     expect(getIntegrationEntry("hindsight")?.kind).toBe("extension");
     expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
+  });
+
+  it("exposes Supermemory as a memory provider", () => {
+    expect(getIntegrationEntry("supermemory")?.kind).toBe("memory");
+    expect(getIntegrationEntry("supermemory")?.connection).toBeUndefined();
   });
 
   it("exposes Buzz as a gallery-only channel", () => {

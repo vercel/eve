@@ -1,9 +1,7 @@
 import type { ModelMessage, SystemModelMessage } from "ai";
 
-import {
-  ALLOWED_DYNAMIC_INSTRUCTION_EVENTS,
-  isBrandedInstructionsEntry,
-} from "#shared/dynamic-tool-definition.js";
+import { ALLOWED_DYNAMIC_INSTRUCTION_EVENTS } from "#dynamic/definition.js";
+import { isBrandedInstructionsEntry } from "#shared/instructions-definition.js";
 import type { InstructionsDefinition } from "#public/definitions/instructions.js";
 import { normalizeInstructionsDefinition } from "#internal/authored-definition/core.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";

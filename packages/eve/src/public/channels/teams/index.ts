@@ -7,6 +7,7 @@ export type { ModelMessage } from "ai";
  * null when the inbound activity did not include it.
  */
 export interface TeamsInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: import("#shared/channel-audience.js").ChannelAudience;
   readonly channelId: string | null;
   readonly conversationType: string | null;
   readonly teamId: string | null;
@@ -82,6 +83,8 @@ export {
 export {
   deriveTeamsInputResponses,
   isTeamsInputResponseActivity,
+  isTeamsToolApprovalResponseActivity,
+  readTeamsToolApprovalPrompt,
   renderAnsweredInputRequestMessage,
   renderInputRequestAttachment,
   renderInputRequestMessage,
@@ -90,6 +93,8 @@ export {
   TEAMS_HITL_CHOICE_INPUT_ID,
   TEAMS_HITL_DATA_KEY,
   TEAMS_HITL_FREEFORM_INPUT_ID,
+  TEAMS_HITL_REQUEST_KIND_KEY,
+  TEAMS_HITL_PROMPT_KEY,
 } from "#public/channels/teams/hitl.js";
 
 export {

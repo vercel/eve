@@ -8,7 +8,7 @@
 export const EVE_ATTRIBUTE_VALUE_MAX_BYTES = 256;
 
 /** Attribute value accepted by eve's internal attribute builders. */
-export type EveAttributeValue = string | number | undefined;
+export type EveAttributeValue = string | number | boolean | undefined;
 
 /**
  * Truncates a string to Workflow's UTF-8 byte budget without splitting
@@ -51,7 +51,7 @@ export function normalizeEveAttributes(
     if (value === undefined) {
       continue;
     }
-    const stringValue = typeof value === "number" ? String(value) : value;
+    const stringValue = typeof value === "string" ? value : String(value);
     normalized[key] = truncateForTag(stringValue);
   }
   return normalized;

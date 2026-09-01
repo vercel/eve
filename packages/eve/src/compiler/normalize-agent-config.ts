@@ -1,13 +1,12 @@
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 import type { AgentSourceManifest } from "#discover/manifest.js";
 import { normalizeLogicalPath } from "#discover/filesystem.js";
 import { normalizeAgentDefinition } from "#internal/authored-definition/core.js";
-import { serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeOutputSchema } from "#tools/schema.js";
 import { formatLanguageModelGatewayId } from "#internal/runtime-model.js";
 import { classifyModelRouting } from "#internal/classify-model-routing.js";
 import { isChatGptModelRouting } from "#shared/chatgpt-model.js";
-import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import type { ModuleSourceRef } from "#shared/source-ref.js";
@@ -15,13 +14,15 @@ import {
   isDynamicModelDefinition,
   type PublicAgentStaticModelDefinition,
 } from "#shared/agent-definition.js";
-import type { DynamicToolEventName } from "#shared/dynamic-tool-definition.js";
+import type { DynamicToolEventName } from "#dynamic/definition.js";
 import type { CompiledAgentDefinition, CompiledRuntimeModelReference } from "#compiler/manifest.js";
 import type { CompiledRuntimeModelLimits } from "#compiler/model-catalog.js";
 import {
   loadModuleBackedDefinition,
   type ManifestCompileContext,
 } from "#compiler/normalize-helpers.js";
+import type { AgentModuleBinding } from "#compiler/source-graph.js";
+import { createCompiledBindingNamespaceLoader } from "#compiler/load-binding-namespace.js";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
@@ -33,27 +34,27 @@ export async function compileAgentConfig(
   manifest: AgentSourceManifest,
   context: ManifestCompileContext,
   options: {
+    readonly binding: AgentModuleBinding;
     readonly definition?: unknown;
-  } = {},
+    readonly source: ModuleSourceRef;
+  },
 ): Promise<CompiledAgentDefinition> {
-  const configModule = manifest.configModule;
-  const configModulePath =
-    configModule === undefined ? undefined : formatAgentConfigModulePath(manifest, configModule);
-  const hasInjectedDefinition = Object.hasOwn(options, "definition");
+  const configModule = options.source;
+  const configModulePath = formatAgentConfigModulePath(manifest, configModule, options.binding);
   const definition = normalizeAgentDefinition(
-    hasInjectedDefinition
+    Object.hasOwn(options, "definition")
       ? options.definition
-      : configModule === undefined
-        ? { model: DEFAULT_AGENT_MODEL_ID }
-        : await loadModuleBackedDefinition({
-            agentRoot: manifest.agentRoot,
-            displayPath: configModulePath!,
-            kind: "agent config",
-            source: configModule,
+      : await loadModuleBackedDefinition({
+          binding: options.binding,
+          displayPath: configModulePath,
+          kind: "agent config",
+          loadNamespace: createCompiledBindingNamespaceLoader({
+            bindings: { [configModule.sourceId]: options.binding },
+            registries: context.registries,
           }),
-    configModule === undefined
-      ? `Expected the default agent config to match the public eve shape.`
-      : `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
+          source: configModule,
+        }),
+    `Expected the agent config export "${configModule.exportName ?? "default"}" from "${configModulePath}" to match the public eve shape.`,
   );
   const dynamicModelDefinition = isDynamicModelDefinition(definition.model)
     ? definition.model
@@ -86,11 +87,12 @@ export async function compileAgentConfig(
     name: string;
     outputSchema?: JsonObject;
     reasoning?: CompiledAgentDefinition["reasoning"];
-    source?: ModuleSourceRef;
+    source: ModuleSourceRef;
     limits?: CompiledAgentDefinition["limits"];
   } = {
     compaction,
     name: manifest.agentId,
+    source: { ...configModule },
   };
 
   if (definition.description !== undefined) {
@@ -99,9 +101,6 @@ export async function compileAgentConfig(
 
   let dynamicModel: CompiledAgentDefinition["dynamicModel"] | undefined;
   if (dynamicModelDefinition !== undefined) {
-    if (configModule === undefined) {
-      throw new Error("Expected dynamic model definitions to be authored in agent.ts.");
-    }
     dynamicModel = {
       eventNames: Object.keys(dynamicModelDefinition.events) as DynamicToolEventName[],
       exportName: configModule.exportName,
@@ -138,15 +137,6 @@ export async function compileAgentConfig(
       maxInputTokensPerSession: definition.limits.maxInputTokensPerSession,
       maxOutputTokensPerSession: definition.limits.maxOutputTokensPerSession,
       sessionTimeoutMs: definition.limits.sessionTimeoutMs,
-    };
-  }
-
-  if (configModule !== undefined) {
-    compiledConfig.source = {
-      exportName: configModule.exportName,
-      sourceKind: "module",
-      logicalPath: configModule.logicalPath,
-      sourceId: configModule.sourceId,
     };
   }
 
@@ -188,10 +178,6 @@ function normalizeExperimentalDefinition(
 
   if (experimental.instrumentationProviders !== undefined) {
     compiledExperimental.instrumentationProviders = experimental.instrumentationProviders;
-  }
-
-  if (experimental.subagentPersistentSessions !== undefined) {
-    compiledExperimental.subagentPersistentSessions = experimental.subagentPersistentSessions;
   }
 
   if (experimental.tasks !== undefined) {
@@ -306,9 +292,12 @@ async function normalizeAuthoredModelReference(input: {
 function formatAgentConfigModulePath(
   manifest: AgentSourceManifest,
   configModule: ModuleSourceRef,
+  binding: AgentModuleBinding,
 ): string {
-  const configPath = join(manifest.agentRoot, configModule.logicalPath);
-  return normalizeLogicalPath(relative(resolveTopLevelAgentRoot(manifest), configPath));
+  if (binding.backing.kind === "programmatic") return configModule.logicalPath;
+  return normalizeLogicalPath(
+    relative(resolveTopLevelAgentRoot(manifest), binding.backing.sourcePath),
+  );
 }
 
 function resolveTopLevelAgentRoot(manifest: AgentSourceManifest): string {

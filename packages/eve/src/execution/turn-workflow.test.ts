@@ -6,6 +6,7 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
@@ -52,6 +53,10 @@ vi.mock("./dispatch-workflow-runtime-actions-step.js", () => ({
 
 vi.mock("./cancel-descendant-turns-step.js", () => ({
   cancelDescendantTurnsStep: vi.fn(),
+}));
+
+vi.mock("./tasks/parent/delegate.js", () => ({
+  acknowledgeDelegatedTasksStep: vi.fn(),
 }));
 
 vi.mock("./workflow-callback-url.js", () => ({
@@ -318,11 +323,12 @@ describe("turnWorkflow", () => {
 
   it("reports a cancelled turn as a park with the cancelled marker", async () => {
     const sessionState = createSessionState();
+    const cancelledState = createSessionState({ continuationToken: "cancelled-state" });
     installInbox([]);
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "cancelled",
       serializedContext: { state: "cancelled" },
-      sessionState,
+      sessionState: cancelledState,
     });
 
     // Task mode on purpose: cancellation bypasses the `canPark` gate.
@@ -336,7 +342,7 @@ describe("turnWorkflow", () => {
     expect(vi.mocked(turnStep).mock.calls[0]?.[0].abortSignal).toBeInstanceOf(AbortSignal);
     expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
       serializedContext: { state: "cancelled" },
-      sessionState,
+      sessionState: cancelledState,
     });
     // The command inbox forwards cancellation to this turn-private hook.
     expect(cancelHookTokens()).toEqual(["turn-token:cancel"]);
@@ -347,11 +353,44 @@ describe("turnWorkflow", () => {
         cancelled: true,
         kind: "park",
         serializedContext: { state: "cancelled" },
-        sessionState,
+        sessionState: cancelledState,
       },
       kind: "turn-result",
     });
     expect(resumeHookMock.mock.calls.filter((call) => call[1]?.kind === "turn-error")).toEqual([]);
+  });
+
+  it("commits and releases background tasks before settling a cancelled turn", async () => {
+    const initialState = createSessionState({ continuationToken: "http:parent" });
+    const backgroundState = createSessionState({ continuationToken: "http:parent:background" });
+    const backgroundTasks = [
+      {
+        taskId: "task-1",
+        taskInboxToken: "task-inbox-1",
+        taskRunId: "task-run-1",
+      },
+    ];
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "cancelled",
+      backgroundTaskState: backgroundState,
+      backgroundTasks,
+      serializedContext: { state: "cancelled" },
+      sessionState: initialState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      mode: "task",
+      sessionState: initialState,
+    });
+    await turnWorkflow(input);
+
+    expect(acknowledgeDelegatedTasksStep).toHaveBeenCalledWith({ tasks: backgroundTasks });
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "cancelled" },
+      sessionState: backgroundState,
+    });
   });
 
   it("honors cancellation observed while a durable turn step returns", async () => {

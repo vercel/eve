@@ -5,6 +5,11 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
+import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
+import {
+  bindInstrumentationRuntime,
+  type InstrumentationRuntime,
+} from "#instrumentation/runtime.js";
 import type { RuntimeTurnAgent } from "#runtime/agent/bootstrap.js";
 import { resolveRuntimeModelReference } from "#runtime/agent/resolve-model.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -13,9 +18,10 @@ import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import type { RuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createRuntimeToolRegistry } from "#runtime/tools/registry.js";
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
+import { countLocalSubagentCalls } from "#execution/tools/subagent/local.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -197,10 +203,7 @@ function createTestNode(
   const agent = {} as ResolvedRuntimeAgentNode["agent"];
 
   return {
-    agent: {
-      ...agent,
-      disabledFrameworkTools: [],
-    },
+    agent,
     channels: [],
     hookRegistry: createEmptyHookRegistry(),
     nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
@@ -215,6 +218,42 @@ function createTestNode(
     toolRegistry: createEmptyToolRegistry(),
     turnAgent: turnAgent ?? createTestTurnAgent(),
     ...overrides,
+  };
+}
+
+async function createNodeWithSourceOwnedTools(input: {
+  readonly names: readonly string[];
+  readonly tasks?: boolean;
+  readonly turnTools?: StaticRuntimeTurnAgent["tools"];
+}): Promise<ResolvedRuntimeAgentNode> {
+  const toolRegistry = await createRuntimeToolRegistry({
+    tools: input.names.map((name) => ({
+      description: `${name} programmatic tool.`,
+      execute: async () => `${name}-sentinel`,
+      inputSchema: null,
+      logicalPath: `tools/${name}.ts`,
+      name,
+      owner: { feature: "test", kind: "framework" },
+      sourceId: `framework:tools/${name}.ts`,
+      sourceKind: "module",
+    })),
+  });
+  const node = createTestNode(
+    createTestTurnAgent({
+      tools: [...toolRegistry.preparedTools, ...(input.turnTools ?? [])],
+    }),
+    { toolRegistry },
+  );
+  return {
+    ...node,
+    agent: {
+      ...node.agent,
+      config: {
+        experimental: { tasks: input.tasks === true },
+        model: { id: "test-model" },
+        name: "test",
+      },
+    },
   };
 }
 
@@ -236,8 +275,15 @@ function createNoopRuntime(): Runtime {
 }
 
 describe("createNodeHarnessTools", () => {
-  it("guides the model to split large tasks across parallel agent calls", () => {
-    const agentTool = createNodeHarnessTools({ node: createTestNode() }).get("agent");
+  it("keeps the compiled framework question tool client-side", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["ask_question"] });
+
+    expect(createNodeHarnessTools({ node }).get("ask_question")?.execute).toBeUndefined();
+  });
+
+  it("lowers the compiled framework agent tool to the canonical dispatch action", async () => {
+    const node = await createNodeWithSourceOwnedTools({ names: ["agent"] });
+    const agentTool = createNodeHarnessTools({ node }).get("agent");
 
     expect(agentTool?.description).toContain("split a large task into independent pieces");
     expect(agentTool?.description).toContain("multiple `agent` calls in one response");
@@ -252,71 +298,93 @@ describe("createNodeHarnessTools", () => {
     });
   });
 
-  it("does not give declared subagent nodes the built-in agent tool", () => {
-    const tools = createNodeHarnessTools({
-      node: createTestNode(undefined, { nodeId: "subagents/researcher" }),
+  it("omits compiled task-control tools unless experimental.tasks is on", async () => {
+    const node = await createNodeWithSourceOwnedTools({
+      names: ["task_cancel", "task_update"],
     });
+    const tools = createNodeHarnessTools({ node });
 
-    expect(tools.has("agent")).toBe(false);
-  });
-
-  it("does not give the root node the built-in agent tool when it is disabled", () => {
-    const node = createTestNode();
-    const tools = createNodeHarnessTools({
-      node: {
-        ...node,
-        agent: {
-          ...node.agent,
-          disabledFrameworkTools: ["agent"],
-        },
-      },
-    });
-
-    expect(tools.has("agent")).toBe(false);
-  });
-
-  it("does not inject task tools without experimental.tasks", () => {
-    const tools = createNodeHarnessTools({ node: createTestNode() });
-
-    for (const name of ["task_peek", "task_cancel", "task_sleep", "task_update"]) {
+    for (const name of ["task_cancel", "task_update"]) {
       expect(tools.has(name)).toBe(false);
     }
   });
 
-  it("injects the task tools when experimental.tasks is on", () => {
-    const node = createTestNode();
+  it("lowers compiled task-control tools when experimental.tasks is on", async () => {
     const tools = createNodeHarnessTools({
-      node: {
-        ...node,
-        agent: {
-          ...node.agent,
-          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
-        },
-      },
+      node: await createNodeWithSourceOwnedTools({
+        names: ["task_cancel", "task_update"],
+        tasks: true,
+      }),
     });
 
-    for (const name of ["task_peek", "task_cancel", "task_update"]) {
+    for (const name of ["task_cancel", "task_update"]) {
       expect(tools.get(name)?.runtimeAction).toEqual({ kind: "task-control" });
       expect(tools.get(name)?.execute).toBeUndefined();
     }
-    expect(tools.get("task_sleep")?.execute).toBeDefined();
-    expect(tools.get("task_sleep")?.runtimeAction).toBeUndefined();
+    expect(tools.has("task_sleep")).toBe(false);
   });
 
-  it("respects disableTool for individual task tools", () => {
-    const node = createTestNode();
-    const tools = createNodeHarnessTools({
-      node: {
-        ...node,
-        agent: {
-          ...node.agent,
-          config: { experimental: { tasks: true }, model: { id: "test-model" }, name: "test" },
-          disabledFrameworkTools: ["task_cancel"],
-        },
+  it("executes compiled local and remote delegation tools in the selected task mode", async () => {
+    const delegationTools: StaticRuntimeTurnAgent["tools"] = [
+      {
+        description: "Delegate local research.",
+        inputSchema: { type: "object" },
+        kind: "subagent",
+        logicalPath: "subagents/research",
+        name: "research",
+        nodeId: "subagents/research",
+        sourceId: "subagents/research",
       },
+      {
+        description: "Delegate remote review.",
+        inputSchema: { type: "object" },
+        kind: "remote",
+        logicalPath: "remote-agents/reviewer",
+        name: "reviewer",
+        nodeId: "remote-agents/reviewer",
+        sourceId: "remote-agents/reviewer",
+      },
+    ];
+    const legacy = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({
+        names: ["agent"],
+        turnTools: delegationTools,
+      }),
+    });
+    expect(legacy.get("research")?.runtimeAction?.kind).toBe("subagent-call");
+    expect(legacy.get("reviewer")?.runtimeAction?.kind).toBe("remote-agent-call");
+    expect(legacy.get("research")?.execution).toBeUndefined();
+    expect(legacy.get("reviewer")?.execution).toBeUndefined();
+
+    const background = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({
+        names: ["agent"],
+        tasks: true,
+        turnTools: delegationTools,
+      }),
+    });
+    for (const name of ["agent", "research", "reviewer"]) {
+      expect(background.get(name)?.execution).toBe("background");
+      expect(background.get(name)?.execute).toBeDefined();
+      expect(background.get(name)?.runtimeAction).toBeUndefined();
+    }
+    expect(
+      countLocalSubagentCalls(
+        ["agent", "research", "reviewer"].map((name) => {
+          const execute = background.get(name)?.execute;
+          if (execute === undefined) throw new Error(`Missing background executor for ${name}.`);
+          return { definition: { execute } };
+        }),
+      ),
+    ).toBe(2);
+  });
+
+  it("does not recreate task tools absent from the compiled graph", async () => {
+    const tools = createNodeHarnessTools({
+      node: await createNodeWithSourceOwnedTools({ names: ["task_update"], tasks: true }),
     });
 
-    expect(tools.has("task_peek")).toBe(true);
+    expect(tools.has("task_update")).toBe(true);
     expect(tools.has("task_cancel")).toBe(false);
   });
 });
@@ -324,6 +392,19 @@ describe("createNodeHarnessTools", () => {
 describe("createExecutionNodeStep", () => {
   it("builds a usable harness step for the root node", async () => {
     setupMockAgentForToolExecution("regular-tool", { question: "Run the tool." });
+    const forceFlush = vi.fn(async () => undefined);
+    const runtime: InstrumentationRuntime = {
+      forceFlush,
+      hooks: createInstrumentationHooks([]),
+      otelSettings: undefined,
+      runInContext: (_operation, execute) => execute(),
+      shutdown: async () => undefined,
+    };
+    const instrumentation = bindInstrumentationRuntime(runtime, new ContextContainer(), {
+      agentName: "test-agent",
+      rootSessionId: "sess-root",
+      sessionId: "sess-root",
+    });
 
     const toolRegistry = await createRuntimeToolRegistry({
       tools: [
@@ -333,6 +414,7 @@ describe("createExecutionNodeStep", () => {
           inputSchema: toInputSchema({ type: "object" }),
           logicalPath: "tools/regular-tool.ts",
           name: "regular-tool",
+          owner: { kind: "application" },
           sourceId: "tools/regular-tool.ts",
           sourceKind: "module",
         },
@@ -352,6 +434,7 @@ describe("createExecutionNodeStep", () => {
     };
     const step = createExecutionNodeStep({
       createRuntime: () => createNoopRuntime(),
+      instrumentation,
       mode: "task",
       modelResolutionScope,
       node: rootNode,
@@ -389,6 +472,7 @@ describe("createExecutionNodeStep", () => {
       rootNode.turnAgent.model,
       modelResolutionScope,
     );
+    expect(forceFlush).toHaveBeenCalledOnce();
   });
 
   it("records visible subagent tools as pending runtime actions", async () => {
@@ -414,6 +498,7 @@ describe("createExecutionNodeStep", () => {
     );
     const step = createExecutionNodeStep({
       createRuntime,
+      instrumentation: undefined,
       mode: "task",
       modelResolutionScope: {
         moduleMap: { nodes: {} },

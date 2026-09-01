@@ -53,6 +53,8 @@ export function registerIntegrationCommands(input: {
     applicationContext,
   )
     .option("-y, --yes")
+    .option("--creation-type <type>", "Select the Vercel Connect creation type.")
+    .option("--connection-method <method>", "Select the Vercel Connect connection method.")
     .option(
       "--non-interactive",
       "Run without interactive prompts, instead emit structured NDJSON when further input is required",
@@ -62,7 +64,11 @@ export function registerIntegrationCommands(input: {
         slug: string,
         service: string,
         canonicalName: string | undefined,
-        options: { nonInteractive?: boolean },
+        options: {
+          creationType?: string;
+          connectionMethod?: "mcp" | "oauth";
+          nonInteractive?: boolean;
+        },
       ) => {
         const { runIntegrationConnectCommand } = await import("./integration-connect.js");
         await runIntegrationConnectCommand(

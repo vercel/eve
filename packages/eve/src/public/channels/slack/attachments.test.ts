@@ -191,17 +191,20 @@ describe("createSlackFetchFile", () => {
     });
   });
 
-  it("invokes a function-shaped bot token to support rotation", async () => {
+  it("resolves function-shaped bot tokens for the session's installation workspace", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(new Uint8Array([0]), { status: 200 }));
 
-    const tokenFn = vi.fn(async () => "xoxb-rotated-token");
+    const tokenFn = vi.fn(async (_context: { readonly teamId?: string }) => "xoxb-rotated-token");
     const fetchFile = createSlackFetchFile({ botToken: tokenFn });
 
-    await fetchFile("https://files.slack.com/x");
+    await fetchFile("https://files.slack.com/x", {
+      state: { installationTeamId: "T_INSTALLATION", teamId: "T_ACTOR" },
+    });
 
     expect(tokenFn).toHaveBeenCalledTimes(1);
+    expect(tokenFn).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
     const [, init] = fetchSpy.mock.calls[0]!;
     expect((init as RequestInit | undefined)?.headers).toEqual({
       authorization: "Bearer xoxb-rotated-token",

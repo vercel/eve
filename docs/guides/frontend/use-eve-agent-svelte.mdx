@@ -18,10 +18,11 @@ Call the binding once for a conversation and read its reactive getters directly.
   const agent = useEveAgent();
   let message = $state("");
   let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isInputDisabled = $derived(isBusy || agent.status === "resuming");
 
   async function handleSubmit() {
     const text = message.trim();
-    if (!text || isBusy) return;
+    if (!text || isInputDisabled) return;
     message = "";
     await agent.send(text);
   }
@@ -35,8 +36,8 @@ Call the binding once for a conversation and read its reactive getters directly.
   event.preventDefault();
   void handleSubmit();
 }}>
-  <input bind:value={message} disabled={isBusy} />
-  <button type="submit" disabled={isBusy}>Send</button>
+  <input bind:value={message} disabled={isInputDisabled} />
+  <button type="submit" disabled={isInputDisabled}>Send</button>
 </form>
 ```
 
@@ -44,14 +45,14 @@ Call the binding once for a conversation and read its reactive getters directly.
 
 The state fields are reactive getters; the commands are ordinary methods:
 
-| Property                             | Svelte shape                      |
-| ------------------------------------ | --------------------------------- |
-| `data`                               | `TData`                           |
-| `status`                             | `UseEveAgentStatus`               |
-| `error`                              | `Error \| undefined`              |
-| `events`                             | `readonly MessageStreamEvent[]`   |
-| `session`                            | `ClientSessionState \| undefined` |
-| `send`, `respond`, `cancel`, `reset` | Methods                           |
+| Property                                       | Svelte shape                      |
+| ---------------------------------------------- | --------------------------------- |
+| `data`                                         | `TData`                           |
+| `status`                                       | `UseEveAgentStatus`               |
+| `error`                                        | `Error \| undefined`              |
+| `events`                                       | `readonly MessageStreamEvent[]`   |
+| `session`                                      | `ClientSessionState \| undefined` |
+| `send`, `respond`, `resume`, `cancel`, `reset` | Methods                           |
 
 Read the getters directly in templates, `$derived`, or `$effect`. The [shared returned-state reference](./overview#returned-state) describes what each value and command does.
 
@@ -106,7 +107,7 @@ See [Human-in-the-loop prompts](./overview#human-in-the-loop-prompts) for reques
 
 ## Cancel, reset, and resume
 
-Call `agent.cancel()` to stop the durable server-side turn while the binding remains attached through settlement. Destroying the component only disconnects its local stream; it does not cancel server execution. Call `agent.reset()` to clear local state and start a new session. Pass `initialSession` and `initialEvents` to restore a saved conversation. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
+Call `agent.cancel()` to stop the durable server-side turn while the binding remains attached through settlement. Destroying the component only disconnects its local stream; it does not cancel server execution. Call `agent.reset()` to clear local state and start a new session. Pass `initialSession`, `initialEvents`, and `resume: true` to restore a saved conversation and follow an in-flight turn. During bounded catch-up, `agent.status` is `"resuming"`; keep the hydrated conversation visible, disable submission, and wait for `"ready"`, `"error"`, or `"streaming"`. Use `agent.resume()` directly when restoration is controlled imperatively. See [Resumable sessions](./overview#resumable-sessions) for the persistence contract and [Sending and streaming](./overview#sending-and-streaming) for cancellation behavior.
 
 ## Custom host and credentials
 

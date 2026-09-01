@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createFakePrompter } from "#internal/testing/fake-prompter.js";
+import { WizardCancelledError } from "#setup/step.js";
 
 import { RegistryFlowFailedError, runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 
@@ -58,11 +59,11 @@ describe("runRegistryFlow", () => {
           address: "extension/agent-browser",
           title: "Agent Browser",
           facts: [],
-          output: [],
+          output: ["Environment: AGENT_BROWSER_TOKEN"],
         },
       ],
       facts: [],
-      output: [],
+      output: ["Environment: AGENT_BROWSER_TOKEN"],
     });
     expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
       APP_ROOT,
@@ -87,6 +88,11 @@ describe("runRegistryFlow", () => {
           value: "category:extension",
           label: "Extensions",
           hint: "Add browser automation, memory, and developer tools",
+        }),
+        expect.objectContaining({
+          value: "category:memory",
+          label: "Memory providers",
+          hint: "Retain and recall scoped context across sessions",
         }),
         expect.objectContaining({
           value: "category:instrumentation",
@@ -119,6 +125,70 @@ describe("runRegistryFlow", () => {
       options: [
         { value: "add", label: "Add to project" },
         { value: "back", label: "Back" },
+      ],
+    });
+  });
+
+  it("browses memory providers", async () => {
+    const answers = ["category:memory", "action:back", "action:done"];
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        return answers.shift()!;
+      },
+    });
+    const flowDeps = deps({
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [
+          {
+            address: "memory/supermemory",
+            name: "memory/supermemory",
+            type: "registry:item",
+            description: "Durable memory",
+            source: "Vercel",
+          },
+        ],
+        total: 1,
+        errors: [],
+      })),
+    });
+
+    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
+
+    expect(prompts[1]).toMatchObject({
+      message: "Browse memory providers",
+      options: expect.arrayContaining([
+        expect.objectContaining({ label: "Supermemory", hint: "Durable memory" }),
+      ]),
+    });
+  });
+
+  it("prints an installed registry item's environment and documentation", async () => {
+    const answers = ["category:extension", "item:0", "add"];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: deps({
+          getRegistryItemManifest: vi.fn(async () => ({
+            description: "Browser automation",
+            envVars: { BROWSER_TOKEN: "", BROWSER_URL: "" },
+            meta: { eve: { docs: "/integrations/browser" } },
+            name: "extension/agent-browser",
+          })),
+        }),
+      }),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          output: [
+            "Environment: BROWSER_TOKEN, BROWSER_URL",
+            "Setup: https://eve.dev/integrations/browser",
+          ],
+        },
       ],
     });
   });
@@ -287,6 +357,130 @@ describe("runRegistryFlow", () => {
       "@acme/analytics",
       expect.objectContaining({ silent: true, prompter: fake.prompter }),
     );
+  });
+
+  it("opens an initial address without the category or search screens", async () => {
+    const answers = ["add"];
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        return answers.shift()!;
+      },
+    });
+    const flowDeps = deps({
+      getRegistryItemManifest: vi.fn(async () => ({
+        name: "channel/slack",
+        title: "Slack",
+        description: "Talk to your agent in Slack",
+        dependencies: ["@slack/web-api"],
+      })),
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        initialAddress: "channel/slack",
+        deps: flowDeps,
+      }),
+    ).resolves.toEqual({
+      kind: "done",
+      addedItems: ["channel/slack"],
+      items: [{ address: "channel/slack", title: "Slack", facts: [], output: [] }],
+      facts: [],
+      output: [],
+    });
+    expect(flowDeps.browseRegistryCatalog).not.toHaveBeenCalled();
+    expect(flowDeps.getRegistryItemManifest).toHaveBeenCalledWith(APP_ROOT, "channel/slack");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toMatchObject({
+      message: "Slack",
+      description: "Talk to your agent in Slack",
+      metadata: [
+        { label: "Source", value: "Vercel" },
+        { label: "Packages", value: "@slack/web-api" },
+      ],
+      options: [
+        { value: "add", label: "Add to project" },
+        { value: "back", label: "Back" },
+      ],
+    });
+    expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
+      APP_ROOT,
+      "channel/slack",
+      expect.objectContaining({ silent: true, prompter: fake.prompter }),
+    );
+  });
+
+  it("falls back to the category hub when an initial address is not added", async () => {
+    const answers = ["back", "action:done"];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+    const flowDeps = deps();
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        initialAddress: "channel/slack",
+        deps: flowDeps,
+      }),
+    ).resolves.toEqual({ kind: "done", addedItems: [], items: [], facts: [], output: [] });
+
+    expect(fake.selectMessages).toEqual(["agent-browser", "Add an integration"]);
+    expect(flowDeps.installRegistryItem).not.toHaveBeenCalled();
+  });
+
+  it("ignores a blank initial address", async () => {
+    const answers = ["action:done"];
+    const fake = createFakePrompter({ single: () => answers.shift()! });
+    const flowDeps = deps();
+
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      initialAddress: "   ",
+      deps: flowDeps,
+    });
+
+    expect(flowDeps.getRegistryItemManifest).not.toHaveBeenCalled();
+    expect(fake.selectMessages).toEqual(["Add an integration"]);
+  });
+
+  it("surfaces an unresolvable initial address", async () => {
+    const fake = createFakePrompter({ single: () => "add" });
+    const flowDeps = deps({
+      getRegistryItemManifest: vi.fn(async () => {
+        throw new Error('Registry item "channel/slak" was not found.');
+      }),
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        initialAddress: "channel/slak",
+        deps: flowDeps,
+      }),
+    ).rejects.toThrow('Registry item "channel/slak" was not found.');
+    expect(flowDeps.installRegistryItem).not.toHaveBeenCalled();
+  });
+
+  it("reports cancellation from an initial address as a dismissed flow", async () => {
+    const fake = createFakePrompter({
+      single: () => {
+        throw new WizardCancelledError();
+      },
+    });
+
+    await expect(
+      runRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        initialAddress: "channel/slack",
+        deps: deps(),
+      }),
+    ).resolves.toEqual({ kind: "cancelled" });
   });
 
   it("collects deployable setups, adds another, then deploys once", async () => {

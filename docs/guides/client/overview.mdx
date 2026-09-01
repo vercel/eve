@@ -30,16 +30,18 @@ const health = await client.health();
 console.log(health.status, health.workflowId);
 ```
 
-Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`.
+The client requires the successful response to match `{ ok: true, status: "ready", workflowId: string }`. Non-2xx responses throw `ClientError`, which carries the HTTP `status` and response `body`; invalid JSON or a malformed successful payload throws `HealthResponseError`.
 
 ## Inspect an agent
 
-Use `info()` to inspect a development agent. The client parses and validates the complete response before returning it:
+Use `info()` to inspect an agent. The client requires the complete agent-info version 4 response before returning it:
 
 ```ts
 const info = await client.info();
 console.log(info.agent.name, info.agent.model.id);
 ```
+
+Version 4 separates active static definitions from dynamic resolvers, includes binding-backed source ownership and composition history, reports first-class memory slots and their provider-tool wrapper dependencies, reports local and remote agents separately, and returns the exact compiled channel route order. A non-success response throws `ClientError`; invalid JSON, an earlier schema version, duplicate identities, inconsistent totals, or mismatched source provenance throws `AgentInfoResponseError`.
 
 ## Authentication
 

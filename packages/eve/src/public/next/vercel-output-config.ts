@@ -4,7 +4,7 @@ import { dirname, join, relative } from "node:path";
 import {
   EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV,
   EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
-} from "#internal/application/paths.js";
+} from "#internal/application/build-output-environment.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,

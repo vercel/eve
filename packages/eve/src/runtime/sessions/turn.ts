@@ -1,6 +1,7 @@
 import type { Node } from "#shared/node.js";
 import type { SourceRef } from "#shared/source-ref.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 
 /**
  * Serializable authored tool descriptor prepared by the runtime for one
@@ -10,6 +11,7 @@ export type PreparedRuntimeAuthoredTool = Readonly<
   InternalToolDefinition &
     SourceRef & {
       kind: "authored-tool";
+      owner: AgentSourceOwner;
     }
 >;
 

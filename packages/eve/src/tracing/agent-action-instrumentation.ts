@@ -13,12 +13,15 @@ import type {
   InstrumentationActionTerminalEvent,
   InstrumentationAttemptScope,
   InstrumentationProviderDefinition,
-} from "#harness/instrumentation/lifecycle.js";
-import { actionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { withChannelAudience } from "#tracing/channel-audience-context.js";
 
 export interface AgentActionInstrumentation {
   readonly events: Pick<
@@ -46,32 +49,30 @@ export function createAgentActionInstrumentation(input: {
   readonly idGenerator: AgentSpanIdGenerator;
   readonly recordInputs: boolean;
   readonly recordOutputs: boolean;
-  readonly resolveParent: (
+  readonly resolveTraceContext: (
     event: InstrumentationActionStartedEvent,
-  ) =>
-    | { readonly context: Context; readonly spanContext: SpanContext }
-    | undefined
-    | PromiseLike<{ readonly context: Context; readonly spanContext: SpanContext } | undefined>;
+  ) => SpanContext | undefined | PromiseLike<SpanContext | undefined>;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
 }): AgentActionInstrumentation {
   const byAttempt = new Map<string, Set<string>>();
 
   const onStarted = async (event: InstrumentationActionStartedEvent): Promise<void> => {
-    const parent = await input.resolveParent(event);
-    if (parent === undefined) return;
+    const traceContext = await input.resolveTraceContext(event);
+    if (traceContext === undefined || !isSampledTrace(traceContext)) return;
 
     const existing = await input.stateStore.getAction(event.idempotencyKey);
     const state: AgentActionTraceState = existing ?? {
       attemptIndex: event.scope.attemptIndex,
       callId: event.callId,
+      channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       inputAttribute: input.recordInputs ? contentAttribute(event.input, false) : undefined,
       kind: event.kind,
       name: event.name,
       parent: {
-        spanId: parent.spanContext.spanId,
-        traceFlags: parent.spanContext.traceFlags,
-        traceId: parent.spanContext.traceId,
+        spanId: input.idGenerator.deriveSpanId(attemptIdempotencyKey(event.scope)),
+        traceFlags: traceContext.traceFlags,
+        traceId: traceContext.traceId,
       },
       rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
       sessionId: event.scope.sessionId,
@@ -101,7 +102,9 @@ export function createAgentActionInstrumentation(input: {
       } else if (event.output.type === "error") {
         recordError(span, event.output.error);
       } else {
-        if (event.usage !== undefined) setAgentUsage(span, event.usage);
+        if (event.usage !== undefined) {
+          setAgentUsage(span, event.usage, { includeGenAiDetails: false });
+        }
         if (input.recordOutputs) {
           const result = contentAttribute(event.output.output, false);
           if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
@@ -125,7 +128,6 @@ export function createAgentActionInstrumentation(input: {
             "agent.action.name": state.name,
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
-            "agent.root.session.id": state.rootSessionId,
             "agent.session.id": state.sessionId,
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
@@ -188,13 +190,19 @@ function actionContext(state: AgentActionTraceState): AgentActionContext {
     traceId: state.parent.traceId,
   };
   return {
-    context: trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
+    context: withChannelAudience(
+      trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
+      state.channelAudience,
+    ),
     spanContext,
   };
 }
 
 function contextFromActionState(state: AgentActionTraceState): Context {
-  return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext({ ...state.parent, isRemote: false }));
+  return withChannelAudience(
+    trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext({ ...state.parent, isRemote: false })),
+    state.channelAudience,
+  );
 }
 
 function recordError(span: Span, error: unknown): void {

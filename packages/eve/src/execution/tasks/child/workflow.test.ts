@@ -79,8 +79,8 @@ describe("taskRunWorkflow", () => {
   it("forwards child updates after dispatch acknowledgement without changing the view", async () => {
     const update = {
       callId: "update-call",
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       kind: "task-update" as const,
       message: "Found three matching records.",
     };
@@ -114,8 +114,8 @@ describe("taskRunWorkflow", () => {
   it("forwards a fast child update before its terminal wake", async () => {
     const update = {
       callId: "update-call",
-      childStepIndex: 2,
-      childTurnId: "turn-child",
+      updateIndex: 2,
+      updateEpoch: "turn-child",
       kind: "task-update" as const,
       message: "Final progress update.",
     };

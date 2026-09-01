@@ -144,6 +144,28 @@ describe("buildStatusLine", () => {
     expect(noProject).toBe("m via ai-gateway(oidc)");
   });
 
+  it("right-aligns monochrome build status and preserves it at narrow widths", () => {
+    const status = (phase: "building" | "complete", width = 120) =>
+      buildStatusLine({
+        devBuild: { phase, summary: "agent/instructions.md changed" },
+        model: "anthropic/claude-sonnet-5",
+        theme,
+        width,
+      })!;
+
+    const building = status("building");
+    const complete = status("complete");
+    expect(stripAnsi(building)).toMatch(
+      /^anthropic\/claude-sonnet-5 +▪ agent\/instructions\.md updating…$/u,
+    );
+    expect(stripAnsi(complete)).toMatch(
+      /^anthropic\/claude-sonnet-5 +✓ agent\/instructions\.md updated$/u,
+    );
+    expect(visibleLength(complete)).toBe(120);
+    expect(complete).not.toContain("\x1b[32m");
+    expect(stripAnsi(status("complete", 20))).toBe("✓ agent/instructions");
+  });
+
   it("leads with the transient logs hint and keeps it as width narrows", () => {
     const input = {
       logLevel: "sandbox",

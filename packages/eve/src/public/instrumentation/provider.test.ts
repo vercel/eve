@@ -27,6 +27,17 @@ describe("defineInstrumentation", () => {
     expect(isInstrumentationProvider(provider)).toBe(true);
   });
 
+  it("preserves a provider trace policy", () => {
+    const tracePolicy = ({ audience }: { audience: string }) => ({
+      emit: true as const,
+      recordInputs: audience === "public",
+      recordOutputs: false,
+    });
+    const provider = defineInstrumentation({ tracePolicy });
+
+    expect(provider.tracePolicy).toBe(tracePolicy);
+  });
+
   it("brands a legacy config-shaped declaration", () => {
     const config = defineInstrumentation({ functionId: "support", recordInputs: false });
 

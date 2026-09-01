@@ -25,7 +25,8 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export async function dispatchRuntimeActionsStep(
   input: RuntimeActionDispatchInput,
@@ -42,8 +43,6 @@ export async function dispatchRuntimeActionsStep(
   }
 
   const { batch, bundle, session } = prepared;
-  const persistentSessions =
-    bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   // Acquired only once preflight can no longer throw, so a planning failure
   // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
@@ -67,7 +66,22 @@ export async function dispatchRuntimeActionsStep(
         case "resume":
           outcome = await dispatchToAgentHandle({
             action: entry.action,
+            activityObserver:
+              prepared.activityObserver === undefined
+                ? undefined
+                : deriveChildActivityObserverConfig({
+                    activityObserver: prepared.activityObserver,
+                    callId: entry.action.callId,
+                    kind: entry.action.kind === "remote-agent-call" ? "remote-agent" : "subagent",
+                    name:
+                      entry.action.kind === "remote-agent-call"
+                        ? entry.action.remoteAgentName
+                        : entry.action.subagentName,
+                    parentSessionId: session.sessionId,
+                    parentTurnId: batch.event.turnId,
+                  }),
             agentId: entry.agentId,
+            auth: prepared.auth,
             bundle: createAgentContinuationBundle({
               action: entry.action,
               bundle,
@@ -91,7 +105,7 @@ export async function dispatchRuntimeActionsStep(
             initiatorAuth: prepared.initiatorAuth,
             parentContinuationToken: input.parentContinuationToken,
             parentTraceContext: prepared.parentTraceContext,
-            persistentSessions,
+            activityObserver: prepared.activityObserver,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,

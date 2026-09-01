@@ -5,6 +5,7 @@ import type { RouteDefinition } from "#channel/routes.js";
 import type { Session, SessionHandle } from "#channel/session.js";
 import type { DeliverPayload, SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { StepInput } from "#harness/types.js";
+import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
 
 /**
  * Enriched return shape from a channel's {@link ChannelAdapter.fetchFile}
@@ -21,7 +22,15 @@ export interface FetchFileResult {
   readonly filename?: string;
 }
 
-export type FetchFileFunction = (url: string) => Promise<Buffer | FetchFileResult | null>;
+/** Runtime context supplied while resolving a channel-owned file URL. */
+export interface FetchFileContext {
+  readonly state: Readonly<Record<string, unknown>>;
+}
+
+export type FetchFileFunction = (
+  url: string,
+  context?: FetchFileContext,
+) => Promise<Buffer | FetchFileResult | null>;
 
 /**
  * Input passed to a channel's `receive` callback when another channel or
@@ -49,7 +58,7 @@ export interface GenericChannelDefinition<
   TState = undefined,
   TCtx = void,
   TReceiveTarget = Record<string, unknown>,
-  TMetadata extends Record<string, unknown> = Record<string, unknown>,
+  TMetadata extends Record<string, unknown> & ChannelAudienceMetadata = Record<string, unknown>,
 > {
   /** Policy used by message sends that do not provide an explicit override. */
   readonly turnPolicy?: TurnPolicy;

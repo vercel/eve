@@ -1,13 +1,6 @@
-import type { HarnessV1NetworkSandboxSession } from "@ai-sdk/harness";
-import type { HarnessAgentSession } from "@ai-sdk/harness/agent";
-
-import { AUTHORING_EVAL_DIRECTORY } from "./paths.js";
-import type { AuthoringTranscriptEntry } from "./protocol.js";
-
 export interface AuthoringSetupContext {
-  readonly sandbox: HarnessV1NetworkSandboxSession;
   readonly workspace: string;
-  readonly artifactsRoot: typeof AUTHORING_EVAL_DIRECTORY;
+  readonly artifactsRoot: string;
   run(command: string, workingDirectory?: string): Promise<void>;
   write(path: string, content: string): Promise<void>;
 }
@@ -30,28 +23,28 @@ export interface AuthoringSetup {
 
 export interface AuthoringTurn {
   readonly text: string;
-  readonly toolCalls: ReadonlyArray<{ input: unknown }>;
+  readonly toolCalls: ReadonlyArray<{ name: string; input: unknown }>;
 }
 
 export interface AuthoringInteractionContext {
-  readonly session: HarnessAgentSession;
-  readonly transcript: ReadonlyArray<AuthoringTranscriptEntry>;
   send(prompt: string): Promise<AuthoringTurn>;
 }
 
 export interface AuthoringCase {
   readonly startingPoint: AuthoringStartingPoint;
+  /** Directory created by the agent, relative to the starting workspace. */
+  readonly projectDirectory?: string;
   readonly setup?: AuthoringSetup;
   readonly interact: (context: AuthoringInteractionContext) => Promise<void>;
 }
 
 export const emptyProject: AuthoringStartingPoint = {
-  id: "empty",
+  id: "empty-v2",
   workspace: "empty",
 };
 
 export const simpleProject: AuthoringStartingPoint = {
-  id: "simple",
+  id: "simple-v2",
   workspace: "scaffolded",
 };
 

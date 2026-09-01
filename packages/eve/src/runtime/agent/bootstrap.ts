@@ -1,6 +1,6 @@
 import type { ModelMessage } from "ai";
 
-import { AGENT_TOOL_NAME, isImplicitAgentToolAvailable } from "#runtime/framework-tools/agent.js";
+import { AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import { composeRuntimeBasePrompt } from "#runtime/prompt/compose.js";
 import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
 import type { ResolvedAgent, ResolvedAgentDefinition } from "#runtime/types.js";
@@ -94,16 +94,12 @@ export function createResolvedRuntimeTurnAgent(input: {
   const subagentDeclaredTool = input.tools.some(
     (tool) => tool.kind === "subagent" || tool.kind === "remote",
   );
-  // The framework `agent` tool is injected after graph resolution, so
-  // declared tools alone under-count. isImplicitAgentToolAvailable is the
-  // same predicate node-step uses for the injection itself — including the
-  // authored-tool shadowing leg, so instructions never advertise a tool an
-  // authored "agent" tool has replaced.
-  const subagentImplicitRootTool = isImplicitAgentToolAvailable({
-    disabledFrameworkTools: agent.disabledFrameworkTools,
-    hasAuthoredAgentTool: input.tools.some((tool) => tool.name === AGENT_TOOL_NAME),
-    nodeId: input.nodeId,
-  });
+  const subagentFrameworkRootTool = input.tools.some(
+    (tool) =>
+      tool.kind === "authored-tool" &&
+      tool.owner.kind === "framework" &&
+      tool.name === AGENT_TOOL_NAME,
+  );
   const base: RuntimeTurnAgentBase = {
     availableSkills: agent.skills.map((skill) => ({
       description: skill.description,
@@ -116,12 +112,9 @@ export function createResolvedRuntimeTurnAgent(input: {
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,
-      persistentSubagentSessions:
-        config?.experimental?.tasks === true ||
-        config?.experimental?.subagentPersistentSessions === true,
-      subagentsAvailable: subagentDeclaredTool || subagentImplicitRootTool,
+      subagentsAvailable: subagentDeclaredTool || subagentFrameworkRootTool,
       tasksEnabled: config?.experimental?.tasks === true,
-      toolsAvailable: input.tools.length > 0 || subagentImplicitRootTool,
+      toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),
     compactionModel: config?.compaction?.model,

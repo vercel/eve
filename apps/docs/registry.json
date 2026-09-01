@@ -29,6 +29,30 @@
       }
     },
     {
+      "name": "experimental/self-modification",
+      "type": "registry:item",
+      "title": "Self-modification (Experimental)",
+      "description": "Add an experimental, development-only source editing subagent to an eve project.",
+      "dependencies": ["@eve/self-modification"],
+      "files": [
+        {
+          "path": "registry/experimental/self-modification/agent.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/agent.ts"
+        },
+        {
+          "path": "registry/experimental/self-modification/sandbox.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/sandbox.ts"
+        },
+        {
+          "path": "registry/experimental/self-modification/extension.ts",
+          "type": "registry:file",
+          "target": "agent/subagents/self-modification/extensions/selfmod.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/agent-browser",
       "type": "registry:item",
       "title": "agent-browser",
@@ -56,6 +80,23 @@
           "path": "registry/extensions/browserbase.ts",
           "type": "registry:file",
           "target": "agent/extensions/browserbase.ts"
+        }
+      ]
+    },
+    {
+      "name": "extension/blitzreels",
+      "type": "registry:item",
+      "title": "BlitzReels",
+      "description": "Turn long videos into short clips, generate media, repair edits, and export.",
+      "dependencies": ["@blitzreels/eve"],
+      "envVars": {
+        "BLITZREELS_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/extensions/blitzreels.ts",
+          "type": "registry:file",
+          "target": "agent/extensions/blitzreels.ts"
         }
       ]
     },
@@ -126,6 +167,28 @@
           "path": "registry/extensions/upstash-agentkit.ts",
           "type": "registry:file",
           "target": "agent/extensions/agentkit.ts"
+        }
+      ]
+    },
+    {
+      "name": "memory/supermemory",
+      "type": "registry:item",
+      "title": "Supermemory",
+      "description": "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
+      "dependencies": ["@supermemory/eve"],
+      "envVars": {
+        "SUPERMEMORY_API_KEY": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.47.3"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/supermemory.ts",
+          "type": "registry:file",
+          "target": "agent/memory/supermemory.ts"
         }
       ]
     },
@@ -309,6 +372,42 @@
           "path": "registry/connections/honeycomb.ts",
           "type": "registry:file",
           "target": "agent/connections/honeycomb.ts"
+        }
+      ]
+    },
+    {
+      "name": "connection/agentcard",
+      "type": "registry:item",
+      "title": "Agentcard",
+      "description": "let agents buy online",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "connect",
+              "agentcard",
+              "mcp.agentcard.sh/mcp",
+              "agentcard",
+              "--creation-type",
+              "agentcard",
+              "--connection-method",
+              "mcp"
+            ]
+          },
+          "requires": ">=0.29.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.7.0"],
+      "files": [
+        {
+          "path": "registry/connections/agentcard.ts",
+          "type": "registry:file",
+          "target": "agent/connections/agentcard.ts"
         }
       ]
     },
@@ -963,6 +1062,30 @@
       ]
     },
     {
+      "name": "connection/shopify",
+      "type": "registry:item",
+      "title": "Shopify",
+      "description": "Search products and manage carts and checkouts on a Shopify storefront.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "shopify"]
+          },
+          "requires": ">=0.46.1"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/connections/shopify.ts",
+          "type": "registry:file",
+          "target": "agent/connections/shopify.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/stripe",
       "type": "registry:item",
       "title": "Stripe",
@@ -1321,6 +1444,30 @@
       }
     },
     {
+      "name": "channel/blooio",
+      "type": "registry:item",
+      "title": "Blooio",
+      "description": "Send and receive iMessage, RCS, and SMS through Blooio, with reactions, typing indicators, read receipts, polls, groups, capability checks, and history.",
+      "dependencies": ["eve-channel-blooio"],
+      "envVars": {
+        "BLOOIO_API_KEY": "",
+        "BLOOIO_WEBHOOK_SECRET": ""
+      },
+      "files": [
+        {
+          "path": "registry/channels/blooio.ts",
+          "type": "registry:file",
+          "target": "agent/channels/blooio.ts"
+        }
+      ],
+      "meta": {
+        "eve": {
+          "docs": "/integrations/blooio#configure",
+          "implementation": "native"
+        }
+      }
+    },
+    {
       "name": "channel/github",
       "type": "registry:item",
       "title": "GitHub",
@@ -1338,7 +1485,8 @@
           "implementation": "native"
         }
       },
-      "dependencies": ["@vercel/connect@>=0.6.0"]
+      "dependencies": ["@vercel/connect@>=0.6.0"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/linear-agent",
@@ -1358,7 +1506,8 @@
           "implementation": "native"
         }
       },
-      "dependencies": ["@vercel/connect"]
+      "dependencies": ["@vercel/connect"],
+      "devDependencies": ["vercel@>=58.5.1"]
     },
     {
       "name": "channel/web",
@@ -1380,15 +1529,14 @@
       },
       "dependencies": [
         "@radix-ui/react-use-controllable-state@1.2.2",
-        "@shikijs/core@4.1.0",
-        "@shikijs/engine-javascript@4.1.0",
-        "@shikijs/engine-oniguruma@4.1.0",
+        "@shikijs/core@3.23.0",
+        "@shikijs/engine-javascript@3.23.0",
+        "@shikijs/engine-oniguruma@3.23.0",
         "@streamdown/cjk@1.0.3",
         "@streamdown/code@1.1.1",
         "@streamdown/math@1.0.2",
         "@streamdown/mermaid@1.0.2",
         "@tailwindcss/postcss@4.3.0",
-        "ai@^7.0.38",
         "class-variance-authority@0.7.1",
         "clsx@2.1.1",
         "cmdk@1.1.1",
@@ -1399,12 +1547,12 @@
         "radix-ui@1.4.3",
         "react@19.2.6",
         "react-dom@19.2.6",
-        "shiki@4.1.0",
+        "shiki@3.23.0",
         "streamdown@2.5.0",
         "tailwind-merge@3.6.0",
         "tailwindcss@4.3.0",
         "use-stick-to-bottom@1.1.4",
-        "zod@4.4.3"
+        "zod@4.5.4"
       ],
       "devDependencies": [
         "@types/node@26",
@@ -1434,6 +1582,16 @@
           "target": "app/globals.css"
         },
         {
+          "path": "registry/channel/web/app/icon.svg",
+          "type": "registry:file",
+          "target": "app/icon.svg"
+        },
+        {
+          "path": "registry/channel/web/app/apple-icon.tsx",
+          "type": "registry:file",
+          "target": "app/apple-icon.tsx"
+        },
+        {
           "path": "registry/channel/web/app/layout.tsx",
           "type": "registry:file",
           "target": "app/layout.tsx"
@@ -1442,6 +1600,16 @@
           "path": "registry/channel/web/app/page.tsx",
           "type": "registry:file",
           "target": "app/page.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/s/[sessionId]/page.tsx",
+          "type": "registry:file",
+          "target": "app/s/[sessionId]/page.tsx"
+        },
+        {
+          "path": "registry/channel/web/app/s/page.tsx",
+          "type": "registry:file",
+          "target": "app/s/page.tsx"
         },
         {
           "path": "registry/channel/web/components.json",
@@ -1472,6 +1640,11 @@
           "path": "registry/channel/web/components/ai-elements/prompt-input.tsx",
           "type": "registry:file",
           "target": "components/ai-elements/prompt-input.tsx"
+        },
+        {
+          "path": "registry/channel/web/components/ai-elements/question.tsx",
+          "type": "registry:file",
+          "target": "components/ai-elements/question.tsx"
         },
         {
           "path": "registry/channel/web/components/ai-elements/reasoning.tsx",
@@ -1587,11 +1760,6 @@
           "path": "registry/channel/web/postcss.config.mjs",
           "type": "registry:file",
           "target": "postcss.config.mjs"
-        },
-        {
-          "path": "registry/channel/web/tsconfig.json",
-          "type": "registry:file",
-          "target": "tsconfig.json"
         }
       ]
     },
@@ -1613,7 +1781,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-gchat#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1639,7 +1807,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-whatsapp#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1663,7 +1831,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-x#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1688,7 +1856,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-messenger#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1712,7 +1880,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-zernio#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1736,7 +1904,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-velt#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1761,7 +1929,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-sendblue#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1785,7 +1953,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-novu#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1809,32 +1977,29 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-liveblocks#configure",
           "implementation": "chat-sdk"
         }
       }
     },
     {
-      "name": "channel/chat-sdk-linq",
+      "name": "channel/linq",
       "type": "registry:item",
       "title": "Linq",
-      "description": "iMessage and SMS conversations, media, and tapbacks through Linq.",
-      "dependencies": ["chat", "@linqapp/chat-sdk-adapter", "@chat-adapter/state-memory"],
-      "envVars": {
-        "LINQ_API_KEY": "",
-        "LINQ_WEBHOOK_SECRET": ""
-      },
-      "files": [
-        {
-          "path": "registry/channels/chat-sdk-linq.ts",
-          "type": "registry:file",
-          "target": "agent/channels/linq.ts"
-        }
-      ],
+      "description": "Connect an eve agent to iMessage and SMS through Linq with guided Connect or portable setup.",
+      "dependencies": ["@vercel/connect@>=0.9.0"],
+      "devDependencies": ["vercel@>=58.5.1"],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
-          "implementation": "chat-sdk"
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "setup", "linq"]
+          },
+          "requires": ">=0.41.0",
+          "docs": "/docs/channels/linq",
+          "implementation": "native"
         }
       }
     },
@@ -1858,7 +2023,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-kapso#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1903,7 +2068,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-dial#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1928,7 +2093,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-agentphone#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1952,7 +2117,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-lark#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -1976,7 +2141,7 @@
       },
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-beeper#configure",
           "implementation": "chat-sdk"
         }
       }
@@ -2001,7 +2166,7 @@
       ],
       "meta": {
         "eve": {
-          "docs": "/docs/channels/chat-sdk",
+          "docs": "/integrations/chat-sdk-resend#configure",
           "implementation": "chat-sdk"
         }
       }

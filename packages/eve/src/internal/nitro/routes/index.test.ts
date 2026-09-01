@@ -29,6 +29,13 @@ describe("buildHomePageResponse", () => {
     expect(body).not.toContain('<h1 class="mono">eve</h1>');
   });
 
+  it("renders the eve favicon as an embedded SVG", async () => {
+    const body = await buildResponseForRequest("https://my-agent.example.com/").text();
+
+    expect(body).toContain('<link rel="icon" href="data:image/svg+xml,');
+    expect(body).toContain('type="image/svg+xml">');
+  });
+
   it("renders and escapes the baked-in agent name", async () => {
     const response = buildHomePageResponse(
       { agentName: 'support"><script>alert(1)</script>' },

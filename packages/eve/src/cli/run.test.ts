@@ -233,6 +233,21 @@ describe("CLI command registration", () => {
     expect(help).not.toContain("show <trace>");
     expect(help).toContain("ls");
   });
+
+  it("keeps info JSON output machine-readable", async () => {
+    const output: string[] = [];
+    const printApplicationInfo = vi.fn(async (logger: { log(message: string): void }) => {
+      logger.log(JSON.stringify({ status: "ready" }));
+    });
+
+    await runCli(
+      ["info", "--json"],
+      { error: vi.fn(), log: (message) => output.push(message) },
+      { printApplicationInfo },
+    );
+
+    expect(JSON.parse(output.join("\n"))).toEqual({ status: "ready" });
+  });
 });
 
 describe("bare eve command", () => {
@@ -813,6 +828,25 @@ describe("eve acp", () => {
 });
 
 describe("eve dev boot progress", () => {
+  it("leaves the interactive startup banner to the TUI", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const startHost = vi.fn(() => ({
+      start: async () => ({
+        kind: "started" as const,
+        appRoot: "/canonical/app",
+        url: "http://127.0.0.1:2000",
+      }),
+      close: async () => {},
+    }));
+
+    await withInteractiveTerminal(() =>
+      runCli(["dev"], logger, { runDevelopmentTui: vi.fn(async () => {}), startHost }),
+    );
+
+    expect(logger.log).not.toHaveBeenCalledWith(expect.stringContaining("☰eve"));
+    expect(logger.log).not.toHaveBeenCalledWith("");
+  });
+
   it("passes one reporter through local startup and clears the row on failure", async () => {
     const writes: string[] = [];
     const close = vi.fn(async () => {});

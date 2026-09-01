@@ -9,6 +9,26 @@ import {
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
 function concurrentWorkflowInterrupt(): WorkflowSandboxInterrupt {
+  const pendingInterruptions = ["alpha", "beta"].map((message, index) => {
+    const toolCallId = `workflow-call:tool-${index + 1}`;
+    return {
+      input: { message },
+      interruptId: `${toolCallId}:interrupt`,
+      payload: {
+        kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
+        runtimeAction: {
+          kind: "subagent-call" as const,
+          nodeId: "subagents/echo-marker",
+          subagentName: "echo-marker",
+        },
+        toolInput: { message },
+        toolName: "echo-marker",
+      },
+      runInterruptionId: `run-interruption-${index + 1}`,
+      toolCallId,
+      toolName: "echo-marker",
+    };
+  });
   const continuation = {
     auth: {
       alg: "HMAC-SHA256" as const,
@@ -17,51 +37,30 @@ function concurrentWorkflowInterrupt(): WorkflowSandboxInterrupt {
       nonce: "nonce",
       signature: "signature",
     },
-    determinism: {
-      dateNowMs: 1,
-      randomSeed: "00000000000000000000000000000000",
-    },
     js: "return Promise.all([])",
-    ledger: ["alpha", "beta"].map((message, index) => {
-      const toolCallId = `workflow-call:tool-${index + 1}`;
-      return {
-        inputJson: JSON.stringify({ message }),
-        interruptId: `${toolCallId}:interrupt`,
-        interruptPayload: {
-          kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
-          runtimeAction: {
-            kind: "subagent-call" as const,
-            nodeId: "subagents/echo-marker",
-            subagentName: "echo-marker",
-          },
-          toolInput: { message },
-          toolName: "echo-marker",
-        },
-        kind: "tool" as const,
-        name: "echo-marker",
-        status: "interrupted" as const,
-        toolCallId,
-      };
-    }),
     outerToolCallId: "workflow-call",
-    version: 1 as const,
+    pendingInterruptions,
+    resolutions: [],
+    token: "token",
+    toolNames: ["echo-marker"],
+    version: 2 as const,
   };
-  const returned = continuation.ledger[1]!;
+  const returned = pendingInterruptions[1]!;
 
   return {
     continuation,
     input: { message: "beta" },
     interruptId: returned.interruptId,
     outerToolCallId: continuation.outerToolCallId,
-    payload: returned.interruptPayload,
+    payload: returned.payload,
     toolCallId: returned.toolCallId,
-    toolName: returned.name,
+    toolName: returned.toolName,
     type: "code-mode-interrupt",
   };
 }
 
 describe("workflow runtime action state", () => {
-  it("derives concurrent actions in ledger order when a later interrupt wins the race", () => {
+  it("derives concurrent actions in request order when a later interrupt wins the race", () => {
     const interrupt = concurrentWorkflowInterrupt();
 
     const pending = getWorkflowRuntimeActionInterrupts(interrupt);
@@ -91,6 +90,24 @@ describe("workflow runtime action state", () => {
     expect(getRuntimeActionKeysFromWorkflowInterrupt(interrupt)).toEqual([
       "subagent-call:echo-marker:echo-marker_workflow-call_tool-1_interrupt",
       "subagent-call:echo-marker:echo-marker_workflow-call_tool-2_interrupt",
+    ]);
+  });
+
+  it("excludes interruptions already resolved in the current continuation batch", () => {
+    const interrupt = concurrentWorkflowInterrupt();
+    const resumed = {
+      ...interrupt,
+      continuation: {
+        ...interrupt.continuation,
+        resolutions: [{ runInterruptionId: "run-interruption-1", value: "alpha-result" }],
+      },
+      input: { message: "beta" },
+      interruptId: "workflow-call:tool-2:interrupt",
+      toolCallId: "workflow-call:tool-2",
+    };
+
+    expect(getWorkflowRuntimeActionInterrupts(resumed).map((entry) => entry.input)).toEqual([
+      { message: "beta" },
     ]);
   });
 });

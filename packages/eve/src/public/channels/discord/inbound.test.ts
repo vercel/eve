@@ -11,6 +11,7 @@ describe("parseDiscordInteraction", () => {
     const interaction = parseDiscordInteraction({
       application_id: "APP1",
       channel_id: "C01",
+      channel: { type: 1 },
       data: {
         id: "CMD1",
         name: "ask",
@@ -31,6 +32,7 @@ describe("parseDiscordInteraction", () => {
     expect(interaction?.type).toBe(2);
     if (interaction?.type !== 2) throw new Error("Expected command interaction.");
     expect(interaction.commandName).toBe("ask");
+    expect(interaction.channelType).toBe(1);
     expect(interaction.options).toEqual([
       { name: "message", options: [], value: "hello from discord" },
     ]);
@@ -143,6 +145,7 @@ describe("commandInteractionMessage", () => {
 describe("Discord context rendering", () => {
   it("renders a deterministic context block", () => {
     const block = formatDiscordContextBlock({
+      applicationId: "APP1",
       channelId: "C01",
       commandName: "ask",
       guildId: "G01",
@@ -151,6 +154,7 @@ describe("Discord context rendering", () => {
       username: "ada",
     });
     expect(block).toContain("<discord_context>");
+    expect(block).toContain("application_id: APP1");
     expect(block).toContain("user_id: U01");
     expect(block).toContain("username: ada");
   });

@@ -54,7 +54,7 @@ export default defineTaskEval({
 
     const terminal = await waitForCompletedTask(t, gate.session, "TASK-C8-REMOTE-VERIFY", taskId);
     terminal.expectOk();
-    const view = requireTaskView(terminal.requireToolCall("task_peek").output, taskId);
+    const view = requireTaskView(terminal.requireToolCall("task_cancel").output, taskId);
     await t.require(
       view,
       satisfies(

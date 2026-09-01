@@ -55,7 +55,10 @@ function delivery(
 }
 
 function weatherTurn(): LocalTraceSpan[] {
-  const turn = span("a".repeat(16), "agent.turn", 0, 0, undefined, { "agent.turn.id": "turn_0" });
+  const turn = span("a".repeat(16), "invoke_agent weather", 0, 0, undefined, {
+    "agent.turn.id": "turn_0",
+    "gen_ai.operation.name": "invoke_agent",
+  });
   const inbound = delivery("0".repeat(16), 0, "turn_0", "weather in sf?");
   const step = span("b".repeat(16), "agent.step", 10, 5000, turn.spanId, {});
   const messages = JSON.stringify([
@@ -110,7 +113,7 @@ describe("buildConversationItems", () => {
   });
 
   it("renders provider-executed tool results as tool cards after the assistant", () => {
-    // Provider-executed tools (e.g. web_search) never get an ai.toolCall
+    // Provider-executed tools (e.g. web_search) never get an execute_tool
     // span; their outcomes live on the model span's tool_results attribute.
     const spans = weatherTurn().map((s) =>
       s.name === "ai.streamText.doStream"
@@ -144,28 +147,36 @@ describe("buildConversationItems", () => {
     expect(items[4]?.name).toBe("get_weather");
   });
 
-  it("finds turns parented to a session window span", () => {
-    // Post-windowing capture: turns are children of the `agent.session` root,
-    // so turn discovery must go by name, not root position.
-    const window = span("0".repeat(16), "agent.session", 0, 0, undefined, {
-      "agent.session.window": 0,
-    });
+  it("finds turns parented to a session span", () => {
+    const session = span("0".repeat(16), "agent.session", 0, 0);
     const spans = weatherTurn().map((s) =>
-      s.name === "agent.turn" ? { ...s, parentSpanId: window.spanId } : s,
+      s.attributes["gen_ai.operation.name"] === "invoke_agent"
+        ? { ...s, parentSpanId: session.spanId }
+        : s,
     );
-    const items = buildConversationItems(trace([window, ...spans]));
+    const items = buildConversationItems(trace([session, ...spans]));
     expect(items.map((item) => item.kind)).toEqual(["user", "assistant", "tool"]);
   });
 
   it("marks turns dispatched by another turn as subagent items", () => {
     const parent = weatherTurn();
-    const childTurn = span("f".repeat(16), "agent.turn", 6000, 6000, undefined, {
-      "agent.parent.call_id": "call-7",
-      "agent.parent.session.id": "session-root",
-      "agent.parent.turn.id": "turn_0",
-      "agent.subagent.name": "echo-marker",
-      "agent.turn.id": "turn_child",
+    const parentAction = span("e".repeat(16), "agent.action", 5900, 6000, parent[0]!.spanId, {
+      "agent.action.call_id": "call-7",
+      "agent.action.kind": "subagent-call",
+      "agent.action.name": "echo-marker",
+      "agent.turn.id": "turn_0",
     });
+    const childTurn = span(
+      "f".repeat(16),
+      "invoke_agent echo-marker",
+      6000,
+      6000,
+      parentAction.spanId,
+      {
+        "agent.turn.id": "turn_child",
+        "gen_ai.operation.name": "invoke_agent",
+      },
+    );
     const childDelivery = delivery("3".repeat(16), 6000, "turn_child", "delegated task");
     const childStep = span("1".repeat(16), "agent.step", 6010, 8000, childTurn.spanId, {});
     const childModel = span(
@@ -180,7 +191,7 @@ describe("buildConversationItems", () => {
       },
     );
     const items = buildConversationItems(
-      trace([...parent, childTurn, childDelivery, childStep, childModel]),
+      trace([...parent, parentAction, childTurn, childDelivery, childStep, childModel]),
     );
     const parentItems = items.filter((item) => item.subagent === undefined);
     const childItems = items.filter((item) => item.subagent !== undefined);
@@ -206,11 +217,13 @@ describe("buildConversationItems", () => {
       "ai.prompt.messages": JSON.stringify([{ role: "user", content: "run the subagent" }]),
       "ai.response.text": "Dispatching.",
     });
-    const childTurn = span("f".repeat(16), "agent.turn", 30, 30, undefined, {
-      "agent.parent.call_id": "call-1",
-      "agent.parent.session.id": "session-root",
-      "agent.parent.turn.id": "turn_0",
-      "agent.subagent.name": "echo-marker",
+    const parentAction = span("e".repeat(16), "agent.action", 20, 30, step1.spanId, {
+      "agent.action.call_id": "call-1",
+      "agent.action.kind": "subagent-call",
+      "agent.action.name": "echo-marker",
+      "agent.turn.id": "turn_0",
+    });
+    const childTurn = span("f".repeat(16), "agent.turn", 30, 30, parentAction.spanId, {
       "agent.turn.id": "turn_child",
     });
     const childDelivery = delivery("5".repeat(16), 30, "turn_child", "delegated task");
@@ -229,6 +242,7 @@ describe("buildConversationItems", () => {
         parentDelivery,
         step1,
         dispatch,
+        parentAction,
         childTurn,
         childDelivery,
         childStep,
@@ -240,6 +254,7 @@ describe("buildConversationItems", () => {
     expect(items.map((item) => [item.kind, item.subagent !== undefined])).toEqual([
       ["user", false],
       ["assistant", false],
+      ["tool", false],
       ["user", true],
       ["assistant", true],
       ["assistant", false],

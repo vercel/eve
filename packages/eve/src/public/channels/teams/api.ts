@@ -324,7 +324,9 @@ export async function updateTeamsActivity(
     )}`,
   });
   if (!response.ok) {
-    throw new Error(`Teams update activity failed with HTTP ${response.status}.`);
+    throw new Error(
+      `Teams update activity failed with HTTP ${response.status} for conversation "${input.conversationId}" activity "${input.activityId}": ${formatConnectorErrorBody(response.body)}`,
+    );
   }
   return toPostedActivity(response.body);
 }
@@ -395,6 +397,12 @@ function toPostedActivity(body: unknown): TeamsPostedActivity {
     id: typeof raw.id === "string" ? raw.id : "",
     raw: body,
   };
+}
+
+function formatConnectorErrorBody(body: unknown): string {
+  const value = typeof body === "string" ? body : JSON.stringify(body);
+  if (value === undefined || value.length === 0) return "empty response body";
+  return value.length <= 1_000 ? value : `${value.slice(0, 997)}...`;
 }
 
 function trimTrailingSlash(value: string): string {

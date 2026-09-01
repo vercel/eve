@@ -1,8 +1,9 @@
-import type { Approval } from "#public/definitions/approval.js";
+import type { Approval } from "#approval/definition.js";
 import type { ResolvedConnectionDefinition } from "#runtime/types.js";
 import { McpConnectionClient } from "#runtime/connections/mcp-client.js";
 import { OpenApiConnectionClient } from "#runtime/connections/openapi-client.js";
-import type { ConnectionClient, ConnectionRegistry } from "#runtime/connections/types.js";
+import type { ConnectionClient } from "#shared/connection-types.js";
+import type { ConnectionRegistry } from "#runtime/connections/registry-types.js";
 
 /**
  * Per-session container mapping connection names to lazily-initialized
@@ -14,9 +15,66 @@ import type { ConnectionClient, ConnectionRegistry } from "#runtime/connections/
 export class ConnectionRegistryImpl implements ConnectionRegistry {
   #clients = new Map<string, ConnectionClient>();
   #connections: readonly ResolvedConnectionDefinition[];
+  readonly #staticConnections: readonly ResolvedConnectionDefinition[];
+  #sessionDynamicConnections = new Map<string, readonly ResolvedConnectionDefinition[]>();
+  #turnDynamicConnections = new Map<string, readonly ResolvedConnectionDefinition[]>();
 
   constructor(connections: readonly ResolvedConnectionDefinition[]) {
+    this.#staticConnections = connections;
     this.#connections = connections;
+  }
+
+  /** Replaces one complete dynamic scope and closes clients whose definition changed. */
+  async replaceDynamicConnections(
+    scope: "session" | "turn",
+    connectionsByResolver: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
+  ): Promise<void> {
+    const session =
+      scope === "session" ? new Map(connectionsByResolver) : this.#sessionDynamicConnections;
+    const turn = scope === "turn" ? new Map(connectionsByResolver) : this.#turnDynamicConnections;
+    const next = this.#buildEffectiveConnections(session, turn);
+    const previousByName = new Map(
+      this.#connections.map((connection) => [connection.connectionName, connection]),
+    );
+    const nextByName = new Map(next.map((connection) => [connection.connectionName, connection]));
+    const staleClients: ConnectionClient[] = [];
+
+    for (const [name, client] of this.#clients) {
+      if (previousByName.get(name) === nextByName.get(name)) continue;
+      this.#clients.delete(name);
+      staleClients.push(client);
+    }
+
+    this.#sessionDynamicConnections = session;
+    this.#turnDynamicConnections = turn;
+    this.#connections = next;
+    await Promise.allSettled(staleClients.map((client) => client.close()));
+  }
+
+  #buildEffectiveConnections(
+    session: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
+    turn: ReadonlyMap<string, readonly ResolvedConnectionDefinition[]>,
+  ): readonly ResolvedConnectionDefinition[] {
+    const effectiveResolvers = new Map(session);
+    for (const [slug, definitions] of turn) effectiveResolvers.set(slug, definitions);
+
+    const dynamicNames = new Map<string, string>();
+    const connections = new Map(
+      this.#staticConnections.map((connection) => [connection.connectionName, connection]),
+    );
+    for (const [resolverSlug, definitions] of effectiveResolvers) {
+      for (const definition of definitions) {
+        const previousOwner = dynamicNames.get(definition.connectionName);
+        if (previousOwner !== undefined && previousOwner !== resolverSlug) {
+          throw new Error(
+            `Dynamic connection "${definition.connectionName}" from resolver "${resolverSlug}" collides with dynamic resolver "${previousOwner}". Namespace the map key manually.`,
+          );
+        }
+        dynamicNames.set(definition.connectionName, resolverSlug);
+        connections.set(definition.connectionName, definition);
+      }
+    }
+    return [...connections.values()];
   }
 
   /**

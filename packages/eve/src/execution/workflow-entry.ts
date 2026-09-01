@@ -47,6 +47,7 @@ import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import type { TokenUsage } from "#shared/token-usage.js";
 import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instructions.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -203,11 +204,14 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
               ],
         kind: "deliver",
         payloads: [
-          {
-            message: input.input.message,
-            context: input.input.context,
-            outputSchema: input.input.outputSchema,
-          },
+          attachClientContext(
+            {
+              message: input.input.message,
+              context: input.input.context,
+              outputSchema: input.input.outputSchema,
+            },
+            readClientContext(input.input),
+          ),
         ],
         requestId: readChannelRequestId(input.serializedContext),
       },
@@ -568,6 +572,10 @@ async function runDriverLoop(input: {
       }
 
       if (next.kind === "closed") {
+        await terminateChildSessionsStep({
+          serializedContext: stateCursor.serializedContext,
+          sessionState: stateCursor.sessionState,
+        });
         return { kind: "result", result: { output: "" } };
       }
 

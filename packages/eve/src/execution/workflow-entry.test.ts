@@ -213,6 +213,43 @@ describe("workflowEntry", () => {
     });
   });
 
+  it("finalizes children when the durable command inbox closes", async () => {
+    const sessionState = createBaseSessionState();
+    const serializedContext = {
+      ...createSerializedContext(),
+      "eve.sessionId": "wrun_test_123",
+    };
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [{ token: "http:test" }],
+      stableHook: {
+        next: vi.fn(async (): Promise<IteratorResult<SessionInboxPayload>> => ({
+          done: true,
+          value: undefined,
+        })),
+      },
+      turnControls: [
+        turnResult({
+          action: "park",
+          serializedContext,
+          sessionState,
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello there" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext,
+      sessionState,
+    });
+  });
+
   it("exits a conflicting initial continuation before dispatching the first turn", async () => {
     const sessionState = createBaseSessionState();
     const dispose = vi.fn();
@@ -922,7 +959,6 @@ describe("workflowEntry", () => {
         auth: undefined,
         caller: undefined,
         kind: "deliver",
-        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
         payloads: [{ inputResponses: [{ optionId: "approve", requestId: "req-1" }] }],
         requestId: undefined,
       },

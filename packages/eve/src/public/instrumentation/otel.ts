@@ -12,8 +12,8 @@
 import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
 import {
   agentRunsIntegration,
-  otelIntegration,
-  type ContentOptions,
+  managedOtelIntegration,
+  type ManagedTraceOptions,
   type OtelIntegration,
 } from "#tracing/otel-declaration.js";
 
@@ -22,11 +22,23 @@ export {
   isOtelIntegration,
   otel,
   otelIntegration,
+  composeSpanExportPolicies,
+  redactSpanInputs,
+  redactSpanOutputs,
   type ContentOptions,
   type OtelDeclaration,
   type OtelIntegration,
   type OtelIntegrationOptions,
   type OtelOptions,
+  type ManagedTraceOptions,
+  type SpanAttributeDecision,
+  type SpanExportAttributeValue,
+  type SpanExportContext,
+  type SpanExportPolicy,
+  type SpanExportPredicate,
+  type TraceCaptureContext,
+  type TraceCapturePolicy,
+  type TracePolicyDecision,
 } from "#tracing/otel-declaration.js";
 
 export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.js";
@@ -34,10 +46,10 @@ export type { SpanExporter, SpanProcessor } from "#compiled/@vercel/otel/index.j
 /**
  * Vercel Agent Runs, enabled by default in production.
  *
- * Export it from `agent/instrumentation/agent-runs.ts` to configure content
- * capture, or export `disableInstrumentation()` from that file to turn it off.
+ * Export it from `agent/instrumentation/agent-runs.ts` to configure export, or
+ * export `disableInstrumentation()` from that file to turn it off.
  */
-export function agentRuns(options: ContentOptions = {}): OtelIntegration {
+export function agentRuns(options: ManagedTraceOptions = {}): OtelIntegration {
   return agentRunsIntegration(options);
 }
 
@@ -47,13 +59,10 @@ export function agentRuns(options: ContentOptions = {}): OtelIntegration {
  * Export it from `agent/instrumentation/local.ts` to keep it alongside a hosted
  * backend, or export `disableInstrumentation()` from that file to turn it off.
  * Omitting the file leaves eve's default in place.
- *
- * `EVE_TRACES_CONTENT=on` opts the default local spool into content capture.
- * `off` overrides this destination and no other, so declining content locally
- * leaves what a hosted backend receives alone.
  */
-export function localTraces(options: ContentOptions = {}): OtelIntegration {
-  return otelIntegration({
+export function localTraces(options: ManagedTraceOptions = {}): OtelIntegration {
+  return managedOtelIntegration({
+    ...options,
     ...resolveLocalTracesContent(options),
     spanProcessors: [createLocalTracesProcessor()],
   });

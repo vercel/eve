@@ -2,7 +2,8 @@ import { z } from "#compiled/zod/index.js";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { JsonValue } from "#shared/json.js";
-import type { TaskMetadata, TaskView } from "#tasks/types.js";
+import type { TaskExecutorBinding } from "#tools/task.js";
+import { sameTaskMetadata, type DurableTaskMetadata, type TaskView } from "#tasks/types.js";
 
 /**
  * Session-state key for the parent's live-task index.
@@ -32,20 +33,33 @@ export interface SessionTaskIndexEntry {
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
-  readonly metadata: TaskMetadata;
-  readonly operationId: string;
+  readonly executor?: TaskExecutorBinding;
+  readonly metadata: DurableTaskMetadata;
+  readonly operationId?: string;
 }
 
-const taskMetadataSchema: z.ZodType<TaskMetadata> = z.strictObject({
-  agentId: z.string().min(1),
-  kind: z.literal("subagent"),
-  mode: z.enum(["local", "remote"]),
-  name: z.string().min(1),
-});
+const taskMetadataSchema: z.ZodType<DurableTaskMetadata> = z.union([
+  z.strictObject({
+    agentId: z.string().min(1),
+    kind: z.literal("subagent"),
+    mode: z.enum(["local", "remote"]),
+    name: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.string().min(1),
+    name: z.string().min(1),
+  }),
+]);
 
 const taskViewBaseShape = {
   executor: z
     .strictObject({
+      binding: z
+        .strictObject({
+          data: z.record(z.string(), z.custom<JsonValue>()),
+          kind: z.string().min(1),
+        })
+        .optional(),
       childSessionId: z.string().min(1).optional(),
       childTurnId: z.string().min(1).optional(),
       lifecycle: z.enum(["parked", "terminal"]).optional(),
@@ -87,8 +101,14 @@ const sessionTaskIndexEntrySchema: z.ZodType<SessionTaskIndexEntry> = z.strictOb
   taskInboxToken: z.string().min(1),
   createdByStepIndex: z.number().int().nonnegative().optional(),
   createdByTurnId: z.string().min(1),
+  executor: z
+    .strictObject({
+      data: z.record(z.string(), z.custom<JsonValue>()),
+      kind: z.string().min(1),
+    })
+    .optional(),
   metadata: taskMetadataSchema,
-  operationId: z.string().min(1),
+  operationId: z.string().min(1).optional(),
   taskId: z.string().min(1),
   taskRunId: z.string().min(1),
   terminalView: taskViewSchema.optional(),
@@ -173,15 +193,6 @@ function isValidTerminalView(view: TaskView): boolean {
     case "working":
       return false;
   }
-}
-
-function sameTaskMetadata(left: TaskMetadata, right: TaskMetadata): boolean {
-  return (
-    left.agentId === right.agentId &&
-    left.kind === right.kind &&
-    left.mode === right.mode &&
-    left.name === right.name
-  );
 }
 
 /** Finds one owned task; `undefined` enforces parent-session ownership. */

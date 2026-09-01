@@ -1,9 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildSessionHandle, createAttachSessionFn, createSession } from "#channel/session.js";
+import {
+  buildSessionHandle,
+  createAttachSessionFn,
+  createSession,
+  type Session,
+} from "#channel/session.js";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { type InputResponse, parseInputResponses } from "#shared/input.js";
+
+function fixedSessionRespondTypeChecks(session: Session): void {
+  const responsesWithMetadata = [
+    { kind: "tool-approval", optionId: "approve", requestId: "approval-1" },
+  ] as const;
+
+  // @ts-expect-error fixed sessions enforce the same exact input-response contract.
+  void session.respond(responsesWithMetadata, { auth: null });
+
+  const widenedResponses: readonly InputResponse[] = responsesWithMetadata;
+  // @ts-expect-error widened responses must be schema-validated before delivery.
+  void session.respond(widenedResponses, { auth: null });
+
+  const validatedResponses = parseInputResponses([
+    { optionId: "approve", requestId: "approval-1" },
+  ]);
+  void session.respond(validatedResponses, { auth: null });
+}
+
+void fixedSessionRespondTypeChecks;
 
 function createRuntime(): Runtime {
   return {
@@ -58,6 +85,56 @@ describe("createSession#cancel", () => {
 });
 
 describe("fixed session operations", () => {
+  it("dispatches ephemeral context separately from durable channel context", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime);
+
+    await session.send(
+      "hello",
+      attachClientContext({ auth: null, context: ["durable"] }, ["ephemeral"]),
+    );
+
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: {
+        auth: null,
+        kind: "send",
+        payload: expect.objectContaining({
+          context: ["durable"],
+          message: "hello",
+        }),
+        requestId: undefined,
+        turnPolicy: "steer",
+      },
+      sessionId: "sess_1",
+    });
+    const call = vi.mocked(runtime.dispatchSession).mock.calls[0]?.[0];
+    expect(
+      readClientContext(call?.command.kind === "send" ? call.command.payload : undefined),
+    ).toEqual(["ephemeral"]);
+  });
+
+  it("keeps the session turn policy out of channel delivery metadata", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime, {
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "req_1",
+      turnPolicy: "queue",
+    });
+
+    await session.send("hello", { auth: null });
+
+    const command = vi.mocked(runtime.dispatchSession).mock.calls[0]?.[0].command;
+    expect(command?.kind === "send" ? command.delivery : undefined).toMatchObject({
+      channelKind: "channel:slack",
+      channelName: "slack",
+      requestId: "req_1",
+    });
+    expect(command?.kind === "send" ? command.delivery : undefined).not.toHaveProperty(
+      "turnPolicy",
+    );
+  });
+
   it("dispatches every operation through the stable session id", async () => {
     const runtime = createRuntime();
     const session = createAttachSessionFn(runtime, { requestId: "req_1" })("sess_1");

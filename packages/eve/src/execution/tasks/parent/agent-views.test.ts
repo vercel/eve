@@ -117,6 +117,17 @@ describe("task-derived agent availability", () => {
     await expect(appendTaskAgentAnnouncement(next)).resolves.toBe(next);
   });
 
+  it("deduplicates task announcements against the prepared history view", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue(task("task_0", "working"));
+    const session = createSession(["run-0"]);
+    const withRawAnnouncement = await appendTaskAgentAnnouncement(session);
+
+    const next = await appendTaskAgentAnnouncement(withRawAnnouncement, []);
+
+    expect(next.history).toHaveLength(withRawAnnouncement.history.length + 1);
+    expect(next.history.at(-1)).toEqual(withRawAnnouncement.history.at(-1));
+  });
+
   it("rejects two nonterminal tasks bound to one child agent", async () => {
     vi.mocked(readLatestTaskView)
       .mockResolvedValueOnce(task("task_0", "working"))

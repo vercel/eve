@@ -75,7 +75,7 @@ for await (const event of response) {
 }
 ```
 
-`message.appended` and `reasoning.appended` are incremental delta events. eve may combine adjacent deltas of the same type while a durable stream write is in flight, but preserves their text and event ordering; any different event is a barrier. Their completed forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas.
+`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. eve may combine adjacent deltas for the same text block or tool call while a durable stream write is in flight, but preserves their text and event ordering. A different event type, tool `callId`, or stream coordinate is a barrier. The completed text forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
 
 ## Handle event types
 
@@ -98,21 +98,25 @@ function handleEvent(event: MessageStreamEvent) {
 
 The most common UI events are:
 
-| Event                | Use                                                                            |
-| -------------------- | ------------------------------------------------------------------------------ |
-| `message.received`   | Confirm the user message landed; `data.parts` includes text and file metadata. |
-| `reasoning.appended` | Render reasoning deltas when the model provides them.                          |
-| `message.appended`   | Render assistant text deltas.                                                  |
-| `actions.requested`  | Show tool calls as the model requests them, before execution.                  |
-| `action.partial`     | Update a generator tool's provisional output snapshot.                         |
-| `action.result`      | Show tool call results.                                                        |
-| `input.requested`    | Pause the UI for approval or a question answer.                                |
-| `result.completed`   | Read structured output from an [output schema](./output-schema).               |
-| `session.waiting`    | Enable the composer; the same fixed session handle accepts the next message.   |
-| `session.completed`  | Mark the conversation terminal.                                                |
-| `session.failed`     | Mark the conversation failed.                                                  |
+| Event                   | Use                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `message.received`      | Confirm the user message landed; `data.parts` includes text and file metadata. |
+| `reasoning.appended`    | Render reasoning deltas when the model provides them.                          |
+| `message.appended`      | Render assistant text deltas.                                                  |
+| `action.input.appended` | Accumulate raw tool-input deltas before validation completes.                  |
+| `actions.requested`     | Show tool calls as the model requests them, before execution.                  |
+| `action.partial`        | Update a generator tool's provisional output snapshot.                         |
+| `action.result`         | Show tool call results.                                                        |
+| `input.requested`       | Pause the UI for approval or a question answer.                                |
+| `input.resolved`        | Record the server-accepted outcome and response for each human-input request.  |
+| `result.completed`      | Read structured output from an [output schema](./output-schema).               |
+| `session.waiting`       | Enable the composer; the same fixed session handle accepts the next message.   |
+| `session.completed`     | Mark the conversation terminal.                                                |
+| `session.failed`        | Mark the conversation failed.                                                  |
 
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
+
+Each `action.input.appended` event stores `inputTextDelta` and its zero-based UTF-16 code-unit `inputTextOffset`, so consumers can reject a gap instead of concatenating corrupt input. The default message reducer starts or restarts at offset `0` and ignores a nonzero offset that is not contiguous. It accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
 
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and
@@ -123,7 +127,7 @@ client-resolvable `http(s)` and `data:` URLs.
 
 `authorization.required` is different from the normal `session.waiting` boundary. It means a connection needs OAuth or another authorization challenge before the parked turn can continue. Chat UIs should render the authorization prompt, disable ordinary text input for that session, and persist the event with the rest of the chat history.
 
-If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load. Do not treat a missing `session.waiting` after `authorization.required` as a finished conversation; the callback or a structured decline should resume the same eve session.
+The stream can emit an interim `session.waiting` while the authorization callback is pending. An active `send()` or `respond()` response stays attached across that parking boundary until the authorization resolves and the resumed turn reaches its next boundary. If you support refresh while an authorization prompt is pending, keep the session cursor from the started session and rehydrate the saved events on load; the callback or a structured decline resumes the same eve session.
 
 ## Reconnection
 

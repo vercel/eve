@@ -1,7 +1,10 @@
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import { deserializeContext } from "#context/serialize.js";
+import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import {
   cancelRemoteAgentTurn,
   resolveRemoteAgentForAction,
+  resolveRemoteAgentStreamHeaders,
 } from "#execution/remote-agent-dispatch.js";
 import {
   createTaskControlError,
@@ -9,7 +12,6 @@ import {
   createUnknownTasksError,
   findTaskAgentAddress,
   lookupTaskEntries,
-  readTaskViews,
   readTaskView,
 } from "#execution/tasks/parent/control-shared.js";
 import { executeTaskUpdate } from "#execution/tasks/child/update.js";
@@ -22,16 +24,21 @@ import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeToolCallActionRequest,
-} from "#runtime/actions/types.js";
+} from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import {
   TASK_CANCEL_TOOL_NAME,
-  TASK_CONTROL_TOOL_NAMES,
-  TASK_PEEK_TOOL_NAME,
+  TASK_TOOL_NAMES,
   TASK_UPDATE_TOOL_NAME,
-} from "#runtime/framework-tools/tasks.js";
+} from "#tools/framework/task-contract.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
-import { isTerminalTaskStatus, type TaskView } from "#tasks/types.js";
+import {
+  isTerminalTaskStatus,
+  readSubagentExecutor,
+  readSubagentTaskMetadata,
+  type SubagentExecutorData,
+  type TaskView,
+} from "#tasks/types.js";
 
 const log = createLogger("execution.tasks.dispatch");
 
@@ -42,7 +49,7 @@ const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 export function isTaskControlAction(
   action: RuntimeActionRequest,
 ): action is RuntimeToolCallActionRequest {
-  return action.kind === "tool-call" && TASK_CONTROL_TOOL_NAMES.has(action.toolName);
+  return action.kind === "tool-call" && TASK_TOOL_NAMES.has(action.toolName);
 }
 
 /**
@@ -72,8 +79,8 @@ export async function executeTaskControlAction(input: {
       result: await executeTaskUpdate({
         action,
         adapter: input.adapter,
-        childStepIndex: input.parentStepIndex ?? 0,
-        childTurnId: input.parentTurnId,
+        updateIndex: input.parentStepIndex ?? 0,
+        updateEpoch: input.parentTurnId,
         serializedContext: input.serializedContext,
       }),
       session,
@@ -94,30 +101,32 @@ export async function executeTaskControlAction(input: {
   }
   const entries = lookup.entries;
 
-  switch (action.toolName) {
-    case TASK_PEEK_TOOL_NAME: {
-      const views = await readTaskViews(entries);
-      return { result: createTaskViewsResult(action, views), session };
-    }
-    case TASK_CANCEL_TOOL_NAME: {
-      const views: TaskView[] = [];
-      for (const entry of entries) {
-        views.push(await cancelOwnedTask({ bundle: input.bundle, entry, session }));
-      }
-      return { result: createTaskViewsResult(action, views), session };
-    }
-    default:
-      return {
-        result: createTaskControlError(action, `Unsupported task control "${action.toolName}".`),
-        session,
-      };
+  if (action.toolName !== TASK_CANCEL_TOOL_NAME) {
+    return {
+      result: createTaskControlError(action, `Unsupported task control "${action.toolName}".`),
+      session,
+    };
   }
+
+  const views: TaskView[] = [];
+  for (const entry of entries) {
+    views.push(
+      await cancelOwnedTask({
+        bundle: input.bundle,
+        entry,
+        serializedContext: input.serializedContext,
+        session,
+      }),
+    );
+  }
+  return { result: createTaskViewsResult(action, views), session };
 }
 
 /** Commits task cancellation, then propagates it to the addressed executor. */
 export async function cancelOwnedTask(input: {
   readonly bundle: CompiledBundle;
   readonly entry: SessionTaskIndexEntry;
+  readonly serializedContext?: Record<string, unknown>;
   readonly session: RuntimeSession;
 }): Promise<TaskView> {
   const { entry } = input;
@@ -143,57 +152,131 @@ export async function cancelOwnedTask(input: {
   const settledView = view;
 
   if (settledView.status === "cancelled" && delivery === "delivered") {
-    await propagateTaskCancel({ bundle: input.bundle, session: input.session, view: settledView });
+    await propagateTaskCancel({
+      bundle: input.bundle,
+      serializedContext: input.serializedContext,
+      session: input.session,
+      view: settledView,
+    });
   }
   return settledView;
 }
 
 /**
- * Best-effort cooperative abort of the cancelled task's child turn,
- * routed through the agent handle that owns the child address. A task
- * whose handle is already gone has nothing left to abort.
+ * Best-effort cooperative abort of the cancelled task's child turn. The
+ * child address comes from the task's durable executor binding when one
+ * was written at delegation, falling back to the agent handle in session
+ * state for tasks delegated before an executor binding existed. A task
+ * with neither has nothing left to abort.
  */
 async function propagateTaskCancel(input: {
   readonly bundle: CompiledBundle;
+  readonly serializedContext?: Record<string, unknown>;
   readonly session: RuntimeSession;
   readonly view: TaskView;
 }): Promise<void> {
-  const handle = findTaskAgentAddress(input.session, input.view.metadata.agentId);
-  if (handle === undefined) return;
-  const childSessionId = handle.address.sessionId;
-  const childTurnId = input.view.executor?.childTurnId;
+  const metadata = readSubagentTaskMetadata(input.view);
+  if (metadata === undefined) return;
+  const executor =
+    readSubagentExecutor(input.view.executor) ??
+    findTaskAgentAddress(input.session, metadata.agentId);
+  if (executor === undefined) return;
   if (
     input.view.executor?.childSessionId !== undefined &&
-    input.view.executor.childSessionId !== childSessionId
+    input.view.executor.childSessionId !== executor.address.sessionId
   ) {
     return;
   }
+  await propagateSubagentExecutorCancel({
+    bundle: input.bundle,
+    childTurnId: input.view.executor?.childTurnId,
+    executor,
+    serializedContext: input.serializedContext,
+    taskId: input.view.taskId,
+  });
+}
+
+/**
+ * Sends the cooperative abort to the child identified by a subagent
+ * executor binding. Failures are logged, never thrown: the task is already
+ * terminal when this runs, so the worst outcome is a child that runs to
+ * completion and has its callback refused.
+ */
+export async function propagateSubagentExecutorCancel(input: {
+  readonly bundle: CompiledBundle | undefined;
+  readonly childTurnId?: string;
+  readonly executor: SubagentExecutorData;
+  readonly serializedContext?: Record<string, unknown>;
+  readonly taskId: string;
+}): Promise<void> {
+  const { address, identity } = input.executor;
+  const childSessionId = address.sessionId;
+  const childTurnId = input.childTurnId;
 
   try {
-    if (handle.address.kind === "agent/remote") {
-      const resolved = resolveRemoteAgentForAction({
-        nodeId: handle.identity.nodeId,
-        remoteAgentName: handle.identity.name,
-        registry: input.bundle.subagentRegistry.subagentsByNodeId,
-      });
+    if (address.kind === "agent/remote") {
+      if (input.bundle === undefined) {
+        throw new Error("No compiled bundle is available to resolve the remote agent.");
+      }
+      const credentialResolver = address.credentialResolver;
+      let dynamicRemoteAgent;
+      if (credentialResolver === undefined && input.serializedContext !== undefined) {
+        const ctx = await deserializeContext(input.serializedContext);
+        const selection = getDynamicSubagentSelection(ctx, identity.nodeId);
+        dynamicRemoteAgent = selection?.kind === "remote" ? selection.remoteAgent : undefined;
+      }
+      const resolved =
+        credentialResolver === undefined
+          ? resolveRemoteAgentForAction({
+              dynamicRemoteAgent,
+              nodeId: identity.nodeId,
+              remoteAgentName: identity.name,
+              registry: input.bundle.subagentRegistry.subagentsByNodeId,
+            })
+          : { name: identity.name, url: address.url };
+      const legacyUrlMismatch = credentialResolver === undefined && resolved.url !== address.url;
+      const headers = legacyUrlMismatch
+        ? {}
+        : credentialResolver?.resolverId === undefined
+          ? credentialResolver === undefined
+            ? undefined
+            : {}
+          : await resolveRemoteAgentStreamHeaders({
+              bundle: input.bundle,
+              name: identity.name,
+              resolverId: credentialResolver.resolverId,
+              url: address.url,
+            });
+      const remote = legacyUrlMismatch
+        ? { name: identity.name, url: address.url }
+        : { ...resolved, url: address.url };
       const cancelInput: {
+        headers?: Record<string, string>;
         readonly remote: typeof resolved & { readonly url: string };
         readonly sessionId: string;
         readonly taskId: string;
         turnId?: string;
       } = {
-        remote: { ...resolved, url: handle.address.url },
+        remote,
         sessionId: childSessionId,
-        taskId: input.view.taskId,
+        taskId: input.taskId,
       };
+      if (headers !== undefined) cancelInput.headers = headers;
       if (childTurnId !== undefined) cancelInput.turnId = childTurnId;
       const result = await cancelRemoteAgentTurn(cancelInput);
       if (result.status === "no_active_turn") {
-        await cancelRemoteAgentTurn({
-          remote: { ...resolved, url: handle.address.url },
+        const retryInput: {
+          headers?: Record<string, string>;
+          remote: typeof resolved & { readonly url: string };
+          sessionId: string;
+          taskId: string;
+        } = {
+          remote,
           sessionId: childSessionId,
-          taskId: input.view.taskId,
-        });
+          taskId: input.taskId,
+        };
+        if (headers !== undefined) retryInput.headers = headers;
+        await cancelRemoteAgentTurn(retryInput);
       }
       return;
     }
@@ -203,20 +286,20 @@ async function propagateTaskCancel(input: {
       turnId?: string;
     } = {
       sessionId: childSessionId,
-      taskId: input.view.taskId,
+      taskId: input.taskId,
     };
     if (childTurnId !== undefined) cancelInput.turnId = childTurnId;
     const result = await requestWorkflowTurnCancellation(cancelInput);
     if (result.status === "no_active_turn") {
       await requestWorkflowTurnCancellation({
         sessionId: childSessionId,
-        taskId: input.view.taskId,
+        taskId: input.taskId,
       });
     }
   } catch (error) {
     logError(log, "task cancel propagation failed; the child may run to completion", error, {
       childSessionId,
-      taskId: input.view.taskId,
+      taskId: input.taskId,
     });
   }
 }

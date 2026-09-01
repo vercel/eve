@@ -380,6 +380,20 @@ export function reduceTraceViewerKey(
     }
     case "text": {
       if (key.framing === "bracketed-paste") return { state: base };
+      if (key.value === "k") {
+        if (base.panelFocus) {
+          return { state: { ...base, panelScroll: Math.max(0, base.panelScroll - 1) } };
+        }
+        return { state: moveSelection(base, -1, environment) };
+      }
+      if (key.value === "j") {
+        if (base.panelFocus) {
+          return {
+            state: { ...base, panelScroll: Math.min(panelMaxScroll, base.panelScroll + 1) },
+          };
+        }
+        return { state: moveSelection(base, 1, environment) };
+      }
       if (key.value === "q") return { state: base, effect: "close" };
       if (key.value === "[" || key.value === "]") {
         const delta = key.value === "[" ? 1 : -1;

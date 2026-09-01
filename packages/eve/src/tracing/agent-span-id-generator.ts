@@ -2,12 +2,13 @@ import { createHash } from "node:crypto";
 
 /**
  * Id generator shared by `registerOTel` and the agent OTel provider. A span
- * whose lifetime crosses durable worker boundaries (`agent.turn`) is emitted
+ * whose lifetime crosses durable worker boundaries (`invoke_agent`) is emitted
  * at its terminal; priming the next span id lets that span carry the
  * pre-allocated id its descendants already parented to.
  */
 export class AgentSpanIdGenerator {
   #primedSpanId: string | undefined;
+  #primedTraceId: string | undefined;
 
   /** Reserves a span id for a span emitted later via {@link withSpanId}. */
   allocateSpanId(): string {
@@ -30,6 +31,11 @@ export class AgentSpanIdGenerator {
   }
 
   generateTraceId(): string {
+    const primed = this.#primedTraceId;
+    if (primed !== undefined) {
+      this.#primedTraceId = undefined;
+      return primed;
+    }
     return randomHexId(32);
   }
 
@@ -40,6 +46,15 @@ export class AgentSpanIdGenerator {
       return startSpan();
     } finally {
       this.#primedSpanId = undefined;
+    }
+  }
+
+  withTraceId<T>(traceId: string, startSpan: () => T): T {
+    this.#primedTraceId = traceId;
+    try {
+      return startSpan();
+    } finally {
+      this.#primedTraceId = undefined;
     }
   }
 }

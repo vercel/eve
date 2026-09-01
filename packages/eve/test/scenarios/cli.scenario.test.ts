@@ -242,7 +242,7 @@ describe("runCli", () => {
     await runCli(["info"], logger);
 
     expect(logger.log).toHaveBeenCalled();
-    expect(getLogOutput(logger)).toContain("eve Info");
+    expect(getLogOutput(logger)).not.toContain("eve Info");
     expect(getLogOutput(logger)).toContain("Application");
     expect(getLogOutput(logger)).toContain("Workflow ID");
     expect(getLogOutput(logger)).toContain(`POST ${EVE_SESSION_ROUTE_PATH}`);

@@ -2,6 +2,7 @@ import { context as otelContext, trace } from "#compiled/@opentelemetry/api/inde
 import {
   type FilePart,
   jsonSchema,
+  type LanguageModelCallEndEvent,
   type LanguageModel,
   type ModelMessage,
   ToolLoopAgent,
@@ -18,26 +19,42 @@ import {
   ChannelInstrumentationKey,
   InitiatorAuthKey,
   LiveStepDynamicModelSelectionKey,
-  LiveStepToolsKey,
   ParentSessionKey,
   SandboxKey,
+  ScheduleIdKey,
+  SessionTraceSeedKey,
   SessionKey,
   SessionIdKey,
   SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicSubagentSelectionsKey,
+  StepDynamicToolMetadataKey,
+  TurnTaskDeliveryKey,
+  TurnTaskStateKey,
 } from "#context/keys.js";
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
+import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { attachClientContext } from "#internal/client-context.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InstrumentationStepStartedEventInput } from "#public/instrumentation/index.js";
+import type {
+  InstrumentationEvents,
+  InstrumentationStepStartedEventInput,
+} from "#public/instrumentation/index.js";
 import { defineInstructions } from "#public/definitions/instructions.js";
 import type { ResolvedDynamicInstructionsResolver } from "#runtime/types.js";
-import type { DynamicResolveContext } from "#shared/dynamic-tool-definition.js";
+import type { DynamicResolveContext } from "#dynamic/definition.js";
+import { registerDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import type { RunMode } from "#shared/run-mode.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { compactMessages, shouldCompact } from "#harness/compaction.js";
-import { getHarnessEmissionState, isHarnessBetweenTurns } from "#harness/emission.js";
+import {
+  getHarnessEmissionState,
+  isHarnessBetweenTurns,
+  setHarnessEmissionState,
+} from "#harness/emission.js";
 import {
   getPendingAuthorization,
   modelFacingAuthorizationOutput,
@@ -51,6 +68,7 @@ import {
 } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
+import { BackgroundToolExecutorKey } from "#harness/background-tools.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -63,11 +81,21 @@ import type { HarnessEmitFn, HarnessSession, ToolLoopHarnessConfig } from "#harn
 import {
   createInstrumentationHooks,
   type InstrumentationContextRunner,
-} from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import {
+  bindInstrumentationRuntime,
+  type InstrumentationRuntime,
+  type SessionInstrumentation,
+} from "#instrumentation/runtime.js";
 import {
   CONDITIONAL_DELIVERY_INSTRUCTION,
   EMPTY_DELIVERY_SENTINEL,
 } from "#shared/empty-delivery.js";
+import {
+  TASK_DELIVERY_INITIATING_INSTRUCTION,
+  TASK_DELIVERY_PENDING_INSTRUCTION,
+  TASK_DELIVERY_SETTLED_INSTRUCTION,
+} from "#tasks/delivery-context.js";
 
 vi.mock("ai", () => ({
   ToolLoopAgent: vi.fn(),
@@ -89,46 +117,107 @@ const {
   registeredOtelIntegration,
 } = vi.hoisted(() => ({
   mockCreateAiSdkHookBridge: vi.fn((..._args: unknown[]) => ({ onStart: vi.fn() })),
-  mockGetRegisteredTelemetryIntegrations: vi.fn((): unknown[] => []),
+  mockGetRegisteredTelemetryIntegrations: vi.fn(
+    (_options?: { readonly sanitizeEveOtelErrors?: boolean }): unknown[] => [],
+  ),
   registeredAuthorIntegration: { onStart: vi.fn() },
   registeredOtelIntegration: { onStart: vi.fn() },
 }));
 
-vi.mock("./ai-sdk-hook-bridge.js", () => ({
+vi.mock("#instrumentation/ai-sdk-hook-bridge.js", () => ({
   createAiSdkHookBridge: (...args: unknown[]) => mockCreateAiSdkHookBridge(...args),
 }));
 
-vi.mock("./ai-sdk-telemetry.js", () => ({
+vi.mock("#instrumentation/ai-sdk-telemetry.js", () => ({
   ensureOtelIntegration: vi.fn(),
-  getRegisteredTelemetryIntegrations: () => mockGetRegisteredTelemetryIntegrations(),
+  getRegisteredTelemetryIntegrations: (options?: { readonly sanitizeEveOtelErrors?: boolean }) =>
+    mockGetRegisteredTelemetryIntegrations(options),
 }));
 
-const mockGetInstrumentationConfig = vi.fn().mockReturnValue(undefined);
-vi.mock("./instrumentation/config.js", () => ({
-  getInstrumentationConfig: (...args: unknown[]) => mockGetInstrumentationConfig(...args),
-}));
+let declaredAudience: ChannelAudience = "unknown";
+let declaredDecision: InstrumentationDecision | undefined;
+let declaredInstrumentation: SessionInstrumentation | undefined;
+let declaredRuntime: InstrumentationRuntime | undefined;
 
-const mockGetInstrumentationRuntime = vi.fn().mockReturnValue(undefined);
-vi.mock("./instrumentation/runtime.js", () => ({
-  getInstrumentationRuntime: (...args: unknown[]) => mockGetInstrumentationRuntime(...args),
-}));
+function createInstrumentationContext(
+  decision: InstrumentationDecision | undefined,
+  audience: ChannelAudience,
+): ContextContainer {
+  const ctx = new ContextContainer();
+  ctx.set(ChannelInstrumentationKey, {
+    kind: "channel:test",
+    metadata: { audience },
+  });
+  if (decision !== undefined) {
+    ctx.set(SessionTraceSeedKey, {
+      decision,
+      spanId: "1".repeat(16),
+      traceFlags: decision.action === "record" ? 1 : 0,
+      traceId: "2".repeat(32),
+    });
+  }
+  return ctx;
+}
 
-/**
- * Registering an authored config writes both stores, so the tests toggle
- * telemetry through one call rather than keeping two mocks in step by hand.
- */
-function declareTelemetry(config: Readonly<Record<string, unknown>> | undefined): void {
-  mockGetInstrumentationConfig.mockReturnValue(config);
-  mockGetInstrumentationRuntime.mockReturnValue(
+function declareTelemetry(
+  config:
+    | (Readonly<Record<string, unknown>> & { readonly events?: InstrumentationEvents })
+    | undefined,
+  decision?: InstrumentationDecision,
+  audience: ChannelAudience = "unknown",
+): void {
+  declaredAudience = audience;
+  declaredDecision = decision;
+  declaredRuntime =
     config === undefined
       ? undefined
       : {
+          forceFlush: async () => undefined,
+          hooks: createInstrumentationHooks([]),
           otelSettings: {
             ...config,
             traceChannelRequests: config["traceChannelRequests"] === true,
           },
-        },
-  );
+          runInContext: (_operation, execute) => execute(),
+          shutdown: async () => undefined,
+          stepStartedRuntimeContextResolver: config.events?.["step.started"] ?? (() => undefined),
+        };
+  declaredInstrumentation = bindInstrumentationRuntime(
+    declaredRuntime,
+    createInstrumentationContext(decision, audience),
+    {
+      agentName: "test-agent",
+      rootSessionId: "test-session",
+      sessionId: "test-session",
+    },
+  )?.prepareExecution();
+}
+
+function bindHookInstrumentation(
+  hooks: ReturnType<typeof createInstrumentationHooks>,
+  runInContext: InstrumentationContextRunner = (_operation, execute) => execute(),
+  useDeclaredRuntime = false,
+): SessionInstrumentation {
+  return bindInstrumentationRuntime(
+    {
+      forceFlush: async () => undefined,
+      hooks,
+      otelSettings: useDeclaredRuntime ? declaredRuntime?.otelSettings : undefined,
+      runtimeContextResolvers: useDeclaredRuntime
+        ? declaredRuntime?.runtimeContextResolvers
+        : undefined,
+      runInContext,
+      shutdown: async () => undefined,
+      stepStartedRuntimeContextResolver: useDeclaredRuntime
+        ? declaredRuntime?.stepStartedRuntimeContextResolver
+        : undefined,
+    },
+    createInstrumentationContext(
+      useDeclaredRuntime ? declaredDecision : undefined,
+      useDeclaredRuntime ? declaredAudience : "unknown",
+    ),
+    { agentName: "test-agent", rootSessionId: "test-session", sessionId: "test-session" },
+  )!.prepareExecution();
 }
 
 vi.mock("./compaction.js", () => ({
@@ -176,6 +265,7 @@ function createTestConfig(
 ): ToolLoopHarnessConfig {
   return {
     handleEvent: emit,
+    instrumentation: declaredInstrumentation,
     mode,
     resolveModel: vi.fn().mockResolvedValue({} as LanguageModel),
     tools: new Map([
@@ -224,6 +314,21 @@ function createScheduleContext(): ContextContainer {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, SCHEDULE_APP_AUTH);
   ctx.set(InitiatorAuthKey, SCHEDULE_APP_AUTH);
+  ctx.set(ScheduleIdKey, "test-schedule");
+  return ctx;
+}
+
+function createScheduledUserContext(): ContextContainer {
+  const auth = {
+    attributes: {},
+    authenticator: "fixture-user",
+    principalId: "scheduled-owner",
+    principalType: "user" as const,
+  };
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, auth);
+  ctx.set(InitiatorAuthKey, auth);
+  ctx.set(ScheduleIdKey, "dynamic-tasks");
   return ctx;
 }
 
@@ -498,6 +603,36 @@ function finalOutputResult(text: string, structured: unknown): Record<string, un
   };
 }
 
+function pendingBashApprovalResult(): Record<string, unknown> {
+  const toolCall = {
+    input: { command: "rm -rf /tmp/demo" },
+    toolCallId: "call-1",
+    toolName: "bash",
+    type: "tool-call" as const,
+  };
+  const approvalRequest = {
+    approvalId: "approval-1",
+    toolCallId: toolCall.toolCallId,
+    type: "tool-approval-request" as const,
+  };
+
+  return {
+    content: [{ ...approvalRequest, toolCall }],
+    finishReason: "tool-calls",
+    response: {
+      messages: [
+        {
+          content: [{ text: "Need approval first.", type: "text" }, toolCall, approvalRequest],
+          role: "assistant",
+        },
+      ],
+    },
+    text: "",
+    toolCalls: [toolCall],
+    toolResults: [],
+  };
+}
+
 function createPendingBashApprovalSession(): HarnessSession {
   return appendPendingInputBatch({
     requests: [
@@ -549,7 +684,7 @@ function createPendingBashApprovalSession(): HarnessSession {
   });
 }
 
-function createPendingProtectedActionApprovalSession(): HarnessSession {
+function createPendingProtectedActionApprovalSessionWithSiblingCall(): HarnessSession {
   return appendPendingInputBatch({
     requests: [
       {
@@ -583,6 +718,12 @@ function createPendingProtectedActionApprovalSession(): HarnessSession {
             approvalId: "approval-1",
             toolCallId: "call-1",
             type: "tool-approval-request",
+          },
+          {
+            input: { action: "sibling" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-call",
           },
         ],
         role: "assistant",
@@ -653,6 +794,90 @@ function createGatewayModelCallError(input: {
 }
 
 describe("createToolLoopHarness", () => {
+  it("uses one projected history view for step consumers while preserving raw history", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+      usage: { inputTokens: 123 },
+    });
+
+    const hidden = { content: "HIDE_FROM_CONSUMERS", role: "user" as const };
+    const projector = vi.fn(({ messages }: { messages: readonly ModelMessage[] }) =>
+      messages.filter((message) => message !== hidden),
+    );
+    const stepEventMessages: Array<readonly ModelMessage[]> = [];
+    const handleEvent: HarnessEmitFn = async (event, messages) => {
+      if (event.type === "step.started") {
+        stepEventMessages.push(messages ?? []);
+      }
+    };
+    const dynamicModelMessages: Array<readonly ModelMessage[]> = [];
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", handleEvent, {
+        dispatchDynamicModelEvent: async ({ messages }) => {
+          dynamicModelMessages.push(messages);
+        },
+        historyProjector: projector,
+      }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "first", role: "user" },
+        hidden,
+        { content: "second", role: "assistant" },
+      ],
+    });
+
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      runStep(session, { message: "third" }),
+    );
+    const expectedView = [
+      { content: "first", role: "user" },
+      { content: "second", role: "assistant" },
+      { content: "third", role: "user" },
+    ];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value;
+
+    expect(dynamicModelMessages).toEqual([expectedView]);
+    expect(stepEventMessages).toEqual([expectedView]);
+    expect(agent.stream).toHaveBeenCalledWith(expect.objectContaining({ messages: expectedView }));
+    expect(result.session.history).toEqual([
+      { content: "first", role: "user" },
+      hidden,
+      { content: "second", role: "assistant" },
+      { content: "third", role: "user" },
+      { content: "Hello!", role: "assistant" },
+    ]);
+    expect(result.session.compaction).toMatchObject({
+      lastKnownInputTokens: 123,
+      lastKnownPromptMessageCount: expectedView.length,
+    });
+    expect(projector.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("stops before lifecycle callbacks and the model when history projection fails", async () => {
+    const handleEvent = vi.fn();
+    const dispatchDynamicModelEvent = vi.fn();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", handleEvent, {
+        dispatchDynamicModelEvent,
+        historyProjector: () => {
+          throw new Error("projection failed");
+        },
+      }),
+    );
+
+    await expect(runStep(createTestSession(), { message: "Hi" })).rejects.toThrow(
+      "projection failed",
+    );
+    expect(handleEvent).not.toHaveBeenCalled();
+    expect(dispatchDynamicModelEvent).not.toHaveBeenCalled();
+    expect(ToolLoopAgent).not.toHaveBeenCalled();
+  });
+
   it("parks when model finishes with stop", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -705,37 +930,78 @@ describe("createToolLoopHarness", () => {
     }
   });
 
-  it("parks without delivery when a terminal response contains the empty-delivery sentinel", async () => {
+  it("removes blank text blocks from persisted history before the provider call", async () => {
     setupMockAgent({
       finishReason: "stop",
-      response: {
-        messages: [
-          {
-            content: `internal ${EMPTY_DELIVERY_SENTINEL} trailing`,
-            role: "assistant",
-          },
-        ],
-      },
-      text: `internal ${EMPTY_DELIVERY_SENTINEL} trailing`,
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
       toolCalls: [],
       toolResults: [],
     });
 
-    const { emit, events } = createEventCollector();
-    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
-
-    const result = await runStep(createTestSession(), { message: "Hi" });
-
-    expect(result.next).toBeNull();
-    expect(result.session.history).toEqual([{ content: "Hi", role: "user" }]);
-    expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        data: expect.objectContaining({ message: null }),
-        type: "message.completed",
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
+    await runStep(
+      createTestSession({
+        history: [
+          { content: " ", role: "assistant" },
+          {
+            content: [
+              { text: "", type: "text" },
+              { text: "Previous reply", type: "text" },
+            ],
+            role: "assistant",
+          },
+        ],
       }),
+      { message: "Continue" },
     );
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value as {
+      generate: ReturnType<typeof vi.fn>;
+    };
+    expect(agent.generate.mock.calls[0]?.[0].messages).toEqual([
+      { content: [{ text: "Previous reply", type: "text" }], role: "assistant" },
+      { content: "Continue", role: "user" },
+    ]);
   });
+
+  it.each([
+    ["literal", EMPTY_DELIVERY_SENTINEL],
+    ["HTML-escaped", "&lt;eve-empty-delivery/&gt;"],
+  ])(
+    "parks without delivery when a terminal response contains the %s sentinel",
+    async (_, sentinel) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: {
+          messages: [
+            {
+              content: `internal ${sentinel} trailing`,
+              role: "assistant",
+            },
+          ],
+        },
+        text: `internal ${sentinel} trailing`,
+        toolCalls: [],
+        toolResults: [],
+      });
+
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+      const result = await runStep(createTestSession(), { message: "Hi" });
+
+      expect(result.next).toBeNull();
+      expect(result.session.history).toEqual([{ content: "Hi", role: "user" }]);
+      expect(vi.mocked(ToolLoopAgent).mock.calls.length).toBe(1);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({ message: null }),
+          type: "message.completed",
+        }),
+      );
+    },
+  );
 
   it("keeps executable tools directly available to the model", async () => {
     setupMockAgent({
@@ -758,6 +1024,81 @@ describe("createToolLoopHarness", () => {
     expect(agentCall!.tools).not.toHaveProperty("Workflow");
   });
 
+  it("registers atomic background tool calls before AI SDK execution", async () => {
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        tools: new Map([
+          [
+            "background_work",
+            {
+              description: "Start background work.",
+              execute: vi.fn(),
+              execution: "background" as const,
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "background_work",
+            },
+          ],
+        ]),
+      }),
+    );
+    await runStep(createTestSession(), { message: "Hi" });
+
+    const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as
+      | (ConstructorParameters<typeof ToolLoopAgent>[0] & {
+          onLanguageModelCallEnd?: (event: LanguageModelCallEndEvent) => Promise<void> | void;
+        })
+      | undefined;
+    const backgroundTool = agentCall?.tools?.background_work as
+      | {
+          execute?: (input: unknown, options: { toolCallId: string }) => Promise<unknown>;
+          onInputAvailable?: (input: {
+            input: unknown;
+            toolCallId: string;
+          }) => Promise<void> | void;
+        }
+      | undefined;
+    expect(agentCall?.onLanguageModelCallEnd).toBeTypeOf("function");
+    expect(backgroundTool?.onInputAvailable).toBeTypeOf("function");
+
+    await backgroundTool!.onInputAvailable!({ input: { value: 1 }, toolCallId: "call-a" });
+    await agentCall!.onLanguageModelCallEnd!({
+      content: [
+        {
+          input: { value: 1 },
+          toolCallId: "call-a",
+          toolName: "background_work",
+          type: "tool-call",
+        },
+        {
+          input: { value: 2 },
+          toolCallId: "call-b",
+          toolName: "background_work",
+          type: "tool-call",
+        },
+      ],
+    } as never);
+
+    let registeredCallIds: string[] = [];
+    const ctx = new ContextContainer();
+    ctx.set(BackgroundToolExecutorKey, {
+      async execute({ batch }) {
+        registeredCallIds = batch.calls.map((call) => call.callId);
+        return { ok: true };
+      },
+    });
+    await contextStorage.run(ctx, () => backgroundTool!.execute!({}, { toolCallId: "call-a" }));
+
+    expect(registeredCallIds).toEqual(["call-a", "call-b"]);
+  });
+
   it("announces parked agents as user-role content before the user message, outside the system prompt", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -769,7 +1110,7 @@ describe("createToolLoopHarness", () => {
 
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", undefined, {
-        persistentSubagentSessions: true,
+        historyProjector: ({ messages }) => [...messages],
         resolveModel: vi.fn().mockResolvedValue(
           new MockLanguageModelV3({
             modelId: "claude-sonnet-4-5",
@@ -839,9 +1180,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
-    );
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
     const session = createTestSession({
       state: {
         [AGENT_HANDLES_STATE_KEY]: {
@@ -892,9 +1231,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const runStep = createToolLoopHarness(
-      createTestConfig("conversation", undefined, { persistentSubagentSessions: true }),
-    );
+    const runStep = createToolLoopHarness(createTestConfig("conversation"));
     const session = createTestSession({
       history: [
         { content: "Delegate this.", role: "user" },
@@ -1166,7 +1503,9 @@ describe("createToolLoopHarness", () => {
     };
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
-    const result = await runStep(createTestSession(), { message: "Hi" });
+    const result = await runStep(createTestSession({ outputSchema: { type: "object" } }), {
+      message: "Hi",
+    });
 
     expect(result.next).toEqual({ done: true, output: "" });
     expect(events.map((event) => event.type)).toEqual([
@@ -1356,7 +1695,7 @@ describe("createToolLoopHarness", () => {
     setupMockAgent({
       content: [
         gateToolCall,
-        { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+        { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
         delegateToolCall,
       ],
       finishReason: "tool-calls",
@@ -1365,13 +1704,34 @@ describe("createToolLoopHarness", () => {
           {
             content: [
               gateToolCall,
-              { approvalId: "approval-1", toolCallId: "gate-1", type: "tool-approval-request" },
+              { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
               delegateToolCall,
             ],
             role: "assistant",
           },
         ],
       },
+      responseMessages: [
+        {
+          content: [
+            {
+              output: { type: "text", value: "/workspace" },
+              toolCallId: "call-1",
+              toolName: "bash",
+              type: "tool-result",
+            },
+          ],
+          role: "tool",
+        },
+        {
+          content: [
+            gateToolCall,
+            { approvalId: "approval-gate", toolCallId: "gate-1", type: "tool-approval-request" },
+            delegateToolCall,
+          ],
+          role: "assistant",
+        },
+      ],
       text: "",
       toolCalls: [gateToolCall, delegateToolCall],
       toolResults: [],
@@ -1382,7 +1742,9 @@ describe("createToolLoopHarness", () => {
       createTestConfig("conversation", emit, { tools: createDelegationToolMap() }),
     );
 
-    const parked = await runStep(createTestSession(), { message: "Gate and delegate." });
+    const parked = await runStep(createPendingBashApprovalSession(), {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
 
     expect(parked.next).toBeNull();
     expect(getPendingRuntimeActionBatch(parked.session.state)?.actions).toEqual([
@@ -1390,6 +1752,15 @@ describe("createToolLoopHarness", () => {
     ]);
     expect(hasPendingInputBatch(parked.session.state)).toBe(true);
     expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
+    expect(
+      parked.session.history.flatMap((message) =>
+        Array.isArray(message.content)
+          ? message.content.filter(
+              (part) => part.type === "tool-result" && part.toolCallId === "call-1",
+            )
+          : [],
+      ),
+    ).toHaveLength(1);
 
     const parkedWithRunningDelegate = {
       ...parked.session,
@@ -1767,7 +2138,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
       usage: { inputTokens: 7, outputTokens: 3 },
     });
-    const { emit } = createEventCollector();
+    const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
 
     const parked = await runStep(createLimitReachedSession(), { message: "Hi again" });
@@ -1782,6 +2153,24 @@ describe("createToolLoopHarness", () => {
     expect(getSessionTokenLimitViolation(resumed.session)).toBeNull();
     // The parked user message survives into model history for the resumed call.
     expect(resumed.session.history).toContainEqual({ content: "Hi again", role: "user" });
+    const resolutionIndex = events.findIndex((event) => event.type === "input.resolved");
+    expect(resolutionIndex).toBeGreaterThan(-1);
+    expect(events[resolutionIndex]).toMatchObject({
+      data: {
+        resolutions: [
+          {
+            kind: "session-limit",
+            outcome: "answered",
+            requestId: LIMIT_REQUEST_ID,
+            response: { optionId: "continue", requestId: LIMIT_REQUEST_ID },
+          },
+        ],
+      },
+      type: "input.resolved",
+    });
+    expect(
+      events.findIndex((event, index) => index > resolutionIndex && event.type === "step.started"),
+    ).toBeGreaterThan(resolutionIndex);
   });
 
   it("grants the budget when the user types the continue option as plain text", async () => {
@@ -1905,7 +2294,7 @@ describe("createToolLoopHarness", () => {
       toolResults: [],
     });
 
-    const approval = vi.fn(() => "user-approval" as const);
+    const approval = vi.fn((_context: unknown) => "user-approval" as const);
     const ctx = new ContextContainer();
     ctx.set(SessionKey, {
       auth: {
@@ -1920,13 +2309,27 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turn: { id: "turn-test", sequence: 0 },
     });
-    ctx.setVirtualContext(LiveStepToolsKey, [
+    registerDurableDynamicCallback({
+      callback: () => ({ ok: true }),
+      phase: "execute",
+      toolName: "tfl__getLineStatus",
+    });
+    registerDurableDynamicCallback({
+      callback: (_closure: unknown, approvalContext: unknown) => approval(approvalContext as never),
+      phase: "approvalRequest",
+      toolName: "tfl__getLineStatus",
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
       {
+        callbacks: {
+          approvalRequest: { closure: {} },
+          execute: { closure: {} },
+        },
         description: "Get TfL line status.",
-        execute: vi.fn().mockResolvedValue({ ok: true }),
-        inputSchema: jsonSchema({ type: "object" }),
+        entryKey: "tfl__getLineStatus",
+        inputSchema: { type: "object" },
         name: "tfl__getLineStatus",
-        approval,
+        resolverSlug: "tfl",
       },
     ]);
 
@@ -2258,6 +2661,7 @@ describe("createToolLoopHarness", () => {
         type: "step.failed",
       }),
     );
+    expect(result.session.outputSchema).toBeUndefined();
   });
 
   it("returns only the final assistant reply when a completed task step includes tool work", async () => {
@@ -4013,6 +4417,7 @@ describe("createToolLoopHarness", () => {
     // same thread rather than the whole run being torn down.
     expect(result.next).toBeNull();
     expect(result.settledTurn).toEqual({ isError: true, output: "Model blew up" });
+    expect(result.session.outputSchema).toBeUndefined();
 
     const types = events.map((e) => e.type);
     expect(types).toContain("session.started");
@@ -4031,6 +4436,45 @@ describe("createToolLoopHarness", () => {
     });
     expect((stepFailed!.data as { details?: { errorId?: string } }).details?.errorId).toBeDefined();
   });
+
+  it.each([
+    {
+      message: "AI Gateway requires a valid credit card on file to service requests.",
+      hint: "Add a valid credit card or credits",
+    },
+    {
+      message: "Model call failed: Free tier users do not have access to this model.",
+      hint: "Switch to a model available on the free tier",
+    },
+    {
+      message: "Model call failed: Free tier requests on this model are rate-limited.",
+      hint: "Wait for the free-tier limit to reset",
+    },
+  ])(
+    "parks the session for the recoverable AI Gateway error: $message",
+    async ({ message, hint }) => {
+      setupMockAgentError(
+        Object.assign(new Error(message), {
+          name: "GatewayInvalidRequestError",
+          statusCode: 403,
+          type: "invalid_request_error",
+        }),
+      );
+
+      const { emit, events } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+      const result = await runStep(createTestSession(), { message: "Hi" });
+
+      expect(result.next).toBeNull();
+      expect(result.settledTurn).toEqual({
+        isError: true,
+        output: expect.stringContaining(hint),
+      });
+      expect(events.map((event) => event.type)).toContain("session.waiting");
+      expect(events.map((event) => event.type)).not.toContain("session.failed");
+    },
+  );
 
   it("rethrows a recoverable task-mode model error for durable step retry", async () => {
     setupMockAgentError(new Error("Model blew up"));
@@ -4117,9 +4561,8 @@ describe("createToolLoopHarness", () => {
 
   it("surfaces a terminal model-call error to the parent as a failed task result", async () => {
     // Regression test for https://github.com/vercel/eve/issues/412 — a
-    // delegated subagent runs in task mode; when its model id does not
-    // resolve (terminal 404), the failure must reach the parent as an
-    // error result, not a successful empty output.
+    // delegated task-mode child whose model id does not resolve (terminal 404)
+    // must report an error to its parent, not a successful empty output.
     const error = Object.assign(new Error("No endpoints found for anthropic/claude-3.5-haiku"), {
       name: "AI_APICallError",
       statusCode: 404,
@@ -4596,11 +5039,15 @@ describe("createToolLoopHarness", () => {
           "test.attempt": typeof input.modelInput.instructions === "string" ? "original" : "retry",
         },
       }));
-      declareTelemetry({
-        events: {
-          "step.started": resolveRuntimeContext,
+      declareTelemetry(
+        {
+          events: {
+            "step.started": resolveRuntimeContext,
+          },
         },
-      });
+        undefined,
+        "public",
+      );
       const { constructedCalls } = setupRecoveryAgent({
         failure: createGatewayUnsupportedToolError({ unsupportedTypes: ["web_search_20250305"] }),
         successResult: {
@@ -4623,10 +5070,7 @@ describe("createToolLoopHarness", () => {
         },
       });
       const config: ToolLoopHarnessConfig = {
-        instrumentation: {
-          hooks: createInstrumentationHooks([]),
-          runInContext: (_operation, execute) => execute(),
-        },
+        instrumentation: declaredInstrumentation,
         mode: "conversation",
         resolveModel: vi.fn().mockResolvedValue("anthropic/claude-opus-4.7"),
         tools: new Map([
@@ -4652,7 +5096,12 @@ describe("createToolLoopHarness", () => {
 
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness({ ...config, handleEvent: emit });
-      const result = await runStep(session, { message: "Hi" });
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+      const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
       // The second agent was constructed for the retry.
       expect(constructedCalls.count()).toBe(2);
@@ -4913,6 +5362,62 @@ describe("createToolLoopHarness", () => {
           content: expect.stringContaining(EMPTY_DELIVERY_SENTINEL),
           role: "user",
         });
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("does not offer silent delivery on an initiating-task retry", async () => {
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      try {
+        await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "[Task state]" }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)).toMatchObject({
+          content: expect.stringContaining("was not delivered"),
+          role: "user",
+        });
+        expect(reissueMessages.at(-1)?.content).not.toContain(EMPTY_DELIVERY_SENTINEL);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("offers silent delivery on a user-auth scheduled initiating retry", async () => {
+      setupFirstThenAgent(emptyResult, successResult);
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { emit } = createEventCollector();
+      const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+      const ctx = createScheduledUserContext();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      try {
+        await contextStorage.run(ctx, () =>
+          runStep(createTestSession(), { message: "[Task state]" }),
+        );
+
+        const reissueAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as {
+          stream: ReturnType<typeof vi.fn>;
+        };
+        const reissueMessages = reissueAgent.stream.mock.calls[0]?.[0]?.messages as Array<{
+          content: unknown;
+          role: string;
+        }>;
+        expect(reissueMessages.at(-1)?.content).toContain(EMPTY_DELIVERY_SENTINEL);
       } finally {
         warnSpy.mockRestore();
       }
@@ -5592,12 +6097,51 @@ describe("createToolLoopHarness", () => {
             toolName: "protected_action",
             type: "tool-result",
           },
+          {
+            output: { type: "text", value: "sibling completed" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
           { finishReason: "stop", type: "finish-step" },
         ],
-        response: { messages: [] },
+        response: {
+          messages: [
+            {
+              content: [
+                {
+                  output: modelFacing,
+                  toolCallId: "call-1",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+                {
+                  output: { type: "text", value: "sibling completed" },
+                  toolCallId: "call-2",
+                  toolName: "protected_action",
+                  type: "tool-result",
+                },
+              ],
+              role: "tool",
+            },
+          ],
+        },
         text: "",
         toolCalls: [],
-        toolResults: [],
+        toolResults: [
+          {
+            output: modelFacing,
+            toolCallId: "call-1",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+          {
+            output: { type: "text", value: "sibling completed" },
+            toolCallId: "call-2",
+            toolName: "protected_action",
+            type: "tool-result",
+          },
+        ],
       });
 
       const { emit, events } = createEventCollector();
@@ -5620,7 +6164,7 @@ describe("createToolLoopHarness", () => {
       stashToolInterrupt(ctx, "call-1", full);
 
       const result = await contextStorage.run(ctx, () =>
-        runStep(createPendingProtectedActionApprovalSession(), {
+        runStep(createPendingProtectedActionApprovalSessionWithSiblingCall(), {
           inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
         }),
       );
@@ -5644,97 +6188,46 @@ describe("createToolLoopHarness", () => {
       });
 
       const actionResults = events.filter((event) => event.type === "action.result");
-      expect(actionResults).toHaveLength(0);
-    });
-
-    it("still parks on authorization without emitting action.result when interactive auth fires in the same step", async () => {
-      const { full, modelFacing } = createAuthSignals();
-
-      setupMockAgent({
-        finishReason: "tool-calls",
-        fullStreamParts: [
-          {
-            input: { action: "run" },
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-call",
-          },
-          {
-            output: modelFacing,
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-result",
-          },
-          { finishReason: "tool-calls", type: "finish-step" },
-        ],
-        response: {
-          messages: [
-            {
-              content: [
-                {
-                  input: { action: "run" },
-                  toolCallId: "call-1",
-                  toolName: "protected_action",
-                  type: "tool-call",
-                },
-              ],
-              role: "assistant",
-            },
-          ],
-        },
-        text: "",
-        toolCalls: [
-          {
-            input: { action: "run" },
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-call",
-          },
-        ],
-        toolResults: [
-          {
-            output: modelFacing,
-            toolCallId: "call-1",
-            toolName: "protected_action",
-            type: "tool-result",
-          },
-        ],
+      expect(actionResults).toHaveLength(1);
+      expect(actionResults[0]?.data).toMatchObject({
+        result: { callId: "call-2", kind: "tool-result", toolName: "protected_action" },
       });
-
-      const { emit, events } = createEventCollector();
-      const runStep = createToolLoopHarness(
-        createTestConfig("conversation", emit, {
-          tools: new Map([
-            [
-              "protected_action",
-              {
-                description: "Run a protected action",
-                execute: vi.fn(),
-                inputSchema: jsonSchema({ type: "object" }),
-                name: "protected_action",
-              },
-            ],
-          ]),
-        }),
-      );
-      const ctx = new ContextContainer();
-      stashToolInterrupt(ctx, "call-1", full);
-
-      const result = await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "run protected action" }),
-      );
-
-      expect(result.next).toBeNull();
-      expect(result.settledTurn).toBeUndefined();
-      expect(getPendingAuthorization(result.session.state)).toEqual({
-        challenges: full.challenges,
-      });
-
-      const authRequired = events.filter((event) => event.type === "authorization.required");
-      expect(authRequired).toHaveLength(1);
-
-      const actionResults = events.filter((event) => event.type === "action.result");
-      expect(actionResults).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.filter(
+                (part) => part.type === "tool-result" && part.toolCallId === "call-1",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "assistant" && Array.isArray(message.content)
+            ? message.content.filter(
+                (part) => part.type === "tool-call" && part.toolCallId === "call-1",
+              )
+            : [],
+        ),
+      ).toHaveLength(0);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "tool"
+            ? message.content.filter(
+                (part) => part.type === "tool-result" && part.toolCallId === "call-2",
+              )
+            : [],
+        ),
+      ).toHaveLength(1);
+      expect(
+        result.session.history.flatMap((message) =>
+          message.role === "assistant" && Array.isArray(message.content)
+            ? message.content.filter(
+                (part) => part.type === "tool-call" && part.toolCallId === "call-2",
+              )
+            : [],
+        ),
+      ).toHaveLength(1);
     });
   });
 
@@ -5778,22 +6271,35 @@ describe("createToolLoopHarness", () => {
     });
 
     const { emit } = createEventCollector();
-    const session = createPendingBashApprovalSession();
+    const hidden = { content: "HIDE_FROM_APPROVAL_RESUME", role: "user" as const };
+    const pendingSession = createPendingBashApprovalSession();
+    const session = {
+      ...pendingSession,
+      history: [hidden, ...pendingSession.history],
+    };
 
     const harness = createToolLoopHarness(
-      createTestConfig("conversation", emit, { tools: new Map() }),
+      createTestConfig("conversation", emit, {
+        historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
+        tools: new Map(),
+      }),
     );
-    const result = await harness(session, {
-      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
-    });
+    const result = await contextStorage.run(new ContextContainer(), () =>
+      harness(session, {
+        inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+      }),
+    );
 
     expect(result.session.history.map((msg) => msg.role)).toEqual([
+      "user",
       "assistant",
       "tool",
       "tool",
       "assistant",
     ]);
-    const approvalMessage = result.session.history[1];
+    const agent = vi.mocked(ToolLoopAgent).mock.results[0]?.value;
+    expect(vi.mocked(agent!.stream).mock.calls[0]?.[0].messages).not.toContain(hidden);
+    const approvalMessage = result.session.history[2];
     expect(Array.isArray(approvalMessage?.content)).toBe(true);
     const approvalParts = approvalMessage?.content as Array<Record<string, unknown>>;
     expect(approvalParts).toHaveLength(1);
@@ -5804,7 +6310,7 @@ describe("createToolLoopHarness", () => {
       type: "tool-approval-response",
     });
 
-    const toolResultMessage = result.session.history[2];
+    const toolResultMessage = result.session.history[3];
     expect(Array.isArray(toolResultMessage?.content)).toBe(true);
     const toolResultParts = toolResultMessage?.content as Array<Record<string, unknown>>;
     expect(toolResultParts).toHaveLength(1);
@@ -5874,6 +6380,67 @@ describe("createToolLoopHarness", () => {
       result.session.history.at(-1)?.role,
     ]).toEqual(["assistant", "tool-call", "tool-result", "assistant"]);
     expect(toolResult).toEqual(resumedToolResultMessage.content[0]);
+  });
+
+  it("defers an agents announcement until an approved sibling tool has produced its result", async () => {
+    const toolResultMessage = {
+      content: [
+        {
+          output: { type: "text", value: "ok" },
+          toolCallId: "call-1",
+          toolName: "bash",
+          type: "tool-result",
+        },
+      ],
+      role: "tool",
+    };
+    setupMockAgent({
+      content: [],
+      finishReason: "stop",
+      response: { messages: [{ content: "Done.", role: "assistant" }] },
+      responseMessages: [toolResultMessage, { content: "Done.", role: "assistant" }],
+      text: "Done.",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const pending = createPendingBashApprovalSession();
+    const session = {
+      ...pending,
+      state: {
+        ...pending.state,
+        [AGENT_HANDLES_STATE_KEY]: {
+          handles: [
+            {
+              address: {
+                continuationToken: "private-token",
+                kind: "agent/local" as const,
+                sessionId: "child-session-123456789012",
+              },
+              identity: {
+                id: "ag_research:123456789012",
+                name: "research",
+                nodeId: "subagents/research",
+              },
+              lastStatus: "waiting",
+              phase: "parked" as const,
+            },
+          ],
+        },
+      },
+    };
+    const harness = createToolLoopHarness(
+      createTestConfig("conversation", undefined, { tools: new Map() }),
+    );
+
+    await harness(session, {
+      inputResponses: [{ optionId: "approve", requestId: "approval-1" }],
+    });
+
+    const agent = vi.mocked(ToolLoopAgent).mock.results.at(-1)?.value;
+    if (agent === undefined) throw new Error("ToolLoopAgent mock did not return an instance.");
+    const messages = vi.mocked(agent.generate).mock.calls[0]?.[0].messages as ModelMessage[];
+    expect(JSON.stringify(messages)).not.toContain("[Agents]");
   });
 
   it("does not persist provider-executed deferred tool-results as generic tool messages", async () => {
@@ -7089,52 +7656,8 @@ describe("createToolLoopHarness", () => {
     ).toEqual([["call-1"], ["call-2"]]);
   });
 
-  it("emits input.requested for tool approval requests and parks without persisting unresolved messages", async () => {
-    setupMockAgent({
-      content: [
-        {
-          approvalId: "approval-1",
-          toolCall: {
-            input: { command: "rm -rf /tmp/demo" },
-            toolCallId: "call-1",
-            toolName: "bash",
-          },
-          type: "tool-approval-request",
-        },
-      ],
-      finishReason: "tool-calls",
-      response: {
-        messages: [
-          {
-            content: [
-              { text: "Need approval first.", type: "text" },
-              {
-                input: { command: "rm -rf /tmp/demo" },
-                toolCallId: "call-1",
-                toolName: "bash",
-                type: "tool-call",
-              },
-              {
-                approvalId: "approval-1",
-                toolCallId: "call-1",
-                type: "tool-approval-request",
-              },
-            ],
-            role: "assistant",
-          },
-        ],
-      },
-      text: "",
-      toolCalls: [
-        {
-          input: { command: "rm -rf /tmp/demo" },
-          toolCallId: "call-1",
-          toolName: "bash",
-          type: "tool-call",
-        },
-      ],
-      toolResults: [],
-    });
+  it("parks tool approval with one durable model-visible projection", async () => {
+    setupMockAgent(pendingBashApprovalResult());
 
     const { emit, events } = createEventCollector();
     const runStep = createToolLoopHarness(
@@ -7165,9 +7688,18 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Delete the temp directory." });
 
     expect(result.next).toBeNull();
-    expect(result.session.history).toEqual([
-      { content: "Delete the temp directory.", role: "user" },
-    ]);
+    expect(result.session.history).toHaveLength(2);
+    expect(result.session.history[0]).toEqual({
+      content: "Delete the temp directory.",
+      role: "user",
+    });
+    const projection = result.session.history[1];
+    expect(projection?.role).toBe("user");
+    const serializedProjection = JSON.stringify(projection?.content);
+    expect(serializedProjection).toMatch(/pending/iu);
+    expect(serializedProjection).toContain("approval-1");
+    expect(serializedProjection).toContain("bash");
+    expect(hasPendingInputBatch(result.session.state)).toBe(true);
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -7336,16 +7868,36 @@ describe("createToolLoopHarness", () => {
     expect(events.filter((event) => event.type === "action.result")).toHaveLength(1);
   });
 
-  it("runs a follow-up user message while the pending tool approval stays open", async () => {
-    const generateCalls: unknown[] = [];
+  it("keeps one pending approval across many follow-up questions", async () => {
+    const isPendingApprovalProjection = (message: ModelMessage) => {
+      const content = JSON.stringify(message.content);
+      return (
+        message.role === "user" &&
+        /pending/iu.test(content) &&
+        content.includes("approval-1") &&
+        content.includes("bash")
+      );
+    };
+    const pendingApprovalInstructions = (index: number): string =>
+      JSON.stringify(vi.mocked(ToolLoopAgent).mock.calls[index]?.[0].instructions);
+    const followupQuestions = [
+      "What is the current status of my request?",
+      "Has the requested action executed yet?",
+      "What are you waiting for before continuing?",
+      "Can you summarize what remains blocked?",
+      "What will happen after I approve the request?",
+    ];
     const agentResults = [
-      {
+      pendingBashApprovalResult(),
+      ...followupQuestions.map((_, index) => ({
         finishReason: "stop",
-        response: { messages: [{ content: "Hello!", role: "assistant" }] },
-        text: "Hello!",
+        response: {
+          messages: [{ content: `Follow-up ${String(index + 1)} answered.`, role: "assistant" }],
+        },
+        text: `Follow-up ${String(index + 1)} answered.`,
         toolCalls: [],
         toolResults: [],
-      },
+      })),
       {
         finishReason: "stop",
         response: {
@@ -7356,125 +7908,95 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       },
     ] satisfies Record<string, unknown>[];
-    let instanceIndex = 0;
+    setupMockAgentSequence(agentResults);
 
-    vi.mocked(ToolLoopAgent).mockImplementation(function (
-      this: MockAgentInstance,
-      settings: MockAgentSettings,
-    ) {
-      const result = agentResults[instanceIndex];
-      instanceIndex += 1;
-      if (result === undefined) {
-        throw new Error("ToolLoopAgent mock exhausted its scripted results.");
+    const readGenerateMessages = (index: number): ModelMessage[] => {
+      const agent = vi.mocked(ToolLoopAgent).mock.results[index]?.value;
+      const call = agent === undefined ? undefined : vi.mocked(agent.generate).mock.calls[0]?.[0];
+      if (call === undefined) {
+        throw new Error(`ToolLoopAgent instance ${String(index)} did not generate.`);
       }
-      const { onStepFinish, prepareStep } = settings;
-      this.generate = vi.fn().mockImplementation(async (input: { messages: unknown[] }) => {
-        if (prepareStep) {
-          await prepareStep({
-            messages: input.messages,
-            steps: [],
-            stepNumber: 0,
-            model: {},
-            context: undefined,
-          });
-        }
-        generateCalls.push(input.messages);
-        if (onStepFinish) await onStepFinish(result);
-        return createMockGenerateResult(result);
-      });
-      return this;
-    } as MockAgentConstructor);
+      return call.messages;
+    };
 
-    const session = appendPendingInputBatch({
-      requests: [
-        {
-          action: {
-            callId: "call-1",
-            input: { command: "rm -rf /tmp/demo" },
-            kind: "tool-call",
-            toolName: "bash",
-          },
-          allowFreeform: false,
-          display: "confirmation",
-          kind: "tool-approval",
-          options: [
-            { id: "approve", label: "Approve" },
-            { id: "cancel", label: "Cancel" },
-          ],
-          prompt: "Approve tool call: bash",
-          requestId: "approval-1",
-        },
-      ],
-      responseMessages: [
-        {
-          content: [
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", undefined, {
+        tools: new Map([
+          [
+            "bash",
             {
-              input: { command: "rm -rf /tmp/demo" },
-              toolCallId: "call-1",
-              toolName: "bash",
-              type: "tool-call",
-            },
-            {
-              approvalId: "approval-1",
-              toolCallId: "call-1",
-              type: "tool-approval-request",
+              description: "Run shell commands",
+              execute: vi.fn().mockResolvedValue("ok"),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "bash",
             },
           ],
-          role: "assistant",
-        },
-      ],
-      session: createTestSession({
-        agent: {
-          modelReference: { id: "test-model" },
-          system: "You are a test assistant.",
-          tools: [
-            { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
-          ],
-        },
+        ]),
       }),
-    });
-    const config = createTestConfig("conversation", undefined, {
-      tools: new Map([
-        [
-          "bash",
-          {
-            description: "Run shell commands",
-            execute: vi.fn().mockResolvedValue("ok"),
-            inputSchema: jsonSchema({ type: "object" }),
-            name: "bash",
-          },
+    );
+    const initialSession = createTestSession({
+      agent: {
+        modelReference: { id: "test-model" },
+        system: "You are a test assistant.",
+        tools: [
+          { description: "Run shell commands", name: "bash", inputSchema: { type: "object" } },
         ],
-      ]),
+      },
+    });
+    const parked = await runStep(initialSession, {
+      message: "Delete the temp directory.",
     });
 
-    // The follow-up message runs as an ordinary turn: the model is called
-    // without the withheld approval batch, and the approval stays open.
-    const firstResult = await createToolLoopHarness(config)(session, {
-      message: "Hi instead.",
-    });
+    expect(parked.next).toBeNull();
+    expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].toolChoice).not.toBe("none");
+    expect(parked.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
+    expect(hasPendingInputBatch(parked.session.state)).toBe(true);
 
-    expect(firstResult.next).toBeNull();
-    expect(generateCalls).toHaveLength(1);
-    expect((generateCalls[0] as { role: string; content: unknown }[]).at(-1)).toEqual({
-      content: "Hi instead.",
-      role: "user",
-    });
-    expect(
-      (generateCalls[0] as { role: string }[]).every((message) => message.role !== "tool"),
-    ).toBe(true);
-    expect(hasDeferredStepInput(firstResult.session)).toBe(false);
-    expect(hasPendingInputBatch(firstResult.session.state)).toBe(true);
+    // Every follow-up runs as an ordinary turn with tools available while the
+    // original approval remains unresolved.
+    let pendingSession = parked.session;
+    for (const [index, question] of followupQuestions.entries()) {
+      const followup = await runStep(pendingSession, {
+        message: question,
+      });
+      const callIndex = index + 1;
+      const messages = readGenerateMessages(callIndex);
+
+      expect(followup.next).toBeNull();
+      expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(callIndex + 1);
+      const settings = vi.mocked(ToolLoopAgent).mock.calls[callIndex]?.[0];
+      expect(settings?.toolChoice).not.toBe("none");
+      expect(settings?.tools).toHaveProperty("bash");
+      expect(messages.at(-1)).toEqual({ content: question, role: "user" });
+      expect(messages.every((message) => message.role !== "tool")).toBe(true);
+      expect(messages.filter(isPendingApprovalProjection)).toHaveLength(1);
+      expect(messages.findIndex(isPendingApprovalProjection)).toBe(1);
+      expect(pendingApprovalInstructions(callIndex)).toContain("Trusted eve runtime state");
+      expect(pendingApprovalInstructions(callIndex)).toContain("approval-1");
+      expect(pendingApprovalInstructions(callIndex)).toContain("bash");
+      expect(pendingApprovalInstructions(callIndex)).not.toContain("rm -rf /tmp/demo");
+      expect(followup.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
+      expect(hasDeferredStepInput(followup.session)).toBe(false);
+      expect(hasPendingInputBatch(followup.session.state)).toBe(true);
+      pendingSession = followup.session;
+    }
 
     // The late denial still restores the withheld batch behind the
     // intervening exchange and resolves it.
-    const deniedResult = await createToolLoopHarness(config)(firstResult.session, {
+    const deniedResult = await runStep(pendingSession, {
       inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
 
-    expect(generateCalls).toHaveLength(2);
-    expect((generateCalls[1] as { role: string; content: unknown }[]).slice(-2)).toEqual([
+    const denialIndex = followupQuestions.length + 1;
+    const denialMessages = readGenerateMessages(denialIndex);
+    const denialSettings = vi.mocked(ToolLoopAgent).mock.calls[denialIndex]?.[0];
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(denialIndex + 1);
+    expect(denialSettings?.toolChoice).not.toBe("none");
+    expect(denialSettings?.tools).toHaveProperty("bash");
+    expect(denialMessages.slice(-2)).toEqual([
       {
         content: [
+          { text: "Need approval first.", type: "text" },
           {
             input: { command: "rm -rf /tmp/demo" },
             toolCallId: "call-1",
@@ -7510,8 +8032,8 @@ describe("createToolLoopHarness", () => {
         role: "tool",
       },
     ]);
-    expect((generateCalls[1] as { role: string; content: unknown }[])[0]).toEqual({
-      content: "Hi instead.",
+    expect(denialMessages[0]).toEqual({
+      content: "Delete the temp directory.",
       role: "user",
     });
     expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
@@ -7519,6 +8041,118 @@ describe("createToolLoopHarness", () => {
       content: "Okay, I will not run that command.",
       role: "assistant",
     });
+  });
+
+  it("executes an unrelated tool while an earlier approval stays open", async () => {
+    const bashExecute = vi.fn().mockResolvedValue("deleted");
+    const statusExecute = vi.fn().mockResolvedValue("ready");
+
+    vi.mocked(ToolLoopAgent).mockImplementation(function (
+      this: MockAgentInstance,
+      settings: MockAgentSettings & {
+        tools?: Record<
+          string,
+          {
+            execute?: (
+              input: unknown,
+              options: { toolCallId: string },
+            ) => Promise<unknown> | unknown;
+          }
+        >;
+      },
+    ) {
+      const { onStepFinish, prepareStep } = settings;
+      const executeStatus = settings.tools?.["status"]?.execute;
+      if (executeStatus === undefined) {
+        throw new Error("status tool was not executable.");
+      }
+
+      this.generate = vi.fn().mockImplementation(async (options: { messages: unknown[] }) => {
+        if (prepareStep) {
+          await prepareStep({
+            context: undefined,
+            messages: options.messages,
+            model: {},
+            stepNumber: 0,
+            steps: [],
+          });
+        }
+
+        const toolCall = {
+          input: {},
+          toolCallId: "status-call",
+          toolName: "status",
+          type: "tool-call" as const,
+        };
+        const output = await executeStatus(toolCall.input, {
+          toolCallId: toolCall.toolCallId,
+        });
+        const toolResult = {
+          input: toolCall.input,
+          output,
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          type: "tool-result" as const,
+        };
+        const result = {
+          finishReason: "tool-calls",
+          response: {
+            messages: [
+              { content: [toolCall], role: "assistant" as const },
+              { content: [toolResult], role: "tool" as const },
+            ],
+          },
+          text: "",
+          toolCalls: [toolCall],
+          toolResults: [toolResult],
+        };
+        if (onStepFinish) await onStepFinish(result);
+        return createMockGenerateResult(result);
+      });
+      return this;
+    } as MockAgentConstructor);
+
+    const pendingSession = createPendingBashApprovalSession();
+    const session = {
+      ...pendingSession,
+      agent: {
+        ...pendingSession.agent,
+        tools: [
+          ...pendingSession.agent.tools,
+          { description: "Read status", name: "status", inputSchema: { type: "object" } },
+        ],
+      },
+    };
+    const config = createTestConfig("conversation", undefined, {
+      tools: new Map([
+        [
+          "bash",
+          {
+            description: "Run shell commands",
+            execute: bashExecute,
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "bash",
+          },
+        ],
+        [
+          "status",
+          {
+            description: "Read status",
+            execute: statusExecute,
+            inputSchema: jsonSchema({ type: "object" }),
+            name: "status",
+          },
+        ],
+      ]),
+    });
+
+    const result = await createToolLoopHarness(config)(session, {
+      message: "Check the status while that waits.",
+    });
+
+    expect(statusExecute).toHaveBeenCalledOnce();
+    expect(bashExecute).not.toHaveBeenCalled();
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("parks a second input batch while an earlier approval stays open", async () => {
@@ -7684,6 +8318,9 @@ describe("createToolLoopHarness", () => {
       message: "Ask me which color to use.",
     });
     expect(questionTurn.next).toBeNull();
+    const questionSettings = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
+    expect(questionSettings?.toolChoice).not.toBe("none");
+    expect(questionSettings?.tools).toHaveProperty("bash");
     expect(getPendingInputRequestIds(questionTurn.session.state)).toEqual(
       new Set(["approval-1", "question-call"]),
     );
@@ -7948,7 +8585,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("keeps channel context after the approval-response model call", async () => {
+  it("defers durable and ephemeral context past the approval-response model call", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Approved.", role: "assistant" }] },
@@ -8009,16 +8646,24 @@ describe("createToolLoopHarness", () => {
     });
     const harness = createToolLoopHarness(config);
     const context = "<linear_context>issue metadata</linear_context>";
+    const ephemeralContext = "Client context:\ncurrent page";
 
-    const firstResult = await harness(createPendingBashApprovalSession(), {
-      context: [context],
-      inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
-    });
+    const firstResult = await harness(
+      createPendingBashApprovalSession(),
+      attachClientContext(
+        {
+          context: [context],
+          inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+        },
+        [ephemeralContext],
+      ),
+    );
 
     const firstMessages = readGenerateMessages(0);
     expect(typeof firstResult.next).toBe("function");
     expect(firstMessages.at(-1)?.role).toBe("tool");
     expect(firstMessages).not.toContainEqual({ content: context, role: "user" });
+    expect(firstMessages).not.toContainEqual({ content: ephemeralContext, role: "user" });
     expect((await readPreparedMessages(0)).at(-1)).toMatchObject({
       providerOptions: {
         anthropic: { cacheControl: { type: "ephemeral" } },
@@ -8031,12 +8676,19 @@ describe("createToolLoopHarness", () => {
     const secondMessages = readGenerateMessages(1);
     expect(secondResult.next).toBeNull();
     expect(secondMessages.slice(0, firstMessages.length)).toEqual(firstMessages);
-    expect(secondMessages.at(-1)).toEqual({ content: context, role: "user" });
+    expect(secondMessages.slice(-2)).toEqual([
+      { content: ephemeralContext, role: "user" },
+      { content: context, role: "user" },
+    ]);
     expect((await readPreparedMessages(1)).at(-1)).toMatchObject({
       content: context,
       providerOptions: {
         anthropic: { cacheControl: { type: "ephemeral" } },
       },
+      role: "user",
+    });
+    expect(secondResult.session.history).not.toContainEqual({
+      content: ephemeralContext,
       role: "user",
     });
   });
@@ -8755,21 +9407,37 @@ describe("createToolLoopHarness", () => {
       }),
     );
     const session = createTestSession({
+      agent: {
+        modelReference: {
+          id: "openai/gpt-4",
+          providerOptions: { openai: { store: false } },
+        },
+        system: "You are a test assistant.",
+        tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+      },
       history: [
         { content: "old message", role: "user" },
         { content: "old reply", role: "assistant" },
       ],
     });
+    const auth = {
+      attributes: {},
+      authenticator: "oidc",
+      principalId: "user_123",
+      principalType: "user",
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, auth);
 
-    await runStep(session, { message: "Hi" });
+    await contextStorage.run(ctx, () => runStep(session, { message: "Hi" }));
 
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
       "message.received",
-      "step.started",
       "compaction.requested",
       "compaction.completed",
+      "step.started",
       "message.completed",
       "step.completed",
       "turn.completed",
@@ -8790,6 +9458,67 @@ describe("createToolLoopHarness", () => {
       sessionId: "test-session",
       turnId: "turn_0",
     });
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[3]).toEqual({
+      openai: {
+        safetyIdentifier: invocationOwnerKey(auth),
+        store: false,
+      },
+    });
+  });
+
+  it("selects the model from the pre-compaction view and dispatches step consumers after rewrite", async () => {
+    vi.mocked(shouldCompact).mockReturnValue(true);
+    const compactedHistory: ModelMessage[] = [
+      { content: "Summary of our conversation so far:", role: "user" },
+      { content: "summary", role: "assistant" },
+      { content: "current", role: "user" },
+    ];
+    vi.mocked(compactMessages).mockResolvedValue(compactedHistory);
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "done", role: "assistant" }] },
+      text: "done",
+      toolCalls: [],
+      toolResults: [],
+    });
+
+    const hidden = { content: "HIDE_FROM_COMPACTION", role: "user" as const };
+    const preCompactionModelViews: Array<readonly ModelMessage[]> = [];
+    const stepViews: Array<readonly ModelMessage[]> = [];
+    const emit: HarnessEmitFn = async (event, messages) => {
+      if (event.type === "step.started") stepViews.push(messages ?? []);
+    };
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        dispatchDynamicModelEvent: async ({ messages }) => {
+          preCompactionModelViews.push(messages);
+        },
+        historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
+        resolveModel: vi
+          .fn()
+          .mockResolvedValue({ modelId: "gpt-4", provider: "openai" } as LanguageModel),
+      }),
+    );
+    const session = createTestSession({
+      history: [
+        { content: "visible", role: "user" },
+        hidden,
+        { content: "reply", role: "assistant" },
+      ],
+    });
+
+    await contextStorage.run(new ContextContainer(), () =>
+      runStep(session, { message: "current" }),
+    );
+
+    const preCompactionView = [
+      { content: "visible", role: "user" },
+      { content: "reply", role: "assistant" },
+      { content: "current", role: "user" },
+    ];
+    expect(preCompactionModelViews).toEqual([preCompactionView]);
+    expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual(preCompactionView);
+    expect(stepViews).toEqual([compactedHistory]);
   });
 
   it("clears static and dynamic user instructions without rerunning lifecycle events", async () => {
@@ -8854,9 +9583,11 @@ describe("createToolLoopHarness", () => {
 
     const { emit, events } = createEventCollector();
     const onCompaction = vi.fn(() => []);
+    const hidden = { content: "Hidden internal context.", role: "user" as const };
     const runStep = createToolLoopHarness(
       createTestConfig("conversation", emit, {
         compactOnly: true,
+        historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
         onCompaction,
         resolveModel: vi
           .fn()
@@ -8872,6 +9603,7 @@ describe("createToolLoopHarness", () => {
       },
       history: [
         { content: "Static user instructions.", role: "user" },
+        hidden,
         { content: "Dynamic user instructions.", role: "user" },
         { content: "old reply", role: "assistant" },
       ],
@@ -9551,6 +10283,65 @@ describe("createToolLoopHarness", () => {
       ]);
     });
 
+    it("threads the active caller into OpenAI provider options across turns", async () => {
+      setupStopResult();
+      const auth = {
+        attributes: {},
+        authenticator: "oidc",
+        principalId: "user_123",
+        principalType: "user",
+      };
+      const session = createTestSession({
+        agent: {
+          modelReference: {
+            id: "openai/gpt-5.6-sol",
+            providerOptions: {
+              openai: { store: false },
+            },
+          },
+          system: "",
+          tools: [{ description: "Adds numbers", name: "add", inputSchema: { type: "object" } }],
+        },
+      });
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          resolveModel: vi.fn().mockResolvedValue("openai/gpt-5.6-sol"),
+        }),
+      );
+      const ctx = new ContextContainer();
+      ctx.set(AuthKey, auth);
+
+      const first = await contextStorage.run(ctx, () => runStep(session, { message: "hi" }));
+      const nextAuth = { ...auth, principalId: "user_456" };
+      ctx.set(AuthKey, nextAuth);
+      await contextStorage.run(ctx, () => runStep(first.session, { message: "again" }));
+
+      const readProviderOptions = async (index: number) => {
+        const agentCall = vi.mocked(ToolLoopAgent).mock.calls[index]?.[0];
+        const prepareStep = getPrepareStep<unknown[], { providerOptions?: unknown }>(
+          agentCall?.prepareStep,
+        );
+        return (
+          await prepareStep({
+            context: undefined,
+            messages: [],
+            model: null,
+            stepNumber: 0,
+            steps: [],
+          })
+        ).providerOptions;
+      };
+
+      await expect(readProviderOptions(0)).resolves.toEqual({
+        gateway: { caching: "auto" },
+        openai: { safetyIdentifier: invocationOwnerKey(auth), store: false },
+      });
+      await expect(readProviderOptions(1)).resolves.toEqual({
+        gateway: { caching: "auto" },
+        openai: { safetyIdentifier: invocationOwnerKey(nextAuth), store: false },
+      });
+    });
+
     it("gateway-auto path: merges gateway.caching='auto' into providerOptions for string model ids", async () => {
       setupStopResult();
       const config: ToolLoopHarnessConfig = {
@@ -10184,7 +10975,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
       });
 
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const config = createTestConfig("conversation");
       const runStep = createToolLoopHarness(config);
       const result = await runStep(createTestSession(), { message: "add stuff" });
@@ -10251,7 +11042,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [{ toolCallId: "call-1", toolName: "add", output: "42" }],
       });
 
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const step1Config = createTestConfig("conversation");
       const step1 = createToolLoopHarness(step1Config);
       const result1 = await step1(createTestSession(), { message: "add stuff" });
@@ -10301,6 +11092,286 @@ describe("createToolLoopHarness", () => {
   });
 
   describe("telemetry metadata", () => {
+    it("keeps integrations metadata-only on a rejected trace", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({
+        recordInputs: true,
+        recordOutputs: true,
+        tracePolicy: () => false,
+      });
+      mockGetRegisteredTelemetryIntegrations.mockReturnValue([
+        registeredOtelIntegration,
+        registeredAuthorIntegration,
+      ]);
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: declaredInstrumentation,
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "private" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: {
+          integrations?: unknown[];
+          recordInputs?: boolean;
+          recordOutputs?: boolean;
+        };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        integrations: [
+          mockCreateAiSdkHookBridge.mock.results[0]!.value,
+          registeredOtelIntegration,
+          registeredAuthorIntegration,
+        ],
+        recordInputs: false,
+        recordOutputs: false,
+      });
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
+        sanitizeEveOtelErrors: true,
+      });
+    });
+
+    it("keeps compaction telemetry metadata-only on a rejected trace", async () => {
+      vi.mocked(shouldCompact).mockReturnValueOnce(true);
+      vi.mocked(compactMessages).mockResolvedValueOnce([
+        { content: "Summary of our conversation so far:", role: "user" },
+        { content: "summary", role: "assistant" },
+      ]);
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry(
+        {
+          recordInputs: true,
+          recordOutputs: true,
+          tracePolicy: () => false,
+        },
+        { action: "drop" },
+      );
+      const runStep = createToolLoopHarness(createTestConfig());
+
+      await runStep(createTestSession(), { message: "private" });
+
+      expect(vi.mocked(compactMessages).mock.calls[0]?.[4]).toMatchObject({
+        isEnabled: true,
+        recordInputs: false,
+        recordOutputs: false,
+      });
+    });
+
+    it("keeps the content-capable lifecycle bridge active on a rejected trace", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({ tracePolicy: () => false }, { action: "drop" });
+      const attemptCompleted = vi.fn();
+      const hooks = createInstrumentationHooks([
+        {
+          capture: "content",
+          events: { "step.attempt.completed": attemptCompleted },
+          name: "analytics",
+        },
+      ]);
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: bindHookInstrumentation(hooks, undefined, true),
+        }),
+      );
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:private",
+        metadata: { audience: "private" },
+      });
+
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
+
+      expect(attemptCompleted).toHaveBeenCalledOnce();
+      expect(mockCreateAiSdkHookBridge.mock.calls[0]?.[1]).toMatchObject({
+        capturesContent: true,
+        capturesInputs: true,
+        capturesOutputs: true,
+      });
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { integrations?: unknown[] };
+      };
+      expect(agentCall.telemetry?.integrations).toEqual([
+        mockCreateAiSdkHookBridge.mock.results[0]!.value,
+      ]);
+    });
+
+    it("keeps provider content independent from emitted OTel content policy", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({
+        recordInputs: true,
+        recordOutputs: true,
+        tracePolicy: () => ({ emit: true, recordInputs: false, recordOutputs: false }),
+      });
+      const hooks = createInstrumentationHooks([{ capture: "content", name: "analytics" }]);
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", undefined, {
+          instrumentation: bindHookInstrumentation(hooks, undefined, true),
+        }),
+      );
+
+      await runStep(createTestSession(), { message: "private" });
+
+      expect(mockCreateAiSdkHookBridge.mock.calls[0]?.[1]).toMatchObject({
+        capturesContent: true,
+        capturesInputs: true,
+        capturesOutputs: true,
+      });
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: false,
+        recordOutputs: false,
+      });
+    });
+
+    it.each([
+      [false, false],
+      [true, false],
+      [false, true],
+      [true, true],
+    ] as const)("applies the explicit %s/%s capture decision", async (inputs, outputs) => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry(
+        {
+          recordInputs: true,
+          recordOutputs: true,
+          tracePolicy: () => ({
+            emit: true,
+            recordInputs: inputs,
+            recordOutputs: outputs,
+          }),
+        },
+        { action: "record", recordInputs: inputs, recordOutputs: outputs },
+        "public",
+      );
+      const runStep = createToolLoopHarness(createTestConfig());
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hello" }));
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: inputs,
+        recordOutputs: outputs,
+      });
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
+        sanitizeEveOtelErrors: !(inputs && outputs),
+      });
+    });
+
+    it("lets destination capture settings narrow an explicit content decision", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry(
+        {
+          recordInputs: false,
+          recordOutputs: true,
+          tracePolicy: () => ({
+            emit: true,
+            recordInputs: true,
+            recordOutputs: true,
+          }),
+        },
+        { action: "record", recordInputs: true, recordOutputs: true },
+        "public",
+      );
+      const runStep = createToolLoopHarness(createTestConfig());
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hello" }));
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: false,
+        recordOutputs: true,
+      });
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
+        sanitizeEveOtelErrors: true,
+      });
+    });
+
+    it("uses the injected decision instead of reinterpreting the trace seed", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      const tracePolicy = vi.fn(() => true);
+      declareTelemetry(
+        { recordInputs: true, recordOutputs: true, tracePolicy },
+        { action: "drop" },
+      );
+      const runStep = createToolLoopHarness(createTestConfig());
+      const ctx = new ContextContainer();
+      ctx.set(SessionTraceSeedKey, {
+        decision: { action: "drop" },
+        spanId: "1".repeat(16),
+        traceFlags: 0,
+        traceId: "2".repeat(32),
+      });
+
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "private" }));
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { integrations?: unknown[] };
+      };
+      expect(agentCall.telemetry?.integrations).toEqual([
+        mockCreateAiSdkHookBridge.mock.results[0]!.value,
+      ]);
+      expect(tracePolicy).not.toHaveBeenCalled();
+    });
+
     it("emits the authored turn trace with the session and turn preamble", async () => {
       const authoredTrace = {
         spanId: "0123456789abcdef",
@@ -10319,7 +11390,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
       const events: UnstampedMessageStreamEvent[] = [];
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", async (event) => {
           events.push(event);
@@ -10349,7 +11420,7 @@ describe("createToolLoopHarness", () => {
         toolResults: [],
       });
 
-      declareTelemetry({});
+      declareTelemetry({ tracePolicy: () => true });
       const config = createTestConfig("conversation");
       const runStep = createToolLoopHarness(config);
       await runStep(createTestSession(), { message: "hi" });
@@ -10365,7 +11436,12 @@ describe("createToolLoopHarness", () => {
       expect(runtimeContext?.["eve.version"]).not.toBe("");
       expect(runtimeContext?.["eve.session.id"]).toBe("test-session");
       expect(agentCall?.telemetry?.isEnabled).toBe(true);
-      expect(agentCall?.telemetry?.integrations).toBeUndefined();
+      expect(agentCall?.telemetry?.integrations).toEqual([
+        mockCreateAiSdkHookBridge.mock.results[0]!.value,
+      ]);
+      expect(mockGetRegisteredTelemetryIntegrations).toHaveBeenCalledWith({
+        sanitizeEveOtelErrors: true,
+      });
     });
 
     it("injects one provider-neutral bridge when lifecycle hooks opt in", async () => {
@@ -10382,7 +11458,7 @@ describe("createToolLoopHarness", () => {
       ]);
       const runInContext: InstrumentationContextRunner = (_operation, execute) => execute();
       const config = createTestConfig("conversation", undefined, {
-        instrumentation: { hooks, runInContext },
+        instrumentation: bindHookInstrumentation(hooks, runInContext),
       });
 
       const runStep = createToolLoopHarness(config);
@@ -10396,7 +11472,11 @@ describe("createToolLoopHarness", () => {
           stepIndex: 0,
           turnId: "turn_0",
         }),
-        hooks,
+        expect.objectContaining({
+          capturesContent: false,
+          capturesInputs: false,
+          capturesOutputs: false,
+        }),
         runInContext,
         {},
       );
@@ -10458,7 +11538,7 @@ describe("createToolLoopHarness", () => {
       const { emit } = createEventCollector();
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", emit, {
-          instrumentation: { hooks, runInContext: (_operation, execute) => execute() },
+          instrumentation: bindHookInstrumentation(hooks),
           tools: createDelegationToolMap(),
         }),
       );
@@ -10484,23 +11564,24 @@ describe("createToolLoopHarness", () => {
         toolCalls: [],
         toolResults: [],
       });
-      declareTelemetry({ recordInputs: true, recordOutputs: false });
+      declareTelemetry({ recordInputs: true, recordOutputs: false }, undefined, "public");
       // An authored module can register its own integration alongside eve's.
       mockGetRegisteredTelemetryIntegrations.mockReturnValue([
         registeredOtelIntegration,
         registeredAuthorIntegration,
       ]);
-      const hooks = createInstrumentationHooks([]);
       const runStep = createToolLoopHarness(
         createTestConfig("conversation", undefined, {
-          instrumentation: {
-            hooks,
-            runInContext: (_operation, execute) => execute(),
-          },
+          instrumentation: declaredInstrumentation,
         }),
       );
 
-      await runStep(createTestSession(), { message: "hi" });
+      const ctx = new ContextContainer();
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:public",
+        metadata: { audience: "public" },
+      });
+      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hi" }));
 
       const bridge = mockCreateAiSdkHookBridge.mock.results[0]!.value;
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
@@ -10514,6 +11595,55 @@ describe("createToolLoopHarness", () => {
         integrations: [bridge, registeredOtelIntegration, registeredAuthorIntegration],
         recordInputs: true,
         recordOutputs: false,
+      });
+    });
+
+    it("emits hosted unknown model telemetry without content", async () => {
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({ recordInputs: true, recordOutputs: true });
+
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: false,
+        recordOutputs: false,
+      });
+    });
+
+    it("keeps unknown model telemetry content in a local development worker", async () => {
+      vi.stubEnv("EVE_DEV", "1");
+      setupMockAgent({
+        finishReason: "stop",
+        response: { messages: [{ content: "Hello!", role: "assistant" }] },
+        text: "Hello!",
+        toolCalls: [],
+        toolResults: [],
+      });
+      declareTelemetry({
+        recordInputs: true,
+        recordOutputs: true,
+        tracePolicy: () => true,
+      });
+
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      await runStep(createTestSession(), { message: "hi" });
+
+      const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
+        telemetry?: { recordInputs?: boolean; recordOutputs?: boolean };
+      };
+      expect(agentCall.telemetry).toMatchObject({
+        recordInputs: true,
+        recordOutputs: true,
       });
     });
 
@@ -10548,23 +11678,38 @@ describe("createToolLoopHarness", () => {
           },
         };
       });
-      declareTelemetry({
-        events: {
-          "step.started": resolveRuntimeContext,
+      declareTelemetry(
+        {
+          events: {
+            "step.started": resolveRuntimeContext,
+          },
         },
-      });
+        undefined,
+        "public",
+      );
 
       const ctx = new ContextContainer();
       ctx.set(ChannelInstrumentationKey, {
         kind: "channel:support",
         metadata: {
+          audience: "public",
           triggeringUserId: "U123",
         },
       });
 
-      const config = createTestConfig("conversation", emit);
+      const hidden = { content: "HIDE_FROM_INSTRUMENTATION", role: "user" as const };
+      const config = createTestConfig("conversation", emit, {
+        historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
+      });
       const runStep = createToolLoopHarness(config);
-      await contextStorage.run(ctx, () => runStep(createTestSession(), { message: "hi" }));
+      await contextStorage.run(ctx, () =>
+        runStep(
+          createTestSession({
+            history: [{ content: "visible", role: "user" }, hidden],
+          }),
+          { message: "hi" },
+        ),
+      );
 
       const agentCall = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0] as {
         runtimeContext?: Record<string, unknown>;
@@ -10572,6 +11717,12 @@ describe("createToolLoopHarness", () => {
       };
       expect(resolveRuntimeContext).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
+          modelInput: expect.objectContaining({
+            messages: [
+              { content: "visible", role: "user" },
+              { content: "hi", role: "user" },
+            ],
+          }),
           step: { index: 0 },
           turn: { id: "turn_0", sequence: 0 },
         }),
@@ -10878,7 +12029,7 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  describe("ephemeral context routing", () => {
+  describe("context routing", () => {
     function getLastAgentSettings(): {
       instructions: unknown;
       messages: Array<{ role: string; content: unknown }>;
@@ -10906,7 +12057,7 @@ describe("createToolLoopHarness", () => {
       };
     }
 
-    it("appends context strings as user messages", async () => {
+    it("appends durable channel context as user messages", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       const session = createTestSession();
@@ -10955,6 +12106,68 @@ describe("createToolLoopHarness", () => {
         { role: "user", content: "Hi" },
         { role: "assistant", content: "ok" },
       ]);
+    });
+
+    it("does not replay ephemeral client context on later turns", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      let session = createTestSession();
+
+      for (const token of ["CTX-A", "CTX-B", "CTX-C"]) {
+        const clientContext = `Client context:\n${token}`;
+        const result = await runStep(
+          session,
+          attachClientContext({ message: `Turn ${token}` }, [clientContext]),
+        );
+        const visibleClientContext = getLastAgentSettings().messages.filter(
+          (message) =>
+            typeof message.content === "string" && message.content.startsWith("Client context:"),
+        );
+
+        expect(visibleClientContext).toEqual([{ content: clientContext, role: "user" }]);
+        expect(result.session.history).not.toContainEqual({
+          content: clientContext,
+          role: "user",
+        });
+        session = result.session;
+      }
+    });
+
+    it("keeps ephemeral client context out of compaction and its token baseline", async () => {
+      vi.mocked(shouldCompact).mockReturnValueOnce(true);
+      vi.mocked(compactMessages).mockImplementationOnce(async (messages) => [...messages]);
+      setupMockAgent({
+        ...defaultModelResult(),
+        usage: { inputTokens: 321 },
+      });
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const session = createTestSession({
+        history: [{ content: "earlier", role: "user" }],
+      });
+
+      const result = await runStep(
+        session,
+        attachClientContext({ message: "Hi" }, ["Client context:\ncurrent"]),
+      );
+
+      expect(vi.mocked(shouldCompact)).toHaveBeenCalledWith(
+        [
+          { content: "earlier", role: "user" },
+          { content: "Client context:\ncurrent", role: "user" },
+          { content: "Hi", role: "user" },
+        ],
+        session.compaction,
+      );
+      expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual([
+        { content: "earlier", role: "user" },
+        { content: "Hi", role: "user" },
+      ]);
+      expect(result.session.history).not.toContainEqual({
+        content: "Client context:\ncurrent",
+        role: "user",
+      });
+      expect(result.session.compaction).not.toHaveProperty("lastKnownInputTokens");
+      expect(result.session.compaction).not.toHaveProperty("lastKnownPromptMessageCount");
     });
 
     it("leaves instructions unchanged when no context is provided", async () => {
@@ -11013,33 +12226,123 @@ describe("createToolLoopHarness", () => {
       expect(instructions).toBe("You are a test assistant.");
     });
 
-    it("does not add conditional-delivery guidance to a human continuation", async () => {
+    it("adds initiating task-reporting guidance without enabling silent delivery", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
-      const ctx = createScheduleContext();
-      ctx.set(AuthKey, {
-        attributes: {},
-        authenticator: "slack",
-        principalId: "U123",
-        principalType: "user",
-      });
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+      ctx.set(TurnTaskStateKey, '[Task state]\n{"tasks":[]}');
 
       await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "What happened?" }),
+        runStep(createTestSession(), { message: "Start the background work." }),
       );
 
       const { instructions } = getLastAgentSettings();
-      expect(instructions).toBe("You are a test assistant.");
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n[Task state]\n{"tasks":[]}\n\n${TASK_DELIVERY_INITIATING_INSTRUCTION}`,
+      });
     });
 
-    it("does not add conditional-delivery guidance to a delegated run", async () => {
+    it("routes later-turn initiating task context through user messages", async () => {
       setupMockAgent(defaultModelResult());
-      const runStep = createToolLoopHarness(createTestConfig("task"));
-      const ctx = createScheduleContext();
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      const taskState = '[Task state]\n{"tasks":[]}';
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+      ctx.set(TurnTaskStateKey, taskState);
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
+
+      await contextStorage.run(ctx, () =>
+        runStep(session, { message: "Start the background work." }),
+      );
+
+      const { instructions, messages } = getLastAgentSettings();
+      expect(instructions).toBe("You are a test assistant.");
+      expect(messages.slice(-3)).toEqual([
+        { role: "user", content: taskState },
+        { role: "user", content: TASK_DELIVERY_INITIATING_INSTRUCTION },
+        { role: "user", content: "Start the background work." },
+      ]);
+    });
+
+    it("keeps a scheduled initiating task turn conditionally deliverable", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = createScheduledUserContext();
+      ctx.set(TurnTaskDeliveryKey, "initiating");
+
+      await contextStorage.run(ctx, () =>
+        runStep(createTestSession(), { message: "[Task state]" }),
+      );
+
+      const { instructions } = getLastAgentSettings();
+      expect(instructions).toEqual({
+        role: "system",
+        content: `You are a test assistant.\n\n${CONDITIONAL_DELIVERY_INSTRUCTION}`,
+      });
+    });
+
+    it("does not apply session schedule provenance to a later human turn", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = createScheduledUserContext();
+      const session = setHarnessEmissionState(createTestSession(), {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 0,
+        turnId: "",
+      });
+
+      await contextStorage.run(ctx, () => runStep(session, { message: "What happened?" }));
+
+      expect(getLastAgentSettings().instructions).toBe("You are a test assistant.");
+    });
+
+    it.each([
+      ["pending", TASK_DELIVERY_PENDING_INSTRUCTION],
+      ["settled", TASK_DELIVERY_SETTLED_INSTRUCTION],
+    ] as const)(
+      "adds %s task-delivery guidance to a top-level framework wake",
+      async (phase, instruction) => {
+        setupMockAgent(defaultModelResult());
+        const runStep = createToolLoopHarness(createTestConfig("conversation"));
+        const ctx = new ContextContainer();
+        ctx.set(TurnTaskDeliveryKey, phase);
+        const session = setHarnessEmissionState(createTestSession(), {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 0,
+          turnId: "",
+        });
+
+        await contextStorage.run(ctx, () =>
+          runStep(session, { message: "Background task task_1 is completed." }),
+        );
+
+        const { instructions, messages } = getLastAgentSettings();
+        expect(instructions).toBe("You are a test assistant.");
+        expect(messages.slice(-2)).toEqual([
+          { role: "user", content: instruction },
+          { role: "user", content: "Background task task_1 is completed." },
+        ]);
+      },
+    );
+
+    it("does not add conditional-delivery guidance to a task-owned conversation child", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const ctx = new ContextContainer();
+      ctx.set(TurnTaskDeliveryKey, "pending");
       setDelegatedParent(ctx);
 
       await contextStorage.run(ctx, () =>
-        runStep(createTestSession(), { message: "Handle delegated work." }),
+        runStep(createTestSession(), { message: "Resume after HITL." }),
       );
 
       const { instructions } = getLastAgentSettings();
@@ -11100,9 +12403,14 @@ describe("createToolLoopHarness", () => {
           resolvers: [resolver],
         });
       };
-      const runStep = createToolLoopHarness(createTestConfig("conversation", handleEvent));
+      const hidden = { content: "Hidden context.", role: "user" as const };
+      const runStep = createToolLoopHarness(
+        createTestConfig("conversation", handleEvent, {
+          historyProjector: ({ messages }) => messages.filter((message) => message !== hidden),
+        }),
+      );
       const session = createTestSession({
-        history: [{ content: "Static context.", role: "user" }],
+        history: [{ content: "Static context.", role: "user" }, hidden],
       });
 
       const result = await contextStorage.run(ctx, () => runStep(session, { message: "Hello." }));
@@ -11117,6 +12425,7 @@ describe("createToolLoopHarness", () => {
       ]);
       expect(result.session.history).toEqual([
         { content: "Static context.", role: "user" },
+        hidden,
         { content: "Session context.", role: "user" },
         { content: "Turn context.", role: "user" },
         { content: "Hello.", role: "user" },

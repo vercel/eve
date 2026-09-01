@@ -48,6 +48,7 @@ export interface DiscordMember {
 export interface DiscordInteractionBase {
   readonly applicationId: string;
   readonly channelId: string;
+  readonly channelType?: number;
   readonly guildId?: string;
   readonly id: string;
   readonly member?: DiscordMember;
@@ -112,6 +113,7 @@ const DISCORD_RESPONSE_INSTRUCTIONS =
  * commandName) are omitted from the block when not provided.
  */
 export interface DiscordInboundContext {
+  readonly applicationId?: string;
   readonly channelId: string;
   readonly commandName?: string;
   readonly guildId?: string;
@@ -151,6 +153,7 @@ export function formatDiscordContextBlock(context: DiscordInboundContext): strin
     "<discord_context>",
     "response_medium: discord",
     `response_instructions: ${DISCORD_RESPONSE_INSTRUCTIONS}`,
+    ...(context.applicationId ? [`application_id: ${context.applicationId}`] : []),
     `user_id: ${context.userId}`,
     ...(context.username ? [`username: ${context.username}`] : []),
     `channel_id: ${context.channelId}`,
@@ -223,9 +226,11 @@ function parseInteractionBase(raw: Record<string, unknown>): DiscordInteractionB
   }
   const user = parseInteractionUser(raw);
   if (!user) return null;
+  const channel = isObject(raw.channel) ? raw.channel : undefined;
   return {
     applicationId: raw.application_id,
     channelId: raw.channel_id,
+    channelType: typeof channel?.type === "number" ? channel.type : undefined,
     guildId: isNonEmptyString(raw.guild_id) ? raw.guild_id : undefined,
     id: raw.id,
     member: parseMember(raw.member),

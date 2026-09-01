@@ -11,13 +11,13 @@ import {
   createEveSessionStreamRoutePath,
   createEveSubagentStreamRoutePath,
 } from "#protocol/routes.js";
-import type { ConnectionAuthorizationChallenge } from "#public/connections/errors.js";
+import type { ConnectionAuthorizationChallenge } from "#connections/errors.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeToolResultActionResult,
-} from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+} from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 
@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "22";
+export const EVE_MESSAGE_STREAM_VERSION = "24";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -275,6 +275,31 @@ export interface InputRequestedStreamEvent {
   type: "input.requested";
 }
 
+/** Authoritative terminal outcome for one human-input request. */
+export type InputResolutionOutcome = "answered" | "approved" | "denied" | "ignored" | "invalid";
+
+/** One server-accepted resolution from a pending human-input batch. */
+export interface InputResolution {
+  readonly kind: InputRequest["kind"];
+  readonly outcome: InputResolutionOutcome;
+  readonly requestId: string;
+  readonly response?: InputResponse;
+}
+
+/**
+ * Stream event emitted after eve accepts a terminal resolution for one or more
+ * pending human-input requests.
+ */
+export interface InputResolvedStreamEvent {
+  data: {
+    resolutions: readonly InputResolution[];
+    sequence: number;
+    stepIndex: number;
+    turnId: string;
+  };
+  type: "input.resolved";
+}
+
 /**
  * Stream event emitted for each runtime action result projected back into the
  * session loop.
@@ -396,6 +421,24 @@ export interface MessageAppendedStreamEvent {
     turnId: string;
   };
   type: "message.appended";
+}
+
+/**
+ * Stream event emitted while the model is generating the input for one tool
+ * call, before the validated call is announced via `actions.requested`.
+ */
+export interface ActionInputAppendedStreamEvent {
+  data: {
+    callId: string;
+    inputTextDelta: string;
+    /** Zero-based UTF-16 code-unit offset where `inputTextDelta` begins. */
+    inputTextOffset: number;
+    sequence: number;
+    stepIndex: number;
+    toolName: string;
+    turnId: string;
+  };
+  type: "action.input.appended";
 }
 
 /**
@@ -690,6 +733,7 @@ export interface SessionCompletedStreamEvent {
  * consumers receive {@link MessageStreamEvent}.
  */
 export type UnstampedMessageStreamEvent =
+  | ActionInputAppendedStreamEvent
   | ApprovalCandidateStreamEvent
   | ApprovalSettledStreamEvent
   | ContextClearedStreamEvent
@@ -712,6 +756,7 @@ export type UnstampedMessageStreamEvent =
   | SubagentStartedStreamEvent
   | ActionsRequestedStreamEvent
   | InputRequestedStreamEvent
+  | InputResolvedStreamEvent
   | ActionPartialStreamEvent
   | ActionResultStreamEvent
   | ReasoningCompletedStreamEvent
@@ -1055,6 +1100,30 @@ export function createActionsRequestedEvent(input: {
   };
 }
 
+/** Creates an `action.input.appended` event for streamed tool input text. */
+export function createActionInputAppendedEvent(input: {
+  readonly callId: string;
+  readonly inputTextDelta: string;
+  readonly inputTextOffset: number;
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly toolName: string;
+  readonly turnId: string;
+}): ActionInputAppendedStreamEvent {
+  return {
+    data: {
+      callId: input.callId,
+      inputTextDelta: input.inputTextDelta,
+      inputTextOffset: input.inputTextOffset,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      toolName: input.toolName,
+      turnId: input.turnId,
+    },
+    type: "action.input.appended",
+  };
+}
+
 /**
  * Creates the `authorization.required` event for one authorization source
  * that needs user authorization before it can continue.
@@ -1171,6 +1240,24 @@ export function createInputRequestedEvent(input: {
       turnId: input.turnId,
     },
     type: "input.requested",
+  };
+}
+
+/** Creates the authoritative `input.resolved` event for one pending HITL batch. */
+export function createInputResolvedEvent(input: {
+  readonly resolutions: readonly InputResolution[];
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}): InputResolvedStreamEvent {
+  return {
+    data: {
+      resolutions: input.resolutions,
+      sequence: input.sequence,
+      stepIndex: input.stepIndex,
+      turnId: input.turnId,
+    },
+    type: "input.resolved",
   };
 }
 

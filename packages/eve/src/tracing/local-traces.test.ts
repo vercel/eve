@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLocalTracesProcessor, resolveLocalTracesContent } from "#tracing/local-traces.js";
+import { localTracePolicy } from "#tracing/local-instrumentation-runtime.js";
 import { localTraces } from "#public/instrumentation/otel.js";
 
 vi.mock("#tracing/local-trace-span-processor.js", () => ({
@@ -65,21 +66,21 @@ describe("createLocalTracesProcessor", () => {
 });
 
 describe("resolveLocalTracesContent", () => {
-  it("records no content by default", () => {
+  it("retains content by default", () => {
     expect(resolveLocalTracesContent()).toEqual({
-      recordInputs: false,
-      recordOutputs: false,
-    });
-  });
-
-  it("records content when explicitly enabled", () => {
-    expect(resolveLocalTracesContent({ recordInputs: true, recordOutputs: true })).toEqual({
       recordInputs: true,
       recordOutputs: true,
     });
   });
 
-  it("uses EVE_TRACES_CONTENT=on as the zero-config opt-in", () => {
+  it("preserves explicit legacy redaction", () => {
+    expect(resolveLocalTracesContent({ recordInputs: false })).toEqual({
+      recordInputs: false,
+      recordOutputs: true,
+    });
+  });
+
+  it("keeps EVE_TRACES_CONTENT=on compatible with the new default", () => {
     vi.stubEnv("EVE_TRACES_CONTENT", "on");
 
     expect(resolveLocalTracesContent()).toEqual({
@@ -88,12 +89,27 @@ describe("resolveLocalTracesContent", () => {
     });
   });
 
-  it("lets EVE_TRACES_CONTENT=off override explicit local capture", () => {
+  it("maps EVE_TRACES_CONTENT=off to full local redaction", () => {
     vi.stubEnv("EVE_TRACES_CONTENT", "off");
 
     expect(resolveLocalTracesContent({ recordInputs: true, recordOutputs: true })).toEqual({
       recordInputs: false,
       recordOutputs: false,
     });
+  });
+});
+
+describe("localTracePolicy", () => {
+  it.each([
+    ["public", true],
+    ["unknown", true],
+    ["private", false],
+  ] as const)("accepts the %s audience: %s", (audience, accepted) => {
+    expect(
+      localTracePolicy({
+        agentName: "weather",
+        audience,
+      }),
+    ).toBe(accepted);
   });
 });

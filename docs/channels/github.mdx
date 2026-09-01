@@ -68,6 +68,8 @@ Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For co
 
 Inbound hooks return `{ auth }` to dispatch, or `null` to ignore. Return `title` alongside `auth` to set the title when the dispatch starts a run. Use `defaultGitHubAuth(ctx)` to derive auth from the actor.
 
+The model-visible `<github_context>` includes `sender`, `bot_name` when resolved, and `is_mentioned` for comments. eve computes `is_mentioned` before removing the invocation token.
+
 ```ts
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
 
@@ -103,7 +105,9 @@ GitHub comments have no interactive button or card affordance. A human-in-the-lo
 
 ### Proactive sessions
 
-Start a session without an inbound comment invocation through `to(github, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(github, target).send(message, { auth })` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`.
+Start a session without an inbound comment invocation through `to(github, target).send(message, { auth })` from a schedule `run` handler, or `ctx.to(github, target).send(message, { auth })` from another channel. The target requires `owner`, `repo`, and exactly one of `issueNumber` or `pullRequestNumber`. This sends turn input to the agent; it is not a direct GitHub comment.
+
+To post without invoking the model, use `channel.thread.post(...)` inside a GitHub event handler. For application-managed retries and deduplication across providers, see [Durable cross-channel notifications](../patterns/durable-cross-channel-notifications).
 
 ### Attachments
 

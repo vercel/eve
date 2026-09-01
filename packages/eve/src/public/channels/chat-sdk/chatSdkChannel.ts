@@ -13,7 +13,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import type {
   ActionEvent,
   Adapter,
@@ -32,6 +32,7 @@ import {
   Message,
   ThreadImpl,
 } from "#compiled/chat/index.js";
+import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
@@ -43,6 +44,8 @@ import {
   type RouteHandlerArgs,
   type Session,
 } from "#public/definitions/channel.js";
+import { chatSdkInstrumentationMetadata } from "#public/channels/chat-sdk/audience.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("chat-sdk.channel");
 const DEFAULT_ROUTE = "/eve/v1";
@@ -81,6 +84,8 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
   lastEditAtMs?: number | null;
   /** Buffered first line of a tool-call message, surfaced as typing status. */
   pendingToolCallMessage?: string | null;
+  /** Authorization status messages, keyed by connection name. */
+  pendingAuthMessageIds?: Record<string, string>;
   /** Step index the current stream anchor belongs to (resets per step). */
   streamStepIndex?: number | null;
 }
@@ -100,6 +105,7 @@ export interface ChatSdkReceiveTarget {
  * Channel-owned metadata exposed to eve instrumentation.
  */
 export interface ChatSdkInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: ChannelAudience;
   readonly adapterName: string | null;
   readonly channelId: string | null;
   readonly isDM: boolean | null;
@@ -290,7 +296,7 @@ export function chatSdkChannel<TAdapters extends ChatSdkAdapters>(
     kindHint: "chat-sdk",
     turnPolicy: config.turnPolicy,
     state: initialState(),
-    metadata: metadataFromState,
+    metadata: chatSdkInstrumentationMetadata,
     context(state) {
       return {
         bot,
@@ -346,6 +352,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
   return {
+    ...defaultAuthorizationEvents(),
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
@@ -574,16 +581,7 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
 }
 
 function initialState(): ChatSdkChannelState {
-  return { thread: null };
-}
-
-function metadataFromState(state: ChatSdkChannelState): ChatSdkInstrumentationMetadata {
-  return {
-    adapterName: state.thread?.adapterName ?? null,
-    channelId: state.thread?.channelId ?? null,
-    isDM: state.thread?.isDM ?? null,
-    threadId: state.thread?.id ?? null,
-  };
+  return { pendingAuthMessageIds: {}, thread: null };
 }
 
 function threadFromState<TAdapters extends ChatSdkAdapters>(

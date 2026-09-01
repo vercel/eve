@@ -5,6 +5,7 @@
  * Task-run transport (start/command/view) lives in `run-parent.ts`, which
  * this module composes and which other non-delegation callers share.
  */
+import type { ActivityObserverConfig } from "#channel/types.js";
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import {
   readLatestTaskView,
@@ -15,21 +16,32 @@ import {
 } from "#execution/tasks/parent/run-parent.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
-import type { RuntimeSubagentChildResult } from "#runtime/actions/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
+import type { TaskExecutorBinding } from "#tools/task.js";
 import { recordSessionTask } from "#tasks/session-index.js";
 import { deriveTaskInboxToken, deriveTaskId } from "#tasks/task-id.js";
-import { isTerminalTaskStatus, type TaskMetadata } from "#tasks/types.js";
+import {
+  createSubagentTaskMetadata,
+  isTerminalTaskStatus,
+  readSubagentTaskMetadata,
+  type DurableTaskMetadata,
+} from "#tasks/types.js";
 
-/** A prepared delegated task: identity plus its started durable run. */
-export interface DelegatedTask {
+/** A prepared background task: identity plus its started durable run. */
+export interface BackgroundTask {
   readonly taskInboxToken: string;
   readonly createdByStepIndex?: number;
   readonly createdByTurnId: string;
-  readonly metadata: TaskMetadata;
-  readonly operationId: string;
+  readonly executor?: TaskExecutorBinding;
+  readonly metadata: DurableTaskMetadata;
   readonly taskId: string;
   readonly taskRunId: string;
+}
+
+/** A subagent task also carries its deterministic agent-handle operation. */
+export interface DelegatedTask extends BackgroundTask {
+  readonly operationId: string;
 }
 
 /**
@@ -39,6 +51,7 @@ export interface DelegatedTask {
  * re-derives the same token and the loser exits on the hook claim.
  */
 export async function beginDelegatedTask(input: {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly agentId: string;
   readonly callId: string;
   readonly mode: "local" | "remote";
@@ -48,6 +61,39 @@ export async function beginDelegatedTask(input: {
   readonly parentTurnId: string;
   readonly session: RuntimeSession;
 }): Promise<DelegatedTask> {
+  const task = await beginBackgroundTask({
+    activityObserver: input.activityObserver,
+    callId: input.callId,
+    metadata: createSubagentTaskMetadata({
+      agentId: input.agentId,
+      mode: input.mode,
+      name: input.name,
+    }),
+    parentSessionId: input.parentSessionId,
+    parentStepIndex: input.parentStepIndex,
+    parentTurnId: input.parentTurnId,
+    session: input.session,
+  });
+  return {
+    ...task,
+    operationId: deriveAgentOperationId({
+      callId: input.callId,
+      parentSessionId: input.parentSessionId,
+      parentTurnId: input.parentTurnId,
+    }),
+  };
+}
+
+/** Creates a replay-stable task run before a background tool starts external work. */
+export async function beginBackgroundTask(input: {
+  readonly activityObserver?: ActivityObserverConfig;
+  readonly callId: string;
+  readonly metadata: DurableTaskMetadata;
+  readonly parentSessionId: string;
+  readonly parentStepIndex?: number;
+  readonly parentTurnId: string;
+  readonly session: RuntimeSession;
+}): Promise<BackgroundTask> {
   const taskId = deriveTaskId({
     callId: input.callId,
     parentSessionId: input.parentSessionId,
@@ -57,21 +103,11 @@ export async function beginDelegatedTask(input: {
     parentContinuationToken: input.session.continuationToken,
     taskId,
   });
-  const operationId = deriveAgentOperationId({
-    callId: input.callId,
-    parentSessionId: input.parentSessionId,
-    parentTurnId: input.parentTurnId,
-  });
-  const metadata: TaskMetadata = {
-    agentId: input.agentId,
-    kind: "subagent",
-    mode: input.mode,
-    name: input.name,
-  };
   await startTaskRun({
+    activityObserver: input.activityObserver,
     taskInboxToken,
     initialView: {
-      metadata,
+      metadata: input.metadata,
       status: "working",
       taskId,
     },
@@ -82,8 +118,7 @@ export async function beginDelegatedTask(input: {
     taskInboxToken,
     createdByStepIndex: input.parentStepIndex ?? 0,
     createdByTurnId: input.parentTurnId,
-    metadata,
-    operationId,
+    metadata: input.metadata,
     taskId,
     taskRunId: owner.runId,
   };
@@ -101,8 +136,12 @@ export async function settleDelegatedDispatch(input: {
   readonly subagentName: string;
   readonly task: DelegatedTask;
 }): Promise<{ readonly receipt: RuntimeSubagentChildResult; readonly session: RuntimeSession }> {
+  const metadata = readSubagentTaskMetadata(input.task);
+  if (metadata === undefined) {
+    throw new Error(`Task "${input.task.taskId}" is not a subagent task.`);
+  }
   const receiptOutput = {
-    agentId: input.task.metadata.agentId,
+    agentId: metadata.agentId,
     status: "working" as const,
     taskId: input.task.taskId,
   };
@@ -173,7 +212,7 @@ export async function failDelegatedDispatch(input: {
 /** Silently terminates a task whose child dispatch failed before parent indexing. */
 export async function rejectDelegatedDispatch(input: {
   readonly error: JsonValue;
-  readonly task: DelegatedTask;
+  readonly task: BackgroundTask;
 }): Promise<void> {
   await sendTaskCommand({
     command: { data: input.error, kind: "reject-dispatch" },

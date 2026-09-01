@@ -5,8 +5,9 @@ import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-i
 import { legacySessionDeliveryWorkflow } from "#internal/testing/legacy-session-delivery-workflow.js";
 import { midCohortSessionDeliveryWorkflow } from "#internal/testing/mid-cohort-session-delivery-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 
 describe("session command inbox integration", () => {
@@ -41,7 +42,7 @@ describe("session command inbox integration", () => {
     }
   });
 
-  it("resumes a 0.30.3–0.30.8 parked consumer from a current send command", async () => {
+  it("resumes a 0.30.5–0.30.8 parked consumer from a current send command", async () => {
     const token = "http:session-command-inbox:mid-cohort-delivery";
     const run = await start(midCohortSessionDeliveryWorkflow, [{ token }]);
 
@@ -66,6 +67,31 @@ describe("session command inbox integration", () => {
         }),
       ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
       await expect(run.returnValue).resolves.toBe("mid-cohort-compatible");
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
+    }
+  });
+
+  it("stamps the consumer wire version onto inbox hooks, readable pre-resume", async () => {
+    const channelToken = "http:session-command-inbox:version-stamp";
+    const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
+    const stableToken = sessionCommandHookToken(run.runId);
+
+    try {
+      await Promise.all([
+        waitForHook({ runId: run.runId }, { token: stableToken }),
+        waitForHook({ runId: run.runId }, { token: channelToken }),
+      ]);
+
+      for (const token of [stableToken, channelToken]) {
+        const hook = (await getHookByToken(token)) as {
+          metadata?: { sessionInboxWireVersion?: unknown };
+        };
+        expect(hook.metadata?.sessionInboxWireVersion, `hook ${token}`).toBe(
+          SESSION_INBOX_WIRE_VERSION,
+        );
+      }
     } finally {
       const status = await run.status;
       if (status === "pending" || status === "running") await run.cancel();

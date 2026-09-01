@@ -11,7 +11,7 @@
  * parent turn inbox, and every start dispatches a conversation-mode
  * (persistent) child so the background task stays resumable.
  *
- * Task-control calls (`task_peek` / `task_cancel` / `task_update`) execute
+ * Task-control calls (`task_cancel` / `task_update`) execute
  * inline in this step, which holds the session ownership index and world
  * access they need.
  */
@@ -29,6 +29,7 @@ import {
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import {
   beginDelegatedTask,
   type DelegatedTask,
@@ -42,7 +43,7 @@ import {
   settleTaskDispatchError,
   type PersistedContinuationTask,
 } from "#execution/tasks/parent/continuation-dispatch.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export async function dispatchTaskStep(
   input: RuntimeActionDispatchInput,
@@ -104,14 +105,26 @@ export async function dispatchTaskStep(
         }
       }
 
+      const action = entry.kind === "resume" ? entry.action : entry.target.action;
       const delegated = await beginDelegatedTask({
         ...describeTaskDispatch({
-          action: entry.kind === "resume" ? entry.action : entry.target.action,
+          action,
           agentId: entry.kind === "resume" ? entry.agentId : undefined,
           parentSessionId: session.sessionId,
           parentTurnId: batch.event.turnId,
           session: nextSession,
         }),
+        activityObserver:
+          prepared.activityObserver === undefined
+            ? undefined
+            : deriveChildActivityObserverConfig({
+                activityObserver: prepared.activityObserver,
+                callId: action.callId,
+                kind: "task",
+                name: entry.kind === "resume" ? entry.action.name : entry.target.action.name,
+                parentSessionId: session.sessionId,
+                parentTurnId: batch.event.turnId,
+              }),
         parentSessionId: session.sessionId,
         parentStepIndex: batch.event.stepIndex,
         parentTurnId: batch.event.turnId,
@@ -133,7 +146,19 @@ export async function dispatchTaskStep(
         case "resume":
           outcome = await dispatchToTaskAgentAddress({
             action: entry.action,
+            activityObserver:
+              prepared.activityObserver === undefined
+                ? undefined
+                : deriveChildActivityObserverConfig({
+                    activityObserver: prepared.activityObserver,
+                    callId: entry.action.callId,
+                    kind: "task",
+                    name: entry.action.name,
+                    parentSessionId: session.sessionId,
+                    parentTurnId: batch.event.turnId,
+                  }),
             agentId: entry.agentId,
+            auth: prepared.auth,
             bundle: createAgentContinuationBundle({
               action: entry.action,
               bundle,
@@ -156,11 +181,7 @@ export async function dispatchTaskStep(
             initiatorAuth: prepared.initiatorAuth,
             parentContinuationToken: delegated.taskInboxToken,
             parentTraceContext: prepared.parentTraceContext,
-            // Background tasks require resumable children, so task mode
-            // always dispatches conversation-mode (persistent) sessions;
-            // `experimental.subagentPersistentSessions` never produces a
-            // third mode here.
-            persistentSessions: true,
+            activityObserver: prepared.activityObserver,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,

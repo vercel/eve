@@ -2,12 +2,12 @@ import type {
   ConnectionAuthDefinition,
   HeadersDefinition,
   ToolFilterDefinition,
-} from "#runtime/connections/types.js";
+} from "#shared/connection-types.js";
 import type { ConnectionToolCallDefinition } from "#public/definitions/connections/tool-call.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import { stampConnectionProtocol } from "#public/definitions/connections/protocol.js";
 import type { Approval } from "#public/definitions/approval.js";
-import { stampDefinitionKey } from "#public/tool-result-narrowing.js";
+import { stampDefinitionKey } from "#internal/authored-definition/source-identity.js";
 
 /**
  * Public definition for an MCP client connection authored in
@@ -52,6 +52,14 @@ export interface McpClientConnectionDefinition {
    * Optional when `headers` is provided for non-Bearer auth schemes.
    */
   auth?: ConnectionAuthDefinition;
+  /**
+   * Stable, non-secret identity for the resolved connection instance.
+   *
+   * Authenticated dynamic connections must set this to an account or tenant
+   * identifier that changes whenever the endpoint or auth provider changes.
+   * eve hashes the value before storing it in durable authorization state.
+   */
+  readonly instanceKey?: string;
   /**
    * Optional per-connection approval gate for connection tool calls.
    *

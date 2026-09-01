@@ -1,0 +1,67 @@
+---
+title: Linq
+description: Connect an eve agent to iMessage and SMS through Linq.
+---
+
+Use `linqChannel` to receive and reply to iMessage and SMS conversations through Linq.
+
+Run `eve add channel/linq` to choose Vercel Connect or portable credentials. With Vercel Connect, eve signs you in and creates or links a Vercel project when needed. Then choose whether to create a managed Linq account and line or connect an existing account with its partner API token. eve fetches the phone numbers assigned to that account, and you select the numbers for the agent. eve configures the connector and webhook through Connect:
+
+```ts title="agent/channels/linq.ts"
+import { connectLinqCredentials } from "@vercel/connect/eve";
+import { linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+});
+```
+
+The default webhook route is `/eve/v1/linq`. The channel verifies forwarded webhooks with same-project Vercel OIDC by default, derives user auth from each message author, marks accepted messages as read, and continues the same eve session for every message in a Linq conversation. A new accepted message cooperatively cancels an active turn and steers its replacement turn.
+
+Set `turnPolicy: "queue"` when every response should finish before Linq starts the next message.
+
+Customize inbound dispatch with `onMessage`. Return `null` to ignore a message, or return `title` alongside `auth` to set the title when the dispatch starts a run:
+
+```ts
+export default linqChannel({
+  credentials: connectLinqCredentials("linq/my-agent"),
+  onMessage(_ctx, message) {
+    if (message.author.isBot) return null;
+    return {
+      auth: null,
+      context: [`The sender is ${message.author.fullName}.`],
+    };
+  },
+});
+```
+
+Set `route` to override the webhook path or `webhookVerifier` to use a different trusted-forwarder verifier.
+
+## Other hosts
+
+For a host without Vercel Connect, choose **Use portable credentials** during `eve add channel/linq`. eve writes `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` to `.env.local`.
+
+After deploying the agent:
+
+1. Create a Linq webhook for your public `https://…/eve/v1/linq` URL with `message.received`, `reaction.added`, and `reaction.removed` events.
+2. Set `LINQ_API_KEY` and `LINQ_WEBHOOK_SECRET` in the host's encrypted environment variables.
+
+To configure the channel by hand, pass the API key and webhook signing secret:
+
+```ts title="agent/channels/linq.ts"
+import { linqChannel } from "eve/channels/linq";
+
+export default linqChannel({
+  credentials: {
+    apiKey: process.env.LINQ_API_KEY!,
+    signingSecret: process.env.LINQ_WEBHOOK_SECRET!,
+  },
+});
+```
+
+For direct Linq webhooks, pass `signingSecret`. A supplied `webhookVerifier` takes precedence over it.
+
+## What to read next
+
+- [Channels overview](./overview): the channel contract and every built-in channel
+- [Auth & route protection](../guides/auth-and-route-protection): authenticating inbound traffic

@@ -138,22 +138,19 @@ describe("getAdvertisedTools for definition arrays", () => {
   it("keeps the task tools in the root session", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_peek", createTaskControlTool("task_peek")],
-      ["task_sleep", createTool("task_sleep")],
+      ["task_cancel", createTaskControlTool("task_cancel")],
       ["task_update", createTaskControlTool("task_update")],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({ session: {}, tools });
 
-    expect([...advertisedTools.keys()]).toEqual(["add", "task_peek", "task_sleep"]);
+    expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
   });
 
   it("keeps only task_update in delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["task_cancel", createTaskControlTool("task_cancel")],
-      ["task_peek", createTaskControlTool("task_peek")],
-      ["task_sleep", createTool("task_sleep")],
       ["task_update", createTaskControlTool("task_update")],
     ]) satisfies HarnessToolMap;
 
@@ -194,6 +191,7 @@ function createSubagentTool(name: string): HarnessToolDefinition {
       nodeId: "workers",
       subagentName: name,
     },
+    workflowCallable: true,
   };
 }
 

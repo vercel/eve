@@ -46,8 +46,8 @@ export async function fireTaskEventCallbackStep(input: {
 export async function fireTaskUpdateCallbackStep(input: {
   readonly callback: unknown;
   readonly callId: string;
-  readonly childStepIndex: number;
-  readonly childTurnId: string;
+  readonly updateIndex: number;
+  readonly updateEpoch: string;
   readonly message: string;
 }): Promise<string | undefined> {
   "use step";
@@ -57,8 +57,8 @@ export async function fireTaskUpdateCallbackStep(input: {
   const response = await postSessionCallbackRequest({
     body: {
       callId: input.callId,
-      childStepIndex: input.childStepIndex,
-      childTurnId: input.childTurnId,
+      updateIndex: input.updateIndex,
+      updateEpoch: input.updateEpoch,
       kind: "task.update",
       message: input.message,
       taskId: callback.taskId,

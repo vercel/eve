@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
 import { resolveEvalTargetHandle } from "#evals/target.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -119,35 +120,5 @@ function fetchUrl(request: string | URL | Request): string {
 }
 
 function infoPayload(input: { readonly name: string }) {
-  return {
-    agent: {
-      agentRoot: "/tmp/app/agent",
-      appRoot: "/tmp/app",
-      model: { id: "mock", routing: { kind: "gateway", target: "mock" } },
-      name: input.name,
-    },
-    capabilities: { devRoutes: true },
-    channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-    connections: [],
-    diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-    hooks: [],
-    instructions: { dynamic: [], static: [] },
-    kind: "eve-agent-info",
-    mode: "development",
-    sandbox: null,
-    schedules: [],
-    skills: { dynamic: [], static: [] },
-    subagents: { local: [], total: 0 },
-    tools: {
-      authored: [],
-      available: [],
-      disabledFramework: [],
-      dynamic: [],
-      framework: [],
-      reserved: [],
-    },
-    version: 2,
-    workflow: { enabled: true, toolName: "workflow" },
-    workspace: { resourceRoot: null, rootEntries: [] },
-  };
+  return createTestAgentInfoResult({ name: input.name });
 }

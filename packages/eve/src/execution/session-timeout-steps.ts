@@ -10,7 +10,8 @@ import {
   sessionTimeoutWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session-timeout-workflow.js";
-import { cancelRun, getWorld, resumeHook } from "#internal/workflow/runtime.js";
+import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { walkCauseChain } from "#shared/errors.js";
 
 /** Starts the durable timer that signals one session deadline. */
@@ -28,7 +29,7 @@ export async function signalSessionTimeoutStep(input: { readonly token: string }
   "use step";
 
   try {
-    await resumeHook(input.token, { kind: "session-timeout" });
+    await resumeSessionInbox(input.token, { kind: "session-timeout" });
   } catch (error) {
     if (!isInactiveTimeoutTarget(error)) {
       throw error;

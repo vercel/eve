@@ -1,29 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { sendCommandToDelivery } from "#execution/session-command-wire.js";
-import { EVE_TASK_INPUT_ROUTE_PATTERN } from "#protocol/routes.js";
+import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import type { RouteContext } from "#public/definitions/channel.js";
-import {
-  getTaskInputResponseChannelDefinitions,
-  handleTaskInputResponseRequest,
-} from "#runtime/task-input-response-route.js";
+import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
 
 const resumeHookMock = vi.fn();
+const getHookByTokenMock = vi.fn();
 const DIGEST = "0123456789abcdef0123456789abcdef";
 const CAPABILITY_TOKEN = `eve:task-input:${DIGEST}`;
 const TARGET_TOKEN = `eve:eve:op:${DIGEST}`;
+const TARGET_HOOK = {
+  metadata: { sessionInboxWireVersion: 1 },
+  runId: "child-session",
+  token: TARGET_TOKEN,
+};
 
 vi.mock("#compiled/@workflow/core/runtime.js", () => ({
-  resumeHook: (token: string, payload: unknown) => resumeHookMock(token, payload),
+  getHookByToken: (...args: unknown[]) => getHookByTokenMock(...args),
+  resumeHook: (...args: unknown[]) => resumeHookMock(...args),
 }));
 
 describe("task input response capability", () => {
-  beforeEach(() => resumeHookMock.mockReset());
-
-  it("registers one capability-scoped POST route", () => {
-    expect(getTaskInputResponseChannelDefinitions()).toEqual([
-      expect.objectContaining({ method: "POST", urlPath: EVE_TASK_INPUT_ROUTE_PATTERN }),
-    ]);
+  beforeEach(() => {
+    getHookByTokenMock.mockReset();
+    getHookByTokenMock.mockResolvedValue(TARGET_HOOK);
+    resumeHookMock.mockReset();
   });
 
   it("resumes only the addressed child input batch", async () => {
@@ -34,12 +35,16 @@ describe("task input response capability", () => {
     );
 
     expect(response.status).toBe(202);
+    expect(getHookByTokenMock).toHaveBeenCalledWith(TARGET_TOKEN);
     expect(resumeHookMock).toHaveBeenCalledWith(
-      TARGET_TOKEN,
-      sendCommandToDelivery({
-        kind: "send",
-        payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
-      }),
+      TARGET_HOOK,
+      sessionInboxWire.encode(
+        {
+          kind: "send",
+          payload: { inputResponses: [{ optionId: "approve", requestId: "req-1" }] },
+        },
+        { version: 1 },
+      ),
     );
   });
 

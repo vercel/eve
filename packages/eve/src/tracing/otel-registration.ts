@@ -120,7 +120,8 @@ export function registerOtelPipeline(input: {
     autoDetectResources: false,
     idGenerator,
     instrumentations: pipeline.instrumentations ?? [],
-    propagators: [...(pipeline.propagators ?? ["none"]), markerPropagator],
+    metricReaders: pipeline.metricReaders,
+    propagators: [...(pipeline.propagators ?? ["auto"]), markerPropagator],
     serviceName: input.serviceName,
     spanProcessors: pipeline.spanProcessors.map((processor) =>
       isSpanProcessor(processor) ? new PrivateSpanFilteringProcessor([processor]) : processor,

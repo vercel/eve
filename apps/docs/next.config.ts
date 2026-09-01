@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { createMDX } from "fumadocs-mdx/next";
+import { createGeistdocs } from "@vercel/geistdocs/next";
 import type { NextConfig } from "next";
 import {
   compatibilityRedirects,
@@ -8,13 +8,16 @@ import {
   rootMarkdownRedirects,
 } from "./lib/geistdocs/redirects";
 
-const withMDX = createMDX();
+const withGeistdocs = createGeistdocs();
 const require = createRequire(import.meta.url);
 const wgslLoader = require.resolve("@vgpu/wgsl/loader-webpack");
 
 const localSiteHost = "localhost:3000";
 
 const config: NextConfig = {
+  cacheComponents: true,
+  partialPrefetching: true,
+
   env: {
     NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL:
       process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL ?? localSiteHost,
@@ -65,4 +68,4 @@ const config: NextConfig = {
   },
 };
 
-export default withMDX(config);
+export default withGeistdocs(config);

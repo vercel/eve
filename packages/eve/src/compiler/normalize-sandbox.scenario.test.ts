@@ -51,9 +51,14 @@ describe("sandbox compilation", () => {
       appRoot: app.appRoot,
     });
     const manifest = await compileAgentManifest(discovered.manifest);
-    expect(manifest.subagents[0]?.agent).toMatchObject({
+    const child = manifest.subagents[0]!.agent;
+    expect(child).toMatchObject({
       sandbox: { inheritsParent: true },
       workspaceResourceRoot: { rootEntries: ["bar.txt"] },
+    });
+    expect(child.bindings[child.sandbox.sourceId]?.usage).toEqual({
+      compile: true,
+      runtimeEntry: false,
     });
   });
 });

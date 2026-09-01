@@ -5,6 +5,9 @@
 export { EveAgentStore } from "#client/eve-agent-store.js";
 export { Client } from "#client/client.js";
 export { AgentInfoResponseError } from "#client/agent-info-error.js";
+export { AgentInfoResultSchema } from "#client/agent-info-schema.js";
+export { HealthResponseError } from "#client/health-response-error.js";
+export { HealthResultSchema } from "#client/health-schema.js";
 export { ClientError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
@@ -30,12 +33,11 @@ export type {
   AgentInfoChannels,
   AgentInfoConnectionEntry,
   AgentInfoDynamicResolverEntry,
-  AgentInfoFrameworkChannelEntry,
-  AgentInfoFrameworkToolEntry,
   AgentInfoHookEntry,
   AgentInfoInstructions,
   AgentInfoInstructionsEntry,
   AgentInfoResult,
+  AgentInfoRemoteAgentEntry,
   AgentInfoSandboxEntry,
   AgentInfoScheduleEntry,
   AgentInfoSkillEntry,
@@ -104,6 +106,9 @@ export type {
   AuthorizationRequiredStreamEvent,
   HandleMessageStreamEvent,
   MessageStreamEventMeta,
+  InputResolution,
+  InputResolutionOutcome,
+  InputResolvedStreamEvent,
   InputRequestedStreamEvent,
   MessageAppendedStreamEvent,
   MessageCompletedStreamEvent,
@@ -134,12 +139,7 @@ export type {
 
 export { isCurrentTurnBoundaryEvent, isTurnFailureEvent } from "#protocol/message.js";
 
-export type {
-  InputOption,
-  InputRequest,
-  InputRequestKind,
-  InputResponse,
-} from "#runtime/input/types.js";
+export type { InputOption, InputRequest, InputRequestKind, InputResponse } from "#shared/input.js";
 export {
   inputOptionSchema,
   inputRequestKindSchema,
@@ -147,6 +147,8 @@ export {
   inputResponseSchema,
   isInputRequest,
   isInputResponse,
-} from "#runtime/input/types.js";
+  parseInputResponse,
+  parseInputResponses,
+} from "#shared/input.js";
 
 export { resolveTextToResponse, resolveTextToResponses } from "#channel/resolve-text.js";

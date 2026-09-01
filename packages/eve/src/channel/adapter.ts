@@ -1,10 +1,16 @@
 import type { ContextAccessor } from "#context/key.js";
 import type { StepInput } from "#harness/types.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { createLogger } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { DeliverPayload } from "#channel/types.js";
-import type { FetchFileResult, FetchFileFunction } from "#shared/channel-definition.js";
+import type {
+  FetchFileContext,
+  FetchFileResult,
+  FetchFileFunction,
+} from "#shared/channel-definition.js";
+import type { ChannelAudienceMetadata } from "#shared/channel-audience.js";
 
 const log = createLogger("channel.adapter");
 
@@ -95,9 +101,11 @@ export type ChannelEventHandlers<TCtx extends ChannelAdapterContext<any> = Chann
  * When fields are provided, staging prefers them over the values the
  * channel populated at ingestion time.
  */
-export type { FetchFileResult };
+export type { FetchFileContext, FetchFileResult };
 
-export type ChannelInstrumentationMetadata = Readonly<Record<string, unknown>>;
+export type ChannelInstrumentationMetadata = Readonly<
+  Record<string, unknown> & ChannelAudienceMetadata
+>;
 
 export type ChannelInstrumentationMetadataProjector = (
   state: Record<string, unknown> | undefined,
@@ -186,24 +194,36 @@ export type ChannelAdapter<TCtx extends ChannelAdapterContext<any> = ChannelAdap
  */
 export function defaultDeliverResult(payload: DeliverPayload): StepInput | undefined {
   if (payload.message !== undefined) {
-    return {
-      inputResponses: payload.inputResponses,
-      message: payload.message,
-      context: payload.context,
-      outputSchema: payload.outputSchema,
-    };
+    return attachClientContext(
+      {
+        inputResponses: payload.inputResponses,
+        message: payload.message,
+        context: payload.context,
+        outputSchema: payload.outputSchema,
+      },
+      readClientContext(payload),
+    );
   }
 
   if (payload.inputResponses !== undefined && payload.inputResponses.length > 0) {
-    return {
-      inputResponses: payload.inputResponses,
-      context: payload.context,
-      outputSchema: payload.outputSchema,
-    };
+    return attachClientContext(
+      {
+        inputResponses: payload.inputResponses,
+        context: payload.context,
+        outputSchema: payload.outputSchema,
+      },
+      readClientContext(payload),
+    );
   }
 
-  if (payload.context !== undefined && payload.context.length > 0) {
-    return { context: payload.context, outputSchema: payload.outputSchema };
+  if (
+    (payload.context !== undefined && payload.context.length > 0) ||
+    (readClientContext(payload)?.length ?? 0) > 0
+  ) {
+    return attachClientContext(
+      { context: payload.context, outputSchema: payload.outputSchema },
+      readClientContext(payload),
+    );
   }
 
   if (payload.outputSchema !== undefined) {

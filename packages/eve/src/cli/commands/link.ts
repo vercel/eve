@@ -44,7 +44,7 @@ export async function runLinkCommand(
   }
   if (!dependencies.hasInteractiveTerminal()) {
     logger.error(
-      "`eve link` needs an interactive terminal to pick the team and project. In CI, run `vercel link --project <name> --yes --non-interactive` instead.",
+      "`eve link` needs an interactive terminal to pick the team and project. Name the project instead: `eve link --project <name-or-id> --non-interactive`.",
     );
     process.exitCode = 1;
     return;

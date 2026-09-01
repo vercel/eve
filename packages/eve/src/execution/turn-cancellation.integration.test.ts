@@ -22,9 +22,9 @@ import type { RouteHandlerArgs } from "#channel/routes.js";
 import { createSession } from "#channel/session.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
-import type { ToolContext } from "#public/definitions/tool.js";
+import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { toInputSchema } from "#shared/tool-schema.js";
+import { toInputSchema } from "#tools/schema.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -77,6 +77,7 @@ function buildWaitForCancelTool(onStart: () => void, onAbort: () => void): Resol
     inputSchema: toInputSchema({ additionalProperties: false, properties: {}, type: "object" }),
     logicalPath: `tools/${WAIT_TOOL_NAME}.ts`,
     name: WAIT_TOOL_NAME,
+    owner: { kind: "application" },
     sourceId: `tools/${WAIT_TOOL_NAME}.ts`,
     sourceKind: "module",
   };
@@ -89,7 +90,7 @@ interface WaitToolFixture {
   toolStarts(): number;
 }
 
-function createWaitToolRuntime(agentName: string): WaitToolFixture {
+async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture> {
   let aborts = 0;
   let starts = 0;
   let resolveStarted: (() => void) | undefined;
@@ -105,7 +106,7 @@ function createWaitToolRuntime(agentName: string): WaitToolFixture {
       aborts += 1;
     },
   );
-  const runtime = createTestRuntime({ agent: { name: agentName }, tools: [waitTool] });
+  const runtime = await createTestRuntime({ agent: { name: agentName }, tools: [waitTool] });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
   if (manifestTool === undefined) {
     throw new Error(`Expected ${WAIT_TOOL_NAME} to be present in the test manifest.`);
@@ -266,7 +267,7 @@ async function expectCancelResponse(
 
 describe("turn cancellation integration", () => {
   it("buffers a default steering message before replacing the active turn", async () => {
-    const fixture = createWaitToolRuntime("turn-steer-message");
+    const fixture = await createWaitToolRuntime("turn-steer-message");
     const rawToken = "turn-steer-message";
     const continuationToken = `http:${rawToken}`;
     const workflowRuntime = createWorkflowRuntime({
@@ -330,7 +331,7 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("cancels a turn mid-tool and accepts the next message normally", async () => {
-    const fixture = createWaitToolRuntime("turn-cancel-tool");
+    const fixture = await createWaitToolRuntime("turn-cancel-tool");
     const continuationToken = "http:turn-cancel-tool";
 
     await fixture.runtime.run(async () => {
@@ -407,7 +408,7 @@ describe("turn cancellation integration", () => {
   });
 
   it("cancels a turn through the eve channel cancel route", async () => {
-    const fixture = createWaitToolRuntime("turn-cancel-route");
+    const fixture = await createWaitToolRuntime("turn-cancel-route");
     const continuationToken = "http:turn-cancel-route";
     const cancelViaRoute = createCancelRouteCaller();
 
@@ -483,7 +484,7 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("cancels a turn from a channel route helper addressed by continuation token", async () => {
-    const fixture = createWaitToolRuntime("turn-cancel-helper");
+    const fixture = await createWaitToolRuntime("turn-cancel-helper");
     const rawToken = "turn-cancel-helper";
     const continuationToken = `http:${rawToken}`;
     const workflowRuntime = createWorkflowRuntime({
@@ -573,7 +574,7 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("cascades cancellation to an in-flight subagent and does not re-dispatch it", async () => {
-    const fixture = createWaitToolRuntime("turn-cancel-subagent");
+    const fixture = await createWaitToolRuntime("turn-cancel-subagent");
     const continuationToken = "http:turn-cancel-subagent";
 
     await fixture.runtime.run(async () => {
@@ -639,7 +640,7 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
-    const runtime = createTestRuntime({ agent: { name: "turn-cancel-hitl" } });
+    const runtime = await createTestRuntime({ agent: { name: "turn-cancel-hitl" } });
     const continuationToken = "http:turn-cancel-hitl";
 
     await runtime.run(async () => {
@@ -730,7 +731,7 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("consumes a cancel with a stale turn guard as a no-op and keeps the turn running", async () => {
-    const fixture = createWaitToolRuntime("turn-cancel-stale-guard");
+    const fixture = await createWaitToolRuntime("turn-cancel-stale-guard");
     const continuationToken = "http:turn-cancel-stale-guard";
 
     await fixture.runtime.run(async () => {
@@ -777,7 +778,7 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("treats a cancel after the turn settled as a benign no-op", async () => {
-    const runtime = createTestRuntime({ agent: { name: "turn-cancel-late" } });
+    const runtime = await createTestRuntime({ agent: { name: "turn-cancel-late" } });
     const continuationToken = "http:turn-cancel-late";
 
     await runtime.run(async () => {
@@ -827,7 +828,7 @@ describe("turn cancellation integration", () => {
   });
 
   it("completes settled turn runs so the world sweeps their hooks", async () => {
-    const runtime = createTestRuntime({ agent: { name: "turn-cancel-sweep" } });
+    const runtime = await createTestRuntime({ agent: { name: "turn-cancel-sweep" } });
     const continuationToken = "http:turn-cancel-sweep";
 
     await runtime.run(async () => {

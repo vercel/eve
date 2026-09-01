@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
@@ -25,6 +25,8 @@ import {
   type RolldownResolveContext,
 } from "#internal/authored-package-boundary.js";
 import { expectObjectRecord } from "#internal/authored-module.js";
+import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { resolvePackageSourceFilePath } from "#internal/application/package.js";
 import {
   buildSingleRolldownChunk,
   buildWithNitroRolldown,
@@ -204,7 +206,7 @@ export async function bundleExtensionDistributionGraph(input: {
   const plugins = [
     createAuthoredDirectiveGuardPlugin(),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin(),
+    createAuthoredAssetImportPlugin({ packageRoot: input.packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: input.packageRoot,
       extensions: RESOLVE_EXTENSIONS,
@@ -259,6 +261,9 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly moduleMapPath: string;
 }): Promise<string> {
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
+  const programmaticLoaderImportSpecifier = resolvePackageSourceFilePath(
+    "src/internal/programmatic-source-loader.ts",
+  );
   const externalDependencies = normalizeExternalDependencies([
     ...(input.manifest.config.build?.externalDependencies ?? []),
     ...input.manifest.subagents.flatMap((subagent) =>
@@ -270,6 +275,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   const moduleMapSource = createCompiledModuleMapSource({
     manifest: input.manifest,
     moduleMapPath: input.moduleMapPath,
+    programmaticLoaderImportSpecifier,
   });
   const extensionScopePlugin = createExtensionScopePlugin(
     [input.manifest, ...input.manifest.subagents.map((subagent) => subagent.agent)].flatMap(
@@ -285,11 +291,12 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
-    createDynamicCapabilityTransformPlugin({ dynamicTools: false }),
+    createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
+    createDynamicCapabilityTransformPlugin(),
     createAuthoredDirectiveGuardPlugin(),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin(),
+    createAuthoredAssetImportPlugin({ packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: packageRoot,
       extensions: RESOLVE_EXTENSIONS,
@@ -305,6 +312,7 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
       platform: "node",
       plugins,
       resolve: {
+        conditionNames: ["eve-source"],
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: resolveAuthoredTsConfigPath(packageRoot),
@@ -318,6 +326,18 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
   } catch (error) {
     throw createAuthoredModuleBundleError(input.moduleMapPath, error);
   }
+}
+
+function createExternalRuntimeImportPlugin(importSpecifier: string): Record<string, unknown> {
+  const normalizedImportSpecifier = normalizeEsmImportSpecifier(importSpecifier);
+  return {
+    name: "eve-external-runtime-import",
+    resolveId(id: string) {
+      return id === normalizedImportSpecifier
+        ? { external: true, id: normalizedImportSpecifier }
+        : undefined;
+    },
+  };
 }
 
 function createVirtualGenerationModuleMapPlugin(input: {
@@ -402,7 +422,7 @@ async function buildAuthoredModuleBundle(
       ? null
       : createFixedNamespaceScopePlugin(options.extensionScopeNamespace),
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
-    createAuthoredAssetImportPlugin(),
+    createAuthoredAssetImportPlugin({ packageRoot }),
     createAuthoredPackageTsConfigPathsPlugin({
       appPackageRoot: packageRoot,
       extensions: RESOLVE_EXTENSIONS,
@@ -418,6 +438,7 @@ async function buildAuthoredModuleBundle(
       platform: "node",
       plugins,
       resolve: {
+        conditionNames: ["eve-source"],
         extensions: [...RESOLVE_EXTENSIONS],
       },
       tsconfig: tsconfigPath,
@@ -513,7 +534,7 @@ function resolveAuthoredPackageRoot(modulePath: string): string {
 
   while (true) {
     if (existsSync(join(currentDirectory, "package.json"))) {
-      return currentDirectory;
+      return realpathSync(currentDirectory);
     }
 
     const parentDirectory = dirname(currentDirectory);

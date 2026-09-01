@@ -4,6 +4,7 @@ import {
   normalizeRequestedOutputSchema,
 } from "#execution/subagent-invocation.js";
 import type {
+  ActivityObserverConfig,
   ChannelInstrumentationProjection,
   RunInput,
   RunSessionLimits,
@@ -12,10 +13,11 @@ import type {
   SessionTraceContext,
 } from "#channel/types.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { resolveRemainingSessionTokenLimits } from "#harness/subagent-token-budget.js";
+import type { JsonObject } from "#shared/json.js";
 
 /**
  * Pending runtime-action batch event metadata needed for child run lineage.
@@ -28,9 +30,11 @@ interface BatchEventMetadata {
 export type SubagentInputSource =
   | {
       readonly description: string;
+      readonly outputSchema?: JsonObject;
       readonly type: "local";
     }
   | {
+      readonly outputSchema?: JsonObject;
       readonly type: "runtime";
     };
 
@@ -95,13 +99,7 @@ export function buildSubagentRunInput(input: {
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
-  /**
-   * Whether the parent agent opted into
-   * `experimental.subagentPersistentSessions`. Persistent children run in
-   * conversation mode so their sessions survive the first answer; otherwise
-   * children run as one-shot task sessions.
-   */
-  readonly persistentSessions?: boolean;
+  readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
 }): SubagentRunInputBuild {
@@ -164,13 +162,12 @@ export function buildSubagentRunInput(input: {
     input: {
       message: formatSubagentCallInputMessage({
         action,
-        persistentSession: input.persistentSessions,
         source,
       }),
-      outputSchema: requestedOutputSchema,
+      outputSchema: requestedOutputSchema ?? source.outputSchema,
     },
     limits: inheritedLimits,
-    mode: input.persistentSessions === true ? "conversation" : "task",
+    mode: "conversation",
     parent: {
       callId: action.callId,
       rootSessionId,
@@ -181,6 +178,7 @@ export function buildSubagentRunInput(input: {
       },
     },
     parentTraceContext: input.parentTraceContext,
+    activityObserver: input.activityObserver,
     subagentDepth: subagentDepth.nextChildDepth,
   };
 
@@ -192,7 +190,6 @@ export function buildSubagentRunInput(input: {
  */
 function formatSubagentCallInputMessage(input: {
   readonly action: Pick<RuntimeSubagentCallActionRequest, "input" | "subagentName">;
-  readonly persistentSession?: boolean;
   readonly source: SubagentInputSource;
 }): string {
   const { message } = input.action.input as { message: string };
@@ -203,14 +200,12 @@ function formatSubagentCallInputMessage(input: {
         description: input.source.description,
         message,
         name: input.action.subagentName,
-        persistentSession: input.persistentSession,
         type: "local",
       }).message;
     case "runtime":
       return formatSubagentInput({
         message,
         name: input.action.subagentName,
-        persistentSession: input.persistentSession,
         type: "runtime",
       }).message;
     default: {
