@@ -114,7 +114,13 @@ function readAcceptedDeploymentId(command: SessionInboxCommand): string | undefi
 }
 
 function withoutActivityObserver(command: SessionInboxCommand): SessionInboxCommand {
-  if (!("caller" in command) || command.caller?.activityObserver === undefined) return command;
+  if (
+    !("caller" in command) ||
+    command.caller === undefined ||
+    !("activityObserver" in command.caller)
+  ) {
+    return command;
+  }
   const { activityObserver: _activityObserver, ...caller } = command.caller;
   return { ...command, caller };
 }
