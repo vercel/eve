@@ -6,9 +6,22 @@ const WORKFLOW_USE_STEP = Symbol.for("WORKFLOW_USE_STEP");
 const STREAM_NAME_SYMBOL = Symbol.for("WORKFLOW_STREAM_NAME");
 const workflowGlobal = globalThis as typeof globalThis & Record<symbol, unknown>;
 
-export class RetryableError extends Error {}
+// The SDK matches these by `name` and `fatal` when it serializes an error out of a body.
+export class RetryableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableError";
+  }
+}
 
-export class FatalError extends Error {}
+export class FatalError extends Error {
+  readonly fatal = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "FatalError";
+  }
+}
 
 interface WorkflowHook<T> extends AsyncIterable<T> {
   readonly token: string;

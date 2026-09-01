@@ -45,7 +45,11 @@ export function createBackgroundSubagentHarnessDefinition(
   if (target?.kind !== "dispatch") {
     throw new Error(`Background subagent tool "${tool.name}" has no prepared dispatch target.`);
   }
-  if (target.target.kind === "task-cancel" || target.target.kind === "task-update") {
+  if (
+    target.target.kind === "task-cancel" ||
+    target.target.kind === "task-update" ||
+    target.target.kind === "workflow-tool-call"
+  ) {
     throw new Error(
       `Background subagent tool "${tool.name}" cannot dispatch ${target.target.kind}.`,
     );

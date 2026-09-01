@@ -1071,7 +1071,7 @@ describe("scaffoldBaseProject", () => {
       compilerOptions: { types?: string[] };
       include?: string[];
     };
-    expect(tsconfig.compilerOptions.types).toEqual(["node"]);
+    expect(tsconfig.compilerOptions.types).toEqual(["node", "eve/workflow-modules"]);
     expect(tsconfig.include).toEqual(["agent/**/*.ts", "evals/**/*.ts"]);
     await expect(readFile(join(projectRoot, "pnpm-workspace.yaml"), "utf8")).resolves.toBe(
       PNPM_WORKSPACE_CONTENT,

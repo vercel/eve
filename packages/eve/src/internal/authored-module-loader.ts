@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 import type { CompiledAgentManifest } from "#compiler/manifest.js";
 import { createCompiledModuleMapSource } from "#compiler/module-map.js";
 import { createAuthoredAssetImportPlugin } from "#internal/authored-asset-import-plugin.js";
-import { assertNoWorkflowDirectivePrologue } from "#internal/authored-directive-prologue.js";
 import { createAuthoredModuleBundleError } from "#internal/authored-module-bundle.js";
 import { createAuthoredModuleEvaluationError } from "#internal/authored-module-evaluation-error.js";
 import { createAuthoredPackageTsConfigPathsPlugin } from "#internal/authored-package-tsconfig-paths.js";
@@ -32,7 +31,13 @@ import {
   buildWithNitroRolldown,
 } from "#internal/bundler/nitro-rolldown.js";
 import { createNodeEsmCompatBannerPlugin } from "#internal/node-esm-compat-banner.js";
+import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
 import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundle/dynamic-capability-transform-plugin.js";
+import {
+  applyWorkflowTransform,
+  isAuthoredApplicationModule,
+  type WorkflowManifest,
+} from "#internal/workflow-bundle/workflow-builders.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
 const AUTHORED_MODULE_BUNDLE_DIRECTORY_PATH = join(
@@ -148,13 +153,14 @@ export async function bundleAuthoredModuleCode(
   modulePath: string,
   options: AuthoredModuleLoadOptions = {},
 ): Promise<string> {
+  const packageRoot = resolveAuthoredPackageRoot(modulePath);
   return await buildAuthoredModuleBundle(modulePath, options, {
     channelIdentity: true,
     packageBoundaryPlugin: createRuntimeLoaderPackageBoundaryPlugin({
       externalDependencies: normalizeExternalDependencies(options.externalDependencies),
-      packageRoot: resolveAuthoredPackageRoot(modulePath),
+      packageRoot,
     }),
-    plugins: [],
+    plugins: [createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot })],
     sourcemap: "inline",
   });
 }
@@ -256,10 +262,16 @@ export async function bundleExtensionDistributionGraph(input: {
  * Shared dependencies are parsed and emitted once instead of once per authored
  * entry.
  */
+export interface AuthoredModuleMapBundle {
+  readonly code: string;
+  /** Fingerprint of the sources that also feed the driver and step registry; a change rebuilds the host. */
+  readonly workflowSourceFingerprint: string | undefined;
+}
+
 export async function bundleAuthoredModuleMapForGeneration(input: {
   readonly manifest: CompiledAgentManifest;
   readonly moduleMapPath: string;
-}): Promise<string> {
+}): Promise<AuthoredModuleMapBundle> {
   const packageRoot = resolveAuthoredPackageRoot(input.manifest.agentRoot);
   const programmaticLoaderImportSpecifier = resolvePackageSourceFilePath(
     "src/internal/programmatic-source-loader.ts",
@@ -286,14 +298,19 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
         })),
     ),
   );
+  const workflowSources = new AuthoredWorkflowSourceRecorder(packageRoot);
   const plugins = [
     createVirtualGenerationModuleMapPlugin({
       id: input.moduleMapPath,
       source: moduleMapSource,
     }),
     createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
-    createDynamicCapabilityTransformPlugin(),
-    createAuthoredDirectiveGuardPlugin(),
+    // Before callback stamping, which must see the stub and never the directive.
+    createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot, recorder: workflowSources }),
+    createDynamicCapabilityTransformPlugin({
+      workflowFunctions: (id) => workflowSources.workflowFunctions(id),
+    }),
+    workflowSources.graphPlugin(),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
     createAuthoredAssetImportPlugin({ packageRoot }),
@@ -322,7 +339,10 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
         sourcemap: false,
       },
     });
-    return removeRolldownModuleRegionComments(chunk.code);
+    return {
+      code: removeRolldownModuleRegionComments(chunk.code),
+      workflowSourceFingerprint: workflowSources.fingerprint(),
+    };
   } catch (error) {
     throw createAuthoredModuleBundleError(input.moduleMapPath, error);
   }
@@ -338,6 +358,76 @@ function createExternalRuntimeImportPlugin(importSpecifier: string): Record<stri
         : undefined;
     },
   };
+}
+
+/** Reuses the build's own resolution so the fingerprint is exact without a second resolver. */
+class AuthoredWorkflowSourceRecorder {
+  readonly #appRoot: string;
+  readonly #directiveModules = new Set<string>();
+  readonly #imports = new Map<string, readonly string[]>();
+  readonly #sources = new Map<string, string>();
+  readonly #workflowFunctions = new Map<string, ReadonlySet<string>>();
+
+  constructor(appRoot: string) {
+    this.#appRoot = appRoot;
+  }
+
+  record(id: string, source: string, manifest: WorkflowManifest): void {
+    this.#sources.set(id, source);
+    if (manifest.steps !== undefined || manifest.workflows !== undefined) {
+      this.#directiveModules.add(id);
+    }
+    const workflows = Object.values(manifest.workflows ?? {})[0];
+    if (workflows !== undefined) this.#workflowFunctions.set(id, new Set(Object.keys(workflows)));
+  }
+
+  workflowFunctions(id: string): ReadonlySet<string> | undefined {
+    return this.#workflowFunctions.get(id);
+  }
+
+  graphPlugin(): Record<string, unknown> {
+    const imports = this.#imports;
+    return {
+      name: "eve-authored-module-graph",
+      buildEnd(this: RolldownModuleGraphContext) {
+        for (const id of this.getModuleIds()) {
+          const info = this.getModuleInfo(id);
+          if (info === null) continue;
+          imports.set(id, [...info.importedIds, ...info.dynamicallyImportedIds]);
+        }
+      },
+    };
+  }
+
+  fingerprint(): string | undefined {
+    if (this.#directiveModules.size === 0) return undefined;
+
+    const reachable = new Set<string>();
+    const queue = [...this.#directiveModules];
+    for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+      if (reachable.has(id) || !this.#sources.has(id)) continue;
+      reachable.add(id);
+      queue.push(...(this.#imports.get(id) ?? []));
+    }
+
+    const hash = createHash("sha256");
+    for (const id of [...reachable].sort()) {
+      hash
+        .update(relative(this.#appRoot, id).split(sep).join("/"))
+        .update("\0")
+        .update(this.#sources.get(id) ?? "")
+        .update("\0");
+    }
+    return hash.digest("hex");
+  }
+}
+
+interface RolldownModuleGraphContext {
+  getModuleIds(): Iterable<string>;
+  getModuleInfo(id: string): {
+    readonly dynamicallyImportedIds: readonly string[];
+    readonly importedIds: readonly string[];
+  } | null;
 }
 
 function createVirtualGenerationModuleMapPlugin(input: {
@@ -462,8 +552,37 @@ function createAuthoredDirectiveGuardPlugin(): Record<string, unknown> {
         return undefined;
       }
 
-      await assertNoWorkflowDirectivePrologue({ filePath: id, source });
+      const { hasDirectives } = await prepareAuthoredWorkflowDirectives({ filePath: id, source });
+      if (hasDirectives) {
+        throw new Error(
+          `Module "${id}" uses Workflow directives ("use step" or "use workflow"). ` +
+            "Workflow directives are supported in application modules only, not in extensions or instrumentation.",
+        );
+      }
       return undefined;
+    },
+  };
+}
+
+// Client mode: steps keep their bodies, workflows become references. Step
+// registration happens once, in the host's step entrypoint.
+function createAuthoredWorkflowDirectivePlugin(input: {
+  readonly appRoot: string;
+  readonly recorder?: AuthoredWorkflowSourceRecorder;
+}): Record<string, unknown> {
+  return {
+    name: "eve-authored-workflow-directives",
+    async transform(source: string, id: string) {
+      if (!AUTHORED_BUNDLED_MODULE_EXTENSION.test(id) || isNodeModulesPath(id)) {
+        return undefined;
+      }
+      if (!isAuthoredApplicationModule(id, input.appRoot)) {
+        return undefined;
+      }
+
+      const transformed = await applyWorkflowTransform(id, source, "client", id, input.appRoot);
+      input.recorder?.record(id, source, transformed.workflowManifest);
+      return transformed.code === source ? undefined : { code: transformed.code, map: null };
     },
   };
 }
@@ -529,7 +648,7 @@ function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
   return false;
 }
 
-function resolveAuthoredPackageRoot(modulePath: string): string {
+export function resolveAuthoredPackageRoot(modulePath: string): string {
   let currentDirectory = dirname(modulePath);
 
   while (true) {

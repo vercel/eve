@@ -1,11 +1,17 @@
-import type { Command } from "#compiled/commander/index.js";
+import { InvalidArgumentError, type Command } from "#compiled/commander/index.js";
 import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import type { ConnectPrincipalType } from "#setup/connection-connector.js";
 
 import { parseSetupAnswer } from "./setup-answers.js";
 
 interface IntegrationCommandLogger {
   error(message: string): void;
   log(message: string): void;
+}
+
+export function parseConnectPrincipalType(value: string): ConnectPrincipalType {
+  if (value === "app" || value === "user") return value;
+  throw new InvalidArgumentError('Expected principal type "app" or "user".');
 }
 
 /** Registers hidden built-in integration setup commands used by trusted registry items. */
@@ -56,6 +62,11 @@ export function registerIntegrationCommands(input: {
     .option("--creation-type <type>", "Select the Vercel Connect creation type.")
     .option("--connection-method <method>", "Select the Vercel Connect connection method.")
     .option(
+      "--principal-type <type>",
+      "Require app- or user-scoped Vercel Connect credentials.",
+      parseConnectPrincipalType,
+    )
+    .option(
       "--non-interactive",
       "Run without interactive prompts, instead emit structured NDJSON when further input is required",
     )
@@ -67,6 +78,7 @@ export function registerIntegrationCommands(input: {
         options: {
           creationType?: string;
           connectionMethod?: "mcp" | "oauth";
+          principalType?: ConnectPrincipalType;
           nonInteractive?: boolean;
         },
       ) => {

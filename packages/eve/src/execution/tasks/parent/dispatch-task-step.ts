@@ -28,6 +28,7 @@ import {
   type RuntimeActionDispatchResult,
   startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
+import { startWorkflowTool } from "#execution/tool-run/dispatch.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import {
@@ -72,6 +73,18 @@ export async function dispatchTaskStep(
     for (const entry of prepared.plan) {
       if (entry.kind === "reject") {
         results.push(entry.result);
+        continue;
+      }
+      if (entry.kind === "workflow-tool") {
+        const started = await startWorkflowTool({
+          action: entry.action,
+          batchEvent: batch.event,
+          ownerInboxToken: input.parentContinuationToken,
+          prepared,
+          session: nextSession,
+        });
+        nextSession = started.session;
+        if (started.result !== undefined) results.push(started.result);
         continue;
       }
 

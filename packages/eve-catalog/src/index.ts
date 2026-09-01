@@ -635,6 +635,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "neon",
+    name: "Neon",
+    kind: "connection",
+    tagline: "Manage Neon projects, run queries, and make schema changes.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Neon: manage projects, run queries, and make schema changes.",
+      mcp: { url: "https://mcp.neon.tech/mcp" },
+    },
+  },
+  {
     slug: "netlify",
     name: "Netlify",
     kind: "connection",

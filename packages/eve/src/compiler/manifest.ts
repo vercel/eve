@@ -54,7 +54,7 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 46;
+export const COMPILED_AGENT_MANIFEST_VERSION = 47;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
@@ -842,6 +842,12 @@ const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
           .object({
             kind: z.literal("request-input"),
             request: z.literal("question"),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("workflow-tool"),
+            workflowId: z.string(),
           })
           .strict(),
       ])

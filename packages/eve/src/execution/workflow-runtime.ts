@@ -65,36 +65,20 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
-
-const WORKFLOW_ENTRY_NAME = "workflowEntry";
-const TURN_WORKFLOW_NAME = "turnWorkflow";
-const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
-const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
-const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
+import {
+  ACTIVITY_COLLECTOR_WORKFLOW_NAME,
+  SESSION_TIMEOUT_WORKFLOW_NAME,
+  TASK_RUN_WORKFLOW_NAME,
+  TOOL_RUN_WORKFLOW_NAME,
+  TURN_WORKFLOW_NAME,
+  WORKFLOW_ENTRY_NAME,
+} from "#execution/stable-workflow-names.js";
 const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
   "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
-
-/**
- * Workflow function names whose bundled id is stable across deployments
- * (no `@<pkg.version>` stamp). The bundler reads this set when emitting
- * the workflow id so cross-deployment routing — `start(ref, args, {
- * deploymentId: "latest" })` — finds the same workflow on a newer
- * deployment even when the eve version differs.
- *
- * Both halves of the contract (bundler output and runtime reference
- * template) read this single set so they cannot drift.
- */
-export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
-  WORKFLOW_ENTRY_NAME,
-  TURN_WORKFLOW_NAME,
-  SESSION_TIMEOUT_WORKFLOW_NAME,
-  TASK_RUN_WORKFLOW_NAME,
-  ACTIVITY_COLLECTOR_WORKFLOW_NAME,
-]);
 
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
@@ -138,6 +122,11 @@ export const taskRunWorkflowReference = {
 /** Stable workflow reference for root-session activity collectors. */
 export const activityCollectorWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
+};
+
+/** Stable workflow reference for authored workflow tool runs. */
+export const toolRunWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${TOOL_RUN_WORKFLOW_NAME}`,
 };
 
 /**

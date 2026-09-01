@@ -2207,6 +2207,30 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
     expect(turn.attributes["error.type"]).toBe("TypeError");
   });
+
+  it("marks an active invocation failed from the terminal session event", async () => {
+    const runtime = createRuntime();
+    const error = new TypeError("workflow failed");
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      error,
+      idempotencyKey: sessionIdempotencyKey("session-1"),
+      sessionId: "session-1",
+      turnId: "turn-1",
+      type: "session.failed",
+    });
+    await runtime.provider.forceFlush();
+
+    const turn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
+    expect(turn.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
+    expect(turn.attributes["error.type"]).toBe("TypeError");
+    expect(turn.events.map((event) => event.name)).toContain("turn.failed");
+  });
 });
 
 function spanContext(traceId: string, spanId: string) {

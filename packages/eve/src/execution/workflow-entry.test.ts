@@ -7,6 +7,7 @@ import { ChannelRequestIdKey, SubagentDepthKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import {
   bindTurnCallerContextStep,
+  notifyCancelledTaskCallerStep,
   notifyDelegatedParentStep,
   notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
@@ -31,6 +32,15 @@ import { sessionCommandHookToken } from "#execution/session-command-token.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
+  defineHook: () => ({
+    create: (options?: { readonly token?: string }) => ({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      dispose: async () => {},
+      getConflict: async () => null,
+      token: options?.token ?? "hook",
+    }),
+    resume: async () => null,
+  }),
   getWorkflowMetadata: vi.fn(() => ({
     url: "https://eve.example.com",
     workflowRunId: "wrun_test_123",
@@ -324,6 +334,56 @@ describe("workflowEntry", () => {
       serializedContext,
       sessionState,
     });
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith({
+      parentWritable: expect.any(WritableStream),
+      serializedContext,
+    });
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
+    expect(notifyTurnCallerStep).not.toHaveBeenCalled();
+  });
+
+  it("completes a parked session when reset retires it", async () => {
+    const sessionState = createBaseSessionState();
+    const serializedContext = {
+      ...createSerializedContext(),
+      "eve.sessionId": "wrun_test_123",
+    };
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      deliveryHooks: [
+        {
+          token: "http:test",
+          values: [{ kind: "reset", reason: "Start over" }],
+        },
+      ],
+      turnControls: [
+        turnResult({
+          action: "park",
+          serializedContext,
+          sessionState,
+        }),
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello there" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).resolves.toEqual({ output: "" });
+
+    expect(terminateChildSessionsStep).toHaveBeenCalledWith({
+      serializedContext,
+      sessionState,
+    });
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledOnce();
+    expect(emitTerminalSessionCompletionStep).toHaveBeenCalledWith({
+      parentWritable: expect.any(WritableStream),
+      serializedContext,
+    });
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
+    expect(notifyTurnCallerStep).not.toHaveBeenCalled();
   });
 
   it("exits a conflicting initial continuation before dispatching the first turn", async () => {
@@ -654,6 +714,7 @@ describe("workflowEntry", () => {
     expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
       expect.objectContaining({
         error: expect.objectContaining({ message: "persistent recoverable failure" }),
+        turnId: "turn_0",
       }),
     );
     expect(terminateChildSessionsStep).toHaveBeenCalledWith({
@@ -678,6 +739,26 @@ describe("workflowEntry", () => {
     // The caller cell was already populated; the crash path must reuse it
     // instead of resolving a second time.
     expect(resolveInitialTurnCallerStep).toHaveBeenCalledOnce();
+  });
+
+  it("does not emit session.failed when notification fails after terminal completion", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(fireSessionCallbackStep).mockRejectedValueOnce(new Error("callback failed"));
+    installHookMocks({
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "run task" },
+        serializedContext: createSerializedContext({ "eve.mode": "task" }),
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(fireSessionCallbackStep).toHaveBeenCalledOnce();
+    expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
+    expect(notifyDelegatedParentStep).not.toHaveBeenCalled();
   });
 
   it("rejects the delegated caller when the session fails before the caller is resolved", async () => {
@@ -1154,6 +1235,84 @@ describe("workflowEntry", () => {
       sessionState: settledState,
     });
     expect(notifyTurnCallerStep).not.toHaveBeenCalled();
+  });
+
+  it("retains the active turn when cancellation settlement fails", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(settleCancelledTurnStep).mockRejectedValueOnce(new Error("settlement failed"));
+    installHookMocks({
+      turnControls: [
+        {
+          action: {
+            cancelled: true,
+            kind: "park",
+            serializedContext: { "eve.sessionId": "wrun_test_123" },
+            sessionState,
+          },
+          kind: "turn-result",
+        },
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ message: "settlement failed" }),
+        serializedContext: { "eve.sessionId": "wrun_test_123" },
+        turnId: "turn_0",
+      }),
+    );
+  });
+
+  it("adopts cancelled-turn state before notifying its caller", async () => {
+    const sessionState = createBaseSessionState();
+    const settledState = createBaseSessionState({
+      emissionState: { sequence: 1, sessionStarted: true, stepIndex: 0, turnId: "" },
+    });
+    const settledContext = { "eve.sessionId": "wrun_test_123", settled: true };
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    vi.mocked(settleCancelledTurnStep).mockResolvedValue({
+      serializedContext: settledContext,
+      sessionState: settledState,
+    });
+    vi.mocked(notifyCancelledTaskCallerStep).mockRejectedValueOnce(
+      new Error("caller notification failed"),
+    );
+    installHookMocks({
+      turnControls: [
+        {
+          action: {
+            cancelled: true,
+            kind: "park",
+            serializedContext: { "eve.sessionId": "wrun_test_123" },
+            sessionState,
+          },
+          kind: "turn-result",
+        },
+      ],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "hello" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({ name: "EveWorkflowFailure" });
+
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({ message: "caller notification failed" }),
+        serializedContext: settledContext,
+        turnId: undefined,
+      }),
+    );
   });
 
   it("does not settle an ordinary park as cancelled", async () => {

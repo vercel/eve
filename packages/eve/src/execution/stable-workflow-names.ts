@@ -1,0 +1,20 @@
+/**
+ * eve workflow functions whose bundled id carries no `@<version>` stamp, so
+ * `start(ref, args, { deploymentId: "latest" })` finds them on a newer
+ * deployment. Dependency-free so the bundler can import it.
+ */
+export const WORKFLOW_ENTRY_NAME = "workflowEntry";
+export const TURN_WORKFLOW_NAME = "turnWorkflow";
+export const SESSION_TIMEOUT_WORKFLOW_NAME = "sessionTimeoutWorkflow";
+export const TASK_RUN_WORKFLOW_NAME = "taskRunWorkflow";
+export const TOOL_RUN_WORKFLOW_NAME = "toolRunWorkflow";
+export const ACTIVITY_COLLECTOR_WORKFLOW_NAME = "activityCollectorWorkflow";
+
+export const STABLE_WORKFLOW_NAMES: ReadonlySet<string> = new Set([
+  WORKFLOW_ENTRY_NAME,
+  TURN_WORKFLOW_NAME,
+  SESSION_TIMEOUT_WORKFLOW_NAME,
+  TASK_RUN_WORKFLOW_NAME,
+  TOOL_RUN_WORKFLOW_NAME,
+  ACTIVITY_COLLECTOR_WORKFLOW_NAME,
+]);

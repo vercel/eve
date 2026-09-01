@@ -1,6 +1,12 @@
 import { createRequire } from "node:module";
 
-import { context, propagation, trace, type Context } from "#compiled/@opentelemetry/api/index.js";
+import {
+  context,
+  metrics,
+  propagation,
+  trace,
+  type Context,
+} from "#compiled/@opentelemetry/api/index.js";
 import {
   registerOTel,
   type Configuration,
@@ -182,15 +188,27 @@ export function registerOtelPipeline(input: {
     throw new Error("The registered OpenTelemetry tracer provider has no lifecycle methods.");
   }
   optionalPeerTracerProxy?.setDelegate(provider);
+  // `registerOTel` also registers a global meter provider when metric readers
+  // are declared, but returns no handle to it. Capture it now so metrics get
+  // the same flush and shutdown coverage as spans; without metric readers the
+  // global is a no-op provider with no lifecycle methods.
+  const meterProvider = runtimeMeterProvider();
   return {
-    forceFlush: () => provider.forceFlush!(),
+    forceFlush: async () => {
+      await Promise.all([provider.forceFlush!(), meterProvider.forceFlush?.()]);
+    },
     idGenerator,
     samplesTrace: (traceId) => samplerAdmitsTrace(idGenerator, traceId),
-    shutdown: () => provider.shutdown!(),
+    shutdown: async () => {
+      // Stop auto-instrumentations first so nothing records into providers
+      // that are about to shut down.
+      disableInstrumentations(pipeline.instrumentations);
+      await Promise.all([provider.shutdown!(), meterProvider.shutdown?.()]);
+    },
   };
 }
 
-/** Lifecycle retained from the tracer provider that owns every destination. */
+/** Lifecycle retained from the providers that own every destination. */
 export interface RegisteredOtelPipeline {
   readonly forceFlush: () => Promise<void>;
   readonly idGenerator: AgentSpanIdGenerator;
@@ -207,6 +225,11 @@ function samplerAdmitsTrace(idGenerator: AgentSpanIdGenerator, traceId: string):
 }
 
 interface RuntimeTracerProvider {
+  forceFlush(): Promise<void>;
+  shutdown(): Promise<void>;
+}
+
+interface RuntimeMeterProvider {
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
 }
@@ -249,6 +272,33 @@ function rollbackRegistration(input: {
 function runtimeTracerProvider(): Partial<RuntimeTracerProvider> {
   const globalProvider = trace.getTracerProvider() as Partial<ProxyTracerProvider>;
   return (globalProvider.getDelegate?.() ?? globalProvider) as Partial<RuntimeTracerProvider>;
+}
+
+function runtimeMeterProvider(): Partial<RuntimeMeterProvider> {
+  const globalProvider = metrics.getMeterProvider() as {
+    forceFlush?: unknown;
+    shutdown?: unknown;
+  } | null;
+  return {
+    forceFlush:
+      typeof globalProvider?.forceFlush === "function"
+        ? () => (globalProvider as RuntimeMeterProvider).forceFlush()
+        : undefined,
+    shutdown:
+      typeof globalProvider?.shutdown === "function"
+        ? () => (globalProvider as RuntimeMeterProvider).shutdown()
+        : undefined,
+  };
+}
+
+function disableInstrumentations(instrumentations: readonly unknown[] | undefined): void {
+  for (const instrumentation of instrumentations ?? []) {
+    const disable = (instrumentation as { disable?: unknown } | null)?.disable;
+    if (typeof disable !== "function") continue;
+    try {
+      disable.call(instrumentation);
+    } catch {}
+  }
 }
 
 function globalTracerUses(idGenerator: AgentSpanIdGenerator): boolean {

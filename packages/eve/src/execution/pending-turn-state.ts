@@ -11,6 +11,7 @@ export function derivePendingState(session: HarnessSession): {
   readonly hasPendingAuthorization: boolean;
   readonly hasPendingInputBatch: boolean;
   readonly pendingRuntimeActionKeys?: readonly string[];
+  readonly startsWorkflowToolRuns?: boolean;
 } {
   const batch = getPendingRuntimeActionBatch(session.state);
   const pendingAuth = getPendingAuthorization(session.state);
@@ -26,5 +27,8 @@ export function derivePendingState(session: HarnessSession): {
   return {
     ...base,
     pendingRuntimeActionKeys: batch.actions.map((action) => getPendingDispatchActionKey(action)),
+    startsWorkflowToolRuns: batch.actions.some(
+      (action) => action.target.kind === "workflow-tool-call",
+    ),
   };
 }

@@ -56,7 +56,9 @@ import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.
 import { readLatestTaskView, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { appendTaskAgentAnnouncement } from "#execution/tasks/parent/agent-views.js";
+import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
+import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
@@ -247,6 +249,7 @@ function createSerializedContext(
 }
 
 afterEach(() => {
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
   getRunMock.mockReset();
   resumeHookMock.mockReset();
   startMock.mockReset();
@@ -3163,7 +3166,7 @@ describe("turnStep", () => {
   });
 });
 
-describe("emitTerminalSessionFailureStep", () => {
+describe("terminal session event steps", () => {
   function buildSerializedContextWithAdapter(
     adapter: ChannelAdapter,
     sessionId: string,
@@ -3205,6 +3208,47 @@ describe("emitTerminalSessionFailureStep", () => {
     return serialized;
   }
 
+  function installTerminalInstrumentation() {
+    const forceFlush = vi.fn(async () => undefined);
+    const publish = vi.fn(async () => undefined);
+    registerInstrumentationRuntime({
+      forceFlush,
+      hooks: { capturesContent: false, publish },
+      otelSettings: undefined,
+      runInContext: (_operation, execute) => execute(),
+      shutdown: async () => undefined,
+    });
+    return { forceFlush, publish };
+  }
+
+  it("publishes and flushes an out-of-turn session completion", async () => {
+    const sessionCompleted = vi.fn();
+    const adapter: ChannelAdapter = {
+      kind: "thread-context",
+      "session.completed": sessionCompleted,
+    };
+    const serializedContext = buildSerializedContextWithAdapter(adapter, "session-completed");
+    const instrumentation = installTerminalInstrumentation();
+
+    await emitTerminalSessionCompletionStep({
+      parentWritable: createTestWritable(),
+      serializedContext,
+    });
+
+    expect(sessionCompleted).toHaveBeenCalledOnce();
+    expect(instrumentation.publish).toHaveBeenCalledExactlyOnceWith({
+      idempotencyKey: "session:session-completed",
+      sessionId: "session-completed",
+      turnId: undefined,
+      type: "session.completed",
+    });
+    expect(instrumentation.forceFlush).toHaveBeenCalledOnce();
+    expect(instrumentation.publish.mock.invocationCallOrder[0]).toBeLessThan(
+      instrumentation.forceFlush.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toHaveLength(1);
+  });
+
   it("invokes the adapter's session.failed handler with a formatted error payload", async () => {
     // Capture adapter side effects — this is how we verify the step
     // actually reaches the user-visible notification path. A terminal
@@ -3218,6 +3262,7 @@ describe("emitTerminalSessionFailureStep", () => {
     };
 
     const serialized = buildSerializedContextWithAdapter(capturingAdapter, "session-terminal");
+    const instrumentation = installTerminalInstrumentation();
 
     // Use a plain-object error shape — the workflow body converts
     // raw Errors to this shape (`normalizeSerializableError`) before
@@ -3234,6 +3279,7 @@ describe("emitTerminalSessionFailureStep", () => {
       error,
       parentWritable: createTestWritable(),
       serializedContext: serialized,
+      turnId: "turn-active",
     });
 
     expect(sessionFailedCalls).toHaveLength(1);
@@ -3253,6 +3299,21 @@ describe("emitTerminalSessionFailureStep", () => {
       sessionId: "session-terminal",
     });
     expect(JSON.stringify(providerLog)).not.toContain("confidential.png");
+    expect(instrumentation.publish).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: "attachment staging failed for confidential.png",
+        }),
+        idempotencyKey: "session:session-terminal",
+        sessionId: "session-terminal",
+        turnId: "turn-active",
+        type: "session.failed",
+      }),
+    );
+    expect(instrumentation.forceFlush).toHaveBeenCalledOnce();
+    expect(instrumentation.publish.mock.invocationCallOrder[0]).toBeLessThan(
+      instrumentation.forceFlush.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
 
     // The terminal step must also write the event to the durable
     // stream so event-stream consumers see a canonical tail instead

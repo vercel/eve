@@ -20,6 +20,8 @@ import {
   prepareAgentStart,
 } from "#harness/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getToolRuns, recordToolRun } from "#harness/tool-runs.js";
+import { toolOutput } from "#tools/model-output.js";
 import { getSessionTokenUsage, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -337,6 +339,118 @@ describe("resolvePendingRuntimeActions", () => {
 
     expect(resolved.outcome).toBe("resolved");
     expect(getProxyInputRequests(resolved.session.state).size).toBe(0);
+  });
+
+  it("forgets a finished workflow tool run and withdraws only its unanswered requests", async () => {
+    const parked = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Deploy.",
+          input: { service: "api" },
+          target: {
+            kind: "workflow-tool-call",
+            workflowId: "workflow//./agent/tools/deploy//execute",
+          },
+          toolName: "deploy",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+    });
+    const withRun = recordToolRun(parked, {
+      callId: "call-1",
+      hookToken: "eve:tool-run:op-1",
+      runId: "run-1",
+      toolName: "deploy",
+    });
+    const answerToken = "eve:tool-run-answer:run-1:0";
+    const session = upsertProxyInputRequests({
+      entries: [
+        ["other-request", { childContinuationToken: CHILD_CONTINUATION_TOKEN, kind: "question" }],
+      ],
+      forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
+      session: upsertProxyInputRequests({
+        entries: [
+          [
+            answerToken,
+            {
+              answerHook: { runId: "run-1" },
+              childContinuationToken: answerToken,
+              kind: "question",
+            },
+          ],
+        ],
+        forChildContinuationToken: answerToken,
+        session: withRun,
+      }),
+    });
+
+    const resolved = await resolvePendingRuntimeActions({
+      session,
+      stepInput: {
+        runtimeActionResults: [
+          { callId: "call-1", kind: "tool-result", output: { deployed: true }, toolName: "deploy" },
+        ],
+      },
+    });
+
+    expect(resolved.outcome).toBe("resolved");
+    expect(getToolRuns(resolved.session.state)).toEqual([]);
+    expect([...getProxyInputRequests(resolved.session.state).keys()]).toEqual(["other-request"]);
+  });
+
+  it("projects a workflow tool's result through its toModelOutput", async () => {
+    const parked = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "call-1",
+          description: "Deploy.",
+          input: { service: "api" },
+          target: {
+            kind: "workflow-tool-call",
+            workflowId: "workflow//./agent/tools/deploy//execute",
+          },
+          toolName: "deploy",
+        },
+      ],
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      responseMessages: [],
+      session: createParkedSession(),
+    });
+    const tools = new Map([
+      [
+        "deploy",
+        {
+          description: "Deploy.",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "deploy",
+          toModelOutput: (output: unknown) =>
+            toolOutput.text(`deployed to ${(output as { url: string }).url}`),
+        },
+      ],
+    ]);
+
+    const resolved = await resolvePendingRuntimeActions({
+      session: parked,
+      stepInput: {
+        runtimeActionResults: [
+          {
+            callId: "call-1",
+            kind: "tool-result",
+            output: { deployed: true, url: "https://api.example" },
+            toolName: "deploy",
+          },
+        ],
+      },
+      tools,
+    });
+
+    const toolMessage = resolved.messages.at(-1);
+    expect(toolMessage?.role).toBe("tool");
+    expect(JSON.stringify(toolMessage?.content)).toContain("deployed to https://api.example");
+    expect(JSON.stringify(toolMessage?.content)).not.toContain('"deployed":true');
   });
 
   it("accepts a dispatch-origin failure result by callId", async () => {
