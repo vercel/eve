@@ -9,6 +9,7 @@ import {
 import { stampDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 
 const APP_ROOT = "/workspace/agent";
 const SERVER_URL = "http://127.0.0.1:3000";
@@ -92,6 +93,56 @@ describe("getLocalDevCapability", () => {
       const nestedContext = new ContextContainer();
       await contextStorage.run(nestedContext, () => {
         expect(getLocalDevCapability(environment())?.appRoot).toBe(APP_ROOT);
+      });
+    });
+  });
+
+  it("survives durable workflow context serialization", async () => {
+    await withClient(
+      "127.0.0.1",
+      async () => {
+        const active = contextStorage.getStore();
+        expect(active).toBeDefined();
+        const restored = await deserializeContext(serializeContext(active!));
+
+        await contextStorage.run(restored, () => {
+          expect(getLocalDevCapability(environment())).toMatchObject({
+            appRoot: APP_ROOT,
+            interactiveClient: true,
+          });
+        });
+      },
+      true,
+    );
+  });
+
+  it("invalidates durable provenance when the dev host secret rotates", async () => {
+    await withClient("127.0.0.1", async () => {
+      const active = contextStorage.getStore();
+      expect(active).toBeDefined();
+      const restored = await deserializeContext(serializeContext(active!));
+      process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV] = "replacement-secret";
+
+      await contextStorage.run(restored, () => {
+        expect(getLocalDevCapability(environment())).toBeUndefined();
+      });
+    });
+  });
+
+  it("rejects tampered durable local provenance", async () => {
+    await withClient("127.0.0.1", async () => {
+      const active = contextStorage.getStore();
+      expect(active).toBeDefined();
+      const serialized = serializeContext(active!);
+      serialized["eve.internal.localDevRequest"] = {
+        address: "127.0.0.1",
+        interactiveClient: true,
+        signature: "forged",
+      };
+      const restored = await deserializeContext(serialized);
+
+      await contextStorage.run(restored, () => {
+        expect(getLocalDevCapability(environment())).toBeUndefined();
       });
     });
   });

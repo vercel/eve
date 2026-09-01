@@ -4,7 +4,11 @@ import {
   resumeDevelopmentRuntimeArtifacts,
   suspendDevelopmentRuntimeArtifacts,
 } from "#services/dev-client/runtime-artifacts.js";
-import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-address.js";
+import {
+  DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER,
+  isTrustedDevelopmentClientAddress,
+  readTrustedDevelopmentClientAddress,
+} from "#internal/nitro/dev-client-address.js";
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
@@ -24,8 +28,8 @@ const LOCAL_DEV_CONTROL_URL_ENV = "EVE_DEV_CONTROL_URL";
 export const LOCAL_DEV_INTERACTIVE_CLIENT_HEADER = "x-eve-dev-interactive-client";
 
 /**
- * Capabilities available to authored code while handling a same-machine
- * request to `eve dev`.
+ * Capabilities available to authored code in an execution initiated by a
+ * same-machine request to `eve dev`.
  *
  * Absence is the signal, not a disabled flag: a deployed runtime has no
  * authored tree to mutate or watcher to pause, and a request from a remote
@@ -74,25 +78,26 @@ export function installLocalDevCapabilityEnvironment(input: {
 }
 
 /**
- * Runs a development request with local-dev access only when the parent host
- * signed a loopback peer address. Public address headers cannot grant access.
+ * Seeds durable local-dev provenance only when the parent host signed a
+ * loopback peer address. Public address headers cannot grant access.
  */
 export async function withLocalDevRequestScope<T>(
   request: Request,
   callback: () => Promise<T>,
 ): Promise<T> {
-  const address = readTrustedDevelopmentClientAddress(
-    request.headers,
-    process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
-  );
-  if (address === undefined || !isLoopbackHostname(address)) {
+  const secret = process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV];
+  const address = readTrustedDevelopmentClientAddress(request.headers, secret);
+  const signature = request.headers.get(DEVELOPMENT_CLIENT_ADDRESS_SIGNATURE_HEADER);
+  if (address === undefined || signature === null || !isLoopbackHostname(address)) {
     return await callback();
   }
 
   return await contextStorage.run(
     new ContextContainer({
       localDevRequest: {
+        address,
         interactiveClient: request.headers.get(LOCAL_DEV_INTERACTIVE_CLIENT_HEADER) === "1",
+        signature,
       },
     }),
     callback,
@@ -100,8 +105,8 @@ export async function withLocalDevRequestScope<T>(
 }
 
 /**
- * Resolves the local dev capability, or `undefined` outside an authorized
- * local request to `eve dev`.
+ * Resolves the local dev capability, or `undefined` outside an execution
+ * initiated by an authorized local request to `eve dev`.
  *
  * This is deliberately not a {@link import("#public/definitions/tool.js").ToolContext}
  * field: both values are meaningless in a deployed runtime, and a capability
@@ -116,6 +121,15 @@ export function getLocalDevCapability(
   const requestScope = contextStorage.getStore()?.localDevRequest;
   if (
     requestScope === undefined ||
+    typeof requestScope.address !== "string" ||
+    typeof requestScope.signature !== "string" ||
+    typeof requestScope.interactiveClient !== "boolean" ||
+    !isLoopbackHostname(requestScope.address) ||
+    !isTrustedDevelopmentClientAddress(
+      requestScope.address,
+      requestScope.signature,
+      process.env[DEVELOPMENT_WORKFLOW_SECRET_ENV],
+    ) ||
     appRoot === undefined ||
     appRoot === "" ||
     controlUrl === undefined ||

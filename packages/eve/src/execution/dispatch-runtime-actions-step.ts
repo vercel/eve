@@ -103,6 +103,7 @@ export async function dispatchRuntimeActionsStep(
             currentSession: nextSession,
             fanoutSize: prepared.fanoutSize,
             initiatorAuth: prepared.initiatorAuth,
+            localDevRequest: prepared.localDevRequest,
             parentContinuationToken: input.parentContinuationToken,
             parentTraceContext: prepared.parentTraceContext,
             activityObserver: prepared.activityObserver,

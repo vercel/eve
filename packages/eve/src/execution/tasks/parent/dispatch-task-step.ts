@@ -179,6 +179,7 @@ export async function dispatchTaskStep(
             currentSession: nextSession,
             fanoutSize: prepared.fanoutSize,
             initiatorAuth: prepared.initiatorAuth,
+            localDevRequest: prepared.localDevRequest,
             parentContinuationToken: delegated.taskInboxToken,
             parentTraceContext: prepared.parentTraceContext,
             activityObserver: prepared.activityObserver,
