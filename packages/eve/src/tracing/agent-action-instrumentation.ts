@@ -16,7 +16,7 @@ import type {
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
-import { setAgentUsage } from "#tracing/agent-otel-usage.js";
+import { setSpanUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
@@ -103,7 +103,7 @@ export function createAgentActionInstrumentation(input: {
         recordError(span, event.output.error);
       } else {
         if (event.usage !== undefined) {
-          setAgentUsage(span, event.usage, { includeGenAiDetails: false });
+          setSpanUsage(span, event.usage, "agent");
         }
         if (input.recordOutputs) {
           const result = contentAttribute(event.output.output, false);

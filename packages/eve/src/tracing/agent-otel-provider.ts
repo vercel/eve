@@ -32,7 +32,7 @@ import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channe
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { runtimeContextAttributes } from "#tracing/agent-otel-runtime-context.js";
-import { setAgentUsage } from "#tracing/agent-otel-usage.js";
+import { setSpanUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
@@ -363,7 +363,7 @@ export function createAgentOtelInstrumentation(
       recordError(state.span, event.error);
     } else {
       await recordTurnUsage(event);
-      setAgentUsage(state.span, event.usage);
+      setSpanUsage(state.span, event.usage, "gen_ai");
       state.span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
       if (event.response?.id !== undefined) {
         state.span.setAttribute("gen_ai.response.id", event.response.id);
@@ -373,7 +373,7 @@ export function createAgentOtelInstrumentation(
       }
       const attempt = steps.get(event.scope);
       if (attempt !== undefined) {
-        setAgentUsage(attempt.span, event.usage, { includeGenAiDetails: false });
+        setSpanUsage(attempt.span, event.usage, "agent");
       }
       if (recordOutputs) {
         state.span.setAttribute("ai.response.finish_reason", event.finishReason);

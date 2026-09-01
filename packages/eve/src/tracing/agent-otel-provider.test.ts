@@ -1500,6 +1500,7 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.usage.input_tokens": 10,
       "gen_ai.usage.output_tokens": 5,
     });
+    expect(Object.keys(model.attributes).some((key) => key.startsWith("agent.usage."))).toBe(false);
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
     // Provider-executed tools never reach the tool loop; their calls and
     // results are captured off the model response content.
