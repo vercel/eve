@@ -1,7 +1,11 @@
-/** The Workflow SDK runtime resolves a run's function from this global; eve's transform fills it. */
+declare global {
+  // The Workflow SDK's generated entrypoint resolves a run's function from this
+  // map; eve's transform creates it and registers every `"use workflow"` function.
+  var __private_workflows: Map<string, unknown> | undefined;
+}
+
 export const WORKFLOW_REGISTRY_GLOBAL = "__private_workflows";
 
 export function readRegisteredWorkflow(workflowId: string): unknown {
-  const registry = (globalThis as Record<string, unknown>)[WORKFLOW_REGISTRY_GLOBAL];
-  return registry instanceof Map ? registry.get(workflowId) : undefined;
+  return globalThis[WORKFLOW_REGISTRY_GLOBAL]?.get(workflowId);
 }

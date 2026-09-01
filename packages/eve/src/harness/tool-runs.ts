@@ -2,16 +2,8 @@ import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 
 const TOOL_RUNS_STATE_KEY = "eve.runtime.toolRuns";
-const ANSWER_HOOK_PREFIX = "eve:tool-run-answer:";
-
 export function toolRunAnswerToken(runId: string, seq: number): string {
-  return `${ANSWER_HOOK_PREFIX}${runId}:${seq}`;
-}
-
-export function isToolRunAnswerToken(token: string, runId?: string): boolean {
-  return token.startsWith(
-    runId === undefined ? ANSWER_HOOK_PREFIX : `${ANSWER_HOOK_PREFIX}${runId}:`,
-  );
+  return `eve:tool-run-answer:${runId}:${seq}`;
 }
 
 /** A workflow tool run the active turn waits on. Background runs live in the task index. */

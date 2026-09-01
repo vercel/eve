@@ -5,7 +5,6 @@
  * body references; identity `(toolName, phase)` is assigned at resolve time.
  */
 
-import { readWorkflowDirective } from "#internal/workflow-bundle/workflow-directive-ast.js";
 import { parseWithNitroRolldownAst } from "#internal/bundler/nitro-rolldown.js";
 import {
   collectReferencedIdentifierNames,
@@ -44,6 +43,7 @@ interface ScopeEntry {
 export async function transformDynamicToolExecute(
   filename: string,
   source: string,
+  workflowFunctions: ReadonlySet<string> = NO_WORKFLOW_FUNCTIONS,
 ): Promise<{ code: string } | null> {
   if (!source.includes("defineTool")) return null;
 
@@ -52,55 +52,20 @@ export async function transformDynamicToolExecute(
   if (defineToolAliases.size === 0) return null;
 
   const callbacks: CallbackInfo[] = [];
-  walkForCallbacks(source, ast, callbacks, [], {
-    defineToolAliases,
-    workflowFunctions: findWorkflowFunctionNames(ast),
-  });
+  walkForCallbacks(source, ast, callbacks, [], { defineToolAliases, workflowFunctions });
   return callbacks.length === 0 ? null : applyTransform(source, callbacks);
 }
 
+const NO_WORKFLOW_FUNCTIONS: ReadonlySet<string> = new Set();
+
 interface WalkContext {
   readonly defineToolAliases: ReadonlySet<string>;
-  /** Workflow bodies never run as callbacks, so they keep their identity and are not stamped. */
+  /**
+   * Top-level `"use workflow"` functions the directive transform already
+   * hoisted and stubbed. A tool whose `execute` is one never runs as a
+   * callback, so it keeps its identity and is not stamped.
+   */
   readonly workflowFunctions: ReadonlySet<string>;
-}
-
-// Both shapes this transform may see: the directive, or the stamp the directive transform left.
-function findWorkflowFunctionNames(program: AstNode): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const statement of (program.body as AstNode[] | undefined) ?? []) {
-    const declaration =
-      statement.type === "ExportNamedDeclaration" ? statement.declaration : statement;
-    if (declaration?.type === "FunctionDeclaration") {
-      const name = declaration.id?.name;
-      if (name !== undefined && hasWorkflowDirective(declaration)) names.add(name);
-      continue;
-    }
-    if (statement.type !== "ExpressionStatement") continue;
-    const expression = statement.expression;
-    if (expression?.type !== "AssignmentExpression") continue;
-    const left = expression.left;
-    const object = left?.object;
-    const property = left?.property;
-    if (
-      left?.type === "MemberExpression" &&
-      object?.type === "Identifier" &&
-      object.name !== undefined &&
-      property?.type === "Identifier" &&
-      property.name === "workflowId"
-    ) {
-      names.add(object.name);
-    }
-  }
-  return names;
-}
-
-function hasWorkflowDirective(fn: AstNode): boolean {
-  const body = fn.body;
-  const statements = Array.isArray(body) ? body : body?.body;
-  return (
-    readWorkflowDirective(Array.isArray(statements) ? statements[0] : undefined) === "use workflow"
-  );
 }
 
 // Keep the old export name for backward compatibility with the plugin.
@@ -178,10 +143,8 @@ function walkForCallbacks(
 
 function isWorkflowExecute(property: AstNode | undefined, context: WalkContext): boolean {
   const value = property?.value as AstNode | undefined;
-  if (value === undefined) return false;
-  if (isFunction(value) || property?.method === true) return hasWorkflowDirective(value);
   return (
-    value.type === "Identifier" &&
+    value?.type === "Identifier" &&
     value.name !== undefined &&
     context.workflowFunctions.has(value.name)
   );

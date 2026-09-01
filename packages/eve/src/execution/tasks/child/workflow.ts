@@ -1,3 +1,4 @@
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import type {
@@ -110,11 +111,16 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
     let runUpdateIndex = 0;
+    // The parent answers with the request's token; only this run knows it was a hook.
+    const answerHooks = new Map<string, AnswerHookRoute>();
     await appendTaskViewStep({ activityObserver: input.activityObserver, view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
       const read = await raceChannelReads(readers);
       if (read.next.done === true) return;
+      if (read.channel === "request") {
+        answerHooks.set(read.next.value.replyTo, { runId: read.next.value.from.runId });
+      }
       const raw: TaskRunHookPayload =
         read.channel === "report"
           ? runReportToTaskUpdate(read.next.value, view.taskId, runUpdateIndex++)
@@ -171,7 +177,11 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         };
       } else if (isTaskInputAnswer) {
         if (view.status !== "input_required") continue;
-        command = await resolveAnsweredCommand(view, payload);
+        command = await resolveAnsweredCommand(
+          view,
+          payload,
+          answerHooks.get(payload.childContinuationToken),
+        );
       } else {
         command = translateTaskInboundPayload(payload);
       }
@@ -262,6 +272,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 async function resolveAnsweredCommand(
   view: Extract<TaskView, { status: "input_required" }>,
   answer: TaskInboundAnswerInput,
+  answerHook: AnswerHookRoute | undefined,
 ): Promise<TaskCommand | undefined> {
   if (answer.taskId !== view.taskId) return undefined;
 
@@ -276,6 +287,6 @@ async function resolveAnsweredCommand(
     .filter((requestId) => outstanding.has(requestId));
   if (requestIds.length === 0) return undefined;
 
-  const delivery = await deliverTaskInputResponsesStep({ answer, requestIds });
+  const delivery = await deliverTaskInputResponsesStep({ answer, answerHook, requestIds });
   return delivery === "delivered" ? { kind: "answered", requestIds } : undefined;
 }

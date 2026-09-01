@@ -419,6 +419,7 @@ async function waitForRuntimeActionResults(input: {
     }
     if (read.channel === "request") {
       const proxyResult = await runProxySubagentEventStep({
+        answerHook: { runId: read.next.value.from.runId },
         hookPayload: runRequestToInputRequestPayload(read.next.value),
         parentWritable: input.cursor.parentWritable,
         serializedContext: input.cursor.serializedContext,

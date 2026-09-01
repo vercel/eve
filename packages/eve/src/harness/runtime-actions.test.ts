@@ -369,7 +369,16 @@ describe("resolvePendingRuntimeActions", () => {
       ],
       forChildContinuationToken: CHILD_CONTINUATION_TOKEN,
       session: upsertProxyInputRequests({
-        entries: [[answerToken, { childContinuationToken: answerToken, kind: "question" }]],
+        entries: [
+          [
+            answerToken,
+            {
+              answerHook: { runId: "run-1" },
+              childContinuationToken: answerToken,
+              kind: "question",
+            },
+          ],
+        ],
         forChildContinuationToken: answerToken,
         session: withRun,
       }),

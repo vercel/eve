@@ -1972,22 +1972,26 @@ export default defineDynamic({
     expect(await transformDynamicToolExecute("tools/null.ts", source)).toBeNull();
   });
 
-  it("leaves workflow-bodied executes to the directive transform", async () => {
+  it("leaves executes that are workflow functions unstamped", async () => {
+    // The shape the directive transform hands over: bodies hoisted to
+    // top-level declarations (here already stubbed) and referenced by name.
     const source = `
 import { defineTool } from "eve/tools";
 
-async function deploy(input) {
-  "use workflow";
-  return input;
+async function execute(input) {
+  throw new Error("stub");
 }
+execute.workflowId = "workflow//./agent/tools/deploy//execute";
+
+async function deploy(input) {
+  throw new Error("stub");
+}
+deploy.workflowId = "workflow//./agent/tools/deploy//deploy";
 
 export default defineTool({
   description: "Inline body",
   inputSchema: {},
-  async execute(input) {
-    "use workflow";
-    return input;
-  },
+  execute,
   async toModelOutput(output) { return String(output); },
 });
 
@@ -1997,10 +2001,13 @@ export const referenced = defineTool({
   execute: deploy,
 });
 `;
-    const result = await transformDynamicToolExecute("agent/tools/deploy.ts", source);
+    const result = await transformDynamicToolExecute(
+      "agent/tools/deploy.ts",
+      source,
+      new Set(["execute", "deploy"]),
+    );
     expect(result).not.toBeNull();
     expect(result?.code).not.toContain("__eve_dynamic_exec_");
-    expect(result?.code).toContain('"use workflow"');
     expect(result?.code).toContain("toModelOutput: __eveStampDynamicCallback(");
   });
 });

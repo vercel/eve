@@ -36,6 +36,7 @@ import { createDynamicCapabilityTransformPlugin } from "#internal/workflow-bundl
 import {
   applyWorkflowTransform,
   isAuthoredApplicationModule,
+  type WorkflowManifest,
 } from "#internal/workflow-bundle/workflow-builders.js";
 
 const AUTHORED_BUNDLED_MODULE_EXTENSION = /\.[cm]?[jt]sx?$/;
@@ -306,7 +307,9 @@ export async function bundleAuthoredModuleMapForGeneration(input: {
     createExternalRuntimeImportPlugin(programmaticLoaderImportSpecifier),
     // Before callback stamping, which must see the stub and never the directive.
     createAuthoredWorkflowDirectivePlugin({ appRoot: packageRoot, recorder: workflowSources }),
-    createDynamicCapabilityTransformPlugin(),
+    createDynamicCapabilityTransformPlugin({
+      workflowFunctions: (id) => workflowSources.workflowFunctions(id),
+    }),
     workflowSources.graphPlugin(),
     extensionScopePlugin,
     createAuthoredRelativeExtensionResolverPlugin({ extensions: RESOLVE_EXTENSIONS }),
@@ -363,14 +366,23 @@ class AuthoredWorkflowSourceRecorder {
   readonly #directiveModules = new Set<string>();
   readonly #imports = new Map<string, readonly string[]>();
   readonly #sources = new Map<string, string>();
+  readonly #workflowFunctions = new Map<string, ReadonlySet<string>>();
 
   constructor(appRoot: string) {
     this.#appRoot = appRoot;
   }
 
-  record(id: string, source: string, hasDirectives: boolean): void {
+  record(id: string, source: string, manifest: WorkflowManifest): void {
     this.#sources.set(id, source);
-    if (hasDirectives) this.#directiveModules.add(id);
+    if (manifest.steps !== undefined || manifest.workflows !== undefined) {
+      this.#directiveModules.add(id);
+    }
+    const workflows = Object.values(manifest.workflows ?? {})[0];
+    if (workflows !== undefined) this.#workflowFunctions.set(id, new Set(Object.keys(workflows)));
+  }
+
+  workflowFunctions(id: string): ReadonlySet<string> | undefined {
+    return this.#workflowFunctions.get(id);
   }
 
   graphPlugin(): Record<string, unknown> {
@@ -569,8 +581,7 @@ function createAuthoredWorkflowDirectivePlugin(input: {
       }
 
       const transformed = await applyWorkflowTransform(id, source, "client", id, input.appRoot);
-      const { steps, workflows } = transformed.workflowManifest;
-      input.recorder?.record(id, source, steps !== undefined || workflows !== undefined);
+      input.recorder?.record(id, source, transformed.workflowManifest);
       return transformed.code === source ? undefined : { code: transformed.code, map: null };
     },
   };
