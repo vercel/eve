@@ -37,7 +37,7 @@ export function formatFallbackSkillPath(input: {
 export async function resolveSandboxSkillRoot(input: {
   readonly sandbox: SandboxSession;
 }): Promise<string> {
-  return await resolveSandboxModelPath({ path: MODEL_SKILL_ROOT, sandbox: input.sandbox });
+  return resolveSkillRootFromHome(await resolveSandboxHome(input.sandbox));
 }
 
 /**
@@ -55,13 +55,13 @@ export async function resolveSandboxModelPath(input: {
   }
 
   const home = await resolveSandboxHome(input.sandbox);
+  if (isModelSkillPath(input.path)) {
+    return `${resolveSkillRootFromHome(home)}${input.path.slice(MODEL_SKILL_ROOT.length)}`;
+  }
+
   if (home !== null) {
     const suffix = input.path.slice(MODEL_HOME_ROOT.length);
     return suffix.length === 0 ? home : `${home === "/" ? "" : home}${suffix}`;
-  }
-
-  if (isModelSkillPath(input.path)) {
-    return `${FALLBACK_SKILL_ROOT}${input.path.slice(MODEL_SKILL_ROOT.length)}`;
   }
 
   return input.path;
@@ -136,6 +136,10 @@ function isModelHomePath(path: string): boolean {
 
 function isModelSkillPath(path: string): boolean {
   return path === MODEL_SKILL_ROOT || path.startsWith(`${MODEL_SKILL_ROOT}/`);
+}
+
+function resolveSkillRootFromHome(home: string | null): string {
+  return home === null || home === "/" ? FALLBACK_SKILL_ROOT : `${home}/.agents/skills`;
 }
 
 function isUsableSandboxHome(path: string): boolean {
