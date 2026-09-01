@@ -73,17 +73,18 @@ export class McpConnectionClient implements ConnectionClient {
   async #createClient(): Promise<MCPClient> {
     const headers = await resolveHeaders(this.#connection);
     const url = this.#connection.url;
+    const fetch = withMcpToolResultCompatibility();
 
     try {
       return await createMCPClient({
-        transport: { type: "http", url, headers },
+        transport: { type: "http", url, headers, fetch },
       });
     } catch (error) {
       if (!isMcpHttpFallbackRetryableError(error)) {
         throw error;
       }
       return await createMCPClient({
-        transport: { type: "sse", url, headers },
+        transport: { type: "sse", url, headers, fetch },
       });
     }
   }
@@ -262,6 +263,101 @@ export class McpConnectionClient implements ConnectionClient {
       scope: this.#connection.connectionName,
     });
   }
+}
+
+/**
+ * Some MCP servers omit the required `content` field when they return
+ * `structuredContent`. The AI SDK rejects that result before eve can use it,
+ * so mirror the structured value into the protocol's recommended text fallback
+ * at the transport boundary.
+ */
+export function withMcpToolResultCompatibility(
+  inner?: typeof globalThis.fetch,
+): typeof globalThis.fetch {
+  return async (input, init) => {
+    const response = await (inner ?? globalThis.fetch)(input, init);
+    if (!isToolCallRequest(init?.body) || !isJsonResponse(response)) {
+      return response;
+    }
+
+    const responseText = await response.text();
+    let payload: unknown;
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      return rebuildResponse(response, responseText);
+    }
+
+    const normalized = normalizeToolCallResponsePayload(payload);
+    return rebuildResponse(
+      response,
+      normalized.changed ? JSON.stringify(normalized.value) : responseText,
+    );
+  };
+}
+
+function isToolCallRequest(body: unknown): boolean {
+  if (typeof body !== "string") return false;
+  try {
+    const payload: unknown = JSON.parse(body);
+    return Array.isArray(payload)
+      ? payload.some((message) => isObject(message) && message.method === "tools/call")
+      : isObject(payload) && payload.method === "tools/call";
+  } catch {
+    return false;
+  }
+}
+
+function isJsonResponse(response: Response): boolean {
+  return (
+    response.ok &&
+    response.headers.get("content-type")?.toLowerCase().includes("application/json") === true
+  );
+}
+
+function normalizeToolCallResponsePayload(payload: unknown): {
+  readonly changed: boolean;
+  readonly value: unknown;
+} {
+  if (Array.isArray(payload)) {
+    let changed = false;
+    const value = payload.map((message) => {
+      const normalized = normalizeToolCallResponsePayload(message);
+      changed ||= normalized.changed;
+      return normalized.value;
+    });
+    return { changed, value: changed ? value : payload };
+  }
+
+  if (!isObject(payload) || !isObject(payload.result)) {
+    return { changed: false, value: payload };
+  }
+
+  const result = payload.result;
+  if (!("structuredContent" in result) || "content" in result) {
+    return { changed: false, value: payload };
+  }
+
+  return {
+    changed: true,
+    value: {
+      ...payload,
+      result: {
+        ...result,
+        content: [{ text: JSON.stringify(result.structuredContent), type: "text" }],
+      },
+    },
+  };
+}
+
+function rebuildResponse(response: Response, body: string): Response {
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  return new Response(body, {
+    headers,
+    status: response.status,
+    statusText: response.statusText,
+  });
 }
 
 /**

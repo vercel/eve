@@ -172,6 +172,7 @@ describe("McpConnectionClient", () => {
     expect(createMCPClient).toHaveBeenCalledTimes(1);
     expect(createMCPClient).toHaveBeenCalledWith({
       transport: {
+        fetch: expect.any(Function),
         headers: {
           Authorization: "Bearer test-token",
           "X-Api-Key": "key123",
@@ -198,6 +199,7 @@ describe("McpConnectionClient", () => {
     await expect(mcpClient.connect()).resolves.toBe(client);
     expect(createMCPClient).toHaveBeenNthCalledWith(1, {
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "http",
         url: "https://mcp.example.com",
@@ -205,6 +207,7 @@ describe("McpConnectionClient", () => {
     });
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
         url: "https://mcp.example.com",
@@ -229,6 +232,7 @@ describe("McpConnectionClient", () => {
     expect(createMCPClient).toHaveBeenCalledTimes(2);
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
         url: "https://mcp.example.com",
@@ -251,6 +255,7 @@ describe("McpConnectionClient", () => {
     expect(createMCPClient).toHaveBeenCalledTimes(2);
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
         url: "https://mcp.example.com",
@@ -275,6 +280,7 @@ describe("McpConnectionClient", () => {
     expect(createMCPClient).toHaveBeenCalledTimes(2);
     expect(createMCPClient).toHaveBeenNthCalledWith(2, {
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "sse",
         url: "https://mcp.example.com",
@@ -294,6 +300,7 @@ describe("McpConnectionClient", () => {
     expect(createMCPClient).toHaveBeenCalledTimes(1);
     expect(createMCPClient).toHaveBeenCalledWith({
       transport: {
+        fetch: expect.any(Function),
         headers: { Authorization: "Bearer test-token" },
         type: "http",
         url: "https://mcp.example.com",
