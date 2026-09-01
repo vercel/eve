@@ -11,6 +11,7 @@ import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-
 import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
+  getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
@@ -345,6 +346,88 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
 
     expect(mocks.createSession).toHaveBeenCalledOnce();
+  });
+
+  it("uses the active session turn when pending batch metadata has an empty turn id", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(session, {
+      definition: { description: "Research", kind: "subagent" },
+      nodeId: "subagents/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getAgentHandleStore(resultState)).toMatchObject({
+      handles: [{ operation: { parentTurnId: "turn_3" } }],
+    });
+  });
+
+  it("persists the active turn when dispatch leaves agent handles unchanged", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "remote",
+    });
+    installContext(session, {
+      definition: REMOTE_REGISTRY_DEFINITION,
+      nodeId: "remote/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getAgentHandleStore(resultState)).toBeUndefined();
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(mocks.createDurableSessionState).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the active session turn for task-mode dispatch", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(
+      session,
+      { definition: { description: "Research", kind: "subagent" }, nodeId: "subagents/research" },
+      true,
+    );
+    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
+
+    const result = await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getSessionTaskIndex(resultState)).toEqual([
+      expect.objectContaining({ createdByTurnId: "turn_3" }),
+    ]);
   });
 
   it("opens a shared parent sandbox with session context and durable backend tags", async () => {
