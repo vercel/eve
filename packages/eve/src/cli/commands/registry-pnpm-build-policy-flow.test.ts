@@ -54,7 +54,7 @@ describe("registry pnpm build policy flow", () => {
     expect(applyPnpmBuildPolicy).toHaveBeenCalledWith(context, "ignore-optional");
     expect(select).toHaveBeenCalledWith(
       expect.objectContaining({
-        hintLayout: "stacked",
+        hintLayout: "inline",
         options: expect.arrayContaining([
           expect.objectContaining({ value: "ignore-optional", hint: expect.any(String) }),
           expect.objectContaining({ value: "allow-builds", hint: expect.any(String) }),

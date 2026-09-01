@@ -112,7 +112,7 @@ export async function prepareDeclaredPnpmBuildPolicy(
             { label: "Packages", value: policy.packages.join(", ") },
             { label: "Policy file", value: context.filePath },
           ],
-          hintLayout: "stacked",
+          hintLayout: "inline",
           initialValue: policy.recommendedAction,
           options: [
             {
