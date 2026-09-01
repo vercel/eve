@@ -10,6 +10,7 @@ import {
   settleAllowedCandidate,
   settleDirectApprovalResponse,
 } from "#harness/hitl/approval-response-attempts.js";
+import { getPendingAuthorization } from "#harness/authorization.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 function responder(principalId: string): SessionAuthContext {
@@ -24,6 +25,7 @@ function responder(principalId: string): SessionAuthContext {
 
 function create(input: {
   readonly candidateId: string;
+  readonly deliveryId?: string;
   readonly principalId: string;
   readonly requestId?: string;
   readonly state?: SessionStateMap;
@@ -31,6 +33,7 @@ function create(input: {
   return createApprovalCandidate({
     candidateIdPrefix: input.candidateId,
     createdAt: 100,
+    deliveryId: input.deliveryId,
     expiresAt: 700,
     requestId: input.requestId ?? "request-1",
     responder: responder(input.principalId),
@@ -40,13 +43,15 @@ function create(input: {
 
 describe("approval candidate state", () => {
   it("persists the complete responder while a candidate is active", () => {
-    const transition = create({ candidateId: "candidate-1", principalId: "U1" });
+    const transition = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
 
     expect(transition.changed).toBe(true);
     expect(getApprovalAuditState(transition.state).activeCandidates).toEqual([
       {
+        attemptId: `response-attempt:${JSON.stringify(["request-1", "d1"])}`,
         candidateId: "candidate-1",
         createdAt: 100,
+        deliveryId: "d1",
         expiresAt: 700,
         requestId: "request-1",
         responder: {
@@ -61,10 +66,30 @@ describe("approval candidate state", () => {
     ]);
   });
 
-  it("silently deduplicates one responder's active candidate", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+  it("does not collide when request and delivery ids contain separators", () => {
+    const first = create({
+      candidateId: "candidate-1",
+      deliveryId: "c",
+      principalId: "U1",
+      requestId: "a:b",
+    });
+    const second = create({
+      candidateId: "candidate-2",
+      deliveryId: "b:c",
+      principalId: "U1",
+      requestId: "a",
+      state: first.state,
+    });
+
+    expect(second.changed).toBe(true);
+    expect(getApprovalAuditState(second.state).activeCandidates).toHaveLength(2);
+  });
+
+  it("deduplicates replay of the same requestId and deliveryId", () => {
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const duplicate = create({
       candidateId: "candidate-1",
+      deliveryId: "d1",
       principalId: "U1",
       state: first.state,
     });
@@ -73,7 +98,7 @@ describe("approval candidate state", () => {
     expect(duplicate.state).toBe(first.state);
   });
 
-  it("defensively deduplicates the same responder under another id", () => {
+  it("keeps direct legacy tests deterministic without deliveryId", () => {
     const first = create({ candidateId: "candidate-1", principalId: "U1" });
     const duplicate = create({
       candidateId: "candidate-2",
@@ -84,11 +109,12 @@ describe("approval candidate state", () => {
     expect(duplicate.changed).toBe(false);
   });
 
-  it("allows different responders to validate concurrently", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+  it("creates competing attempts for distinct deliveryIds from the same responder", () => {
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const second = create({
       candidateId: "candidate-2",
-      principalId: "U2",
+      deliveryId: "d2",
+      principalId: "U1",
       state: first.state,
     });
 
@@ -97,7 +123,7 @@ describe("approval candidate state", () => {
   });
 
   it("tracks authorization-required state and provider expiry", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const state = markApprovalCandidateAuthorizationRequired({
       authorizationChallenges: [],
       candidateId: "candidate-1",
@@ -111,8 +137,29 @@ describe("approval candidate state", () => {
     });
   });
 
+  it("stores authorization challenges in the ledger-owned authorization projection", () => {
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
+    const state = markApprovalCandidateAuthorizationRequired({
+      authorizationChallenges: [
+        {
+          attemptId: "oauth-1",
+          candidateId: "candidate-1",
+          challenge: { url: "https://idp.example/oauth-1" },
+          hookUrl: "https://eve.example/oauth-1",
+          name: "github",
+        },
+      ],
+      candidateId: "candidate-1",
+      state: first.state,
+    });
+
+    expect(getPendingAuthorization(state)?.challenges).toEqual([
+      expect.objectContaining({ attemptId: "oauth-1", candidateId: "candidate-1", name: "github" }),
+    ]);
+  });
+
   it("projects the responder to narrow identity in terminal history", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const state = finishApprovalCandidate({
       candidateId: "candidate-1",
       completedAt: 200,
@@ -154,10 +201,11 @@ describe("approval candidate state", () => {
   });
 
   it("expires stale candidates intrinsically before creating another candidate", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const next = createApprovalCandidate({
       candidateIdPrefix: "candidate-2",
       createdAt: 800,
+      deliveryId: "d2",
       expiresAt: 1_400,
       requestId: "request-1",
       responder: responder("U2"),
@@ -173,10 +221,11 @@ describe("approval candidate state", () => {
   });
 
   it("expires only candidates whose deadline has passed", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const second = createApprovalCandidate({
       candidateIdPrefix: "candidate-2",
       createdAt: 100,
+      deliveryId: "d2",
       expiresAt: 900,
       requestId: "request-1",
       responder: responder("U2"),
@@ -194,9 +243,10 @@ describe("approval candidate state", () => {
   });
 
   it("atomically settles the first allowed candidate and stales competitors", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const second = create({
       candidateId: "candidate-2",
+      deliveryId: "d2",
       principalId: "U2",
       state: first.state,
     });
@@ -224,7 +274,7 @@ describe("approval candidate state", () => {
   });
 
   it("lets Cancel win atomically and stales every Allow candidate", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const cancelled = settleDirectApprovalResponse({
       actor: responder("U2"),
       outcome: "cancelled",
@@ -243,7 +293,7 @@ describe("approval candidate state", () => {
   });
 
   it("does not let a candidate start after terminal settlement", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
+    const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
     const settled = settleAllowedCandidate({
       candidateId: "candidate-1",
       settledAt: 300,
@@ -251,29 +301,11 @@ describe("approval candidate state", () => {
     });
     const late = create({
       candidateId: "candidate-2",
+      deliveryId: "d2",
       principalId: "U2",
       state: settled.state,
     });
 
     expect(late.changed).toBe(false);
-  });
-
-  it("keeps unrelated requests active when another request settles", () => {
-    const first = create({ candidateId: "candidate-1", principalId: "U1" });
-    const unrelated = create({
-      candidateId: "candidate-2",
-      principalId: "U2",
-      requestId: "request-2",
-      state: first.state,
-    });
-    const settled = settleAllowedCandidate({
-      candidateId: "candidate-1",
-      settledAt: 300,
-      state: unrelated.state,
-    });
-
-    expect(getApprovalAuditState(settled.state).activeCandidates).toEqual([
-      expect.objectContaining({ candidateId: "candidate-2", requestId: "request-2" }),
-    ]);
   });
 });

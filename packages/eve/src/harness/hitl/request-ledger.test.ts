@@ -159,6 +159,9 @@ describe("request ledger extension migration", () => {
     const migrated = setPendingAuthorization(legacy, { challenges: [challenge] });
     expect(migrated).not.toHaveProperty("eve.runtime.pendingAuthorization");
     expect(getPendingAuthorization(migrated)?.challenges).toEqual([challenge]);
+    expect(readRequestLedger(migrated).authorizations).toEqual([
+      { challenge, responseAttemptId: undefined },
+    ]);
   });
 });
 

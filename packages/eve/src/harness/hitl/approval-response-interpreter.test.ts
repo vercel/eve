@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { getPendingAuthorization } from "#harness/authorization.js";
 import { settleDirectApprovalResponse } from "#harness/hitl/approval-response-attempts.js";
 import { interpretApprovalResponses } from "#harness/hitl/approval-response-interpreter.js";
 import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
@@ -104,5 +105,76 @@ describe("interpretApprovalResponses", () => {
         batch.requests.map((pending) => pending.requestId),
       ),
     ).toEqual([request.requestId]);
+  });
+
+  it("deduplicates replay of the same attributed delivery", async () => {
+    const parked = parkedSession();
+    const first = await interpretApprovalResponses({
+      now: 100,
+      session: parked,
+      stepInput: {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            deliveryId: "delivery-1",
+            response: { optionId: "approve", requestId: request.requestId },
+          },
+        ],
+      },
+      tools: new Map(),
+    });
+    const replay = await interpretApprovalResponses({
+      now: 101,
+      session: first.session,
+      stepInput: {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            deliveryId: "delivery-1",
+            response: { optionId: "approve", requestId: request.requestId },
+          },
+        ],
+      },
+      tools: new Map(),
+    });
+
+    expect(first.session.state).toBeDefined();
+    expect(replay.kind).toBe("continue");
+  });
+
+  it("creates distinct competing attempts for distinct deliveryIds from the same responder", async () => {
+    const parked = parkedSession();
+    const first = await interpretApprovalResponses({
+      now: 100,
+      session: parked,
+      stepInput: {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            deliveryId: "delivery-1",
+            response: { optionId: "approve", requestId: request.requestId },
+          },
+        ],
+      },
+      tools: new Map(),
+    });
+    const second = await interpretApprovalResponses({
+      now: 101,
+      session: first.session,
+      stepInput: {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            deliveryId: "delivery-2",
+            response: { optionId: "approve", requestId: request.requestId },
+          },
+        ],
+      },
+      tools: new Map(),
+    });
+
+    const pending = getPendingAuthorization(second.session.state);
+    expect(second.kind).toBe("continue-coordination");
+    expect(pending).toBeUndefined();
   });
 });
