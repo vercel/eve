@@ -125,7 +125,7 @@ interface CrashCleanupState {
  *
  * Owns the stable command inbox, its channel alias, and the session lifecycle; each turn-owned
  * turn resolves its own runtime actions in-line and reports back only
- * `done`/`park` via the closed-contract {@link NextDriverAction}. The
+ * `done`/`park` via the closed `NextDriverAction` contract. The
  * only session-shape flag the driver reads (besides identity) is
  * `hasProxyInputRequests`, the documented short-circuit for hook-payload
  * routing to any descendant still active when the parent parks.
