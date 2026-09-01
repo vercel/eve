@@ -51,7 +51,8 @@ describe("Neon connection setup", () => {
     expect(buildConnectionInstall(integration)).toContain("eve add connection/neon");
     expect(quickStart).toContain('url: "https://mcp.neon.tech/mcp"');
     expect(quickStart).toContain('auth: connect({ connector: "neon/neon", principalType: "app" })');
-    expect(setup.configureVariants["mcp:app"]).toContain("vercel connect create neon --name neon");
+    expect(setup.configureVariants["mcp:app"]).toContain("vercel connect create neon");
+    expect(setup.configureVariants["mcp:app"]).not.toContain("--name");
   });
 });
 

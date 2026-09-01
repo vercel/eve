@@ -53,6 +53,8 @@ export interface ConnectionSpec {
   connectorService?: string;
   /** Auth-mode-specific services passed to `vercel connect create`. */
   connectorServices?: Partial<Record<AuthMode, string>>;
+  /** Whether `vercel connect create` should use the service's default name. */
+  defaultConnectorName?: boolean;
   /** Supported auth modes in display order; the first is the default. */
   authModes: AuthMode[];
   /** API-key wiring when `authModes` includes `apiKey`. */
@@ -131,6 +133,7 @@ interface ConnectionPresentation extends Presentation {
   connectors?: Partial<Record<AuthMode, string>>;
   connectorService?: string;
   connectorServices?: Partial<Record<AuthMode, string>>;
+  defaultConnectorName?: boolean;
   configureNote?: string;
   configureNotes?: Partial<Record<AuthMode, string>>;
 }
@@ -1933,6 +1936,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["app"],
     connector: "neon/neon",
     connectorService: "neon",
+    defaultConnectorName: true,
     configureNote:
       "Neon's MCP server can modify projects and databases. Use a development or test project, review tool calls, and append `?readonly=true` or `?projectId=<project-id>` to scope access.",
   },
@@ -2440,6 +2444,9 @@ function buildConnection(entry: IntegrationEntry): Integration {
   }
   if (presentation.connectorServices !== undefined) {
     spec.connectorServices = presentation.connectorServices;
+  }
+  if (presentation.defaultConnectorName !== undefined) {
+    spec.defaultConnectorName = presentation.defaultConnectorName;
   }
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
