@@ -54,7 +54,7 @@ The DSL has six boundary constructs and three orthogonal policy axes:
 ```text
 Boundary  ::= Value | Workflow | Inbox | State | Stream | Opaque
 Evolution ::= Migratable | Opaque
-Encoding  ::= FixedWrite | TargetEncoded
+Encoding  ::= Current | TargetEncoded
 Affinity  ::= CompatibleDeployment | OriginDeployment | RuntimeOwner(name)
 ```
 
@@ -77,24 +77,22 @@ that the compiler can inspect.
 The turn workflow and adjacent durable boundaries form one contract program:
 
 ```ts title="packages/eve/src/execution/durable-contracts.ts"
-const turnWorkflowInput = durable.value<TurnWorkflowInput>({
+const turnWorkflowInputV0 = durable.legacy<TurnWorkflowInputV0>({
+  decode: decodeTurnWorkflowInputV0,
+  onWorkflowFailure: extractTurnWorkflowV0FailureRoute,
+});
+
+const turnWorkflowInputV1 = turnWorkflowInputV0.next<TurnWorkflowInput>({
+  decode: decodeTurnWorkflowInputV1,
+  encode: encodeTurnWorkflowInputV1,
+  migrate: turnWorkflowInputV0ToV1,
+  onWorkflowFailure: extractTurnWorkflowV1FailureRoute,
+  schema: durable.buildSchema(() => import("./turn-workflow-input-v1.schema.js")),
+});
+
+const turnWorkflowInput = durable.value({
   name: "turnWorkflow.input",
-  canonicalVersion: 1,
-  writeVersion: 1,
-  initialVersion: 0,
-  versions: {
-    0: { decode: decodeTurnWorkflowInputV0, schema: null },
-    1: {
-      decode: decodeTurnWorkflowInputV1,
-      schema: durable.buildSchema(() => import("./turn-workflow-input-v1.schema.js")),
-    },
-  },
-  encoders: {
-    1: encodeTurnWorkflowInputV1,
-  },
-  migrations: {
-    0: turnWorkflowInputV0ToV1,
-  },
+  current: turnWorkflowInputV1,
 });
 
 async function runTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
@@ -116,10 +114,6 @@ export const turnWorkflow = durable.workflow({
   result: durable.void("turnWorkflow.result"),
   failure: {
     inbox: turnControl,
-    legacyRoutes: {
-      0: extractTurnWorkflowV0FailureRoute,
-      1: extractTurnWorkflowV1FailureRoute,
-    },
   },
   run: runTurnWorkflow,
 });
@@ -129,9 +123,9 @@ export const sessionInbox = durable.inbox({
   message: sessionInboxWire,
   negotiation: "consumer",
   targets: {
-    legacyDeliver: { version: 0, encode: encodeSessionInboxV0Deliver },
-    legacySend: { version: 0, encode: encodeSessionInboxV0Send },
-    v1: { version: 1, encode: encodeSessionInboxV1 },
+    legacyDeliver: { wire: sessionInboxWireV0, serialize: serializeAsV0Deliver },
+    legacySend: { wire: sessionInboxWireV0, serialize: serializeAsV0Send },
+    v1: { wire: sessionInboxWireV1, serialize: serializeAsV1 },
   },
   resolveTarget: resolveSessionInboxTarget,
 });
@@ -166,6 +160,11 @@ The DSL is internal to eve. It is not public agent authoring API. A declaration
 returns branded producer and consumer surfaces; it does not expose the generic
 workflow reference, raw state key access, or untyped hook resume path that would
 allow callers to bypass the contract.
+
+Version nodes are reusable typed identities. A pre-DSL workflow input node owns
+its failure-route extractor, while inbox encoder targets reference their wire
+node rather than repeating its numeric version. The compiler derives the
+persisted number and rejects missing metadata for any node that requires it.
 
 ## Compilation and generated surfaces
 
@@ -237,18 +236,17 @@ a compatibility claim eve cannot uphold.
 
 `durable.value` is the shared evolution primitive. Workflow input and result,
 inbox messages, state cells, stream events, and durable references all compose
-it.
+it. Authors declare an append-only chain; the compiled facade exposes the
+derived metadata and operations:
 
 ```ts
 interface DurableValueContract<TCurrent> {
   readonly acceptedVersions: readonly number[] | null;
-  readonly canonicalVersion: number;
-  readonly encodableVersions: readonly number[];
+  readonly currentVersion: number;
   readonly name: string;
   readonly schemaHashes: Readonly<Record<number, string | null>> | null;
-  readonly writeVersion: number;
   decode(value: unknown): TCurrent;
-  encode(value: TCurrent, targetVersion?: number): unknown;
+  encodeCurrent(value: TCurrent): unknown;
 }
 ```
 
@@ -257,32 +255,84 @@ applies forward migrations, validates the canonical representation, and returns
 only that representation. An unsupported version or failed migration never
 reaches application logic.
 
-`encode` accepts the canonical domain value. Without a target it emits
-`writeVersion`; target-encoded transports select one of `encodableVersions`.
-Every encoder constructs its target wire shape directly from the canonical
-value. It is not a general reverse migration over arbitrary persisted data.
+`encodeCurrent` accepts the canonical domain value and emits the current node's
+wire shape. Older wire shapes are produced only by transport-specific target
+serializers, such as the two session-inbox v0 targets. They construct their
+target shape directly from the canonical value; they are not reverse migrations
+over arbitrary persisted data.
 
 ### Version model
 
-`canonicalVersion` identifies the representation delivered to consuming code.
-`writeVersion` identifies the default representation emitted by producers.
-Separating them allows a release to read N+1 while continuing to write N for
-rollback safety.
+`durable.legacy` creates markerless version 0. A new contract without historical
+data begins with `durable.version`, which creates version 1. Calling `.next`
+appends exactly one version and derives its number from its predecessor. The new
+node owns the decoder, current encoder, schema, and required migration from the
+previous node; those declarations cannot drift into separate maps.
 
-`acceptedVersions` is the complete finite set current code can decode. A `null`
-set means support has not yet been modeled, not that no versions or every
-version is accepted. A legacy `null` contract may continue writing its existing
-version, but it cannot advance that version.
+`durable.value({ current })` derives `currentVersion` from the current node,
+`acceptedVersions` from its complete predecessor chain, and schema hashes from
+their build-only schemas. It also proves every accepted node reaches current
+through contiguous migrations. There is no separately authored version registry,
+migration map, encoder map, or write version.
 
-`initialVersion: 0` identifies a historical unversioned shape. Each migration
-moves exactly one version forward. Every accepted version must have a complete
-path to `canonicalVersion`, and every advertised encodable version must have an
-encoder.
+```ts
+const valueV2 = valueV1.next({
+  decode: decodeV2,
+  encode: encodeV2,
+  migrate: migrateV1ToV2,
+  schema: durable.buildSchema(() => import("./value-v2.schema.js")),
+});
 
-A `null` accepted set becomes finite only in a reader-only release that preserves
-the existing write version and adds executable fixtures for every claimed
-historical cohort. The following release may advance the write version after the
-finite reader declaration is part of the rollback floor.
+const value = durable.value({ name: "value", current: valueV2 });
+```
+
+A published node's schema, encoded fixtures, and normalized historical fixtures
+are immutable. An in-place change to any of those artifacts fails with an
+instruction to append `.next(...)`. Decoder, encoder, or migration code may be
+fixed under the same node only when every frozen input, output, and normalization
+remains identical and a new fixture demonstrates the previously missing case.
+
+Append `.next(...)` whenever the persisted wire shape or its canonical meaning
+changes. Internal implementation changes that preserve both do not append a
+node. New wire fields, removed fields, stricter interpretation, or different
+normalization require `.next(...)`; behavior unsupported by an old consumer uses
+capability negotiation rather than overloading a value version.
+
+A defective historical decoder or migration is not repaired by editing its
+published node or by running through the same broken path. The current node may
+add a direct recovery edge from the affected historical node:
+
+```ts
+const valueV2 = valueV1.next({
+  decode: decodeV2,
+  encode: encodeV2,
+  migrate: migrateV1ToV2,
+  recover: [
+    durable.recover(valueV0, {
+      decode: decodeCorrectedRawV0,
+      toCurrent: recoverRawV0AsV2,
+    }),
+  ],
+  schema: durable.buildSchema(() => import("./value-v2.schema.js")),
+});
+```
+
+The recovery edge decodes the original persisted bytes and bypasses defective
+intermediate normalization. It is a new immutable graph edge with historical
+fixtures, not a mutation of v0. Data already overwritten after a lossy migration
+cannot be reconstructed and is reported as unrecoverable.
+
+Decode path selection is deterministic. For a historical source node, the
+compiler chooses the recovery edge with the highest reachable target on the
+current chain, then follows contiguous migrations to current. If no recovery edge
+exists, it uses the contiguous path. Only one recovery edge may exist for a
+source-target pair, and the manifest records the selected path so changing it
+requires new fixtures and graph review.
+
+A bootstrap contract may expose `acceptedVersions: null` when its history has
+not yet been modeled. Before appending `.next(...)`, the same candidate must
+declare the historical chain and add executable fixtures for every claimed
+cohort. Once finite, the chain remains append-only.
 
 ### Schema identity
 
@@ -313,10 +363,15 @@ cannot complete. A child workflow version cannot remain supported unless its
 parent has either a generated terminal route, a legacy extractor, or direct raw
 run monitoring.
 
+Format-2 workflow input versions normalize with a `preDslProducer` marker, so the
+compiler requires `onWorkflowFailure` on each corresponding node and records the
+extractor identity in the graph manifest. Removing an extractor is therefore a
+manifest regression rather than a missing entry in a manually synchronized map.
+
 The returned handle carries the literal contract name in a private TypeScript
 brand. `startLatest` accepts only that handle and a canonical input value, never
 a bare ID, generic workflow reference, or raw argument tuple. It encodes input at
-the contract's write version before starting the hidden reference.
+the contract's current version before starting the hidden reference.
 
 ```ts
 interface DurableRun<TResult> {
@@ -354,15 +409,16 @@ test modules. Exact starts use the same input encoding and result decoding path.
 
 Every workflow declares a result contract. Workflows that communicate only
 through hooks use `durable.void(name)`. Direct Workflow results have no receiver
-capability negotiation, so their write version advances only when every
-supported caller cohort accepts it. A result that requires per-consumer
-negotiation travels through an inbox instead.
+capability negotiation, so a result consumed by an older pinned caller does not
+change shape. A result that must evolve across mixed versions travels through an
+inbox instead.
 
 An existing workflow's historical raw return value becomes unversioned result
 version 0. Its first result contract accepts v0, retains an encoder that
-reproduces the raw shape, and continues writing v0 while a legacy caller can
-remain. Frozen fixtures prove both bytes and domain semantics before the result
-can move to a versioned envelope.
+reproduces the raw shape, and continues emitting v0 while a legacy caller can
+remain. Frozen fixtures prove both bytes and domain semantics. Moving that
+exchange to a versioned envelope requires a negotiated inbox boundary, not a
+global result-version rollout.
 
 ## Inbox contracts
 
@@ -378,10 +434,19 @@ hook used to classify markerless continuations. The compiler records its stable
 identity and every target it may return; returning an undeclared target fails
 before resume.
 
+Each target serializer projects the inbox's current domain message into the
+referenced wire node. This projection cannot be derived when the current domain
+type differs from the historical type, so it is irreducible compatibility code.
+Targets reference typed nodes rather than repeating version numbers, and adding a
+new current message node type-checks every retained serializer against that new
+domain type. Multiple targets may share one wire node, as with v0 `send` and
+`deliver`. Inbox capabilities derive from these targets, not from a second
+encodable-version list.
+
 ```text
-producer encodable versions: [1, 2]
-consumer accepted versions:  [0, 1]
-selected wire version:       1
+producer target versions:   [0, 1, 2]
+consumer accepted versions: [0, 1]
+selected target:            v1
 ```
 
 No compatible target fails explicitly and leaves the inbox parked. The producer
@@ -402,13 +467,27 @@ the payload. An unknown version leaves the authorization challenge pending.
 ## State contracts
 
 `durable.state` binds a stable persisted key to one value contract. Its reader
-decodes and migrates historical values. Its writer emits the declared write
-version. The state key is manifest identity and cannot change in place.
+decodes and migrates historical values. Its writer emits the current node. The
+state key is manifest identity and cannot change in place.
 
 Framework modules cannot access a DSL-owned key through the raw
 `Record<string, unknown>` session state. Import and source guards reserve raw
 state access for the generated state facade and historical fixtures, preventing
 an unversioned side channel around the contract graph.
+
+Every generated persistence facade writes the contract identity and actual
+emitted node with the value: current for ordinary writes, or the selected wire
+node for target-encoded delivery. Any record required to execute a session
+updates the session's compatibility index in the same durable step result or
+storage transaction; the record is not visible as committed unless the index is
+committed with it. Latest routing and recovery compare that index with deployment
+manifests before selecting code.
+
+Output-only records, such as message-stream events, are excluded from execution
+routing and carry their own contract node for projection by the current stream
+reader. A record cannot use that exception if session execution may read it. A
+deployment that cannot decode any indexed execution dependency is never selected
+for that session.
 
 This foundation covers eve-owned state. A public migration surface for authored
 `defineState` values is a separate API decision.
@@ -458,14 +537,14 @@ graph. The artifact is lexically sorted and excludes timestamps, absolute paths,
 Git revisions, and deployment-local values, so identical package inputs produce
 identical bytes.
 
-| Node     | Manifest identity and policy                                      |
-| -------- | ----------------------------------------------------------------- |
-| Value    | accepted, canonical, write, and encodable versions; schema hashes |
-| Workflow | stable ID; input, result, and terminal failure edges              |
-| Inbox    | message edge; named encoder targets; classifier and negotiation   |
-| State    | persisted state key; value edge                                   |
-| Stream   | protocol and event value edges; unknown-event policy              |
-| Opaque   | origin-deployment affinity or named runtime owner                 |
+| Node     | Manifest identity and policy                                       |
+| -------- | ------------------------------------------------------------------ |
+| Value    | current and accepted nodes; schema, migration, and recovery edges  |
+| Workflow | stable ID; input, result, terminal, and legacy failure edges       |
+| Inbox    | message edge; named target serializers; classifier and negotiation |
+| State    | persisted state key; value edge                                    |
+| Stream   | protocol and event value edges; unknown-event policy               |
+| Opaque   | origin-deployment affinity or named runtime owner                  |
 
 The manifest validates every graph edge. Removing a node, changing its kind or
 identity, retargeting an edge, or changing a state key, negotiation mode, stream
@@ -486,14 +565,14 @@ format 2 does not pretend old events carried the stream header as a discriminato
 Inline workflow input fields normalize to a synthetic
 `${workflow.name}.input` value. Historical raw workflow results normalize to
 `${workflow.name}.result` at unversioned version 0. The first explicit result
-contract preserves that identity, accepts and encodes v0, and writes v0 while
+contract preserves that identity, accepts and encodes v0, and emits v0 while
 legacy callers remain.
 
 A format-2 contract with `acceptedVersions: null` retains unknown support. Its
-current version is the only proven encodable and writable version. A candidate
-may replace `null` with a finite accepted set only in a reader-only release that
-preserves the write version and adds executable fixtures for every claimed
-historical cohort. Unknown support never authorizes a write advance.
+current version is the only proven readable shape. A candidate that appends a
+new node must replace `null` with a finite historical chain in the same build and
+add executable fixtures for every claimed cohort. Unknown support never
+authorizes a new current version by itself.
 
 Format 1 remains accepted only as the initial manifest bootstrap. Existing
 non-null schema hashes and compatibility claims cannot be removed when formats
@@ -501,19 +580,15 @@ advance.
 
 ## Compatibility rules
 
-For base build B, candidate C, producer P, consumer R, and every supported
-production cohort H, the graph compiler enforces:
+For base build B, candidate C, consumer R, and every supported historical cohort
+H, the graph compiler enforces:
 
 ```text
-forward read:       H.writeVersion in C.acceptedVersions for every supported H
-rollback read:      C.writeVersion in H.acceptedVersions
-target negotiation: choose max(P.encodableVersions intersect R.acceptedVersions)
-legacy target:      classifier selects one declared target identity
-migration closure:  every accepted version reaches canonicalVersion
-write validity:     writeVersion in encodableVersions
+historical read:    H.currentVersion in C.acceptedVersions for every supported H
+target delivery:    classifier selects a declared target accepted by R
+migration closure:  every accepted node reaches the current node
 read preservation:  B.acceptedVersions subset C.acceptedVersions
-write preservation: B.encodableVersions subset C.encodableVersions
-version monotonic:  C canonical and write versions do not decrease
+version monotonic:  C.currentVersion >= B.currentVersion
 schema stability:   C.schemaHash[v] = B.schemaHash[v] for every frozen v
 graph stability:    persisted names, edges, and policies do not change
 origin affinity:    consumer deployment = origin deployment
@@ -522,26 +597,33 @@ runtime ownership:  only the declared external owner interprets the value
 
 Membership, migration closure, and set preservation require finite accepted
 sets. A legacy `null`-to-`null` comparison passes only when versions, schema
-status, identity, and graph edges remain unchanged. A `null` set becomes finite
-only through the reader-only fixture rule above.
+status, identity, and graph edges remain unchanged. A candidate may replace
+`null` and append a new current node in one build only when it declares and tests
+the complete historical chain.
 
 Capability negotiation chooses a representable wire shape. It never authorizes
 new behavior absent from the consumer's declared capabilities. New control
 actions remain gated separately from payload encoding.
 
-### Reader-first rollout
+### Single-deployment evolution
 
-A new durable value version rolls out in two releases:
+A durable shape change ships in one candidate deployment:
 
-1. The reader release adds the new decoder, schema, migration, and target
-   encoder, advances the canonical version, and continues writing the old
-   version.
-2. After that release becomes the rollback floor and passes historical cohorts,
-   the writer release advances `writeVersion`.
+1. The author appends one `.next(...)` node containing the decoder, current
+   encoder, schema, and migration from its predecessor.
+2. The candidate proves it can read every historical cohort and becomes the new
+   regression-gated latest deployment.
+3. Latest-owned state writes the new current shape. A pinned driver may carry
+   that state opaquely but cannot interpret or reconstruct it.
+4. Messages sent to older pinned consumers use transport targets linked to the
+   historical version nodes they understand.
 
-Encoding the old wire version from the new canonical value is a target serializer,
-not a reverse migration over stored history. The gate requires every supported
-rollback cohort to accept the proposed write version before promotion.
+This model does not promise arbitrary rollback after new state is written. A
+deployment is a valid recovery target for a session only when its manifest
+accepts every current value recorded in that session's compatibility index.
+If no older admitted deployment satisfies that constraint, recovery rolls
+forward. Target serializers preserve communication with old pinned consumers;
+they do not make old application code a reader of new latest-owned state.
 
 ## Runtime lifecycle
 
@@ -551,13 +633,13 @@ The generated workflow facade owns the complete input and result path:
 
 ```text
 canonical producer input
-    | encode at input.writeVersion
+    | input.encodeCurrent
     v
 versioned persisted input
     | decode, validate, migrate, validate canonical
     v
 run canonical workflow function
-    | encode at result.writeVersion
+    | result.encodeCurrent
     v
 versioned or legacy-v0 result
     | DurableRun decodes
@@ -576,8 +658,8 @@ The inbox facade negotiates against the pinned receiver before persistence:
 ```text
 domain message
     | inspect exact hook metadata
-    | select producer encodable intersect consumer accepted
-    | encode selected version
+    | select a declared target accepted by the consumer
+    | run the target serializer
     v
 resume the inspected hook
     | consumer decode and migrate
@@ -637,16 +719,16 @@ against an editable checked-in baseline that the same pull request could change
 to hide a regression.
 
 The comparator rejects contract removal, stable ID changes, version decreases,
-accepted or encodable version removal, frozen schema changes, unresolved or
-retargeted edges, and persisted policy changes. It applies forward-read and
-rollback-read checks to every supported production cohort, not only the pull
+accepted-version or inbox-target removal, frozen schema changes, unresolved or
+retargeted edges, and persisted policy changes. It proves the candidate reads the
+current value written by every supported historical cohort, not only the pull
 request base.
 
 ### Historical fixtures and mixed-version cohorts
 
 Frozen payload fixtures prove every declared version still decodes and every
 target encoder emits the promised shape. Historical executable producers and
-consumers prove domain behavior, fixed-point migration, rollback reads, and
+consumers prove domain behavior, fixed-point migration, target delivery, and
 preservation of declared durable keys.
 
 The first required mixed-version cohort independently builds the published
@@ -659,17 +741,23 @@ The suspension matrix covers parked and active turns, cancellation, runtime
 actions, authorization, input requests, subagents, tasks, timeouts, state reads,
 and workflow results.
 
-### Promotion and demotion
+### Promotion and recovery
 
 Production latest resolves to the newest regression-gated deployment. Promotion
 is not long-lived blue/green routing: after admission, each new turn takes the
-promoted code. A demotion control restores the previous admitted deployment if a
-semantic regression escapes canaries.
+promoted code.
+
+Recovery is compatibility-aware rather than a global rollback guarantee. A
+previously admitted deployment may receive a session only when its manifest can
+read that session's compatibility index. Sessions that have written newer
+state remain on a compatible deployment and require a forward fix when no older
+deployment qualifies.
 
 Older immutable drivers already call Vercel's existing
 `resolve-latest-deployment` path. An eve-only resolver can protect newly created
-drivers but cannot retrofit those runs. Complete demotion requires the platform
-resolver to return an audited regression-gated deployment.
+drivers but cannot retrofit those runs. Complete recovery routing requires the
+platform resolver to select an audited deployment compatible with the session
+compatibility index.
 
 ## Compatibility horizon
 
@@ -691,10 +779,15 @@ consume it.
   opaque affinity declaration.
 - Contract identities, graph edges, state keys, and persisted policies never
   change in place.
-- Every accepted version validates and reaches the canonical version.
-- Every write version has an encoder and is accepted by every required rollback
-  cohort.
-- New wire versions follow reader-first rollout.
+- Value history is an append-only node chain; current, accepted, migration,
+  schema, and current-encoder metadata are derived from that chain.
+- Every accepted version validates and reaches the current canonical
+  representation.
+- Every current value node has an encoder, and every historical node has a
+  migration path to current.
+- New wire versions append one node and ship in one regression-gated deployment.
+- A session records a compatibility index, and routing never selects a
+  deployment that cannot read it.
 - Unknown versions fail without consuming, defaulting, or reinterpreting durable
   data.
 - Workflow inputs and results cross only through generated facades.
@@ -721,6 +814,8 @@ consume it.
 - Making the internal foundation DSL a public agent-authoring API.
 - Automatically migrating executable closures or opaque dependency state.
 - Removing historical support while sessions can be unbounded.
+- Guaranteeing rollback to a deployment that cannot read state already written
+  by the current deployment.
 
 ## Implementation boundary
 
@@ -754,8 +849,8 @@ Implementation proceeds in six independently reviewable slices:
    compatibility algebra against the base and supported cohorts.
 5. Close raw primitive imports and run the complete historical fixture and
    mixed-version suspension matrix.
-6. Route Vercel latest through an audited promotion pointer with immediate
-   demotion and pre-promotion canaries.
+6. Route Vercel latest through an audited promotion pointer with
+   compatibility-index recovery and pre-promotion canaries.
 
 Each slice preserves the current format-2 gate until its graph replacement is
 active. No slice removes a historical decoder, encoder, or migration.
@@ -780,20 +875,23 @@ The proposal resolves the architectural review questions as follows:
 - [x] **Close raw durable primitive bypasses.** Mechanical guards cover latest
       starts, hooks, state, streams, attachment references, and opaque
       continuations, with narrow historical-fixture and runtime-owner allowlists.
-- [x] **Preserve forward and rollback reads.** Reader-first rollout and cohort
-      comparison prove every proposed write version is readable by current and
-      rollback deployments.
+- [x] **Derive version bookkeeping.** Authors append one `.next(...)` node;
+      current, accepted, migration, schema, and encoder metadata compile from
+      the chain without synchronized version maps.
+- [x] **Preserve mixed-version communication.** The candidate reads every
+      historical value, while target-specific inbox serializers encode for old
+      pinned consumers.
 - [x] **Preserve historical workflow results.** Existing raw results become
       explicit v0 contracts with byte- and semantics-preserving fixtures.
 - [x] **Normalize bootstrap manifests conservatively.** Format-2 identities and
       unknown support sets remain intact; normalization never invents support or
-      authorizes a write advance.
+      authorizes a new current node without historical fixtures.
 - [x] **Prove target-encoded delivery.** Inbox negotiation selects only a common
       producer/consumer version and leaves the durable owner recoverable when no
       version exists.
 - [x] **Keep platform routing limits explicit.** The design does not claim an
-      eve-only resolver can demote old immutable drivers already using the
-      platform's latest resolver.
+      eve-only resolver can reroute old immutable drivers or recover a session
+      onto code that cannot read its compatibility index.
 - [x] **Require behavioral admission.** Generated manifests prove structure;
       historical mixed-version execution and suspended-session canaries remain
       the semantic merge and promotion gate.
