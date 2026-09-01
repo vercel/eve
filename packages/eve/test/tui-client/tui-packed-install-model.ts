@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { theme } from "./lib/theme.ts";
 
 /**
- * End-to-end proof that the *packed* eve artifact can open onboarding `/model`
+ * End-to-end proof that the *packed* eve artifact can open initial onboarding
  * after a consumer-shaped install.
  *
  * Every other smoke test resolves eve's modules inside the workspace, where
@@ -103,7 +103,7 @@ void (async () => {
       userInput: input,
       name: "Packed install model command",
       appRoot: consumerRoot,
-      initialInput: "/model",
+      onboard: true,
       getVercelAuthStatus: async () => "authenticated",
       promptCommandHandler: createPromptCommandHandler({
         target: {
@@ -128,9 +128,9 @@ void (async () => {
     const runPromise = runner.run();
 
     try {
-      // The provider picker paints before the first prompt only when the
-      // prefilled onboarding `/model` flow and its module graph load — the
-      // exact surface the oxc-parser regression crashed.
+      // The provider picker paints before the first prompt only when initial
+      // onboarding and its module graph load — the exact surface the
+      // oxc-parser regression crashed.
       await screen.waitForText("Configure the agent model", 15_000);
       await screen.waitForText("Which model provider do you want to use?", 15_000);
       console.log(theme.muted("[tui-packed-install] /model opened provider setup"));
@@ -139,15 +139,7 @@ void (async () => {
       await screen.waitForText("Change model", 5_000);
       input.send("\x1b");
       await screen.waitForText("/model dismissed.", 5_000);
-      // Fresh-model onboarding now follows the picker with the registry hub.
-      // Dismiss it too before asserting that the runner returns to chat.
-      await screen.waitForText("Add to your agent", 5_000);
-      // The title paints before registry loading necessarily yields to the
-      // category picker. Wait for a real option so Escape belongs to the
-      // question rather than the setup flow's between-questions interrupt trap.
-      await screen.waitForText("Channels", 5_000);
-      input.send("\x1b");
-      await screen.waitForText("/add dismissed.", 5_000);
+      // Cancelling the required model phase exits onboarding and returns to chat.
       await screen.waitForIdlePrompt(5_000);
 
       input.type("/exit");

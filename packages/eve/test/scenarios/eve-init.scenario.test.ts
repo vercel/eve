@@ -234,7 +234,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -273,7 +273,7 @@ describe("eve init smoke", () => {
     );
     const [installCall, devCall] = await fakePnpm.readCalls();
     expect(installCall?.args.slice(-2)).toEqual(["install", "--no-frozen-lockfile"]);
-    expect(devCall?.args.slice(-5)).toEqual(["exec", "eve", "dev", "--input", "/model"]);
+    expect(devCall?.args.slice(-4)).toEqual(["exec", "eve", "dev", "--onboard"]);
   });
 
   it("adds Web Chat through npm without writing pnpm configuration", async () => {
@@ -298,7 +298,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["exec", "--", "eve", "dev", "--input", "/model"],
+        args: ["exec", "--", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);
@@ -399,7 +399,7 @@ describe("eve init smoke", () => {
         cwd: canonicalProjectDir,
       },
       {
-        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--input", "/model"],
+        args: ["--dir", canonicalProjectDir, "exec", "eve", "dev", "--onboard"],
         cwd: canonicalProjectDir,
       },
     ]);
