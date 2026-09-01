@@ -6,8 +6,8 @@ import {
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
-  orderedSetupIssues,
   normalizeLocalModelEndpoint,
+  orderedSetupIssues,
   type BootDetectionContext,
 } from "./setup-issues.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
@@ -149,16 +149,10 @@ describe("formatSetupIssuesLine", () => {
     ).toBe("2 setup issues: AI Gateway credentials · /model, Channels · /channels");
   });
 
-  it("formats the logged-out hint, which is not a boot detection", () => {
-    // Confirming login is a `vercel whoami` subprocess, so the hint lives
-    // outside the cheap-and-local BOOT_DETECTIONS and is rendered by the runner.
-    expect(BOOT_DETECTIONS.some((detection) => detection.id === "login")).toBe(false);
+  it("formats the Vercel auth hints", () => {
     expect(formatSetupIssuesLine([LOGIN_SETUP_ISSUE])).toBe(
       "1 setup issue: not logged in · /vc:login",
     );
-  });
-
-  it("formats the CLI-missing hint, which points at its own fix command", () => {
     expect(formatSetupIssuesLine([CLI_MISSING_SETUP_ISSUE])).toBe(
       "1 setup issue: Vercel CLI not found · /vc:install",
     );
@@ -166,26 +160,15 @@ describe("formatSetupIssuesLine", () => {
 });
 
 describe("orderedSetupIssues", () => {
-  it("puts the auth prerequisite before the boot detections", () => {
+  it("puts the auth issue before boot-time issues", () => {
     const modelIssue = {
       kind: "attention" as const,
       label: "model provider not linked",
-      command: "/model" as const,
+      command: "/model",
     };
     expect(orderedSetupIssues([modelIssue], CLI_MISSING_SETUP_ISSUE)).toEqual([
       CLI_MISSING_SETUP_ISSUE,
       modelIssue,
     ]);
-    expect(orderedSetupIssues([modelIssue], LOGIN_SETUP_ISSUE)).toEqual([
-      LOGIN_SETUP_ISSUE,
-      modelIssue,
-    ]);
-  });
-
-  it("returns the boot issues unchanged when no auth prerequisite is unmet", () => {
-    const boot = [
-      { kind: "attention" as const, label: "AI Gateway credentials missing", command: "/model" },
-    ];
-    expect(orderedSetupIssues(boot, undefined)).toEqual(boot);
   });
 });

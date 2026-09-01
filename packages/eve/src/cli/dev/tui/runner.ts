@@ -72,8 +72,8 @@ import {
   detectSetupIssues,
   formatSetupIssuesLine,
   LOGIN_SETUP_ISSUE,
-  orderedSetupIssues,
   normalizeLocalModelEndpoint,
+  orderedSetupIssues,
   type BootDetection,
   type BootDetectionContext,
   type SetupIssue,
@@ -514,11 +514,7 @@ export class EveTUIRunner {
   #disposed = false;
   /** Aborts the off-critical-path boot auth probe when the run loop unwinds. */
   readonly #authProbeAbort = new AbortController();
-  /**
-   * Set once a setup command changes Vercel state (any status-line effect), so
-   * a slow boot login probe that resolves afterward cannot paint a stale
-   * "not logged in" hint over a session the user has since logged into.
-   */
+  /** Set once setup changes Vercel state, so a late boot probe cannot paint stale guidance. */
   #authHintStale = false;
   /** Cheap-and-local boot detection issues, cached so the auth probe can re-combine. */
   #bootIssues: SetupIssue[] = [];
@@ -1588,15 +1584,16 @@ export class EveTUIRunner {
     this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
     if (this.#renderer.renderSetupWarning === undefined) return;
     this.#paintSetupAttention();
-    // Login state is a `vercel whoami` round-trip — too costly for the
-    // cheap-and-local boot detections above — so it rides its own probe off
-    // the critical path and never delays the first prompt.
-    this.#probeAuthIssue();
+    if (info?.agent.model.routing.kind !== "external") this.#probeAuthIssue();
   }
 
-  /** Repaints the attention line from the cached detection + auth issues, or clears it. */
+  /** Repaints relevant setup issues, excluding Vercel guidance for external providers. */
   #paintSetupAttention(): void {
-    const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue);
+    const issues = orderedSetupIssues(this.#bootIssues, this.#authIssue).filter(
+      (issue) =>
+        this.#agentInfo?.agent.model.routing.kind !== "external" ||
+        !issue.command.startsWith("/vc:"),
+    );
     if (issues.length > 0) {
       this.#renderer.renderSetupWarning?.(formatSetupIssuesLine(issues));
     } else {
@@ -1621,9 +1618,7 @@ export class EveTUIRunner {
 
   /**
    * Re-evaluates the attention line after a setup command changed local state,
-   * so a fixed issue clears (e.g. the `not logged in · /vc:login` line disappears
-   * once `/vc:login` succeeds) instead of lingering stale. Authoritative: unlike
-   * the boot probe it re-reads detections and auth and is not stale-guarded.
+   * so fixed issues clear instead of lingering stale.
    */
   async #refreshSetupAttention(info: AgentInfoResult | undefined): Promise<void> {
     const appRoot = this.#appRoot;
@@ -1633,10 +1628,12 @@ export class EveTUIRunner {
     if (info !== undefined) context.info = info;
     try {
       this.#bootIssues = await detectSetupIssues(context, this.#bootDetections);
-      const status = await this.#getVercelAuthStatus(appRoot, {
-        signal: this.#authProbeAbort.signal,
-      });
-      this.#authIssue = authIssueForStatus(status);
+      this.#authIssue =
+        info?.agent.model.routing.kind === "external"
+          ? undefined
+          : authIssueForStatus(
+              await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal }),
+            );
     } catch {
       return;
     }
@@ -1745,52 +1742,13 @@ export class EveTUIRunner {
   }
 
   /**
-   * Fresh `eve init` launches the TUI with `/model` prefilled. Project-backed
-   * model access depends on the Vercel CLI and a Vercel session, so resolve
-   * only those missing prerequisites before entering the model picker. A probe
-   * failure still opens `/model`: its API-key and external-provider paths do
-   * not require Vercel. After model setup, open the categorized registry hub so
-   * a new user has concrete next steps before reaching the chat prompt.
+   * Fresh `eve init` launches the TUI with `/model` prefilled. Open the model
+   * picker directly so API-key and external-provider paths do not depend on the
+   * Vercel CLI. Vercel-backed choices own their own prerequisites. After model
+   * setup, open the categorized registry hub so a new user has concrete next
+   * steps before reaching the chat prompt.
    */
   async #runInitialModelOnboarding(title: string): Promise<void> {
-    const appRoot = this.#appRoot;
-    if (appRoot === undefined) return;
-
-    const authStatus = async (): Promise<VercelAuthStatus | undefined> => {
-      try {
-        return await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
-      } catch {
-        return undefined;
-      }
-    };
-
-    let status = await authStatus();
-    if (status === "cli-missing") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:install", argument: "" },
-        title,
-        { trigger: "startup", keepSetupFlowOpen: true },
-      );
-      status = await authStatus();
-      if (status === "cli-missing") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
-    }
-
-    if (status === "logged-out") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:login", argument: "" },
-        title,
-        { trigger: "startup", keepSetupFlowOpen: true },
-      );
-      status = await authStatus();
-      if (status === "cli-missing" || status === "logged-out") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
-    }
-
     await this.#executeExtensionCommand({ type: "extension", name: "model", argument: "" }, title, {
       trigger: "startup",
       initialModelStep: "provider",
@@ -1886,8 +1844,7 @@ export class EveTUIRunner {
   /**
    * Setup commands can write authored source and env files. Force the local
    * runtime snapshot to catch up, then cache the credential-normalized `/info`
-   * shared by the status bar and setup detector. The Vercel auth probe stays
-   * off the prompt path.
+   * shared by the status bar and setup detector.
    */
   async #refreshModelAccess(): Promise<void> {
     const appRoot = this.#appRoot;
@@ -1896,6 +1853,10 @@ export class EveTUIRunner {
     loadDevelopmentEnvironmentFiles(appRoot);
     await this.#runtimeArtifacts?.refreshAfterSourceChange({});
     const refreshedInfo = this.#replaceAgentInfo(await this.#readAgentInfo());
+    if (refreshedInfo?.agent.model.routing.kind === "external") {
+      this.#authIssue = undefined;
+      this.#paintSetupAttention();
+    }
     void this.#refreshSetupAttention(refreshedInfo);
   }
 

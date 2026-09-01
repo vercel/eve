@@ -872,7 +872,6 @@ describe("EveTUIRunner idle session follow", () => {
       appRoot: "/tmp/weather-agent",
       initialInput: "/model",
       bootDetections: [],
-      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: { handle },
     });
 
@@ -3469,6 +3468,16 @@ describe("EveTUIRunner boot setup detection", () => {
       },
     },
   };
+  const externalProviderInfo: AgentInfoResult = {
+    ...AGENT_INFO,
+    agent: {
+      ...AGENT_INFO.agent,
+      model: {
+        id: "claude-sonnet-4-5",
+        routing: { kind: "external" as const, provider: "anthropic" },
+      },
+    },
+  };
 
   function bootRunner(input: { appRoot?: string; issues: SetupIssue[] }) {
     const warnings: string[] = [];
@@ -3548,13 +3557,90 @@ describe("EveTUIRunner boot setup detection", () => {
     expect(warnings).toEqual(["1 setup issue: AI Gateway credentials · /model"]);
   });
 
-  it("runs the initial model onboarding prerequisites before opening /model", async () => {
+  it("shows Vercel auth guidance for an AI Gateway model", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(disconnectedGatewayInfo);
+    const getAuthStatus = vi.fn(async (): Promise<"cli-missing"> => "cli-missing");
+    const renderSetupWarning = vi.fn();
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [],
+      client,
+      getVercelAuthStatus: getAuthStatus,
+      name: "Weather Agent",
+      renderer: fakeRenderer({ renderSetupWarning }),
+      serverUrl: "http://localhost:3000",
+      session: stubSession(),
+    });
+
+    await runner.run();
+    await vi.waitFor(() =>
+      expect(renderSetupWarning).toHaveBeenCalledWith(
+        "1 setup issue: Vercel CLI not found · /vc:install",
+      ),
+    );
+    expect(getAuthStatus).toHaveBeenCalledOnce();
+  });
+
+  it("does not probe or show Vercel auth guidance for an external model provider", async () => {
+    const client = stubClient();
+    vi.spyOn(client, "info").mockResolvedValue(externalProviderInfo);
+    const getAuthStatus = vi.fn(async (): Promise<"cli-missing"> => "cli-missing");
+    const renderSetupWarning = vi.fn();
+    const runner = new EveTUIRunner({
+      appRoot: "/tmp/weather-agent",
+      bootDetections: [
+        {
+          id: "vercel-test",
+          detect: () => [
+            { kind: "attention", label: "not logged in", command: "/vc:login" },
+            { kind: "attention", label: "Channels", command: "/channels" },
+          ],
+        },
+      ],
+      client,
+      getVercelAuthStatus: getAuthStatus,
+      name: "Weather Agent",
+      renderer: fakeRenderer({ renderSetupWarning }),
+      serverUrl: "http://localhost:3000",
+      session: stubSession(),
+    });
+
+    await runner.run();
+
+    expect(getAuthStatus).not.toHaveBeenCalled();
+    expect(renderSetupWarning).toHaveBeenCalledWith("1 setup issue: Channels · /channels");
+  });
+
+  it("clears Vercel guidance immediately when model setup selects an external provider", async () => {
+    let detectionCount = 0;
+    const clearSetupWarning = vi.fn();
+    const renderSetupWarning = vi.fn();
+    const { runner } = providerSetupRefreshRunner({
+      refreshInfo: async () => externalProviderInfo,
+      renderer: { clearSetupWarning, renderSetupWarning },
+      bootDetections: [
+        {
+          id: "vercel-test",
+          detect: () => {
+            detectionCount += 1;
+            if (detectionCount === 1) {
+              return [{ kind: "attention", label: "not logged in", command: "/vc:login" }];
+            }
+            return new Promise<SetupIssue[]>(() => {});
+          },
+        },
+      ],
+    });
+
+    await runner.run();
+
+    expect(renderSetupWarning).toHaveBeenCalledWith("1 setup issue: not logged in · /vc:login");
+    expect(clearSetupWarning).toHaveBeenCalledOnce();
+  });
+
+  it("opens initial model onboarding without Vercel prerequisites", async () => {
     const order: string[] = [];
-    const authStatuses: Array<"cli-missing" | "logged-out" | "authenticated"> = [
-      "cli-missing",
-      "logged-out",
-      "authenticated",
-    ];
     const handle = vi.fn(async (command: { name: string }) => {
       order.push(command.name);
       return { message: "/model dismissed." };
@@ -3585,23 +3671,13 @@ describe("EveTUIRunner boot setup detection", () => {
           ],
         },
       ],
-      getVercelAuthStatus: vi.fn(async () => authStatuses.shift() ?? "authenticated"),
+      getVercelAuthStatus: vi.fn(async (): Promise<"authenticated"> => "authenticated"),
       promptCommandHandler: { handle },
     });
 
     await runner.run();
 
-    expect(order).toEqual(["vc:install", "vc:login", "model", "add", "prompt"]);
-    expect(handle).toHaveBeenNthCalledWith(
-      1,
-      { type: "extension", name: "vc:install", argument: "" },
-      expect.objectContaining({ keepSetupFlowOpen: true }),
-    );
-    expect(handle).toHaveBeenNthCalledWith(
-      2,
-      { type: "extension", name: "vc:login", argument: "" },
-      expect.objectContaining({ keepSetupFlowOpen: true }),
-    );
+    expect(order).toEqual(["model", "add", "prompt"]);
     expect(handle).toHaveBeenCalledWith(
       { type: "extension", name: "model", argument: "" },
       { renderer, title: "Weather Agent", initialModelStep: "provider" },
@@ -3610,44 +3686,6 @@ describe("EveTUIRunner boot setup detection", () => {
       { type: "extension", name: "add", argument: "" },
       { renderer, title: "Weather Agent" },
     );
-  });
-
-  it("stops onboarding when Vercel CLI installation leaves the CLI unavailable", async () => {
-    const order: string[] = [];
-    const authStatuses: Array<"cli-missing"> = ["cli-missing", "cli-missing"];
-    const end = vi.fn();
-    const setupFlow = createFakeSetupFlowRenderer({ end });
-    const runner = new EveTUIRunner({
-      session: sessionYielding([]),
-      renderer: fakeRenderer({ setupFlow }),
-      name: "Weather Agent",
-      appRoot: "/tmp/weather-agent",
-      initialInput: "/model",
-      bootDetections: [
-        {
-          id: "test",
-          detect: () => [
-            {
-              kind: "attention",
-              label: "model provider not linked",
-              command: "/model",
-            },
-          ],
-        },
-      ],
-      getVercelAuthStatus: vi.fn(async () => authStatuses.shift() ?? "cli-missing"),
-      promptCommandHandler: {
-        handle: async (command) => {
-          order.push(command.name);
-          return { message: "/vc:install dismissed." };
-        },
-      },
-    });
-
-    await runner.run();
-
-    expect(order).toEqual(["vc:install"]);
-    expect(end).toHaveBeenCalledOnce();
   });
 
   it("does not auto-open /model outside the prefilled onboarding launch", async () => {
