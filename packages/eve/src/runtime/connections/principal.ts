@@ -27,15 +27,23 @@ import { isVercelOidcIssuer } from "#shared/vercel-project.js";
  *   would otherwise alias to the same cache slot.
  * - `{ type: "user", id }` → `"user:${id}"`. This is the native
  *   Vercel Connect user projection.
+ *
+ * `%` and `:` are percent-encoded within each user segment so the
+ * separator cannot make distinct principals render to the same key.
  */
 export function principalKey(principal: ConnectionPrincipal): string {
   if (principal.type === "app") {
     return "app";
   }
+  const id = encodePrincipalKeySegment(principal.id);
   if (principal.issuer === undefined) {
-    return `user:${principal.id}`;
+    return `user:${id}`;
   }
-  return `user:${principal.issuer}:${principal.id}`;
+  return `user:${encodePrincipalKeySegment(principal.issuer)}:${id}`;
+}
+
+function encodePrincipalKeySegment(value: string): string {
+  return value.replaceAll("%", "%25").replaceAll(":", "%3A");
 }
 
 /**

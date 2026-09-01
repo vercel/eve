@@ -59,6 +59,36 @@ describe("principalKey", () => {
   it("keys an issuerless native Vercel user by its user id", () => {
     expect(principalKey({ id: "user_123", type: "user" })).toBe("user:user_123");
   });
+
+  it("does not alias an issuer with an issuerless id containing the separator", () => {
+    const issued = principalKey({ id: "U123", issuer: "slack", type: "user" });
+    const issuerless = principalKey({ id: "slack:U123", type: "user" });
+
+    expect(issued).not.toBe(issuerless);
+    expect(issuerless).toBe("user:slack%3AU123");
+  });
+
+  it("does not alias a separator in the issuer with one in the id", () => {
+    const separatorInIssuer = principalKey({
+      id: "U123",
+      issuer: "slack:webhook",
+      type: "user",
+    });
+    const separatorInId = principalKey({ id: "webhook:U123", issuer: "slack", type: "user" });
+
+    expect(separatorInIssuer).not.toBe(separatorInId);
+    expect(separatorInIssuer).toBe("user:slack%3Awebhook:U123");
+    expect(separatorInId).toBe("user:slack:webhook%3AU123");
+  });
+
+  it("does not alias a literal percent-encoded separator with a separator", () => {
+    const encoded = principalKey({ id: "a%3Ab", type: "user" });
+    const separator = principalKey({ id: "a:b", type: "user" });
+
+    expect(encoded).not.toBe(separator);
+    expect(encoded).toBe("user:a%253Ab");
+    expect(separator).toBe("user:a%3Ab");
+  });
 });
 
 describe("resolveConnectionPrincipal", () => {

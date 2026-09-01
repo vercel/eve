@@ -158,7 +158,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       type: "user",
     });
     // The audit attribute never enters Connect token-cache keying.
-    expect(principalKey(principal)).toBe("user:slack:slack:U123");
+    expect(principalKey(principal)).toBe("user:slack:slack%3AU123");
   });
 
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {
