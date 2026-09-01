@@ -25,6 +25,16 @@ describe("resolveVersionToken", () => {
     expect(manifest).toContain(`"@vercel/connect": "${resolved}"`);
   });
 
+  it("keeps the required Zod peer on the exact vendored catalog version", () => {
+    const resolved = resolveVersionToken("zodPackageVersion", "__ZOD_VERSION__");
+    const packageJson = JSON.parse(readFileSync(fileURLToPath(EVE_PACKAGE_JSON_URL), "utf8")) as {
+      peerDependencies?: { zod?: string };
+    };
+
+    expect(resolved).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(packageJson.peerDependencies?.zod).toBe("catalog:");
+  });
+
   it("resolves eve runtime and dependency version tokens from eve's own package.json", () => {
     const runtimeVersion = resolveVersionToken(
       "evePackage.runtimeVersion",
