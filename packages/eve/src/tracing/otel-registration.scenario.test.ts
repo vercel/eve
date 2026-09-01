@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ROOT_CONTEXT as COMPILED_ROOT_CONTEXT,
   context as runtimeContext,
+  metrics as runtimeMetrics,
   trace as runtimeTrace,
 } from "#compiled/@opentelemetry/api/index.js";
 import { registerOtelPipeline } from "#tracing/otel-registration.js";
@@ -20,12 +21,14 @@ const authoredApi = require("@opentelemetry/api") as typeof import("@opentelemet
 
 afterEach(() => {
   authoredApi.context.disable();
+  authoredApi.metrics.disable();
   authoredApi.propagation.disable();
   authoredApi.trace.disable();
   context.disable();
   propagation.disable();
   trace.disable();
   (runtimeContext as typeof runtimeContext & { disable(): void }).disable();
+  (runtimeMetrics as typeof runtimeMetrics & { disable(): void }).disable();
   (runtimeTrace as typeof runtimeTrace & { disable(): void }).disable();
 });
 
@@ -168,6 +171,44 @@ describe("registerOtelPipeline", () => {
         inject: () => {},
       }),
     ).toBe(true);
+  });
+
+  it("flushes and shuts down the registered meter provider", async () => {
+    const reader = {
+      forceFlush: vi.fn(async () => {}),
+      setMetricProducer: vi.fn(),
+      shutdown: vi.fn(async () => {}),
+    };
+    const runtime = registerOtelPipeline({
+      pipeline: { metricReaders: [reader], spanProcessors: [] },
+      serviceName: "weather",
+    });
+
+    await runtime.forceFlush();
+    expect(reader.forceFlush).toHaveBeenCalledOnce();
+    expect(reader.shutdown).not.toHaveBeenCalled();
+
+    await runtime.shutdown();
+    expect(reader.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("disables declared instrumentations at shutdown", async () => {
+    const instrumentation = {
+      disable: vi.fn(),
+      enable: vi.fn(),
+      getConfig: () => ({ enabled: false }),
+      setMeterProvider: vi.fn(),
+      setTracerProvider: vi.fn(),
+    };
+    const runtime = registerOtelPipeline({
+      pipeline: { instrumentations: [instrumentation], spanProcessors: [] },
+      serviceName: "weather",
+    });
+    expect(instrumentation.enable).toHaveBeenCalledOnce();
+    expect(instrumentation.disable).not.toHaveBeenCalled();
+
+    await runtime.shutdown();
+    expect(instrumentation.disable).toHaveBeenCalledOnce();
   });
 
   it("does not export the private registration span", async () => {
