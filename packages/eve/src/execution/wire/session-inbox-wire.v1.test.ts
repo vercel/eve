@@ -147,6 +147,28 @@ describe("session inbox wire v1", () => {
     ).toEqual({ kind: "cancel", taskId: "task-1", turnId: undefined });
   });
 
+  it("omits an undefined activity observer from legacy callers", () => {
+    const caller = {
+      activityObserver: undefined,
+      callId: "call-1",
+      replyTo: { kind: "hook" as const, token: "hook-token" },
+      subagentName: "researcher",
+    };
+
+    expect(
+      sessionInboxWireEncoder.encode(
+        { caller, kind: "send", payload: { message: "continue" } },
+        { version: 1 },
+      ),
+    ).toMatchObject({
+      caller: {
+        callId: "call-1",
+        replyTo: { kind: "hook", token: "hook-token" },
+        subagentName: "researcher",
+      },
+    });
+  });
+
   it("encodes controls with v1 and round-trips", () => {
     const clear = sessionInboxWireEncoder.encode({ kind: "clear" }, { version: 1 });
     expect(stableStringify(clear)).toBe(FROZEN_FIXTURES.clear);
