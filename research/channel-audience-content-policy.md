@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: proposed
-last_updated: "2026-08-28"
+last_updated: "2026-09-01"
 ---
 
 # Audience-aware trace content policy
@@ -20,7 +20,7 @@ Channels may project one of three values from their existing synchronous `metada
 type ChannelAudience = "public" | "private" | "unknown";
 ```
 
-The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
+The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests. Proactive Slack `receive` / `ctx.send` targets may optionally supply `audience` when the caller already knows channel visibility, for example a webhook that classified the Slack destination before handoff.
 
 The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. Remote agents classify their receiving channel independently rather than trusting opaque metadata across deployment boundaries.
 

@@ -72,7 +72,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -278,6 +278,12 @@ export interface SlackChannelCredentials {
 export interface SlackReceiveTarget {
   readonly channelId: string;
   readonly threadTs?: string;
+  /**
+   * Optional audience for proactive receives. Omit to leave `unknown`.
+   * Pass when the caller already knows channel visibility, for example a
+   * webhook or schedule that classified the Slack destination before handoff.
+   */
+  readonly audience?: ChannelAudience;
   /** Slack workspace whose app installation supplies credentials for this send. */
   readonly installationTeamId?: string;
   /**
@@ -988,10 +994,15 @@ async function receiveOnSlack(
   // Threadless proactive runs need distinct identities until their first
   // Slack post supplies the real thread timestamp and re-keys the session.
   const continuationThreadTs = threadTs || crypto.randomUUID();
+  const audience =
+    receiveTarget.audience === undefined
+      ? undefined
+      : normalizeChannelAudience(receiveTarget.audience);
 
   return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
     auth: input.auth,
     state: {
+      ...(audience === undefined ? {} : { audience }),
       channelId,
       installationTeamId: installationTeamId ?? null,
       threadTs: threadTs || null,
