@@ -3,13 +3,41 @@ import { defineAgent } from "eve";
 import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 /**
- * Deterministic script: each directive names the workflow tool to call with
- * service "api"; once the turn holds a tool result the reply echoes it.
+ * Deterministic script for waiting, background, parallel, and chained
+ * workflow-tool calls. Once a directive has its expected results, the reply
+ * echoes them for eval assertions.
  */
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
   const roles = request.messages.map((entry) => entry.role);
   const turnHasToolResult = roles.lastIndexOf("tool") > roles.lastIndexOf("user");
+  const deployResults = request.toolResults.filter((result) => result.name === "deploy_service");
+
+  if (message.includes("WORKFLOW-PARALLEL-START")) {
+    if (deployResults.length === 0) {
+      return {
+        toolCalls: ["api", "web"].map((service) => ({
+          input: { service },
+          name: "deploy_service",
+        })),
+      };
+    }
+    return `WORKFLOW-PARALLEL-RESULT ${JSON.stringify(deployResults.map((result) => result.output))}`;
+  }
+
+  if (message.includes("WORKFLOW-CHAIN-START")) {
+    if (deployResults.length < 2) {
+      return {
+        toolCalls: [
+          {
+            input: { service: deployResults.length === 0 ? "api" : "web" },
+            name: "deploy_service",
+          },
+        ],
+      };
+    }
+    return `WORKFLOW-CHAIN-RESULT ${JSON.stringify(deployResults.map((result) => result.output))}`;
+  }
 
   for (const [directive, tool] of [
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
@@ -51,6 +79,10 @@ export default defineAgent({
   experimental: {
     ...base.experimental,
     tasks: true,
+    workflow: {
+      ...base.experimental?.workflow,
+      agentStepsPerWorkflowStep: 5,
+    },
   },
   // Always author the deterministic script so this fixture never depends on a
   // live model; world suites already set EVE_E2E_MODEL=mock.
