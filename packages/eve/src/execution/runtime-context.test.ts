@@ -311,7 +311,7 @@ describe("buildRunContext", () => {
     expect(projection!.metadata).toEqual({ audience: "unknown" });
   });
 
-  it("keeps forwarded origin policy authoritative over inherited channel metadata", () => {
+  it("keeps forwarded origin policy separate from inherited channel metadata", () => {
     const forwardedTracePolicy = {
       ceiling: { recordInputs: false, recordOutputs: true },
       originAudience: "private",
@@ -334,6 +334,6 @@ describe("buildRunContext", () => {
     });
 
     expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual(forwardedTracePolicy);
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("private");
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
   });
 });

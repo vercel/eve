@@ -80,7 +80,10 @@ import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
-import { readForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  readForwardedTraceAssertion,
+} from "#shared/forwarded-trace-policy.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -616,7 +619,7 @@ export async function startSubagent(input: {
   readonly taskOwned: boolean;
   readonly target: DispatchStartTarget;
 }): Promise<DispatchOutcome> {
-  const parentTraceContext =
+  const storedParentTraceContext =
     readActionTraceContext(
       input.serializedContext,
       input.session.sessionId,
@@ -624,8 +627,20 @@ export async function startSubagent(input: {
       input.target.action.callId,
     ) ?? input.parentTraceContext;
   const forwardedTracePolicy = readForwardedTraceAssertion(
-    parentTraceContext?.forwardedTracePolicy,
+    storedParentTraceContext?.forwardedTracePolicy,
   );
+  const liveAudience = normalizeChannelAudience(input.channelMetadata?.metadata.audience);
+  const parentTraceContext =
+    storedParentTraceContext?.decision === undefined
+      ? storedParentTraceContext
+      : {
+          ...storedParentTraceContext,
+          decision: applyLiveDeliveryAudienceCeiling(
+            storedParentTraceContext.decision,
+            liveAudience,
+            forwardedTracePolicy,
+          ),
+        };
 
   switch (input.target.kind) {
     case "local":
@@ -657,9 +672,7 @@ export async function startSubagent(input: {
         batchEvent: input.batchEvent,
         bundle: input.bundle,
         callbackBaseUrl: input.callbackBaseUrl,
-        originAudience:
-          forwardedTracePolicy?.originAudience ??
-          normalizeChannelAudience(input.channelMetadata?.metadata.audience),
+        originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
         currentSession: input.currentSession,
         dynamicRemoteAgent: input.target.dynamicRemoteAgent,
         initiatorAuth: input.initiatorAuth,

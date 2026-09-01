@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyLiveDeliveryAudienceCeiling,
   decisionToTraceContentCeiling,
   readForwardedTraceAssertion,
   resolveForwardedTraceSeed,
@@ -70,6 +71,27 @@ describe("resolveForwardedTraceSeed", () => {
       decision: { action: "drop" },
       forwardedTracePolicy: undefined,
       traceFlags: 0,
+    });
+  });
+});
+
+describe("applyLiveDeliveryAudienceCeiling", () => {
+  const decision = { action: "record", recordInputs: true, recordOutputs: true } as const;
+  const forwardedTracePolicy = {
+    ceiling: { recordInputs: true, recordOutputs: true },
+    originAudience: "public",
+  } as const;
+
+  it.each([
+    ["unknown", forwardedTracePolicy, true],
+    ["public", forwardedTracePolicy, true],
+    ["private", forwardedTracePolicy, false],
+    ["private", undefined, false],
+  ] as const)("handles the %s delivery audience", (audience, policy, recordsContent) => {
+    expect(applyLiveDeliveryAudienceCeiling(decision, audience, policy)).toEqual({
+      action: "record",
+      recordInputs: recordsContent,
+      recordOutputs: recordsContent,
     });
   });
 });

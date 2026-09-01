@@ -36,7 +36,10 @@ import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
-import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
+import {
+  applyLiveDeliveryAudienceCeiling,
+  resolveForwardedTraceSeed,
+} from "#shared/forwarded-trace-policy.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import { suppressTracing } from "#tracing/suppress-tracing.js";
@@ -175,19 +178,19 @@ export function createAgentOtelInstrumentation(
           };
     return instrumentationEventForTraceDecision(
       normalizedEvent,
-      decision.action === "drop"
-        ? decision
-        : {
-            action: "record",
-            recordInputs: recordInputs && decision.recordInputs,
-            recordOutputs: recordOutputs && decision.recordOutputs,
-          },
+      applyLiveDeliveryAudienceCeiling(
+        decision.action === "drop"
+          ? decision
+          : {
+              action: "record",
+              recordInputs: recordInputs && decision.recordInputs,
+              recordOutputs: recordOutputs && decision.recordOutputs,
+            },
+        audience,
+        eventTraceState?.forwardedTracePolicy ?? contextTraceState?.forwardedTracePolicy,
+      ),
       audience,
-      {
-        applyAudienceCeiling:
-          eventTraceState?.forwardedTracePolicy === undefined &&
-          contextTraceState?.forwardedTracePolicy === undefined,
-      },
+      { applyAudienceCeiling: false },
     );
   };
 

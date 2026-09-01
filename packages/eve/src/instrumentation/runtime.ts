@@ -3,10 +3,7 @@ import { context as otelContext, trace } from "#compiled/@opentelemetry/api/inde
 
 import type { InstrumentationEvents } from "#public/instrumentation/index.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
-import {
-  applyAudienceCeiling,
-  shouldCaptureInstrumentationContent,
-} from "#shared/instrumentation-content.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
 import type {
   InstrumentationAttemptScope,
   InstrumentationContextRunner,
@@ -71,6 +68,7 @@ import {
   readInstrumentationDecision,
 } from "#shared/instrumentation-decision.js";
 import {
+  applyLiveDeliveryAudienceCeiling,
   type ForwardedTraceAssertion,
   formatTraceContentCeiling,
   readForwardedTraceAssertion,
@@ -336,9 +334,13 @@ export function bindInstrumentationRuntime(
         const audience = normalizeChannelAudience(channel?.metadata.audience);
         const capturesContent = shouldCaptureInstrumentationContent(audience);
         const effectiveDecision =
-          decision === undefined || sessionContext.forwardedTracePolicy !== undefined
+          decision === undefined
             ? decision
-            : applyAudienceCeiling(decision, audience);
+            : applyLiveDeliveryAudienceCeiling(
+                decision,
+                audience,
+                sessionContext.forwardedTracePolicy,
+              );
         const capturesRuntimeContextInput =
           effectiveDecision === undefined
             ? capturesContent
@@ -526,10 +528,11 @@ export function initializeSessionInstrumentation(input: {
 }): void {
   const runtime = getInstrumentationRuntime();
   const channel = input.ctx.get(ChannelInstrumentationKey);
-  const audience = normalizeChannelAudience(channel?.metadata.audience);
   const forwardedTracePolicy = readForwardedTraceAssertion(
     input.parentTraceContext?.forwardedTracePolicy,
   );
+  const audience =
+    forwardedTracePolicy?.originAudience ?? normalizeChannelAudience(channel?.metadata.audience);
   const traceSeed = allocateSessionTraceSeed({
     agentName: input.agentName,
     audience,

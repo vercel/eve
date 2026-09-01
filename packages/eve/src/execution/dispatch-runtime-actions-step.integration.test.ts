@@ -657,7 +657,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       false,
       null,
       undefined,
-      "unknown",
+      "private",
     );
 
     const result = await dispatchRuntimeActionsStep({
@@ -666,10 +666,10 @@ describe("dispatchRuntimeActionsStep child starts", () => {
       parentWritable: createWritable(),
       serializedContext: {
         [SessionTraceSeedKey.name]: {
-          decision: { action: "record", recordInputs: false, recordOutputs: true },
+          decision: { action: "record", recordInputs: true, recordOutputs: true },
           forwardedTracePolicy: {
-            ceiling: { recordInputs: false, recordOutputs: true },
-            originAudience: "private",
+            ceiling: { recordInputs: true, recordOutputs: true },
+            originAudience: "public",
           },
           spanId: "3".repeat(16),
           traceFlags: 1,
@@ -701,12 +701,12 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(result.results).toEqual([]);
     expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        originAudience: "private",
+        originAudience: "public",
         parentTraceContext: expect.objectContaining({
-          decision: { action: "record", recordInputs: false, recordOutputs: true },
+          decision: { action: "record", recordInputs: false, recordOutputs: false },
           forwardedTracePolicy: {
-            ceiling: { recordInputs: false, recordOutputs: true },
-            originAudience: "private",
+            ceiling: { recordInputs: true, recordOutputs: true },
+            originAudience: "public",
           },
           isRemote: false,
           spanId: actionSpanId,

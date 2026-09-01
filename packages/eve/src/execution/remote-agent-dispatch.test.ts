@@ -605,6 +605,31 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     });
   });
 
+  it("serializes the current delivery-effective decision as the next ceiling", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      auth: CURRENT_AUTH,
+      callbackBaseUrl: "https://caller.example.com",
+      initiatorAuth: INITIATOR_AUTH,
+      originAudience: "public",
+      parentTraceContext: {
+        decision: { action: "record", recordInputs: false, recordOutputs: false },
+        spanId: "2".repeat(16),
+        traceFlags: 1,
+        traceId: "1".repeat(32),
+      },
+      remote: { ...createRemoteAgent(), forwardPrincipal: true },
+      session: createSession(),
+    });
+
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
+      baggage: "eve.audience=public;ceiling=i0o0",
+    });
+  });
+
   it("uses unsampled trace flags as the only propagated drop signal", async () => {
     const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
     vi.stubGlobal("fetch", fetchMock);

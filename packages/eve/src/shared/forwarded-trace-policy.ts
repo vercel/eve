@@ -1,4 +1,5 @@
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { applyAudienceCeiling } from "#shared/instrumentation-content.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import {
   DROP_INSTRUMENTATION,
@@ -51,6 +52,18 @@ export function traceContentCeilingToDecision(
 
 export function formatTraceContentCeiling(ceiling: TraceContentCeiling): string {
   return `i${ceiling.recordInputs ? "1" : "0"}o${ceiling.recordOutputs ? "1" : "0"}`;
+}
+
+/** Applies a distinct live delivery audience without re-capping callback or origin delivery. */
+export function applyLiveDeliveryAudienceCeiling(
+  decision: InstrumentationDecision,
+  liveAudience: ChannelAudience,
+  forwardedTracePolicy: ForwardedTraceAssertion | undefined,
+): InstrumentationDecision {
+  return forwardedTracePolicy !== undefined &&
+    (liveAudience === "unknown" || liveAudience === forwardedTracePolicy.originAudience)
+    ? decision
+    : applyAudienceCeiling(decision, liveAudience);
 }
 
 export function readForwardedTraceAssertion(value: unknown): ForwardedTraceAssertion | undefined {

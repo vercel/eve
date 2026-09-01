@@ -940,6 +940,39 @@ describe("createAgentOtelInstrumentation", () => {
     );
   });
 
+  it("caps forwarded content for an explicitly private delivery", async () => {
+    const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
+    const ctx = new ContextContainer();
+    const traceSeed = {
+      ...spanContext("1", "2"),
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: true },
+        originAudience: "public",
+      },
+    } as const;
+    ctx.set(SessionTraceSeedKey, traceSeed);
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runtime.projectEvent({
+          delivery: {
+            channelAudience: "private",
+            channelKind: "channel:slack",
+            channelName: "slack",
+            deliveryId: "delivery-private",
+          },
+          idempotencyKey: "channel-delivery:session-1:delivery-private",
+          input: { message: "private" },
+          rootSessionId: "session-1",
+          sessionId: "session-1",
+          traceSeed,
+          type: "channel.delivery.started",
+        }),
+      ),
+    ).resolves.toMatchObject({ input: undefined });
+  });
+
   it("normalizes an event-carried drop before opening its session span", async () => {
     const runtime = createRuntime(new InMemoryAgentTraceStateStore(), null);
     const ctx = new ContextContainer();

@@ -158,14 +158,14 @@ describe("eveChannel forwarded principal → runtime principal", () => {
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("private");
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
     expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: false },
       originAudience: "private",
     });
 
     setChannelContext(ctx, { ...run.adapter, state: { persisted: true } });
-    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("private");
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
     ctx.set(SessionTraceSeedKey, {
       decision: { action: "record", recordInputs: true, recordOutputs: false },
       forwardedTracePolicy: {

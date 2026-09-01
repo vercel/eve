@@ -75,11 +75,12 @@ function initializeRemoteSession(
   tracePolicy: TraceCapturePolicy,
   input: {
     readonly ceiling?: { readonly recordInputs: boolean; readonly recordOutputs: boolean };
+    readonly liveAudience?: "private" | "public" | "unknown";
     readonly originAudience?: "private" | "public" | "unknown";
   } = {},
 ): ContextContainer {
   const originAudience = input.originAudience ?? "public";
-  const ctx = createContext(originAudience);
+  const ctx = createContext(input.liveAudience ?? originAudience);
   registerInstrumentationRuntime({
     ...createRuntime({ capturesContent: true, publish: vi.fn() }, tracePolicy),
     idGenerator: new AgentSpanIdGenerator(),
@@ -140,6 +141,34 @@ describe("initializeSessionInstrumentation", () => {
     ).toMatchObject({ recordInputs: true, recordOutputs: true });
   });
 
+  it.each([
+    ["unknown", true],
+    ["private", false],
+  ] as const)(
+    "applies the live %s delivery audience independently from a public origin",
+    async (deliveryAudience, recordsContent) => {
+      const ctx = initializeRemoteSession(() => true);
+      ctx.set(ChannelInstrumentationKey, {
+        kind: "channel:test",
+        metadata: { audience: deliveryAudience },
+      });
+
+      expect(
+        await readTelemetry(
+          bindSessionInstrumentation({
+            agentName: "remote-agent",
+            ctx,
+            rootSessionId: "session-1",
+            sessionId: "session-1",
+          }),
+        ),
+      ).toMatchObject({
+        recordInputs: recordsContent,
+        recordOutputs: recordsContent,
+      });
+    },
+  );
+
   it("does not let a forwarded policy override a receiver drop decision", () => {
     const ctx = initializeRemoteSession(() => false);
 
@@ -158,6 +187,7 @@ describe("initializeSessionInstrumentation", () => {
       () => ({ emit: true, recordInputs: true, recordOutputs: true }),
       {
         ceiling: { recordInputs: true, recordOutputs: false },
+        liveAudience: "unknown",
         originAudience: "private",
       },
     );

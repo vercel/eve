@@ -3399,7 +3399,7 @@ describe("runProxySubagentEventStep", () => {
     });
     expect(result.serializedContext[ChannelInstrumentationKey.name]).toMatchObject({
       metadata: {
-        audience: "private",
+        audience: "unknown",
       },
     });
 
