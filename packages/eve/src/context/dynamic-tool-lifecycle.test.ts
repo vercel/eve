@@ -45,7 +45,11 @@ import {
   stampDurableDynamicToolCallbacks,
 } from "#tools/durable-callbacks.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
-import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import {
+  createSessionStartedEvent,
+  createStepStartedEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 
 // Re-implement the naming logic here to test it independently
 // (the production function is unexported — testing via the public behavior)
@@ -365,6 +369,14 @@ function createApprovalContext(input: {
 }
 
 function makeEvent(type: string): UnstampedMessageStreamEvent {
+  if (type === "step.started") {
+    return createStepStartedEvent({
+      modelId: "test-model",
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "test-turn",
+    });
+  }
   return { type, data: {} } as UnstampedMessageStreamEvent;
 }
 
@@ -906,10 +918,12 @@ describe("dispatchDynamicToolEvent", () => {
     const resolver = createResolver("api", ["step.started"], () => ({
       query: createReplayableTool("cached"),
     }));
-    const event = {
-      type: "step.started",
-      data: { stepIndex: 1, turnId: "turn-1" },
-    } as UnstampedMessageStreamEvent;
+    const event = createStepStartedEvent({
+      modelId: "test-model",
+      sequence: 0,
+      stepIndex: 1,
+      turnId: "turn-1",
+    });
 
     await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
     ctx.clearVirtualContext();
@@ -933,7 +947,12 @@ describe("dispatchDynamicToolEvent", () => {
       ctx,
       resolvers: [resolver],
       messages: [],
-      event: makeEvent("step.started"),
+      event: createStepStartedEvent({
+        modelId: "test-model",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "test-turn",
+      }),
     });
     expect(buildDynamicTools(ctx)[0]!.description).toBe("call 1");
 
@@ -941,7 +960,12 @@ describe("dispatchDynamicToolEvent", () => {
       ctx,
       resolvers: [resolver],
       messages: [],
-      event: makeEvent("step.started"),
+      event: createStepStartedEvent({
+        modelId: "test-model",
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "test-turn",
+      }),
     });
     expect(buildDynamicTools(ctx)).toHaveLength(1);
     expect(buildDynamicTools(ctx)[0]!.description).toBe("call 2");

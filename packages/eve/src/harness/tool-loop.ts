@@ -896,11 +896,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         : effectiveStepInput;
 
     const approvalContext = contextStorage.getStore();
-    const needsResponseAuthorizationTools = shouldPrepareApprovalPolicyTools({
-      session,
-      stepInput: effectiveStepInput,
-    });
-    let responseAuthorizationTools = config.tools;
     if (
       shouldPrepareApprovalReplayTools({ session, stepInput: effectiveStepInput }) &&
       approvalContext !== undefined &&
@@ -917,12 +912,16 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: projectHistory(resolvedRuntimeActions.messages, session.state),
       });
     }
-    if (needsResponseAuthorizationTools) {
-      responseAuthorizationTools = buildResponseAuthorizationTools({
-        authoredTools: config.tools,
-        context: approvalContext,
-      });
-    }
+    // Only persisted policy work can invoke a dynamic tool's approval.response callback.
+    const responseAuthorizationTools = shouldPrepareApprovalPolicyTools({
+      session,
+      stepInput: effectiveStepInput,
+    })
+      ? buildResponseAuthorizationTools({
+          authoredTools: config.tools,
+          context: approvalContext,
+        })
+      : config.tools;
     const coordinated = await coordinateApprovalDelivery({
       session,
       stepInput: effectiveStepInput,

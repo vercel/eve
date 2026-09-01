@@ -18,7 +18,11 @@ import {
 import { buildResolveContext } from "#context/dynamic-resolve-context.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createLogger } from "#internal/logging.js";
-import type { SessionStartedStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
+import type {
+  SessionStartedStreamEvent,
+  StepStartedStreamEvent,
+  UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { ALLOWED_DYNAMIC_TOOL_EVENTS } from "#dynamic/definition.js";
 import { isBrandedToolEntry, type DynamicToolEntry } from "#tools/dynamic.js";
 import {
@@ -291,37 +295,30 @@ const resolvedStepTools = new WeakMap<
   { readonly coordinate: string; readonly metadata: readonly CurrentDynamicToolMetadata[] }
 >();
 
-function stepCoordinate(event: UnstampedMessageStreamEvent): string | undefined {
-  const data = ("data" in event ? event.data : undefined) as
-    | { readonly stepIndex?: unknown; readonly turnId?: unknown }
-    | undefined;
-  return typeof data?.turnId === "string" && typeof data.stepIndex === "number"
-    ? `${data.turnId}:${String(data.stepIndex)}`
-    : undefined;
+function stepCoordinate(event: StepStartedStreamEvent): string {
+  return `${event.data.turnId}:${String(event.data.stepIndex)}`;
 }
 
 function storeResolvedStepTools(input: {
   readonly ctx: AlsContext;
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: StepStartedStreamEvent;
   readonly metadata: readonly CurrentDynamicToolMetadata[];
 }): void {
   input.ctx.set(StepDynamicToolMetadataKey, input.metadata);
   const coordinate = stepCoordinate(input.event);
-  if (coordinate !== undefined) {
-    resolvedStepTools.set(input.ctx, { coordinate, metadata: input.metadata });
-  }
+  resolvedStepTools.set(input.ctx, { coordinate, metadata: input.metadata });
 }
 
 /** Resolves step-scoped tools once for one internal policy/model pass. */
 export async function resolveStepDynamicTools(input: {
   readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: StepStartedStreamEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const coordinate = stepCoordinate(input.event);
   const cached = resolvedStepTools.get(input.ctx);
-  if (coordinate !== undefined && cached?.coordinate === coordinate) {
+  if (cached?.coordinate === coordinate) {
     input.ctx.set(StepDynamicToolMetadataKey, cached.metadata);
     return;
   }
@@ -340,7 +337,7 @@ export async function resolveStepDynamicTools(input: {
 export async function preparePersistedStepDynamicToolMetadata(input: {
   readonly ctx: AlsContext;
   readonly resolvers: readonly ResolvedDynamicToolResolver[];
-  readonly event: UnstampedMessageStreamEvent;
+  readonly event: StepStartedStreamEvent;
   readonly messages: readonly ModelMessage[];
 }): Promise<void> {
   const persisted = input.ctx.get(StepDynamicToolMetadataKey) ?? [];
@@ -372,7 +369,7 @@ export async function dispatchDynamicToolEvent(input: {
 }): Promise<void> {
   if (!ALLOWED_DYNAMIC_TOOL_EVENTS.has(input.event.type)) return;
   if (input.event.type === "step.started") {
-    await resolveStepDynamicTools(input);
+    await resolveStepDynamicTools({ ...input, event: input.event });
     return;
   }
 
