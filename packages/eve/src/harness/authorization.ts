@@ -40,6 +40,11 @@ import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connect
 import type { JsonValue } from "#shared/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
+import {
+  clearPendingAuthorizationState,
+  readPendingAuthorizationState,
+  writePendingAuthorizationState,
+} from "#harness/hitl/request-ledger.js";
 
 const AUTHORIZATION_BRAND = "__eveAuthorization" as const;
 const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
@@ -299,8 +304,6 @@ export const CallbackBaseUrlKey = new ContextKey<string>("eve.callbackBaseUrl");
 // Session state persistence (internal — used by framework only)
 // ---------------------------------------------------------------------------
 
-const PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
-
 export interface PendingAuthorizationState {
   readonly challenges: readonly AuthorizationChallenge[];
 }
@@ -312,12 +315,9 @@ export function setPendingAuthorization(
   const active = resolveActiveAuthorizationChallenges(value.challenges);
   const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
   const superseded = getSupersededAuthorizationChallenges(sessionState, active);
-  return {
-    ...sessionState,
-    [PENDING_AUTHORIZATION_KEY]: {
-      challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
-    },
-  };
+  return writePendingAuthorizationState(sessionState, {
+    challenges: [...previous.filter((challenge) => !superseded.includes(challenge)), ...active],
+  });
 }
 
 /** Keeps the last challenge for each authorization name and principal scope. */
@@ -364,9 +364,7 @@ export function clearPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
   attemptIds?: readonly string[],
 ): Record<string, unknown> | undefined {
-  if (sessionState === undefined || sessionState[PENDING_AUTHORIZATION_KEY] === undefined) {
-    return sessionState;
-  }
+  if (getPendingAuthorization(sessionState) === undefined) return sessionState;
 
   if (attemptIds !== undefined) {
     if (attemptIds.length === 0) return sessionState;
@@ -377,27 +375,22 @@ export function clearPendingAuthorization(
       const challenges = pending.challenges.filter(
         (challenge) => !completedAttemptIds.has(challenge.attemptId ?? challenge.name),
       );
+      if (challenges.length === pending.challenges.length) return sessionState;
       if (challenges.length > 0) {
-        return {
-          ...sessionState,
-          [PENDING_AUTHORIZATION_KEY]: { challenges },
-        };
+        return writePendingAuthorizationState(sessionState, { challenges });
       }
     }
   }
 
-  const state = { ...sessionState };
-  delete state[PENDING_AUTHORIZATION_KEY];
-  return Object.keys(state).length > 0 ? state : undefined;
+  return clearPendingAuthorizationState(sessionState);
 }
 
 export function getPendingAuthorization(
   sessionState: Record<string, unknown> | undefined,
 ): PendingAuthorizationState | undefined {
-  if (!sessionState) return undefined;
-  const v = sessionState[PENDING_AUTHORIZATION_KEY];
-  if (typeof v !== "object" || v === null) return undefined;
-  return v as PendingAuthorizationState;
+  const value = readPendingAuthorizationState(sessionState);
+  if (typeof value !== "object" || value === null) return undefined;
+  return value as PendingAuthorizationState;
 }
 
 export function hasPendingAuthorization(

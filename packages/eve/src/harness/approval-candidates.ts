@@ -1,8 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { SessionStateMap } from "#harness/types.js";
-
-const APPROVAL_STATE_KEY = "eve.runtime.hitl.approvalState";
+import {
+  readApprovalAttemptState,
+  writeApprovalAttemptState,
+} from "#harness/hitl/request-ledger.js";
 
 export type ApprovalCandidateStatus =
   | "pending"
@@ -398,7 +400,7 @@ function sameResponder(
 }
 
 function readApprovalState(state: SessionStateMap | undefined): DurableApprovalState {
-  const value = state?.[APPROVAL_STATE_KEY];
+  const value = readApprovalAttemptState(state);
   if (typeof value !== "object" || value === null) {
     return {
       activeCandidates: {},
@@ -438,5 +440,5 @@ function writeApprovalState(
   state: SessionStateMap | undefined,
   approvalState: DurableApprovalState,
 ): SessionStateMap {
-  return { ...state, [APPROVAL_STATE_KEY]: approvalState };
+  return writeApprovalAttemptState(state, approvalState);
 }

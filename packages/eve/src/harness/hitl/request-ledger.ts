@@ -7,6 +7,8 @@ import type { InputRequest } from "#shared/input.js";
 const KEY = "eve.runtime.hitl.requestLedger";
 const LEGACY_BATCHES_KEY = "eve.runtime.pendingInputBatches";
 const LEGACY_BATCH_KEY = "eve.runtime.pendingInputBatch";
+const LEGACY_APPROVAL_STATE_KEY = "eve.runtime.hitl.approvalState";
+const LEGACY_PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
 
 export interface RequestRecord {
   readonly groupId: string;
@@ -26,7 +28,9 @@ export interface RequestGroup {
 }
 
 export interface RequestLedger {
+  readonly approvalState?: unknown;
   readonly groups: readonly RequestGroup[];
+  readonly pendingAuthorization?: unknown;
   readonly requests: readonly RequestRecord[];
   readonly version: number;
 }
@@ -68,14 +72,56 @@ export function writeRequestLedger(input: {
   if (current.version !== input.expectedVersion) throw new RequestLedgerConflictError();
   assertUniqueRequestIds(input.requests);
   const state = { ...input.session.state };
+  delete state[LEGACY_APPROVAL_STATE_KEY];
   delete state[LEGACY_BATCH_KEY];
   delete state[LEGACY_BATCHES_KEY];
+  delete state[LEGACY_PENDING_AUTHORIZATION_KEY];
   state[KEY] = {
+    ...current,
     groups: input.groups,
     requests: input.requests,
     version: current.version + 1,
   } satisfies RequestLedger;
   return { ...input.session, state };
+}
+
+export function readApprovalAttemptState(state: SessionStateMap | undefined): unknown {
+  const ledger = state?.[KEY] as RequestLedger | undefined;
+  return ledger?.approvalState ?? state?.[LEGACY_APPROVAL_STATE_KEY];
+}
+
+export function writeApprovalAttemptState(
+  state: SessionStateMap | undefined,
+  approvalState: unknown,
+): SessionStateMap {
+  return writeLedgerExtension(state, { approvalState }, [LEGACY_APPROVAL_STATE_KEY]);
+}
+
+export function readPendingAuthorizationState(state: SessionStateMap | undefined): unknown {
+  const ledger = state?.[KEY] as RequestLedger | undefined;
+  return ledger?.pendingAuthorization ?? state?.[LEGACY_PENDING_AUTHORIZATION_KEY];
+}
+
+export function writePendingAuthorizationState(
+  state: SessionStateMap | undefined,
+  pendingAuthorization: unknown,
+): SessionStateMap {
+  return writeLedgerExtension(state, { pendingAuthorization }, [LEGACY_PENDING_AUTHORIZATION_KEY]);
+}
+
+export function clearPendingAuthorizationState(
+  state: SessionStateMap | undefined,
+): SessionStateMap | undefined {
+  if (readPendingAuthorizationState(state) === undefined) return state;
+  const ledger = readRequestLedger(state);
+  const next = { ...ledger };
+  delete next.pendingAuthorization;
+  const result: Record<string, unknown> = {
+    ...state,
+    [KEY]: { ...next, version: ledger.version + 1 },
+  };
+  delete result[LEGACY_PENDING_AUTHORIZATION_KEY];
+  return Object.keys(result).length === 0 ? undefined : result;
 }
 
 export function createRequestGroup(input: {
@@ -200,7 +246,27 @@ function importLegacyBatches(state: SessionStateMap | undefined): RequestLedger 
     };
   });
   assertUniqueRequestIds(requests);
-  return { groups, requests, version: 0 };
+  return {
+    approvalState: state?.[LEGACY_APPROVAL_STATE_KEY],
+    groups,
+    pendingAuthorization: state?.[LEGACY_PENDING_AUTHORIZATION_KEY],
+    requests,
+    version: 0,
+  };
+}
+
+function writeLedgerExtension(
+  state: SessionStateMap | undefined,
+  extension: Pick<RequestLedger, "approvalState" | "pendingAuthorization">,
+  legacyKeys: readonly string[],
+): SessionStateMap {
+  const ledger = readRequestLedger(state);
+  const result: Record<string, unknown> = {
+    ...state,
+    [KEY]: { ...ledger, ...extension, version: ledger.version + 1 },
+  };
+  for (const key of legacyKeys) delete result[key];
+  return result;
 }
 
 function assertUniqueRequestIds(requests: readonly RequestRecord[]): void {

@@ -113,3 +113,51 @@ describe("request ledger", () => {
     });
   });
 });
+
+describe("request ledger extension migration", () => {
+  it("reads legacy approval-attempt state and removes its key on write", async () => {
+    const { getApprovalAuditState, settleDirectApprovalResponse } =
+      await import("#harness/approval-candidates.js");
+    const actor = {
+      attributes: {},
+      authenticator: "test",
+      principalId: "user-1",
+      principalType: "user",
+    };
+    const legacy = {
+      "eve.runtime.hitl.approvalState": {
+        activeCandidates: {},
+        candidateHistory: [],
+        nextCandidateSequence: 0,
+        settlements: {},
+      },
+    };
+    expect(getApprovalAuditState(legacy).settlements).toEqual([]);
+
+    const settled = settleDirectApprovalResponse({
+      actor,
+      outcome: "allowed",
+      requestId: "request-1",
+      settledAt: 1,
+      state: legacy,
+    });
+    expect(settled.state).not.toHaveProperty("eve.runtime.hitl.approvalState");
+    expect(getApprovalAuditState(settled.state).settlements).toHaveLength(1);
+  });
+
+  it("reads legacy Authorization state and removes its key on write", async () => {
+    const { getPendingAuthorization, setPendingAuthorization } =
+      await import("#harness/authorization.js");
+    const challenge = {
+      challenge: { url: "https://example.com" },
+      hookUrl: "https://example.com/callback",
+      name: "linear",
+    } as const;
+    const legacy = { "eve.runtime.pendingAuthorization": { challenges: [challenge] } };
+    expect(getPendingAuthorization(legacy)?.challenges).toEqual([challenge]);
+
+    const migrated = setPendingAuthorization(legacy, { challenges: [challenge] });
+    expect(migrated).not.toHaveProperty("eve.runtime.pendingAuthorization");
+    expect(getPendingAuthorization(migrated)?.challenges).toEqual([challenge]);
+  });
+});
