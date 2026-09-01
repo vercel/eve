@@ -1449,6 +1449,50 @@ describe("createAgentOtelInstrumentation", () => {
     expect(audiences.get("invoke_agent weather")).toBe("private");
   });
 
+  it("carries the channel audience on the tool execution context", async () => {
+    const runtime = createRuntime();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-1:turn-1:0:0",
+      attemptIndex: 0,
+      channelAudience: "private",
+      functionId: "weather",
+      sessionId: "session-1",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    await publishTurnStarted({
+      channelAudience: "private",
+      hooks: runtime.hooks,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      callId: "tool-1",
+      idempotencyKey: "tool:session-1:turn-1:tool-1",
+      input: { city: "SF" },
+      scope,
+      toolName: "weather",
+      type: "tool.call.started",
+    });
+
+    const withSpy = vi.spyOn(context, "with");
+    await runtime.runInContext(
+      { idempotencyKey: "tool:session-1:turn-1:tool-1", scope, type: "tool.call" },
+      async () => undefined,
+    );
+
+    expect(withSpy).toHaveBeenCalledOnce();
+    expect(channelAudienceFromContext(withSpy.mock.calls[0]![0])).toBe("private");
+    withSpy.mockRestore();
+  });
+
   it("does not create approval spans for other input requests", async () => {
     const runtime = createRuntime();
     const scope: InstrumentationAttemptScope = {
