@@ -17,10 +17,11 @@ model/tool step.
 
 The fixed cost comes from the durable topology. An ordinary root turn starts a child Workflow
 run, crosses five explicit step boundaries for full settlement, creates private hooks, writes
-8–9 stream chunks, resumes the session driver twice, and carries the full session snapshot
-through multiple persisted values. Two of those steps perform no work for a root session. Every
-additional model/tool cycle schedules another `turnStep` and awaits another Workflow attributes
-write.
+8–9 stream chunks, resumes the session driver twice, and carries the full session snapshot through
+multiple persisted values. Workflow already group-commits adjacent stream chunks at the World
+boundary, so chunk count is not equivalent to persistence-request count. Two of the explicit
+steps perform no work for a root session. Every additional model/tool cycle schedules another
+`turnStep` and awaits another Workflow attributes write.
 
 This proposal makes performance measurable before changing the topology, then tests three levels
 of improvement:
@@ -139,7 +140,7 @@ client delivery
         │     ├─ claim cancellation hook
         │     ├─ turnStep × model/tool cycles
         │     │  ├─ rebuild context, bundle, harness, and tools
-        │     │  ├─ await each protocol stream write
+        │     │  ├─ enqueue each ordered protocol stream chunk
         │     │  └─ await Workflow attributes update
         │     ├─ terminal control-send step
         │     └─ dispose private hooks
@@ -282,9 +283,41 @@ attribute event to the world, so best-effort error handling does not make it non
 A/B the stress and 1/2/4/8-step cases with the write disabled. If material, aggregate token/model
 attributes and persist them once at turn settlement, or attach them to an existing durable event.
 
-Likewise measure the 8–9 individually awaited protocol stream writes in a simple turn. Keep text
-and tool output streaming immediate, but prototype coalescing adjacent lifecycle-only events into
-2–3 flushes. Event order and the final response boundary must remain identical.
+The stream-write audit does not currently justify an eve runtime change. eve already coalesces
+adjacent text, reasoning, tool-input, and tool-partial events in its bounded ordered emitter.
+Workflow `@workflow/core@5.0.0-beta.43` then acknowledges `writer.write()` when a chunk enters its
+bounded buffer and group-commits buffered chunks with `world.streams.writeMulti`. The Vercel World
+implementation (`@workflow/world-vercel@5.0.0-beta.39`) preserves each chunk boundary inside that
+single request. `writer.close()` drains pending writes before closing, and the step executor adopts
+the same drain barrier when eve releases the writer lock to park.
+
+A controlled probe against the installed Workflow stream implementation used eight ordered chunks
+and a mocked World with 20–40 ms write latency:
+
+| Write pattern                       | World data writes          | Close writes | Consequence                        |
+| ----------------------------------- | -------------------------- | -----------: | ---------------------------------- |
+| Immediate, default flush interval   | 1 `write` + 1 `writeMulti` |            1 | No leading delay                   |
+| 30 ms apart, default flush interval | 8 `write`                  |            1 | No adjacent chunks to group-commit |
+| Immediate, 5 ms flush interval      | 1 `writeMulti`             |            1 | At least 5 ms leading delay        |
+
+This is protocol-level evidence, not a hosted latency result. It disproves the assumption that
+eight awaited eve writes necessarily create eight persistence round trips. Making the global
+flush interval positive could collapse a burst to one request, but would add fixed delay to the
+first text, tool, and terminal chunk of every idle stream. That violates this experiment's
+immediate-streaming constraint.
+
+Packing several eve events into one Workflow chunk is also incorrect with the current protocol.
+Workflow reconnects by chunk index, while eve clients increment that cursor once per decoded
+event. A disconnect after the first event in a packed chunk would resume at the next chunk and
+skip the remainder. Promise concurrency would not reduce backend writes and could move lifecycle
+handlers ahead of durable event order.
+
+The narrow useful upstream primitive is a `writeMany(chunks)` or scoped `cork()`/`uncork()` that
+invokes `writeMulti` while retaining distinct chunk indexes. Before requesting it, hosted traces
+should count `workflow.stream.flush` operations, chunks per flush, buffer dwell, and chunk RTT to
+show that lifecycle bursts actually miss the existing in-flight group commit. The current
+ordering-barrier, sink-failure/drain, reconnect, rewind, and terminal-`session.waiting` tests are
+the correctness baseline for any later prototype.
 
 ### 4. Reduce child startup and control handshakes
 
