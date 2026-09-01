@@ -341,6 +341,7 @@ reports are attached to the linked GitHub Actions runs.
 | ---------------------------------------------- | ----------------------------------------------------------------------- | --------------: | -------------: | -------------: | --------------------: | ---------------: | ------------------------------- |
 | Exact benchmark control                        | [`33468124247`](https://github.com/vercel/eve/actions/runs/33468124247) |         3.042 s |        3.036 s |        3.692 s |               1.867 s |   +13.31 ms/turn | Reference                       |
 | Parallel readiness hooks                       | [`33468104562`](https://github.com/vercel/eve/actions/runs/33468104562) |         3.018 s |        2.897 s |        3.753 s |               1.867 s |   +13.80 ms/turn | Neutral on follow-up turns      |
+| Overlap retired control cleanup                | [`33470436515`](https://github.com/vercel/eve/actions/runs/33470436515) |         3.084 s |        2.977 s |        3.604 s |               1.929 s |   +13.97 ms/turn | Neutral; do not merge           |
 | Workflow SDK beta.47                           | [`33468117677`](https://github.com/vercel/eve/actions/runs/33468117677) |         4.460 s |        4.847 s |        6.422 s |               1.863 s |    +7.40 ms/turn | Reject; material regression     |
 | Remove root no-op steps                        | [`33468608676`](https://github.com/vercel/eve/actions/runs/33468608676) |         2.036 s |        2.053 s |        2.367 s |               1.584 s |    +5.17 ms/turn | Ship                            |
 | Root no-ops + attribute overlap                | [`33469404605`](https://github.com/vercel/eve/actions/runs/33469404605) |         2.009 s |        2.008 s |        2.341 s |               1.607 s |    +5.27 ms/turn | Current PR candidate            |
@@ -432,6 +433,33 @@ not as interleaved base/head blocks, and isolated maxima remained noisy: experim
 2 recorded a 6.373-second concurrent first-turn batch against the control's 6.282 seconds. The
 p50 and p95 improved in both experiment runs, but the dedicated paired benchmark remains the proof
 gate for shipping.
+
+#### Retired control-cleanup result: neutral
+
+The isolated `barba/perf-exp-terminal-overlap` branch started turn N's deferred control-hook
+disposal as soon as turn N+1 settled, overlapped it with independent parent settlement, and joined
+both before the driver parked or returned. It retained cleanup-first error precedence and did not
+overlap the active child's cancellation-hook disposal with terminal publication. Twenty-six
+focused Workflow/cancellation integrations passed.
+
+Hosted run [`33470436515`](https://github.com/vercel/eve/actions/runs/33470436515), with raw report
+[artifact `9786485510`](https://github.com/vercel/eve/actions/runs/33470436515/artifacts/9786485510),
+did not show a material improvement against the exact control:
+
+| Metric                      |       Control | Overlap branch | Delta |
+| --------------------------- | ------------: | -------------: | ----: |
+| Sequential mean             |       3.042 s |        3.084 s | +1.4% |
+| Sequential p50              |       3.036 s |        2.977 s | −1.9% |
+| Sequential p95              |       3.692 s |        3.604 s | −2.4% |
+| Concurrent second-turn p50  |       1.867 s |        1.929 s | +3.3% |
+| Sequential turn-order slope | 13.31 ms/turn |  13.97 ms/turn | +4.9% |
+
+The mixed signs and low-single-digit changes are hosted noise, while concurrent second-turn p95
+also produced an isolated 7.958-second outlier. Do not add another stateful cleanup abstraction for
+this result. The branch conflicts in the same hot loop with the inline/root combination, and root
+caller-step removal leaves even less independent settlement work available to hide cleanup behind.
+Keep the existing durable ordering and focus on eliminating boundaries rather than rearranging
+this one.
 
 ### 3. Reduce observability-only work in each step
 
@@ -806,6 +834,32 @@ provide equivalent semantics, but then eve owns a new storage protocol, retry/fe
 stream directory. Prototype that only if Workflow cannot expose the atomic operation. Even with
 either handoff, append-only history revisions or delta snapshots remain a separate requirement to
 remove the growing successor-input payload.
+
+## Decisions and next work
+
+Ship the measurement/reporting increment, root no-op removal, and joined attribute overlap in the
+current PR. The root change is independently reproduced, clears the 30% target, reduces exact
+durable step count, and preserves the delegated path. Keep reporting informational until paired
+base/head calibration is complete.
+
+Do not ship the SDK beta.47 update, polling child return, terminal attribute coalescing, stream
+packing, hook coalescing, retired-cleanup overlap, inline root turn, or sequencer successor. The
+first six are negative, unsafe, or neutral on measured evidence; the final two prove the latency
+ceiling but omit required semantics.
+
+Proceed in this order:
+
+1. land the dedicated paired benchmark and phase counters so future PRs compare immutable base and
+   head deployments rather than unrelated hosted samples;
+2. take the Workflow team a minimal resume/child round-trip reproducer plus the beta.43/beta.47
+   artifact pair;
+3. specify the atomic successor/hook-ownership transfer primitive, since removing the parent/child
+   topology has the only reproduced path to sub-second p50 without relying on model changes;
+4. prototype append-only history revisions or delta snapshots behind that bounded executor;
+5. request non-polling child completion, hook token aliases, idempotent attribute writes,
+   cursor-preserving `writeMany`, and a public step-lifetime `waitUntil` as independent primitives;
+6. retain the current child topology until the successor prototype passes FIFO, retry, crash,
+   cancellation, authorization, HITL, task/subagent, latest-deployment, and stream-resume suites.
 
 ## Proof of success
 
