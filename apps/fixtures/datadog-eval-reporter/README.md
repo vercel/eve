@@ -1,16 +1,18 @@
 # Datadog eval reporter fixture
 
-This deterministic mock-model eval uses the no-op Datadog reporter and exports
-its runtime trace through the standard OTLP environment variables:
+This deterministic mock-model app exercises the Datadog eval reporter against
+`dd-trace@6.13.0`.
 
 ```bash
-export DATADOG_API_KEY="..."
-export OTEL_EXPORTER_OTLP_TRACES_PROTOCOL="http/protobuf"
-export OTEL_EXPORTER_OTLP_TRACES_ENDPOINT="https://otlp.datadoghq.com/v1/traces"
-export OTEL_EXPORTER_OTLP_TRACES_HEADERS="dd-api-key=${DATADOG_API_KEY},dd-otlp-source=llmobs"
+export DD_API_KEY="..."
+export DD_APP_KEY="..."
+export DD_SITE="datadoghq.com"
 
 pnpm --filter datadog-eval-reporter-fixture eval
 ```
 
-Implement the reporter's three lifecycle placeholders to create an Experiment,
-submit each completed eval, and finalize the run.
+The run creates one Datadog LLM Observability Experiment, submits one synthetic
+experiment span for the smoke eval, attaches the assertion metrics, and prints
+the Experiment URL. The fixture does not export the agent runtime's OpenTelemetry
+spans; Datadog's external Experiment API generates the experiment row's trace
+and span identifiers.

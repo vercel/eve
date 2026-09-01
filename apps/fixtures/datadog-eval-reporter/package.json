@@ -7,8 +7,7 @@
     "eval": "eve eval --strict"
   },
   "dependencies": {
-    "@opentelemetry/sdk-trace-base": "2.6.1",
-    "@vercel/otel": "2.1.2",
+    "dd-trace": "6.13.0",
     "eve": "workspace:*"
   }
 }
