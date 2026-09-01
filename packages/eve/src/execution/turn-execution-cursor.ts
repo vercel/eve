@@ -1,5 +1,5 @@
 import type { DeliverHookPayload } from "#channel/types.js";
-import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
+import type { TurnControlPayload, TurnResultPayload } from "#execution/turn-control-protocol.js";
 import { sendTurnControlStep } from "#execution/turn-control-protocol.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type {
@@ -37,10 +37,12 @@ export class TurnExecutionCursor extends SessionStateCursor {
   readonly parentWritable: WritableStream<Uint8Array>;
 
   private lastReportedContinuationToken: string;
+  private readonly returnTerminalResult: boolean;
 
   constructor(input: {
     readonly controlToken: string;
     readonly parentWritable: WritableStream<Uint8Array>;
+    readonly returnTerminalResult?: boolean;
     readonly serializedContext: Record<string, unknown>;
     readonly sessionState: DurableSessionState;
   }) {
@@ -48,6 +50,7 @@ export class TurnExecutionCursor extends SessionStateCursor {
     this.controlToken = input.controlToken;
     this.lastReportedContinuationToken = input.sessionState.continuationToken;
     this.parentWritable = input.parentWritable;
+    this.returnTerminalResult = input.returnTerminalResult === true;
   }
 
   /** Adopts a state transition and reports any continuation-token change once. */
@@ -81,9 +84,9 @@ export class TurnExecutionCursor extends SessionStateCursor {
     transition: TurnTransition,
     action: TurnTerminalAction,
     bufferedDeliveries: readonly DeliverHookPayload[],
-  ): Promise<void> {
+  ): Promise<TurnResultPayload> {
     this.adoptState(transition);
-    await this.send({
+    const result: TurnResultPayload = {
       action: {
         ...action,
         serializedContext: this.serializedContext,
@@ -91,7 +94,9 @@ export class TurnExecutionCursor extends SessionStateCursor {
       },
       bufferedDeliveries: bufferedDeliveries.length === 0 ? undefined : [...bufferedDeliveries],
       kind: "turn-result",
-    });
+    };
+    if (!this.returnTerminalResult) await this.send(result);
+    return result;
   }
 
   /** Sends one control payload to the session driver. */

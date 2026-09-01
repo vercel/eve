@@ -8,9 +8,14 @@ import type { SessionCommandInbox, SessionInboxPayload } from "#execution/sessio
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 
 const createHookMock = vi.fn();
+const awaitTurnRunResultStepMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+}));
+
+vi.mock("./await-turn-run-result-step.js", () => ({
+  awaitTurnRunResultStep: (...args: unknown[]) => awaitTurnRunResultStepMock(...args),
 }));
 
 vi.mock("./dispatch-turn-step.js", () => ({
@@ -25,6 +30,33 @@ describe("dispatchAndAwaitTurn", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     createHookMock.mockReset();
+    awaitTurnRunResultStepMock.mockReturnValue(new Promise(() => {}));
+  });
+
+  it("settles from the child return value without a terminal control resume", async () => {
+    const state = createState("http:test");
+    createHookMock.mockReturnValue(
+      createMockHook(() => new Promise<IteratorResult<TurnControlPayload>>(() => {})),
+    );
+    awaitTurnRunResultStepMock.mockResolvedValue({
+      action: { kind: "park", serializedContext: {}, sessionState: state },
+      kind: "turn-result",
+    });
+
+    const turn = await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: { kind: "deliver", payloads: [{ message: "start" }] },
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: {},
+      sessionState: state,
+    });
+
+    expect(turn.action).toEqual({ kind: "park", serializedContext: {}, sessionState: state });
+    expect(awaitTurnRunResultStepMock).toHaveBeenCalledWith({ runId: "turn-run" });
   });
 
   it("rekeys the public hook when the active turn changes its continuation token", async () => {

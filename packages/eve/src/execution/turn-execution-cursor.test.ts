@@ -72,6 +72,35 @@ describe("TurnExecutionCursor", () => {
       },
     });
   });
+
+  it("returns a negotiated terminal transition without resuming the control hook", async () => {
+    const cursor = new TurnExecutionCursor({
+      controlToken: "turn-control",
+      parentWritable: new WritableStream<Uint8Array>(),
+      returnTerminalResult: true,
+      serializedContext: { revision: 1 },
+      sessionState: createState("slack:C1:"),
+    });
+    const finalState = createState("slack:C1:T1");
+
+    await expect(
+      cursor.finish(
+        { serializedContext: { revision: 2 }, sessionState: finalState },
+        { kind: "done", output: "ok" },
+        [],
+      ),
+    ).resolves.toEqual({
+      action: {
+        kind: "done",
+        output: "ok",
+        serializedContext: { revision: 2 },
+        sessionState: finalState,
+      },
+      bufferedDeliveries: undefined,
+      kind: "turn-result",
+    });
+    expect(sendTurnControlStep).not.toHaveBeenCalled();
+  });
 });
 
 function createState(continuationToken: string): DurableSessionState {

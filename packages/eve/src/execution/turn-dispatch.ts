@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
+import { awaitTurnRunResultStep } from "#execution/await-turn-run-result-step.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
@@ -47,7 +48,7 @@ export async function dispatchAndAwaitTurn(input: {
   });
 
   try {
-    await dispatchTurnStep({
+    const { runId } = await dispatchTurnStep({
       capabilities: input.capabilities,
       completionToken: control.token,
       delivery: input.delivery,
@@ -56,7 +57,7 @@ export async function dispatchAndAwaitTurn(input: {
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
     });
-    const action = await control.waitForAction();
+    const action = await control.waitForAction(awaitTurnRunResultStep({ runId }));
     return { action, dispose: () => control.dispose() };
   } catch (error) {
     await control.dispose();

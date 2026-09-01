@@ -13,12 +13,14 @@ export type TurnInboxPayload =
     };
 
 /** Control payloads emitted from an active turn to its session driver. */
+export interface TurnResultPayload {
+  readonly action: NextDriverAction;
+  readonly bufferedDeliveries?: readonly DeliverHookPayload[];
+  readonly kind: "turn-result";
+}
+
 export type TurnControlPayload =
-  | {
-      readonly action: NextDriverAction;
-      readonly bufferedDeliveries?: readonly DeliverHookPayload[];
-      readonly kind: "turn-result";
-    }
+  | TurnResultPayload
   | { readonly kind: "turn-error"; readonly error: unknown }
   | { readonly continuationToken: string; readonly kind: "turn-continuation-token" }
   | {

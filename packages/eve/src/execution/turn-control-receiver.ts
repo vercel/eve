@@ -2,11 +2,11 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
-import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
+import type { TurnControlPayload, TurnResultPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
-import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import {
@@ -31,6 +31,7 @@ export class TurnControlReceiver {
   private readonly cancelledTaskIds: Set<string>;
   private readonly seenTaskDeliveries: Set<string>;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
+  private pendingTerminal: Promise<TurnResultPayload | void> | null = null;
 
   constructor(input: {
     readonly bufferedDeliveries: DeliverHookPayload[];
@@ -63,9 +64,11 @@ export class TurnControlReceiver {
   }
 
   /** Services control messages until the active turn returns its terminal driver action. */
-  async waitForAction(): Promise<TurnDriverAction> {
+  async waitForAction(terminal?: Promise<TurnResultPayload | void>): Promise<TurnDriverAction> {
+    this.pendingTerminal = terminal ?? null;
     while (true) {
       const winner = await this.nextControlOrCommand();
+      if (winner.kind === "terminal") return this.readTerminalControl(winner.payload)!;
       if (winner.kind === "command") {
         const terminal = await this.handleSessionCommand(winner.command);
         if (terminal !== undefined) return terminal;
@@ -156,11 +159,28 @@ export class TurnControlReceiver {
   private async nextControlOrCommand(): Promise<
     | { readonly command: DecodedSessionInbox; readonly kind: "command" }
     | { readonly kind: "control"; readonly payload: TurnControlPayload }
+    | { readonly kind: "terminal"; readonly payload: TurnResultPayload }
   > {
-    const winner = await Promise.race([
+    const contenders: Array<
+      Promise<
+        | { readonly kind: "command"; readonly value: IteratorResult<SessionInboxPayload> }
+        | { readonly kind: "control"; readonly value: IteratorResult<TurnControlPayload> }
+        | { readonly kind: "terminal"; readonly value: TurnResultPayload | void }
+      >
+    > = [
       this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
       this.commandInbox.next().then((value) => ({ kind: "command" as const, value })),
-    ]);
+    ];
+    if (this.pendingTerminal !== null) {
+      contenders.push(this.pendingTerminal.then((value) => ({ kind: "terminal" as const, value })));
+    }
+    const winner = await Promise.race(contenders);
+
+    if (winner.kind === "terminal") {
+      this.pendingTerminal = null;
+      if (winner.value === undefined) return await this.nextControlOrCommand();
+      return { kind: "terminal", payload: winner.value };
+    }
 
     if (winner.kind === "command") {
       if (winner.value.done) {
@@ -210,48 +230,23 @@ export class TurnControlReceiver {
 
     let delivery = this.takeInputResponseDelivery();
     while (delivery === undefined) {
-      const winner = await Promise.race([
-        this.getControlPromise().then((value) => ({ kind: "control" as const, value })),
-        this.commandInbox.next().then((value) => ({ kind: "command" as const, value })),
-      ]);
+      const winner = await this.nextControlOrCommand();
+
+      if (winner.kind === "terminal") return this.readTerminalControl(winner.payload);
 
       if (winner.kind === "control") {
-        this.consumeControl();
-        if (winner.value.done) {
-          throw new Error("Turn control hook closed during a delivery request.");
-        }
-        if (winner.value.value.kind === "turn-continuation-token") {
-          await this.commandInbox.rekeyContinuation(winner.value.value.continuationToken);
-          continue;
-        }
-        const terminal = this.readTerminalControl(winner.value.value);
+        const terminal = this.readTerminalControl(winner.payload);
         if (terminal !== undefined) return terminal;
         if (
-          winner.value.value.kind === "turn-delivery-cancelled" &&
-          winner.value.value.requestId === request.requestId
+          winner.payload.kind === "turn-delivery-cancelled" &&
+          winner.payload.requestId === request.requestId
         ) {
           return undefined;
         }
         continue;
       }
 
-      if (winner.value.done) {
-        throw new Error("Session command inbox closed during a turn delivery request.");
-      }
-
-      this.commandInbox.consumeNext();
-      if (winner.value.value.kind === "runtime-action-result") {
-        continue;
-      }
-      let decoded: DecodedSessionInbox;
-      try {
-        decoded = sessionInboxWire.decode(winner.value.value);
-      } catch (error) {
-        if (!(error instanceof SessionInboxWireError)) throw error;
-        // Drop loudly and keep servicing the request; see sessionInboxWire.decode.
-        await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
-        continue;
-      }
+      const decoded = winner.command;
       if (decoded.kind === "deliver") {
         if (!this.acceptTaskDelivery(decoded)) continue;
         if (deliveryHasMessage(decoded)) {
@@ -302,6 +297,10 @@ export class TurnControlReceiver {
   ): Promise<TurnDriverAction | undefined> {
     while (true) {
       const winner = await this.nextControlOrCommand();
+      if (winner.kind === "terminal") {
+        if (!this.shouldDiscard(outstanding)) this.bufferedDeliveries.unshift(outstanding);
+        return this.readTerminalControl(winner.payload);
+      }
       if (winner.kind === "command") {
         const terminal = await this.handleSessionCommand(winner.command);
         if (terminal !== undefined) {

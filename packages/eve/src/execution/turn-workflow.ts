@@ -8,7 +8,11 @@ import {
 import type { DeliverHookPayload } from "#channel/types.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
-import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
+import {
+  sendTurnControlStep,
+  type TurnInboxPayload,
+  type TurnResultPayload,
+} from "#execution/turn-control-protocol.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
@@ -48,7 +52,7 @@ export type { TurnWorkflowInput };
  * `turn.cancelled` → `session.waiting` — never as a failure. A late or
  * guard-mismatched cancel is a benign no-op.
  */
-export async function turnWorkflow(rawInput: unknown): Promise<void> {
+export async function turnWorkflow(rawInput: unknown): Promise<TurnResultPayload | void> {
   "use workflow";
 
   const input = migrateTurnWorkflowInput(rawInput);
@@ -60,7 +64,7 @@ export async function turnWorkflow(rawInput: unknown): Promise<void> {
   return runTurnOwnedWorkflow(input);
 }
 
-async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
+async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<TurnResultPayload | void> {
   const inbox = createHook<TurnInboxPayload>({ token: `${input.completionToken}:inbox` });
   // Hook promises and iterators share one durable cursor. Create the iterator before
   // claiming so conflict replay is consumed by getConflict(), not a later iterator read.
@@ -68,6 +72,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const cursor = new TurnExecutionCursor({
     controlToken: input.completionToken,
     parentWritable: input.stepInput.parentWritable,
+    returnTerminalResult: input.driverCapabilities?.returnTerminalResult,
     serializedContext: input.stepInput.serializedContext,
     sessionState: input.stepInput.sessionState,
   });
@@ -135,8 +140,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           serializedContext: result.serializedContext,
           sessionState: result.backgroundTaskState ?? result.sessionState,
         });
-        await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
-        return;
+        return await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
       }
 
       if (
@@ -158,21 +162,19 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         // stable ID after a cancelled turn. The epilogue runs in the driver
         // (`settleCancelledTurnStep`), not as a step in this run, where queued
         // cancel wakes could re-dispatch it.
-        await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
-        return;
+        return await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
       }
 
       if (result.sleepDurationMs !== undefined) {
         const outcome = await waitForTurnSleep(result.sleepDurationMs, cancellation);
         if (outcome === "cancel") {
-          await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
-          return;
+          return await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         }
       }
 
       if (result.action === "done") {
         await cancellation?.dispose();
-        await cursor.finish(
+        return await cursor.finish(
           result,
           {
             kind: "done",
@@ -183,7 +185,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           },
           bufferedDeliveries,
         );
-        return;
       }
 
       // A pending runtime-action batch (model-driven `park` or dynamic-workflow
@@ -231,8 +232,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           continue;
         }
         if (results === "cancel-turn") {
-          await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
-          return;
+          return await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
         }
         nextStepInput = { kind: "runtime-action-result", ...results };
         continue;
@@ -247,7 +247,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
 
         await cancellation?.dispose();
-        await cursor.finish(
+        return await cursor.finish(
           result,
           {
             authorizationAttemptIds: result.authorizationAttemptIds,
@@ -257,14 +257,15 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           },
           bufferedDeliveries,
         );
-        return;
       }
 
       await cursor.adopt(result);
       nextStepInput = undefined;
     }
   } catch (error) {
-    await cursor.send({ error: normalizeSerializableError(error), kind: "turn-error" });
+    if (input.driverCapabilities?.returnTerminalResult !== true) {
+      await cursor.send({ error: normalizeSerializableError(error), kind: "turn-error" });
+    }
     throw error;
   } finally {
     // Dispose-only teardown: `iterator.return()` would await a pending
@@ -281,13 +282,13 @@ async function finishCancelledTurn(input: {
   readonly bufferedDeliveries: readonly DeliverHookPayload[];
   readonly cancellation: TurnCancellationControl | undefined;
   readonly cursor: TurnExecutionCursor;
-}): Promise<void> {
+}): Promise<TurnResultPayload> {
   await cancelDescendantTurnsStep({
     serializedContext: input.cursor.serializedContext,
     sessionState: input.cursor.sessionState,
   });
   await input.cancellation?.dispose();
-  await input.cursor.finish(
+  return await input.cursor.finish(
     { sessionState: input.cursor.sessionState },
     { cancelled: true, kind: "park" },
     input.bufferedDeliveries,

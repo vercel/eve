@@ -100,6 +100,41 @@ describe("turnWorkflow", () => {
     });
   });
 
+  it("returns the terminal action when the driver negotiates child completion", async () => {
+    const sessionState = createSessionState();
+    installInbox([]);
+    vi.mocked(turnStep).mockResolvedValueOnce({
+      action: "done",
+      output: "ok",
+      serializedContext: { state: "done" },
+      sessionState,
+    });
+
+    const { input } = createInput({
+      driverCapabilities: {
+        cancelledTurnSettle: true,
+        returnTerminalResult: true,
+        turnInbox: true,
+      },
+      sessionState,
+    });
+
+    await expect(turnWorkflow(input)).resolves.toEqual({
+      action: {
+        kind: "done",
+        output: "ok",
+        serializedContext: { state: "done" },
+        sessionState,
+      },
+      bufferedDeliveries: undefined,
+      kind: "turn-result",
+    });
+    expect(resumeHookMock).not.toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({ kind: "turn-result" }),
+    );
+  });
+
   it("migrates a pre-version (unversioned) input and runs the first turn step", async () => {
     const sessionState = createSessionState();
     const parentWritable = new WritableStream<Uint8Array>();
