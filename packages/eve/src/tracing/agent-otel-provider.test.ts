@@ -195,6 +195,7 @@ async function emitAttempt(input: {
           },
         ],
         finishReason: "tool-calls",
+        modelId: "claude-response",
         performance: { responseTimeMs: 10 },
         responseId: "response-1",
         usage: {
@@ -790,6 +791,7 @@ describe("createAgentOtelInstrumentation", () => {
       }),
     ]);
     expect(model.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
+    expect(model.kind).toBe(SpanKind.CLIENT);
     expect(
       executionParents.some(
         (parent) =>
@@ -827,10 +829,10 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.framework.name": "eve",
       "agent.model.id": "claude-test",
       "agent.model.provider": "anthropic",
+      "agent.usage.cache_read_tokens": 4,
+      "agent.usage.cache_write_tokens": 2,
       "agent.usage.input_tokens": 10,
       "agent.usage.output_tokens": 5,
-      "gen_ai.usage.cache_creation.input_tokens": 2,
-      "gen_ai.usage.cache_read.input_tokens": 4,
     });
     expect(action.attributes).toMatchObject({
       "agent.action.kind": "tool-call",
@@ -839,12 +841,12 @@ describe("createAgentOtelInstrumentation", () => {
     });
     expect(tool.kind).toBe(SpanKind.INTERNAL);
     expect(tool.attributes).toMatchObject({
+      "gen_ai.agent.name": "weather",
       "gen_ai.operation.name": "execute_tool",
       "gen_ai.tool.call.id": "tool-1",
       "gen_ai.tool.name": "weather",
       "gen_ai.tool.type": "function",
     });
-    expect(tool.attributes).not.toHaveProperty("gen_ai.agent.name");
   });
 
   it.each(["private", "unknown"] as const)(
@@ -1414,6 +1416,9 @@ describe("createAgentOtelInstrumentation", () => {
     for (const name of ["chat claude-test", "agent.action", "execute_tool weather"]) {
       const span = byName(spans, name)[0]!;
       expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
+      if (name === "chat claude-test") {
+        expect(span.attributes["gen_ai.response.finish_reasons"]).toEqual(["error"]);
+      }
       if (name !== "agent.action") expect(span.attributes["error.type"]).toBe("Error");
       expect(span.events).toContainEqual(
         expect.objectContaining({
@@ -1482,13 +1487,20 @@ describe("createAgentOtelInstrumentation", () => {
     expect(model.attributes["ai.response.text"]).toBe("Checking the weather.");
     expect(model.attributes).toMatchObject({
       "gen_ai.agent.name": "weather",
+      "gen_ai.conversation.id": "session-1",
       "gen_ai.input.messages":
         '[{"parts":[{"content":"real user text","type":"text"}],"role":"user"}]',
       "gen_ai.operation.name": "chat",
       "gen_ai.output.messages": expect.stringContaining('"finish_reason":"tool_call"'),
+      "gen_ai.response.id": "response-1",
       "gen_ai.response.finish_reasons": ["tool-calls"],
+      "gen_ai.response.model": "claude-response",
       "gen_ai.system_instructions":
         '[{"content":"You are a weather assistant (system prompt).","type":"text"}]',
+      "gen_ai.usage.cache_read.input_tokens": 4,
+      "gen_ai.usage.cache_write.input_tokens": 2,
+      "gen_ai.usage.input_tokens": 10,
+      "gen_ai.usage.output_tokens": 5,
     });
     expect(model.attributes["agent.input.messages.delta"]).toBeUndefined();
     // Provider-executed tools never reach the tool loop; their calls and

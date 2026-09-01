@@ -210,6 +210,9 @@ export function createAgentToolInstrumentation(input: {
 
 function toolAttributes(event: InstrumentationToolCallStartedEvent): Record<string, string> {
   return {
+    ...(event.scope.functionId === undefined
+      ? {}
+      : { "gen_ai.agent.name": event.scope.functionId }),
     "gen_ai.operation.name": "execute_tool",
     "gen_ai.tool.call.id": event.callId,
     "gen_ai.tool.name": event.toolName,

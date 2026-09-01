@@ -326,11 +326,13 @@ export function createAgentOtelInstrumentation(
       {
         attributes: {
           "gen_ai.agent.name": event.scope.functionId,
+          "gen_ai.conversation.id": event.scope.sessionId,
           "gen_ai.operation.name": "chat",
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
           ...runtimeContextAttributes(event.runtimeContext),
         },
+        kind: SpanKind.CLIENT,
       },
       attempt.context,
     );
@@ -358,13 +360,21 @@ export function createAgentOtelInstrumentation(
     const state = takeSpanState(modelSpans, event.scope, event.idempotencyKey);
     if (state === undefined) return;
     if (event.type === "model.call.failed") {
-      recordError(state.span, event.error);
+      recordModelError(state.span, event.error);
     } else {
       await recordTurnUsage(event);
       setAgentUsage(state.span, event.usage);
       state.span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
+      if (event.response?.id !== undefined) {
+        state.span.setAttribute("gen_ai.response.id", event.response.id);
+      }
+      if (event.response?.modelId !== undefined) {
+        state.span.setAttribute("gen_ai.response.model", event.response.modelId);
+      }
       const attempt = steps.get(event.scope);
-      if (attempt !== undefined) setAgentUsage(attempt.span, event.usage);
+      if (attempt !== undefined) {
+        setAgentUsage(attempt.span, event.usage, { includeGenAiDetails: false });
+      }
       if (recordOutputs) {
         state.span.setAttribute("ai.response.finish_reason", event.finishReason);
         const content = event.content;
@@ -545,7 +555,7 @@ export function createAgentOtelInstrumentation(
 
   function drainOpenSpans(event: InstrumentationStepAttemptTerminalEvent): void {
     for (const state of modelSpans.get(event.scope)?.values() ?? []) {
-      if (event.type === "step.attempt.failed") recordError(state.span, event.error);
+      if (event.type === "step.attempt.failed") recordModelError(state.span, event.error);
       state.span.end();
     }
     modelSpans.delete(event.scope);
@@ -664,4 +674,9 @@ function recordError(span: Span, error: unknown): void {
     span.recordException(error);
     span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
   } else span.setStatus({ code: SpanStatusCode.ERROR });
+}
+
+function recordModelError(span: Span, error: unknown): void {
+  span.setAttribute("gen_ai.response.finish_reasons", ["error"]);
+  recordError(span, error);
 }
