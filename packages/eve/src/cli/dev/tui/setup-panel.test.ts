@@ -908,11 +908,31 @@ describe("renderSelectQuestion", () => {
     expect(text).toContain(
       colorTheme.colors.inverse(colorTheme.colors.blue(colorTheme.colors.bold(" Channels (1) "))),
     );
-    expect(plain).toContain("Channels (1)  →  Integrations  ·  Review");
+    expect(plain).toContain("Channels (1)   →  Integrations  ·  Review");
     expect(plain).toContain("1 selected");
     expect(plain).toContain("space/enter toggle · → next");
     expect(plain).not.toContain("← back");
     expect(plain).not.toContain("Submit");
+  });
+
+  it("keeps the planner rail width stable as the active step changes", () => {
+    const options = [{ value: "next", label: "Continue" }];
+    const widths = PLANNER_NAVIGATION.steps.map((_, activeStep) => {
+      const [rail] = renderSelectQuestion(
+        {
+          kind: "single",
+          navigation: { ...PLANNER_NAVIGATION, activeStep },
+          message: "Continue setup",
+          options,
+          select: initialSelectState({ options }),
+        },
+        colorTheme,
+        80,
+      );
+      return stripAnsi(rail ?? "").length;
+    });
+
+    expect(new Set(widths)).toEqual(new Set([40]));
   });
 
   it("advertises only available planner directions", () => {
@@ -940,10 +960,10 @@ describe("renderSelectQuestion", () => {
       80,
     ).join("\n");
 
-    expect(review).toContain("Channels  ·  Integrations  ←  Review ");
+    expect(review).toContain("Channels  ·  Integrations  ←   Review ");
     expect(review).toContain("enter to select · ← back");
     expect(review).not.toContain("→ next");
-    expect(integrations).toContain("Channels  ←  Integrations  →  Review");
+    expect(integrations).toContain("Channels  ←   Integrations   →  Review");
     expect(integrations).toContain("space/enter toggle · ←/→ steps");
   });
 
@@ -990,7 +1010,7 @@ describe("renderSelectQuestion", () => {
       80,
     ).join("\n");
 
-    expect(text).toContain("Model  ·   Channels  →  Integrations");
+    expect(text).toContain("Model  ·   Channels   →  Integrations");
     expect(text).toContain("space/enter toggle · → next");
     expect(text).not.toContain("← back");
   });

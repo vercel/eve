@@ -459,9 +459,9 @@ function plannerStepRows(
     if (index === labels.length - 1) return [label];
     const separator =
       navigation.activeStep === index && canNavigateForward(navigation)
-        ? " →  "
+        ? "  →  "
         : navigation.activeStep === index + 1 && canNavigateBack(navigation)
-          ? "  ← "
+          ? "  ←  "
           : "  ·  ";
     return [label, theme.colors.dim(separator)];
   });
