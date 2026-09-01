@@ -32,9 +32,9 @@ const outputSchema = {
   properties: {
     status: {
       type: "string",
-      enum: ["installed", "needs-terminal"],
+      enum: ["installed", "needs-terminal", "failed"],
       description:
-        "`installed` means the item's files and dependencies are in the project. `needs-terminal` means nothing was installed.",
+        "`installed` means the item is present. `needs-terminal` means nothing was installed. `failed` means installation stopped; read `message` and `changed` before retrying.",
     },
     address: { type: "string" },
     title: { type: "string" },
@@ -46,7 +46,12 @@ const outputSchema = {
     },
     reason: {
       type: "string",
-      description: "Why the item was not installed here. Present only for `needs-terminal`.",
+      description: "Why the item was not installed here.",
+    },
+    changed: {
+      type: "array",
+      items: { type: "string" },
+      description: "Project-relative paths a failed install could not restore.",
     },
     nextCommand: {
       type: "string",
@@ -65,13 +70,14 @@ interface RegistryAddDependencies {
 /** What the tool reports back. Mirrors {@link outputSchema}. */
 export interface RegistryAddResult {
   readonly address: string;
-  /** `installed` means files and dependencies landed; `needs-terminal` means nothing did. */
-  readonly status: "installed" | "needs-terminal";
+  /** `failed` carries an explicit mutation outcome instead of implying nothing changed. */
+  readonly status: "installed" | "needs-terminal" | "failed";
   readonly message: string;
   readonly title?: string;
   readonly envVars?: readonly string[];
   readonly reason?: string;
   readonly nextCommand?: string;
+  readonly changed?: readonly string[];
 }
 
 /**
@@ -186,7 +192,14 @@ export async function addRegistryItem(
     };
   }
   if (outcome.kind === "failed") {
-    throw new Error(outcome.message);
+    return {
+      address,
+      status: "failed",
+      title: entry.title,
+      reason: outcome.message,
+      message: outcome.message,
+      ...(outcome.changed === undefined ? {} : { changed: outcome.changed }),
+    };
   }
 
   const envVars = unsetEnvVars(entry);

@@ -12,6 +12,12 @@ import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js"
 import { WizardCancelledError } from "#setup/step.js";
 
 import { hasInteractiveTerminal } from "./preconditions.js";
+import {
+  registryInstallFailureCode,
+  registryInstallFailureMessage,
+  rollbackRegistryInstall,
+  snapshotRegistryInstall,
+} from "./registry-install-transaction.js";
 import { runDeclaredSetups } from "./registry-declared-setups.js";
 import {
   errorMessage,
@@ -543,12 +549,34 @@ export async function runAddCommand(
     if (address === itemAddress("channel/web")) {
       await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
     }
-    await addRegistryItems([address], {
-      config,
-      cwd: appRoot,
-      overwrite: options.overwrite,
-      silent: options.silent,
-    });
+    const installSnapshot = await snapshotRegistryInstall(appRoot, registryItem);
+    try {
+      await addRegistryItems([address], {
+        config,
+        cwd: appRoot,
+        overwrite: options.overwrite,
+        silent: options.silent,
+      });
+    } catch (error) {
+      const rollback = await rollbackRegistryInstall(appRoot, installSnapshot);
+      const failureCode = registryInstallFailureCode(error);
+      const message = registryInstallFailureMessage(failureCode);
+      if (options.nonInteractive) {
+        logger.log(
+          serializeHeadlessSetupEvent({
+            version: 1,
+            type: "failed",
+            item,
+            completedItems: [],
+            message,
+            failureCode,
+            rolledBack: rollback.restored,
+            ...(rollback.changed.length === 0 ? {} : { changed: rollback.changed }),
+          }),
+        );
+      }
+      throw new Error(message, { cause: error });
+    }
     if (eveMetadata?.setup === undefined)
       return reportCompletion(logger, item, { facts: [] }, options);
 

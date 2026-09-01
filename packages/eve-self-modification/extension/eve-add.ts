@@ -21,12 +21,20 @@ export type EveAddOutcome =
   | { readonly kind: "installed" }
   /** The child ended in a state that needs a terminal (a setup question). */
   | { readonly kind: "blocked"; readonly message: string }
-  | { readonly kind: "failed"; readonly message: string };
+  | {
+      readonly kind: "failed";
+      readonly message: string;
+      readonly changed?: readonly string[];
+    };
 
 interface HeadlessEvent {
   readonly version?: number;
   readonly type: string;
   readonly item?: string;
+  readonly message?: string;
+  readonly failureCode?: string;
+  readonly rolledBack?: boolean;
+  readonly changed?: readonly string[];
 }
 
 function terminateChildTree(child: ReturnType<SpawnLike>, signal: NodeJS.Signals): void {
@@ -226,10 +234,38 @@ export async function runEveAdd(input: {
           kind: "blocked",
           message: `Installing ${input.address} stopped for input that only a terminal can supply.`,
         };
+      } else if (
+        event?.type === "failed" &&
+        event.item === input.address &&
+        typeof event.message === "string"
+      ) {
+        const reason =
+          event.failureCode === "pnpm_build_policy"
+            ? "Dependency installation stopped because pnpm requires build-script decisions. Run `pnpm approve-builds`, then retry the eve add command."
+            : "Dependency installation failed. Retry the eve add command in a terminal for details.";
+        const changed = Array.isArray(event.changed)
+          ? event.changed.filter(
+              (path): path is string =>
+                typeof path === "string" &&
+                path.length <= 300 &&
+                !path.includes("..") &&
+                /^[\w@+./ -]+$/u.test(path),
+            )
+          : [];
+        outcome = {
+          kind: "failed",
+          message:
+            event.rolledBack === true
+              ? `${reason} Project files were restored.`
+              : changed.length === 0
+                ? `${reason} The install may have partially changed the project.`
+                : `${reason} The install partially changed: ${changed.join(", ")}. Restore those files, then retry.`,
+          ...(changed.length === 0 ? {} : { changed }),
+        };
       } else {
         outcome = {
           kind: "failed",
-          message: `\`eve add ${input.address}\` failed. Run it in a terminal for details.`,
+          message: `\`eve add ${input.address}\` failed and may have partially changed the project. Run it in a terminal for details.`,
         };
       }
       finishAfterTreeExits(outcome);

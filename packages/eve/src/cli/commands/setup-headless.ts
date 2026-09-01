@@ -42,6 +42,11 @@ export type HeadlessSetupEvent =
       item: string;
       completedItems: readonly string[];
       message: string;
+      failureCode?: "pnpm_build_policy" | "dependency_install";
+      /** True when every project file tracked by the installer was restored. */
+      rolledBack?: boolean;
+      /** Project-relative paths that could not be restored. Never contains file contents. */
+      changed?: readonly string[];
       next?: HeadlessSetupCommand;
     }
   | {

@@ -219,8 +219,39 @@ describe("addRegistryItem", () => {
       spawn,
     });
 
-    await expect(install).rejects.toThrow(/Run it in a terminal for details/u);
-    await expect(install).rejects.not.toThrow(/secret-child-output/u);
+    await expect(install).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringMatching(/may have partially changed the project/u),
+    });
+    await expect(install).resolves.not.toMatchObject({
+      message: expect.stringContaining("secret-child-output"),
+    });
+  });
+
+  it("returns a sanitized structured failure and its partial changes", async () => {
+    const { spawn } = fakeSpawn({
+      code: 1,
+      output: [
+        "token=secret-child-output",
+        JSON.stringify({
+          version: 1,
+          type: "failed",
+          item: "extension/browserbase",
+          completedItems: [],
+          message: "untrusted child message",
+          failureCode: "pnpm_build_policy",
+          changed: ["package.json"],
+        }),
+      ].join("\n"),
+    });
+
+    await expect(
+      addRegistryItem("extension/browserbase", { getCapability: () => capability(), spawn }),
+    ).resolves.toMatchObject({
+      status: "failed",
+      changed: ["package.json"],
+      message: expect.stringContaining("pnpm requires build-script decisions"),
+    });
   });
 
   it("waits for a cancelled child to close before releasing the install", async () => {
