@@ -3,6 +3,7 @@ import { equals } from "eve/evals/expect";
 
 const TURN_COUNT = 100;
 const PERFORMANCE_LOG_PREFIX = "EVE_WORKFLOW_STRESS_METRIC=";
+const INLINE_TURN_EXPERIMENT = "__evePerfInlineTurn";
 
 export default defineEval({
   description: "Workflow stress: one durable session completes 100 sequential turns.",
@@ -15,7 +16,7 @@ export default defineEval({
     for (let turnNumber = 1; turnNumber <= TURN_COUNT; turnNumber += 1) {
       const marker = `sequential-turn-${String(turnNumber).padStart(3, "0")}`;
       const startedAt = performance.now();
-      const result = await t.send(marker);
+      const result = await t.send(marker, { clientContext: INLINE_TURN_EXPERIMENT });
       const durationMs = performance.now() - startedAt;
       const elapsedSeconds = durationMs / 1_000;
 

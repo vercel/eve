@@ -5,6 +5,7 @@ const SESSION_COUNT = 50;
 const TURNS_PER_SESSION = 2;
 const TURN_COUNT = SESSION_COUNT * TURNS_PER_SESSION;
 const PERFORMANCE_LOG_PREFIX = "EVE_WORKFLOW_STRESS_METRIC=";
+const INLINE_TURN_EXPERIMENT = "__evePerfInlineTurn";
 
 export default defineEval({
   description: "Workflow stress: 50 durable sessions complete 100 total turns.",
@@ -16,7 +17,9 @@ export default defineEval({
     const firstTurns = await Promise.all(
       sessions.map(async (session, index) => {
         const startedAt = performance.now();
-        const result = await session.send(markerFor(index, 1));
+        const result = await session.send(markerFor(index, 1), {
+          clientContext: INLINE_TURN_EXPERIMENT,
+        });
 
         return {
           durationMs: performance.now() - startedAt,
@@ -33,7 +36,9 @@ export default defineEval({
     const secondTurns = await Promise.all(
       sessions.map(async (session, index) => {
         const startedAt = performance.now();
-        const result = await session.send(markerFor(index, 2));
+        const result = await session.send(markerFor(index, 2), {
+          clientContext: INLINE_TURN_EXPERIMENT,
+        });
 
         return {
           durationMs: performance.now() - startedAt,
