@@ -30,14 +30,36 @@ export interface RequestRecord {
 
 export type RequestGroupOwner = "framework-approval-gate" | "session-turn";
 
+export interface RequestGroupCompletionReady {
+  readonly deliveryKey: string;
+  readonly ownerCompletion: unknown;
+  readonly status: "ready";
+}
+
+export interface RequestGroupCompletionDelivered {
+  readonly deliveryKey: string;
+  readonly status: "delivered";
+}
+
 export interface RequestGroup {
-  readonly completion: "waiting" | "delivered" | "cancelled";
+  readonly completion:
+    | "waiting"
+    | "cancelled"
+    | RequestGroupCompletionReady
+    | RequestGroupCompletionDelivered;
   readonly event?: PendingInputBatchEvent;
   readonly id: string;
   readonly owner: RequestGroupOwner;
   readonly requestIds: readonly string[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
+}
+
+export interface ReadyRequestGroupDelivery {
+  readonly deliveryKey: string;
+  readonly groupId: string;
+  readonly owner: RequestGroupOwner;
+  readonly ownerCompletion: unknown;
 }
 
 export interface RequestLedgerAuthorizationRecord {
@@ -259,6 +281,115 @@ export function openRequestGroups(
   });
 }
 
+export function prepareReadyRequestGroupDeliveries(input: {
+  readonly ownerCompletions: ReadonlyMap<
+    string,
+    {
+      readonly deliveryKey: string;
+      readonly ownerCompletion: unknown;
+    }
+  >;
+  readonly session: HarnessSession;
+}): HarnessSession {
+  const ledger = readRequestLedger(input.session.state);
+  if (input.ownerCompletions.size === 0) return input.session;
+  const readyGroupIds = new Set(input.ownerCompletions.keys());
+  let changed = false;
+  const groups = ledger.groups.map((group) => {
+    const ready = input.ownerCompletions.get(group.id);
+    if (ready === undefined || group.completion !== "waiting") return group;
+    changed = true;
+    return {
+      ...group,
+      completion: {
+        deliveryKey: ready.deliveryKey,
+        ownerCompletion: ready.ownerCompletion,
+        status: "ready",
+      },
+    } satisfies RequestGroup;
+  });
+  if (!changed) return input.session;
+  const requests = ledger.requests.map((request) =>
+    request.groupId !== undefined && readyGroupIds.has(request.groupId) && request.state === "open"
+      ? { ...request, state: "terminal" as const }
+      : request,
+  );
+  return writeRequestLedger({
+    expectedVersion: ledger.version,
+    groups,
+    requests,
+    session: input.session,
+  });
+}
+
+export function listReadyRequestGroupDeliveries(
+  state: SessionStateMap | undefined,
+): readonly ReadyRequestGroupDelivery[] {
+  return readRequestLedger(state).groups.flatMap((group) => {
+    if (typeof group.completion !== "object" || group.completion.status !== "ready") return [];
+    return [
+      {
+        deliveryKey: group.completion.deliveryKey,
+        groupId: group.id,
+        owner: group.owner,
+        ownerCompletion: group.completion.ownerCompletion,
+      },
+    ];
+  });
+}
+
+export function acknowledgeReadyRequestGroupDelivery(input: {
+  readonly deliveryKey: string;
+  readonly session: HarnessSession;
+}): HarnessSession {
+  const ledger = readRequestLedger(input.session.state);
+  let changed = false;
+  const groups = ledger.groups.map((group) => {
+    if (
+      typeof group.completion !== "object" ||
+      group.completion.status !== "ready" ||
+      group.completion.deliveryKey !== input.deliveryKey
+    ) {
+      return group;
+    }
+    changed = true;
+    return {
+      ...group,
+      completion: { deliveryKey: group.completion.deliveryKey, status: "delivered" as const },
+    };
+  });
+  if (!changed) return input.session;
+  return writeRequestLedger({
+    expectedVersion: ledger.version,
+    groups,
+    requests: ledger.requests,
+    session: input.session,
+  });
+}
+
+export function cancelIncompleteRequestGroups(session: HarnessSession): HarnessSession {
+  const ledger = readRequestLedger(session.state);
+  const groupIds = new Set(
+    ledger.groups
+      .filter((group) => group.completion === "waiting" || typeof group.completion === "object")
+      .map((group) => group.id),
+  );
+  if (groupIds.size === 0) return session;
+  return writeRequestLedger({
+    expectedVersion: ledger.version,
+    groups: ledger.groups.map((group) =>
+      groupIds.has(group.id) ? { ...group, completion: "cancelled" as const } : group,
+    ),
+    requests: ledger.requests.map((request) =>
+      request.state === "open" &&
+      (groupIds.has(request.groupId ?? "") || request.request.kind === "authorization")
+        ? { ...request, state: "terminal" as const }
+        : request,
+    ),
+    session,
+  });
+}
+
 export function completeRequestGroups(
   session: HarnessSession,
   batches: readonly PendingInputBatch[],
@@ -276,7 +407,12 @@ export function completeRequestGroups(
   return writeRequestLedger({
     expectedVersion: ledger.version,
     groups: ledger.groups.map((group) =>
-      groupIds.has(group.id) ? { ...group, completion: "delivered" } : group,
+      groupIds.has(group.id)
+        ? {
+            ...group,
+            completion: { deliveryKey: `legacy:${group.id}`, status: "delivered" as const },
+          }
+        : group,
     ),
     requests: ledger.requests.map((request) =>
       request.groupId !== undefined && groupIds.has(request.groupId)

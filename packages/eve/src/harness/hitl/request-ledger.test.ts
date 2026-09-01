@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  acknowledgeReadyRequestGroupDelivery,
+  cancelIncompleteRequestGroups,
   classifyRequestResponse,
   createRequestGroup,
+  listReadyRequestGroupDeliveries,
   openRequestGroups,
+  prepareReadyRequestGroupDeliveries,
   readRequestLedger,
   RequestLedgerConflictError,
+  writePendingAuthorizationState,
   writeRequestLedger,
 } from "#harness/hitl/request-ledger.js";
 import {
@@ -108,7 +113,7 @@ describe("request ledger", () => {
 
     expect(openRequestGroups(delivered.state)).toEqual([]);
     expect(readRequestLedger(delivered.state)).toMatchObject({
-      groups: [{ completion: "delivered" }],
+      groups: [{ completion: { deliveryKey: "legacy:session-turn:0", status: "delivered" } }],
       requests: [{ id: "request-1", state: "terminal" }],
     });
   });
@@ -218,5 +223,123 @@ describe("request group owners", () => {
     });
 
     expect(readRequestLedger(created.state).groups[0]?.owner).toBe("session-turn");
+  });
+});
+
+describe("request group completion delivery", () => {
+  it("prepares resolved groups as ready, terminalizes their public requests, and lists deliveries in group order", () => {
+    const request2: InputRequest = {
+      action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask_question" },
+      kind: "question",
+      prompt: "Second?",
+      requestId: "request-2",
+    };
+    const created = createRequestGroup({
+      requests: [request],
+      responseMessages: [],
+      session: createRequestGroup({
+        owner: "framework-approval-gate",
+        requests: [request2],
+        responseMessages: [],
+        session: session(),
+      }),
+    });
+
+    const prepared = prepareReadyRequestGroupDeliveries({
+      ownerCompletions: new Map([
+        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: 1 } }],
+        ["session-turn:1", { deliveryKey: "delivery-2", ownerCompletion: ["opaque"] }],
+      ]),
+      session: created,
+    });
+
+    expect(listReadyRequestGroupDeliveries(prepared.state)).toEqual([
+      {
+        deliveryKey: "delivery-1",
+        groupId: "session-turn:0",
+        owner: "framework-approval-gate",
+        ownerCompletion: { ok: 1 },
+      },
+      {
+        deliveryKey: "delivery-2",
+        groupId: "session-turn:1",
+        owner: "session-turn",
+        ownerCompletion: ["opaque"],
+      },
+    ]);
+    expect(openRequestGroups(prepared.state)).toEqual([]);
+    expect(readRequestLedger(prepared.state).requests).toEqual([
+      expect.objectContaining({ id: "request-2", state: "terminal" }),
+      expect.objectContaining({ id: "request-1", state: "terminal" }),
+    ]);
+  });
+
+  it("acknowledges one ready delivery idempotently", () => {
+    const created = createRequestGroup({
+      requests: [request],
+      responseMessages: [],
+      session: session(),
+    });
+    const prepared = prepareReadyRequestGroupDeliveries({
+      ownerCompletions: new Map([
+        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
+      ]),
+      session: created,
+    });
+
+    const acknowledged = acknowledgeReadyRequestGroupDelivery({
+      deliveryKey: "delivery-1",
+      session: prepared,
+    });
+    const idempotent = acknowledgeReadyRequestGroupDelivery({
+      deliveryKey: "delivery-1",
+      session: acknowledged,
+    });
+
+    expect(readRequestLedger(acknowledged.state).groups[0]?.completion).toEqual({
+      deliveryKey: "delivery-1",
+      status: "delivered",
+    });
+    expect(idempotent).toBe(acknowledged);
+  });
+
+  it("force-closes waiting and ready groups to cancelled and terminalizes open requests including internal authorization", () => {
+    const challenge = {
+      attemptId: "authorization-1",
+      challenge: { url: "https://example.com" },
+      hookUrl: "https://example.com/callback",
+      name: "linear",
+    } as const;
+    const waiting = createRequestGroup({
+      requests: [request],
+      responseMessages: [],
+      session: session(),
+    });
+    const withAuthorization = {
+      ...waiting,
+      state: writePendingAuthorizationState(waiting.state, [
+        { challenge, responseAttemptId: "authorization-1" },
+      ]),
+    };
+    const ready = prepareReadyRequestGroupDeliveries({
+      ownerCompletions: new Map([
+        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
+      ]),
+      session: withAuthorization,
+    });
+
+    const cancelled = cancelIncompleteRequestGroups(ready);
+
+    expect(readRequestLedger(cancelled.state)).toMatchObject({
+      groups: [{ completion: "cancelled" }],
+      requests: [
+        { id: "request-1", state: "terminal" },
+        {
+          request: { kind: "authorization", requestId: expect.stringContaining("authorization:") },
+          state: "terminal",
+        },
+      ],
+    });
+    expect(listReadyRequestGroupDeliveries(cancelled.state)).toEqual([]);
   });
 });
