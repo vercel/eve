@@ -5,13 +5,17 @@ import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers
 import { recordToolRun } from "#harness/tool-runs.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
-import type {
-  RuntimeToolResultActionResult,
-  RuntimeWorkflowToolCallActionRequest,
-} from "#shared/action-types.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import type { PendingDispatchAction, PendingWorkflowToolAction } from "#shared/dispatch-action.js";
 import { toError } from "#shared/errors.js";
 
 const log = createLogger("execution.tool-run");
+
+export function isWorkflowToolAction(
+  action: PendingDispatchAction,
+): action is PendingWorkflowToolAction {
+  return action.target.kind === "workflow-tool-call";
+}
 
 /**
  * Starts the run and records it on the session so the turn can bind its
@@ -19,7 +23,7 @@ const log = createLogger("execution.tool-run");
  * with an error and records nothing, so nothing is left to cancel.
  */
 export async function startWorkflowTool(input: {
-  readonly action: RuntimeWorkflowToolCallActionRequest;
+  readonly action: PendingWorkflowToolAction;
   readonly batchEvent: {
     readonly sequence: number;
     readonly stepIndex: number;
@@ -51,7 +55,7 @@ export async function startWorkflowTool(input: {
       },
       stepIndex: batchEvent.stepIndex,
       toolName: action.toolName,
-      workflowId: action.workflowId,
+      workflowId: action.target.workflowId,
     });
     return {
       session: recordToolRun(session, {

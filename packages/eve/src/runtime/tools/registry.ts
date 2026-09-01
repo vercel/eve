@@ -102,6 +102,15 @@ function prepareToolBehavior(
       presentation: behavior.presentation,
     };
   }
+  if (behavior.handling.kind === "workflow-tool") {
+    return {
+      ...behavior,
+      handling: {
+        kind: "dispatch",
+        target: { kind: "workflow-tool-call", workflowId: behavior.handling.workflowId },
+      },
+    };
+  }
   if (behavior.handling.kind !== "dispatch") {
     return { ...behavior, handling: behavior.handling };
   }

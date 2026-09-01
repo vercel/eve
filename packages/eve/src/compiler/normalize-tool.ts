@@ -108,10 +108,14 @@ export async function compileToolEntry(
     };
   }
 
+  const workflowId = await readToolWorkflowId(options.binding);
   return {
     kind: "tool",
     definition: {
-      behavior: entry.definition.behavior,
+      behavior:
+        workflowId === undefined
+          ? entry.definition.behavior
+          : { availability: [], handling: { kind: "workflow-tool", workflowId } },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,
@@ -124,7 +128,6 @@ export async function compileToolEntry(
       requiresApproval: entry.definition.hasApproval,
       sourceId: source.sourceId,
       sourceKind: "module",
-      workflowId: await readToolWorkflowId(options.binding),
     },
   };
 }

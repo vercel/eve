@@ -402,6 +402,14 @@ function projectPreparedKernelEffects(
           sourceId: tool.sourceId,
         });
         break;
+      case "workflow-tool":
+        effects.push({
+          action: "workflow-tool-call",
+          audience: [...behavior.availability],
+          kind: "dispatch",
+          sourceId: tool.sourceId,
+        });
+        break;
       default: {
         const _exhaustive: never = handling;
         throw new Error(`Unsupported compiled tool handling: ${String(_exhaustive)}`);

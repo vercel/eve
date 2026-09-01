@@ -88,7 +88,6 @@ export async function resolveToolDefinition(
       outputSchema,
       sourceId: definition.sourceId,
       sourceKind: "module",
-      workflowId: definition.workflowId,
       ...extractOptionalHooks(resolvedRecord, definition),
     };
   } catch (error) {

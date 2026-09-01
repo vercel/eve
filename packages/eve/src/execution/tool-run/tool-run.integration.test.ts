@@ -73,11 +73,13 @@ async function createWorkflowToolRuntime(input: {
   runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
     default: { execute: input.execute },
   };
-  // The compiler derives workflowId from authored source; an in-memory tool has
-  // none, so record the id the test tier's transform stamped on the fixture.
+  // The compiler derives the workflow id from authored source; an in-memory tool
+  // has none, so record the id the test tier's transform stamped on the fixture.
   const workflowId = Reflect.get(input.execute, "workflowId");
   expect(workflowId).toEqual(expect.any(String));
-  Object.assign(manifestTool as { workflowId?: string }, { workflowId });
+  Object.assign(manifestTool, {
+    behavior: { availability: [], handling: { kind: "workflow-tool", workflowId } },
+  });
   return runtime;
 }
 

@@ -70,21 +70,6 @@ export const runtimeRemoteAgentCallActionRequestSchema = z
   })
   .strict();
 
-/** Call to a tool whose `execute` is a workflow; the run's outcome settles it as a `tool-result`. */
-export type RuntimeWorkflowToolCallActionRequest = z.infer<
-  typeof runtimeWorkflowToolCallActionRequestSchema
->;
-
-const runtimeWorkflowToolCallActionRequestSchema = z
-  .object({
-    callId: z.string(),
-    input: jsonObjectSchema,
-    kind: z.literal("workflow-tool-call"),
-    toolName: z.string(),
-    workflowId: z.string(),
-  })
-  .strict();
-
 /**
  * Eve-owned `load-skill` action requested by the model.
  */
@@ -111,8 +96,7 @@ export type RuntimeActionRequest =
   | RuntimeLoadSkillActionRequest
   | RuntimeRemoteAgentCallActionRequest
   | RuntimeSubagentCallActionRequest
-  | RuntimeToolCallActionRequest
-  | RuntimeWorkflowToolCallActionRequest;
+  | RuntimeToolCallActionRequest;
 
 /**
  * Zod schema for one runtime action request.
@@ -122,7 +106,6 @@ export const runtimeActionRequestSchema = z.discriminatedUnion("kind", [
   runtimeRemoteAgentCallActionRequestSchema,
   runtimeSubagentCallActionRequestSchema,
   runtimeToolCallActionRequestSchema,
-  runtimeWorkflowToolCallActionRequestSchema,
 ]);
 
 /**

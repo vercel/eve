@@ -14,7 +14,6 @@ export function getRuntimeActionRequestKey(action: RuntimeActionRequest): string
     case "subagent-call":
       return `subagent-call:${action.subagentName}:${action.callId}`;
     case "tool-call":
-    case "workflow-tool-call":
       return `tool-call:${action.toolName}:${action.callId}`;
   }
 }
@@ -29,6 +28,7 @@ export function getPendingDispatchActionKey(action: PendingDispatchAction): stri
       return `subagent-call:${action.target.subagentName}:${action.callId}`;
     case "task-cancel":
     case "task-update":
+    case "workflow-tool-call":
       return `tool-call:${action.toolName}:${action.callId}`;
     default: {
       const _exhaustive: never = action.target;

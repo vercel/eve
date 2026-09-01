@@ -346,10 +346,13 @@ describe("resolvePendingRuntimeActions", () => {
       actions: [
         {
           callId: "call-1",
+          description: "Deploy.",
           input: { service: "api" },
-          kind: "workflow-tool-call",
+          target: {
+            kind: "workflow-tool-call",
+            workflowId: "workflow//./agent/tools/deploy//execute",
+          },
           toolName: "deploy",
-          workflowId: "workflow//./agent/tools/deploy//execute",
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
@@ -403,10 +406,13 @@ describe("resolvePendingRuntimeActions", () => {
       actions: [
         {
           callId: "call-1",
+          description: "Deploy.",
           input: { service: "api" },
-          kind: "workflow-tool-call",
+          target: {
+            kind: "workflow-tool-call",
+            workflowId: "workflow//./agent/tools/deploy//execute",
+          },
           toolName: "deploy",
-          workflowId: "workflow//./agent/tools/deploy//execute",
         },
       ],
       event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },

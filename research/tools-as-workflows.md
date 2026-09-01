@@ -194,9 +194,10 @@ framework-internal; the authoring surface is `ask`, `yield`, and `ctx.abortSigna
 
 Directive discovery reads the syntax tree. Authored modules are compiled into the existing Workflow
 driver bundle with the module body kept, eve-definer default exports dropped, and unused imports
-stripped, so `defineTool` and the schema library never enter the driver. The server bundle registers
-the steps and leaves `execute` as a stub carrying its `workflowId`; that stamp is how the harness
-recognizes a workflow tool.
+stripped, so `defineTool` and the schema library never enter the driver. The compiler derives the
+body's workflow id from the tool's source and records it as the tool's compiled handling; the runtime
+prepares a `workflow-tool-call` dispatch target from it, the same path the task-control and
+self-agent tools take, so the harness parks the turn instead of calling `execute`.
 
 ## Decisions made while implementing
 

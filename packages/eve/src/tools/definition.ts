@@ -58,8 +58,6 @@ export interface InternalToolDefinition extends ToolDefinitionBase {
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
-  /** Set when `execute` is a `"use workflow"` body; the harness starts this run instead of calling it. */
-  workflowId?: string;
 }
 
 export type PublicToolInputSchema<TInput = unknown> =

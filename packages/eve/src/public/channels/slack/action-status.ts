@@ -74,7 +74,6 @@ export function describeActionRequest(action: RuntimeActionRequest): string {
     case "subagent-call":
       return action.subagentName;
     case "tool-call":
-    case "workflow-tool-call":
       return toolCallLabel(action.toolName, action.input);
   }
 }
