@@ -50,7 +50,6 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
@@ -206,6 +205,12 @@ export function createWorkflowRuntime(config: {
         limits: input.limits,
         serializedContext,
       };
+      if (collectorRunId !== undefined) {
+        workflowInput.activityCollectorRunId = collectorRunId;
+      }
+      if (input.continuationConflictCommand !== undefined) {
+        workflowInput.continuationConflictCommand = input.continuationConflictCommand;
+      }
       if (sessionTimeoutMs !== undefined) {
         workflowInput.sessionTimeoutMs = sessionTimeoutMs;
       }
@@ -242,22 +247,6 @@ export function createWorkflowRuntime(config: {
           continuationToken: input.continuationToken,
         });
         throw error;
-      }
-
-      if (input.continuationToken) {
-        try {
-          const owner = await waitForCommandHookOwner(input.continuationToken);
-          if (owner.runId !== run.runId) {
-            throw new RuntimeSessionOwnershipConflictError({
-              continuationToken: input.continuationToken,
-              ownerSessionId: owner.runId,
-              sessionId: run.runId,
-            });
-          }
-        } catch (error) {
-          await cancelActivityCollector(collectorRunId);
-          throw error;
-        }
       }
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
@@ -353,10 +342,6 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     throw error;
   }
 
-  if (command.kind === "reset") {
-    await waitForCommandHookRelease(sessionCommandHookToken(hook.runId), hook.runId);
-  }
-
   return activeCommandResult(command, hook.runId);
 }
 
@@ -411,6 +396,11 @@ function isInactiveCommandTarget(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Resolves hook ownership for replay-idempotent work already running inside a
+ * durable step. Request handlers must return from start/resume acceptance and
+ * leave ownership arbitration to the workflow.
+ */
 export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
@@ -420,24 +410,6 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
       if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     }
-  }
-}
-
-async function waitForCommandHookRelease(token: string, sessionId: string): Promise<void> {
-  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
-  while (true) {
-    try {
-      const owner = normalizeWorkflowHook(await getHookByToken(token));
-      if (owner.runId !== sessionId) return;
-    } catch (error) {
-      if (HookNotFoundError.is(error)) return;
-      throw error;
-    }
-
-    if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for session "${sessionId}" to release its command inbox.`);
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
 }
 

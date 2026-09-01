@@ -47,22 +47,26 @@ curl -X POST https://<deployment>/eve/v1/session \
 # {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
-The `202` response means Workflow accepted the durable run. The command inbox may still be
-starting, so an immediate follow-up or control request can report that the session is not active.
-The event-stream client retries the brief window before the new run becomes readable.
+The `202` response means Workflow accepted the durable run. The route does not wait for command
+inbox or continuation-token ownership. The inbox may still be starting, so an immediate follow-up
+or control request can report that the session is not active. The event-stream client retries the
+brief window before the new run becomes readable.
 
 Authenticated callers that may retry a create request can pass their own `operationId` for
-create-once semantics. The same operation under the same authenticated principal returns the
-active session it already created instead of dispatching the input again. The first accepted
-payload wins; retries with different input still return that first session. Anonymous callers
-cannot use `operationId`, and operation ownership expires when the session is no longer resumable.
+create-once semantics. Once the operation owner is active, the same operation under the same
+authenticated principal returns that session instead of dispatching the input again. The create
+route does not wait for a concurrently starting request to publish ownership: simultaneous
+requests can receive different accepted candidate IDs, while only the candidate that claims the
+operation runs its first turn. Retry the operation after startup when you need its canonical
+session ID. Anonymous callers cannot use `operationId`, and operation ownership expires when the
+session is no longer resumable.
 
 ```bash
 curl -X POST https://<deployment>/eve/v1/session \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"message":"What is the weather in Paris?","operationId":"order-4213-research"}'
-# {"ok":true,"sessionId":"wrun_A","status":"accepted"} — retries return the same sessionId
+# {"ok":true,"sessionId":"wrun_A","status":"accepted"}
 ```
 
 The first request requires `message`. A follow-up request accepts exactly one of
@@ -101,7 +105,10 @@ Post to `/eve/v1/session/:sessionId/compact` to summarize context without sendin
 
 ### Reset a session
 
-Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/reset` to queue terminal retirement for that session. The
+response does not wait for the session inbox to be released. Reset never replaces the ID
+automatically; create a new session explicitly for a fresh conversation. See
+[Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
 
 ## Replace or disable the defaults
 

@@ -1,7 +1,6 @@
 import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
-import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import {
   handleConnectionCallbackRequest,
   handleLegacyConnectionCallbackRequest,
@@ -268,20 +267,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             title: messageResult.title,
           });
         } catch (error) {
-          // A concurrent create-once request won the token: adopt its session
-          // without delivering this duplicate input.
-          if (operationToken !== undefined && isRuntimeSessionOwnershipConflictError(error)) {
-            return Response.json(
-              { ok: true, sessionId: error.ownerSessionId, status: "accepted" },
-              {
-                headers: {
-                  "cache-control": "no-store",
-                  [EVE_SESSION_ID_HEADER]: error.ownerSessionId,
-                },
-                status: 202,
-              },
-            );
-          }
           const errorId = logError(log, "session-create request failed", error);
           return Response.json(
             { error: "Failed to create the session.", errorId, ok: false },

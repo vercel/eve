@@ -82,6 +82,10 @@ part of the authored channel API.
 
 Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
+Cold-start sends return their accepted candidate without waiting for address
+ownership. If simultaneous sends race, eve forwards the losing candidate's
+message to the winner; resolve the address after startup when you need a fixed
+handle to the canonical owner.
 
 ```ts
 const source = from(threadId);
@@ -155,8 +159,10 @@ address's current owner as a fixed handle.
   success emits `compaction.requested`, `compaction.completed`, then `session.waiting`.
 - `clear` removes model-message history in place. It preserves the system prompt,
   skills, tools, durable state, limits, address ownership, and session sandbox.
-- `reset` terminally retires the current session. A later address `send()` creates
-  a fresh session; a fixed `Session` handle remains pinned to the retired ID.
+- `reset` queues terminal retirement for the current session and returns once the
+  durable inbox accepts it. It does not wait for address ownership to be released.
+  After retirement, an address `send()` creates a fresh session; a fixed `Session`
+  handle remains pinned to the retired ID.
 
 Control operations never create a session. Unknown or inactive targets return a
 benign no-active status. Authenticate and deduplicate command webhooks before

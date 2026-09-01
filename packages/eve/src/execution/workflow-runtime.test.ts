@@ -20,7 +20,6 @@ import {
   turnWorkflowReference,
   workflowEntryReference,
 } from "#execution/workflow-runtime.js";
-import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -286,12 +285,9 @@ describe("createWorkflowRuntime command dispatch", () => {
     ).rejects.toBe(failure);
   });
 
-  it("waits for reset to release the stable command inbox", async () => {
-    const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
+  it("returns after reset is durably accepted", async () => {
     resumeHookMock.mockResolvedValue({ runId: "session-1" });
-    getHookByTokenMock
-      .mockResolvedValueOnce(currentSessionHook("eve:token"))
-      .mockRejectedValue(new HookNotFoundError(sessionCommandHookToken("session-1")));
+    getHookByTokenMock.mockResolvedValueOnce(currentSessionHook("eve:token"));
 
     await expect(
       buildRuntime().dispatchContinuation({
@@ -304,7 +300,7 @@ describe("createWorkflowRuntime command dispatch", () => {
       reason: "User requested /new",
       version: 1,
     });
-    expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
+    expect(getHookByTokenMock).toHaveBeenCalledOnce();
   });
 });
 
@@ -452,24 +448,50 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(getHookByTokenMock).not.toHaveBeenCalled();
   });
 
-  it("waits only for continuation ownership when a token is supplied", async () => {
+  it("returns an MCP invocation without checking continuation ownership", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock.mockResolvedValue({ runId: "driver-run" });
-    getHookByTokenMock.mockResolvedValue({ runId: "driver-run" });
 
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
         adapter,
         auth: null,
-        continuationToken: "slack:thread",
+        continuationToken: "invocation:token",
+        externalInvocation: {
+          continuationToken: "invocation:token",
+          ownerKey: "owner",
+        },
         input: { message: "hello" },
-        mode: "conversation",
+        mode: "task",
       }),
     ).resolves.toMatchObject({ sessionId: "driver-run" });
 
-    expect(getHookByTokenMock).toHaveBeenCalledOnce();
-    expect(getHookByTokenMock).toHaveBeenCalledWith("slack:thread");
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+  });
+
+  it("passes a channel's losing-candidate delivery to the workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+    const continuationConflictCommand = {
+      auth: null,
+      kind: "send" as const,
+      payload: { message: "hello" },
+    };
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter,
+      auth: null,
+      continuationConflictCommand,
+      continuationToken: "slack:thread",
+      input: { message: "hello" },
+      mode: "conversation",
+    });
+
+    expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
+      continuationConflictCommand,
+    });
   });
 
   it("stores an explicit title alongside the trace-content policy", async () => {
@@ -535,6 +557,7 @@ describe("createWorkflowRuntime#createSession", () => {
     });
     expect(collectorInput.token).toHaveLength(43);
     const workflowInput = startMock.mock.calls[1]?.[1][0];
+    expect(workflowInput.activityCollectorRunId).toBe("collector-run");
     expect(workflowInput.serializedContext[ActivityObserverKey.name]).toEqual({
       sink: {
         url: `https://agent.example.com/eve/v1/activity/${collectorInput.token}`,
@@ -608,14 +631,12 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
-  it("cancels the collector when continuation ownership rejects the root candidate", async () => {
+  it("does not inspect continuation ownership after accepting a root candidate", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
     startMock
       .mockResolvedValueOnce({ runId: "collector-run" })
       .mockResolvedValueOnce({ runId: "driver-run" });
-    getHookByTokenMock.mockResolvedValue({ runId: "other-run" });
-
     await expect(
       buildRuntime(compiledArtifactsSource).createSession({
         adapter: activityAdapter(),
@@ -624,11 +645,10 @@ describe("createWorkflowRuntime#createSession", () => {
         input: { message: "hello" },
         mode: "conversation",
       }),
-    ).rejects.toBeInstanceOf(RuntimeSessionOwnershipConflictError);
+    ).resolves.toMatchObject({ sessionId: "driver-run" });
 
-    expect(cancelRunMock).toHaveBeenCalledWith("world", "collector-run", {
-      cancelReason: "Root session creation did not complete",
-    });
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(cancelRunMock).not.toHaveBeenCalled();
   });
 
   it("serializes the selected dynamic subagent config for the child workflow", async () => {

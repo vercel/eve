@@ -5,6 +5,7 @@ import type {
   DeliverPayload,
   HookPayload,
   RunInput,
+  SessionCommand,
   SessionCapabilities,
   TurnCaller,
 } from "#channel/types.js";
@@ -49,6 +50,7 @@ import { isTaskOwnedSerializedContext } from "#execution/tasks/child/instruction
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { CHANNEL_CONTEXT_KEY_NAME, SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
+import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
   "Agent workflow failed. Inspect the private session trace for details.";
@@ -63,6 +65,8 @@ const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =
  * and deserialized at each `"use step"` boundary.
  */
 export interface WorkflowEntryInput {
+  readonly activityCollectorRunId?: string;
+  readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   readonly input: RunInput["input"];
   readonly limits?: RunInput["limits"];
   readonly sessionTimeoutMs?: number | false;
@@ -215,10 +219,25 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       if (stableClaim.status === "rejected") throw stableClaim.reason;
       if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
       if (continuationClaim.status === "rejected") {
-        // A concurrent create can start two candidate runs before either
-        // publishes the shared continuation alias. The runtime adopts the
-        // alias owner; the losing candidate exits before its first turn.
-        if (isHookConflictError(continuationClaim.reason)) return { output: "" };
+        // Only the durable alias owner runs a first turn; a losing candidate
+        // hands its address delivery to that owner before exiting.
+        if (isHookConflictError(continuationClaim.reason)) {
+          if (
+            input.activityCollectorRunId !== undefined ||
+            input.continuationConflictCommand !== undefined
+          ) {
+            await settleContinuationConflictStep({
+              activityCollectorRunId: input.activityCollectorRunId,
+              command: input.continuationConflictCommand,
+              continuationToken,
+              ownerSessionId:
+                typeof continuationClaim.reason.conflictingRunId === "string"
+                  ? continuationClaim.reason.conflictingRunId
+                  : undefined,
+            });
+          }
+          return { output: "" };
+        }
         throw continuationClaim.reason;
       }
 

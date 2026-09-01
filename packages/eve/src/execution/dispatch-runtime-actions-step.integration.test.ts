@@ -5,7 +5,6 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
-import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
@@ -58,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   startRemoteAgentSession: vi.fn(),
   startWorkflowPreferLatest: vi.fn(),
+  waitForCommandHookOwner: vi.fn(),
 }));
 
 vi.mock("#context/serialize.js", () => ({
@@ -87,7 +87,7 @@ vi.mock("#execution/workflow-runtime.js", () => ({
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
   startWorkflowPreferLatest: mocks.startWorkflowPreferLatest,
   taskRunWorkflowReference: { workflowId: "workflow//eve//taskRun" },
-  waitForCommandHookOwner: vi.fn().mockResolvedValue({ runId: "task-run-1" }),
+  waitForCommandHookOwner: mocks.waitForCommandHookOwner,
 }));
 
 // Only the network calls are mocked; error classification and registry
@@ -168,6 +168,9 @@ const REMOTE_REGISTRY_DEFINITION = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
+  mocks.waitForCommandHookOwner.mockImplementation(async (token: string) => ({
+    runId: token.startsWith("subagent:") ? CHILD_SESSION_ID : "task-run-1",
+  }));
   mocks.dispatchSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID, status: "accepted" });
   mocks.continueRemoteAgentSession.mockResolvedValue(undefined);
   mocks.startRemoteAgentSession.mockResolvedValue({
@@ -559,13 +562,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     // A retried dispatch step re-derives the same deterministic child
     // continuation token, so the first attempt's child owns it.
-    mocks.createSession.mockRejectedValue(
-      new RuntimeSessionOwnershipConflictError({
-        continuationToken: "subagent:parent-session:call-1",
-        ownerSessionId: CHILD_SESSION_ID,
-        sessionId: "duplicate-child",
-      }),
-    );
+    mocks.createSession.mockResolvedValue({ sessionId: "duplicate-child" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
@@ -614,13 +611,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     // A retried dispatch step re-derives the same deterministic child
     // continuation token, so the first attempt's child owns it.
-    mocks.createSession.mockRejectedValue(
-      new RuntimeSessionOwnershipConflictError({
-        continuationToken: "subagent:parent-session:call-1",
-        ownerSessionId: CHILD_SESSION_ID,
-        sessionId: "duplicate-child",
-      }),
-    );
+    mocks.createSession.mockResolvedValue({ sessionId: "duplicate-child" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",

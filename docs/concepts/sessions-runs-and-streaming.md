@@ -210,7 +210,10 @@ Compaction summarizes context without adding a user message. User-role instructi
 
 Clear removes model-message history in place, including static and dynamic user-role instructions and recalled memory records, while preserving the session identity, system-role instructions, tools, skills, application-defined durable state, limits, and sandbox. It clears framework memory locks and replay bookkeeping but does not delete data from a provider's external store. It does not rerun instruction definitions or resolvers. It emits `context.cleared` followed by `session.waiting`.
 
-Reset terminally retires the exact session ID. A reset ID never becomes a new session; create another session explicitly for a fresh conversation. Compact, clear, and reset return `"no_active_session"` when the target is already inactive.
+Reset queues terminal retirement for the exact session ID and returns as soon as the durable inbox
+accepts the command. It does not wait for the inbox to be released. A reset ID never becomes a new
+session; create another session explicitly for a fresh conversation. Compact, clear, and reset
+return `"no_active_session"` when the target is already inactive.
 
 ## Reconnect and rewind
 

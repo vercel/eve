@@ -484,6 +484,14 @@ export interface RunInput {
    */
   readonly continuationToken?: string;
   /**
+   * Framework-owned delivery to forward when another run wins the initial
+   * continuation-token claim. Channel addresses set this so concurrent cold
+   * starts preserve every distinct inbound message inside durable execution.
+   * Create-once and replay-idempotent starts omit it so losing inputs are
+   * discarded.
+   */
+  readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
+  /**
    * The original (top-level) caller's auth, forwarded down the delegation
    * chain so the child's `session.auth.initiator` always resolves back to
    * whoever started the root session. Defaults to {@link auth} when omitted
