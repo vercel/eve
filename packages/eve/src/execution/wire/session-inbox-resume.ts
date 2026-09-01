@@ -6,7 +6,7 @@ import type {
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
 import {
-  isReservedSessionCommandToken,
+  isSessionCommandHookToken,
   sessionCommandHookToken,
 } from "#execution/session-command-token.js";
 import {
@@ -42,7 +42,7 @@ function isStableInboxFastPathCompatible(
   token: string,
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): boolean {
-  if (!isReservedSessionCommandToken(token)) return false;
+  if (!isSessionCommandHookToken(token)) return false;
   return !("caller" in command && command.caller?.activityObserver !== undefined);
 }
 

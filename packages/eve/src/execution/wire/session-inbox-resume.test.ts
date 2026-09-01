@@ -120,6 +120,21 @@ describe("resumeSessionInbox", () => {
     });
   });
 
+  it("inspects reserved session aliases outside the stable inbox", async () => {
+    const token = "eve:session:session-1:session-timeout";
+    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 1 });
+    getHookByTokenMock.mockResolvedValue(hook);
+    resumeHookMock.mockResolvedValue(hook);
+
+    await resumeSessionInbox(token, { kind: "session-timeout" });
+
+    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
+    expect(resumeHookMock).toHaveBeenCalledWith(hook, {
+      kind: "session-timeout",
+      version: 1,
+    });
+  });
+
   it("retains metadata negotiation when a stable delivery needs the current caller wire", async () => {
     const token = sessionCommandHookToken("session-1");
     const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
