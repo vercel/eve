@@ -99,9 +99,6 @@ import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
 import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 
-const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
-  "Task mode cannot complete while input requests remain pending.";
-
 function channelDeliveryErrorCode(error: unknown): string {
   if (typeof error === "object" && error !== null && "code" in error) {
     const code = (error as { readonly code?: unknown }).code;
