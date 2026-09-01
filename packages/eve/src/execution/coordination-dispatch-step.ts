@@ -245,7 +245,7 @@ export async function dispatchCoordinationStep(
     results: [...results, ...normalized.results],
     sessionState:
       nextSession === session
-        ? normalized.sessionState
+        ? prepared.sessionState
         : createDurableSessionState({ session: nextSession }),
     pendingTasks,
   };

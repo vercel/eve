@@ -24,7 +24,7 @@ export async function prepareOwnerAgentInvocation(input: {
   readonly knownAgentIds?: readonly string[];
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-}): Promise<PreparedCoordinationDispatch> {
+}): Promise<Omit<PreparedCoordinationDispatch, "sessionState">> {
   const durableSession = await readDurableSession(input.sessionState);
   const ctx = await deserializeContext(input.serializedContext);
   const event = getHarnessEmissionState(durableSession.state);

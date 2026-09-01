@@ -34,7 +34,9 @@ import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   assertUniqueCoordinationCallIds,
   getPendingCoordinationBatch,
+  setPendingCoordinationBatch,
 } from "#harness/coordination.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type {
   RuntimeAgentDispatchRequest,
@@ -45,7 +47,11 @@ import type {
   RuntimeWorkflowTaskRequest,
 } from "#shared/action-types.js";
 import type { SessionParent } from "#channel/types.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  createDurableSessionState,
+  type DurableSessionState,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,
   createUnavailableDynamicSubagentResult,
@@ -123,6 +129,7 @@ export interface PreparedCoordinationDispatch {
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
   readonly session: RuntimeSession;
+  readonly sessionState: DurableSessionState;
 }
 
 /**
@@ -142,10 +149,12 @@ export async function prepareCoordinationDispatch(input: {
   if (pending === undefined) return undefined;
   const requests = [...pending.runtimeActions, ...pending.tasks];
   if (requests.length === 0) return undefined;
+  const turnId = pending.event.turnId || activeTurnId(input.sessionState.emissionState);
+  const event = pending.event.turnId === turnId ? pending.event : { ...pending.event, turnId };
   const ctx = await deserializeContext(input.serializedContext);
-  return await prepareActionDispatch({
+  const prepared = await prepareActionDispatch({
     batch: {
-      event: pending.event,
+      event,
       localFanoutSize: pending.localFanoutSize,
       requests,
     },
@@ -153,6 +162,20 @@ export async function prepareCoordinationDispatch(input: {
     durableSession,
     serializedContext: input.serializedContext,
   });
+  if (event === pending.event) {
+    return { ...prepared, sessionState: input.sessionState };
+  }
+
+  const session = setPendingCoordinationBatch({
+    ...pending,
+    event,
+    session: prepared.session,
+  });
+  return {
+    ...prepared,
+    session,
+    sessionState: createDurableSessionState({ session }),
+  };
 }
 
 type DispatchRequest =
@@ -178,7 +201,7 @@ export async function prepareActionDispatch(input: {
   /** Explicit handle ids for owners whose registry lives outside session state. */
   readonly knownAgentIds?: readonly string[];
   readonly serializedContext: Record<string, unknown>;
-}): Promise<PreparedCoordinationDispatch> {
+}): Promise<Omit<PreparedCoordinationDispatch, "sessionState">> {
   const { batch, durableSession } = input;
   assertUniqueCoordinationCallIds(batch.requests);
 
