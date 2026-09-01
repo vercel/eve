@@ -138,8 +138,8 @@ void (async () => {
       input.send("\x1b");
       await screen.waitForText("Change model", 5_000);
       input.send("\x1b");
-      await screen.waitForText("/model dismissed.", 5_000);
-      // Cancelling the required model phase exits onboarding and returns to chat.
+      // Initial onboarding suppresses the standalone command transcript; cancelling
+      // the required model phase returns directly to chat.
       await screen.waitForIdlePrompt(5_000);
 
       input.type("/exit");
