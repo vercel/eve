@@ -500,12 +500,14 @@ describe("createExecutionNodeStep", () => {
       },
     };
     setupMockAgentForToolExecution("wired_dynamic_tool", {});
-    const step = createExecutionNodeStep({
+    const stepInput = {
       createRuntime: () => createNoopRuntime(),
-      mode: "task",
+      instrumentation: undefined,
+      mode: "task" as const,
       modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
       node,
-    });
+    };
+    const step = createExecutionNodeStep(stepInput);
 
     const responder = {
       attributes: {},
