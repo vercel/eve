@@ -86,6 +86,7 @@ export function installInstrumentationRuntime(input: {
     idGenerator: otelRuntime?.idGenerator ?? new AgentSpanIdGenerator(),
     instrumentationProviders: input.instrumentationProviders,
     otelSettings: input.collected.declared ? input.collected.settings : undefined,
+    ownsAgentSpans: otelRuntime !== undefined,
     prepareSessionTrace,
     prepareTurnTrace,
     runtimeContextResolvers: input.runtimeContextResolvers,

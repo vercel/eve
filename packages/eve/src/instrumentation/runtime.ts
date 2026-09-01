@@ -147,6 +147,7 @@ export interface InstrumentationRuntime {
   readonly hooks: InstrumentationHooks;
   readonly idGenerator?: AgentSpanIdGenerator;
   readonly instrumentationProviders?: boolean;
+  readonly ownsAgentSpans?: boolean;
   readonly prepareSessionTrace?: (
     event: InstrumentationSessionStartedEvent,
   ) => Promise<InstrumentationTraceSeed>;
@@ -218,8 +219,10 @@ export function bindInstrumentationRuntime(
   };
   const captureExecutionRuntime = () => {
     const otelSettings = runtime.otelSettings;
-    if (otelSettings !== undefined) ensureOtelIntegration();
+    const ownsAgentSpans = runtime.ownsAgentSpans === true;
+    if (otelSettings !== undefined && !ownsAgentSpans) ensureOtelIntegration();
     return {
+      ownsAgentSpans,
       otelSettings,
       runtimeContextResolvers: runtime.runtimeContextResolvers,
       stepStartedRuntimeContextResolver: runtime.stepStartedRuntimeContextResolver,
@@ -268,7 +271,10 @@ export function bindInstrumentationRuntime(
         const functionId = settings?.functionId ?? boundSession.agentName;
         if (functionId) attributes["ai.telemetry.functionId"] = functionId;
         let turnSpan =
-          tracer !== undefined && decision?.action !== "drop" && input.hasInput
+          tracer !== undefined &&
+          !executionRuntime.ownsAgentSpans &&
+          decision?.action !== "drop" &&
+          input.hasInput
             ? tracer.startSpan("ai.eve.turn", { attributes })
             : undefined;
         const spanContext = turnSpan?.spanContext();
@@ -337,7 +343,13 @@ export function bindInstrumentationRuntime(
           }
           const sanitizeEveOtelErrors =
             settings !== undefined && !(content.recordInputs && content.recordOutputs);
-          const integrations = () => getRegisteredTelemetryIntegrations({ sanitizeEveOtelErrors });
+          const integrations = () =>
+            getRegisteredTelemetryIntegrations({
+              ...(executionRuntime.ownsAgentSpans
+                ? { excludeEveOtelIntegration: true }
+                : undefined),
+              sanitizeEveOtelErrors,
+            });
           return {
             functionId: settings?.functionId ?? boundSession.agentName,
             includeRuntimeContext,

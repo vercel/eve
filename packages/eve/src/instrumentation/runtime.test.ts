@@ -151,6 +151,45 @@ describe("bindInstrumentationRuntime", () => {
     expect(telemetry).toMatchObject({ recordInputs: false, recordOutputs: false });
   });
 
+  it("uses one framework-owned span tree when the runtime owns agent spans", async () => {
+    const originalIntegrations = globalThis.AI_SDK_TELEMETRY_INTEGRATIONS;
+    const authoredIntegration = { onStart: vi.fn() };
+    globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = [authoredIntegration];
+    const runtime = {
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }),
+      ownsAgentSpans: true,
+    };
+    const instrumentation = bindInstrumentationRuntime(runtime, createContext(), boundSession);
+
+    try {
+      const result = await instrumentation?.prepareExecution().runStep(
+        {
+          environment: "test",
+          eveVersion: "0.0.0",
+          hasInput: true,
+          session: { sessionId: "session-1", state: {} as Record<string, unknown> },
+        },
+        async (scope) => ({
+          integrations: scope.prepareAttempt({
+            attemptIndex: 0,
+            stepIndex: 0,
+            turnId: "turn-1",
+          }).telemetry?.integrations,
+          session: scope.session,
+        }),
+      );
+
+      expect(result?.session.state?.["eve.harness.turnTrace"]).toBeUndefined();
+      expect(result?.integrations).toEqual([
+        expect.objectContaining({ onStart: expect.any(Function) }),
+        authoredIntegration,
+      ]);
+      expect(globalThis.AI_SDK_TELEMETRY_INTEGRATIONS).toEqual([authoredIntegration]);
+    } finally {
+      globalThis.AI_SDK_TELEMETRY_INTEGRATIONS = originalIntegrations;
+    }
+  });
+
   it("isolates concurrent step decisions and audiences", async () => {
     const ctx = createContext("private");
     const runtime = createRuntime({ capturesContent: true, publish: vi.fn() });

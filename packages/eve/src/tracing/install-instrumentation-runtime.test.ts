@@ -71,6 +71,7 @@ describe("installInstrumentationRuntime", () => {
     expect(forceFlush).toHaveBeenCalledOnce();
     expect(providerFlush).toHaveBeenCalledOnce();
     expect(runtime.instrumentationProviders).toBe(true);
+    expect(runtime.ownsAgentSpans).toBe(true);
     expect(runtime.otelSettings).toEqual({
       functionId: undefined,
       recordInputs: true,
