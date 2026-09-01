@@ -150,6 +150,7 @@ interface DeliveryHookConfig {
 
 interface AuthHookConfig {
   readonly dispose?: () => void;
+  readonly getConflict?: () => Promise<{ readonly runId: string } | null>;
   readonly return?: () => Promise<IteratorResult<HookPayload>>;
 }
 
@@ -223,6 +224,41 @@ describe("workflowEntry", () => {
       serializedContext: expect.any(Object),
       sessionState,
     });
+  });
+
+  it("claims command hooks while session creation is still pending", async () => {
+    const sessionState = createBaseSessionState();
+    let resolveSessionCreation:
+      | ((result: ReturnType<typeof createSessionStepResultForMock>) => void)
+      | undefined;
+    vi.mocked(createSessionStep).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSessionCreation = resolve;
+      }),
+    );
+    const stableGetConflict = vi.fn(async () => null);
+    const authorizationGetConflict = vi.fn(async () => null);
+    const continuationGetConflict = vi.fn(async () => null);
+    installHookMocks({
+      authHook: { getConflict: authorizationGetConflict },
+      deliveryHooks: [{ getConflict: continuationGetConflict, token: "http:test" }],
+      stableHook: { getConflict: stableGetConflict },
+      turnControls: [turnResult({ action: "done", output: "ok", sessionState })],
+    });
+
+    const result = workflowEntry({
+      input: { message: "hello there" },
+      serializedContext: createSerializedContext(),
+    });
+
+    expect(createSessionStep).toHaveBeenCalledOnce();
+    expect(stableGetConflict).toHaveBeenCalledOnce();
+    expect(authorizationGetConflict).toHaveBeenCalledOnce();
+    expect(continuationGetConflict).toHaveBeenCalledOnce();
+    expect(dispatchTurnStep).not.toHaveBeenCalled();
+
+    resolveSessionCreation?.(createSessionStepResultForMock(sessionState));
+    await expect(result).resolves.toEqual({ output: "ok" });
   });
 
   it("omits caller resolution, binding, and settlement steps for a root turn", async () => {
@@ -772,6 +808,15 @@ describe("workflowEntry", () => {
     // serialized context or the delegated parent's call parks forever.
     vi.mocked(createSessionStep).mockRejectedValueOnce(new Error("session creation failed"));
     vi.mocked(resolveInitialTurnCallerStep).mockResolvedValueOnce(caller);
+    const stableDispose = vi.fn();
+    const authorizationDispose = vi.fn();
+    const continuationDispose = vi.fn();
+    installHookMocks({
+      authHook: { dispose: authorizationDispose },
+      deliveryHooks: [{ dispose: continuationDispose, token: "http:test" }],
+      stableHook: { dispose: stableDispose },
+      turnControls: [],
+    });
     const serializedContext = createSerializedContext({
       "eve.channel": {
         kind: "subagent",
@@ -803,6 +848,9 @@ describe("workflowEntry", () => {
     });
     // No snapshot was ever received, so there are no children to terminate.
     expect(terminateChildSessionsStep).not.toHaveBeenCalled();
+    expect(stableDispose).toHaveBeenCalledOnce();
+    expect(authorizationDispose).toHaveBeenCalledOnce();
+    expect(continuationDispose).toHaveBeenCalledOnce();
   });
 
   it("does not resolve or notify a caller when a root turn crashes", async () => {
@@ -1826,6 +1874,7 @@ function installHookMocks(input: {
     if (token.endsWith(":auth")) {
       return createMockHook({
         dispose: input.authHook?.dispose,
+        getConflict: input.authHook?.getConflict,
         return: input.authHook?.return,
         token,
         values: [],

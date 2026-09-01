@@ -34,7 +34,10 @@ import { emitTerminalSessionFailureStep } from "#execution/terminal-session-fail
 import { finalizeTerminalSession } from "#execution/finalize-terminal-session.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
-import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
+import {
+  createSessionCommandInbox,
+  type SessionCommandInbox,
+} from "#execution/session-command-inbox.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
@@ -178,65 +181,101 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       | DynamicSubagentAgentConfig
       | undefined;
 
-    const { state: sessionState } = await createSessionStep({
-      compiledArtifactsSource: serializedBundle.source,
-      continuationToken,
-      dynamicSubagentAgentConfig,
-      inheritedLimits: input.limits,
-      nodeId: serializedBundle.nodeId,
-      outputSchema: input.input.outputSchema,
-      rootSessionId: rootSessionIdFromParent,
-      sessionId,
-      subagentDepth,
-      taskOwned: isTaskOwnedSerializedContext(input.serializedContext),
-    });
-    crashCleanupState.lastSessionState = sessionState;
-    if (!hasGuaranteedRootLineage(input.serializedContext)) {
-      crashCleanupState.caller = await resolveInitialTurnCallerStep({
-        serializedContext: input.serializedContext,
-      });
-    }
-    crashCleanupState.callerResolved = true;
+    const commandInbox = createSessionCommandInbox();
+    const stableCommandToken = sessionCommandHookToken(sessionId);
+    // getHookUrl() builds authorization callback URLs with this token. It is
+    // inlined because the durable workflow body cannot import the harness.
+    const authorizationHookToken = `${sessionId}:auth`;
+    let sessionState: DurableSessionState;
+    let outcome: DriverLoopOutcome;
+    try {
+      // Hook ownership is independent of session hydration. Start every
+      // readiness claim immediately so Workflow can persist them while the
+      // session bundle is loading, then join every sibling before cleanup.
+      const [sessionCreation, stableClaim, authorizationClaim, continuationClaim] =
+        await Promise.allSettled([
+          createSessionStep({
+            compiledArtifactsSource: serializedBundle.source,
+            continuationToken,
+            dynamicSubagentAgentConfig,
+            inheritedLimits: input.limits,
+            nodeId: serializedBundle.nodeId,
+            outputSchema: input.input.outputSchema,
+            rootSessionId: rootSessionIdFromParent,
+            sessionId,
+            subagentDepth,
+            taskOwned: isTaskOwnedSerializedContext(input.serializedContext),
+          }),
+          commandInbox.claimStable(stableCommandToken),
+          commandInbox.claimAuthorization(authorizationHookToken),
+          commandInbox.rekeyContinuation(continuationToken),
+        ]);
 
-    const outcome = await runDriverLoop({
-      capabilities,
-      driverWritable,
-      initialInput: {
-        deliveryMetadata:
-          input.serializedContext["eve.channelDelivery"] === undefined
-            ? undefined
-            : [
-                {
-                  ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
-                    RunInput["delivery"]
-                  >),
-                  payloadIndex: 0,
-                },
-              ],
-        kind: "deliver",
-        payloads: [
-          attachClientContext(
-            {
-              message: input.input.message,
-              context: input.input.context,
-              outputSchema: input.input.outputSchema,
-            },
-            readClientContext(input.input),
-          ),
-        ],
-        requestId: readChannelRequestId(input.serializedContext),
-      },
-      crashCleanupState,
-      mode,
-      serializedContext: input.serializedContext,
-      sessionState,
-      sessionTimeoutDeadline:
-        input.sessionTimeoutMs === false
-          ? undefined
-          : new Date(
-              workflowStartedAt.getTime() + (input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
+      if (sessionCreation.status === "rejected") throw sessionCreation.reason;
+      if (stableClaim.status === "rejected") throw stableClaim.reason;
+      if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
+      if (continuationClaim.status === "rejected") {
+        // A concurrent create can start two candidate runs before either
+        // publishes the shared continuation alias. The runtime adopts the
+        // alias owner; the losing candidate exits before its first turn.
+        if (isHookConflictError(continuationClaim.reason)) return { output: "" };
+        throw continuationClaim.reason;
+      }
+
+      sessionState = sessionCreation.value.state;
+      crashCleanupState.lastSessionState = sessionState;
+      if (!hasGuaranteedRootLineage(input.serializedContext)) {
+        crashCleanupState.caller = await resolveInitialTurnCallerStep({
+          serializedContext: input.serializedContext,
+        });
+      }
+      crashCleanupState.callerResolved = true;
+
+      outcome = await runDriverLoop({
+        capabilities,
+        commandInbox,
+        driverWritable,
+        initialInput: {
+          deliveryMetadata:
+            input.serializedContext["eve.channelDelivery"] === undefined
+              ? undefined
+              : [
+                  {
+                    ...(input.serializedContext["eve.channelDelivery"] as NonNullable<
+                      RunInput["delivery"]
+                    >),
+                    payloadIndex: 0,
+                  },
+                ],
+          kind: "deliver",
+          payloads: [
+            attachClientContext(
+              {
+                message: input.input.message,
+                context: input.input.context,
+                outputSchema: input.input.outputSchema,
+              },
+              readClientContext(input.input),
             ),
-    });
+          ],
+          requestId: readChannelRequestId(input.serializedContext),
+        },
+        crashCleanupState,
+        mode,
+        serializedContext: input.serializedContext,
+        sessionState,
+        sessionTimeoutDeadline:
+          input.sessionTimeoutMs === false
+            ? undefined
+            : new Date(
+                workflowStartedAt.getTime() +
+                  (input.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS),
+              ),
+        stableCommandToken,
+      });
+    } finally {
+      await commandInbox.dispose();
+    }
     if (outcome.kind === "result") {
       return outcome.result;
     }
@@ -337,6 +376,7 @@ function hasGuaranteedRootLineage(serializedContext: Record<string, unknown>): b
 
 async function runDriverLoop(input: {
   readonly capabilities?: SessionCapabilities;
+  readonly commandInbox: SessionCommandInbox;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly initialInput: HookPayload;
   readonly crashCleanupState: CrashCleanupState;
@@ -344,7 +384,9 @@ async function runDriverLoop(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly sessionTimeoutDeadline?: Date;
+  readonly stableCommandToken: string;
 }): Promise<DriverLoopOutcome> {
+  const commandInbox = input.commandInbox;
   // One payload per exact authorization attempt accumulates across
   // intervening turns. Replaced attempts are pruned at each park.
   const collectedAuthPayloads = new Map<string, DeliverPayload>();
@@ -424,21 +466,12 @@ async function runDriverLoop(input: {
   const bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset"> = [];
   const cancelledTaskIds = new Set<string>();
   const seenTaskDeliveries = new Set<string>();
-  const commandInbox = createSessionCommandInbox();
-  const stableCommandToken = sessionCommandHookToken(input.sessionState.sessionId);
-  await commandInbox.claimStable(stableCommandToken);
-  // Per-session authorization-callback hook. Claimed before any turns so it
-  // exists when authorization.required events trigger OAuth callbacks;
-  // getHookUrl() builds callback URLs with this token (see authHookToken —
-  // inlined here because the workflow driver body cannot import the
-  // harness module).
-  await commandInbox.claimAuthorization(`${input.sessionState.sessionId}:auth`);
   const sessionTimeout =
     input.sessionTimeoutDeadline === undefined
       ? undefined
       : createSessionTimeoutControl({
           deadline: input.sessionTimeoutDeadline,
-          token: stableCommandToken,
+          token: input.stableCommandToken,
         });
 
   // Durable state accumulated across turns and the parked waits between
@@ -496,18 +529,6 @@ async function runDriverLoop(input: {
   };
 
   try {
-    if (input.sessionState.continuationToken) {
-      try {
-        await commandInbox.rekeyContinuation(input.sessionState.continuationToken);
-      } catch (error) {
-        // A concurrent create can start two candidate runs before either
-        // publishes the shared continuation alias. The runtime adopts the
-        // alias owner; the losing candidate must exit before its first turn
-        // instead of emitting a second session failure for the same create.
-        if (!isHookConflictError(error)) throw error;
-        return { kind: "result", result: { output: "" } };
-      }
-    }
     await sessionTimeout?.start();
 
     let action: TurnDriverAction = await runTurn(input.initialInput);
@@ -656,6 +677,5 @@ async function runDriverLoop(input: {
   } finally {
     await disposeSettledTurnControl?.();
     await sessionTimeout?.dispose();
-    await commandInbox.dispose();
   }
 }
