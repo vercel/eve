@@ -998,17 +998,27 @@ async function receiveOnSlack(
     receiveTarget.audience === undefined
       ? undefined
       : normalizeChannelAudience(receiveTarget.audience);
+  const state: {
+    channelId: string;
+    installationTeamId: string | null;
+    threadTs: string | null;
+    teamId: string | null;
+    triggeringUserId: string | null;
+    audience?: ChannelAudience;
+  } = {
+    channelId,
+    installationTeamId: installationTeamId ?? null,
+    threadTs: threadTs || null,
+    teamId: deps.teamId ?? null,
+    triggeringUserId: deps.triggeringUserId ?? null,
+  };
+  if (audience !== undefined) {
+    state.audience = audience;
+  }
 
   return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
     auth: input.auth,
-    state: {
-      ...(audience === undefined ? {} : { audience }),
-      channelId,
-      installationTeamId: installationTeamId ?? null,
-      threadTs: threadTs || null,
-      teamId: deps.teamId ?? null,
-      triggeringUserId: deps.triggeringUserId ?? null,
-    },
+    state,
     title: input.title,
   });
 }
