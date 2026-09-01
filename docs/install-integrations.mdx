@@ -26,6 +26,8 @@ Some integrations package several independently installable components. For exam
 
 When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
 
+An official item may identify optional pnpm dependencies that have build scripts. Before installation, eve asks whether to skip those optional packages, allow their build scripts, or abort. Your choice updates `ignoredOptionalDependencies` or `allowBuilds` in the pnpm workspace that owns the project. Allow build scripts only when you trust the packages named in the prompt.
+
 ## Automate setup
 
 Use `eve add <item> --non-interactive` when a script or coding agent cannot answer terminal prompts. It prints NDJSON events and exits with a status you can branch on:
