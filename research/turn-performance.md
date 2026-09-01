@@ -518,6 +518,29 @@ in increasing order of risk:
 4. ask Workflow for a latest-deployment step/child-completion primitive that avoids a second run
    and polling join.
 
+The narrow inbox/cancellation-hook pass found no semantics-preserving lazy claim. The inbox claim
+is the duplicate child-run fence: deferring it until a runtime-action wait would let duplicate
+starts execute the model, tools, and side effects concurrently. The cancellation claim must be
+ready before the first `turnStep`, because an otherwise ordinary one-step turn can be steered or
+cancelled while its model or tool is running.
+
+One hook can demultiplex tagged cancel and runtime-action payloads within a single deployment, but
+it cannot replace the two current tokens safely across deployment versions. Session drivers stay
+pinned while child turns route to latest: old drivers resume `{control}:cancel`, and the shared
+duplicate-run fence must remain `{control}:inbox` so old and new child retries still contend for
+the same owner. A per-turn readiness handshake adds another durable control step, while
+`HookOptions.metadata` makes every inbox resume hydrate the run encryption key; the current
+Workflow SDK explicitly takes that slower path for any metadata-bearing hook. Either choice can
+cost more than the claim it removes, especially on subagent/runtime-action turns.
+
+The required Workflow primitive is one hook entity with atomically registered token aliases (or
+an equivalent public, no-key-lookup protocol capability). Aliasing both `{control}:inbox` and
+`{control}:cancel` to one durable iterator would preserve old-driver cancellation, cross-version
+duplicate fencing, stale-message isolation, and one-claim startup. Until that exists, keep the two
+hooks; there is no safe hosted A/B whose faster result would represent shippable behavior. The
+research-only branch `barba/perf-exp-turn-hook-coalesce` records the rejected prototype at
+`3343fc7`; no runtime changes remain on that branch.
+
 The third option is only viable if it retains latest-deployment routing. Running all future turns
 inside the pinned driver would improve latency by silently disabling live upgrades, which is not
 an acceptable trade.
@@ -715,6 +738,74 @@ If Workflow cannot provide atomic hook ownership transfer, an eve-owned sequence
 necessary. A direct ingress fast path that starts a turn before driver replay is another possible
 prototype, but it has the same serialization and fencing problem and should follow, not precede,
 the successor-run experiment.
+
+### Successor-run feasibility result
+
+The executable prototype on `barba/perf-exp-successor-turns` narrows the design space, but it is
+not a production candidate. The Workflow APIs provide two required pieces today:
+
+- explicit recursive `start(..., { deploymentId: "latest" })` creates a bounded successor on the
+  current deployment; and
+- a `WritableStream` can be passed across runs, so successor output can remain on the original
+  session stream.
+
+They do not provide atomic ownership transfer for the stable command hook. Hook tokens have one
+active owner. Disposing the old hook and claiming it in a successor are separate durable writes.
+The integration proof deliberately gates the successor between those writes and observes
+`HookNotFoundError` from both `getHookByToken()` and `resumeHook()`. A direct run-to-run handoff
+would therefore reject a command in that interval and cannot replace the current driver.
+
+The same test contains the narrowest lossless workaround supported by the current API:
+
+```text
+stable public token
+  └─ minimal FIFO sequencer run
+       ├─ active executor N receives commands
+       ├─ executor N asks the sequencer to seal generation N
+       ├─ sequencer forwards a seal, then durably holds later commands
+       ├─ executor N drains every pre-seal command
+       ├─ executor N starts latest-deployment executor N+1 with state + shared stream
+       └─ sequencer activates N+1 and forwards held commands in FIFO order
+```
+
+Six burst deliveries produced six ordered stream records through six owning executor runs. Every
+nonterminal executor persisted exactly five steps regardless of history depth; the terminal
+executor persisted three. The deterministic executor token also fenced a losing duplicate start.
+This proves that one-turn executor histories and stream continuity are possible with current
+Workflow primitives.
+
+It also shows why the workaround should not ship as the performance fix:
+
+- the sequencer is still a long-lived relay whose hook/event log grows with every command;
+- every ingress crosses a sequencer replay plus a forwarding step before the executor wakes;
+- seal, successor start, readiness, and activation add five durable steps per nonterminal turn;
+- the full conversation snapshot still grows once per successor input even though it is no longer
+  copied repeatedly into one driver's event log; and
+- the prototype intentionally omits production cancellation, timeout, authorization, HITL,
+  subagent/task, terminal-caller, and failure-recovery paths.
+
+Consequently there is no hosted stress result for this branch: wiring the prototype into the eve
+runtime would knowingly add overhead and leave required semantics incomplete. The focused test is
+the proof artifact, not a benchmark substitute. Commit `a4c7ae2` retains that artifact; two
+focused integration cases, full typecheck, lint, and invariant checks pass.
+
+The enabling Workflow primitive is an atomic, replay-idempotent successor handoff. Given a stable
+token, expected owner/generation, handoff id, latest-deployment workflow reference, checkpoint,
+and existing stream, one commit must:
+
+1. fence the old owner at an exact inbox sequence;
+2. start and register the successor on the latest deployment;
+3. preserve or transfer every payload before the fence and route every later payload to the
+   successor;
+4. keep `resumeHook(stableToken, payload)` continuously addressable, never transiently not found;
+5. return the same successor on replay of the handoff id; and
+6. preserve the stable eve session id and original resumable stream.
+
+An eve-owned durable inbox with monotonic sequence numbers and compare-and-swap ownership could
+provide equivalent semantics, but then eve owns a new storage protocol, retry/fencing rules, and a
+stream directory. Prototype that only if Workflow cannot expose the atomic operation. Even with
+either handoff, append-only history revisions or delta snapshots remain a separate requirement to
+remove the growing successor-input payload.
 
 ## Proof of success
 
