@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
-import { discoverAuthoredWorkflowModules } from "./authored-workflow-modules.js";
+import {
+  discoverAuthoredWorkflowModules,
+  readAuthoredExecuteWorkflowId,
+} from "./authored-workflow-modules.js";
 
 let appRoot: string;
 
@@ -148,5 +151,51 @@ export default defineTool({
     );
 
     await expect(discoverAuthoredWorkflowModules(appRoot)).rejects.toThrow(/use workflow/);
+  });
+});
+
+describe("readAuthoredExecuteWorkflowId", () => {
+  it("names the run a tool's execute compiles to, in both authoring shapes", async () => {
+    const inline = await write(
+      "agent/tools/deploy.ts",
+      [
+        'import { defineTool } from "eve/tools";',
+        "export default defineTool({",
+        '  description: "d",',
+        "  inputSchema: {},",
+        "  async execute() {",
+        '    "use workflow";',
+        "    return 1;",
+        "  },",
+        "});",
+        "",
+      ].join("\n"),
+    );
+    const referenced = await write(
+      "agent/tools/nested/release.ts",
+      [
+        'import { defineTool } from "eve/tools";',
+        'export default defineTool({ description: "d", inputSchema: {}, execute: release });',
+        "async function release() {",
+        '  "use workflow";',
+        "  return 1;",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const plain = await write(
+      "agent/tools/ping.ts",
+      'import { defineTool } from "eve/tools";\nexport default defineTool({ description: "d", inputSchema: {}, execute: () => 1 });\n',
+    );
+
+    await expect(readAuthoredExecuteWorkflowId({ appRoot, filePath: inline })).resolves.toBe(
+      "workflow//./agent/tools/deploy//execute",
+    );
+    await expect(readAuthoredExecuteWorkflowId({ appRoot, filePath: referenced })).resolves.toBe(
+      "workflow//./agent/tools/nested/release//release",
+    );
+    await expect(
+      readAuthoredExecuteWorkflowId({ appRoot, filePath: plain }),
+    ).resolves.toBeUndefined();
   });
 });

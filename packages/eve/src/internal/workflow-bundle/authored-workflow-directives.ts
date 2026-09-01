@@ -40,6 +40,8 @@ interface DirectiveFunctionNode {
 }
 
 export interface AuthoredWorkflowDirectiveSource {
+  /** Name of the top-level `"use workflow"` function the default export's `execute` is or references. */
+  readonly executeWorkflow?: string;
   readonly hasDirectives: boolean;
   readonly hasWorkflowDirective: boolean;
   readonly source: string;
@@ -84,7 +86,9 @@ export async function prepareAuthoredWorkflowDirectives(input: {
 
   const executeProperty = findDefaultExportExecuteProperty(body);
   const executeFunction =
-    executeProperty !== undefined && isAstNode(executeProperty.value)
+    executeProperty !== undefined &&
+    isAstNode(executeProperty.value) &&
+    isFunctionLike(executeProperty.value)
       ? executeProperty.value
       : undefined;
   if (executeFunction !== undefined) allowed.add(executeFunction);
@@ -128,7 +132,13 @@ export async function prepareAuthoredWorkflowDirectives(input: {
 
   const hoist = found.find((entry) => entry.fn === executeFunction);
   if (hoist === undefined || executeProperty === undefined) {
-    return { hasDirectives: true, hasWorkflowDirective, source: input.source };
+    const prepared: AuthoredWorkflowDirectiveSource = {
+      hasDirectives: true,
+      hasWorkflowDirective,
+      source: input.source,
+    };
+    const referenced = readExecuteReference(executeProperty, found);
+    return referenced === undefined ? prepared : { ...prepared, executeWorkflow: referenced };
   }
 
   if (declaresTopLevelBinding(body, HOISTED_EXECUTE_NAME)) {
@@ -139,10 +149,27 @@ export async function prepareAuthoredWorkflowDirectives(input: {
   }
 
   return {
+    executeWorkflow: HOISTED_EXECUTE_NAME,
     hasDirectives: true,
     hasWorkflowDirective,
     source: hoistExecuteMethod(input.source, executeProperty, hoist.fn),
   };
+}
+
+/** `execute: deploy`, where `deploy` is a top-level `"use workflow"` declaration. */
+function readExecuteReference(
+  executeProperty: AstNode | undefined,
+  found: readonly DirectiveFunctionNode[],
+): string | undefined {
+  const value = executeProperty?.value;
+  if (!isAstNode(value) || value.type !== "Identifier" || typeof value.name !== "string") {
+    return undefined;
+  }
+  const name = value.name;
+  const target = found.find(
+    (entry) => entry.directive === "use workflow" && entry.fn.id?.name === name,
+  );
+  return target === undefined ? undefined : name;
 }
 
 function findDefaultExportExecuteProperty(body: readonly AstNode[]): AstNode | undefined {
@@ -157,9 +184,7 @@ function findDefaultExportExecuteProperty(body: readonly AstNode[]): AstNode | u
       property.type === "Property" &&
       property.kind === "init" &&
       property.computed !== true &&
-      readPropertyName(property.key) === HOISTED_EXECUTE_NAME &&
-      isAstNode(property.value) &&
-      isFunctionLike(property.value),
+      readPropertyName(property.key) === HOISTED_EXECUTE_NAME,
   );
 }
 

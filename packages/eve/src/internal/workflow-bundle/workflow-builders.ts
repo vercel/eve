@@ -6,7 +6,9 @@ import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import {
+  createWorkflowId,
   findWorkflowDirectiveFunctions,
+  stripJavaScriptExtension,
   transformWorkflowDirectives,
 } from "./workflow-transformer.js";
 
@@ -81,12 +83,9 @@ export async function applyWorkflowTransform(
     // package directory) and the server bundle (built from the app) agree.
     return transformWorkflowDirectives({
       authored: true,
-      filename: toRelativeImportPath(
-        toRealPath(absolutePath),
-        toRealPath(resolvedProjectRoot),
-      ).replace(/^\.\//, ""),
+      filename: authoredRelativePath(absolutePath, resolvedProjectRoot),
       mode: prepared?.hasDirectives === true ? mode : false,
-      moduleSpecifier: undefined,
+      moduleSpecifier: authoredModuleIdBase(absolutePath, resolvedProjectRoot),
       source: prepared?.source ?? source,
       stableModuleSpecifier: undefined,
       stableWorkflowNames,
@@ -109,6 +108,23 @@ export function isAuthoredApplicationModule(absolutePath: string, appRoot: strin
   if (!normalizedPath.startsWith(`${normalizedRoot}/`)) return false;
   if (isInNodeModules(normalizedPath)) return false;
   return findPackageJson(normalizedPath)?.name !== EVE_PACKAGE_NAME;
+}
+
+function authoredRelativePath(absolutePath: string, appRoot: string): string {
+  return toRelativeImportPath(toRealPath(absolutePath), toRealPath(appRoot)).replace(/^\.\//, "");
+}
+
+function authoredModuleIdBase(absolutePath: string, appRoot: string): string {
+  return `./${stripJavaScriptExtension(authoredRelativePath(absolutePath, appRoot))}`;
+}
+
+/** The id the transform mints for an authored `"use workflow"` function. */
+export function authoredWorkflowId(
+  absolutePath: string,
+  appRoot: string,
+  functionName: string,
+): string {
+  return createWorkflowId(authoredModuleIdBase(absolutePath, appRoot), functionName);
 }
 
 // Bundlers hand back real paths while configuration carries the spelled

@@ -9,7 +9,11 @@ import {
 
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import { isWorkflowSourceFile } from "./builder-support.js";
-import { isAuthoredApplicationModule, isAuthoredApplicationRoot } from "./workflow-builders.js";
+import {
+  authoredWorkflowId,
+  isAuthoredApplicationModule,
+  isAuthoredApplicationRoot,
+} from "./workflow-builders.js";
 
 // The SDK's own ignore list (`BaseBuilder.getInputFiles`) plus eve's generated locations.
 const IGNORED_DIRECTORIES = new Set([
@@ -94,4 +98,25 @@ async function collectSourceFiles(root: string): Promise<string[]> {
 
   await visit(root);
   return files;
+}
+
+/**
+ * The workflow id a tool's `execute` will run as, or `undefined` for an
+ * ordinary tool. Derived from the source the way the transform derives it, so
+ * the compiled manifest and the driver registry name the same run.
+ */
+export async function readAuthoredExecuteWorkflowId(input: {
+  readonly appRoot: string;
+  readonly filePath: string;
+}): Promise<string | undefined> {
+  if (!isAuthoredApplicationModule(input.filePath, input.appRoot)) return undefined;
+  const source = await readFile(input.filePath, "utf8");
+  if (!detectWorkflowPatterns(source).hasDirective) return undefined;
+  const { executeWorkflow } = await prepareAuthoredWorkflowDirectives({
+    filePath: input.filePath,
+    source,
+  });
+  return executeWorkflow === undefined
+    ? undefined
+    : authoredWorkflowId(input.filePath, input.appRoot, executeWorkflow);
 }

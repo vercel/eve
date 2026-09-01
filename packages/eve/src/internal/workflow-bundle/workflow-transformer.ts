@@ -166,7 +166,7 @@ export async function transformWorkflowDirectives(input: {
     }
 
     const isStable = input.stableWorkflowNames?.has(fn.name) === true;
-    const workflowId = `workflow//${isStable ? stableIdBase : defaultIdBase}//${fn.name}`;
+    const workflowId = createWorkflowId(isStable ? stableIdBase : defaultIdBase, fn.name);
     manifest.workflows ??= {};
     const workflowsForFile = (manifest.workflows[input.filename] ??= {});
     workflowsForFile[fn.name] = { workflowId };
@@ -640,8 +640,12 @@ function extendRemovalEnd(source: string, end: number): number {
   return cursor;
 }
 
-function stripJavaScriptExtension(path: string): string {
+export function stripJavaScriptExtension(path: string): string {
   return path.replace(/\.(?:[cm]?[jt]sx?)$/, "");
+}
+
+export function createWorkflowId(idBase: string, functionName: string): string {
+  return `workflow//${idBase}//${functionName}`;
 }
 
 function createStepId(idBase: string, functionName: string): string {

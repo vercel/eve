@@ -21,7 +21,6 @@ import { toolRunWorkflowReference } from "#execution/workflow-runtime.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import type { InputRequestedStreamEvent } from "#protocol/message.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { readWorkflowToolId } from "#shared/workflow-tool.js";
 import { toInputSchema } from "#tools/schema.js";
 
 const DEPLOY_INPUT_SCHEMA = toInputSchema({
@@ -56,8 +55,6 @@ async function createWorkflowToolRuntime(input: {
   readonly execute: (...args: never[]) => unknown;
   readonly toolName: string;
 }): Promise<TestRuntime> {
-  const workflowId = readWorkflowToolId(input.execute);
-  expect(workflowId).toEqual(expect.any(String));
   const tool: ResolvedToolDefinition = {
     description: `Deploys a service (${input.toolName}).`,
     execute: input.execute as ResolvedToolDefinition["execute"],
@@ -67,7 +64,6 @@ async function createWorkflowToolRuntime(input: {
     owner: { kind: "application" },
     sourceId: `tools/${input.toolName}.ts`,
     sourceKind: "module",
-    workflowId,
   };
   const runtime = await createTestRuntime({ agent: { name: input.agentName }, tools: [tool] });
   const manifestTool = runtime.manifest.tools.find((entry) => entry.name === input.toolName);
@@ -77,6 +73,11 @@ async function createWorkflowToolRuntime(input: {
   runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
     default: { execute: input.execute },
   };
+  // The compiler derives workflowId from authored source; an in-memory tool has
+  // none, so record the id the test tier's transform stamped on the fixture.
+  const workflowId = Reflect.get(input.execute, "workflowId");
+  expect(workflowId).toEqual(expect.any(String));
+  Object.assign(manifestTool as { workflowId?: string }, { workflowId });
   return runtime;
 }
 

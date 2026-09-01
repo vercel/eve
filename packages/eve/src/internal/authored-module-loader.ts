@@ -637,7 +637,7 @@ function resolveAuthoredTsConfigPath(packageRoot: string): string | false {
   return false;
 }
 
-function resolveAuthoredPackageRoot(modulePath: string): string {
+export function resolveAuthoredPackageRoot(modulePath: string): string {
   let currentDirectory = dirname(modulePath);
 
   while (true) {

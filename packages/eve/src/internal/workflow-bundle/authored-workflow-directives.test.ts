@@ -48,6 +48,7 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     const prepared = await prepareAuthoredWorkflowDirectives({ filePath: FILE, source });
 
     expect(prepared.hasDirectives).toBe(true);
+    expect(prepared.executeWorkflow).toBe("execute");
     expect(prepared.source).toContain("  execute,\n  toModelOutput: (output) => output,");
     expect(prepared.source).toContain(
       "async function execute({ service }: { service: string }, ctx: ToolContext): Promise<{ ok: boolean }> {\n" +
@@ -121,6 +122,7 @@ describe("prepareAuthoredWorkflowDirectives", () => {
     ].join("\n");
 
     await expect(prepareAuthoredWorkflowDirectives({ filePath: FILE, source })).resolves.toEqual({
+      executeWorkflow: "deploy",
       hasDirectives: true,
       hasWorkflowDirective: true,
       source,
