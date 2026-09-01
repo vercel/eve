@@ -49,14 +49,14 @@ function errorMessage(error: unknown): string {
 export function runRequestToInputRequestPayload(
   message: RunRequestMessage,
 ): SubagentInputRequestHookPayload {
-  const { from, replyTo, request } = message;
+  const { answerToken, from, request } = message;
   return {
     callId: from.callId,
-    childContinuationToken: replyTo,
+    childContinuationToken: answerToken,
     childSessionId: from.runId,
     event: {
-      requests: [toInputRequest(request, from, replyTo)],
-      sequence: 0,
+      requests: [toInputRequest(request, from, answerToken)],
+      sequence: from.sequence,
       stepIndex: from.stepIndex,
       turnId: from.turnId,
     },

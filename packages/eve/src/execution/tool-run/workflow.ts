@@ -21,10 +21,11 @@ const CANCEL_GRACE = "30s";
 
 function noop(): void {}
 
+type WorkflowToolStream = AsyncIterable<JsonValue, JsonValue | undefined, void>;
 type WorkflowToolExecute = (
   input: unknown,
   ctx: ToolContext,
-) => Promise<JsonValue> | AsyncIterable<JsonValue>;
+) => Promise<JsonValue> | WorkflowToolStream;
 
 /**
  * Runs one authored workflow tool call. The run's own hook is its identity
@@ -53,6 +54,7 @@ export async function toolRunWorkflow(input: ToolRunWorkflowInput): Promise<void
       callId: input.callId,
       input: input.input,
       runId,
+      sequence: input.session.turn.sequence,
       stepIndex: input.stepIndex,
       toolName: input.toolName,
       turnId: input.session.turn.id,
@@ -108,14 +110,14 @@ async function runBody(
     await resumeHookStep(input.owner.report, report);
     next = await iterator.next();
   }
-  return (next.value as JsonValue | undefined) ?? last ?? null;
+  return next.value ?? last ?? null;
 }
 
-function isAsyncIterable(value: unknown): value is AsyncIterable<JsonValue> {
+function isAsyncIterable(value: unknown): value is WorkflowToolStream {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as AsyncIterable<JsonValue>)[Symbol.asyncIterator] === "function"
+    typeof (value as WorkflowToolStream)[Symbol.asyncIterator] === "function"
   );
 }
 

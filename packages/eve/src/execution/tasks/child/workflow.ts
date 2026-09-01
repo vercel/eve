@@ -119,7 +119,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       const read = await raceChannelReads(readers);
       if (read.next.done === true) return;
       if (read.channel === "request") {
-        answerHooks.set(read.next.value.replyTo, { runId: read.next.value.from.runId });
+        answerHooks.set(read.next.value.answerToken, { runId: read.next.value.from.runId });
       }
       const raw: TaskRunHookPayload =
         read.channel === "report"

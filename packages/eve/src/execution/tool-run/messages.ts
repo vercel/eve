@@ -18,6 +18,8 @@ export interface RunRef {
   /** The tool's parsed input, shown as the request's action when the run asks. */
   readonly input: JsonObject;
   readonly runId: string;
+  /** Stream coordinates of the model call that made the tool call. */
+  readonly sequence: number;
   readonly stepIndex: number;
   readonly toolName: string;
   readonly turnId: string;
@@ -28,18 +30,20 @@ export type RunOutcome =
   | { readonly status: "failed"; readonly error: unknown }
   | { readonly status: "cancelled"; readonly reason?: string };
 
+/** Progress sent up from a run; the owner streams it as a turn partial or a task update. */
 export interface RunReport {
   readonly from: RunRef;
   readonly update: JsonValue;
 }
 
-/** `replyTo` is the token of the hook the human's answer resumes. */
+/** A question sent up from a run; the owner puts it to the human and resumes `answerToken` with the reply. */
 export interface RunRequestMessage {
+  readonly answerToken: string;
   readonly from: RunRef;
-  readonly replyTo: string;
   readonly request: ToolInputRequest;
 }
 
+/** The end of a run, sent up once; the owner settles the tool call or the task with it. */
 export interface RunOutcomeMessage {
   readonly from: RunRef;
   readonly result: RunOutcome;
@@ -105,7 +109,7 @@ export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInput
   const answer = createHook<ToolInputResponse>({
     token: toolRunAnswerToken(context.from.runId, context.answerSeq++),
   });
-  const message: RunRequestMessage = { from: context.from, replyTo: answer.token, request };
+  const message: RunRequestMessage = { answerToken: answer.token, from: context.from, request };
   void resumeHookStep(context.owner.request, message);
   return answer;
 }

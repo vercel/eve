@@ -26,13 +26,21 @@ export type ChannelRead<R extends readonly ChannelReader<string, unknown>[]> = {
     : never;
 }[number];
 
-const EXTRA = Symbol("extra");
-
-export async function raceChannelReads<
-  const R extends readonly ChannelReader<string, unknown>[],
-  X = never,
->(readers: R, extra?: Promise<X>): Promise<ChannelRead<R> | X> {
-  const tagged = extra?.then((value) => ({ [EXTRA]: value }));
+/**
+ * Channel reads wake the loop with `undefined` after buffering their result;
+ * a cancel wins the race outright.
+ */
+export function raceChannelReads<const R extends readonly ChannelReader<string, unknown>[]>(
+  readers: R,
+): Promise<ChannelRead<R>>;
+export function raceChannelReads<const R extends readonly ChannelReader<string, unknown>[]>(
+  readers: R,
+  cancelled: Promise<"cancel"> | undefined,
+): Promise<ChannelRead<R> | "cancel">;
+export async function raceChannelReads<const R extends readonly ChannelReader<string, unknown>[]>(
+  readers: R,
+  cancelled?: Promise<"cancel">,
+): Promise<ChannelRead<R> | "cancel"> {
   while (true) {
     for (const reader of readers) {
       if (reader.failure !== undefined) throw reader.failure.error;
@@ -53,12 +61,7 @@ export async function raceChannelReads<
       );
       waits.push(reader.pending);
     }
-    if (tagged !== undefined) waits.push(tagged);
-    const settled = await Promise.race(waits);
-    if (isExtra(settled)) return settled[EXTRA] as X;
+    if (cancelled !== undefined) waits.push(cancelled);
+    if ((await Promise.race(waits)) === "cancel") return "cancel";
   }
-}
-
-function isExtra(value: unknown): value is { readonly [EXTRA]: unknown } {
-  return typeof value === "object" && value !== null && EXTRA in value;
 }
