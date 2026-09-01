@@ -529,10 +529,6 @@ function allocateSessionTraceSeed(input: {
     channelType: input.channelType,
   });
   const traceId = input.runtime.idGenerator.generateTraceId();
-  // The seed is stamped onto workflow attributes as `$eve.trace_id` before
-  // any span exists, so the configured OTel sampler must agree now: a
-  // policy-sampled seed for a sampler-dropped trace would link to a trace
-  // that is never exported.
   const sampled = decision.action === "record" && (input.runtime.samplesTrace?.(traceId) ?? true);
   return {
     decision,
