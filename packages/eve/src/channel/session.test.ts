@@ -9,6 +9,7 @@ import {
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer } from "#context/container.js";
 import { AuthKey, ContinuationTokenKey, InitiatorAuthKey, SessionIdKey } from "#context/keys.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 import { type InputResponse, parseInputResponses } from "#shared/input.js";
 
 function fixedSessionRespondTypeChecks(session: Session): void {
@@ -84,6 +85,34 @@ describe("createSession#cancel", () => {
 });
 
 describe("fixed session operations", () => {
+  it("dispatches ephemeral context separately from durable channel context", async () => {
+    const runtime = createRuntime();
+    const session = createSession("sess_1", runtime);
+
+    await session.send(
+      "hello",
+      attachClientContext({ auth: null, context: ["durable"] }, ["ephemeral"]),
+    );
+
+    expect(runtime.dispatchSession).toHaveBeenCalledWith({
+      command: {
+        auth: null,
+        kind: "send",
+        payload: expect.objectContaining({
+          context: ["durable"],
+          message: "hello",
+        }),
+        requestId: undefined,
+        turnPolicy: "steer",
+      },
+      sessionId: "sess_1",
+    });
+    const call = vi.mocked(runtime.dispatchSession).mock.calls[0]?.[0];
+    expect(
+      readClientContext(call?.command.kind === "send" ? call.command.payload : undefined),
+    ).toEqual(["ephemeral"]);
+  });
+
   it("keeps the session turn policy out of channel delivery metadata", async () => {
     const runtime = createRuntime();
     const session = createSession("sess_1", runtime, {

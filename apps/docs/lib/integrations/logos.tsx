@@ -229,6 +229,15 @@ export const arcanaLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const supermemoryLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 39.467 32" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M39.126 12.632H24.606V.01h-4.692v13.695c0 1.454.574 2.851 1.595 3.88l11.856 11.958 3.318-3.346-8.758-8.831h11.204v-4.732ZM2.446 5.822l8.757 8.832H0v4.731h14.52v12.623h4.692V18.312c0-1.453-.573-2.847-1.595-3.88L5.764 2.476 2.446 5.822Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const hindsightLogo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 186 139" xmlns="http://www.w3.org/2000/svg" {...props}>
     <g stroke="#078BC2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="8">
@@ -749,6 +758,7 @@ export const logos = {
   kernel: kernelLogo,
   upstash: upstashLogo,
   arcana: arcanaLogo,
+  supermemory: supermemoryLogo,
   hindsight: hindsightLogo,
   airtable: airtableLogo,
   bitly: bitlyLogo,

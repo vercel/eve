@@ -1,32 +1,28 @@
 import type { ExperimentConfig } from "@vercel/agent-eval";
-import { registerAgent } from "@vercel/agent-eval";
 
-import type { AuthoringBenchmarkModel, AuthoringTreatment } from "./benchmark-config.js";
-import { createAuthoringAgent } from "./harness-agent.js";
+import {
+  harnessId,
+  type AuthoringBenchmarkModel,
+  type AuthoringTreatment,
+  publishedBenchmark,
+} from "./benchmark-config.js";
+import { createNativeAuthoringSetup } from "./native-authoring-setup.js";
 
 export function authoringExperiment(options: {
-  readonly archive: Uint8Array;
-  readonly dependencyArchive: Uint8Array;
-  readonly digest: string;
-  readonly dependencyDigest: string;
+  readonly revision: string;
+  readonly packageSpec: string;
   readonly runs?: number;
   readonly evals?: readonly string[];
   readonly benchmark: AuthoringBenchmarkModel;
   readonly treatment: AuthoringTreatment;
   readonly verbose?: boolean;
 }): ExperimentConfig {
-  const agent = createAuthoringAgent({
-    model: options.benchmark.model,
-    archive: options.archive,
-    dependencyArchive: options.dependencyArchive,
-    digest: options.digest,
-    dependencyDigest: options.dependencyDigest,
-  });
-  registerAgent(agent);
   return {
-    agent: agent.name,
-    model: options.benchmark.model,
-    evals: process.env.EVE_BENCHMARK_EVAL ?? (options.evals ? [...options.evals] : "*"),
+    agent: `vercel-ai-gateway/${harnessId(options.benchmark.harness)}`,
+    model: nativeModel(options.benchmark),
+    evals:
+      process.env.EVE_BENCHMARK_EVAL ??
+      (options.evals ? [...options.evals] : [...publishedBenchmark.caseIds]),
     scripts: ["typecheck", "build"],
     runs: options.runs ?? 1,
     earlyExit: false,
@@ -35,9 +31,16 @@ export function authoringExperiment(options: {
     timeout: Number(process.env.EVE_BENCHMARK_TIMEOUT ?? 900),
     sandbox: "vercel",
     copyFiles: "changed",
-    agentOptions: {
-      agentsMd: options.treatment === "guided",
-      verbose: options.verbose ?? false,
-    },
+    setup: createNativeAuthoringSetup({
+      packageSpec: options.packageSpec,
+      revision: options.revision,
+      treatment: options.treatment,
+    }),
+    agentOptions: { verbose: options.verbose ?? false },
   };
+}
+
+function nativeModel(benchmark: AuthoringBenchmarkModel): string {
+  if (benchmark.harness !== "Claude Code") return benchmark.model;
+  return benchmark.model.replace(/^anthropic\//u, "");
 }

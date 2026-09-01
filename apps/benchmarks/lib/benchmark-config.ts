@@ -2,13 +2,13 @@ export const authoringTreatments = ["baseline", "guided"] as const;
 
 export type AuthoringTreatment = (typeof authoringTreatments)[number];
 
-export type AuthoringBenchmarkSupport = "supported" | "candidate";
+export type AuthoringBenchmarkSupport = "supported" | "candidate" | "superseded";
 
 export interface AuthoringBenchmarkModel {
   readonly id: string;
   readonly model: string;
   readonly displayName: string;
-  readonly harness: "OpenCode";
+  readonly harness: "OpenCode" | "Claude Code" | "Codex";
   readonly support: AuthoringBenchmarkSupport;
 }
 
@@ -18,7 +18,7 @@ export const benchmarkModels = [
     model: "claude-sonnet-4-6",
     displayName: "Claude Sonnet 4.6",
     harness: "OpenCode",
-    support: "supported",
+    support: "superseded",
   },
   {
     id: "kimi-k3",
@@ -31,7 +31,7 @@ export const benchmarkModels = [
     id: "claude-fable-5",
     model: "anthropic/claude-fable-5",
     displayName: "Claude Fable 5",
-    harness: "OpenCode",
+    harness: "Claude Code",
     support: "supported",
   },
   {
@@ -45,21 +45,21 @@ export const benchmarkModels = [
     id: "gpt-5-6-sol",
     model: "openai/gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
-    harness: "OpenCode",
+    harness: "Codex",
     support: "supported",
   },
   {
     id: "gpt-5-6-terra",
     model: "openai/gpt-5.6-terra",
     displayName: "GPT-5.6 Terra",
-    harness: "OpenCode",
+    harness: "Codex",
     support: "supported",
   },
   {
     id: "claude-sonnet-5",
     model: "anthropic/claude-sonnet-5",
     displayName: "Claude Sonnet 5",
-    harness: "OpenCode",
+    harness: "Claude Code",
     support: "supported",
   },
   {
@@ -73,8 +73,8 @@ export const benchmarkModels = [
     id: "claude-opus-5",
     model: "anthropic/claude-opus-5",
     displayName: "Claude Opus 5",
-    harness: "OpenCode",
-    support: "candidate",
+    harness: "Claude Code",
+    support: "supported",
   },
   {
     id: "gemini-3-1-pro-preview",
@@ -103,10 +103,16 @@ export const publishedBenchmark = {
 } as const;
 
 export function publishedExperimentId(
-  benchmark: Pick<AuthoringBenchmarkModel, "id">,
+  benchmark: Pick<AuthoringBenchmarkModel, "id" | "harness">,
   treatment: AuthoringTreatment,
 ): string {
-  return `${benchmark.id}-opencode--${treatment}`;
+  return `${benchmark.id}-${harnessId(benchmark.harness)}--${treatment}`;
+}
+
+export function harnessId(harness: AuthoringBenchmarkModel["harness"]): string {
+  if (harness === "Claude Code") return "claude-code";
+  if (harness === "Codex") return "codex";
+  return "opencode";
 }
 
 export function parseAuthoringTreatment(value: string): AuthoringTreatment {

@@ -1,5 +1,34 @@
 # eve
 
+## 0.47.6
+
+### Patch Changes
+
+- 63f2e07: Run `Workflow` programs with the official AI SDK code-mode runtime while preserving eve's durable subagent accounting and event stream.
+- 450681a: Upgrade eve and newly generated projects to Zod 4.5, with lazy schema compilation for faster internal validation and substantially lower schema memory overhead. Boolean-only checks now use Zod's validation fast path instead of constructing full parse results.
+
+## 0.47.5
+
+### Patch Changes
+
+- e0317ff: Add Supermemory as a memory provider in the official registry. Run `eve add memory/supermemory` to install the provider and create a principal-scoped memory slot.
+
+## 0.47.4
+
+### Patch Changes
+
+- e2e055c: Instrumentation providers can now define a `tracePolicy` to independently control event admission and input or output content capture. The deprecated `capture` setting continues to work through an equivalent policy mapping, while providers that omit both settings capture content only for public audiences.
+- 6b111ed: Exposes `metricReaders` on `otelIntegration()` so destinations can declare OTLP metric readers alongside span processors. Readers from every destination are collected in declaration order and passed to `registerOTel`, which builds the process's meter provider. Also adds the metrics API surface to the vendored `@opentelemetry/api` declarations so user-land instrumentation code can typecheck against `metrics.getMeter()`.
+- a0c33dc: Allow `connections/` modules to use `defineDynamic` for caller-specific MCP and OpenAPI connection sets resolved at session or turn boundaries. Dynamic connections participate in ordinary discovery, auth, approval, and qualified tool calls, fail closed on resolver errors, and pin durable authorization to a stable resolved instance.
+- 4264f03: Preserve completed tool results across sequential approval and authorization pauses so resumed model calls do not repeat successful tool executions.
+- fde3161: Ensure the workspace CLI restores missing compiled vendor modules before rebuilding itself.
+- cfc82cc: Refactor internal instrumentation ownership and execution wiring without changing session tracing behavior.
+- 69e9bff: Instrumentation trace policies now always receive the active agent's canonical ID, including for configless agents and cancelled turns. Explicit provider policies must be bound to an agent before events are published.
+- f062299: Slack channels can now handle signed slash command payloads with `onSlashCommand`, including command arguments, actor and channel identity, trigger metadata, and workspace-scoped Slack API access.
+- 3bdcb88: Align local agent invocation and tool execution spans with the OpenTelemetry GenAI agent conventions. Agent turns now emit usage-bearing `invoke_agent` spans, model calls emit `chat` directly beneath `agent.step` without a redundant `ai.streamText` wrapper, tool calls emit `execute_tool` spans, and terminal failures include `error.type`. In experimental provider mode, channel requests use `agent.channel.request`; legacy instrumentation retains HTTP-semantic route names. The first terminal delivery for a turn parents its invocation, and Workflow SDK spans started from agent contexts remain on a separate trace. These naming changes advance the Agent Trace schema to version 3 while local readers retain version 2 compatibility.
+- d87cf40: Add an `onShortcut` hook to the Slack channel for message and global shortcuts. Shortcut handlers receive normalized payload data and workspace-scoped Slack API access.
+- a637227: Keep conversation sessions active when AI Gateway requests require billing setup or hit free-tier model restrictions, so users can resolve the plan limit and retry in the same thread.
+
 ## 0.47.3
 
 ### Patch Changes

@@ -82,6 +82,38 @@ export function moveRight(state: LineState): LineState {
     : { text: state.text, cursor: nextGraphemeBoundary(state.text, state.cursor) };
 }
 
+/** Moves to the beginning of the current or previous word (Alt+B). */
+export function moveWordBackward(state: LineState): LineState {
+  let cursor = state.cursor;
+  while (cursor > 0) {
+    const previous = previousGraphemeBoundary(state.text, cursor);
+    if (isWordCharacter(state.text.slice(previous, cursor))) break;
+    cursor = previous;
+  }
+  while (cursor > 0) {
+    const previous = previousGraphemeBoundary(state.text, cursor);
+    if (!isWordCharacter(state.text.slice(previous, cursor))) break;
+    cursor = previous;
+  }
+  return cursor === state.cursor ? state : { text: state.text, cursor };
+}
+
+/** Moves to the end of the current or next word (Alt+F). */
+export function moveWordForward(state: LineState): LineState {
+  let cursor = state.cursor;
+  while (cursor < state.text.length) {
+    const next = nextGraphemeBoundary(state.text, cursor);
+    if (isWordCharacter(state.text.slice(cursor, next))) break;
+    cursor = next;
+  }
+  while (cursor < state.text.length) {
+    const next = nextGraphemeBoundary(state.text, cursor);
+    if (!isWordCharacter(state.text.slice(cursor, next))) break;
+    cursor = next;
+  }
+  return cursor === state.cursor ? state : { text: state.text, cursor };
+}
+
 /** Moves the caret to the start of the line (Home / Ctrl+A). */
 export function moveHome(state: LineState): LineState {
   const cursor = logicalLineStart(state.text, state.cursor);
@@ -172,9 +204,15 @@ export function applyLineEditorKey(
     case "delete":
       return deleteForward(state);
     case "left":
+    case "ctrl-b":
       return moveLeft(state);
     case "right":
+    case "ctrl-f":
       return moveRight(state);
+    case "alt-b":
+      return moveWordBackward(state);
+    case "alt-f":
+      return moveWordForward(state);
     case "home":
     case "ctrl-a":
       return moveHome(state);
@@ -194,6 +232,10 @@ export function applyLineEditorKey(
 
 function isWhitespace(text: string): boolean {
   return /^\s+$/u.test(text);
+}
+
+function isWordCharacter(text: string): boolean {
+  return /^[\p{L}\p{M}\p{N}_]/u.test(text);
 }
 
 /**

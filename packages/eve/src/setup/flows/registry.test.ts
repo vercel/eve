@@ -90,6 +90,11 @@ describe("runRegistryFlow", () => {
           hint: "Add browser automation, memory, and developer tools",
         }),
         expect.objectContaining({
+          value: "category:memory",
+          label: "Memory providers",
+          hint: "Retain and recall scoped context across sessions",
+        }),
+        expect.objectContaining({
           value: "category:instrumentation",
           label: "Observability",
           hint: "Trace, evaluate, and monitor your agent",
@@ -121,6 +126,41 @@ describe("runRegistryFlow", () => {
         { value: "add", label: "Add to project" },
         { value: "back", label: "Back" },
       ],
+    });
+  });
+
+  it("browses memory providers", async () => {
+    const answers = ["category:memory", "action:back", "action:done"];
+    const prompts: unknown[] = [];
+    const fake = createFakePrompter({
+      single: (options) => {
+        prompts.push(options);
+        return answers.shift()!;
+      },
+    });
+    const flowDeps = deps({
+      browseRegistryCatalog: vi.fn(async () => ({
+        items: [
+          {
+            address: "memory/supermemory",
+            name: "memory/supermemory",
+            type: "registry:item",
+            description: "Durable memory",
+            source: "Vercel",
+          },
+        ],
+        total: 1,
+        errors: [],
+      })),
+    });
+
+    await runRegistryFlow({ appRoot: APP_ROOT, prompter: fake.prompter, deps: flowDeps });
+
+    expect(prompts[1]).toMatchObject({
+      message: "Browse memory providers",
+      options: expect.arrayContaining([
+        expect.objectContaining({ label: "Supermemory", hint: "Durable memory" }),
+      ]),
     });
   });
 

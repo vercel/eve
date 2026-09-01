@@ -10,6 +10,7 @@ const typeLabel: Record<Integration["type"], string> = {
   connection: "Connection",
   extension: "Extension",
   instrumentation: "Instrumentation",
+  memory: "Memory provider",
 };
 
 const section = (title: string, content: string): string => `## ${title}\n\n${content}`;
@@ -57,7 +58,7 @@ export const integrationMarkdown = (integration: Integration): string => {
 /** Markdown landing page for agent-readable integration discovery. */
 export const integrationsIndexMarkdown = (): string =>
   [
-    "Browse every third-party service eve connects to, including extensions, messaging channels, and tool connections over MCP or OpenAPI.",
+    "Browse eve integrations, including extensions, messaging channels, memory providers, and tool connections over MCP or OpenAPI.",
     ...integrations.map(
       (integration) =>
         `- [${integration.name}](/integrations/${integration.slug}): ${integration.tagline}`,

@@ -8,6 +8,7 @@ import {
   resolveAssistantStepText,
 } from "#harness/messages.js";
 import type { StepInput } from "#harness/types.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 function textFilePart(overrides: {
   readonly filename: string;
@@ -108,6 +109,16 @@ describe("coalesceTurnInputs", () => {
         { requestId: "r2", text: "yes" },
       ],
     });
+  });
+
+  it("coalesces ephemeral context without making it durable context", () => {
+    const result = coalesceTurnInputs(
+      attachClientContext({}, ["first"]),
+      attachClientContext({}, ["second"]),
+    );
+
+    expect(readClientContext(result)).toEqual(["first", "second"]);
+    expect(result.context).toBeUndefined();
   });
 
   it("combines messages and inputResponses", () => {

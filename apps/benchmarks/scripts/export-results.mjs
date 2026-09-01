@@ -16,10 +16,12 @@ import {
 } from "./cost.mjs";
 import {
   authoringTreatments,
+  benchmarkModels,
   findPublishedBenchmarkModel,
   publishedBenchmark,
   publishedBenchmarkModels,
   publishedExperimentId,
+  harnessId,
 } from "../lib/benchmark-config.ts";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -55,6 +57,8 @@ const experimentIds = benchmarks.flatMap((benchmark) =>
   authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
 );
 const stale = staleCells(experimentIds);
+const previous = readPublishedResults();
+const previousResults = readPreviousResults(previous);
 const results = [];
 
 for (const benchmark of benchmarks) {
@@ -78,12 +82,54 @@ for (const benchmark of benchmarks) {
         caseId,
         status: status ?? "current",
         ...result,
-        ...meanRunMetrics(summaryPath, benchmark.model),
+        ...meanRunMetrics(summaryPath, benchmark.model, benchmark.harness),
       });
     }
   }
 }
 
+const experiments = benchmarks.flatMap((benchmark) =>
+  authoringTreatments.map((treatment) => ({
+    id: publishedExperimentId(benchmark, treatment),
+    groupId: `${benchmark.id}-${harnessId(benchmark.harness)}`,
+    model: benchmark.model,
+    modelDisplayName: benchmark.displayName,
+    harness: benchmark.harness,
+    treatment,
+  })),
+);
+const completeCurrentExperimentIds = new Set(
+  experiments
+    .filter((experiment) =>
+      caseIds.every((caseId) =>
+        results.some(
+          (result) =>
+            result.experimentId === experiment.id &&
+            result.caseId === caseId &&
+            result.status === "current",
+        ),
+      ),
+    )
+    .map((experiment) => experiment.id),
+);
+const published = experiments.map((experiment) => {
+  if (completeCurrentExperimentIds.has(experiment.id)) {
+    return {
+      experiment,
+      results: results.filter((result) => result.experimentId === experiment.id),
+    };
+  }
+  const previousExperiment = previous?.experiments.find(
+    (candidate) =>
+      candidate.model === experiment.model && candidate.treatment === experiment.treatment,
+  );
+  return {
+    experiment: previousExperiment ?? experiment,
+    results: previousExperiment
+      ? previous.results.filter((result) => result.experimentId === previousExperiment.id)
+      : results.filter((result) => result.experimentId === experiment.id),
+  };
+});
 const output = {
   schemaVersion: 1,
   generatedAt: new Date().toISOString(),
@@ -93,17 +139,9 @@ const output = {
     caseCount: caseIds.length,
     runsPerCell: publishedBenchmark.runs,
   },
-  experiments: benchmarks.flatMap((benchmark) =>
-    authoringTreatments.map((treatment) => ({
-      id: publishedExperimentId(benchmark, treatment),
-      groupId: `${benchmark.id}-opencode`,
-      model: benchmark.model,
-      modelDisplayName: benchmark.displayName,
-      harness: benchmark.harness,
-      treatment,
-    })),
-  ),
-  results,
+  experiments: published.map((entry) => entry.experiment),
+  results: published.flatMap((entry) => entry.results),
+  ...(previousResults.length === 0 ? {} : { previouslyMeasured: previousResults }),
 };
 
 const destination =
@@ -111,6 +149,57 @@ const destination =
 mkdirSync(dirname(destination), { recursive: true });
 writeFileSync(destination, `${JSON.stringify(output, null, 2)}\n`);
 console.log(`Exported ${results.length} benchmark cells to ${destination}`);
+
+function readPublishedResults() {
+  const destination =
+    values.output === undefined ? outputPath : resolve(process.cwd(), values.output);
+  if (!existsSync(destination)) return undefined;
+  return JSON.parse(readFileSync(destination, "utf8"));
+}
+
+function readPreviousResults(previous) {
+  if (previous === undefined) return [];
+  const supersededExperimentIds = new Set(
+    benchmarkModels
+      .filter((benchmark) => benchmark.support === "superseded")
+      .flatMap((benchmark) =>
+        authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
+      ),
+  );
+  const supersededExperiments = (previous.experiments ?? []).filter((experiment) =>
+    supersededExperimentIds.has(experiment.id),
+  );
+  const archivedExperimentIds = new Set(supersededExperiments.map((experiment) => experiment.id));
+  const supersededResults = (previous.results ?? []).filter((result) =>
+    archivedExperimentIds.has(result.experimentId),
+  );
+  const retained = (previous.previouslyMeasured ?? [])
+    .filter(
+      (measurement) => Array.isArray(measurement.experiments) && Array.isArray(measurement.results),
+    )
+    .map((measurement) => {
+      const experiments = measurement.experiments.filter((experiment) =>
+        supersededExperimentIds.has(experiment.id),
+      );
+      const experimentIds = new Set(experiments.map((experiment) => experiment.id));
+      return {
+        ...measurement,
+        experiments,
+        results: measurement.results.filter((result) => experimentIds.has(result.experimentId)),
+      };
+    })
+    .filter((measurement) => measurement.experiments.length > 0);
+  if (supersededExperiments.length === 0) return retained;
+
+  return [
+    ...retained,
+    {
+      suite: previous.suite,
+      experiments: supersededExperiments,
+      results: supersededResults,
+    },
+  ];
+}
 
 function selectedBenchmarks(value) {
   if (value === undefined) return publishedBenchmarkModels;
@@ -175,28 +264,36 @@ function latestValidResult(experimentId, caseId) {
   return undefined;
 }
 
-function meanRunMetrics(summaryPath, model) {
-  const runs = readdirSync(dirname(summaryPath), { withFileTypes: true })
+function meanRunMetrics(summaryPath, model, harness) {
+  const performanceRuns = runMetrics(summaryPath, harness);
+  const performanceUsage = performanceRuns.flatMap((run) =>
+    run.usage === null ? [] : [run.usage],
+  );
+  const result = {};
+  const pricing = modelPricing[model];
+  if (pricing !== undefined && performanceUsage.length > 0) {
+    result.meanEstimatedListCostUsd = mean(
+      performanceUsage.map((value) => priceUsage(value, pricing)),
+    );
+  }
+  if (performanceUsage.length > 0) {
+    result.meanTokenConsumption = mean(performanceUsage.map(tokenConsumption));
+  }
+  if (performanceRuns.length > 0) {
+    result.meanToolInvocationCount = mean(performanceRuns.map((run) => run.toolInvocations));
+  }
+  return result;
+}
+
+function runMetrics(summaryPath, harness) {
+  return readdirSync(dirname(summaryPath), { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && /^run-\d+$/u.test(entry.name))
     .flatMap((entry) => {
       const transcriptPath = join(dirname(summaryPath), entry.name, "transcript-raw.jsonl");
       if (!existsSync(transcriptPath)) return [];
       const raw = readFileSync(transcriptPath, "utf8");
-      return [{ usage: extractRunUsage(raw), toolInvocations: countToolInvocations(raw) }];
+      return [{ usage: extractRunUsage(raw, harness), toolInvocations: countToolInvocations(raw) }];
     });
-  const usage = runs.flatMap((run) => (run.usage === null ? [] : [run.usage]));
-  const result = {};
-  const pricing = modelPricing[model];
-  if (pricing !== undefined && usage.length > 0) {
-    result.meanEstimatedListCostUsd = mean(usage.map((value) => priceUsage(value, pricing)));
-  }
-  if (usage.length > 0) {
-    result.meanTokenConsumption = mean(usage.map(tokenConsumption));
-  }
-  if (runs.length > 0) {
-    result.meanToolInvocationCount = mean(runs.map((run) => run.toolInvocations));
-  }
-  return result;
 }
 
 function mean(values) {

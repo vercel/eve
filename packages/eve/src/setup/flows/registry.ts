@@ -21,7 +21,7 @@ const DONE = "action:done";
 const ALL = "category:all";
 
 type RegistryRow = string;
-type RegistryCategory = "channel" | "connection" | "extension" | "instrumentation";
+type RegistryCategory = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
 const REGISTRY_CATEGORIES: ReadonlyArray<{
   value: `category:${RegistryCategory}`;
@@ -50,6 +50,13 @@ const REGISTRY_CATEGORIES: ReadonlyArray<{
     label: "Extensions",
     hint: "Add browser automation, memory, and developer tools",
     browseLabel: "Browse extensions",
+  },
+  {
+    value: "category:memory",
+    prefix: "memory/",
+    label: "Memory providers",
+    hint: "Retain and recall scoped context across sessions",
+    browseLabel: "Browse memory providers",
   },
   {
     value: "category:instrumentation",

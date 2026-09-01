@@ -131,12 +131,12 @@ export type StrictInputResponses<TResponses extends readonly InputResponse[]> = 
  * Returns true when a value matches the input request contract.
  */
 export function isInputRequest(value: unknown): value is InputRequest {
-  return inputRequestSchema.safeParse(value).success;
+  return z.validate(inputRequestSchema, value);
 }
 
 /**
  * Returns true when a value matches the input response contract.
  */
 export function isInputResponse(value: unknown): value is ValidatedInputResponse {
-  return inputResponseSchema.safeParse(value).success;
+  return z.validate(inputResponseSchema, value);
 }

@@ -33,7 +33,7 @@ const TEST_WEB_PACKAGE_VERSIONS = {
   reactPackageVersion: "19.2.6",
   reactDomPackageVersion: "19.2.6",
   streamdownPackageVersion: "2.5.0",
-  zodPackageVersion: "4.4.3",
+  zodPackageVersion: "4.5.4",
   typesReactPackageVersion: "19.2.15",
   typesReactDomPackageVersion: "19.2.3",
 } satisfies WebPackageVersions;
@@ -964,7 +964,7 @@ describe("scaffoldExtensionProject", () => {
       projectName: "demo-extension",
       targetDirectory,
       evePackage: TEST_EVE_PACKAGE,
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
     });
 
     const packageJson = JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")) as {
@@ -983,7 +983,7 @@ describe("scaffoldExtensionProject", () => {
       eve: { extension: { source: "./extension", dist: "./dist/extension" } },
       files: ["dist"],
       peerDependencies: { eve: "*" },
-      dependencies: { zod: "4.4.3" },
+      dependencies: { zod: "4.5.4" },
       scripts: {
         build: "eve extension build",
         prepare: "eve extension build",
@@ -1030,7 +1030,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
     });
 
     const agentSource = await readFile(join(projectRoot, "agent/agent.ts"), "utf8");
@@ -1119,7 +1119,7 @@ describe("scaffoldBaseProject", () => {
         targetDirectory,
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
-        zodPackageVersion: "4.4.3",
+        zodPackageVersion: "4.5.4",
         typescriptPackageVersion: "7.0.2",
       });
 
@@ -1165,7 +1165,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 
@@ -1208,7 +1208,7 @@ describe("scaffoldBaseProject", () => {
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
       connectPackageVersion: "0.2.2",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 
@@ -1259,7 +1259,7 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         connectPackageVersion: "0.2.2",
-        zodPackageVersion: "4.4.3",
+        zodPackageVersion: "4.5.4",
         typescriptPackageVersion: "7.0.2",
       });
 
@@ -1314,7 +1314,7 @@ describe("scaffoldBaseProject", () => {
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
         connectPackageVersion: "0.2.2",
-        zodPackageVersion: "4.4.3",
+        zodPackageVersion: "4.5.4",
         typescriptPackageVersion: "7.0.2",
       });
 
@@ -1352,7 +1352,7 @@ describe("scaffoldBaseProject", () => {
       targetDirectory,
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 
@@ -1375,7 +1375,7 @@ describe("scaffoldBaseProject", () => {
       targetDirectory,
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 
@@ -1393,7 +1393,7 @@ describe("scaffoldBaseProject", () => {
       targetDirectory,
       evePackage: { version: "0.25.0", nodeEngine: ">=24.5.0" },
       aiPackageVersion: "7.0.0",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 
@@ -1413,7 +1413,7 @@ describe("scaffoldBaseProject", () => {
       targetDirectory,
       evePackage: LATEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 
@@ -1433,7 +1433,7 @@ describe("scaffoldBaseProject", () => {
       targetDirectory,
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 
@@ -1457,7 +1457,7 @@ describe("scaffoldBaseProject", () => {
         targetDirectory,
         evePackage: TEST_EVE_PACKAGE,
         aiPackageVersion: "7.0.0",
-        zodPackageVersion: "4.4.3",
+        zodPackageVersion: "4.5.4",
         typescriptPackageVersion: "7.0.2",
       }),
     ).rejects.toThrow(/Use an empty directory/);
@@ -1472,7 +1472,7 @@ describe("scaffoldBaseProject", () => {
       },
       evePackage: TEST_EVE_PACKAGE,
       aiPackageVersion: "7.0.0",
-      zodPackageVersion: "4.4.3",
+      zodPackageVersion: "4.5.4",
       typescriptPackageVersion: "7.0.2",
     });
 

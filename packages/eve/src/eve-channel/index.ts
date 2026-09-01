@@ -53,7 +53,6 @@ import {
   checkUploadPolicy,
   createSessionStreamResponse,
   deriveOperationContinuationToken,
-  mergeContext,
   parseCancelTurnBody,
   parseCreateBody,
   parseIncludeTailIndex,
@@ -65,6 +64,7 @@ import {
   rejectSessionContinuationToken,
   requireSessionId,
 } from "#eve-channel/request.js";
+import { attachClientContext } from "#internal/client-context.js";
 import {
   findRemoteSubagentBinding,
   healthResponse,
@@ -201,11 +201,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             callback: body.callback,
             continuationToken: operationToken,
             initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
-            input: {
-              message: body.message,
-              context: mergeContext(body.context, messageResult.context),
-              outputSchema: body.outputSchema,
-            },
+            input: attachClientContext(
+              {
+                message: body.message,
+                context: messageResult.context,
+                outputSchema: body.outputSchema,
+              },
+              body.context,
+            ),
             mode: body.mode ?? "conversation",
             parentTraceContext,
             title: messageResult.title,
@@ -264,7 +267,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
-        let context = body.context;
+        let context: readonly string[] | undefined;
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
@@ -275,21 +278,24 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             sessionId,
           });
           if (messageResult instanceof Response) return messageResult;
-          context = mergeContext(body.context, messageResult.context);
+          context = messageResult.context;
           dispatchAuth = messageResult.auth;
         }
 
         let result: Awaited<ReturnType<Session["send"]>>;
         try {
           const session = attachSession(sessionId);
-          const options = {
-            activityObserver: body.activityObserver,
-            auth: dispatchAuth,
-            callback: body.callback,
-            context,
-            outputSchema: body.outputSchema,
-            turnPolicy: body.turnPolicy,
-          };
+          const options = attachClientContext(
+            {
+              activityObserver: body.activityObserver,
+              auth: dispatchAuth,
+              callback: body.callback,
+              context,
+              outputSchema: body.outputSchema,
+              turnPolicy: body.turnPolicy,
+            },
+            body.context,
+          );
           result =
             body.inputResponses === undefined
               ? await session.send(body.message!, options)

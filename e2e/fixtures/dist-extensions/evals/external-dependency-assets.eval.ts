@@ -8,7 +8,7 @@ export default defineEval({
 
     t.succeeded();
     t.calledTool("gizmo__gizmo_layout", {
-      output: { payload: "zod@4.4.3" },
+      output: { payload: "zod@4.5.4" },
     });
   },
 });

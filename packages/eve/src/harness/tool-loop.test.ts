@@ -35,6 +35,7 @@ import {
 import { SCHEDULE_APP_AUTH } from "#channel/schedule-auth.js";
 import { invocationOwnerKey } from "#internal/invocation/metadata.js";
 import { decodeSandboxRef, isSandboxRefUrl } from "#internal/attachments/sandbox-refs.js";
+import { attachClientContext } from "#internal/client-context.js";
 import { mockSandbox } from "#internal/testing/mocks/mock-sandbox.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type {
@@ -8584,7 +8585,7 @@ describe("createToolLoopHarness", () => {
     ]);
   });
 
-  it("keeps channel context after the approval-response model call", async () => {
+  it("defers durable and ephemeral context past the approval-response model call", async () => {
     setupMockAgent({
       finishReason: "stop",
       response: { messages: [{ content: "Approved.", role: "assistant" }] },
@@ -8645,16 +8646,24 @@ describe("createToolLoopHarness", () => {
     });
     const harness = createToolLoopHarness(config);
     const context = "<linear_context>issue metadata</linear_context>";
+    const ephemeralContext = "Client context:\ncurrent page";
 
-    const firstResult = await harness(createPendingBashApprovalSession(), {
-      context: [context],
-      inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
-    });
+    const firstResult = await harness(
+      createPendingBashApprovalSession(),
+      attachClientContext(
+        {
+          context: [context],
+          inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
+        },
+        [ephemeralContext],
+      ),
+    );
 
     const firstMessages = readGenerateMessages(0);
     expect(typeof firstResult.next).toBe("function");
     expect(firstMessages.at(-1)?.role).toBe("tool");
     expect(firstMessages).not.toContainEqual({ content: context, role: "user" });
+    expect(firstMessages).not.toContainEqual({ content: ephemeralContext, role: "user" });
     expect((await readPreparedMessages(0)).at(-1)).toMatchObject({
       providerOptions: {
         anthropic: { cacheControl: { type: "ephemeral" } },
@@ -8667,12 +8676,19 @@ describe("createToolLoopHarness", () => {
     const secondMessages = readGenerateMessages(1);
     expect(secondResult.next).toBeNull();
     expect(secondMessages.slice(0, firstMessages.length)).toEqual(firstMessages);
-    expect(secondMessages.at(-1)).toEqual({ content: context, role: "user" });
+    expect(secondMessages.slice(-2)).toEqual([
+      { content: ephemeralContext, role: "user" },
+      { content: context, role: "user" },
+    ]);
     expect((await readPreparedMessages(1)).at(-1)).toMatchObject({
       content: context,
       providerOptions: {
         anthropic: { cacheControl: { type: "ephemeral" } },
       },
+      role: "user",
+    });
+    expect(secondResult.session.history).not.toContainEqual({
+      content: ephemeralContext,
       role: "user",
     });
   });
@@ -12013,7 +12029,7 @@ describe("createToolLoopHarness", () => {
     });
   });
 
-  describe("ephemeral context routing", () => {
+  describe("context routing", () => {
     function getLastAgentSettings(): {
       instructions: unknown;
       messages: Array<{ role: string; content: unknown }>;
@@ -12041,7 +12057,7 @@ describe("createToolLoopHarness", () => {
       };
     }
 
-    it("appends context strings as user messages", async () => {
+    it("appends durable channel context as user messages", async () => {
       setupMockAgent(defaultModelResult());
       const runStep = createToolLoopHarness(createTestConfig("conversation"));
       const session = createTestSession();
@@ -12090,6 +12106,68 @@ describe("createToolLoopHarness", () => {
         { role: "user", content: "Hi" },
         { role: "assistant", content: "ok" },
       ]);
+    });
+
+    it("does not replay ephemeral client context on later turns", async () => {
+      setupMockAgent(defaultModelResult());
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      let session = createTestSession();
+
+      for (const token of ["CTX-A", "CTX-B", "CTX-C"]) {
+        const clientContext = `Client context:\n${token}`;
+        const result = await runStep(
+          session,
+          attachClientContext({ message: `Turn ${token}` }, [clientContext]),
+        );
+        const visibleClientContext = getLastAgentSettings().messages.filter(
+          (message) =>
+            typeof message.content === "string" && message.content.startsWith("Client context:"),
+        );
+
+        expect(visibleClientContext).toEqual([{ content: clientContext, role: "user" }]);
+        expect(result.session.history).not.toContainEqual({
+          content: clientContext,
+          role: "user",
+        });
+        session = result.session;
+      }
+    });
+
+    it("keeps ephemeral client context out of compaction and its token baseline", async () => {
+      vi.mocked(shouldCompact).mockReturnValueOnce(true);
+      vi.mocked(compactMessages).mockImplementationOnce(async (messages) => [...messages]);
+      setupMockAgent({
+        ...defaultModelResult(),
+        usage: { inputTokens: 321 },
+      });
+      const runStep = createToolLoopHarness(createTestConfig("conversation"));
+      const session = createTestSession({
+        history: [{ content: "earlier", role: "user" }],
+      });
+
+      const result = await runStep(
+        session,
+        attachClientContext({ message: "Hi" }, ["Client context:\ncurrent"]),
+      );
+
+      expect(vi.mocked(shouldCompact)).toHaveBeenCalledWith(
+        [
+          { content: "earlier", role: "user" },
+          { content: "Client context:\ncurrent", role: "user" },
+          { content: "Hi", role: "user" },
+        ],
+        session.compaction,
+      );
+      expect(vi.mocked(compactMessages).mock.calls[0]?.[0]).toEqual([
+        { content: "earlier", role: "user" },
+        { content: "Hi", role: "user" },
+      ]);
+      expect(result.session.history).not.toContainEqual({
+        content: "Client context:\ncurrent",
+        role: "user",
+      });
+      expect(result.session.compaction).not.toHaveProperty("lastKnownInputTokens");
+      expect(result.session.compaction).not.toHaveProperty("lastKnownPromptMessageCount");
     });
 
     it("leaves instructions unchanged when no context is provided", async () => {

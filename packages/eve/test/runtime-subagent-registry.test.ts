@@ -9,7 +9,7 @@ const SUBAGENT_TOOL_INPUT_SCHEMA = {
   type: "object",
   properties: {
     agentId: {
-      anyOf: [{ type: "string" }, { type: "null" }],
+      type: ["string", "null"],
       description:
         "Only pass this to continue a previous delegation: the id of an agent from the <agents> list. To start a new agent — the common case — omit this field entirely (or pass null or an empty string).",
     },

@@ -171,6 +171,28 @@
       ]
     },
     {
+      "name": "memory/supermemory",
+      "type": "registry:item",
+      "title": "Supermemory",
+      "description": "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
+      "dependencies": ["@supermemory/eve"],
+      "envVars": {
+        "SUPERMEMORY_API_KEY": ""
+      },
+      "meta": {
+        "eve": {
+          "requires": ">=0.47.3"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/supermemory.ts",
+          "type": "registry:file",
+          "target": "agent/memory/supermemory.ts"
+        }
+      ]
+    },
+    {
       "name": "extension/arcana",
       "type": "registry:item",
       "title": "Kybernesis Arcana",
@@ -1530,7 +1552,7 @@
         "tailwind-merge@3.6.0",
         "tailwindcss@4.3.0",
         "use-stick-to-bottom@1.1.4",
-        "zod@4.4.3"
+        "zod@4.5.4"
       ],
       "devDependencies": [
         "@types/node@26",

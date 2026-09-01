@@ -25,17 +25,26 @@ export interface BenchmarkResult {
   measuredAt?: string;
 }
 
+export interface BenchmarkSuite {
+  eveRevision: string | null;
+  caseFingerprint: string | null;
+  caseCount: number;
+  runsPerCell: number;
+}
+
+export interface PreviouslyMeasuredBenchmarkResults {
+  suite: BenchmarkSuite;
+  experiments: BenchmarkExperiment[];
+  results: BenchmarkResult[];
+}
+
 export interface PublishedBenchmarkResults {
   schemaVersion: 1;
   generatedAt: string | null;
-  suite: {
-    eveRevision: string | null;
-    caseFingerprint: string | null;
-    caseCount: number;
-    runsPerCell: number;
-  };
+  suite: BenchmarkSuite;
   experiments: BenchmarkExperiment[];
   results: BenchmarkResult[];
+  previouslyMeasured?: PreviouslyMeasuredBenchmarkResults[];
 }
 
 export interface BenchmarkCaseRow {
