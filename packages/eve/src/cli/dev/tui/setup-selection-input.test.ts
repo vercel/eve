@@ -118,9 +118,9 @@ describe("setupSelectionIntent", () => {
     expect(toggled).toMatchObject({ kind: "update", select: { selected: new Set(["web"]) } });
   });
 
-  it("keeps Space available for filtering a planner checklist", () => {
+  it("also uses Space to toggle a planner checklist", () => {
     const options = [{ value: "web", label: "Web Chat" }];
-    const filtered = reduceSetupSelectInput({
+    const toggled = reduceSetupSelectInput({
       key: { type: "text", value: " ", framing: "unframed" },
       kind: "searchable-multi",
       options,
@@ -128,7 +128,7 @@ describe("setupSelectionIntent", () => {
       required: false,
       plannerNavigation: true,
     });
-    expect(filtered).toMatchObject({ kind: "update", select: { filter: " " } });
+    expect(toggled).toMatchObject({ kind: "update", select: { selected: new Set(["web"]) } });
   });
 
   it("applies filter text and submits the visible match", () => {

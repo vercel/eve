@@ -910,7 +910,7 @@ describe("renderSelectQuestion", () => {
     );
     expect(plain).toContain("Channels (1)  →  Integrations  ·  Review");
     expect(plain).toContain("1 selected");
-    expect(plain).toContain("enter toggle · → next");
+    expect(plain).toContain("space/enter toggle · → next");
     expect(plain).not.toContain("← back");
     expect(plain).not.toContain("Submit");
   });
@@ -944,7 +944,7 @@ describe("renderSelectQuestion", () => {
     expect(review).toContain("enter to select · ← back");
     expect(review).not.toContain("→ next");
     expect(integrations).toContain("Channels  ←  Integrations  →  Review");
-    expect(integrations).toContain("enter toggle · ←/→ steps");
+    expect(integrations).toContain("space/enter toggle · ←/→ steps");
   });
 
   it("does not advertise navigation into completed prefix steps", () => {
@@ -967,7 +967,7 @@ describe("renderSelectQuestion", () => {
     ).join("\n");
 
     expect(text).toContain("Model  ·   Channels  →  Integrations");
-    expect(text).toContain("enter toggle · → next");
+    expect(text).toContain("space/enter toggle · → next");
     expect(text).not.toContain("← back");
   });
 

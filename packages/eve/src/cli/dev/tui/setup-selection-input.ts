@@ -127,12 +127,7 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
         ? updatedSelect(input, { type: "backspace" })
         : { kind: "ignore" };
     case "text": {
-      if (
-        input.key.framing === "unframed" &&
-        isMultiSelect(input) &&
-        input.plannerNavigation !== true &&
-        input.key.value === " "
-      ) {
+      if (input.key.framing === "unframed" && isMultiSelect(input) && input.key.value === " ") {
         return updatedSelect(input, { type: "toggle" });
       }
       if (!isSearchableSelect(input)) return { kind: "ignore" };

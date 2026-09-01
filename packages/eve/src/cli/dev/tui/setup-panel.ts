@@ -798,7 +798,7 @@ function selectFooterHints(
   if (plannerNavigation !== undefined) {
     const canGoBack = canNavigateBack(plannerNavigation);
     const canGoForward = plannerNavigation.activeStep < plannerNavigation.steps.length - 1;
-    hints.push(presentation.selection === "multiple" ? "enter toggle" : "enter to select");
+    hints.push(presentation.selection === "multiple" ? "space/enter toggle" : "enter to select");
     if (canGoBack && canGoForward) hints.push("←/→ steps");
     else if (canGoBack) hints.push("← back");
     else if (canGoForward) hints.push("→ next");
