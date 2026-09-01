@@ -22,8 +22,8 @@ import {
   prepareRuntimeActionDispatch,
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
-  startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
+import { startSubagent } from "#execution/dispatch-runtime-actions-start.js";
 import { startWorkflowTool } from "#execution/tool-run/dispatch.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
@@ -153,7 +153,7 @@ export async function dispatchRuntimeActionsStep(
     results,
     sessionState:
       nextSession === session
-        ? input.sessionState
+        ? prepared.getBaselineSessionState()
         : createDurableSessionState({ session: nextSession }),
     pendingTasks: [],
   };

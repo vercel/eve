@@ -33,9 +33,23 @@
       "type": "registry:item",
       "title": "Self-modification (Experimental)",
       "description": "Add an experimental, development-only source editing subagent to an eve project.",
-      "dependencies": [
-        "@eve/self-modification"
-      ],
+      "dependencies": ["@eve/self-modification"],
+      "meta": {
+        "eve": {
+          "install": {
+            "pnpm": {
+              "buildScripts": [
+                {
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
+                  "optional": true,
+                  "recommendedAction": "ignore-optional",
+                  "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
+                }
+              ]
+            }
+          }
+        }
+      },
       "files": [
         {
           "path": "registry/experimental/self-modification/agent.ts",
