@@ -98,6 +98,39 @@ describe("resumeSessionInbox", () => {
     });
   });
 
+  it("strips an undefined activity observer from the stable fast path", async () => {
+    const token = sessionCommandHookToken("session-1");
+    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 2 });
+    resumeHookMock.mockResolvedValue(hook);
+
+    await resumeSessionInbox(token, {
+      caller: {
+        activityObserver: undefined,
+        callId: "call-1",
+        replyTo: { kind: "hook", token: "reply-1" },
+        subagentName: "researcher",
+      },
+      kind: "send",
+      payload: { message: "follow-up" },
+    });
+
+    expect(getHookByTokenMock).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(token, {
+      auth: undefined,
+      caller: {
+        callId: "call-1",
+        replyTo: { kind: "hook", token: "reply-1" },
+        subagentName: "researcher",
+      },
+      delivery: undefined,
+      kind: "send",
+      payload: { message: "follow-up" },
+      requestId: undefined,
+      taskDeliveryId: undefined,
+      turnPolicy: undefined,
+    });
+  });
+
   it("encodes continuation delivery for the resolved consumer and resumes that hook", async () => {
     const hook = sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 1 });
     getHookByTokenMock.mockResolvedValue(hook);
