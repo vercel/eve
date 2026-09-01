@@ -259,8 +259,6 @@ export function createAgentOtelInstrumentation(
     attemptScopes.delete(event.scope.attemptId);
     const attempt = steps.get(scope);
     if (attempt === undefined) return;
-    // The span event drops the `attempt` segment: this span *is* one attempt,
-    // and `agent.step.attempt` on it already says which.
     attempt.span.addEvent(
       event.type === "step.attempt.completed" ? "step.completed" : "step.failed",
     );
