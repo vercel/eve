@@ -41,6 +41,21 @@ attributes now start in parallel with result settlement, allowing the user-visib
 to persist first, but the durable step still joins the attribute write before it exits. This
 preserves cumulative-write ordering and identical local and hosted lifetime behavior.
 
+The independent hosted trials now identify one mergeable result and one architectural target.
+Removing guaranteed root-only caller steps reduces sequential mean by 33.1% in isolation; the
+current PR combination reduces mean by 34.0%, p50 by 33.9%, and p95 by 36.6%. A benchmark-only
+inline-turn prototype reduces p50 by 63.5%, and its combination with the root optimization
+reproduces 0.799–0.828-second p50s. That fast path cannot ship because it loses live-deployment,
+cancellation, and runtime-wait semantics, but it proves that eve's parent/child topology—not the
+hosted platform—is the largest remaining fixed cost.
+
+The narrow background-work pass found no additional hot-path await that can safely move to
+`ctx.waitUntil` today. Request-route work already uses Nitro's lifetime primitive; Workflow steps
+have no supported equivalent. Stream writes are already group-committed, the stress fixture's
+instrumentation flush is a no-op, and detaching attributes, hook operations, or terminal cleanup
+would weaken persistence ordering, retry safety, or cancellation. The useful follow-up is a small
+set of explicit Workflow primitives, not an eve fire-and-forget shim.
+
 ## Observed baseline
 
 The current stress fixture uses a synchronous deterministic mock model, so its latency is almost
@@ -315,6 +330,31 @@ Experiments are ordered by information value and expected risk. Each change gets
 run, the narrowest correctness tests, cancellation/replay tests where relevant, and the existing
 stress e2e before it can ship.
 
+### Hosted experiment ledger
+
+All deltas below use the exact benchmark-base run as the control. The stress model is synchronous,
+so these measurements isolate eve and Workflow overhead rather than provider latency. Each row is
+an independently pushed branch unless explicitly labeled as a combination. Raw JSON and Markdown
+reports are attached to the linked GitHub Actions runs.
+
+| Experiment                                     | Run                                                                     | Sequential mean | Sequential p50 | Sequential p95 | Concurrent second p50 | Turn-order slope | Decision                        |
+| ---------------------------------------------- | ----------------------------------------------------------------------- | --------------: | -------------: | -------------: | --------------------: | ---------------: | ------------------------------- |
+| Exact benchmark control                        | [`33468124247`](https://github.com/vercel/eve/actions/runs/33468124247) |         3.042 s |        3.036 s |        3.692 s |               1.867 s |   +13.31 ms/turn | Reference                       |
+| Parallel readiness hooks                       | [`33468104562`](https://github.com/vercel/eve/actions/runs/33468104562) |         3.018 s |        2.897 s |        3.753 s |               1.867 s |   +13.80 ms/turn | Neutral on follow-up turns      |
+| Workflow SDK beta.47                           | [`33468117677`](https://github.com/vercel/eve/actions/runs/33468117677) |         4.460 s |        4.847 s |        6.422 s |               1.863 s |    +7.40 ms/turn | Reject; material regression     |
+| Remove root no-op steps                        | [`33468608676`](https://github.com/vercel/eve/actions/runs/33468608676) |         2.036 s |        2.053 s |        2.367 s |               1.584 s |    +5.17 ms/turn | Ship                            |
+| Root no-ops + attribute overlap                | [`33469404605`](https://github.com/vercel/eve/actions/runs/33469404605) |         2.009 s |        2.008 s |        2.341 s |               1.607 s |    +5.27 ms/turn | Current PR candidate            |
+| Inline ordinary root turn                      | [`33468225787`](https://github.com/vercel/eve/actions/runs/33468225787) |         1.170 s |        1.110 s |        1.515 s |               0.946 s |    +0.44 ms/turn | Ceiling only; semantics missing |
+| Root no-ops + inline root turn, confirmation 1 | [`33469355029`](https://github.com/vercel/eve/actions/runs/33469355029) |         0.814 s |        0.799 s |        1.063 s |               0.743 s |    +2.63 ms/turn | Architectural floor             |
+| Root no-ops + inline root turn, confirmation 2 | [`33469627035`](https://github.com/vercel/eve/actions/runs/33469627035) |         0.858 s |        0.828 s |        1.218 s |               0.738 s |    +3.35 ms/turn | Architectural floor reproduced  |
+
+The current PR candidate improves the exact control by 34.0% on sequential mean, 33.9% on p50,
+36.6% on p95, and 13.9% on concurrent second-turn p50. The independently confirmed root no-op
+change accounts for almost all of that result; attribute overlap is directionally small compared
+with hosted noise. The two combined-floor runs reproduce a 71.8–73.2% mean reduction and a
+72.7–73.7% p50 reduction, proving that sub-second warm turns are possible if eve replaces the
+parent/child topology without losing its semantics.
+
 ### 1. Isolate Workflow SDK and resume cost
 
 Run the same eve SHA against the current Workflow package set and beta.47, with beta.46 included
@@ -325,6 +365,22 @@ round trip.
 This decides whether the recent approximately 1.8-second fixed regression belongs in eve, the
 Workflow SDK/world, or their interaction. If write-before-wake is the cost, work with Workflow on
 a transactional persist-and-wake primitive; eve must not restore a lossy wake ordering.
+
+#### Hosted result
+
+The isolated `barba/perf-exp-workflow-sdk-latest` branch changed only the aligned Workflow
+packages from the benchmark base to beta.47. Its stress job
+[`33468117677`](https://github.com/vercel/eve/actions/runs/33468117677) completed and regressed
+sequential mean from 3.042 to 4.460 seconds (+46.6%), p50 from 3.036 to 4.847 seconds (+59.7%),
+and p95 from 3.692 to 6.422 seconds (+73.9%). Concurrent second-turn p50 was effectively neutral
+at 1.863 versus 1.867 seconds, so the package set changed the sequential path rather than applying
+a uniform hosted-load penalty.
+
+Do not upgrade eve on this result. The two approximately 4.91-second runs from PR #2611 point in
+the same direction, but the experiment does not assign causality to one Workflow change because
+the compatible core, API, Vercel World, and Nitro packages moved together. A Workflow-only
+`resumeHook`/child-round-trip microbenchmark is still required before attributing the regression
+to write-before-wake or another persistence change.
 
 ### 2. Remove guaranteed root no-op steps
 
@@ -527,6 +583,22 @@ The first can improve both. The benchmark reports acceptance, readiness, and fir
 separately so the result cannot be presented as a turn-speed improvement when it only moves the
 wait.
 
+#### Parallel readiness result
+
+The isolated `barba/perf-exp-parallel-hooks` branch started independent stable/authorization
+claims together and overlapped continuation-ownership validation with stable-hook readiness while
+retaining partial-failure cleanup. Focused correctness, type, invariant, and build checks passed.
+Its hosted stress run
+[`33468104562`](https://github.com/vercel/eve/actions/runs/33468104562) was neutral on the measured
+follow-up path: mean changed from 3.042 to 3.018 seconds (−0.8%), p50 to 2.897 seconds (−4.6%),
+p95 to 3.753 seconds (+1.6%), and concurrent second-turn p50 remained 1.867 seconds. The first
+cold turn was also unchanged at 2.614 versus 2.615 seconds.
+
+This does not justify a turn-performance claim. The changed awaits primarily affect session
+creation/readiness, while the current stress fixture measures follow-up turns after setup. Keep
+the branch as a candidate for the dedicated acceptance/readiness benchmark, not as part of the
+turn-latency shipping change.
+
 ### 7. Budget extension and per-step work
 
 After the fixed topology is addressed, fit the incremental cost of tool cycles and authored
@@ -588,6 +660,29 @@ exporter must prove both that step settlement no longer includes exporter latenc
 export completes before invocation teardown. The existing stress fixture should show no expected
 delta from this experiment; it needs a separate exporter diagnostic rather than being presented as
 proof of the change.
+
+### Inline-turn ceiling result
+
+The benchmark-only branch in
+[PR #2824](https://github.com/vercel/eve/pull/2824) executed an ordinary root turn in the session
+driver instead of starting a child run. The isolated hosted run
+[`33468225787`](https://github.com/vercel/eve/actions/runs/33468225787) reduced sequential mean by
+61.6% (3.042 to 1.170 seconds), p50 by 63.5% (3.036 to 1.110 seconds), p95 by 59.0% (3.692 to
+1.515 seconds), and concurrent second-turn p50 by 49.3% (1.867 to 0.946 seconds). The turn-order
+slope fell from 13.31 to 0.44 ms/turn.
+
+Combining that prototype with root no-op removal crossed the product target twice. Runs
+[`33469355029`](https://github.com/vercel/eve/actions/runs/33469355029) and
+[`33469627035`](https://github.com/vercel/eve/actions/runs/33469627035) recorded sequential p50s
+of 0.799 and 0.828 seconds and p95s of 1.063 and 1.218 seconds. Both stress jobs passed. This is
+the strongest evidence in the investigation: the existing platform can sustain sub-second warm
+turns when eve removes the parent/child round trip.
+
+The prototype is deliberately non-mergeable. It pins future ordinary turns to the driver's
+deployment and lacks the child's mid-turn cancellation, runtime wait, sleep, and background-work
+ownership. Those are product semantics, not optional overhead. The measurements establish an
+architectural ceiling and justify a successor/latest-deployment primitive; they do not justify
+shipping the inline fast path.
 
 ## Structural direction
 
