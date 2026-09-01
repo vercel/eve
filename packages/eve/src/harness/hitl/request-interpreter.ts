@@ -2,25 +2,41 @@ import type { ModelMessage, UserContent } from "ai";
 
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
+import { buildResolvedInputBatch } from "#harness/input-request-resolution.js";
 import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
 import { isSessionLimitContinuationRequestId } from "#harness/session-limit-continuation.js";
 import {
+  findAnsweredApprovalBatches,
   hasAnsweredApprovalBatch,
-  resolveApprovalInputBatches,
+  limitApprovalTailBatch,
+  reduceApprovalRequestVerdict,
 } from "#harness/hitl/approval-input-requests.js";
-import { compactStepInput } from "#harness/hitl/pending-input-resolution.js";
+import {
+  compactStepInput,
+  finishResolvedInput,
+  responsesForBatches,
+} from "#harness/hitl/pending-input-resolution.js";
 import type {
   ResolvePendingInputResult,
   ResolvedStepInput,
 } from "#harness/hitl/pending-input-resolution.js";
-import { resolveQuestionOnlyInputBatches } from "#harness/hitl/question-input-requests.js";
 import {
+  findAnsweredQuestionBatches,
+  reduceQuestionRequestVerdict,
+} from "#harness/hitl/question-input-requests.js";
+import type { RequestVerdict } from "#harness/hitl/request-verdict.js";
+import {
+  hasAnsweredSessionLimitBatch,
   isSessionLimitInputBatch,
-  resolveSessionLimitInput,
+  reduceSessionLimitRequestVerdict,
 } from "#harness/hitl/session-limit-input-requests.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
-import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import {
+  getPendingInputBatches,
+  queueDeferredStepInput,
+  removePendingInputBatches,
+} from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -90,16 +106,16 @@ export function interpretRequestDelivery(input: {
   };
   switch (route.kind) {
     case "session-limit":
-      return resolveSessionLimitInput({ ...resolverInput, pendingBatch: route.batch });
+      return resolveSessionLimitRoute({ ...resolverInput, pendingBatch: route.batch });
     case "approval":
-      return resolveApprovalInputBatches({
+      return resolveApprovalRoute({
         ...resolverInput,
         approvalBatches: route.approvalBatches,
         questionBatches: route.questionBatches,
         resolveApprovalKey: input.resolveApprovalKey,
       });
     case "question":
-      return resolveQuestionOnlyInputBatches(resolverInput);
+      return resolveQuestionRoute(resolverInput);
   }
 }
 
@@ -150,6 +166,240 @@ function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchD
 
   if (isSessionLimitInputBatch(batch)) return "session-limit";
   return batch.requests.some((request) => isApprovalRequest(request)) ? "approval" : "question";
+}
+
+function resolveApprovalRoute(input: {
+  readonly approvalBatches: readonly PendingInputBatch[];
+  readonly baseHistory: ModelMessage[];
+  readonly batches: readonly PendingInputBatch[];
+  readonly deferTurnInput: boolean;
+  readonly questionBatches: readonly PendingInputBatch[];
+  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  readonly resolvedStepInput: ResolvedStepInput | undefined;
+  readonly responses: readonly InputResponse[];
+  readonly session: HarnessSession;
+}): ResolvePendingInputResult {
+  const answeredApprovalBatches = new Set(
+    findAnsweredApprovalBatches(input.approvalBatches, input.responses),
+  );
+  const answeredQuestionBatches = new Set(
+    findAnsweredQuestionBatches(input.questionBatches, input.responses),
+  );
+  let resolvedBatches = input.batches.filter(
+    (batch) => answeredApprovalBatches.has(batch) || answeredQuestionBatches.has(batch),
+  );
+  resolvedBatches = limitApprovalTailBatch(resolvedBatches);
+
+  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
+  const leftoverResponses = responsesForBatches(input.responses, openBatches);
+
+  if (resolvedBatches.length === 0) {
+    if (input.resolvedStepInput?.message === undefined) {
+      return {
+        outcome: "unresolved",
+        messages: [...input.baseHistory],
+        session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
+      };
+    }
+
+    const session =
+      leftoverResponses.length === 0
+        ? input.session
+        : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
+    return {
+      consumedMessage: input.resolvedStepInput.messageConsumed,
+      outcome: "continue",
+      messages: [...input.baseHistory],
+      session,
+    };
+  }
+
+  const verdict = reduceRequestVerdicts(
+    resolvedBatches,
+    {
+      messages: [...input.baseHistory],
+      session: input.session,
+    },
+    (batch, state) =>
+      batch.requests.some((request) => isApprovalRequest(request))
+        ? reduceApprovalRequestVerdict({
+            batch,
+            messages: state.messages,
+            resolveApprovalKey: input.resolveApprovalKey,
+            responses: input.responses,
+            session: state.session,
+          })
+        : reduceQuestionRequestVerdict({
+            batch,
+            messages: state.messages,
+            responses: input.responses,
+            session: state.session,
+          }),
+  );
+
+  const session = removePendingInputBatches(verdict.session, resolvedBatches);
+
+  return finishResolvedInput({
+    deferTurnInput:
+      resolvedBatches.some((batch) =>
+        batch.requests.some((request) => isApprovalRequest(request)),
+      ) || input.deferTurnInput,
+    leftoverResponses,
+    messages: verdict.messages,
+    rejectedActions: verdict.rejectedActions,
+    resolvedInputs: resolvedBatches.flatMap((batch) => {
+      const resolved = buildResolvedInputBatch(batch, input.responses);
+      return resolved === undefined ? [] : [resolved];
+    }),
+    resolvedStepInput: input.resolvedStepInput,
+    session,
+  });
+}
+
+function resolveQuestionRoute(input: {
+  readonly baseHistory: ModelMessage[];
+  readonly batches: readonly PendingInputBatch[];
+  readonly deferTurnInput: boolean;
+  readonly resolvedStepInput: ResolvedStepInput | undefined;
+  readonly responses: readonly InputResponse[];
+  readonly session: HarnessSession;
+}): ResolvePendingInputResult {
+  const resolvedBatches = findAnsweredQuestionBatches(input.batches, input.responses);
+  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
+  const leftoverResponses = responsesForBatches(input.responses, openBatches);
+
+  if (resolvedBatches.length === 0) {
+    if (input.resolvedStepInput?.message === undefined) {
+      return {
+        outcome: "unresolved",
+        messages: [...input.baseHistory],
+        session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
+      };
+    }
+
+    const sole = input.batches.length === 1 ? input.batches[0] : undefined;
+    if (sole === undefined) {
+      const session =
+        leftoverResponses.length === 0
+          ? input.session
+          : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
+      return {
+        consumedMessage: input.resolvedStepInput.messageConsumed,
+        outcome: "continue",
+        messages: [...input.baseHistory],
+        session,
+      };
+    }
+
+    const verdict = reduceQuestionRequestVerdict({
+      batch: sole,
+      messages: [...input.baseHistory],
+      responses: [],
+      session: input.session,
+    });
+    const session = removePendingInputBatches(verdict.session, [sole]);
+    return {
+      consumedMessage: input.resolvedStepInput.messageConsumed,
+      outcome: "resolved",
+      messages: verdict.messages,
+      resolvedInputs: [buildResolvedInputBatch(sole, [])].filter(
+        (batch): batch is NonNullable<typeof batch> => batch !== undefined,
+      ),
+      session,
+    };
+  }
+
+  const verdict = reduceRequestVerdicts(
+    resolvedBatches,
+    {
+      messages: [...input.baseHistory],
+      session: input.session,
+    },
+    (batch, state) =>
+      reduceQuestionRequestVerdict({
+        batch,
+        messages: state.messages,
+        responses: input.responses,
+        session: state.session,
+      }),
+  );
+  const session = removePendingInputBatches(verdict.session, resolvedBatches);
+
+  return finishResolvedInput({
+    deferTurnInput: input.deferTurnInput,
+    leftoverResponses,
+    messages: verdict.messages,
+    resolvedInputs: resolvedBatches.flatMap((batch) => {
+      const resolved = buildResolvedInputBatch(batch, input.responses);
+      return resolved === undefined ? [] : [resolved];
+    }),
+    resolvedStepInput: input.resolvedStepInput,
+    session,
+  });
+}
+
+function resolveSessionLimitRoute(input: {
+  readonly baseHistory: ModelMessage[];
+  readonly batches: readonly PendingInputBatch[];
+  readonly deferTurnInput: boolean;
+  readonly pendingBatch: PendingInputBatch;
+  readonly resolvedStepInput: ResolvedStepInput | undefined;
+  readonly responses: readonly InputResponse[];
+  readonly session: HarnessSession;
+}): ResolvePendingInputResult {
+  if (!hasAnsweredSessionLimitBatch(input.pendingBatch, input.responses)) {
+    return {
+      deferredMessage: true,
+      outcome: "unresolved",
+      messages: [...input.baseHistory],
+      session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
+    };
+  }
+
+  const openBatches = input.batches.filter((batch) => batch !== input.pendingBatch);
+  const leftoverResponses = responsesForBatches(input.responses, openBatches);
+  const limitBlocked = openBatches.some((batch) =>
+    batch.requests.some((request) => isSessionLimitContinuationRequestId(request.requestId)),
+  );
+  const verdict = reduceSessionLimitRequestVerdict({
+    batch: input.pendingBatch,
+    messages: [...input.baseHistory],
+    responses: input.responses,
+    session: input.session,
+  });
+  const session = removePendingInputBatches(verdict.session, [input.pendingBatch]);
+
+  return finishResolvedInput({
+    deferTurnInput: input.deferTurnInput || limitBlocked,
+    leftoverResponses,
+    limitContinuation: verdict.limitContinuation,
+    messages: verdict.messages,
+    resolvedInputs: [buildResolvedInputBatch(input.pendingBatch, input.responses)].filter(
+      (batch): batch is NonNullable<typeof batch> => batch !== undefined,
+    ),
+    resolvedStepInput: input.resolvedStepInput,
+    session,
+  });
+}
+
+function reduceRequestVerdicts(
+  batches: readonly PendingInputBatch[],
+  initial: RequestVerdict,
+  reduce: (batch: PendingInputBatch, state: RequestVerdict) => RequestVerdict,
+): RequestVerdict {
+  let state = initial;
+  for (const batch of batches) {
+    const verdict = reduce(batch, state);
+    state = {
+      messages: verdict.messages,
+      rejectedActions:
+        verdict.rejectedActions === undefined
+          ? state.rejectedActions
+          : [...(state.rejectedActions ?? []), ...verdict.rejectedActions],
+      session: verdict.session,
+    };
+  }
+  return state;
 }
 
 function canonicalizeInputResponses(responses: readonly InputResponse[]): readonly InputResponse[] {
