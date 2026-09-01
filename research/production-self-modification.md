@@ -52,27 +52,31 @@ instructions, registry coordination, and publication.
 import { defineSelfModificationConfig } from "@eve/self-modification/config";
 
 export default defineSelfModificationConfig({
-  development: {
+  local: {
     enabled: false,
   },
-  source: {
-    git: {
-      repository: "github.com/acme/agents",
-      directory: "apps/support-agent",
+  deployed: {
+    source: {
+      git: {
+        repository: "github.com/acme/agents",
+        directory: "apps/support-agent",
+      },
     },
-  },
-  target: {
-    branch: "main",
+    target: {
+      branch: "main",
+    },
   },
 });
 ```
 
-`development.enabled` controls direct source edits under `eve dev` and defaults
-to `true`. `source.git.repository` is the only GitHub repository the production
-flow may access. `source.git.directory` is the repository-relative application
-root containing `agent/`; `"."` represents the repository root.
-`target.branch` is both the checkout base and the draft pull request base.
-Omitting either `source` or `target` disables production self-modification.
+`local.enabled` controls live direct source edits under `eve dev` and defaults
+to `true`; the development source watcher reloads those edits for subsequent
+turns. `deployed.source.git.repository` is the only GitHub repository the
+deployed flow may access. `deployed.source.git.directory` is the
+repository-relative application root containing `agent/`; `"."` represents the
+repository root. `deployed.target.branch` is both the checkout base and the
+draft pull request base. Omitting either `deployed.source` or
+`deployed.target` disables deployed self-modification.
 
 The same config is passed to the agent and sandbox definitions and mounted as
 the extension config. The model belongs to the agent definition; a custom
@@ -84,18 +88,18 @@ credentials are operational configuration and never authored configuration.
 Local editing and draft pull requests use the same dynamic self-modification
 subagent and typed configuration, but have different effect boundaries:
 
-| Shared boundary       | Local development                                                                 | Deployed pull request                                                                                      |
-| --------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Purpose               | Makes persistent authored-source changes; changes do not affect the current turn. | Prepares persistent authored-source and official registry changes; changes do not affect the current turn. |
-| Source workspace      | Directly edits the authored `agent/` directory mounted at `/source`.              | Edits an isolated checkout of the configured target branch.                                                |
-| Registry installation | Keeps the existing development flow.                                              | Runs a constrained, trusted `eve add` operation in the configured application root.                        |
-| Result                | The change is available on a subsequent local turn.                               | The change becomes effective only after review, merge, and redeployment.                                   |
-| Activation            | Selected when `EVE_DEV=1`; `development.enabled` defaults to `true`.              | Selected outside development when `source` and `target` are configured and trusted prerequisites pass.     |
-| GitHub capability     | Has no GitHub credential or publication capability.                               | Trusted checkout and publication code resolve separate credentials outside the model sandbox.              |
+| Shared boundary       | Local live editing                                                                | Deployed pull request                                                                                                          |
+| --------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Purpose               | Makes persistent authored-source changes; changes do not affect the current turn. | Prepares persistent authored-source and official registry changes; changes do not affect the current turn.                     |
+| Source workspace      | Directly edits the authored `agent/` directory mounted at `/source`.              | Edits an isolated checkout of the configured target branch.                                                                    |
+| Registry installation | Keeps the existing local flow.                                                    | Runs a constrained, trusted `eve add` operation in the configured application root.                                            |
+| Result                | The source watcher reloads the change for a subsequent local turn.                | The change becomes effective only after review, merge, and redeployment.                                                       |
+| Activation            | Selected when `EVE_DEV=1`; `local.enabled` defaults to `true`.                    | Selected outside local development when `deployed.source` and `deployed.target` are configured and trusted prerequisites pass. |
+| GitHub capability     | Has no GitHub credential or publication capability.                               | Trusted checkout and publication code resolve separate credentials outside the model sandbox.                                  |
 
-The modes are mutually exclusive. Even when production is configured,
-`eve dev` selects local editing unless `development.enabled` is `false`; it
-never uses the deployed pull request workflow.
+The modes are mutually exclusive. Even when deployed self-modification is
+configured, `eve dev` selects local live editing unless `local.enabled` is
+`false`; it never uses the deployed pull request workflow.
 
 ## Production source and workspace
 
@@ -314,7 +318,7 @@ its project:
 
 1. eve obtains workload identity for the running Vercel project;
 2. a workload-authenticated broker verifies that the exact project Git link
-   matches `source.git.repository`;
+   matches `deployed.source.git.repository`;
 3. the broker resolves the ordinary Vercel GitHub App installation; and
 4. it mints a repository- and permission-scoped installation token.
 
@@ -342,7 +346,7 @@ installation leaves the default local-editing configuration intact.
 
 Interactive setup detects and displays the GitHub repository,
 repository-relative application directory, and default branch before writing
-`source` and `target`. It does not silently overwrite or broaden existing
+`deployed.source` and `deployed.target`. It does not silently overwrite or broaden existing
 authored configuration. The generated agent, sandbox, and extension entrypoints
 consume the same value.
 
