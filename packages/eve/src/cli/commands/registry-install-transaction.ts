@@ -1,6 +1,8 @@
 import { readFile, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
+import { serializeHeadlessSetupEvent, type HeadlessSetupEvent } from "./setup-headless.js";
+
 interface Snapshot {
   readonly path: string;
   readonly contents?: Buffer;
@@ -85,4 +87,36 @@ export function registryInstallFailureMessage(code: RegistryInstallFailureCode):
   return code === "pnpm_build_policy"
     ? "Dependency installation stopped because pnpm requires build-script decisions. Run `pnpm approve-builds`, then retry the eve add command."
     : "Dependency installation failed. Retry the eve add command in a terminal for details.";
+}
+
+export async function installRegistryItemTransaction(input: {
+  readonly appRoot: string;
+  readonly item: string;
+  readonly registryItem: unknown;
+  readonly nonInteractive: boolean | undefined;
+  readonly logger: { log(message: string): void };
+  readonly install: () => Promise<void>;
+}): Promise<void> {
+  const snapshot = await snapshotRegistryInstall(input.appRoot, input.registryItem);
+  try {
+    await input.install();
+  } catch (error) {
+    const rollback = await rollbackRegistryInstall(input.appRoot, snapshot);
+    const failureCode = registryInstallFailureCode(error);
+    const message = registryInstallFailureMessage(failureCode);
+    if (input.nonInteractive) {
+      const failureEvent: Extract<HeadlessSetupEvent, { type: "failed" }> = {
+        version: 1,
+        type: "failed",
+        item: input.item,
+        completedItems: [],
+        message,
+        failureCode,
+        rolledBack: rollback.restored,
+      };
+      if (rollback.changed.length > 0) failureEvent.changed = rollback.changed;
+      input.logger.log(serializeHeadlessSetupEvent(failureEvent));
+    }
+    throw new Error(message, { cause: error });
+  }
 }
