@@ -290,6 +290,25 @@ successor that claims the next cancellation surface. Starting both writes concur
 reintroduce a claim/teardown race and could weaken cancellation. Workflow bodies also expose no
 request `waitUntil` lifetime; all durable cleanup remains joined.
 
+**Hosted result: do not merge.** A paired run of the isolated change did not prove a stable
+material improvement over the control. Lower warm-turn medians and p95 were offset by a higher
+mean, a worse turn-order slope, and severe hosted tail outliers:
+
+| Metric                     |      Control |      Overlap |                 Delta |
+| -------------------------- | -----------: | -----------: | --------------------: |
+| Sequential all-turn mean   |       3.042s |       3.084s |      +42.0ms (+1.38%) |
+| Sequential warm p50        |       3.045s |       2.985s |      -60.0ms (-1.97%) |
+| Sequential warm p95        |       3.693s |       3.606s |      -86.9ms (-2.35%) |
+| Concurrent second-turn p50 |       1.867s |       1.929s |      +61.9ms (+3.32%) |
+| Sequential slope           | 13.31ms/turn | 13.97ms/turn | +0.66ms/turn (+4.95%) |
+
+The overlap run also recorded a 16.261s sequential maximum and a 7.958s concurrent second-turn
+p95, versus 4.002s and 2.171s in the control. Treat the mixed central metrics and these outliers as
+neutral/noisy, not evidence of a regression or success. Keep the implementation as a reference;
+retry only after tracing shows retired hook disposal is a material part of the critical tail.
+Control: [run 33468124247](https://github.com/vercel/eve/actions/runs/33468124247). Overlap:
+[run 33470436515](https://github.com/vercel/eve/actions/runs/33470436515), artifact `9786485510`.
+
 ### 4. Remove observability-only writes from each step
 
 `setEveAttributes` is awaited after every model attempt. Inside a Workflow step the SDK writes an
