@@ -180,7 +180,9 @@ export function validateDurableDynamicToolCallbacks(
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
       key !== "execute" &&
-      key !== "label" &&
+      key !== "activityLabel" &&
+      key !== "activityResult" &&
+      key !== "activityUpdate" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
       key !== "toModelOutput",
@@ -203,11 +205,23 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.execute,
     required: true,
   })!;
-  const labelStart = validateReference({
+  const activityLabel = validateReference({
     name,
-    phase: "labelStart",
-    stamped: raw.label?.start,
+    phase: "activityLabel",
+    stamped: raw.activityLabel,
     required: hasLabelStart,
+  });
+  const activityResult = validateReference({
+    name,
+    phase: "activityResult",
+    stamped: raw.activityResult,
+    required: entry.activity?.result !== undefined,
+  });
+  const activityUpdate = validateReference({
+    name,
+    phase: "activityUpdate",
+    stamped: raw.activityUpdate,
+    required: entry.activity?.update !== undefined,
   });
   const approvalRequest = validateReference({
     name,
@@ -230,12 +244,16 @@ export function validateDurableDynamicToolCallbacks(
 
   const callbacks: {
     execute: DurableDynamicCallbackReference;
-    label?: { start?: DurableDynamicCallbackReference };
+    activityLabel?: DurableDynamicCallbackReference;
+    activityResult?: DurableDynamicCallbackReference;
+    activityUpdate?: DurableDynamicCallbackReference;
     approvalRequest?: DurableDynamicCallbackReference;
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
   } = { execute };
-  if (labelStart !== undefined) callbacks.label = { start: labelStart };
+  if (activityLabel !== undefined) callbacks.activityLabel = activityLabel;
+  if (activityResult !== undefined) callbacks.activityResult = activityResult;
+  if (activityUpdate !== undefined) callbacks.activityUpdate = activityUpdate;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

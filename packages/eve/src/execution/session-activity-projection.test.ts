@@ -86,6 +86,38 @@ describe("projectSessionActivity", () => {
     expect(snapshot.pendingSettlements).toEqual({});
   });
 
+  it("uses the durable partial event id for activity updates", () => {
+    const event: MessageStreamEvent = {
+      data: {
+        result: {
+          callId: "tool-1",
+          kind: "tool-result",
+          output: { phase: "Collecting" },
+          toolName: "build_report",
+        },
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      meta: { at, id: "partial-1" },
+      type: "action.partial",
+    };
+
+    expect(
+      projectSessionActivity({
+        activityLabels: { "tool-1": "Collecting sources" },
+        event,
+        sessionId: "session-1",
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        eventId: expect.stringContaining(":update:partial-1"),
+        kind: "action.label.updated",
+        label: "Collecting sources",
+      }),
+    ]);
+  });
+
   it("maps session and later turn starts to the active delegated work", () => {
     const first: ActivityWorkIdentityV1 = {
       callId: "call-1",

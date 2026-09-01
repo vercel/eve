@@ -52,13 +52,19 @@ describe("activity protocol and reducer", () => {
           kind: "action.label.updated",
           label: "Search issues",
         },
+        {
+          actionId: "action",
+          eventId: "action:update",
+          kind: "action.label.updated",
+          label: "Found 3 issues",
+        },
       ],
       version: 1,
     });
 
     expect(batch).toBeDefined();
     expect(reduceActivityBatch(createActivitySnapshot(), batch!).actions.action?.label).toBe(
-      "Search issues",
+      "Found 3 issues",
     );
   });
 

@@ -38,6 +38,7 @@ import {
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
 import type { JsonObject } from "#shared/json.js";
+import { normalizeActivityText } from "#shared/activity-text.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
@@ -280,6 +281,19 @@ function readSubagentBackgroundTaskReceipt(
   return status === "working" && typeof taskId === "string" ? { status, taskId } : undefined;
 }
 
+function resolveActivityText(
+  project: ((value: unknown) => string) | undefined,
+  value: unknown,
+): string | undefined {
+  if (project === undefined) return undefined;
+  try {
+    const text = normalizeActivityText(project(value));
+    return text === "" ? undefined : text;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
  * events.
@@ -440,6 +454,10 @@ async function consumeStreamContent(
         type: "subagent.completed",
       });
     }
+    const activityResult =
+      result.isError === true
+        ? undefined
+        : resolveActivityText(options?.tools.get(result.toolName)?.activityResult, result.output);
     await emitFn(
       createActionResultEvent({
         result,
@@ -447,10 +465,16 @@ async function consumeStreamContent(
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
+      undefined,
+      activityResult === undefined ? undefined : { [result.callId]: activityResult },
     );
   };
 
   const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
+    const activityUpdate = resolveActivityText(
+      options?.tools.get(result.toolName)?.activityUpdate,
+      result.output,
+    );
     await emitFn(
       createActionPartialEvent({
         result,
@@ -458,6 +482,8 @@ async function consumeStreamContent(
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
+      undefined,
+      activityUpdate === undefined ? undefined : { [result.callId]: activityUpdate },
     );
   };
 

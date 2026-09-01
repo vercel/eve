@@ -29,12 +29,14 @@ function moduleMap(value: unknown): CompiledModuleMap {
 }
 
 describe("resolveToolDefinition", () => {
-  it("reattaches the authored label start callback callback", async () => {
+  it("reattaches authored activity callbacks", async () => {
     const resolved = await resolveToolDefinition(
       definition,
       moduleMap({
-        label: {
-          start: (input: { environment: string }) => `Deploy to ${input.environment}`,
+        activity: {
+          label: (input: { environment: string }) => `Deploy to ${input.environment}`,
+          result: (output: { url: string }) => `Deployed to ${output.url}`,
+          update: (partial: { phase: string }) => partial.phase,
         },
         description: definition.description,
         execute: () => null,
@@ -44,6 +46,10 @@ describe("resolveToolDefinition", () => {
       { kind: "application" },
     );
 
-    expect(resolved.label?.start?.({ environment: "production" })).toBe("Deploy to production");
+    expect(resolved.activityLabel?.({ environment: "production" })).toBe("Deploy to production");
+    expect(resolved.activityResult?.({ url: "https://example.com" })).toBe(
+      "Deployed to https://example.com",
+    );
+    expect(resolved.activityUpdate?.({ phase: "Uploading" })).toBe("Uploading");
   });
 });

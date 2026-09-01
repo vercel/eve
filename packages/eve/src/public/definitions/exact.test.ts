@@ -62,6 +62,17 @@ describe("definition helper exact inputs", () => {
 
   it("accepts async-generator tool executors", () => {
     const streamedTool = defineTool({
+      activity: {
+        label: () => "Build report",
+        result(output) {
+          expectTypeOf(output.phase).toEqualTypeOf<string>();
+          return `Report ${output.phase}`;
+        },
+        update(partial) {
+          expectTypeOf(partial.phase).toEqualTypeOf<string>();
+          return partial.phase;
+        },
+      },
       description: "Stream report progress.",
       inputSchema: { type: "object" },
       async *execute() {
