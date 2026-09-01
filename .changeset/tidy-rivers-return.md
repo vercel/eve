@@ -2,4 +2,4 @@
 "eve": minor
 ---
 
-Return eve, MCP, and authored-channel session starts after durable acceptance without polling continuation ownership, and return reset requests without polling for inbox release.
+Session creation on eve, MCP, and authored channels now returns as soon as Workflow accepts the run. Concurrent first messages on one channel address are settled inside the workflow, and racing `operationId` requests may return different candidate IDs; retry or resolve after startup for the canonical owner.

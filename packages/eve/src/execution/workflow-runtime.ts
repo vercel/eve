@@ -342,6 +342,10 @@ async function dispatchWorkflowCommand<TCommand extends SessionCommand>(
     throw error;
   }
 
+  if (command.kind === "reset") {
+    await waitForCommandHookRelease(sessionCommandHookToken(hook.runId), hook.runId);
+  }
+
   return activeCommandResult(command, hook.runId);
 }
 
@@ -410,6 +414,24 @@ export async function waitForCommandHookOwner(token: string): Promise<WorkflowHo
       if (!HookNotFoundError.is(error) || Date.now() >= deadline) throw error;
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
     }
+  }
+}
+
+async function waitForCommandHookRelease(token: string, sessionId: string): Promise<void> {
+  const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
+  while (true) {
+    try {
+      const owner = normalizeWorkflowHook(await getHookByToken(token));
+      if (owner.runId !== sessionId) return;
+    } catch (error) {
+      if (HookNotFoundError.is(error)) return;
+      throw error;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for session "${sessionId}" to release its command inbox.`);
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
   }
 }
 

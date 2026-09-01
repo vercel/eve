@@ -105,10 +105,7 @@ Post to `/eve/v1/session/:sessionId/compact` to summarize context without sendin
 
 ### Reset a session
 
-Post to `/eve/v1/session/:sessionId/reset` to queue terminal retirement for that session. The
-response does not wait for the session inbox to be released. Reset never replaces the ID
-automatically; create a new session explicitly for a fresh conversation. See
-[Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
+Post to `/eve/v1/session/:sessionId/reset` to terminally retire that session. Reset never replaces the ID automatically; create a new session explicitly for a fresh conversation. See [Compact, clear, and reset](../concepts/sessions-runs-and-streaming#compact-clear-and-reset).
 
 ## Replace or disable the defaults
 
