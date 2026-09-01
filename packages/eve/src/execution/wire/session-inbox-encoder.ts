@@ -32,8 +32,7 @@ type LegacySessionInboxWireTarget = Extract<SessionInboxWireTarget, { readonly v
 type VersionedSessionInboxEncoder = (command: SessionInboxCommand) => unknown;
 
 const versionedEncoders = {
-  1: (command: SessionInboxCommand) =>
-    encodeSessionCommandV1(withoutAcceptedDeployment(withoutActivityObserver(command))),
+  1: (command: SessionInboxCommand) => encodeSessionCommandV1(withoutAcceptedDeployment(command)),
   2: (command: SessionInboxCommand) => encodeSessionCommandV2(withoutAcceptedDeployment(command)),
   3: encodeSessionCommandV3,
 } satisfies Record<SessionInboxWireVersion, VersionedSessionInboxEncoder>;
@@ -60,7 +59,7 @@ function encode(
 ): SessionInboxWireV1 | SessionInboxWireV2 | SessionInboxWireV3 | Record<string, unknown> {
   if (target.version === 0) {
     const legacy = encodeSessionCommandV0(
-      encodeSessionCommandV1(withoutAcceptedDeployment(withoutActivityObserver(command))),
+      encodeSessionCommandV1(withoutAcceptedDeployment(command)),
       target.variant,
     );
     const legacyRecord = legacy as Record<string, unknown>;
@@ -112,18 +111,5 @@ function readAcceptedDeploymentId(command: SessionInboxCommand): string | undefi
   return command.deliveryMetadata?.find((metadata) => metadata.payloadIndex === 0)
     ?.acceptedDeploymentId;
 }
-
-function withoutActivityObserver(command: SessionInboxCommand): SessionInboxCommand {
-  if (
-    !("caller" in command) ||
-    command.caller === undefined ||
-    !("activityObserver" in command.caller)
-  ) {
-    return command;
-  }
-  const { activityObserver: _activityObserver, ...caller } = command.caller;
-  return { ...command, caller };
-}
-
 /** Server/step-safe producer facade. */
 export const sessionInboxWire = { encode } as const;

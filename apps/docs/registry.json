@@ -261,7 +261,15 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "vercel", "vercel", "vercel"]
+            "args": [
+              "integration",
+              "connect",
+              "vercel",
+              "vercel",
+              "vercel",
+              "--connection-method",
+              "mcp"
+            ]
           },
           "requires": ">=0.29.0"
         }

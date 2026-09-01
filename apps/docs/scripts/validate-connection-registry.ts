@@ -58,6 +58,7 @@ const CONNECT_CREATION_TYPES: Readonly<Record<string, string>> = {
 };
 const CONNECT_METHODS: Readonly<Record<string, "mcp" | "oauth">> = {
   agentcard: "mcp",
+  vercel: "mcp",
 };
 const CONNECT_PRINCIPAL_TYPES: Readonly<Record<string, "app" | "user">> = {
   neon: "app",

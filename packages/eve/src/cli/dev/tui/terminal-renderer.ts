@@ -57,15 +57,18 @@ import {
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
+  SetupFlowInterrupt,
   SetupFlowRenderer,
   SetupFlowStatus,
   SetupSelectRequest,
+  SetupSelectResult,
 } from "./setup-flow.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
+  orderedSelection,
   reduceSelect,
   searchActionQuery,
   selectValueAtCursor,
@@ -240,6 +243,7 @@ type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: num
 
 type SetupFlowState = {
   title: string;
+  navigation?: PlannerNavigation;
   indicator: SetupFlowIndicatorState;
   lines: FlowPanelLine[];
   summary?: { headline: string; facts: readonly { label: string; value: string }[] };
@@ -574,7 +578,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
-  #flowInterrupt?: () => void;
+  #flowInterrupt?: (interrupt: SetupFlowInterrupt) => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
   #flowIdleConsumer?: (key: TerminalKey) => void;
   /** The open `/traces` viewer session, if the alt-screen viewer is active. */
@@ -587,6 +591,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
+    setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
@@ -1791,13 +1796,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const content = stripAnsi(text);
     if (content.trim().length === 0) return;
     this.#start();
-    this.#pushBlock(
-      tone === "success"
-        ? { kind: "result", body: content, live: false, status: "done" }
-        : tone === "error"
-          ? { kind: "flow", title: tone, body: content, live: false }
-          : { kind: "result", body: content, live: false },
-    );
+    this.#pushBlock({
+      kind: "result",
+      body: content,
+      live: false,
+      status: tone === "success" ? "done" : undefined,
+    });
     this.#paint();
   }
 
@@ -1822,6 +1826,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The ticker runs for the whole flow: the idle pulse, the status indicator,
     // and the output preview all animate through it.
     this.#startTicker();
+    this.#paint();
+  }
+
+  #setSetupFlowNavigation(navigation: PlannerNavigation | undefined): void {
+    if (this.#setupFlow === undefined) return;
+    this.#setupFlow.navigation = navigation;
     this.#paint();
   }
 
@@ -1873,16 +1883,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * clears an active search first. One question at a time; it vanishes on
    * resolve.
    */
-  async #readSetupSelect(opts: SetupSelectRequest): Promise<readonly string[] | undefined> {
+  async #readSetupSelect(opts: SetupSelectRequest): Promise<SetupSelectResult> {
     const flow = this.#beginSetupQuestion();
     const multiple = isMultiSelectRequest(opts);
     const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
     let selectOptions: readonly SetupPanelOption[] = opts.options;
 
+    const plannerNavigation = opts.navigation?.kind === "planner";
     const initial: Parameters<typeof initialSelectState>[0] = {
       options: selectOptions,
       searchAction,
-      submitRow: multiple,
+      submitRow: multiple && !plannerNavigation,
     };
     if ("initialValue" in opts && opts.initialValue !== undefined) {
       initial.defaultValue = opts.initialValue;
@@ -1905,7 +1916,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         {
           options: selectOptions,
           searchAction,
-          submitRow: multiple,
+          submitRow: multiple && !plannerNavigation,
         },
       );
       this.#paint();
@@ -1926,7 +1937,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const filter = select.filter;
         selectOptions = options;
         select = {
-          ...initialSelectState({ options, searchAction, submitRow: multiple }),
+          ...initialSelectState({
+            options,
+            searchAction,
+            submitRow: multiple && !plannerNavigation,
+          }),
           filter,
         };
       } catch (reason) {
@@ -1963,8 +1978,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.question = (width) => renderSelectQuestion(panelState(), this.#theme, width);
     this.#paint();
 
-    const question = this.#captureSetupQuestion<readonly string[] | undefined>((key, settle) => {
-      const close = (value: readonly string[] | undefined): void => {
+    const question = this.#captureSetupQuestion<SetupSelectResult>((key, settle) => {
+      const close = (value: SetupSelectResult): void => {
         searchVersion += 1;
         settle(value);
       };
@@ -1975,9 +1990,34 @@ export class TerminalRenderer implements AgentTUIRenderer {
         return;
       }
 
+      const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
+      const plannerDirection =
+        key.type === "left" &&
+        (plannerStep?.activeStep ?? 0) > (plannerStep?.firstNavigableStep ?? 0)
+          ? "back"
+          : key.type === "right" &&
+              plannerStep !== undefined &&
+              plannerStep.activeStep >= (plannerStep.firstNavigableStep ?? 0) &&
+              plannerStep.activeStep < plannerStep.steps.length - 1
+            ? "forward"
+            : undefined;
+      if (plannerDirection !== undefined) {
+        close({
+          kind: "navigate",
+          direction: plannerDirection,
+          values: multiple ? orderedSelection(selectOptions, select.selected) : [],
+        });
+        return;
+      }
+
       const base = { key, options: selectOptions, searchAction, select };
       const result = multiple
-        ? reduceSetupSelectInput({ ...base, kind: opts.kind, required: opts.required })
+        ? reduceSetupSelectInput({
+            ...base,
+            kind: opts.kind,
+            required: opts.required,
+            plannerNavigation: plannerNavigation || undefined,
+          })
         : reduceSetupSelectInput({ ...base, kind: opts.kind });
       switch (result.kind) {
         case "cancel":
@@ -2516,7 +2556,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    return this.#requireSetupFlow();
+    const flow = this.#requireSetupFlow();
+    // A standard question means the preceding background operation settled.
+    // Clear its transient item summary and timer before painting the prompt.
+    if (flow.status !== undefined) {
+      flow.status = undefined;
+      flow.summary = undefined;
+      flow.preview = undefined;
+    }
+    return flow;
   }
 
   /** A flow is implicitly opened for a bare question (tests, future hosts). */
@@ -2599,11 +2647,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** See {@link SetupFlowRenderer.waitForInterrupt}. */
   #waitForFlowInterrupt(options?: { interruptible?: boolean }): {
-    promise: Promise<void>;
+    promise: Promise<SetupFlowInterrupt>;
     dispose(): void;
   } {
-    let fire!: () => void;
-    const promise = new Promise<void>((resolve) => {
+    let fire!: (interrupt: SetupFlowInterrupt) => void;
+    const promise = new Promise<SetupFlowInterrupt>((resolve) => {
       fire = resolve;
     });
     this.#flowInterrupt = fire;
@@ -2636,7 +2684,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const fire = this.#flowInterrupt;
         this.#flowInterrupt = undefined;
         this.#disarmFlowIdleTrap();
-        fire?.();
+        fire?.(key.type === "ctrl-c" ? "ctrl-c" : "escape");
         return;
       }
       if (key.type === "ctrl-r") this.#paint();
@@ -2736,6 +2784,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.lines = [];
     flow.outputBuffer = [];
     flow.preview = undefined;
+    flow.status = undefined;
     flow.summary =
       content === undefined
         ? undefined
@@ -4122,6 +4171,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       const state: Parameters<typeof renderFlowPanel>[0] = {
         title: flow.title,
+        navigation: flow.navigation,
         lines:
           flow.summary === undefined
             ? flow.hideLinesWhileQuestion === true

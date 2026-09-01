@@ -347,6 +347,7 @@ export async function runModelFlow(input: {
   let lastApply: ApplyModelSettingsOutcome | undefined;
   let committedProviderSelection: ProviderSelection | undefined;
   let shouldAuthenticateChatGpt = false;
+  let completed = false;
   let commitDraft = false;
   const sourceOwnedExternalRouting =
     routing?.kind === "external" && !isChatGptModelRouting(routing);
@@ -403,6 +404,7 @@ export async function runModelFlow(input: {
     }
 
     if (pick === "done") {
+      completed = true;
       commitDraft = true;
       break;
     }
@@ -468,7 +470,9 @@ export async function runModelFlow(input: {
       nextSelection = "provider";
       continue;
     }
-    // External-provider setup only shows instructions, so keep the menu open.
+    // Direct-provider setup remains source-owned. Acknowledging the instructions
+    // returns to Done so the user can explicitly continue without persisting a
+    // misleading eve provider selection.
     if (result.kind === "external-provider") {
       if (signal?.aborted) return { kind: "cancelled" };
       nextSelection = "done";
@@ -514,7 +518,7 @@ export async function runModelFlow(input: {
     committedProviderSelection === undefined &&
     !shouldAuthenticateChatGpt
   ) {
-    return { kind: "cancelled" };
+    return completed ? { kind: "done", accessChanged: false } : { kind: "cancelled" };
   }
   const done: Extract<ModelFlowResult, { kind: "done" }> = {
     kind: "done",

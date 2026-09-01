@@ -7,8 +7,8 @@ import type {
 } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
+import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
 import { sessionInboxWireV2Schema } from "#execution/wire/session-inbox-wire.v2.js";
-import { normalizeSessionInboxWireV3 } from "#execution/wire/session-inbox-wire.v3-migration.js";
 import { formatValidationError } from "#runtime/validation.js";
 
 const v2 = sessionInboxWireV2Schema.options;
@@ -34,7 +34,7 @@ export const sessionInboxWireV3Schema = z.discriminatedUnion("kind", [
 export type SessionInboxWireV3 = z.infer<typeof sessionInboxWireV3Schema>;
 
 export function parseSessionInboxWireV3(value: unknown) {
-  return sessionInboxWireV3Schema.safeParse(normalizeSessionInboxWireV3(value));
+  return sessionInboxWireV3Schema.safeParse(normalizeSessionInboxWireV2(value));
 }
 
 /** Builds and validates one complete version-3 wire value. */
