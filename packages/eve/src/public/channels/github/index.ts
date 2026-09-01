@@ -44,6 +44,7 @@ export {
   type GitHubInboundContext,
   type GitHubInboundResult,
   type GitHubInboundResultOrPromise,
+  type GitHubInstrumentationMetadata,
   type GitHubProgressConfig,
   type GitHubReceiveTarget,
 } from "#public/channels/github/githubChannel.js";

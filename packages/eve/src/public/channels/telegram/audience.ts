@@ -6,21 +6,24 @@ export function telegramInstrumentationMetadata(
   state: TelegramChannelState,
 ): TelegramInstrumentationMetadata {
   return {
-    audience: telegramAudience(state.chatType),
+    audience: telegramAudience(state.chatType, state.chatUsername),
     chatId: state.chatId,
     chatType: state.chatType,
     triggeringUserId: state.triggeringUserId ?? null,
   };
 }
 
-function telegramAudience(chatType: TelegramChannelState["chatType"]): ChannelAudience {
+function telegramAudience(
+  chatType: TelegramChannelState["chatType"],
+  chatUsername: TelegramChannelState["chatUsername"],
+): ChannelAudience {
+  if (chatType === null) return "unknown";
   if (
-    chatType === "private" ||
-    chatType === "group" ||
-    chatType === "supergroup" ||
-    chatType === "channel"
+    (chatType === "supergroup" || chatType === "channel") &&
+    typeof chatUsername === "string" &&
+    chatUsername.length > 0
   ) {
-    return "private";
+    return "public";
   }
-  return "unknown";
+  return "private";
 }

@@ -51,6 +51,7 @@ import {
 import type { GitHubPullRequestContextConfig } from "#public/channels/github/pr-context.js";
 import { verifyGitHubRequest } from "#public/channels/github/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { readNonEmptyString } from "#shared/guards.js";
 
 const log = createLogger("github.channel");
@@ -96,6 +97,11 @@ export interface GitHubChannelContext {
   readonly repository: GitHubRepositoryRef;
   readonly thread: GitHubThread;
   state: GitHubChannelState;
+}
+
+/** GitHub channel metadata exposed to instrumentation callbacks. */
+export interface GitHubInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience: ChannelAudience;
 }
 
 /** Event-handler GitHub context, including continuation routing. */
@@ -227,7 +233,11 @@ export interface GitHubChannelConfig {
 }
 
 /** Concrete return type of {@link githubChannel}. */
-export interface GitHubChannel extends Channel<GitHubChannelState, GitHubReceiveTarget> {}
+export interface GitHubChannel extends Channel<
+  GitHubChannelState,
+  GitHubReceiveTarget,
+  GitHubInstrumentationMetadata
+> {}
 
 /** GitHub channel factory for GitHub App webhooks and proactive comments. */
 export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
@@ -246,10 +256,19 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
     ...config.events,
   };
 
-  const channel = defineChannel<GitHubChannelState, GitHubChannelContext, GitHubReceiveTarget>({
+  const channel = defineChannel<
+    GitHubChannelState,
+    GitHubChannelContext,
+    GitHubReceiveTarget,
+    GitHubInstrumentationMetadata
+  >({
     kindHint: "github",
     turnPolicy: config.turnPolicy,
     state: initialGitHubState(),
+
+    metadata(state): GitHubInstrumentationMetadata {
+      return { audience: state.audience ?? "unknown" };
+    },
 
     context(state, session) {
       return rebuildGitHubContext(state, session, config);
@@ -411,23 +430,23 @@ export function githubChannel(config: GitHubChannelConfig = {}): GitHubChannel {
         );
       }
 
-      const repositoryId =
-        target.repositoryId ??
-        (
-          await getGitHubRepository({
-            api: config.api,
-            credentials: config.credentials,
-            installationId: target.installationId,
-            owner,
-            repo,
-          })
-        ).id;
+      const repository =
+        target.repositoryId === undefined
+          ? await getGitHubRepository({
+              api: config.api,
+              credentials: config.credentials,
+              installationId: target.installationId,
+              owner,
+              repo,
+            })
+          : { audience: "unknown" as const, id: target.repositoryId };
 
       const state = stateFromReceiveTarget({
+        audience: repository.audience,
         target,
         owner,
         repo,
-        repositoryId,
+        repositoryId: repository.id,
       });
 
       if (target.initialMessage !== undefined) {

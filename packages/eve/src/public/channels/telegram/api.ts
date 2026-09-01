@@ -50,6 +50,8 @@ export interface TelegramMessageResult {
   readonly chatId?: string;
   /** Recognized Telegram chat type associated with the message, when returned. */
   readonly chatType?: TelegramChatType;
+  /** Telegram chat username, when returned. */
+  readonly chatUsername?: string;
   /** Telegram's raw JSON response. */
   readonly raw: unknown;
 }
@@ -322,6 +324,8 @@ function toTelegramMessageResult(body: unknown): TelegramMessageResult {
     chatId:
       typeof chat.id === "number" || typeof chat.id === "string" ? String(chat.id) : undefined,
     chatType: parseTelegramChatType(chat.type) ?? undefined,
+    chatUsername:
+      typeof chat.username === "string" && chat.username.length > 0 ? chat.username : undefined,
     id:
       typeof result.message_id === "number" || typeof result.message_id === "string"
         ? String(result.message_id)

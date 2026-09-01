@@ -1308,7 +1308,10 @@ async function dispatchSlackMessage(input: {
   });
   const author = input.message.author;
   const channelState: SlackChannelState = {
-    audience: "unknown",
+    audience:
+      input.kind === "direct_message" || input.message.isExtSharedChannel === true
+        ? "private"
+        : "unknown",
     channelId: input.message.channelId,
     installationTeamId: input.installationTeamId ?? null,
     teamId: input.message.teamId ?? null,
@@ -1334,12 +1337,16 @@ async function dispatchSlackMessage(input: {
     state: channelState,
   });
   let privateConversation: Promise<boolean> | undefined;
-  const isDMOrPrivateChannel = () =>
-    (privateConversation ??= isPrivateSlackConversation({
+  const isDMOrPrivateChannel = async () => {
+    const isPrivate = await (privateConversation ??= isPrivateSlackConversation({
       channelId: input.message.channelId,
+      isExtSharedChannel: input.message.isExtSharedChannel,
       raw: input.message.raw,
       request: slack.request,
     }));
+    channelState.audience = isPrivate ? "private" : "public";
+    return isPrivate;
+  };
   const isBotMentioned =
     input.kind === "app_mention" ||
     (input.botUserId !== undefined && input.message.text.includes(`<@${input.botUserId}`));

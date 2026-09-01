@@ -51,8 +51,13 @@ import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
 import type { ValidatedInputResponse } from "#shared/input.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
-import { discordAudience, discordInstrumentationMetadata } from "./audience.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
+import {
+  discordCommandAudience,
+  discordInstrumentationMetadata,
+  discordStateFromInteraction,
+  initialDiscordState,
+} from "./audience.js";
 
 const log = createLogger("discord.channel");
 
@@ -97,6 +102,8 @@ export interface DiscordChannelCredentials extends DiscordCredentials {
 
 /** Target accepted by `receive(discord, { target })` for proactive sessions. */
 export interface DiscordReceiveTarget {
+  /** Optional audience evidence for proactive receives. Omit to leave `unknown`. */
+  readonly audience?: ChannelAudience;
   readonly channelId: string;
   readonly conversationId?: string;
   readonly initialMessage?: string | DiscordMessageBody;
@@ -105,12 +112,15 @@ export interface DiscordReceiveTarget {
 /**
  * Result of an inbound Discord command hook. Return `null` to acknowledge the
  * interaction without dispatching the agent.
+ * - `audience`: optional visibility evidence already known by the handler.
  * - `auth`: session auth context for the dispatched turn, or `null` for anonymous.
  * - `ephemeral`: when `true`, the deferred reply is visible only to the invoking user.
  * - `context`: model-visible context lines appended after the Discord context block.
  * - `title`: workflow run title override that does not change model input.
  */
 export type DiscordCommandResult = {
+  /** Optional audience evidence from the command handler. */
+  readonly audience?: ChannelAudience;
   readonly auth: SessionAuthContext | null;
   readonly ephemeral?: boolean;
   readonly context?: readonly string[];
@@ -300,7 +310,7 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
       return from(discordContinuationToken(channelId, conversationId)).send(input.message, {
         auth: input.auth,
         state: {
-          audience: "unknown",
+          audience: normalizeChannelAudience(receiveTarget.audience),
           applicationId: null,
           channelId,
           conversationId: conversationId || null,
@@ -506,7 +516,7 @@ async function handleCommandInteraction(input: {
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
 }): Promise<Response> {
-  const state = stateFromInteraction(input.interaction, {
+  const state = discordStateFromInteraction(input.interaction, {
     conversationId: input.interaction.id,
     hasMessageAnchor: false,
     initialResponseSent: false,
@@ -525,6 +535,7 @@ async function handleCommandInteraction(input: {
   if (result === null || result === undefined) {
     return discordJson({ content: "Command ignored.", ephemeral: true });
   }
+  state.audience = discordCommandAudience(state.audience, result);
 
   input.waitUntil(
     dispatchCommand({
@@ -632,39 +643,6 @@ async function dispatchInputResponses(input: {
   } catch (error) {
     log.error("interaction response delivery failed", { error });
   }
-}
-
-function stateFromInteraction(
-  interaction: DiscordInteraction,
-  options: {
-    readonly conversationId: string;
-    readonly hasMessageAnchor: boolean;
-    readonly initialResponseSent: boolean;
-  },
-): DiscordChannelState {
-  return {
-    audience: discordAudience(interaction.channelType),
-    applicationId: interaction.applicationId,
-    channelId: interaction.channelId,
-    conversationId: options.conversationId,
-    guildId: interaction.guildId ?? null,
-    hasMessageAnchor: options.hasMessageAnchor,
-    initialResponseSent: options.initialResponseSent,
-    interactionToken: interaction.token,
-  };
-}
-
-function initialDiscordState(): DiscordChannelState {
-  return {
-    audience: "unknown",
-    applicationId: null,
-    channelId: null,
-    conversationId: null,
-    guildId: null,
-    hasMessageAnchor: false,
-    initialResponseSent: false,
-    interactionToken: null,
-  };
 }
 
 function mergeCredentials(

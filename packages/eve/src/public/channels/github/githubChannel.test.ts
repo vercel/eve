@@ -199,6 +199,61 @@ describe("githubChannel", () => {
     }
   });
 
+  it.each([
+    { audience: "public", repositoryFields: { visibility: "public" } },
+    { audience: "unknown", repositoryFields: { private: false } },
+    { audience: "private", repositoryFields: { visibility: "private" } },
+    { audience: "private", repositoryFields: { visibility: "internal" } },
+    { audience: "private", repositoryFields: { private: true } },
+    {
+      audience: "private",
+      repositoryFields: { private: true, visibility: "public" },
+    },
+    {
+      audience: "unknown",
+      repositoryFields: { private: "false", visibility: "PUBLIC" },
+    },
+    {
+      audience: "unknown",
+      repositoryFields: { private: "false", visibility: "public" },
+    },
+  ] as const)(
+    "projects explicit repository visibility as $audience for verified webhooks",
+    async ({ audience, repositoryFields }) => {
+      const channel = githubChannel({
+        botName: "testbot",
+        credentials: { webhookSecret: SECRET },
+        onComment: () => ({ auth: null }),
+      });
+      const { send } = await firePost(
+        channel,
+        signedRequest(
+          "issue_comment",
+          basePayload({
+            action: "created",
+            comment: {
+              body: "@testbot help me",
+              id: 10,
+              user: { id: 1, login: "octocat", type: "User" },
+            },
+            issue: { number: 5 },
+            repository: {
+              full_name: "vercel/eve",
+              id: 123,
+              name: "eve",
+              owner: { login: "vercel" },
+              ...repositoryFields,
+            },
+          }),
+        ),
+      );
+
+      const state = send.mock.calls[0]![1].state as GitHubChannelState;
+      expect(state.audience).toBe(audience);
+      expect(getAdapter(channel).instrumentation?.metadata?.({ ...state })).toEqual({ audience });
+    },
+  );
+
   it("acks ping deliveries without dispatching", async () => {
     const channel = githubChannel({ credentials: { webhookSecret: SECRET } });
     const { response, send } = await firePost(channel, signedRequest("ping", basePayload({})));
@@ -1187,5 +1242,58 @@ describe("githubChannel", () => {
     expect(sandbox.commandLog).toContain(
       `cd '/workspace' && GIT_TERMINAL_PROMPT=0 git fetch --depth 1 origin '${headSha}'`,
     );
+  });
+
+  it("reuses repository API metadata to seed proactive receive visibility", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 123, visibility: "private" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const channel = asCompiled<GitHubChannelState>(
+      githubChannel({ api: { apiBaseUrl: "https://github.test", fetch: fetchMock } }),
+    );
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await channel.receive!(
+      {
+        auth: null,
+        message: "run",
+        target: { issueNumber: 5, owner: "vercel", repo: "eve" },
+      },
+      mockChannelContext(send),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://github.test/repos/vercel/eve");
+    const state = send.mock.calls[0]![1].state as GitHubChannelState;
+    expect(state).toMatchObject({ audience: "private", repositoryId: 123 });
+    expect(channel.adapter.instrumentation?.metadata?.({ ...state })).toEqual({
+      audience: "private",
+    });
+  });
+
+  it("keeps proactive receive visibility unknown when repositoryId skips metadata lookup", async () => {
+    const fetchMock = vi.fn();
+    const channel = asCompiled<GitHubChannelState>(
+      githubChannel({ api: { apiBaseUrl: "https://github.test", fetch: fetchMock } }),
+    );
+    const send = vi.fn().mockResolvedValue({ id: "s1" });
+
+    await channel.receive!(
+      {
+        auth: null,
+        message: "run",
+        target: { issueNumber: 5, owner: "vercel", repo: "eve", repositoryId: 123 },
+      },
+      mockChannelContext(send),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    const state = send.mock.calls[0]![1].state as GitHubChannelState;
+    expect(state).toMatchObject({ audience: "unknown", repositoryId: 123 });
+    expect(channel.adapter.instrumentation?.metadata?.({ ...state })).toEqual({
+      audience: "unknown",
+    });
   });
 });

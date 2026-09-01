@@ -97,6 +97,7 @@ export function linqChannel(config: LinqChannelConfig): LinqChannel {
   const linq = createLinqAdapter(adapterConfig);
   const bridge = chatSdkChannel({
     adapters: { linq },
+    audience: "private",
     concurrency: "concurrent",
     events: config.events,
     routes: { linq: config.route ?? "/eve/v1/linq" },

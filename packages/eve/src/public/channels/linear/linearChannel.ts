@@ -34,6 +34,7 @@ import {
   type Channel,
   type ChannelContinuationOps,
 } from "#public/definitions/channel.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { isObject, readNonEmptyString } from "#shared/guards.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -63,6 +64,7 @@ export interface LinearChannelState {
 
 /** Per-session instrumentation snapshot for Linear runtime telemetry. */
 export interface LinearInstrumentationMetadata extends Record<string, unknown> {
+  readonly audience?: ChannelAudience;
   readonly agentSessionId: string | null;
   readonly commentId: string | null;
   readonly issueId: string | null;
@@ -216,6 +218,7 @@ export function linearChannel(config: LinearChannelConfig = {}): LinearChannel {
     state: initialLinearState(),
     metadata(state): LinearInstrumentationMetadata {
       return {
+        audience: "unknown",
         agentSessionId: state.agentSessionId,
         commentId: state.commentId ?? null,
         issueId: state.issueId ?? null,

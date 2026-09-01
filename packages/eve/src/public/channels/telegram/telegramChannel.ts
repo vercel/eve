@@ -60,6 +60,7 @@ import {
   stateFromTelegramCallbackQuery,
   stateFromTelegramMessage,
   telegramContinuationTokenFromState,
+  updateTelegramChatMetadata,
 } from "#public/channels/telegram/state.js";
 import {
   verifyTelegramRequest,
@@ -96,6 +97,7 @@ export interface TelegramChannelState extends TelegramHitlState {
   chatId: string | null;
   /** Telegram chat type, when known from an inbound update. */
   chatType: TelegramChatType | null;
+  chatUsername?: string | null;
   /** Group/supergroup conversation anchor message id. */
   conversationId: string | null;
   /** Forum topic id, when known. */
@@ -363,15 +365,12 @@ function buildTelegramHandle(input: {
   readonly session?: SessionHandle;
   readonly state: TelegramChannelState;
 }): TelegramHandle {
-  const api = input.config.api;
-  const state = input.state;
-  const credentials = input.config.credentials;
+  const { api, credentials } = input.config;
+  const { state } = input;
 
   function anchor(posted: TelegramMessageResult): void {
     const chatType = state.chatType ?? posted.chatType ?? null;
-    if (state.chatType === null && posted.chatType !== undefined) {
-      state.chatType = posted.chatType;
-    }
+    updateTelegramChatMetadata(state, posted);
     if (!posted.id || !shouldAnchorTelegramConversation(chatType)) return;
     state.conversationId = posted.id;
     if (state.chatId) {

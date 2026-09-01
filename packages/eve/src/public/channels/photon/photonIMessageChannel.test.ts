@@ -1,13 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { directMessage, newMessage, send } = vi.hoisted(() => ({
-  directMessage: vi.fn(),
-  newMessage: vi.fn(),
-  send: vi.fn(),
-}));
-
-vi.mock("#public/channels/chat-sdk/index.js", () => ({
-  chatSdkChannel: () => ({
+const { chatSdkChannel, directMessage, newMessage, send } = vi.hoisted(() => ({
+  chatSdkChannel: vi.fn(() => ({
     bot: {
       getAdapter: () => ({ markRead: vi.fn() }),
       onDirectMessage: directMessage,
@@ -15,7 +9,14 @@ vi.mock("#public/channels/chat-sdk/index.js", () => ({
     },
     channel: { routes: [] },
     send,
-  }),
+  })),
+  directMessage: vi.fn(),
+  newMessage: vi.fn(),
+  send: vi.fn(),
+}));
+
+vi.mock("#public/channels/chat-sdk/index.js", () => ({
+  chatSdkChannel,
   messageToUserContent: (message: Message) => message.text,
 }));
 vi.mock("#compiled/@chat-adapter/state-memory/index.js", () => ({
@@ -56,6 +57,7 @@ describe("photonIMessageChannel", () => {
       { context: [], message: "Steer this response" },
       { auth: null, thread, title: "Photon run" },
     );
+    expect(chatSdkChannel).toHaveBeenCalledWith(expect.objectContaining({ audience: "private" }));
   });
 
   it("derives user auth for default direct-message dispatch", async () => {
