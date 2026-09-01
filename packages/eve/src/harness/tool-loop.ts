@@ -158,7 +158,7 @@ import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
-} from "#harness/stale-input-responses.js";
+} from "#harness/hitl/request-interpreter.js";
 import {
   normalizeModelMessages,
   normalizeUserContent,

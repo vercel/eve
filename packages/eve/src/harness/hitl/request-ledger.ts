@@ -38,6 +38,17 @@ export class RequestLedgerConflictError extends Error {
   }
 }
 
+export type RequestResponseClass = "open" | "stale" | "invalid";
+
+export function classifyRequestResponse(
+  state: SessionStateMap | undefined,
+  requestId: string,
+): RequestResponseClass {
+  const request = readRequestLedger(state).requests.find((candidate) => candidate.id === requestId);
+  if (request === undefined) return "invalid";
+  return request.state === "open" ? "open" : "stale";
+}
+
 export function readRequestLedger(state: SessionStateMap | undefined): RequestLedger {
   const persisted = state?.[KEY] as RequestLedger | undefined;
   if (persisted !== undefined) {

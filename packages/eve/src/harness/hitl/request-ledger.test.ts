@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  classifyRequestResponse,
   createRequestGroup,
   openRequestGroups,
   readRequestLedger,
@@ -78,6 +79,21 @@ describe("request ledger", () => {
         session: created,
       }),
     ).toThrow(RequestLedgerConflictError);
+  });
+
+  it("distinguishes open, stale, and invalid responses", () => {
+    const created = appendPendingInputBatch({
+      requests: [request],
+      responseMessages: [],
+      session: session(),
+    });
+    expect(classifyRequestResponse(created.state, "request-1")).toBe("open");
+    expect(classifyRequestResponse(created.state, "unknown")).toBe("invalid");
+
+    const batch = openRequestGroups(created.state)[0];
+    if (batch === undefined) throw new Error("Expected an open request group.");
+    const delivered = removePendingInputBatches(created, [batch]);
+    expect(classifyRequestResponse(delivered.state, "request-1")).toBe("stale");
   });
 
   it("retains terminal requests after a group is delivered", () => {
