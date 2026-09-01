@@ -31,13 +31,13 @@ import { finalizeDone } from "#execution/workflow-entry-finalization.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
+import { finalizeTerminalSession } from "#execution/finalize-terminal-session.js";
 import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
 import { isHookConflictError } from "#execution/hook-ownership.js";
 import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
-import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import { readSerializedSubagentDepth } from "#harness/subagent-depth.js";
@@ -658,46 +658,4 @@ async function runDriverLoop(input: {
     await sessionTimeout?.dispose();
     await commandInbox.dispose();
   }
-}
-
-async function finalizeTerminalSession(input: {
-  readonly caller: TurnCaller | undefined;
-  readonly driverWritable: WritableStream<Uint8Array>;
-  readonly mode: RunMode;
-  readonly notifyCaller: boolean;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-  readonly terminalState: CrashCleanupState;
-}): Promise<WorkflowEntryResult> {
-  await terminateChildSessionsStep({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
-  });
-  await emitTerminalSessionCompletionStep({
-    parentWritable: input.driverWritable,
-    serializedContext: input.serializedContext,
-  });
-  input.terminalState.terminalEmitted = true;
-
-  if (!input.notifyCaller) return { output: "" };
-
-  if (input.mode === "task") {
-    await fireSessionCallbackStep({
-      output: "",
-      serializedContext: input.serializedContext,
-      status: "completed",
-    });
-    await notifyDelegatedParentStep({
-      result: createDelegatedSubagentSuccessResult(input.serializedContext, ""),
-      serializedContext: input.serializedContext,
-    });
-  } else {
-    await notifyTurnCallerStep({
-      caller: input.caller,
-      lifecycle: "terminal",
-      sessionId: input.sessionState.sessionId,
-      settled: { output: "" },
-    });
-  }
-  return { output: "" };
 }
