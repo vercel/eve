@@ -67,9 +67,9 @@ const SECTIONS = {
       "connection/notion",
       "connection/vercel",
       "extension/agent-browser",
+      "experimental/self-modification",
     ],
-    includes: (item: Item) =>
-      !item.name.startsWith("channel/") && !item.name.startsWith("experimental/"),
+    includes: (item: Item) => !item.name.startsWith("channel/"),
   },
 } as const;
 
