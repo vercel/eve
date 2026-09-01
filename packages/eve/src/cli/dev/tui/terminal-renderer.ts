@@ -1984,7 +1984,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
       const plannerDirection =
-        key.type === "left" && (plannerStep?.activeStep ?? 0) > 0
+        key.type === "left" &&
+        (plannerStep?.activeStep ?? 0) > (plannerStep?.firstNavigableStep ?? 0)
           ? "back"
           : key.type === "right" &&
               plannerStep !== undefined &&

@@ -431,6 +431,10 @@ function selectPresentation(state: SetupOptionSelectPanelState): SelectPresentat
   }
 }
 
+function canNavigateBack(navigation: PlannerNavigation): boolean {
+  return navigation.activeStep > (navigation.firstNavigableStep ?? 0);
+}
+
 function plannerStepRows(
   navigation: Extract<SetupQuestionPanelBase["navigation"], { kind: "planner" }>,
   activeCount: number | undefined,
@@ -449,7 +453,7 @@ function plannerStepRows(
     const separator =
       navigation.activeStep === index
         ? " →  "
-        : navigation.activeStep === index + 1
+        : navigation.activeStep === index + 1 && canNavigateBack(navigation)
           ? "  ← "
           : "  ·  ";
     return [label, theme.colors.dim(separator)];
@@ -792,7 +796,7 @@ function selectFooterHints(
   if (presentation.filter !== undefined) hints.push("type to filter");
   hints.push("↑/↓ move");
   if (plannerNavigation !== undefined) {
-    const canGoBack = plannerNavigation.activeStep > 0;
+    const canGoBack = canNavigateBack(plannerNavigation);
     const canGoForward = plannerNavigation.activeStep < plannerNavigation.steps.length - 1;
     hints.push(presentation.selection === "multiple" ? "enter toggle" : "enter to select");
     if (canGoBack && canGoForward) hints.push("←/→ steps");

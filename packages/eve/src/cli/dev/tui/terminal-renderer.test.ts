@@ -3790,6 +3790,32 @@ describe("TerminalRenderer setup panel", () => {
     renderer.shutdown();
   });
 
+  it("ignores Left Arrow before the first navigable planner step", async () => {
+    const { input, renderer } = makeRenderer();
+    const answer = renderer.setupFlow.readSelect({
+      kind: "searchable-multi",
+      navigation: {
+        kind: "planner",
+        activeStep: 1,
+        firstNavigableStep: 1,
+        steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+      },
+      message: "Where should people reach your agent?",
+      options: [{ value: "web", label: "Web Chat" }],
+      required: false,
+    });
+
+    input.left();
+    input.enter();
+    input.right();
+    await expect(answer).resolves.toEqual({
+      kind: "navigate",
+      direction: "forward",
+      values: ["web"],
+    });
+    renderer.shutdown();
+  });
+
   it("proceeds from a planner checklist with Right Arrow and preserves its selections", async () => {
     const { screen, input, renderer } = makeRenderer();
     const answer = renderer.setupFlow.readSelect({

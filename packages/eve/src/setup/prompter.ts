@@ -113,6 +113,8 @@ export class PlannerNavigationError extends Error {
 export interface PlannerNavigation {
   kind: "planner";
   activeStep: number;
+  /** Earliest step reachable with Left Arrow; defaults to the first step. */
+  firstNavigableStep?: number;
   steps: readonly { label: string; count?: number }[];
 }
 

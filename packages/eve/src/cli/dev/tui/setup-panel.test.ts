@@ -947,6 +947,30 @@ describe("renderSelectQuestion", () => {
     expect(integrations).toContain("enter toggle · ←/→ steps");
   });
 
+  it("does not advertise navigation into completed prefix steps", () => {
+    const options = [{ value: "web", label: "Web Chat" }];
+    const text = renderSelectQuestion(
+      {
+        kind: "searchable-multi",
+        navigation: {
+          kind: "planner",
+          activeStep: 1,
+          firstNavigableStep: 1,
+          steps: [{ label: "Model" }, { label: "Channels" }, { label: "Integrations" }],
+        },
+        message: "Select channels",
+        options,
+        select: initialSelectState({ options }),
+      },
+      theme,
+      80,
+    ).join("\n");
+
+    expect(text).toContain("Model  ·   Channels  →  Integrations");
+    expect(text).toContain("enter toggle · → next");
+    expect(text).not.toContain("← back");
+  });
+
   it("windows the railed list to five rows with an Esc-only footer", () => {
     const many = Array.from({ length: 20 }, (_, index) => ({
       value: `model-${index}`,
