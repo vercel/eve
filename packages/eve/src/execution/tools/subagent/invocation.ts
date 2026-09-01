@@ -6,6 +6,7 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import {
+  readWorkflowToolRunAdmission,
   readWorkflowToolRunOwner,
   readWorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
@@ -48,8 +49,9 @@ export type AgentInvocationReply =
   | TaskInboundUpdate;
 
 export const AGENT_INVOCATION_EVENT_EFFECT = "agent.event";
+const AGENT_INVOCATION_IDS = Symbol.for("eve.workflow-tool-run.agent-invocation-ids");
 
-/** Sends an agent invocation to the owning background task. */
+/** Invokes an agent from a task-owned background workflow tool. */
 export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonValue> {
   validateAgentInput(input, true);
   return await invokeAgent(
@@ -73,16 +75,22 @@ export async function invokeAgent(
   validateAgentInput(input, false);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
+  const admission = readWorkflowToolRunAdmission(ctx);
   if (run.execution !== "background") {
     throw new Error("agent() is only available inside a background workflow tool.");
   }
+  claimInvocationId(ctx, options.invocationId);
   const replies = createHook<AgentInvocationReply>();
   let ownsReplies = false;
   let eventIndex = 0;
   try {
     await claimHookOwnership(replies);
     ownsReplies = true;
-    const request = {
+    if (admission !== undefined) {
+      const admitted = await admission;
+      if (admitted.status === "rejected") throw new Error(admitted.reason);
+    }
+    await resumeHookStep(owner.request, {
       from: run,
       replyTo: replies.token,
       request: {
@@ -90,9 +98,8 @@ export async function invokeAgent(
         invocationId: options.invocationId,
         kind: "effect",
         name: "agent.invoke",
-      } satisfies AgentInvocationRequest,
-    };
-    await resumeHookStep(owner.request, request);
+      },
+    });
 
     for await (const reply of replies) {
       if (reply.kind === "runtime-action-result") {
@@ -101,24 +108,35 @@ export async function invokeAgent(
             candidate.kind === "subagent-result" && candidate.callId === options.invocationId,
         );
         if (result !== undefined) {
+          await resumeHookStep(owner.request, {
+            from: run,
+            replyTo: replies.token,
+            request: {
+              input: JSON.parse(JSON.stringify(result)) as JsonValue,
+              invocationId: `${options.invocationId}:settled`,
+              kind: "effect",
+              name: "agent.settled",
+            },
+          });
           if (result.isError === true) throw result.output;
           return result.output;
         }
         continue;
       }
       if (reply.kind === "subagent-input-request") {
-        for (const request of reply.event.requests) {
-          await resumeHookStep(owner.request, {
-            from: run,
-            replyTo: reply.childContinuationToken,
-            request,
-            requestCoordinates: {
-              sequence: reply.event.sequence,
-              stepIndex: reply.event.stepIndex,
-              turnId: reply.event.turnId,
-            },
-          });
-        }
+        await resumeHookStep(owner.request, {
+          from: run,
+          replyTo: reply.childContinuationToken,
+          request: {
+            kind: "input-batch",
+            requests: reply.event.requests,
+          },
+          requestCoordinates: {
+            sequence: reply.event.sequence,
+            stepIndex: reply.event.stepIndex,
+            turnId: reply.event.turnId,
+          },
+        });
         continue;
       }
       if (reply.kind === "task-update") {
@@ -173,6 +191,12 @@ function toJsonValue(value: AgentInvocationEvent): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue;
 }
 
+export function isAgentInvocationEvent(value: unknown): value is AgentInvocationEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const kind = Reflect.get(value, "kind");
+  return kind === "subagent-authorization-event" || kind === "subagent-input-request";
+}
+
 export function isAgentInvocationRequest(value: unknown): value is AgentInvocationRequest {
   if (typeof value !== "object" || value === null) return false;
   const request = value as {
@@ -196,10 +220,21 @@ export function isAgentInvocationRequest(value: unknown): value is AgentInvocati
   );
 }
 
-export function isAgentInvocationEvent(value: unknown): value is AgentInvocationEvent {
-  if (typeof value !== "object" || value === null) return false;
-  const kind = Reflect.get(value, "kind");
-  return kind === "subagent-authorization-event" || kind === "subagent-input-request";
+function claimInvocationId(ctx: ToolContext, invocationId: string): void {
+  const holder = ctx as ToolContext & { [AGENT_INVOCATION_IDS]?: Set<string> };
+  const ids = holder[AGENT_INVOCATION_IDS] ?? new Set<string>();
+  if (ids.has(invocationId)) {
+    const separator = invocationId.lastIndexOf(":");
+    const key = separator < 0 ? invocationId : invocationId.slice(separator + 1);
+    throw {
+      code: "DUPLICATE_AGENT_INVOCATION_KEY",
+      message: `agent() invocation key "${key}" was already used in this run; keys must be unique per run.`,
+    };
+  }
+  ids.add(invocationId);
+  if (holder[AGENT_INVOCATION_IDS] === undefined) {
+    Object.defineProperty(holder, AGENT_INVOCATION_IDS, { enumerable: false, value: ids });
+  }
 }
 
 export function isAgentInvocationEventEffect(value: {

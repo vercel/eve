@@ -72,8 +72,8 @@ export interface CreateSessionInput {
   readonly turnAgent: RuntimeTurnAgent;
   readonly limits?: AuthoredSessionLimits;
   readonly outputSchema?: HarnessSession["outputSchema"];
-  readonly subagentDepth?: number;
   readonly systemPromptAdditions?: readonly string[];
+  readonly taskId?: string;
   readonly workflowMaxSubagents?: number;
 }
 
@@ -106,8 +106,8 @@ export function createSession(input: CreateSessionInput): HarnessSession {
   if (input.outputSchema !== undefined) {
     session.outputSchema = input.outputSchema;
   }
-  if (input.subagentDepth !== undefined) {
-    session.subagentDepth = input.subagentDepth;
+  if (input.taskId !== undefined) {
+    session.taskId = input.taskId;
   }
   if (input.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = input.workflowMaxSubagents;
@@ -212,7 +212,7 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
     sandboxState?: HarnessSession["sandboxState"];
     sessionId: string;
     state?: HarnessSession["state"];
-    subagentDepth?: number;
+    taskId?: string;
     workflowMaxSubagents?: number;
   } = {
     agent: { system: session.agent.system },
@@ -245,8 +245,8 @@ export function projectToDurableSession(session: HarnessSession): DurableSession
   if (session.state !== undefined) {
     durable.state = session.state;
   }
-  if (session.subagentDepth !== undefined) {
-    durable.subagentDepth = session.subagentDepth;
+  if (session.taskId !== undefined) {
+    durable.taskId = session.taskId;
   }
   if (session.workflowMaxSubagents !== undefined) {
     durable.workflowMaxSubagents = session.workflowMaxSubagents;
@@ -302,8 +302,8 @@ export function hydrateDurableSession(input: {
   if (durable.state !== undefined) {
     session.state = durable.state;
   }
-  if (durable.subagentDepth !== undefined) {
-    session.subagentDepth = durable.subagentDepth;
+  if (durable.taskId !== undefined) {
+    session.taskId = durable.taskId;
   }
   if (durable.workflowMaxSubagents !== undefined) {
     session.workflowMaxSubagents = durable.workflowMaxSubagents;
@@ -322,9 +322,9 @@ function createSessionToolDefinitions(turnAgent: RuntimeTurnAgent): SessionToolD
 
 function resolveSessionLimits(input: {
   readonly limits?: AuthoredSessionLimits;
-  readonly subagentDepth?: number;
+  readonly rootSessionId?: string;
 }): SessionLimits {
-  const isSubagent = input.subagentDepth !== undefined && input.subagentDepth > 0;
+  const isSubagent = input.rootSessionId !== undefined;
 
   const maxInputTokensPerSession = resolveSessionTokenLimit({
     authored: input.limits?.maxInputTokensPerSession,

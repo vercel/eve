@@ -15,7 +15,7 @@ describe("subagent compilation", () => {
         "agent/agent.ts":
           "export default { model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
         "agent/subagents/researcher/agent.ts":
-          "import { defineAgent } from 'eve';\nexport default defineAgent({ description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
+          "export default { description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
       },
       name: "subagent-execution-edge",
     });
@@ -39,7 +39,7 @@ describe("subagent compilation", () => {
         "agent/agent.ts":
           "export default { model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
         "agent/subagents/researcher/agent.ts":
-          "import { defineAgent } from 'eve';\nexport default defineAgent({ description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 });\n",
+          "export default { description: 'Research.', model: 'openai/gpt-5.5', modelContextWindowTokens: 200000 };\n",
       },
       name: "subagent-execution-gate",
     });

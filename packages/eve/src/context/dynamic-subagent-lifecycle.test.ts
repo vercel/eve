@@ -48,9 +48,7 @@ describe("dynamic subagent lifecycle", () => {
       {
         description: expect.stringContaining("Research the request."),
         name: "researcher",
-        task: {
-          resultKind: "subagent",
-        },
+        resultKind: "subagent",
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
@@ -257,9 +255,7 @@ describe("dynamic subagent lifecycle", () => {
       {
         description: expect.stringContaining("Research on the remote deployment."),
         name: "researcher",
-        task: {
-          resultKind: "subagent",
-        },
+        resultKind: "subagent",
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toMatchObject({

@@ -17,13 +17,23 @@ function orchestrationTools(): HarnessToolMap {
     [
       "researcher",
       {
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "subagent-call",
+              nodeId: "subagents/researcher",
+              subagentName: "researcher",
+            },
+          },
+        },
         description: "Delegate to the researcher subagent.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "researcher",
-        task: {
-          resultKind: "subagent",
-          workflowId: "workflow//eve//subagentToolExecuteWorkflow",
-        },
+        nodeId: "subagents/researcher",
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
     [
@@ -32,10 +42,8 @@ function orchestrationTools(): HarnessToolMap {
         description: "Delegate to the remote reviewer.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "remote_reviewer",
-        task: {
-          resultKind: "subagent",
-          workflowId: "workflow//eve//subagentToolExecuteWorkflow",
-        },
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
     [

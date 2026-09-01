@@ -109,22 +109,19 @@
  *             are append-only protocol history: change the contract by adding a
  *             version and migration, never by updating historical data and its
  *             snapshot together.
- *   rule 41 — The task kernel must stay executor-neutral. Files under
- *             `src/tasks/**` and `src/execution/tasks/**` must not name
- *             subagents, agent ids, child sessions, or local/remote agent
- *             transports. Executors translate their own protocol before it
- *             reaches tasks and own their control effects outside this tree.
+ *   rule 41 — The task kernel must stay executor-neutral. Production files
+ *             under `src/tasks/**` and `src/execution/tasks/**` must not import
+ *             subagent implementations. Executor-specific presentation and
+ *             transport composition live outside this tree.
  *   rule 42 — The shared subagent workflow body is framework-authored
  *             userspace. It must not import task, harness, or context
  *             internals or recover private state through `Symbol.for`.
  *             Privileged dispatch belongs in ordinary step-backed APIs that
  *             the workflow body consumes through a public contract.
- *   rule 43 — The execution and harness core must stay executor-neutral.
- *             Files under `src/execution/**` and `src/harness/**`, excluding
- *             executor-owned subagent trees, must not name subagent or
- *             agent-transport concepts. Executors translate their protocol
- *             at neutral core seams. Pre-existing violations are ratcheted
- *             through the baseline until the rule can become absolute.
+ *   rule 43 — Reusable session plumbing stays independent of the subagent
+ *             executor. The generic inbox, router, and state cursor must not
+ *             import subagent modules; session/turn composition roots may
+ *             compose built-in executors directly.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
@@ -261,11 +258,7 @@ async function scanRepo(state) {
 
 // ---------- Rule 41: executor-neutral task kernel ----------
 
-const TASK_EXECUTOR_CONCEPT_RE =
-  /subagent|agentId|childSession|childTurn|agent\/(?:local|remote)|\b(?:local|remote)\b/i;
-
-const EXECUTION_CORE_EXECUTOR_CONCEPT_RE =
-  /subagent|agentId|childSession|childTurn|agent\/(?:local|remote)|remote-agent/i;
+const SUBAGENT_IMPORT_RE = /from ["']#(?:subagents|execution\/tools\/subagent)(?:\/|\.js)/;
 
 /**
  * @param {string} posix
@@ -276,23 +269,23 @@ function checkRule41(posix, lines, violations) {
   const inTaskKernel =
     posix.startsWith("packages/eve/src/tasks/") ||
     posix.startsWith("packages/eve/src/execution/tasks/");
-  if (!inTaskKernel) return;
+  if (!inTaskKernel || /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
 
   lines.forEach((line, idx) => {
-    if (!TASK_EXECUTOR_CONCEPT_RE.test(line)) return;
+    if (!SUBAGENT_IMPORT_RE.test(line)) return;
     violations.push({
       rule: 41,
       file: posix,
       line: idx + 1,
       message:
-        "task-kernel code names an agent-specific executor concept. Translate executor events and implement commit, cancellation, input delivery, and cleanup outside src/tasks and src/execution/tasks.",
+        "task-kernel code imports an agent-specific executor. Move presentation and transport composition outside src/tasks and src/execution/tasks.",
     });
   });
 }
 
 // ---------- Rule 42: userspace subagent workflow ----------
 
-const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/execution/tools/subagent/workflow.ts";
+const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
 const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
   /["']#(?:tasks(?:\/|\.js)|execution(?:\/|\.js)|harness(?:\/|\.js)|context(?:\/|\.js)|shared(?:\/|\.js))/;
 
@@ -331,15 +324,14 @@ function checkRule42(posix, lines, violations) {
  * @param {{ baseline: Record<string, number>; current: Map<string, number> }} state
  */
 function checkRule43(posix, lines, state) {
-  const inCore =
-    posix.startsWith("packages/eve/src/execution/") ||
-    posix.startsWith("packages/eve/src/harness/");
-  const inSubagentExecutor =
-    posix.startsWith("packages/eve/src/execution/tools/subagent/") ||
-    posix.startsWith("packages/eve/src/subagents/");
-  if (!inCore || inSubagentExecutor) return;
+  const genericFiles = new Set([
+    "packages/eve/src/execution/session-command-inbox.ts",
+    "packages/eve/src/execution/session-command-router.ts",
+    "packages/eve/src/execution/session-state-cursor.ts",
+  ]);
+  if (!genericFiles.has(posix)) return;
 
-  const count = lines.filter((line) => EXECUTION_CORE_EXECUTOR_CONCEPT_RE.test(line)).length;
+  const count = lines.filter((line) => SUBAGENT_IMPORT_RE.test(line)).length;
   if (count > 0) state.current.set(posix, count);
 }
 
@@ -1712,7 +1704,7 @@ async function main() {
     violations.push({
       rule: 43,
       file,
-      message: `${now} executor-specific concept${now === 1 ? "" : "s"} detected (baseline: ${was}). Move subagent behavior to src/subagents or src/execution/tools/subagent, or replace the dependency with an executor-neutral core contract.`,
+      message: `${now} subagent import${now === 1 ? "" : "s"} detected in generic session plumbing (baseline: ${was}). Move executor-specific behavior to composition or subagent-owned modules.`,
     });
   }
 

@@ -2,9 +2,7 @@ import type { ContextContainer } from "#context/container.js";
 import { loadContext } from "#context/container.js";
 import type { FrameworkContextProvider } from "#context/provider.js";
 import { runStep } from "#context/run-step.js";
-import { serializeContext } from "#context/serialize.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
-import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { CallbackBaseUrlKey } from "#harness/authorization.js";
 import { isAuthorizationSignal } from "#harness/authorization.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
@@ -25,12 +23,11 @@ import type { ToolExecuteOptions } from "#tools/definition.js";
 import {
   createTaskDelegated,
   isTaskDelegated,
-  type TaskExecutorBinding,
   type TaskExec,
   type TaskSendCommand,
 } from "#tools/task.js";
 import { recordSessionTask } from "#tasks/session-index.js";
-import { isTerminalTaskStatus, type TaskInboundUpdate } from "#tasks/types.js";
+import type { TaskInboundUpdate } from "#tasks/types.js";
 import type { AgentView } from "#subagents/handles/prompt.js";
 import { createWorkflowCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
@@ -40,27 +37,29 @@ import {
   type BackgroundTask,
 } from "#execution/tasks/parent/delegate.js";
 import { parseWorkflowToolInput } from "#execution/tools/workflow/background.js";
-import { startWorkflowToolRun } from "#execution/tools/workflow/start.js";
 import {
-  readLatestTaskView,
   sendTaskCommand,
   sendTaskInboundPayload,
   startTaskRun,
   waitForTaskCommandOwner,
 } from "#execution/tasks/parent/run-parent.js";
-import { readAgentHandleStoreStep } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
-import { sendAgentHandleCommandStep } from "#execution/session-command-inbox.js";
 import { parseJsonObject } from "#shared/json.js";
-import { deriveWorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
-import { createWorkflowToolExecutorBinding } from "#execution/tools/workflow/types.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
-import type { AgentHandleCommandResponse } from "#execution/session-command-inbox.js";
+import {
+  getAgentHandleStore,
+  writeHandles,
+  type AgentHandleStoreCommand,
+  type AgentHandleStoreCommandResult,
+} from "#subagents/handles/store.js";
+import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 
 type SubagentReceiptIdentity = ReturnType<typeof createSubagentReceiptIdentity>;
+
+const IN_PROCESS_WORKFLOW_EXECUTOR = { data: {}, kind: "workflow-task" } as const;
 
 interface SubagentTaskProjection {
   readonly identity?: SubagentReceiptIdentity;
@@ -76,13 +75,11 @@ interface SubagentTaskProjection {
 interface BackgroundToolExecutionRecord {
   claim?: {
     readonly operationId: string;
-    readonly sessionId: string;
     readonly taskId: string;
   };
   reservation?: {
     readonly agentId: string;
     readonly operationId: string;
-    readonly sessionId: string;
   };
   settled: boolean;
   task?: BackgroundTask;
@@ -160,12 +157,15 @@ export function readRetainedBackgroundToolResult(
 class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   private readonly executions = new Map<string, Promise<unknown>>();
   private readonly records: BackgroundToolExecutionRecord[] = [];
+  private agentHandleSession: HarnessSession;
+  private agentHandlesChanged = false;
   private retained = false;
 
   private readonly initialSession: HarnessSession;
 
   constructor(initialSession: HarnessSession) {
     this.initialSession = initialSession;
+    this.agentHandleSession = initialSession;
   }
 
   execute(input: {
@@ -186,11 +186,9 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     return execution;
   }
 
-  async readAgentViews(): Promise<readonly import("#subagents/handles/prompt.js").AgentView[]> {
-    const store = await readAgentHandleStoreStep({
-      sessionId: this.initialSession.sessionId,
-    });
-    return store.handles.flatMap<AgentView>((handle) => {
+  async readAgentViews(): Promise<readonly AgentView[]> {
+    const handles = getAgentHandleStore(this.agentHandleSession.state)?.handles ?? [];
+    return handles.flatMap<AgentView>((handle) => {
       if (handle.phase === "reserved") return [];
       if (handle.phase === "available") {
         return [
@@ -217,7 +215,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
   async commit(session: HarnessSession): Promise<HarnessSession> {
     const incomplete = this.records.filter((record) => !record.settled);
     if (incomplete.length > 0) {
-      await compensateBackgroundToolExecution(
+      await this.compensate(
         incomplete,
         new Error("Background tool execution did not delegate or complete its task."),
       );
@@ -234,7 +232,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     const settled = this.records.filter((record) => record.settled);
     const incomplete = this.records.filter((record) => !record.settled);
     if (incomplete.length > 0) {
-      await compensateBackgroundToolExecution(incomplete, cause);
+      await this.compensate(incomplete, cause);
     }
     if (settled.length === 0) return;
     // Cancellation must not compensate settled records: their tasks are
@@ -243,7 +241,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       this.retained = true;
       return;
     }
-    await compensateBackgroundToolExecution(settled, cause);
+    await this.compensate(settled, cause);
   }
 
   retainedResult(): BackgroundToolStepResult | undefined {
@@ -255,6 +253,9 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     for (const record of this.records) {
       if (!record.settled || record.task === undefined) continue;
       next = recordSessionTask(next, record.task);
+    }
+    if (this.agentHandlesChanged) {
+      next = writeHandles(next, getAgentHandleStore(this.agentHandleSession.state)?.handles ?? []);
     }
     return next;
   }
@@ -309,7 +310,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       session: this.initialSession,
       task,
     };
-    if (input.definition.task !== undefined) {
+    if (input.definition.workflowId !== undefined) {
       record.settled = true;
       return {
         ...started.receipt,
@@ -353,7 +354,13 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     };
     readonly record: BackgroundToolExecutionRecord;
   }): Promise<{ readonly receipt?: { readonly agentId: string }; readonly task: BackgroundTask }> {
-    const workflow = input.input.definition.task;
+    const workflow =
+      input.input.definition.workflowId === undefined
+        ? undefined
+        : {
+            ...input.input.definition,
+            workflowId: input.input.definition.workflowId,
+          };
     const workflowInput =
       workflow === undefined
         ? undefined
@@ -374,11 +381,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
           })
         : undefined;
     const taskInput = {
-      workflowToolAgentDispatch: {
-        callbackBaseUrl: input.ctx.get(CallbackBaseUrlKey),
-        serializedContext: serializeContext(input.ctx),
-        sessionState: createDurableSessionState({ session: this.initialSession }),
-      },
       callId: input.input.options.toolCallId,
       metadata: subagentProjection?.metadata ?? { kind: "tool", name: input.input.definition.name },
       parentSessionId: this.initialSession.sessionId,
@@ -409,23 +411,19 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       subagentProjection.identity !== undefined
     ) {
       const identity = subagentProjection.identity;
-      const reservation = await sendAgentHandleCommandStep({
-        command: {
-          identity: identity.identity,
-          kind: "reserve",
-          operationId: identity.operation.id,
-          taskId: task.taskId,
-        },
-        commandId: `${identity.operation.id}:reserve`,
-        sessionId: taskInput.parentSessionId,
+      const reservation = this.applyAgentHandleCommand({
+        identity: identity.identity,
+        callId: taskInput.callId,
+        kind: "reserve",
+        operationId: identity.operation.id,
+        taskId: task.taskId,
       });
-      if (reservation.result.kind !== "ready") {
+      if (reservation.kind !== "ready") {
         throw new Error(`Agent handle store rejected start operation "${identity.operation.id}".`);
       }
       input.record.reservation = {
         agentId: identity.identity.id,
         operationId: identity.operation.id,
-        sessionId: taskInput.parentSessionId,
       };
     }
     if (
@@ -438,50 +436,45 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         parentSessionId: taskInput.parentSessionId,
         parentTurnId,
       });
-      const claim = await sendAgentHandleCommandStep({
-        command: {
-          agentId: subagentProjection.metadata.agentId,
-          expectedTarget: subagentProjection.metadata.mode,
-          invokedName: subagentProjection.metadata.name,
-          kind: "claim",
-          operationId,
-          taskId: task.taskId,
-        },
-        commandId: `${operationId}:claim`,
-        sessionId: taskInput.parentSessionId,
+      const claim = this.applyAgentHandleCommand({
+        agentId: subagentProjection.metadata.agentId,
+        callId: taskInput.callId,
+        expectedTarget: subagentProjection.metadata.mode,
+        invokedName: subagentProjection.metadata.name,
+        kind: "claim",
+        operationId,
+        taskId: task.taskId,
       });
       if (!readClaimedHandle(claim)) {
         throwAgentClaimError(subagentProjection.metadata.agentId, claim);
       }
       input.record.claim = {
         operationId,
-        sessionId: taskInput.parentSessionId,
         taskId: task.taskId,
       };
     }
     await startTaskRun({
-      workflowToolAgentDispatch: taskInput.workflowToolAgentDispatch,
       initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
       parentContinuationToken: sessionCommandHookToken(this.initialSession.sessionId),
       taskInboxToken: task.taskInboxToken,
+      workflow: {
+        callId: taskInput.callId,
+        executeInput: workflow.executeInput?.(workflowInput),
+        input: workflowInput,
+        resultKind: workflow.resultKind,
+        session: buildCallbackContext().session,
+        stepIndex: input.emission.stepIndex,
+        toolName: input.input.definition.name,
+        workflowId: workflow.workflowId,
+      },
     });
     const owner = await waitForTaskCommandOwner({ taskInboxToken: task.taskInboxToken });
-    const started = await startWorkflowToolRun({
-      callId: taskInput.callId,
-      execution: "background",
-      executeInput: workflow.executeInput?.(workflowInput),
-      input: workflowInput,
-      owner: deriveWorkflowToolRunOwner(task.taskInboxToken),
-      resultKind: workflow.resultKind,
-      session: buildCallbackContext().session,
-      stepIndex: input.emission.stepIndex,
-      toolName: input.input.definition.name,
-      workflowId: workflow.workflowId,
-    });
-    const executor = createWorkflowToolExecutorBinding(started);
-    const backgroundTask = { ...task, executor, taskRunId: owner.runId };
+    const backgroundTask = {
+      ...task,
+      executor: IN_PROCESS_WORKFLOW_EXECUTOR,
+      taskRunId: owner.runId,
+    };
     input.record.task = backgroundTask;
-    await bindWorkflowToolRun(backgroundTask, executor);
     if (workflow.resultKind !== "subagent") {
       return { task: backgroundTask };
     }
@@ -493,6 +486,54 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       return { receipt: subagentProjection.receipt, task: backgroundTask };
     }
     return { receipt: subagentProjection.receipt, task: backgroundTask };
+  }
+
+  private applyAgentHandleCommand(command: AgentHandleStoreCommand): AgentHandleStoreCommandResult {
+    const applied = applyTaskAgentHandleCommand(this.agentHandleSession, command);
+    if (applied.session !== this.agentHandleSession) {
+      this.agentHandleSession = applied.session;
+      this.agentHandlesChanged = true;
+    }
+    return applied.result;
+  }
+
+  private async compensate(
+    records: readonly BackgroundToolExecutionRecord[],
+    cause: unknown,
+  ): Promise<void> {
+    const failures: unknown[] = [];
+    for (const record of records.toReversed()) {
+      if (record.task !== undefined) {
+        try {
+          await rejectDelegatedDispatch({
+            error: {
+              code: "PARENT_STEP_FAILED",
+              message: cause instanceof Error ? cause.message : String(cause),
+            },
+            task: record.task,
+          });
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (record.claim !== undefined) {
+        this.applyAgentHandleCommand({ kind: "release-task", taskId: record.claim.taskId });
+      }
+      if (record.reservation !== undefined && record.task !== undefined) {
+        this.applyAgentHandleCommand({
+          agentId: record.reservation.agentId,
+          kind: "remove",
+          taskId: record.task.taskId,
+        });
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        [cause, ...failures],
+        "Background tool execution failed and its tasks could not all be rejected.",
+        { cause },
+      );
+    }
   }
 }
 
@@ -566,21 +607,6 @@ async function deliverTaskCommand(
   }
 }
 
-async function bindWorkflowToolRun(
-  task: BackgroundTask,
-  executor: TaskExecutorBinding,
-): Promise<void> {
-  const outcome = await sendTaskCommand({
-    command: { executor, kind: "bind" },
-    retryUnreachable: { attempts: 20, delayMs: 250 },
-    taskInboxToken: task.taskInboxToken,
-  });
-  if (outcome === "delivered") return;
-  const view = await readLatestTaskView({ taskRunId: task.taskRunId });
-  if (view !== undefined && isTerminalTaskStatus(view.status)) return;
-  throw new Error(`Task run "${task.taskId}" did not accept its workflow-tool binding.`);
-}
-
 function createTaskSender(
   task: BackgroundTask,
   callId: string,
@@ -609,67 +635,11 @@ function createTaskSender(
   };
 }
 
-async function compensateBackgroundToolExecution(
-  records: readonly BackgroundToolExecutionRecord[],
-  cause: unknown,
-): Promise<void> {
-  const failures: unknown[] = [];
-  for (const record of records.toReversed()) {
-    if (record.task !== undefined) {
-      try {
-        await rejectDelegatedDispatch({
-          error: {
-            code: "PARENT_STEP_FAILED",
-            message: cause instanceof Error ? cause.message : String(cause),
-          },
-          task: record.task,
-        });
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-    if (record.claim !== undefined) {
-      try {
-        await sendAgentHandleCommandStep({
-          command: { kind: "release-task", taskId: record.claim.taskId },
-          commandId: `${record.claim.operationId}:release-task`,
-          sessionId: record.claim.sessionId,
-        });
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-    if (record.reservation !== undefined && record.task !== undefined) {
-      try {
-        await sendAgentHandleCommandStep({
-          command: {
-            agentId: record.reservation.agentId,
-            kind: "remove",
-            taskId: record.task.taskId,
-          },
-          commandId: `${record.reservation.operationId}:rollback`,
-          sessionId: record.reservation.sessionId,
-        });
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-  }
-  if (failures.length > 0) {
-    throw new AggregateError(
-      [cause, ...failures],
-      "Background tool execution failed and its tasks could not all be rejected.",
-      { cause },
-    );
-  }
+function readClaimedHandle(result: AgentHandleStoreCommandResult): boolean {
+  return result.kind === "ready" && result.handle?.phase === "claimed";
 }
 
-function readClaimedHandle(event: AgentHandleCommandResponse): boolean {
-  return event.result.kind === "ready" && event.result.handle?.phase === "claimed";
-}
-
-function throwAgentClaimError(agentId: string, event: AgentHandleCommandResponse): never {
-  const result = event.result;
+function throwAgentClaimError(agentId: string, result: AgentHandleStoreCommandResult): never {
   if (result.kind === "mismatch") {
     throw new Error(
       JSON.stringify({

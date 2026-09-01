@@ -18,7 +18,6 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { dispatchWorkflowTasksStep } from "#execution/workflow-task-dispatch-step.js";
 import {
   migrateTurnWorkflowInput,
   type TurnStepInput,
@@ -221,19 +220,16 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         return;
       }
 
-      // A pending runtime-action batch (model-driven `park` or dynamic-workflow
-      // interrupt) is resolved in-line so the turn stays alive across the wait;
-      // the arms differ only in their dispatch path: the workflow task adapter
-      // for interrupt-sourced batches, and coordination otherwise.
-      if (pendingCallIds !== undefined) {
+      // Both sources converge on coordination dispatch. Model-driven `park`
+      // already carries a coordination batch; a dynamic Workflow interrupt is
+      // normalized into that shape inside the dispatch step.
+      if (
+        pendingCallIds !== undefined &&
+        (result.action === "park" || result.action === "dispatch-workflow-tasks")
+      ) {
         await cursor.adopt(result);
-        let dispatch;
-        if (result.action === "dispatch-workflow-tasks") {
-          dispatch = dispatchWorkflowTasksStep;
-        } else {
-          dispatch = dispatchCoordinationStep;
-        }
-        const dispatchResult = await dispatch({
+        const dispatchResult = await dispatchCoordinationStep({
+          action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,
           parentWritable: cursor.parentWritable,
@@ -509,6 +505,7 @@ async function waitForRuntimeActionResults(input: {
       pendingDeliveryRequest = undefined;
 
       const routed = await routeDeliverToChildren({
+        callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
         delivery: value.delivery,
         parentWritable: input.cursor.parentWritable,
         serializedContext: input.cursor.serializedContext,

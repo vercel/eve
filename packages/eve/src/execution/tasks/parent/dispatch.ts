@@ -1,6 +1,5 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
-import { isSubagentAdapterState, SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
+import type { HarnessSession as RuntimeSession } from "#harness/types.js";
 import {
   createTaskControlError,
   createTaskViewsResult,
@@ -14,8 +13,6 @@ import {
   cancelTaskOwnedWork,
   type TaskExecutorCancel,
 } from "#execution/tasks/parent/task-cancel.js";
-import { fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
-import { forwardLocalTaskUpdateStep } from "#execution/task-update-proxy-step.js";
 import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus, type TaskInboundUpdate, type TaskView } from "#tasks/types.js";
@@ -28,6 +25,12 @@ import {
 const CANCEL_COMMIT_POLL_ATTEMPTS = 10;
 const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 
+export type DeliverTaskUpdate = (input: {
+  readonly adapter?: ChannelAdapter;
+  readonly callback: unknown;
+  readonly update: TaskInboundUpdate;
+}) => Promise<string | undefined>;
+
 export function isTaskControlAction(action: RuntimeToolCallActionRequest): boolean {
   return action.kind === "tool-call" && TASK_TOOL_NAMES.has(action.toolName);
 }
@@ -37,6 +40,7 @@ export async function executeTaskControlAction(input: {
   readonly adapter?: ChannelAdapter;
   readonly bundle: import("#runtime/sessions/runtime-context-keys.js").CompiledBundle;
   readonly cancelOwnedWork?: TaskExecutorCancel;
+  readonly deliverUpdate?: DeliverTaskUpdate;
   readonly parentStepIndex?: number;
   readonly parentTurnId: string;
   readonly serializedContext?: Record<string, unknown>;
@@ -62,7 +66,7 @@ export async function executeTaskControlAction(input: {
       updateEpoch: input.parentTurnId,
       updateIndex: input.parentStepIndex ?? 0,
     } satisfies TaskInboundUpdate;
-    const taskId = await deliverTaskUpdate({
+    const taskId = await input.deliverUpdate?.({
       adapter: input.adapter,
       callback: input.serializedContext?.["eve.sessionCallback"],
       update,
@@ -110,41 +114,6 @@ export async function executeTaskControlAction(input: {
     );
   }
   return { result: createTaskViewsResult(action, views), session };
-}
-
-async function deliverTaskUpdate(input: {
-  readonly adapter?: ChannelAdapter;
-  readonly callback: unknown;
-  readonly update: TaskInboundUpdate;
-}): Promise<string | undefined> {
-  const local = readLocalTaskUpdateRoute(input.adapter);
-  if (local !== undefined) {
-    await forwardLocalTaskUpdateStep({
-      parentContinuationToken: local.parentContinuationToken,
-      update: input.update,
-    });
-    return local.taskId;
-  }
-  return await fireTaskUpdateCallbackStep({
-    callback: input.callback,
-    callId: input.update.callId,
-    message: input.update.message,
-    updateEpoch: input.update.updateEpoch,
-    updateIndex: input.update.updateIndex,
-  });
-}
-
-function readLocalTaskUpdateRoute(
-  adapter: ChannelAdapter | undefined,
-): { readonly parentContinuationToken: string; readonly taskId: string } | undefined {
-  if (adapter?.kind !== SUBAGENT_ADAPTER_KIND || !isSubagentAdapterState(adapter.state)) {
-    return undefined;
-  }
-  if (adapter.state.taskId === undefined) return undefined;
-  return {
-    parentContinuationToken: adapter.state.parentContinuationToken,
-    taskId: adapter.state.taskId,
-  };
 }
 
 /** Commits cancellation, then stops task-owned child work and its lifecycle run. */

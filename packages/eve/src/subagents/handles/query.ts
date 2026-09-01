@@ -1,17 +1,21 @@
 import type { RuntimeActionResult, RuntimeSubagentChildResult } from "#shared/action-types.js";
 import { AGENT_HANDLES_STATE_KEY } from "#subagents/handles/state-key.js";
-import type { AgentHandle, AgentHandleStore } from "#subagents/handles/store.js";
+import type {
+  AgentHandle,
+  AgentHandleStore,
+  TurnOwnedAgentHandle,
+} from "#subagents/handles/store.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 /** A handle with one outstanding operation and a confirmed child address. */
-export type RunningAgentHandle = Extract<AgentHandle, { phase: "running" }>;
+export type RunningAgentHandle = Extract<TurnOwnedAgentHandle, { phase: "running" }>;
 
 /**
  * Schema-free read of the agent handles from session state.
  *
  * Trust boundary: every source store was validated by a handle transition.
- * Driver-side reads and ownership merges trust that invariant instead of
- * re-validating, so the workflow driver bundle stays free of compiled zod.
+ * Driver-side reads trust that invariant instead of re-validating, so the
+ * workflow driver bundle stays free of compiled zod.
  */
 function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHandle[] {
   const raw = state?.[AGENT_HANDLES_STATE_KEY];
@@ -22,15 +26,7 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
   return Array.isArray(handles) ? (handles as readonly AgentHandle[]) : [];
 }
 
-/**
- * Rebases task-owned handle mutations accepted by the session driver while a
- * turn was running onto that turn's returned state.
- *
- * The turn owns `starting`/`running`/`parked`; stable-inbox commands own
- * `reserved`/`claimed`/`available`. Replacing only the latter prevents the
- * turn's older snapshot from erasing a concurrently accepted task lease while
- * preserving any ordinary handle transition the turn itself committed.
- */
+/** Preserves driver-owned task leases when a concurrent turn returns an older snapshot. */
 export function mergeTaskOwnedAgentHandlesIntoTurnState(input: {
   readonly driverState: SessionStateMap | undefined;
   readonly turnState: SessionStateMap | undefined;

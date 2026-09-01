@@ -1,4 +1,7 @@
-import type { RuntimeWorkflowTaskRequest } from "#shared/action-types.js";
+import type {
+  RuntimeAgentDispatchRequest,
+  RuntimeWorkflowTaskRequest,
+} from "#shared/action-types.js";
 import type { JsonObject } from "#shared/json.js";
 import {
   getWorkflowSandboxPendingInterrupts,
@@ -8,6 +11,7 @@ import {
 export const WORKFLOW_TASK_INTERRUPT_KIND = "eve.workflow-task";
 
 interface SerializedWorkflowTaskDefinition {
+  readonly action?: "remote-agent-call" | "subagent-call";
   readonly executeInput?: import("#shared/json.js").JsonValue;
   readonly nodeId?: string;
   readonly resultKind?: "subagent" | "tool";
@@ -24,7 +28,7 @@ export function isWorkflowTaskInterrupt(interrupt: unknown): boolean {
 
 export function buildWorkflowTaskFromInterrupt(
   interrupt: WorkflowSandboxInterrupt,
-): RuntimeWorkflowTaskRequest {
+): RuntimeAgentDispatchRequest | RuntimeWorkflowTaskRequest {
   const raw = interrupt.payload as Record<string, unknown>;
   const task = raw.task as SerializedWorkflowTaskDefinition | undefined;
   const toolInput = raw.toolInput as JsonObject;
@@ -34,6 +38,18 @@ export function buildWorkflowTaskFromInterrupt(
 
   if (task === undefined || typeof task.workflowId !== "string") {
     throw new Error("Workflow delegation interrupts require a workflow task.");
+  }
+  if (task.resultKind === "subagent" && task.nodeId !== undefined && task.action !== undefined) {
+    const common = {
+      callId,
+      description: "",
+      input: toolInput,
+      name: toolName,
+      nodeId: task.nodeId,
+    };
+    return task.action === "remote-agent-call"
+      ? { ...common, kind: "remote-agent-call", remoteAgentName: toolName }
+      : { ...common, kind: "subagent-call", subagentName: toolName };
   }
   const result: {
     -readonly [K in keyof RuntimeWorkflowTaskRequest]: RuntimeWorkflowTaskRequest[K];
@@ -59,7 +75,7 @@ export function getWorkflowTaskInterrupts(
 
 export function buildWorkflowTasksFromInterrupt(
   interrupt: WorkflowSandboxInterrupt,
-): RuntimeWorkflowTaskRequest[] {
+): Array<RuntimeAgentDispatchRequest | RuntimeWorkflowTaskRequest> {
   return getWorkflowTaskInterrupts(interrupt).map((pending) =>
     buildWorkflowTaskFromInterrupt(pending),
   );

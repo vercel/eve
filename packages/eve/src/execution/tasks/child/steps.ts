@@ -4,14 +4,13 @@ import {
   isWorkflowToolEffectRequest,
   type WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
-import { isAgentInvocationEvent } from "#execution/tools/subagent/invocation.js";
 import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
-import type { JsonValue } from "#shared/json.js";
+import { parseJsonValue, type JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
   TASK_VIEW_STREAM_NAMESPACE,
@@ -101,8 +100,8 @@ export async function wakeTaskUpdateParentStep(input: {
   }
 }
 
-/** Forwards one agent HITL event to the parent channel proxy. */
-export async function wakeTaskAgentEventParentStep(input: {
+/** Forwards one task-owned workflow effect to the parent session. */
+export async function wakeTaskEffectParentStep(input: {
   readonly request: WorkflowToolRunRequestMessage;
   readonly taskId: string;
   readonly token: string;
@@ -110,29 +109,21 @@ export async function wakeTaskAgentEventParentStep(input: {
   "use step";
 
   const effect = input.request.request;
-  if (!isWorkflowToolEffectRequest(effect) || effect.name !== "agent.event") {
-    throw new Error(
-      `Unsupported task agent event "${isWorkflowToolEffectRequest(effect) ? effect.name : "input"}".`,
-    );
+  if (!isWorkflowToolEffectRequest(effect)) {
+    throw new Error("Cannot forward task input as a workflow effect.");
   }
-  if (
-    !isAgentInvocationEvent(effect.input) ||
-    effect.input.kind !== "subagent-authorization-event"
-  ) {
-    throw new Error("Unsupported task agent event payload.");
-  }
+  const delivery: { -readonly [K in keyof TaskEffectDelivery]: TaskEffectDelivery[K] } = {
+    input: parseJsonValue(effect.input),
+    name: effect.name,
+    replyTo: input.request.replyTo,
+    taskId: input.taskId,
+  };
+  if (effect.invocationId !== undefined) delivery.invocationId = effect.invocationId;
   const command: SessionCommand = {
     kind: "send",
     payload: {
       task: {
-        effects: [
-          {
-            input: effect.input as unknown as TaskEffectDelivery["input"],
-            name: effect.name,
-            replyTo: input.request.replyTo,
-            taskId: input.taskId,
-          },
-        ],
+        effects: [delivery],
       },
     },
     taskDeliveryId: `${input.taskId}:effect:${input.request.from.runId}:${effect.invocationId ?? effect.name}`,
@@ -152,20 +143,29 @@ export async function wakeWorkflowTaskInputRequestParentStep(input: {
 }): Promise<void> {
   "use step";
 
+  const delivery: TaskInputRequestDelivery =
+    input.request.requests === undefined
+      ? {
+          replyTo: input.request.replyTo,
+          request: input.request.request,
+          sequence: input.request.sequence,
+          stepIndex: input.request.stepIndex,
+          taskId: input.taskId,
+          turnId: input.request.turnId,
+        }
+      : {
+          replyTo: input.request.replyTo,
+          requests: input.request.requests,
+          sequence: input.request.sequence,
+          stepIndex: input.request.stepIndex,
+          taskId: input.taskId,
+          turnId: input.request.turnId,
+        };
   const command: SessionCommand = {
     kind: "send",
     payload: {
       task: {
-        inputRequests: [
-          {
-            replyTo: input.request.replyTo,
-            request: input.request.request,
-            sequence: input.request.sequence,
-            stepIndex: input.request.stepIndex,
-            taskId: input.taskId,
-            turnId: input.request.turnId,
-          } satisfies TaskInputRequestDelivery,
-        ],
+        inputRequests: [delivery],
       },
     },
     taskDeliveryId: `${input.taskId}:input:${input.request.turnId}:${input.request.stepIndex}:${input.request.sequence}`,

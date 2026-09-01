@@ -12,7 +12,6 @@ import {
   type TypedToolError,
   type TypedToolResult,
 } from "ai";
-import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { readClientContext } from "#internal/client-context.js";
@@ -141,12 +140,9 @@ import {
 import {
   coordinateApprovalDelivery,
   shouldPrepareApprovalPolicyTools,
+  shouldPrepareApprovalReplayTools,
 } from "#harness/approval-delivery-coordinator.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
-import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
-import { isSubagentAdapterState, SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
-import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,
   getApprovedTools,
@@ -454,19 +450,6 @@ function buildHarnessToolsWithDynamicSubagents(
   return effectiveTools;
 }
 
-function isTaskOwnedChannel(channel: ChannelAdapter | undefined): boolean {
-  if (
-    channel?.kind === SUBAGENT_ADAPTER_KIND &&
-    isSubagentAdapterState(channel.state) &&
-    channel.state.taskId !== undefined
-  ) {
-    return true;
-  }
-  return (
-    readTaskIdFromInboxToken(String(channel?.state?.parentContinuationToken ?? "")) !== undefined
-  );
-}
-
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const baseEmit = config.handleEvent;
 
@@ -508,11 +491,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     let emissionState = getHarnessEmissionState(session.state);
     const store = contextStorage.getStore();
     const parent = store?.get(ParentSessionKey);
-    const channel = store?.get(ChannelKey);
     const callback = store?.get(SessionCallbackKey);
     const hasDelegatedCaller = parent !== undefined || callback !== undefined;
-    const taskOwned = callback?.taskId !== undefined || isTaskOwnedChannel(channel);
-    const taskUpdatesEnabled = taskOwned && config.tools.has(TASK_UPDATE_TOOL_NAME);
     let activeAttemptScope: InstrumentationAttempt | undefined;
     const emit =
       stepInstrumentation?.createHandleEvent({
@@ -663,6 +643,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         pendingRequestIds,
         stepInput: stepInput.input,
       }),
+      tools: config.tools,
     });
     const effectiveStepInput = staleConversion.stepInput;
     const preambleStepInput =
@@ -674,7 +655,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     if (
       approvalContext !== undefined &&
       config.resolveStepDynamicTools !== undefined &&
-      shouldPrepareApprovalPolicyTools({ session, stepInput: effectiveStepInput })
+      shouldPrepareApprovalReplayTools({ session, stepInput: effectiveStepInput })
     ) {
       await config.resolveStepDynamicTools({
         ctx: approvalContext,
@@ -687,13 +668,19 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: projectHistory(resolvedCoordination.messages, session.state),
       });
     }
+    const responseAuthorizationTools = shouldPrepareApprovalPolicyTools({
+      session,
+      stepInput: effectiveStepInput,
+    })
+      ? buildResponseAuthorizationTools({
+          authoredTools: config.tools,
+          context: approvalContext,
+        })
+      : config.tools;
     const coordinated = await coordinateApprovalDelivery({
       session,
       stepInput: effectiveStepInput,
-      tools: buildResponseAuthorizationTools({
-        authoredTools: config.tools,
-        context: approvalContext,
-      }),
+      tools: responseAuthorizationTools,
     });
     session = coordinated.session;
     if (emit) {
@@ -1282,7 +1269,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       const harnessTools = buildHarnessToolsWithDynamicSubagents(config.tools, ctx);
       const backgroundBatch = createBackgroundToolCallBatch();
       const advertisedHarnessTools = getAdvertisedTools({
-        delegatedCaller: taskUpdatesEnabled,
         session,
         tools: harnessTools,
       });
@@ -1295,12 +1281,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         disabledProviderTools: opts.disabledProviderTools,
         modelReference: requireSessionModelReference(session),
         tools: advertisedHarnessTools,
-        webSearchProvider: config.webSearchProvider,
       });
 
       if (ctx !== undefined) {
         const dynamicTools = getAdvertisedTools({
-          delegatedCaller: taskUpdatesEnabled,
           session,
           tools: buildDynamicTools(ctx),
         });
@@ -1314,7 +1298,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         // Dynamic tools override a same-named authored tool.
         for (const [name, toolDefinition] of Object.entries(dynamicToolSet)) {
           const advertised = advertisedHarnessTools.get(name);
-          if (advertised?.runtimeAction !== undefined || advertised?.task !== undefined) {
+          if (advertised?.runtimeAction !== undefined || advertised?.workflowId !== undefined) {
             throw new Error(
               `Dynamic tool "${name}" collides with a coordination-visible deferred tool.`,
             );
@@ -1331,7 +1315,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         config.workflow === true ? { maxSubagents: config.workflowMaxSubagents } : undefined;
 
       const advertisedModelTools = await getAdvertisedTools({
-        delegatedCaller: taskUpdatesEnabled,
         modelTools: flatTools,
         session,
         tools: advertisedHarnessTools,
@@ -1353,6 +1336,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       activeAttemptScope = attemptScope;
 
       const hooks = buildStepHooks({
+        auth: ctx?.get(AuthKey) ?? null,
         cachePath,
         emit,
         emissionState,
@@ -1793,7 +1777,6 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       config,
       emit,
       emissionState,
-      delegatedCaller: taskUpdatesEnabled,
       durableModelPromptMessageCount:
         ephemeralContextMessages.length === 0 ? projectedMessages.length : undefined,
       promptMessages: messages,
@@ -2325,7 +2308,6 @@ async function handleStepResult(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: ReturnType<typeof getHarnessEmissionState>;
-  readonly delegatedCaller: boolean;
   readonly durableModelPromptMessageCount?: number;
   readonly promptMessages: readonly ModelMessage[];
   readonly result: HarnessStepResult;
@@ -2419,6 +2401,7 @@ async function handleStepResult(input: {
   const questionRequests = extractQuestionInputRequests({
     toolCalls: result.toolCalls,
     excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
+    tools: input.coordinationTools,
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
   const pendingApprovals = renderPendingApprovalsSnippet(approvalRequests);
@@ -2438,7 +2421,6 @@ async function handleStepResult(input: {
       : [{ content: pendingApprovals, role: "user" as const }]),
   ];
   const advertisedCoordinationTools = getAdvertisedTools({
-    delegatedCaller: input.delegatedCaller,
     session: baseSession,
     tools: input.coordinationTools,
   });
@@ -2711,7 +2693,7 @@ async function handleStepResult(input: {
 function isDeferredHarnessTool(tool: HarnessToolDefinition | undefined): boolean {
   return (
     tool?.runtimeAction !== undefined ||
-    (tool?.task !== undefined && tool.execution !== "background")
+    (tool?.workflowId !== undefined && tool.execution !== "background")
   );
 }
 

@@ -110,6 +110,7 @@ describe("createRuntimeSubagentRegistry", () => {
 
     expect(prepared.execution).toBe("background");
     expect(prepared.task).toEqual({
+      nodeId: definition.nodeId,
       resultKind: "subagent",
       workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
     });

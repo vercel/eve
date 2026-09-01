@@ -27,10 +27,8 @@ function orchestrationTools(): HarnessToolMap {
           type: "object",
         }),
         name: "echo-marker",
-        task: {
-          resultKind: "subagent",
-          workflowId: "workflow//eve//subagentToolExecuteWorkflow",
-        },
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
   ]);

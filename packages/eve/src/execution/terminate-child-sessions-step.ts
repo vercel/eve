@@ -10,7 +10,7 @@ import {
   resolveRemoteAgentStreamHeaders,
 } from "#subagents/remote-dispatch.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
-import { cancelBackgroundAgentTask } from "#subagents/task-cancel.js";
+import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";

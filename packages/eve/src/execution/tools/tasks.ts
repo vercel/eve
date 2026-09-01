@@ -41,5 +41,5 @@ export function createTaskToolHarnessDefinitions(): readonly HarnessToolDefiniti
 /**
  * Authored tools with the same name shadow these framework definitions,
  * and `disableTool(name)` removes individual controls. advertised-tools
- * uses caller/session shape to expose only `task_update` to task children.
+ * evaluates their selected availability against persisted session metadata.
  */

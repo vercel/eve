@@ -1,7 +1,8 @@
 import {
   formatAgentStatus,
+  EMPTY_AGENT_HANDLE_STORE,
   getAgentHandleStore,
-  setAgentHandleStore,
+  writeHandles,
   type AgentAddress,
   type AgentHandle,
   type AgentHandleStore,
@@ -11,8 +12,9 @@ import {
   type ContinueOperation,
   type StartOperation,
   type TaskOwnedAgentHandle,
+  type TurnOwnedAgentHandle,
 } from "#subagents/handles/store.js";
-import type { HarnessSession } from "#harness/types.js";
+import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { AgentTurnOutcome } from "#shared/agent-turn-outcome.js";
 
 /**
@@ -51,14 +53,14 @@ export function prepareAgentStart(
   ]);
 }
 
-type AgentStartTargetInput = Extract<AgentHandle, { phase: "starting" }>["target"];
+type AgentStartTargetInput = Extract<TurnOwnedAgentHandle, { phase: "starting" }>["target"];
 
 /** Result of preparing a continuation against an existing handle. */
 export type PrepareAgentContinuationResult =
   | {
       readonly kind: "ready";
       readonly session: HarnessSession;
-      readonly handle: Extract<AgentHandle, { phase: "running" }>;
+      readonly handle: Extract<TurnOwnedAgentHandle, { phase: "running" }>;
     }
   | { readonly kind: "unknown" }
   | { readonly kind: "mismatch" }
@@ -103,7 +105,7 @@ export function prepareAgentContinuation(
     return { kind: "busy" };
   }
 
-  const running: Extract<AgentHandle, { phase: "running" }> = {
+  const running: Extract<TurnOwnedAgentHandle, { phase: "running" }> = {
     address: existing.address,
     identity: existing.identity,
     operation: { ...input.operation, previousStatus: existing.lastStatus },
@@ -119,7 +121,7 @@ export function prepareAgentContinuation(
   };
 }
 
-type ActiveAgentHandle = Extract<AgentHandle, { phase: "starting" | "running" }>;
+type ActiveAgentHandle = Extract<TurnOwnedAgentHandle, { phase: "starting" | "running" }>;
 
 function findActiveHandle(
   handles: readonly AgentHandle[],
@@ -338,6 +340,7 @@ export function applyAgentHandleStoreCommand(
           : { result: { handle: existing, kind: "busy" }, store };
       }
       const handle: TaskOwnedAgentHandle = {
+        callId: command.callId,
         identity: command.identity,
         operationId: command.operationId,
         phase: "reserved",
@@ -363,6 +366,7 @@ export function applyAgentHandleStoreCommand(
       }
       const handle: TaskOwnedAgentHandle = {
         address: command.address,
+        callId: existing.callId,
         identity: existing.identity,
         operationId: existing.operationId,
         phase: "claimed",
@@ -393,6 +397,7 @@ export function applyAgentHandleStoreCommand(
       }
       const handle: TaskOwnedAgentHandle = {
         address: existing.address,
+        callId: command.callId,
         identity: existing.identity,
         operationId: command.operationId,
         phase: "claimed",
@@ -425,6 +430,22 @@ export function applyAgentHandleStoreCommand(
   }
 }
 
+/** Applies one task-owned handle transition to a harness session. */
+export function applyTaskAgentHandleCommand<Session extends { readonly state?: SessionStateMap }>(
+  session: Session,
+  command: AgentHandleStoreCommand,
+): {
+  readonly result: AgentHandleStoreCommandResult;
+  readonly session: Session;
+} {
+  const store = getAgentHandleStore(session.state) ?? EMPTY_AGENT_HANDLE_STORE;
+  const applied = applyAgentHandleStoreCommand(store, command);
+  return {
+    result: applied.result,
+    session: applied.store === store ? session : writeHandles(session, applied.store.handles),
+  };
+}
+
 function replaceHandle(
   store: AgentHandleStore,
   existing: AgentHandle,
@@ -443,18 +464,4 @@ function replaceHandle(
 
 function handlesEqual(left: readonly AgentHandle[], right: readonly AgentHandle[]): boolean {
   return left.length === right.length && left.every((handle, index) => handle === right[index]);
-}
-
-/**
- * Persists the handle store, validating it against the strict store schema
- * first. This write-time check is what lets the schema-free driver-side
- * reader (`query.ts`) trust any stored value without revalidating: a
- * transition bug fails loudly here instead of poisoning the session for
- * every later read.
- */
-function writeHandles(session: HarnessSession, handles: readonly AgentHandle[]): HarnessSession {
-  return {
-    ...session,
-    state: setAgentHandleStore(session.state, { handles }),
-  };
 }

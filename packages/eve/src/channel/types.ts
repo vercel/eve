@@ -432,6 +432,8 @@ export interface SessionCapabilities {
  */
 export interface RunInput {
   readonly adapter: ChannelAdapter<any>;
+  /** Framework task that owns this run, when the run is a task executor. */
+  readonly taskId?: string;
   /**
    * Registered channel name for root sessions started from an authored
    * channel route. Framework runs omit this and use their framework
@@ -511,12 +513,6 @@ export interface RunInput {
    * for that axis.
    */
   readonly limits?: RunSessionLimits;
-  /**
-   * Framework-owned depth of delegated local subagent sessions. Root sessions
-   * omit this and are treated as depth 0; each local child receives
-   * parent depth + 1.
-   */
-  readonly subagentDepth?: number;
   /** Framework-owned metadata for a protocol-neutral external invocation. */
   readonly externalInvocation?: {
     readonly continuationToken: string;

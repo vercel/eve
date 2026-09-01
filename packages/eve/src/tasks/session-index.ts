@@ -38,12 +38,10 @@ export interface SessionTaskIndexEntry {
   readonly metadata: TaskMetadata;
 }
 
-const taskMetadataSchema: z.ZodType<TaskMetadata> = z.strictObject({
-  agentId: z.string().min(1).optional(),
+const taskMetadataSchema = z.looseObject({
   kind: z.string().min(1),
-  mode: z.enum(["local", "remote"]).optional(),
   name: z.string().min(1),
-});
+}) as z.ZodType<TaskMetadata>;
 
 const taskViewBaseShape = {
   executor: z

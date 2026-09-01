@@ -3,15 +3,21 @@ import {
   AGENT_TOOL_DESCRIPTION,
   SUBAGENT_TOOL_INPUT_SCHEMA,
 } from "#tools/framework/agent-contract.js";
+import { attachToolBehavior } from "#tools/behavior.js";
 
-/** The harness intercepts this tool before its durable dispatch step executes. */
-export const agent = defineTool({
-  description: AGENT_TOOL_DESCRIPTION,
-  execution: "background",
-  inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
-  execute() {
-    throw new Error("agent is handled by eve's durable dispatch step.");
-  },
-});
+export const agent = attachToolBehavior(
+  defineTool({
+    description: AGENT_TOOL_DESCRIPTION,
+    execution: "background",
+    inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
+    execute() {
+      "use workflow";
+      throw new Error(
+        "The framework agent tool executes through its shared workflow registration.",
+      );
+    },
+  }),
+  { availability: ["root-session"], handling: { action: "self-agent", kind: "dispatch" } },
+);
 
 export default agent;

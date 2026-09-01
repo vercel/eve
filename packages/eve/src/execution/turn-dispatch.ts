@@ -9,6 +9,7 @@ import type {
 import { runInlineTurn } from "#execution/inline-turn.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
+import type { SessionCommandRouter } from "#execution/session-command-router.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
@@ -36,6 +37,7 @@ interface TurnDispatchInput {
   readonly controlToken: string;
   readonly delivery: HookPayload;
   readonly commandInbox: SessionCommandInbox;
+  readonly commandRouter: SessionCommandRouter;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -66,6 +68,7 @@ async function dispatchAndAwaitChildTurn(
     bufferedSessionControls: input.bufferedSessionControls,
     cancelledTaskIds: input.cancelledTaskIds,
     commandInbox: input.commandInbox,
+    commandRouter: input.commandRouter,
     expectedTurnId: activeTurnId(input.sessionState.emissionState),
     seenTaskDeliveries: input.seenTaskDeliveries ?? new Set(),
     token: input.controlToken,

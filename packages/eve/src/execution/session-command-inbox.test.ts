@@ -37,38 +37,6 @@ describe("createSessionCommandInbox", () => {
     await inbox.dispose();
   });
 
-  it("delegates handle commands from the stable inbox to the session-state owner", async () => {
-    const command = {
-      command: {
-        identity: { id: "agent-1", name: "research", nodeId: "subagents/research" },
-        kind: "reserve" as const,
-        operationId: "operation-1",
-        taskId: "task-1",
-      },
-      commandId: "command-1",
-      kind: "agent-handle-command" as const,
-    };
-    installHooks(
-      createMockHook({
-        reads: [Promise.resolve(resolved(command)), Promise.resolve(resolved(send("next")))],
-        token: "stable",
-      }),
-    );
-    const handleAgentHandleCommand = vi.fn(async () => {});
-    const inbox = createSessionCommandInbox({ handleAgentHandleCommand });
-
-    await inbox.claimStable("stable");
-
-    const internal = await inbox.next();
-    expect(internal).toEqual(resolved(command));
-    inbox.consumeNext();
-    await expect(inbox.handleAgentHandleCommand(command)).resolves.toBe(true);
-    expect(handleAgentHandleCommand).toHaveBeenCalledWith(command);
-    await expect(inbox.next()).resolves.toEqual(resolved(send("next")));
-    inbox.consumeNext();
-    await inbox.dispose();
-  });
-
   it("retains a committed read from the previous alias across rekey", async () => {
     const oldRead = createDeferred<IteratorResult<SessionInboxPayload>>();
     const replacementRead = createDeferred<IteratorResult<SessionInboxPayload>>();
@@ -155,7 +123,7 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionInboxWireVersion: 2 },
+      metadata: { sessionInboxWireVersion: 3 },
       token: "stable",
     });
     await inbox.dispose();

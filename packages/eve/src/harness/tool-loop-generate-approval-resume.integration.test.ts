@@ -331,7 +331,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         }
       },
       mode: "conversation",
-      prepareStepDynamicTools: (input) =>
+      resolveStepDynamicTools: (input) =>
         preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [resolver] }),
       resolveModel: async (): Promise<LanguageModel> => model,
       tools: new Map(),
@@ -428,12 +428,12 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       } satisfies OldSourceOffsetDynamicToolMetadata,
     ]);
     const execute = vi.fn(async () => "/workspace");
-    const prepareStepDynamicTools = vi.fn((input) =>
+    const resolveStepDynamicTools = vi.fn((input) =>
       preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [] }),
     );
     const runStep = createToolLoopHarness({
       ...createConfig(createModel(), execute),
-      prepareStepDynamicTools,
+      resolveStepDynamicTools,
     });
 
     await expect(
@@ -449,7 +449,7 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       ),
     ).resolves.toBeDefined();
 
-    expect(prepareStepDynamicTools).not.toHaveBeenCalled();
+    expect(resolveStepDynamicTools).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 

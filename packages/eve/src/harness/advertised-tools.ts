@@ -1,11 +1,5 @@
 import type { ToolSet } from "ai";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveSubagentDepth } from "#subagents/depth.js";
-import {
-  TASK_CANCEL_TOOL_NAME,
-  TASK_TOOL_NAMES,
-  TASK_UPDATE_TOOL_NAME,
-} from "#tools/framework/task-contract.js";
 import {
   ensureWorkflowContinuationSecurity,
   getWorkflowContinuationSecurity,
@@ -13,22 +7,19 @@ import {
 import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
-type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "subagentDepth">;
+type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "taskId">;
 
 type AdvertisedToolMapInput = {
-  readonly delegatedCaller?: boolean;
   readonly session: AdvertisedToolSession;
   readonly tools: HarnessToolMap;
 };
 
 type AdvertisedToolDefinitionsInput = {
-  readonly delegatedCaller?: boolean;
   readonly session: AdvertisedToolSession;
   readonly tools: readonly HarnessToolDefinition[];
 };
 
 type AdvertisedModelToolsInput = {
-  readonly delegatedCaller?: boolean;
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
@@ -62,24 +53,16 @@ export function getAdvertisedTools(
   }
 
   if (isToolDefinitionList(input.tools)) {
-    return filterUnavailableDelegationToolDefinitions(
-      input.tools,
-      input.session,
-      input.delegatedCaller,
-    );
+    return filterUnavailableToolDefinitions(input.tools, input.session);
   }
 
-  return filterUnavailableDelegationToolMap(input.tools, input.session, input.delegatedCaller);
+  return filterUnavailableToolMap(input.tools, input.session);
 }
 
 async function getAdvertisedModelTools(
   input: AdvertisedModelToolsInput,
 ): Promise<AdvertisedModelTools> {
-  const tools = filterUnavailableDelegationToolMap(
-    input.tools,
-    input.session,
-    input.delegatedCaller,
-  );
+  const tools = filterUnavailableToolMap(input.tools, input.session);
   if (input.workflow === undefined) {
     return {
       harnessTools: tools,
@@ -112,15 +95,14 @@ async function getAdvertisedModelTools(
   };
 }
 
-function filterUnavailableDelegationToolDefinitions(
+function filterUnavailableToolDefinitions(
   tools: readonly HarnessToolDefinition[],
   session: AdvertisedToolSession,
-  delegatedCaller: boolean | undefined,
 ): readonly HarnessToolDefinition[] {
   const filteredTools: HarnessToolDefinition[] = [];
 
   for (const tool of tools) {
-    if (shouldHideDelegationTool(tool, session, delegatedCaller)) {
+    if (shouldHideTool(tool, session)) {
       continue;
     }
     filteredTools.push(tool);
@@ -128,15 +110,14 @@ function filterUnavailableDelegationToolDefinitions(
   return filteredTools;
 }
 
-function filterUnavailableDelegationToolMap(
+function filterUnavailableToolMap(
   tools: HarnessToolMap,
   session: AdvertisedToolSession,
-  delegatedCaller: boolean | undefined,
 ): HarnessToolMap {
   const filteredTools = new Map<string, HarnessToolDefinition>();
 
   for (const [name, tool] of tools) {
-    if (shouldHideDelegationTool(tool, session, delegatedCaller)) {
+    if (shouldHideTool(tool, session)) {
       continue;
     }
     filteredTools.set(name, tool);
@@ -149,9 +130,8 @@ function filterWorkflowHostToolsForRootSession(
   session: AdvertisedToolSession,
 ): HarnessToolMap {
   const filteredTools = new Map<string, HarnessToolDefinition>();
-  const subagentDepth = resolveSubagentDepth(session);
 
-  if (session.rootSessionId !== undefined || subagentDepth.currentDepth > 0) {
+  if (session.rootSessionId !== undefined) {
     return filteredTools;
   }
 
@@ -163,32 +143,22 @@ function filterWorkflowHostToolsForRootSession(
   return filteredTools;
 }
 
-function shouldHideDelegationTool(
+function shouldHideTool(
   definition: HarnessToolDefinition,
   session: AdvertisedToolSession,
-  delegatedCaller: boolean | undefined,
 ): boolean {
-  if (definition.name === TASK_UPDATE_TOOL_NAME) return delegatedCaller !== true;
-  if (definition.name === TASK_CANCEL_TOOL_NAME) return false;
-  if (isRootOnlyFrameworkTool(definition)) {
-    return session.rootSessionId !== undefined || resolveSubagentDepth(session).currentDepth > 0;
+  const delegated = session.rootSessionId !== undefined;
+  if (
+    definition.rootOnly === true ||
+    definition.behavior?.availability.includes("root-session") === true
+  ) {
+    return delegated;
+  }
+  if (definition.behavior?.availability.includes("delegated-task-child") === true) {
+    return session.taskId === undefined;
   }
 
   return false;
-}
-
-/**
- * Tools that only a root session may see. The `agent` self-delegation
- * tool and task controls are inherited by self-delegated children, so session
- * shape is the only signal that separates the root from its children.
- */
-function isRootOnlyFrameworkTool(definition: HarnessToolDefinition): boolean {
-  if (definition.rootOnly === true) return true;
-  return (
-    definition.name !== TASK_UPDATE_TOOL_NAME &&
-    definition.name !== TASK_CANCEL_TOOL_NAME &&
-    TASK_TOOL_NAMES.has(definition.name)
-  );
 }
 
 function isToolDefinitionList(

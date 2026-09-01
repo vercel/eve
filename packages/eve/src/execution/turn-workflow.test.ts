@@ -4,7 +4,6 @@ import type { HookPayload } from "#channel/types.js";
 import { SessionDynamicModelReferenceKey } from "#context/keys.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
-import { dispatchWorkflowTasksStep } from "#execution/workflow-task-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
@@ -73,10 +72,6 @@ vi.mock("./workflow-steps.js", () => ({
 
 vi.mock("#execution/coordination-dispatch-step.js", () => ({
   dispatchCoordinationStep: vi.fn(),
-}));
-
-vi.mock("#execution/workflow-task-dispatch-step.js", () => ({
-  dispatchWorkflowTasksStep: vi.fn(),
 }));
 
 vi.mock("./cancel-descendant-turns-step.js", () => ({
@@ -771,7 +766,7 @@ describe("turnWorkflow", () => {
     const pendingState = createSessionState();
     const completedState = createSessionState();
     installInbox([]);
-    vi.mocked(dispatchWorkflowTasksStep).mockResolvedValue({
+    vi.mocked(dispatchCoordinationStep).mockResolvedValue({
       results: [
         {
           callId: "call-1",
@@ -806,7 +801,8 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    expect(dispatchWorkflowTasksStep).toHaveBeenCalledWith({
+    expect(dispatchCoordinationStep).toHaveBeenCalledWith({
+      action: "dispatch-workflow-tasks",
       callbackBaseUrl: "https://eve.example.com",
       parentContinuationToken: "turn-token:inbox",
       parentWritable,

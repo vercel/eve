@@ -31,6 +31,7 @@ describe("resolveRemoteAgentForAction", () => {
       nodeId: "subagents/research.ts",
       sourceId: "subagents/research.ts",
       sourceKind: "module",
+      workflowId: "workflow//./agent/subagents/research//execute",
     } as const;
 
     const credentialsStepId = "eve:dynamic-remote-agent//selected-research";

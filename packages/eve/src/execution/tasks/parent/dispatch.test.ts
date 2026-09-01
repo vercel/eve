@@ -2,16 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cancelOwnedTask, executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
-import { fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
-import { forwardLocalTaskUpdateStep } from "#execution/task-update-proxy-step.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
-vi.mock("#subagents/callback-step.js", () => ({ fireTaskUpdateCallbackStep: vi.fn() }));
-vi.mock("#execution/task-update-proxy-step.js", () => ({ forwardLocalTaskUpdateStep: vi.fn() }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({
   cancelRun: vi.fn(),
@@ -77,9 +73,10 @@ describe("task updates", () => {
   beforeEach(() => vi.resetAllMocks());
 
   it("forwards a task-owned update and confirms delivery", async () => {
-    vi.mocked(fireTaskUpdateCallbackStep).mockResolvedValue("task-1");
+    const deliverUpdate = vi.fn(async () => "task-1");
 
     const result = await executeTaskControlAction({
+      deliverUpdate,
       action: {
         callId: "call-update",
         input: { message: "Working" },
@@ -93,14 +90,22 @@ describe("task updates", () => {
       session: {} as never,
     });
 
-    expect(fireTaskUpdateCallbackStep).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Working", updateEpoch: "turn-child", updateIndex: 2 }),
+    expect(deliverUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          message: "Working",
+          updateEpoch: "turn-child",
+          updateIndex: 2,
+        }),
+      }),
     );
     expect(result.result).toMatchObject({ output: { status: "sent", taskId: "task-1" } });
   });
 
   it("forwards a local task-owned child update through the subagent adapter hook", async () => {
+    const deliverUpdate = vi.fn(async () => "task-1");
     const result = await executeTaskControlAction({
+      deliverUpdate,
       action: {
         callId: "call-update",
         input: { message: "Working" },
@@ -124,8 +129,9 @@ describe("task updates", () => {
       session: {} as never,
     });
 
-    expect(forwardLocalTaskUpdateStep).toHaveBeenCalledWith({
-      parentContinuationToken: "agent-reply-hook",
+    expect(deliverUpdate).toHaveBeenCalledWith({
+      adapter: expect.objectContaining({ kind: "subagent" }),
+      callback: undefined,
       update: {
         callId: "call-update",
         kind: "task-update",
@@ -134,7 +140,6 @@ describe("task updates", () => {
         updateIndex: 2,
       },
     });
-    expect(fireTaskUpdateCallbackStep).not.toHaveBeenCalled();
     expect(result.result).toMatchObject({ output: { status: "sent", taskId: "task-1" } });
   });
 });

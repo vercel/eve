@@ -11,51 +11,13 @@ import {
   SESSION_INBOX_WIRE_VERSION,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
 } from "#execution/wire/session-inbox-contract.js";
-import type {
-  AgentHandleStore,
-  AgentHandleStoreCommand,
-  AgentHandleStoreCommandResult,
-} from "#subagents/handles/store.js";
-
-export {
-  applyAgentHandleCommandStep,
-  readAgentHandleStoreStep,
-  sendAgentHandleCommandStep,
-} from "#execution/session-command-inbox-agent-handles.js";
-
-export interface AgentHandleCommandRequest {
-  readonly command: AgentHandleStoreCommand;
-  readonly commandId: string;
-  readonly kind: "agent-handle-command";
-}
-
-export interface AgentHandleCommandResponse {
-  readonly commandId: string;
-  readonly result: AgentHandleStoreCommandResult;
-  readonly store: AgentHandleStore;
-}
-
-function isAgentHandleCommandRequest(value: unknown): value is AgentHandleCommandRequest {
-  if (typeof value !== "object" || value === null) return false;
-  if (Reflect.get(value, "kind") !== "agent-handle-command") return false;
-  if (typeof Reflect.get(value, "commandId") !== "string") return false;
-  const command = Reflect.get(value, "command");
-  if (typeof command !== "object" || command === null) return false;
-  return ["read", "reserve", "confirm", "claim", "remove", "release-task"].includes(
-    String(Reflect.get(command, "kind")),
-  );
-}
-
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
  *
- * This union is the hook's transport typing only. The inbox intercepts internal
- * handle commands; consumers interpret every other payload through
- * `sessionInboxWire.decode` in `execution/wire/session-inbox-wire.ts`, which
- * owns the versioned wire schema and its legacy-shape fallbacks.
+ * This union is the hook's transport typing only. The driver routes payloads
+ * after the inbox surfaces them; the inbox owns no command semantics.
  */
 export type SessionInboxPayload =
-  | AgentHandleCommandRequest
   | DeliverHookPayload
   | RuntimeActionResultHookPayload
   | SessionCommand
@@ -93,8 +55,6 @@ export interface SessionCommandInbox {
   claimAuthorization(token: string): Promise<void>;
   claimStable(token: string): Promise<void>;
   consumeNext(): void;
-  /** Handles an internal handle command before it reaches session-command decoding. */
-  handleAgentHandleCommand(payload: SessionInboxPayload): Promise<boolean>;
   /** Whether an authorization read is already eligible to be consumed. */
   hasReadyAuthorization(): boolean;
   next(): Promise<IteratorResult<SessionInboxPayload>>;
@@ -125,11 +85,7 @@ export interface SessionCommandInboxHandle extends SessionCommandInbox {
  * only the channel alias. Reads already committed to a retired alias remain in
  * the multiplexed queue and are consumed exactly once.
  */
-export function createSessionCommandInbox(
-  input: {
-    readonly handleAgentHandleCommand?: (request: AgentHandleCommandRequest) => Promise<void>;
-  } = {},
-): SessionCommandInboxHandle {
+export function createSessionCommandInbox(): SessionCommandInboxHandle {
   let stable: SessionCommandHookState | undefined;
   let continuation: SessionCommandHookState | undefined;
   let authorization: SessionCommandHookState | undefined;
@@ -289,15 +245,6 @@ export function createSessionCommandInbox(
       if (authorization?.enabled !== true || authorization.resolved === undefined) return false;
       if (offeredRead !== undefined) return offeredRead.state === authorization;
       return ready[0]?.state === authorization;
-    },
-
-    async handleAgentHandleCommand(payload: SessionInboxPayload): Promise<boolean> {
-      if (!isAgentHandleCommandRequest(payload)) return false;
-      if (input.handleAgentHandleCommand === undefined) {
-        throw new Error("Session command inbox has no agent handle store owner.");
-      }
-      await input.handleAgentHandleCommand(payload);
-      return true;
     },
 
     next: nextRead,

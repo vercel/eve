@@ -134,6 +134,7 @@ describe("buildSubagentRunInput", () => {
       parentContinuationToken: "invocation-reply-hook",
       taskId: "task-1",
     });
+    expect(runInput.taskId).toBe("task-1");
   });
 
   it("forwards channelMetadata to the child run input", () => {
@@ -208,23 +209,6 @@ describe("buildSubagentRunInput", () => {
       sessionId: "intermediate-session",
       turn: { id: "turn-99", sequence: 1 },
     });
-  });
-
-  it("increments subagent depth for the child run input", () => {
-    const nestedSession: HarnessSession = {
-      ...makeSession(),
-      sessionId: "intermediate-session",
-      subagentDepth: 2,
-    };
-    const { runInput } = buildRuntimeSubagentRunInput({
-      action: makeAction(),
-      auth: null,
-      batchEvent: { sequence: 1, turnId: "turn-99" },
-      initiatorAuth: null,
-      session: nestedSession,
-    });
-
-    expect(runInput.subagentDepth).toBe(3);
   });
 
   it("threads inherited limits through the child run input", () => {

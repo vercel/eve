@@ -1,23 +1,21 @@
 import { createHook } from "#compiled/@workflow/core/index.js";
 
-import { sendAgentHandleCommandStep } from "#execution/session-command-inbox.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
   appendTaskViewStep,
   deliverTaskInputResponsesStep,
-  wakeTaskAgentEventParentStep,
+  wakeTaskEffectParentStep,
   wakeTaskParentStep,
   wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep,
 } from "#execution/tasks/child/steps.js";
-import { dispatchTaskAgentInvocationStep } from "#execution/tools/subagent/invocation-step.js";
 import {
-  isAgentInvocationEventEffect,
-  isAgentInvocationRequest,
-  type AgentInvocationRequest,
-} from "#execution/tools/subagent/invocation.js";
-import { cancelWorkflowToolRunStep } from "#execution/tools/workflow/cancel.js";
+  createWorkflowBodyRef,
+  executeWorkflowBody,
+  type WorkflowBodyDefinition,
+} from "#execution/tools/workflow/body.js";
 import {
+  deriveWorkflowToolRunOwner,
   isWorkflowToolEffectRequest,
   type WorkflowToolEffectRequest,
   type WorkflowToolRunRequestMessage,
@@ -29,13 +27,7 @@ import {
   workflowToolRunReportToTaskUpdate,
   workflowToolRunRequestToTaskInputRequest,
 } from "#execution/tools/workflow/owner-inbox.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import {
-  readWorkflowToolExecutorAddress,
-  type WorkflowToolAgentDispatch,
-} from "#execution/tools/workflow/types.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
-import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import {
   isReadyTaskStatus,
@@ -50,25 +42,29 @@ import {
 } from "#tasks/types.js";
 
 export interface TaskRunWorkflowInput {
-  readonly workflowToolAgentDispatch?: WorkflowToolAgentDispatch;
   readonly initialView: TaskView;
   readonly parentContinuationToken: string;
   readonly taskInboxToken: string;
+  readonly workflow?: WorkflowBodyDefinition;
 }
 
 /** A workflow-body question routed through the task that owns the workflow tool run. */
-export interface WorkflowToolRunTaskInputRequest {
+interface WorkflowToolRunTaskInputRequestBase {
   readonly kind: "task-input-request";
   readonly replyTo: string;
-  readonly request: TaskInputRequest;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
 }
 
+export type WorkflowToolRunTaskInputRequest = WorkflowToolRunTaskInputRequestBase &
+  (
+    | { readonly request: TaskInputRequest; readonly requests?: never }
+    | { readonly request?: never; readonly requests: readonly TaskInputRequest[] }
+  );
+
 interface PendingWorkflowToolTraffic {
-  readonly events: WorkflowToolRunRequestMessage[];
-  readonly invocations: WorkflowToolRunRequestMessage[];
+  readonly effects: WorkflowToolRunRequestMessage[];
 }
 
 /** Owns lifecycle for one background task and consumes its executor traffic. */
@@ -88,9 +84,16 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
   let pendingUpdates: TaskInboundUpdate[] = [];
   let updateIndex = 0;
-  const pendingTraffic: PendingWorkflowToolTraffic = { events: [], invocations: [] };
+  const pendingTraffic: PendingWorkflowToolTraffic = { effects: [] };
   const answerHooks = new Map<string, AnswerHookRoute>();
-  const dispatchedInvocationIds = new Set<string>();
+  const bodyController = new AbortController();
+  let bodyReader:
+    | import("#execution/tools/workflow/owner-channels.js").ChannelReader<
+        "body",
+        import("#execution/tools/workflow/messages.js").WorkflowToolRunOutcome
+      >
+    | undefined;
+  let executorSettled = input.workflow === undefined;
 
   try {
     try {
@@ -103,7 +106,25 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
     await appendTaskViewStep({ view });
     while (!isFinished()) {
-      const read = await raceChannelReads(readers);
+      const read = await raceChannelReads(
+        bodyReader === undefined ? readers : [...readers, bodyReader],
+      );
+      if (read.channel === "body") {
+        executorSettled = true;
+        bodyReader = undefined;
+        if (read.next.done) continue;
+        await applyPayload({
+          command: workflowToolRunOutcomeToTaskCommand({
+            from: createWorkflowBodyRef({ ...input.workflow!, execution: "background" }),
+            result: read.next.value,
+          }),
+          kind: "task-command",
+        });
+        if (view.status === "cancelled" && dispatchAcknowledged && !dispatchRejected) {
+          await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+        }
+        continue;
+      }
       if (read.next.done) return;
 
       if (read.channel === "report") {
@@ -136,23 +157,13 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
   } finally {
     if (ownsHook) {
-      try {
-        if (isFinished() && input.workflowToolAgentDispatch !== undefined) {
-          await sendAgentHandleCommandStep({
-            command: { kind: "release-task", taskId: view.taskId },
-            commandId: `${view.taskId}:release`,
-            sessionId: input.workflowToolAgentDispatch.sessionState.sessionId,
-          });
-        }
-      } finally {
-        await workflowToolRunChannels.dispose();
-        await disposeHook(commands);
-      }
+      await workflowToolRunChannels.dispose();
+      await disposeHook(commands);
     }
   }
 
   function isFinished(): boolean {
-    return isTerminalTaskStatus(view.status) && dispatchAcknowledged;
+    return isTerminalTaskStatus(view.status) && dispatchAcknowledged && executorSettled;
   }
 
   async function handleUpdate(update: TaskInboundUpdate): Promise<void> {
@@ -171,7 +182,26 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       payload.kind === "task-command" && payload.command.kind === "reject-dispatch";
     if (isReady || isRejected) dispatchAcknowledged = true;
     if (isRejected) dispatchRejected = true;
-    if (isReady || isRejected) await flushPendingTraffic();
+    if (isReady || isRejected) {
+      if (isRejected || isTerminalTaskStatus(view.status)) {
+        executorSettled = true;
+      } else if (input.workflow !== undefined && bodyReader === undefined && !executorSettled) {
+        bodyReader = createChannelReader(
+          "body",
+          awaitBodyResult(
+            executeWorkflowBody(
+              {
+                ...input.workflow,
+                execution: "background",
+                owner: deriveWorkflowToolRunOwner(input.taskInboxToken),
+              },
+              bodyController.signal,
+            ),
+          ),
+        );
+      }
+      await flushPendingTraffic();
+    }
 
     if (payload.kind === "task-input-request") pendingInputRequest = payload;
     if (payload.kind === "task-update") {
@@ -190,7 +220,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
             )
           : undefined;
     } else if (payload.kind === "task-input-request") {
-      command = { inputRequests: [payload.request], kind: "require-input" };
+      command = {
+        inputRequests: payload.requests ?? [payload.request],
+        kind: "require-input",
+      };
     } else if (payload.kind === "task-command") {
       command = payload.command;
     } else {
@@ -208,7 +241,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (result.action !== "accepted") return;
     view = result.view;
     await appendTaskViewStep({ view });
-    if (command.kind === "cancel") await cancelWorkflowToolRun();
+    if (command.kind === "cancel") {
+      bodyController.abort(new Error(`Task ${view.taskId} was cancelled.`));
+      if (bodyReader === undefined) executorSettled = true;
+    }
     if (!isTerminalTaskStatus(view.status)) await flushUpdates();
     if (
       pendingInputRequest !== undefined &&
@@ -224,6 +260,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     } else if (
       !dispatchRejected &&
       dispatchAcknowledged &&
+      (command.kind !== "cancel" || executorSettled) &&
       ((!isTerminalTaskStatus(previous.status) && isTerminalTaskStatus(view.status)) ||
         (!isReadyTaskStatus(previous.status) &&
           isReadyTaskStatus(view.status) &&
@@ -244,90 +281,36 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   async function handleEffect(
     message: WorkflowToolRunRequestMessage,
-    effect: WorkflowToolEffectRequest,
+    _effect: WorkflowToolEffectRequest,
   ): Promise<void> {
-    if (isAgentInvocationRequest(effect)) {
-      if (input.workflowToolAgentDispatch === undefined) {
-        throw new Error("agent.invoke requires a task workflow with agent dispatch context.");
-      }
-      if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
-      if (dispatchedInvocationIds.has(effect.invocationId)) {
-        await resumeDuplicateInvocation(message.replyTo, effect);
-        return;
-      }
-      dispatchedInvocationIds.add(effect.invocationId);
-      if (!dispatchAcknowledged) {
-        pendingTraffic.invocations.push(message);
-        return;
-      }
-      await dispatchAgentInvocation(message);
+    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
+    if (!dispatchAcknowledged) {
+      pendingTraffic.effects.push(message);
       return;
     }
-    if (isAgentInvocationEventEffect(effect)) {
-      if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
-      if (!dispatchAcknowledged) {
-        pendingTraffic.events.push(message);
-        return;
-      }
-      await wakeTaskAgentEventParent(message);
-      return;
-    }
-    throw new Error(`Unsupported background workflow effect "${effect.name}".`);
+    await wakeTaskEffectParent(message);
   }
 
   async function flushPendingTraffic(): Promise<void> {
     if (!dispatchRejected) {
-      for (const request of pendingTraffic.invocations) await dispatchAgentInvocation(request);
-      for (const request of pendingTraffic.events) await wakeTaskAgentEventParent(request);
+      for (const request of pendingTraffic.effects) await wakeTaskEffectParent(request);
     }
-    pendingTraffic.invocations.length = 0;
-    pendingTraffic.events.length = 0;
+    pendingTraffic.effects.length = 0;
   }
 
-  async function wakeTaskAgentEventParent(request: WorkflowToolRunRequestMessage): Promise<void> {
-    await wakeTaskAgentEventParentStep({
+  async function wakeTaskEffectParent(request: WorkflowToolRunRequestMessage): Promise<void> {
+    await wakeTaskEffectParentStep({
       request,
       taskId: view.taskId,
       token: input.parentContinuationToken,
     });
   }
+}
 
-  async function dispatchAgentInvocation(request: WorkflowToolRunRequestMessage): Promise<void> {
-    if (!isAgentInvocationRequest(request.request)) return;
-    if (input.workflowToolAgentDispatch === undefined) return;
-    const dispatched = await dispatchTaskAgentInvocationStep({
-      ...input.workflowToolAgentDispatch,
-      replyTo: request.replyTo,
-      request: request.request,
-      taskId: view.taskId,
-    });
-    if (dispatched.result !== undefined) {
-      await resumeInvocationResult(request.replyTo, dispatched.result);
-    }
-  }
-
-  async function resumeDuplicateInvocation(
-    replyTo: string,
-    request: AgentInvocationRequest,
-  ): Promise<void> {
-    await resumeInvocationResult(replyTo, duplicateInvocationResult(request));
-  }
-
-  async function resumeInvocationResult(
-    replyTo: string,
-    result: RuntimeSubagentResult,
-  ): Promise<void> {
-    await resumeHookStep(replyTo, {
-      kind: "runtime-action-result",
-      results: [result],
-    });
-  }
-
-  async function cancelWorkflowToolRun(): Promise<void> {
-    const run = readWorkflowToolExecutorAddress(view.executor?.binding);
-    if (run === undefined) return;
-    await cancelWorkflowToolRunStep({ reason: `Task ${view.taskId} was cancelled.`, run });
-  }
+async function* awaitBodyResult(
+  result: Promise<import("#execution/tools/workflow/messages.js").WorkflowToolRunOutcome>,
+): AsyncGenerator<import("#execution/tools/workflow/messages.js").WorkflowToolRunOutcome> {
+  yield await result;
 }
 
 async function resolveAnsweredCommand(
@@ -349,23 +332,4 @@ async function resolveAnsweredCommand(
   return (await deliverTaskInputResponsesStep({ answer, answerHook, requestIds })) === "delivered"
     ? { kind: "answered", requestIds }
     : undefined;
-}
-
-function duplicateInvocationResult(request: AgentInvocationRequest): RuntimeSubagentResult {
-  return {
-    callId: request.invocationId,
-    isError: true,
-    kind: "subagent-result",
-    origin: "dispatch",
-    output: {
-      code: "DUPLICATE_AGENT_INVOCATION_KEY",
-      message: `agent() invocation key "${invocationKey(request.invocationId)}" was already used in this run; keys must be unique per run.`,
-    },
-    subagentName: request.input.target,
-  };
-}
-
-function invocationKey(invocationId: string): string {
-  const separator = invocationId.lastIndexOf(":");
-  return separator < 0 ? invocationId : invocationId.slice(separator + 1);
 }

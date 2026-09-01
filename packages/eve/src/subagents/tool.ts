@@ -12,7 +12,6 @@ import type {
 import type { HarnessSession } from "#harness/types.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
-import { resolveSubagentDepth } from "#subagents/depth.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
 
@@ -126,7 +125,6 @@ export function buildSubagentRunInput(input: {
   // explicit root, so its own `sessionId` becomes the root for its
   // children.
   const rootSessionId = session.rootSessionId ?? session.sessionId;
-  const subagentDepth = resolveSubagentDepth(session);
   const inheritedLimits: {
     -readonly [K in keyof RunSessionLimits]: RunSessionLimits[K];
   } = resolveRemainingSessionTokenLimits(session, input.fanoutSize);
@@ -180,8 +178,8 @@ export function buildSubagentRunInput(input: {
     },
     parentTraceContext: input.parentTraceContext,
     activityObserver: input.activityObserver,
-    subagentDepth: subagentDepth.nextChildDepth,
   };
+  if (input.taskId !== undefined) runInput.taskId = input.taskId;
 
   return { childContinuationToken, runInput };
 }

@@ -105,10 +105,8 @@ describe("createCoordinationRequestFromToolCall", () => {
               description: "Delegate research.",
               inputSchema: jsonSchema({ type: "object" }),
               name: "researcher",
-              task: {
-                resultKind: "subagent" as const,
-                workflowId: "workflow://subagent-tool",
-              },
+              resultKind: "subagent" as const,
+              workflowId: "workflow://subagent-tool",
             },
           ],
         ]),

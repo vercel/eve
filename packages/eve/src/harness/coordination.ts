@@ -4,6 +4,7 @@ import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#prot
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type {
   RuntimeActionRequest,
+  RuntimeAgentDispatchRequest,
   RuntimeActionResult,
   RuntimeToolCallActionRequest,
   RuntimeWorkflowTaskRequest,
@@ -70,7 +71,7 @@ export interface PendingCoordinationBatch {
   /** Framework task controls deferred to the turn owner. */
   readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
   /** Authored-tool and subagent workflow tasks pending coordination. */
-  readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+  readonly tasks: readonly (RuntimeAgentDispatchRequest | RuntimeWorkflowTaskRequest)[];
   readonly event: PendingCoordinationEventMetadata;
   readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
@@ -131,7 +132,7 @@ export function clearPendingCoordinationBatch(session: HarnessSession): HarnessS
  */
 export function setPendingCoordinationBatch(input: {
   readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
-  readonly tasks: readonly RuntimeWorkflowTaskRequest[];
+  readonly tasks: readonly (RuntimeAgentDispatchRequest | RuntimeWorkflowTaskRequest)[];
   readonly event: PendingCoordinationEventMetadata;
   readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
@@ -461,17 +462,17 @@ export function createCoordinationRequestFromToolCall(input: {
       },
     };
   }
-  if (definition?.task !== undefined) {
+  if (definition?.workflowId !== undefined) {
     return {
       kind: "task",
       request: {
         callId: input.toolCall.toolCallId,
-        executeInput: definition.task.executeInput?.(inputObject),
+        executeInput: definition.executeInput?.(inputObject),
         input: inputObject,
         kind: "workflow-task",
-        resultKind: definition.task.resultKind,
+        resultKind: definition.resultKind,
         toolName: input.toolCall.toolName,
-        workflowId: definition.task.workflowId,
+        workflowId: definition.workflowId,
       },
     };
   }

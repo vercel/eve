@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import {
   acceptTaskAgentEventStep,
+  recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/task-hitl-proxy-steps.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
-import { setAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 import { getProxyInputRequests } from "#harness/proxy-input-requests.js";
+import { getSessionTaskIndex } from "#tasks/session-index.js";
 
 vi.mock("#execution/durable-session-store.js", () => ({ readDurableSession: vi.fn() }));
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({ readLatestTaskView: vi.fn() }));
@@ -309,5 +311,61 @@ describe("acceptTaskAgentEventStep", () => {
         sessionState,
       }),
     ).resolves.toEqual({ accepted: false });
+  });
+});
+
+describe("recordTerminalTaskViewsStep", () => {
+  it("caches an owned terminal view and releases the task's agent lease", async () => {
+    vi.mocked(readDurableSession).mockResolvedValue({
+      agent: { system: "" },
+      continuationToken: "parent-token",
+      history: [],
+      sessionId: "parent-session",
+      state: setAgentHandleStore(
+        {
+          "eve.tasks": {
+            tasks: [
+              {
+                createdByTurnId: "turn-1",
+                metadata: { agentId: "agent-1", kind: "subagent", mode: "local", name: "research" },
+                taskId: "task-1",
+                taskInboxToken: "task-token",
+                taskRunId: "task-run",
+              },
+            ],
+            version: 2,
+          },
+        },
+        {
+          handles: [
+            {
+              address: {
+                continuationToken: "child-token",
+                kind: "agent/local",
+                sessionId: "child-1",
+              },
+              identity: { id: "agent-1", name: "research", nodeId: "node-1" },
+              operationId: "operation-1",
+              phase: "claimed",
+              taskId: "task-1",
+            },
+          ],
+        },
+      ),
+    });
+    const view = {
+      lastOutput: { data: "done", type: "result" as const },
+      metadata: { agentId: "agent-1", kind: "subagent", mode: "local" as const, name: "research" },
+      status: "completed" as const,
+      taskId: "task-1",
+    };
+
+    const result = await recordTerminalTaskViewsStep({ sessionState, views: [view] });
+    const state = result.snapshot?.session.state;
+
+    expect(getSessionTaskIndex(state)[0]?.terminalView).toEqual(view);
+    expect(getAgentHandleStore(state)?.handles).toEqual([
+      expect.objectContaining({ phase: "available" }),
+    ]);
   });
 });

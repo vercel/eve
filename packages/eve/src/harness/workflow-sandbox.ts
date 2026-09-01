@@ -95,7 +95,7 @@ function createWorkflowHostTools(tools: HarnessToolMap, names: Iterable<string>)
 
   for (const name of names) {
     const tool = tools.get(name);
-    if (tool?.task !== undefined) {
+    if (tool?.workflowId !== undefined) {
       hostTools[name] = createWorkflowTaskHostTool(tool);
     }
   }
@@ -114,10 +114,16 @@ function createWorkflowTaskHostTool(harnessTool: HarnessToolDefinition): ToolSet
       return requestWorkflowSandboxInterrupt({
         kind: WORKFLOW_TASK_INTERRUPT_KIND,
         task: {
-          executeInput: harnessTool.task?.executeInput?.(toolInput),
-          nodeId: harnessTool.task?.nodeId,
-          resultKind: harnessTool.task?.resultKind,
-          workflowId: harnessTool.task?.workflowId,
+          action:
+            harnessTool.behavior?.handling?.kind === "dispatch" &&
+            (harnessTool.behavior.handling.target.kind === "subagent-call" ||
+              harnessTool.behavior.handling.target.kind === "remote-agent-call")
+              ? harnessTool.behavior.handling.target.kind
+              : undefined,
+          executeInput: harnessTool.executeInput?.(toolInput),
+          nodeId: harnessTool.nodeId,
+          resultKind: harnessTool.resultKind,
+          workflowId: harnessTool.workflowId,
         },
         toolInput,
         toolName: harnessTool.name,

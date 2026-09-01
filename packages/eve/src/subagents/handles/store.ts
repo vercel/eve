@@ -94,21 +94,13 @@ export type AgentAddress =
     };
 
 /**
- * Durable ownership record for one delegated child.
+ * Parent-turn-owned lifecycle: `starting → running → parked ↔ running`.
  *
- * - `starting` — the parent committed intent to start; the child may or
- *   may not exist yet.
- * - `running` — one identified child turn is outstanding.
- * - `parked` — the child is idle and resumable; only this phase is
- *   model-visible.
- * - `reserved` — a background task owns a fresh identity before start.
- * - `claimed` — a background task owns the addressed child turn.
- * - `available` — the addressed child is idle between background tasks.
- *
- * A terminal child has no handle: settlement deletes it. Every execution
- * policy uses this store; task-owned phases carry the task lease explicitly.
+ * `starting` owns a start intent before the child has an address, `running`
+ * owns one outstanding child turn, and `parked` retains an idle, resumable
+ * child. A terminal child or dead dispatch leaves this union entirely.
  */
-export type AgentHandle =
+export type TurnOwnedAgentHandle =
   | {
       readonly phase: "starting";
       readonly identity: AgentIdentity;
@@ -126,25 +118,48 @@ export type AgentHandle =
       readonly identity: AgentIdentity;
       readonly address: AgentAddress;
       readonly lastStatus: string;
-    }
+    };
+
+/**
+ * Background-task lifecycle: `reserved → claimed → available ↔ claimed`.
+ *
+ * `reserved` leases a fresh identity before start, `claimed` leases an
+ * addressed child turn to one task, and `available` retains the idle address
+ * between tasks. A terminal child leaves this union entirely.
+ */
+export type TaskOwnedAgentHandle =
   | {
+      /** Fresh identity leased to one task before the child's address is confirmed. */
       readonly phase: "reserved";
       readonly identity: AgentIdentity;
       readonly operationId: string;
+      readonly callId?: string;
       readonly taskId: string;
     }
   | {
-      readonly phase: "available";
-      readonly identity: AgentIdentity;
-      readonly address: AgentAddress;
-    }
-  | {
+      /** Addressed child turn leased to one task until that task releases it. */
       readonly phase: "claimed";
       readonly identity: AgentIdentity;
       readonly operationId: string;
+      readonly callId?: string;
       readonly address: AgentAddress;
       readonly taskId: string;
+    }
+  | {
+      /** Idle addressed child with no task lease, ready for a later task to claim. */
+      readonly phase: "available";
+      readonly identity: AgentIdentity;
+      readonly address: AgentAddress;
     };
+
+/**
+ * Durable ownership record for one delegated child.
+ *
+ * The two execution policies share an identity namespace and serialized store,
+ * but their lifecycle states and transitions are disjoint. A terminal child has
+ * no handle: settlement deletes it.
+ */
+export type AgentHandle = TurnOwnedAgentHandle | TaskOwnedAgentHandle;
 
 /** Lifecycle phase of a delegated agent handle. */
 export type AgentHandlePhase = AgentHandle["phase"];
@@ -153,12 +168,6 @@ export type AgentHandlePhase = AgentHandle["phase"];
 export interface AgentHandleStore {
   readonly handles: readonly AgentHandle[];
 }
-
-/** Task-owned phases within the shared session agent handle store. */
-export type TaskOwnedAgentHandle = Extract<
-  AgentHandle,
-  { readonly phase: "available" | "claimed" | "reserved" }
->;
 
 export const EMPTY_AGENT_HANDLE_STORE: AgentHandleStore = { handles: [] };
 
@@ -169,6 +178,7 @@ export type AgentHandleStoreCommand =
       readonly identity: AgentIdentity;
       readonly kind: "reserve";
       readonly operationId: string;
+      readonly callId?: string;
       readonly taskId: string;
     }
   | {
@@ -180,6 +190,7 @@ export type AgentHandleStoreCommand =
   | {
       readonly agentId: string;
       readonly expectedTarget: "local" | "remote";
+      readonly callId?: string;
       readonly invokedName: string;
       readonly kind: "claim";
       readonly operationId: string;
@@ -248,7 +259,42 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
   }),
 ]);
 
-const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("phase", [
+const agentHandleStoreCommandSchema: z.ZodType<AgentHandleStoreCommand> = z.discriminatedUnion(
+  "kind",
+  [
+    z.strictObject({ kind: z.literal("read") }),
+    z.strictObject({
+      identity: identitySchema,
+      callId: nonEmptyString.optional(),
+      kind: z.literal("reserve"),
+      operationId: nonEmptyString,
+      taskId: nonEmptyString,
+    }),
+    z.strictObject({
+      address: addressSchema,
+      kind: z.literal("confirm"),
+      operationId: nonEmptyString,
+      taskId: nonEmptyString,
+    }),
+    z.strictObject({
+      agentId: nonEmptyString,
+      callId: nonEmptyString.optional(),
+      expectedTarget: z.enum(["local", "remote"]),
+      invokedName: nonEmptyString,
+      kind: z.literal("claim"),
+      operationId: nonEmptyString,
+      taskId: nonEmptyString,
+    }),
+    z.strictObject({
+      agentId: nonEmptyString,
+      kind: z.literal("remove"),
+      taskId: nonEmptyString,
+    }),
+    z.strictObject({ kind: z.literal("release-task"), taskId: nonEmptyString }),
+  ],
+);
+
+const turnOwnedAgentHandleSchema: z.ZodType<TurnOwnedAgentHandle> = z.discriminatedUnion("phase", [
   z.strictObject({
     identity: identitySchema,
     operation: startOperationSchema,
@@ -267,7 +313,11 @@ const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("phase", 
     lastStatus: z.string().max(MAX_STATUS_LENGTH),
     phase: z.literal("parked"),
   }),
+]);
+
+const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discriminatedUnion("phase", [
   z.strictObject({
+    callId: nonEmptyString.optional(),
     identity: identitySchema,
     operationId: nonEmptyString,
     phase: z.literal("reserved"),
@@ -275,16 +325,22 @@ const agentHandleSchema: z.ZodType<AgentHandle> = z.discriminatedUnion("phase", 
   }),
   z.strictObject({
     address: addressSchema,
-    identity: identitySchema,
-    phase: z.literal("available"),
-  }),
-  z.strictObject({
-    address: addressSchema,
+    callId: nonEmptyString.optional(),
     identity: identitySchema,
     operationId: nonEmptyString,
     phase: z.literal("claimed"),
     taskId: nonEmptyString,
   }),
+  z.strictObject({
+    address: addressSchema,
+    identity: identitySchema,
+    phase: z.literal("available"),
+  }),
+]);
+
+const agentHandleSchema: z.ZodType<AgentHandle> = z.union([
+  turnOwnedAgentHandleSchema,
+  taskOwnedAgentHandleSchema,
 ]);
 
 const agentHandleStoreSchema: z.ZodType<AgentHandleStore> = z
@@ -322,6 +378,12 @@ export function assertPersistableAgentHandleStore(store: AgentHandleStore): Agen
   return parsed.data;
 }
 
+/** Parses one complete command before the session inbox routes it to the handle store. */
+export function parseAgentHandleStoreCommand(value: unknown): AgentHandleStoreCommand | undefined {
+  const parsed = agentHandleStoreCommandSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /**
  * Reads and validates the agent handle store from session state.
  *
@@ -353,5 +415,16 @@ export function setAgentHandleStore(
   return {
     ...state,
     [AGENT_HANDLES_STATE_KEY]: assertPersistableAgentHandleStore(store),
+  };
+}
+
+/** Writes a validated handle list to a session-shaped value. */
+export function writeHandles<Session extends { readonly state?: SessionStateMap }>(
+  session: Session,
+  handles: readonly AgentHandle[],
+): Session {
+  return {
+    ...session,
+    state: setAgentHandleStore(session.state, { handles }),
   };
 }

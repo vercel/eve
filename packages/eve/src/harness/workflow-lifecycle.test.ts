@@ -28,10 +28,8 @@ function createTools(): HarnessToolMap {
         description: "Delegate to the researcher.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "researcher",
-        task: {
-          resultKind: "subagent",
-          workflowId: "workflow//eve//subagentToolExecuteWorkflow",
-        },
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
   ]);
@@ -42,7 +40,7 @@ function workflowInterrupt(): WorkflowSandboxInterrupt {
     kind: WORKFLOW_TASK_INTERRUPT_KIND,
     task: {
       resultKind: "subagent" as const,
-      workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+      workflowId: "workflow//./agent/subagents/researcher//execute",
     },
     toolInput: { message: "Investigate" },
     toolName: "researcher",

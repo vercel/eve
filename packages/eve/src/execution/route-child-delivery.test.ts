@@ -11,6 +11,8 @@ import {
 } from "#execution/task-hitl-proxy-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import { dispatchTaskAgentInvocationStep } from "#execution/tools/subagent/invocation-step.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 
 vi.mock("#subagents/event-proxy-step.js", () => ({
   emitRecordedTaskInputRequestStep: vi.fn(),
@@ -22,6 +24,12 @@ vi.mock("#execution/task-hitl-proxy-steps.js", () => ({
 }));
 vi.mock("#execution/proxied-deliver-step.js", () => ({
   routeProxiedDeliverStep: vi.fn(),
+}));
+vi.mock("#execution/tools/subagent/invocation-step.js", () => ({
+  dispatchTaskAgentInvocationStep: vi.fn(),
+}));
+vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
+  resumeHookStep: vi.fn(),
 }));
 
 const state = (hasProxyInputRequests: boolean): DurableSessionState => ({
@@ -172,6 +180,68 @@ describe("task HITL delivery routing", () => {
       serializedContext: { adapter: "updated" },
       sessionState: nextState,
     });
+  });
+
+  it("dispatches agent invocations against the parent state and replies with immediate errors", async () => {
+    const nextState = state(false);
+    const result = {
+      callId: "call-1:research",
+      isError: true as const,
+      kind: "subagent-result" as const,
+      origin: "dispatch" as const,
+      output: { code: "AGENT_UNREACHABLE", message: "gone" },
+      subagentName: "research",
+    };
+    vi.mocked(dispatchTaskAgentInvocationStep).mockResolvedValue({
+      accepted: true,
+      result,
+      sessionState: nextState,
+    });
+
+    const routed = await routeDeliverToChildren({
+      callbackBaseUrl: "https://parent.example",
+      delivery: {
+        kind: "deliver",
+        payloads: [
+          {
+            task: {
+              effects: [
+                {
+                  input: { message: "Find it", target: "research" },
+                  invocationId: "call-1:research",
+                  name: "agent.invoke",
+                  replyTo: "agent-reply",
+                  taskId: "task-1",
+                },
+              ],
+            },
+          },
+        ],
+      },
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { source: "parent" },
+      sessionState: state(false),
+    });
+
+    expect(dispatchTaskAgentInvocationStep).toHaveBeenCalledWith({
+      callbackBaseUrl: "https://parent.example",
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1:research",
+        kind: "effect",
+        name: "agent.invoke",
+      },
+      serializedContext: { source: "parent" },
+      sessionState: state(false),
+      taskId: "task-1",
+    });
+    expect(resumeHookStep).toHaveBeenCalledWith("agent-reply", {
+      kind: "runtime-action-result",
+      results: [result],
+    });
+    expect(acceptTaskAgentEventStep).not.toHaveBeenCalled();
+    expect(routed).toMatchObject({ sessionState: nextState });
   });
 
   it("reindexes ordinary metadata after consuming task-only payloads", async () => {

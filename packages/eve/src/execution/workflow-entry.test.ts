@@ -3,13 +3,12 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
-import { ChannelRequestIdKey, SubagentDepthKey } from "#context/keys.js";
+import { ChannelRequestIdKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import {
   bindTurnCallerContextStep,
   notifyCancelledTaskCallerStep,
   notifyDelegatedParentStep,
-  notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
 } from "#subagents/parent-notification.js";
@@ -202,7 +201,7 @@ describe("workflowEntry", () => {
         continuationToken: "http:test",
         nodeId: undefined,
         sessionId: "wrun_test_123",
-        taskOwned: false,
+        taskId: undefined,
       }),
     );
     expect(dispatchTurnStep).toHaveBeenCalledWith(
@@ -322,11 +321,6 @@ describe("workflowEntry", () => {
     );
 
     expect(resolveInitialTurnCallerStep).toHaveBeenCalledExactlyOnceWith({ serializedContext });
-    expect(notifyTaskTurnStartedStep).toHaveBeenCalledExactlyOnceWith({
-      caller,
-      childSessionId: "wrun_test_123",
-      childTurnId: "turn_0",
-    });
     expect(bindTurnCallerContextStep).toHaveBeenCalledExactlyOnceWith({
       caller,
       serializedContext: expect.objectContaining({ "eve.sessionCallback": expect.any(Object) }),
@@ -533,15 +527,12 @@ describe("workflowEntry", () => {
     await workflowEntry({
       input: { message: "hello there" },
       limits: { maxInputTokensPerSession: 4 },
-      serializedContext: createSerializedContext({
-        [SubagentDepthKey.name]: 3,
-      }),
+      serializedContext: createSerializedContext({}),
     });
 
     expect(createSessionStep).toHaveBeenCalledWith(
       expect.objectContaining({
         inheritedLimits: { maxInputTokensPerSession: 4 },
-        subagentDepth: 3,
       }),
     );
   });
@@ -1378,7 +1369,7 @@ describe("workflowEntry", () => {
       expect.objectContaining({
         error: expect.objectContaining({ message: "caller notification failed" }),
         serializedContext: settledContext,
-        turnId: undefined,
+        turnId: "turn_0",
       }),
     );
   });

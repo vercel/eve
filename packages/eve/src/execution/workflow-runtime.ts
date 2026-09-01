@@ -123,8 +123,6 @@ export const workflowToolRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
 };
 
-export { subagentToolExecuteWorkflowReference } from "#execution/tools/subagent/workflow-reference.js";
-
 /**
  * Creates a workflow-backed runtime whose long-lived driver owns the
  * event stream and dispatches each turn as a child workflow run.
@@ -203,6 +201,8 @@ export function createWorkflowRuntime(config: {
         limits: input.limits,
         serializedContext,
       };
+      const taskId = input.taskId ?? input.callback?.taskId;
+      if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
       }

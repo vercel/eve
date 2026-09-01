@@ -2,6 +2,7 @@ import type { LanguageModel } from "ai";
 
 import type { Runtime, SessionCapabilities } from "#channel/types.js";
 import { dispatchDynamicModelEvent } from "#context/dynamic-model-lifecycle.js";
+import { preparePersistedStepDynamicToolMetadata } from "#context/dynamic-tool-lifecycle.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { ExecutionInstrumentation } from "#instrumentation/runtime.js";
 import { LOAD_SKILL_TOOL_NAME } from "#runtime/skills/fragment-context.js";
@@ -103,13 +104,17 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     compactOnly: input.compactOnly,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
-    webSearchProvider: input.node.agent.webSearchProvider,
     handleEvent: input.handleEvent,
     historyProjector: input.historyProjector,
     historyView: input.historyView,
     instrumentation: sessionInstrumentation,
     mode: input.mode,
     onCompaction: preserveFrameworkStateOnCompaction,
+    resolveStepDynamicTools: (resolveInput) =>
+      preparePersistedStepDynamicToolMetadata({
+        ...resolveInput,
+        resolvers: input.node.agent.dynamicToolResolvers ?? [],
+      }),
     dispatchDynamicModelEvent: dispatchModelEvent,
     resolveModel,
     runtimeIdentity: buildRuntimeIdentity(input.node),
@@ -214,10 +219,13 @@ function resolveHarnessToolDefinition(input: {
     }
     return createWorkflowToolHarnessDefinition({
       definition: createRegisteredHarnessToolDefinition({
+        behavior: input.tool.behavior,
         definition: registeredTool.definition,
         rootOnly: input.tool.rootOnly,
       }),
-      ...input.tool.task,
+      nodeId: input.tool.task.nodeId,
+      resultKind: input.tool.task.resultKind,
+      workflowId: input.tool.task.workflowId,
     });
   }
 
@@ -231,13 +239,14 @@ function resolveHarnessToolDefinition(input: {
   }
 
   return createRegisteredHarnessToolDefinition({
+    behavior: input.tool.behavior,
     definition: registeredTool.definition,
     rootOnly: input.tool.rootOnly,
   });
 }
 
 type PreparedRuntimeWorkflowTool = PreparedRuntimeTool & {
-  readonly task: NonNullable<PreparedRuntimeTool["task"]>;
+  readonly task: import("#runtime/sessions/turn.js").PreparedRuntimeWorkflowTask;
 };
 
 function isPreparedRuntimeWorkflowTool(
@@ -247,6 +256,7 @@ function isPreparedRuntimeWorkflowTool(
 }
 
 function createRegisteredHarnessToolDefinition(input: {
+  readonly behavior?: HarnessToolDefinition["behavior"];
   readonly definition: ResolvedToolDefinition;
   readonly rootOnly?: boolean;
 }): HarnessToolDefinition {
@@ -256,7 +266,7 @@ function createRegisteredHarnessToolDefinition(input: {
       (definition) => definition.name === def.name,
     );
     if (taskDefinition !== undefined) {
-      return taskDefinition;
+      return { ...taskDefinition, behavior: input.behavior };
     }
   }
   const rawExecute = def.execute;
@@ -265,6 +275,7 @@ function createRegisteredHarnessToolDefinition(input: {
 
   const definition: HarnessToolDefinition = {
     approvalKey: def.approvalKey,
+    behavior: input.behavior,
     description: def.description,
     execution: def.execution,
     execute: isFrameworkRequestInput

@@ -42,6 +42,8 @@ import {
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
+import { AuthKey } from "#context/keys.js";
+import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 
 // ---------------------------------------------------------------------------
 // Step result type
@@ -75,6 +77,7 @@ export type HarnessStepResult = Pick<
  * Input for {@link buildStepHooks}.
  */
 interface StepHooksInput {
+  readonly auth?: import("#channel/types.js").SessionAuthContext | null;
   readonly cachePath: PromptCachePath;
   readonly emit?: HarnessEmitFn;
   readonly emissionState: HarnessEmissionState;
@@ -179,7 +182,12 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
       messages: processed,
     };
 
-    const providerOptions = requireSessionModelReference(session).providerOptions;
+    const modelReference = requireSessionModelReference(session);
+    const providerOptions = mergeProviderSafetyIdentifier(
+      modelReference,
+      modelReference.providerOptions,
+      input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
+    );
     if (input.cachePath.kind === "gateway-auto") {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<
         typeof stepResult.providerOptions

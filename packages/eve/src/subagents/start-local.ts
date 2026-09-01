@@ -53,6 +53,7 @@ export async function startLocalSubagent(input: {
     activityObserver: input.activityObserver,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,
+    selfAgent: source.type === "runtime",
     source,
     taskId: input.taskId,
   });

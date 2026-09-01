@@ -1,16 +1,9 @@
 import type { SessionContext } from "#context/session-context.js";
-import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 
 export type WorkflowToolRunSessionContext = SessionContext["session"];
-
-export interface WorkflowToolAgentDispatch {
-  readonly callbackBaseUrl?: string;
-  readonly serializedContext: Record<string, unknown>;
-  readonly sessionState: DurableSessionState;
-}
 
 export const WORKFLOW_TOOL_EXECUTOR_KIND = "workflow-tool";
 

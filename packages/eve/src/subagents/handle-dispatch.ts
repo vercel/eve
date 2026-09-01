@@ -81,6 +81,19 @@ export async function dispatchToTaskAgentAddress(input: {
   readonly handle: Extract<TaskOwnedAgentHandle, { phase: "claimed" }>;
   readonly taskId: string;
 }): Promise<DispatchOutcome> {
+  return await dispatchToAgentAddress(input);
+}
+
+/** Delivers a continuation to an already-claimed local or remote agent address. */
+export async function dispatchToAgentAddress(input: {
+  readonly action: RuntimeAgentHandleAction;
+  readonly auth: SessionAuthContext | null;
+  readonly bundle: CompiledBundle;
+  readonly currentSession: RuntimeSession;
+  readonly parentToken: string;
+  readonly handle: { readonly address: AgentAddress; readonly identity: AgentIdentity };
+  readonly taskId?: string;
+}): Promise<DispatchOutcome> {
   const { action, handle } = input;
   const agentId = handle.identity.id;
 

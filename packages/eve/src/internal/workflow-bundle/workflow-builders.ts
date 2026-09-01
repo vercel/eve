@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
+import { SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME } from "#runtime/subagents/workflow-reference.js";
 import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
 import {
   createWorkflowId,
@@ -54,7 +55,10 @@ export async function applyWorkflowTransform(
   mode: "workflow" | "step" | "client" | false,
   absolutePath?: string,
   projectRoot?: string,
-  stableWorkflowNames: ReadonlySet<string> = STABLE_WORKFLOW_NAMES,
+  stableWorkflowNames: ReadonlySet<string> = new Set([
+    ...STABLE_WORKFLOW_NAMES,
+    SUBAGENT_TOOL_EXECUTE_WORKFLOW_NAME,
+  ]),
 ): Promise<{
   code: string;
   workflowManifest: WorkflowManifest;

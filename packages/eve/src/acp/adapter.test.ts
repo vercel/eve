@@ -154,6 +154,13 @@ describe("EveAcpAdapter", () => {
         data: {
           actions: [
             { callId: "call-1", input: { city: "SF" }, kind: "tool-call", toolName: "weather" },
+            {
+              callId: "workflow-1",
+              input: { report: "weekly" },
+              kind: "workflow-tool-call",
+              toolName: "publish",
+              workflowId: "publish-workflow",
+            },
           ],
           sequence: 3,
           stepIndex: 0,
@@ -194,11 +201,13 @@ describe("EveAcpAdapter", () => {
       "agent_message_chunk",
       "agent_thought_chunk",
       "tool_call",
+      "tool_call",
       "tool_call_update",
     ]);
     expect(notifications.slice(0, 2).map(({ params }) => (params as any).update.messageId)).toEqual(
       ["t1:message:0", "t1:thought:0"],
     );
+    expect((notifications[3]!.params as any).update.title).toBe("publish");
     expect(JSON.stringify(notifications)).not.toContain("secret");
   });
 

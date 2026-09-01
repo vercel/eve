@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deliverTaskInputResponsesStep,
   formatTaskNotification,
+  wakeTaskEffectParentStep,
 } from "#execution/tasks/child/steps.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { TaskView } from "#tasks/types.js";
@@ -146,5 +147,48 @@ describe("deliverTaskInputResponsesStep", () => {
       "eve:workflow-tool-run-answer:run-1:0",
       [{ optionId: "approve", requestId: "req-1" }],
     );
+  });
+});
+
+describe("wakeTaskEffectParentStep", () => {
+  it("forwards an agent invocation through the task effect envelope", async () => {
+    const request = {
+      from: {
+        callId: "call-1",
+        execution: "background" as const,
+        input: {},
+        runId: "run-1",
+        stepIndex: 0,
+        toolName: "research",
+        turnId: "turn-1",
+      },
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1:research",
+        kind: "effect" as const,
+        name: "workflow.event",
+      },
+    };
+
+    await wakeTaskEffectParentStep({ request, taskId: "task-1", token: "parent-token" });
+
+    expect(resumeSessionInbox).toHaveBeenCalledWith("parent-token", {
+      kind: "send",
+      payload: {
+        task: {
+          effects: [
+            {
+              input: { message: "Find it", target: "research" },
+              invocationId: "call-1:research",
+              name: "workflow.event",
+              replyTo: "agent-reply",
+              taskId: "task-1",
+            },
+          ],
+        },
+      },
+      taskDeliveryId: "task-1:effect:run-1:call-1:research",
+    });
   });
 });

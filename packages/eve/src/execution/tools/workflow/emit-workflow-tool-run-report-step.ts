@@ -20,7 +20,7 @@ export async function emitWorkflowToolRunReportStep(input: {
       output: input.update,
       toolName: input.from.toolName,
     }),
-    sequence: input.from.sequence,
+    sequence: input.from.sequence ?? 0,
     stepIndex: input.from.stepIndex,
     turnId: input.from.turnId,
   });

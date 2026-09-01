@@ -3,7 +3,7 @@
  * Task-run transport (start/command/view) lives in `run-parent.ts`, which
  * Callers compose these primitives around their own executor policy.
  */
-import type { RuntimeSession } from "#subagents/handle-dispatch.js";
+import type { HarnessSession } from "#harness/types.js";
 import {
   readLatestTaskView,
   sendTaskCommand,
@@ -37,7 +37,7 @@ export function prepareBackgroundTask(input: {
   readonly parentSessionId: string;
   readonly parentStepIndex?: number;
   readonly parentTurnId: string;
-  readonly session: RuntimeSession;
+  readonly session: HarnessSession;
 }): BackgroundTaskDraft {
   const taskId = deriveTaskId({
     callId: input.callId,
@@ -63,7 +63,7 @@ export async function beginBackgroundTask(input: {
   readonly parentSessionId: string;
   readonly parentStepIndex?: number;
   readonly parentTurnId: string;
-  readonly session: RuntimeSession;
+  readonly session: HarnessSession;
 }): Promise<BackgroundTask> {
   const task = prepareBackgroundTask(input);
   await startTaskRun({

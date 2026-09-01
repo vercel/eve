@@ -18,6 +18,7 @@ export async function finalizeExpiredSession(input: {
   readonly mode: RunMode;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly terminalState?: { terminalEmitted: boolean };
 }): Promise<{ readonly output: unknown }> {
   await terminateChildSessionsStep({
     serializedContext: input.serializedContext,
@@ -27,6 +28,7 @@ export async function finalizeExpiredSession(input: {
     parentWritable: input.driverWritable,
     serializedContext: input.serializedContext,
   });
+  if (input.terminalState !== undefined) input.terminalState.terminalEmitted = true;
 
   if (input.mode === "task") {
     await fireSessionCallbackStep({
@@ -53,6 +55,7 @@ export async function finalizeDone(input: {
   readonly action: NextDriverAction & { readonly kind: "done" };
   readonly caller: TurnCaller | undefined;
   readonly mode: RunMode;
+  readonly terminalState?: { terminalEmitted: boolean };
 }): Promise<{ readonly output: unknown }> {
   const { output, serializedContext } = input.action;
   const failed = input.action.isError === true;
@@ -61,6 +64,7 @@ export async function finalizeDone(input: {
     serializedContext,
     sessionState: input.action.sessionState,
   });
+  if (input.terminalState !== undefined) input.terminalState.terminalEmitted = true;
   if (input.mode === "task") {
     await fireSessionCallbackStep({
       error: failed ? output : undefined,

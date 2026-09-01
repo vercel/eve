@@ -78,16 +78,11 @@ export function buildToolSet(input: {
       definition.execution === "background" && definition.execute !== undefined
         ? {
             execute: definition.execute,
+            executeInput: definition.executeInput,
             name: definition.name,
-            task:
-              definition.task === undefined
-                ? undefined
-                : {
-                    executeInput: definition.task.executeInput,
-                    nodeId: definition.task.nodeId,
-                    resultKind: definition.task.resultKind,
-                    workflowId: definition.task.workflowId,
-                  },
+            nodeId: definition.nodeId,
+            resultKind: definition.resultKind,
+            workflowId: definition.workflowId,
           }
         : undefined,
     );

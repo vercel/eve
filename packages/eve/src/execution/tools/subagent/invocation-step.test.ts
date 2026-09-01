@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { dispatchAgentInvocation } from "#execution/tools/subagent/invocation-step.js";
-import { dispatchToTaskAgentAddress } from "#subagents/handle-dispatch.js";
-import { startSubagent } from "#execution/coordination-dispatch-shared.js";
 import {
-  readAgentHandleStoreStep,
-  sendAgentHandleCommandStep,
-} from "#execution/session-command-inbox.js";
+  dispatchAgentInvocation,
+  settleTaskAgentInvocationStep,
+} from "#execution/tools/subagent/invocation-step.js";
+import { dispatchToTaskAgentAddress } from "#subagents/handle-dispatch.js";
+import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invocation-preparation.js";
+import { readDurableSession } from "#execution/durable-session-store.js";
+import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 
 vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -16,15 +17,15 @@ vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
 vi.mock("#subagents/continuation-bundle.js", () => ({
   createAgentContinuationBundle: vi.fn(() => ({ nodeId: "child" })),
 }));
-vi.mock("#execution/coordination-dispatch-shared.js", () => ({
+vi.mock("#execution/tools/subagent/start.js", () => ({
   startSubagent: vi.fn(),
 }));
 vi.mock("#execution/tools/subagent/invocation-preparation.js", () => ({
   prepareOwnerAgentInvocation: vi.fn(),
 }));
-vi.mock("#execution/session-command-inbox.js", () => ({
-  readAgentHandleStoreStep: vi.fn(),
-  sendAgentHandleCommandStep: vi.fn(),
+vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  readDurableSession: vi.fn(),
 }));
 const action = {
   callId: "call-1",
@@ -35,7 +36,19 @@ const action = {
   nodeId: "subagents/research",
   subagentName: "research",
 };
-const session = { sessionId: "parent", state: undefined } as never;
+const availableRecord = {
+  address: { continuationToken: "child", kind: "agent/local" as const, sessionId: "child" },
+  identity: { id: "agent-1", name: "research", nodeId: "subagents/research" },
+  phase: "available" as const,
+};
+const session = {
+  agent: { system: "" },
+  compaction: {},
+  continuationToken: "parent-token",
+  history: [],
+  sessionId: "parent",
+  state: setAgentHandleStore(undefined, { handles: [availableRecord] }),
+};
 const prepared = {
   adapter: {},
   adapterCtx: {},
@@ -56,40 +69,12 @@ const called = {
   callId: "call-1",
   kind: "called" as const,
   name: "research",
-  session,
+  session: session as never,
   toolName: "research",
 };
-const availableRecord = {
-  address: called.address,
-  identity: { id: "agent-1", name: "research", nodeId: "subagents/research" },
-  phase: "available" as const,
-};
-const claimedRecord = {
-  ...availableRecord,
-  operationId: "operation-1",
-  phase: "claimed" as const,
-  taskId: "task-1",
-};
-
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(readAgentHandleStoreStep).mockResolvedValue({ handles: [availableRecord] });
-  vi.mocked(sendAgentHandleCommandStep).mockImplementation(async ({ command, commandId }) => ({
-    commandId,
-    result:
-      command.kind === "reserve"
-        ? {
-            handle: {
-              identity: command.identity,
-              operationId: command.operationId,
-              phase: "reserved",
-              taskId: command.taskId,
-            },
-            kind: "ready",
-          }
-        : { handle: claimedRecord, kind: "ready" },
-    store: { handles: [claimedRecord] },
-  }));
+  vi.mocked(readDurableSession).mockResolvedValue(session as never);
 });
 
 describe("owner agent invocation dispatch", () => {
@@ -104,12 +89,23 @@ describe("owner agent invocation dispatch", () => {
 
     expect(dispatchToTaskAgentAddress).toHaveBeenCalledWith(
       expect.objectContaining({
+        handle: expect.objectContaining({
+          identity: availableRecord.identity,
+          phase: "claimed",
+          taskId: "task-1",
+        }),
         parentToken: "agent-reply",
-        handle: claimedRecord,
         taskId: "task-1",
       }),
     );
-    expect(dispatched).toEqual({ agentId: "agent-1" });
+    expect(dispatched).toMatchObject({ agentId: "agent-1" });
+    expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual([
+      expect.objectContaining({
+        identity: availableRecord.identity,
+        phase: "claimed",
+        taskId: "task-1",
+      }),
+    ]);
   });
 
   it("starts a fresh agent with task-owned handle semantics", async () => {
@@ -127,7 +123,53 @@ describe("owner agent invocation dispatch", () => {
         taskId: "task-1",
       }),
     );
-    expect(dispatched).toEqual({ agentId: expect.any(String) });
+    expect(dispatched).toMatchObject({ agentId: expect.any(String) });
+    expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual(
+      expect.arrayContaining([expect.objectContaining({ phase: "claimed", taskId: "task-1" })]),
+    );
+  });
+});
+
+describe("task-owned agent settlement", () => {
+  it.each(["parked", "terminal"] as const)("applies a %s child outcome", async (kind) => {
+    const claimed = {
+      ...availableRecord,
+      operationId: "operation-1",
+      phase: "claimed" as const,
+      taskId: "task-1",
+    };
+    vi.mocked(readDurableSession).mockResolvedValue({
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+    } as never);
+
+    const settled = await settleTaskAgentInvocationStep({
+      result: {
+        callId: "call-1",
+        kind: "subagent-result",
+        origin: "child",
+        outcome: {
+          kind,
+          result: { kind: "succeeded", output: "done" },
+          usageDelta: {
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 2,
+            outputTokens: 1,
+          },
+        },
+        output: "done",
+        subagentName: "research",
+      },
+      sessionState: {} as never,
+      taskId: "task-1",
+    });
+
+    const handles =
+      getAgentHandleStore(settled.sessionState.snapshot?.session.state)?.handles ?? [];
+    expect(handles).toEqual(
+      kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
+    );
   });
 });
 
@@ -138,8 +180,8 @@ async function dispatch() {
     request: {
       input: { message: "Find it", target: "research" },
       invocationId: "call-1",
-      kind: "effect" as const,
-      name: "agent.invoke" as const,
+      kind: "effect",
+      name: "agent.invoke",
     },
     serializedContext: {},
     sessionState: {} as never,

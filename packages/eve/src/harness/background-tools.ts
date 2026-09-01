@@ -7,14 +7,12 @@ import type { JsonValue } from "#shared/json.js";
 
 export interface BackgroundExecutableTool {
   readonly execute: (input: unknown, options: ToolExecuteOptions, task: TaskExec) => unknown;
+  readonly executeInput?: (input: unknown) => JsonValue;
   readonly name: string;
+  readonly nodeId?: string;
+  readonly resultKind?: "subagent" | "tool";
   /** Present when the execute body runs in the task-owned durable workflow. */
-  readonly task?: {
-    readonly executeInput?: (input: unknown) => JsonValue;
-    readonly nodeId?: string;
-    readonly resultKind?: "subagent" | "tool";
-    readonly workflowId: string;
-  };
+  readonly workflowId?: string;
 }
 
 export interface BackgroundToolCall {

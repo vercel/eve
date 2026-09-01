@@ -13,7 +13,7 @@ function createTask(index: number): RuntimeWorkflowTaskRequest {
     kind: "workflow-task",
     resultKind: "subagent",
     toolName: "echo-marker",
-    workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+    workflowId: "workflow//./agent/subagents/researcher//execute",
   };
 }
 

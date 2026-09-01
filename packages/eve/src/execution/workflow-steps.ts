@@ -86,10 +86,7 @@ import {
   readRetainedBackgroundToolResult,
   runBackgroundStep,
 } from "#execution/background-tool-execution.js";
-import {
-  isTaskOwnedSerializedContext,
-  TASK_UPDATE_SESSION_INSTRUCTION,
-} from "#execution/tasks/child/instructions.js";
+import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { reconcileSessionContinuationToken } from "#execution/reconcile-session-continuation-token.js";
@@ -133,7 +130,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   const bundle = ctx.require(BundleKey);
   const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
   const taskUpdatesEnabled =
-    isTaskOwnedSerializedContext(input.serializedContext) &&
+    durableSession.taskId !== undefined &&
     effectiveAgent.turnAgent.tools.some(
       (tool) =>
         tool.kind === "authored-tool" &&

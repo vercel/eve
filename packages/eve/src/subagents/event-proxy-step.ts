@@ -85,7 +85,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
       childContinuationToken: input.request.replyTo,
       childSessionId: input.request.taskId,
       event: {
-        requests: [input.request.request as never],
+        requests: (input.request.requests ?? [input.request.request]) as never,
         sequence: input.request.sequence,
         stepIndex: input.request.stepIndex,
         turnId: input.request.turnId,

@@ -74,19 +74,19 @@ describe("workflow-tool task input", () => {
     });
   });
 
-  it("does not normalize agent invocation effects as human input", () => {
+  it("does not normalize workflow effects as human input", () => {
     expect(() =>
       workflowToolRunRequestToTaskInputRequest({
         from,
         replyTo: "subagent:parent:call-1",
         request: {
-          input: { message: "Review this", target: "reviewer" },
+          input: { kind: "internal-event" },
           invocationId: "call-1",
           kind: "effect",
-          name: "agent.invoke",
+          name: "internal.event",
         },
       }),
-    ).toThrow("An agent invocation request must be handled as a task-owned workflow effect.");
+    ).toThrow("A workflow owner effect cannot be normalized as human input.");
   });
 });
 

@@ -13,6 +13,7 @@ import {
 } from "#harness/proxy-input-requests.js";
 import { isInputRequest } from "#shared/input.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
 import {
@@ -38,23 +39,30 @@ export async function recordTaskInputRequestStep(input: {
 
   const durableSession = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(durableSession.state, input.request.taskId);
-  if (entry === undefined || !isInputRequest(input.request.request)) {
+  const requests = input.request.requests ?? [input.request.request];
+  if (entry === undefined || requests.length === 0 || !requests.every(isInputRequest)) {
     return { accepted: false, sessionState: input.sessionState };
   }
   const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-  const requestId = input.request.request.requestId;
+  const requestIds = requests.map((request) => request.requestId);
   if (
     view?.status !== "input_required" ||
-    view.inputRequests.length !== 1 ||
-    view.inputRequests[0] === null ||
-    typeof view.inputRequests[0] !== "object" ||
-    Array.isArray(view.inputRequests[0]) ||
-    Reflect.get(view.inputRequests[0], "requestId") !== requestId
+    view.inputRequests.length !== requestIds.length ||
+    !view.inputRequests.every(
+      (request, index) =>
+        request !== null &&
+        typeof request === "object" &&
+        !Array.isArray(request) &&
+        Reflect.get(request, "requestId") === requestIds[index],
+    )
   ) {
     return { accepted: false, sessionState: input.sessionState };
   }
 
-  const parentRequestId = createTaskInputRequestId(input.request.taskId, requestId);
+  const parentRequests = requests.map((request) => ({
+    ...request,
+    requestId: createTaskInputRequestId(input.request.taskId, request.requestId),
+  }));
   const handle = getAgentHandleStore(durableSession.state)?.handles.find(
     (candidate) => candidate.phase === "claimed" && candidate.taskId === input.request.taskId,
   );
@@ -65,24 +73,29 @@ export async function recordTaskInputRequestStep(input: {
           createEveTaskInputRoutePath(createTaskInputCapabilityToken(input.request.replyTo)),
         )
       : undefined;
-  const route: { -readonly [K in keyof ProxyInputRequest]: ProxyInputRequest[K] } = {
-    childContinuationToken: input.request.replyTo,
-    childRequestId: requestId,
-    kind: input.request.request.kind,
-    taskId: input.request.taskId,
-  };
-  if (remoteResponseUrl !== undefined) route.childResponseUrl = remoteResponseUrl;
+  const entries = requests.map((request, index) => {
+    const parentRequest = parentRequests[index]!;
+    const route: { -readonly [K in keyof ProxyInputRequest]: ProxyInputRequest[K] } = {
+      childContinuationToken: input.request.replyTo,
+      childRequestId: request.requestId,
+      kind: request.kind,
+      taskId: input.request.taskId,
+    };
+    if (remoteResponseUrl !== undefined) route.childResponseUrl = remoteResponseUrl;
+    return [parentRequest.requestId, route] as const;
+  });
   const state = upsertProxyInputRequestState({
-    entries: [[parentRequestId, route]],
+    entries,
     forChildContinuationToken: input.request.replyTo,
     state: durableSession.state,
   });
+  const request: TaskInputRequestDelivery =
+    input.request.requests === undefined
+      ? { ...input.request, request: parentRequests[0]! }
+      : { ...input.request, request: undefined, requests: parentRequests };
   return {
     accepted: true,
-    request: {
-      ...input.request,
-      request: { ...input.request.request, requestId: parentRequestId },
-    },
+    request,
     sessionState: {
       ...input.sessionState,
       hasProxyInputRequests: true,
@@ -150,13 +163,21 @@ export async function recordTerminalTaskViewsStep(input: {
 }): Promise<DurableSessionState> {
   "use step";
   const durableSession = await readDurableSession(input.sessionState);
-  let state = durableSession.state;
-  for (const view of input.views) state = cacheTerminalTaskView(state, view);
-  if (state === durableSession.state) return input.sessionState;
+  let session = durableSession;
+  for (const view of input.views) {
+    if (findSessionTaskEntry(session.state, view.taskId) === undefined) continue;
+    const state = cacheTerminalTaskView(session.state, view);
+    if (state !== session.state) session = { ...session, state };
+    session = applyTaskAgentHandleCommand(session, {
+      kind: "release-task",
+      taskId: view.taskId,
+    }).session;
+  }
+  if (session === durableSession) return input.sessionState;
   return {
     ...input.sessionState,
     snapshot: {
-      session: { ...durableSession, state },
+      session,
       version: input.sessionState.version,
     },
   };

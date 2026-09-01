@@ -17,8 +17,10 @@ function concurrentWorkflowInterrupt(): WorkflowSandboxInterrupt {
       payload: {
         kind: WORKFLOW_TASK_INTERRUPT_KIND,
         task: {
+          action: "subagent-call" as const,
+          nodeId: "subagents/researcher",
           resultKind: "subagent",
-          workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+          workflowId: "workflow//./agent/subagents/researcher//execute",
         },
         toolInput: { message },
         toolName: "echo-marker",
@@ -76,16 +78,16 @@ describe("workflow task state", () => {
       {
         callId: "echo-marker_workflow-call_tool-1_interrupt",
         input: { message: "alpha" },
-        kind: "workflow-task",
-        resultKind: "subagent",
-        toolName: "echo-marker",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+        subagentName: "echo-marker",
       },
       {
         callId: "echo-marker_workflow-call_tool-2_interrupt",
         input: { message: "beta" },
-        kind: "workflow-task",
-        resultKind: "subagent",
-        toolName: "echo-marker",
+        kind: "subagent-call",
+        nodeId: "subagents/researcher",
+        subagentName: "echo-marker",
       },
     ]);
     expect(getWorkflowTaskCallIds(interrupt)).toEqual([

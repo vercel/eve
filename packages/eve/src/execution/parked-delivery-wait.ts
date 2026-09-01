@@ -1,13 +1,8 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { SessionCommandRouter } from "#execution/session-command-router.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
-import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
-import {
-  sessionInboxWire,
-  SessionInboxWireError,
-  type DecodedSessionInbox,
-} from "#execution/wire/session-inbox-wire.js";
 import { coalesceDeliveries } from "#harness/messages.js";
 
 type NextSessionAction =
@@ -63,8 +58,10 @@ export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly callbackBaseUrl?: string;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
+  readonly commandRouter: SessionCommandRouter;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
@@ -85,8 +82,10 @@ export async function nextTurnDelivery(input: {
 async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
+  readonly callbackBaseUrl?: string;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
+  readonly commandRouter: SessionCommandRouter;
   readonly deferDeliveries?: boolean;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly seenTaskDeliveries?: Set<string>;
@@ -100,6 +99,7 @@ async function awaitNextTurnDelivery(input: {
       bufferedSessionControls: input.bufferedSessionControls,
       cancelledTaskIds,
       commandInbox: input.commandInbox,
+      commandRouter: input.commandRouter,
       deferDeliveries: input.deferDeliveries,
       seenTaskDeliveries,
     });
@@ -118,6 +118,7 @@ async function awaitNextTurnDelivery(input: {
     }
 
     const routed = await routeDeliverToChildren({
+      callbackBaseUrl: input.callbackBaseUrl,
       delivery: deliver,
       parentWritable: input.driverWritable,
       serializedContext: input.stateCursor.serializedContext,
@@ -143,6 +144,7 @@ async function waitForNextSessionAction(input: {
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly cancelledTaskIds: Set<string>;
   readonly commandInbox: SessionCommandInbox;
+  readonly commandRouter: SessionCommandRouter;
   readonly deferDeliveries?: boolean;
   readonly seenTaskDeliveries: Set<string>;
 }): Promise<NextSessionAction> {
@@ -187,27 +189,8 @@ async function waitForNextSessionAction(input: {
       return { delivery: null, kind: "delivery" };
     }
 
-    if (await input.commandInbox.handleAgentHandleCommand(first.value)) {
-      continue;
-    }
-
-    // Runtime-action results use the active turn's private inbox. A late value
-    // can still surface through an old session alias, where the driver has
-    // always ignored it rather than treating it as a session command.
-    if (first.value.kind === "runtime-action-result") {
-      continue;
-    }
-
-    let decoded: DecodedSessionInbox;
-    try {
-      decoded = sessionInboxWire.decode(first.value);
-    } catch (error) {
-      if (!(error instanceof SessionInboxWireError)) throw error;
-      // A lost delivery with an operator-visible signal is the designed
-      // failure; reinterpreting an unknown payload is the bug. Stay parked.
-      await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
-      continue;
-    }
+    const decoded = await input.commandRouter.route(first.value);
+    if (decoded === undefined) continue;
 
     if (decoded.kind === "session-timeout") {
       return { kind: "expired" };

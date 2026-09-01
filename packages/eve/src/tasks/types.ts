@@ -1,4 +1,4 @@
-import type { JsonValue } from "#shared/json.js";
+import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 
 /** Durable lifecycle status for one unit of background work. */
@@ -6,19 +6,13 @@ export type TaskStatus = "working" | "input_required" | "completed" | "failed" |
 
 /** Executor-neutral identity shown for one task. */
 export interface TaskMetadata {
-  readonly agentId?: string;
   readonly kind: string;
-  readonly mode?: "local" | "remote";
   readonly name: string;
+  readonly [key: string]: JsonValue | undefined;
 }
 
 export function sameTaskMetadata(left: TaskMetadata, right: TaskMetadata): boolean {
-  return (
-    left.agentId === right.agentId &&
-    left.kind === right.kind &&
-    left.mode === right.mode &&
-    left.name === right.name
-  );
+  return jsonValuesEqual(left, right);
 }
 
 export type TaskOutput =
@@ -143,7 +137,7 @@ export interface TaskInboundUpdate {
 export interface TaskInboundInputRequest {
   readonly kind: "task-input-request";
   readonly replyTo: string;
-  readonly request: TaskInputRequest;
+  readonly requests: readonly TaskInputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -169,8 +163,7 @@ export type TaskRunInboundPayload =
   | TaskInboundUpdate;
 
 /** Generic task-owned request sent through the parent session payload. */
-export interface TaskInputRequestDelivery {
-  readonly request: TaskInputRequest;
+interface TaskInputRequestDeliveryBase {
   readonly replyTo: string;
   readonly sequence: number;
   readonly stepIndex: number;
@@ -178,9 +171,16 @@ export interface TaskInputRequestDelivery {
   readonly turnId: string;
 }
 
+export type TaskInputRequestDelivery = TaskInputRequestDeliveryBase &
+  (
+    | { readonly request: TaskInputRequest; readonly requests?: never }
+    | { readonly request?: never; readonly requests: readonly TaskInputRequest[] }
+  );
+
 /** Opaque workflow-owner effect forwarded to the parent session after task admission. */
 export interface TaskEffectDelivery {
   readonly input: JsonValue;
+  readonly invocationId?: string;
   readonly name: string;
   readonly replyTo: string;
   readonly taskId: string;

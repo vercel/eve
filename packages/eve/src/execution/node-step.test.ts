@@ -2,8 +2,16 @@ import { ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Runtime } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey, SessionIdKey, SessionKey } from "#context/keys.js";
+import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
+import {
+  AuthKey,
+  InitiatorAuthKey,
+  SessionIdKey,
+  SessionKey,
+  StepDynamicToolMetadataKey,
+} from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
@@ -20,6 +28,8 @@ import { createPreparedRuntimeSubagentTool } from "#runtime/subagents/registry.j
 import { createExecutionNodeStep, createNodeHarnessTools } from "#execution/node-step.js";
 import { createSession } from "#execution/session.js";
 import { createStubSandboxRegistry } from "#internal/testing/stub-sandbox-registry.js";
+import { defineTool } from "#tools/definition.js";
+import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 import { toInputSchema } from "#tools/schema.js";
 import {
   AGENT_TOOL_DESCRIPTION,
@@ -267,11 +277,12 @@ describe("createNodeHarnessTools", () => {
         turnTools: delegationTools,
       }),
     });
-    for (const name of ["agent", "research", "reviewer"]) {
+    for (const name of ["research", "reviewer"]) {
       expect(tools.get(name)?.execution).toBe("background");
       expect(tools.get(name)?.execute).toBeDefined();
       expect(tools.get(name)?.runtimeAction).toBeUndefined();
-      expect(tools.get(name)?.task?.resultKind).toBe("subagent");
+      expect(tools.get(name)?.resultKind).toBe("subagent");
+      expect(tools.get(name)?.workflowId).toBe("workflow//eve//subagentToolExecuteWorkflow");
     }
   });
 
@@ -367,6 +378,152 @@ describe("createExecutionNodeStep", () => {
     expect(resolveRuntimeModelReference).toHaveBeenCalledWith(
       rootNode.turnAgent.model,
       modelResolutionScope,
+    );
+  });
+
+  it("prepares persisted step tools with the node's dynamic resolvers", async () => {
+    const executeCallback = vi.fn(async (closure: unknown) => {
+      return (closure as { version: string }).version;
+    });
+    const handler = vi.fn(() => ({
+      wired_dynamic_tool: defineTool({
+        approval: stampDurableDynamicCallback(() => "user-approval" as const, {
+          callback: () => "user-approval" as const,
+          closure: { version: "current-request" },
+        }),
+        description: "A dynamic tool.",
+        execute: stampDurableDynamicCallback(async () => "current-execute", {
+          callback: executeCallback,
+          closure: { version: "current-execute" },
+        }),
+        inputSchema: { type: "object" },
+      }),
+    }));
+    const dynamicToolResolver = {
+      eventNames: ["step.started"],
+      events: { "step.started": handler },
+      logicalPath: "agent/tools/wired.ts",
+      slug: "wired",
+      sourceId: "test:wired-dynamic-tool",
+      sourceKind: "module",
+    } as never;
+    const baseNode = createTestNode();
+    const node = {
+      ...baseNode,
+      agent: {
+        ...baseNode.agent,
+        dynamicToolResolvers: [dynamicToolResolver],
+      },
+    };
+    setupMockAgentForToolExecution("wired_dynamic_tool", {});
+    const step = createExecutionNodeStep({
+      createRuntime: () => createNoopRuntime(),
+      instrumentation: undefined,
+      mode: "task",
+      modelResolutionScope: { moduleMap: { nodes: {} }, nodeId: undefined },
+      node,
+    });
+
+    const responder = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, responder);
+    ctx.set(InitiatorAuthKey, null);
+    ctx.set(BundleKey, {
+      compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
+    } as never);
+    ctx.set(ChannelKey, { kind: "http" });
+    ctx.set(SessionIdKey, "sess-dynamic");
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: null },
+      sessionId: "sess-dynamic",
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          approvalRequest: {
+            closure: { version: "persisted-request" },
+            stepId: "eve:dynamic-tool//old/approval-request/0-100",
+          },
+          execute: {
+            closure: { version: "persisted-execute" },
+            stepId: "eve:dynamic-tool//old/execute/0-100",
+          },
+        },
+        description: "Old dynamic tool.",
+        entryKey: "wired_dynamic_tool",
+        inputSchema: { type: "object" },
+        name: "wired_dynamic_tool",
+        resolverSlug: "wired",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ]);
+    const session = appendPendingInputBatch({
+      requests: [
+        {
+          action: {
+            callId: "call-wired",
+            input: {},
+            kind: "tool-call",
+            toolName: "wired_dynamic_tool",
+          },
+          allowFreeform: false,
+          display: "confirmation",
+          kind: "tool-approval",
+          options: [
+            { id: "approve", label: "Approve" },
+            { id: "cancel", label: "Cancel" },
+          ],
+          prompt: "Approve dynamic tool",
+          requestId: "approval-wired",
+        },
+      ],
+      responseMessages: [
+        {
+          content: [
+            {
+              input: {},
+              toolCallId: "call-wired",
+              toolName: "wired_dynamic_tool",
+              type: "tool-call",
+            },
+            {
+              approvalId: "approval-wired",
+              toolCallId: "call-wired",
+              type: "tool-approval-request",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: createSession({
+        continuationToken: "test-dynamic",
+        sessionId: "sess-dynamic",
+        turnAgent: node.turnAgent,
+      }),
+    });
+
+    await contextStorage.run(ctx, () =>
+      step(session, {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            response: { optionId: "approve", requestId: "approval-wired" },
+          },
+        ],
+      }),
+    );
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(executeCallback).toHaveBeenCalledWith(
+      { version: "persisted-execute" },
+      {},
+      expect.objectContaining({ callId: "call-wired_dynamic_tool" }),
     );
   });
 });

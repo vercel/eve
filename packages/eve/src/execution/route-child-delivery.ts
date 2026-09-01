@@ -14,6 +14,18 @@ import {
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/task-hitl-proxy-steps.js";
+import {
+  dispatchTaskAgentInvocationStep,
+  settleTaskAgentInvocationStep,
+} from "#execution/tools/subagent/invocation-step.js";
+import {
+  isAgentInvocationRequest,
+  type AgentInvocationRequest,
+} from "#execution/tools/subagent/invocation.js";
+import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type { TaskEffectDelivery } from "#tasks/types.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -26,6 +38,7 @@ import {
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {
+  readonly callbackBaseUrl?: string;
   readonly delivery: DeliverHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
@@ -34,13 +47,6 @@ export async function routeDeliverToChildren(input: {
   const payload = coalesceDeliverPayloads(input.delivery.payloads);
   let serializedContext = input.serializedContext;
   let sessionState = input.sessionState;
-
-  if ((payload.task?.views?.length ?? 0) > 0) {
-    sessionState = await recordTerminalTaskViewsStep({
-      sessionState,
-      views: payload.task?.views ?? [],
-    });
-  }
 
   for (const request of payload.task?.inputRequests ?? []) {
     const recorded = await recordTaskInputRequestStep({
@@ -60,6 +66,53 @@ export async function routeDeliverToChildren(input: {
   }
 
   for (const effect of payload.task?.effects ?? []) {
+    if (isSubagentCalledEffect(effect)) {
+      const emitted = await emitTaskSubagentCalledStep({
+        event: effect.input,
+        parentWritable: input.parentWritable,
+        serializedContext,
+      });
+      serializedContext = emitted.serializedContext;
+      continue;
+    }
+    const settlement = readAgentSettlement(effect);
+    if (settlement !== undefined) {
+      const settled = await settleTaskAgentInvocationStep({
+        result: settlement,
+        sessionState,
+        taskId: effect.taskId,
+      });
+      sessionState = settled.sessionState;
+      continue;
+    }
+    const invocation = readAgentInvocation(effect);
+    if (invocation !== undefined) {
+      const dispatched = await dispatchTaskAgentInvocationStep({
+        callbackBaseUrl: input.callbackBaseUrl,
+        replyTo: effect.replyTo,
+        request: invocation,
+        serializedContext,
+        sessionState,
+        taskId: effect.taskId,
+      });
+      sessionState = dispatched.sessionState;
+      if (dispatched.accepted && dispatched.calledEvent !== undefined) {
+        const emitted = await emitTaskSubagentCalledStep({
+          event: dispatched.calledEvent,
+          parentWritable: input.parentWritable,
+          serializedContext,
+        });
+        serializedContext = emitted.serializedContext;
+      }
+      if (dispatched.accepted && dispatched.result !== undefined) {
+        await resumeHookStep(effect.replyTo, {
+          kind: "runtime-action-result",
+          results: [dispatched.result],
+        });
+      }
+      continue;
+    }
+
     const accepted = await acceptTaskAgentEventStep({
       effect,
       sessionState,
@@ -73,6 +126,16 @@ export async function routeDeliverToChildren(input: {
     });
     serializedContext = emitted.serializedContext;
     sessionState = emitted.sessionState;
+  }
+
+  // Child settlement carries the authoritative parked/terminal handle verdict
+  // and is enqueued before the task's terminal view. Preserve that ordering
+  // when several task deliveries are coalesced into one parent turn.
+  if ((payload.task?.views?.length ?? 0) > 0) {
+    sessionState = await recordTerminalTaskViewsStep({
+      sessionState,
+      views: payload.task?.views ?? [],
+    });
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];
@@ -115,4 +178,35 @@ export async function routeDeliverToChildren(input: {
     serializedContext,
     sessionState,
   });
+}
+
+function isSubagentCalledEffect(effect: TaskEffectDelivery): effect is TaskEffectDelivery & {
+  readonly input: Extract<
+    import("#protocol/message.js").UnstampedMessageStreamEvent,
+    { type: "subagent.called" }
+  >;
+} {
+  return (
+    effect.name === "agent.called" &&
+    typeof effect.input === "object" &&
+    effect.input !== null &&
+    !Array.isArray(effect.input) &&
+    Reflect.get(effect.input, "type") === "subagent.called"
+  );
+}
+
+function readAgentSettlement(effect: TaskEffectDelivery): RuntimeSubagentChildResult | undefined {
+  if (effect.name !== "agent.settled") return undefined;
+  const result = effect.input as RuntimeSubagentChildResult;
+  return result.kind === "subagent-result" && result.origin === "child" ? result : undefined;
+}
+
+function readAgentInvocation(effect: TaskEffectDelivery): AgentInvocationRequest | undefined {
+  const request = {
+    input: effect.input,
+    invocationId: effect.invocationId,
+    kind: "effect" as const,
+    name: effect.name,
+  };
+  return isAgentInvocationRequest(request) ? request : undefined;
 }

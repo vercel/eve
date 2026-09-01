@@ -1,5 +1,4 @@
 import type { SubagentInputRequestHookPayload } from "#channel/types.js";
-import { isAgentInvocationRequest } from "#execution/tools/subagent/invocation.js";
 import type {
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunReport,
@@ -159,14 +158,16 @@ export function workflowToolRunRequestToTaskInputRequest(
   message: WorkflowToolRunRequestMessage,
 ): WorkflowToolRunTaskInputRequest {
   const { from, replyTo, request, requestCoordinates } = message;
-  return {
-    kind: "task-input-request",
+  const base = {
+    kind: "task-input-request" as const,
     replyTo,
-    request: normalizeInputRequest(request, from, replyTo),
     sequence: requestCoordinates?.sequence ?? 0,
     stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
     turnId: requestCoordinates?.turnId ?? from.turnId,
   };
+  return "kind" in request && request.kind === "input-batch"
+    ? { ...base, requests: request.requests }
+    : { ...base, request: normalizeInputRequest(request, from, replyTo) };
 }
 
 function normalizeInputRequest(
@@ -174,11 +175,6 @@ function normalizeInputRequest(
   from: WorkflowToolRunRef,
   requestId: string,
 ): InputRequest {
-  if (isAgentInvocationRequest(request)) {
-    throw new TypeError(
-      "An agent invocation request must be handled as a task-owned workflow effect.",
-    );
-  }
   if ("action" in request && "requestId" in request) return request as InputRequest;
   if (isEffectRequest(request)) {
     throw new TypeError("A workflow owner effect cannot be normalized as human input.");

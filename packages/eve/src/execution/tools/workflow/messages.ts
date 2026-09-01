@@ -7,6 +7,7 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 
 export interface WorkflowToolRunOwner {
+  readonly admission: string;
   readonly outcome: string;
   readonly report: string;
   readonly request: string;
@@ -19,7 +20,11 @@ export interface WorkflowToolEffectRequest {
   readonly name: string;
 }
 
-export type WorkflowToolRequest = WorkflowToolEffectRequest | ToolInputRequest | InputRequest;
+export type WorkflowToolRequest =
+  | WorkflowToolEffectRequest
+  | ToolInputRequest
+  | InputRequest
+  | { readonly kind: "input-batch"; readonly requests: readonly InputRequest[] };
 
 export function isWorkflowToolEffectRequest(
   value: WorkflowToolRequest,
@@ -34,6 +39,7 @@ export interface WorkflowToolRunRef {
   readonly input: JsonObject;
   readonly resultKind?: "subagent" | "tool";
   readonly runId: string;
+  readonly sequence?: number;
   readonly stepIndex: number;
   readonly toolName: string;
   readonly turnId: string;
@@ -71,6 +77,7 @@ export const workflowToolRunOutcomeHook = defineHook<WorkflowToolRunOutcomeMessa
 
 export function deriveWorkflowToolRunOwner(inboxToken: string): WorkflowToolRunOwner {
   return {
+    admission: `${inboxToken}:admission`,
     outcome: `${inboxToken}:outcome`,
     report: `${inboxToken}:report`,
     request: `${inboxToken}:request`,
@@ -90,6 +97,10 @@ export function isWorkflowToolRunControlMessage(
 const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
 
 interface WorkflowToolRunContext {
+  /** Compatibility for already-started two-run background workflows. */
+  readonly admission?: Promise<
+    { readonly status: "accepted" } | { readonly status: "rejected"; readonly reason: string }
+  >;
   answerSeq: number;
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunOwner;
@@ -123,6 +134,12 @@ export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
 
 export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
   return readWorkflowToolRunContext(ctx).owner;
+}
+
+export function readWorkflowToolRunAdmission(
+  ctx: ToolContext,
+): WorkflowToolRunContext["admission"] {
+  return readWorkflowToolRunContext(ctx).admission;
 }
 
 /** Returns an answer hook which may be awaited or raced with another workflow operation. */

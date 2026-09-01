@@ -25,22 +25,22 @@ export function createWorkflowToolHarnessDefinition(
           outputSchema: toOutputSchema(SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA),
         }
       : input.definition;
-  const task = {
+  const workflow = {
     executeInput: input.executeInput,
     nodeId: input.nodeId,
     resultKind: input.resultKind,
     workflowId: input.workflowId,
   };
   if (definition.execution !== "background") {
-    return { ...definition, execute: undefined, task };
+    return { ...definition, ...workflow, execute: undefined };
   }
   return {
     ...definition,
+    ...workflow,
     execute: createWorkflowToolBackgroundExecute({
       toolName: definition.name,
       workflowId: input.workflowId,
     }),
-    task,
   };
 }
 
@@ -50,13 +50,13 @@ export function createPreparedWorkflowToolHarnessDefinition(
   if (tool.task === undefined) {
     throw new Error(`Prepared tool "${tool.name}" is not backed by a workflow task.`);
   }
-  const nodeId = "nodeId" in tool ? tool.nodeId : tool.task.nodeId;
   const input: {
     -readonly [
       K in keyof WorkflowToolHarnessDefinitionInput
     ]: WorkflowToolHarnessDefinitionInput[K];
   } = {
     definition: {
+      behavior: tool.behavior,
       description: tool.description,
       execution: tool.execution,
       inputSchema: toInputSchema(tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
@@ -64,9 +64,10 @@ export function createPreparedWorkflowToolHarnessDefinition(
       outputSchema: toOutputSchema(tool.outputSchema),
       rootOnly: tool.rootOnly,
     },
-    ...tool.task,
+    nodeId: tool.task.nodeId,
+    resultKind: tool.task.resultKind,
+    workflowId: tool.task.workflowId,
   };
-  if (nodeId !== undefined) input.nodeId = nodeId;
   return createWorkflowToolHarnessDefinition(input);
 }
 

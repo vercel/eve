@@ -116,8 +116,6 @@ export type SessionTraceSeed = SessionTraceContext;
 export const SessionTraceSeedKey = new ContextKey<SessionTraceSeed>("eve.sessionTraceSeed");
 export const OtelTraceEnabledKey = new ContextKey<boolean>("eve.otelTraceEnabled");
 
-export const SubagentDepthKey = new ContextKey<number>("eve.subagentDepth");
-
 /**
  * Session-level capability flags (see {@link SessionCapabilities}). Set
  * on root runs by channel routes and inherited pointwise by subagent
