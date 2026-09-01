@@ -355,7 +355,7 @@ describe("initializeSessionInstrumentation", () => {
       ...createRuntime({ capturesContent: true, publish: vi.fn() }, input.tracePolicy),
       idGenerator: new AgentSpanIdGenerator(),
       prepareSessionTrace: async () => ({ spanId: "", traceFlags: 0, traceId: "" }),
-      ...(input.samplesTrace === undefined ? {} : { samplesTrace: input.samplesTrace }),
+      samplesTrace: input.samplesTrace,
     });
   }
 

@@ -81,20 +81,19 @@ describe("registerOtelPipeline", () => {
 
   it("passes the pre-allocated trace id to a custom sampler without exporting the probe", async () => {
     const seen: string[] = [];
-    const sampler = {
-      shouldSample: (_context: unknown, traceId: string) => {
-        seen.push(traceId);
-        return { decision: traceId.startsWith("a") ? 2 : 0 };
-      },
-      toString: () => "test-sampler",
-    };
+    const sampler: NonNullable<Parameters<typeof registerOtelPipeline>[0]["pipeline"]["sampler"]> =
+      {
+        shouldSample: (_context: unknown, traceId: string) => {
+          seen.push(traceId);
+          return { decision: traceId.startsWith("a") ? 2 : 0 };
+        },
+        toString: () => "test-sampler",
+      };
     const exporter = new InMemorySpanExporter();
     const processor = new SimpleSpanProcessor(exporter);
     const runtime = registerOtelPipeline({
       pipeline: {
-        sampler: sampler as unknown as NonNullable<
-          Parameters<typeof registerOtelPipeline>[0]["pipeline"]["sampler"]
-        >,
+        sampler,
         spanProcessors: [processor],
       },
       serviceName: "weather",
