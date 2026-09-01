@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/876
 status: proposed
-last_updated: "2026-08-31"
+last_updated: "2026-09-01"
 ---
 
 # Turn performance and Workflow overhead
@@ -274,6 +274,47 @@ and crash-cleanup behavior remains on the existing path.
 
 This is the lowest-risk structural change. Prove exact step-count reduction and no change to root,
 subagent, task, failure, and cancellation results.
+
+#### Hosted result
+
+Two Vercel stress runs of the isolated change reproduced a material improvement against a
+contemporaneous instrumentation-only control. The first experiment SHA, `522e869`, is runtime
+identical to the final `863daf1` SHA; the amend changed comments only. All three stress jobs
+completed successfully and uploaded their raw JSON reports:
+
+- [Control run `33468124247`](https://github.com/vercel/eve/actions/runs/33468124247), SHA
+  `57b477d`, with [artifact `9785707208`](https://github.com/vercel/eve/actions/runs/33468124247/artifacts/9785707208).
+- [Experiment run `33468070932`](https://github.com/vercel/eve/actions/runs/33468070932), SHA
+  `522e869`, with [artifact `9785657364`](https://github.com/vercel/eve/actions/runs/33468070932/artifacts/9785657364).
+- [Confirmatory experiment run `33468608676`](https://github.com/vercel/eve/actions/runs/33468608676),
+  final SHA `863daf1`, with
+  [artifact `9785832093`](https://github.com/vercel/eve/actions/runs/33468608676/artifacts/9785832093).
+
+The control and confirmatory workflows' aggregate conclusions are failures because their separate
+`fixture-tasks` jobs failed. Their `agent-workflow-stress` jobs and artifact uploads succeeded.
+
+| Raw artifact metric         |        Control |           Experiment 1, delta |          Experiment 2, delta |
+| --------------------------- | -------------: | ----------------------------: | ---------------------------: |
+| Sequential mean             |        3.042 s |    2.184 s, −0.858 s (−28.2%) |   2.036 s, −1.006 s (−33.1%) |
+| Sequential p50              |        3.036 s |    2.057 s, −0.979 s (−32.3%) |   2.053 s, −0.983 s (−32.4%) |
+| Sequential p90              |        3.584 s |    2.455 s, −1.129 s (−31.5%) |   2.288 s, −1.295 s (−36.1%) |
+| Sequential p95              |        3.692 s |    2.527 s, −1.165 s (−31.6%) |   2.367 s, −1.326 s (−35.9%) |
+| First 10 warm mean          |        2.396 s |    1.806 s, −0.591 s (−24.6%) |   1.722 s, −0.674 s (−28.1%) |
+| Last 10 mean                |        3.607 s |    2.362 s, −1.244 s (−34.5%) |   2.209 s, −1.398 s (−38.8%) |
+| Sequential turn-order slope | +13.31 ms/turn | −0.08 ms/turn, −13.39 ms/turn | +5.17 ms/turn, −8.14 ms/turn |
+| Concurrent first-turn p50   |        5.679 s |    4.320 s, −1.359 s (−23.9%) |   4.394 s, −1.285 s (−22.6%) |
+| Concurrent second-turn p50  |        1.867 s |    1.510 s, −0.357 s (−19.1%) |   1.584 s, −0.283 s (−15.1%) |
+
+Exact Workflow-world integration coverage confirms the mechanism: two root turns omit one caller
+resolution, two caller binds, and two caller notifications, while the delegated two-turn path
+retains that `1 + 2 + 2` step inventory and its results.
+
+The result is replicated but not yet statistically paired. These workflows ran close together,
+not as interleaved base/head blocks, and isolated maxima remained noisy: experiment 1 recorded a
+15.687-second sequential maximum and a 3.025-second concurrent second-turn batch, while experiment
+2 recorded a 6.373-second concurrent first-turn batch against the control's 6.282 seconds. The
+p50 and p95 improved in both experiment runs, but the dedicated paired benchmark remains the proof
+gate for shipping.
 
 ### 3. Remove observability-only writes from each step
 
