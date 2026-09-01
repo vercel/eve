@@ -161,3 +161,32 @@ describe("request ledger extension migration", () => {
     expect(getPendingAuthorization(migrated)?.challenges).toEqual([challenge]);
   });
 });
+
+describe("request group owners", () => {
+  it("stores the framework approval gate as the owner of an approval group", () => {
+    const approval: InputRequest = {
+      action: { callId: "call-approval", input: {}, kind: "tool-call", toolName: "bash" },
+      kind: "tool-approval",
+      prompt: "Approve bash",
+      requestId: "approval-1",
+    };
+    const created = createRequestGroup({
+      owner: "framework-approval-gate",
+      requests: [approval],
+      responseMessages: [],
+      session: session(),
+    });
+
+    expect(readRequestLedger(created.state).groups[0]?.owner).toBe("framework-approval-gate");
+  });
+
+  it("defaults non-gate groups to the session-turn owner", () => {
+    const created = createRequestGroup({
+      requests: [request],
+      responseMessages: [],
+      session: session(),
+    });
+
+    expect(readRequestLedger(created.state).groups[0]?.owner).toBe("session-turn");
+  });
+});

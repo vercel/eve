@@ -17,11 +17,13 @@ export interface RequestRecord {
   readonly state: "open" | "terminal";
 }
 
+export type RequestGroupOwner = "framework-approval-gate" | "session-turn";
+
 export interface RequestGroup {
   readonly completion: "waiting" | "delivered" | "cancelled";
   readonly event?: PendingInputBatchEvent;
   readonly id: string;
-  readonly owner: "session-turn";
+  readonly owner: RequestGroupOwner;
   readonly requestIds: readonly string[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -126,6 +128,7 @@ export function clearPendingAuthorizationState(
 
 export function createRequestGroup(input: {
   readonly event?: PendingInputBatchEvent;
+  readonly owner?: RequestGroupOwner;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -144,7 +147,7 @@ export function createRequestGroup(input: {
         completion: "waiting",
         event: input.event,
         id: groupId,
-        owner: "session-turn",
+        owner: input.owner ?? "session-turn",
         requestIds: input.requests.map((request) => request.requestId),
         responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
         responseMessages: input.responseMessages,

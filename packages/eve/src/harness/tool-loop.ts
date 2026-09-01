@@ -2479,6 +2479,7 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
+      owner: approvalRequests.length > 0 ? "framework-approval-gate" : "session-turn",
       requests: inputRequests,
       responseMessages: [],
       session: parkedSession,
@@ -2514,6 +2515,7 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
+      owner: approvalRequests.length > 0 ? "framework-approval-gate" : "session-turn",
       requests: inputRequests,
       responseAuthRequiredRequestIds: approvalRequests
         .filter((request) => {

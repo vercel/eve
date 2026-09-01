@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import type { InputRequest } from "#shared/input.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
+import type { RequestGroupOwner } from "#harness/hitl/request-ledger.js";
 import {
   completeRequestGroups,
   createRequestGroup,
@@ -32,6 +33,7 @@ export interface PendingInputBatchEvent {
  */
 export interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
+  readonly owner?: RequestGroupOwner;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -129,6 +131,7 @@ export function removePendingInputBatches(
  */
 export function appendPendingInputBatch(input: {
   readonly event?: PendingInputBatchEvent;
+  readonly owner?: RequestGroupOwner;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -136,6 +139,7 @@ export function appendPendingInputBatch(input: {
 }): HarnessSession {
   return createRequestGroup({
     event: input.event,
+    owner: input.owner,
     requests: input.requests,
     responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
     responseMessages: input.responseMessages,
