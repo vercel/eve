@@ -1,6 +1,7 @@
 import type { FilePart, TextPart, UserContent } from "ai";
 
 import type { FetchFileResult } from "#channel/adapter.js";
+import { EveAttachmentError } from "#internal/attachments/errors.js";
 import { createLogger } from "#internal/logging.js";
 import {
   downloadTelegramFile,
@@ -86,7 +87,11 @@ export function createTelegramFetchFile(input: {
       filePath: file.filePath,
     });
     if (!response.ok) {
-      throw new Error(`Telegram file fetch returned HTTP ${response.status} for ${url}.`);
+      throw new EveAttachmentError({
+        adapterKind: "telegram",
+        kind: "resolver-threw",
+        message: `Telegram file fetch returned HTTP ${response.status}.`,
+      });
     }
 
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -108,7 +113,11 @@ export function createTelegramFetchFile(input: {
       input.policy,
     );
     if (violation !== null) {
-      throw new Error(`Telegram file rejected — ${formatUploadPolicyViolation(violation)}`);
+      throw new EveAttachmentError({
+        adapterKind: "telegram",
+        kind: "resolver-threw",
+        message: `Telegram file rejected — ${formatUploadPolicyViolation(violation)}`,
+      });
     }
     return result;
   };

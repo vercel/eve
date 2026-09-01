@@ -405,6 +405,8 @@ defineChannel({
 });
 ```
 
+If `fetchFile` throws, eve replaces that attachment with a model-visible error note and continues the turn. Built-in channels include safe details such as the upstream HTTP status. Custom channel errors use a generic note, while eve keeps the original error in operator logs.
+
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
 
 The framework handles staging bytes to the sandbox, enforcing upload policy, hydrating files for the model call, and reconstituting `URL` objects after queue serialization. See [Inbound attachments](../sandbox#inbound-attachments) for the shared storage, size, and provider-input behavior.
