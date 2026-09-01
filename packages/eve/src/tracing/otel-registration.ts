@@ -13,6 +13,7 @@ import type { OtelPipeline } from "#tracing/otel-declaration.js";
 
 const REGISTRATION_SPAN_NAME = "eve.otel.registration";
 const REPLAY_DEDUPLICATION_LIMIT = 100_000;
+const PENDING_CHILD_SPAN_LIMIT = 10_000;
 const require = createRequire(import.meta.url);
 
 class RegistrationMarkerPropagator {
@@ -42,6 +43,7 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
   private readonly endedSpans = new Set<string>();
   private readonly forwardedSpans = new Set<string>();
   private readonly pendingByParent = new Map<string, unknown[]>();
+  private pendingSpanCount = 0;
   private readonly processors: readonly SpanProcessor[];
   private readonly startedSpans = new Set<string>();
 
@@ -50,6 +52,7 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
   }
 
   async forceFlush(): Promise<void> {
+    this.drainPendingSpans();
     await Promise.all(this.processors.map((processor) => processor.forceFlush()));
   }
 
@@ -69,6 +72,8 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
       const pending = this.pendingByParent.get(parent) ?? [];
       pending.push(span);
       this.pendingByParent.set(parent, pending);
+      this.pendingSpanCount += 1;
+      if (this.pendingSpanCount > PENDING_CHILD_SPAN_LIMIT) this.releaseOldestPendingParent();
       return;
     }
     this.forward(span, identity);
@@ -82,17 +87,38 @@ class PrivateSpanFilteringProcessor implements SpanProcessor {
   }
 
   async shutdown(): Promise<void> {
+    this.drainPendingSpans();
     await Promise.all(this.processors.map((processor) => processor.shutdown()));
+  }
+
+  // A parent that never ends (lost worker, abandoned attempt) must not hold
+  // its ended children forever: flush and shutdown are the last chance to
+  // export them, and the cap bounds what one stuck parent can buffer. Spans
+  // released here precede their parent; an ordinary flush drains nothing
+  // because parents end before the per-step flush runs.
+  private drainPendingSpans(): void {
+    while (this.pendingByParent.size > 0) this.releaseOldestPendingParent();
+  }
+
+  private releaseOldestPendingParent(): void {
+    const parent = this.pendingByParent.keys().next().value;
+    if (parent === undefined) return;
+    this.releaseChildren(parent);
+  }
+
+  private releaseChildren(parent: string): void {
+    const children = this.pendingByParent.get(parent);
+    if (children === undefined) return;
+    this.pendingByParent.delete(parent);
+    this.pendingSpanCount -= children.length;
+    for (const child of children) this.forward(child, spanIdentity(child));
   }
 
   private forward(span: unknown, identity: string | undefined): void {
     for (const processor of this.processors) processor.onEnd(span);
     if (identity === undefined) return;
     addBounded(this.forwardedSpans, identity);
-    const children = this.pendingByParent.get(identity);
-    if (children === undefined) return;
-    this.pendingByParent.delete(identity);
-    for (const child of children) this.forward(child, spanIdentity(child));
+    this.releaseChildren(identity);
   }
 }
 
