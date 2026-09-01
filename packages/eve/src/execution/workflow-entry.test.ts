@@ -526,12 +526,7 @@ describe("workflowEntry", () => {
       sessionState,
     });
     expect(dispatchTurnStep).not.toHaveBeenCalled();
-    expect(notifyTurnCallerStep).toHaveBeenCalledWith({
-      caller: undefined,
-      lifecycle: "parked",
-      sessionId: "wrun_test_123",
-      settled: { output: "ok" },
-    });
+    expect(notifyTurnCallerStep).not.toHaveBeenCalled();
   });
 
   it("dispatches a compact control without converting it into a delivery", async () => {
