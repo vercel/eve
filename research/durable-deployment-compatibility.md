@@ -138,43 +138,73 @@ per-version schema hashes:
 }
 ```
 
-The artifact is complete and lexically sorted. A `null` version set means the
-current decoder does not expose a truthful finite support set; a `null` hash
-means the accepted version has no canonical schema identity yet. The message
-stream therefore leaves both fields `null`. The build hashes only the canonical
-session-inbox v1 JSON Schema, recursively sorting object keys before SHA-256.
-Hashing stays in a build-only module so Zod and `node:crypto` do not enter the
-runtime registry or workflow bundles. The artifact contains no timestamp,
-absolute path, Git SHA, or deployment-local value, so identical package inputs
-produce identical bytes.
+### Manifest guarantees
 
-The version-1 task input dual-writes `taskInboxToken` and its historical name,
-`continuationToken`, so a new producer can still start an older task workflow
-during a deployment transition. Its migration accepts either pre-version name;
-the other version-1 migrations are identity stamps that preserve additive
-fields.
+The manifest is a complete, lexically sorted inventory of the durable contracts
+owned by the build. For each contract, `currentVersion` identifies the version
+the build writes and `acceptedVersions` identifies the historical versions it
+can read. A `null` accepted-version set means that support has not yet been
+modeled as a truthful finite list; it does not mean the contract accepts no
+versions.
+
+Each accepted version may also have a canonical schema fingerprint. A `null`
+fingerprint means the version is recognized but its schema has not yet been
+formalized. The message stream has a current version but does not yet declare a
+complete historical support set or canonical schemas, so its accepted versions
+and schema hashes remain `null`.
+
+The session-inbox v1 contract currently has a canonical JSON Schema. The build
+recursively sorts the schema's object keys before computing its SHA-256
+fingerprint, so key ordering does not change its identity. Schema generation and
+hashing stay in build-only code so Zod and `node:crypto` do not enter the runtime
+registry or workflow bundles. The manifest also excludes timestamps, absolute
+paths, Git revisions, and deployment-local values, ensuring identical package
+inputs produce identical bytes.
+
+### Transitional compatibility
+
+Task workflow input renamed `continuationToken` to `taskInboxToken`. Version 1
+writes both fields so a new producer can still start an older task workflow
+during a mixed-version deployment, and its migration accepts either historical
+name. The other version-1 workflow-input migrations preserve the prior
+unversioned fields and add the version marker.
 
 Connection authorization callbacks use the same target-aware `sessionInboxWire`
-boundary as stable and continuation session deliveries. The callback route
-inspects the target hook before encoding, including the existing markerless
-stable-inbox classification, and the authorization source decodes before it
-interprets callback payloads. An unknown payload version is reported through the
-dropped-wire step and leaves the authorization challenge parked rather than
-reinterpreting or consuming it silently.
+protocol as session deliveries. Before sending a callback, the producer
+inspects the target hook and encodes the payload for the version its pinned
+workflow can decode. The authorization workflow decodes the envelope before
+interpreting it. An unknown version is reported through the dropped-wire step
+and leaves the authorization challenge pending rather than consuming or
+reinterpreting it.
 
-The registry that creates the manifest also owns the stable workflow IDs used
-by runtime references and the workflow bundler. Tests transform every real
-stable workflow declaration and compare the emitted ID with the registry. A
-renamed function, removed directive, changed routing key, or stale version
-inventory therefore fails before release.
+### Registry enforcement
 
-The durable contract regression gate builds both the pull request base and the
-candidate instead of comparing against an editable committed baseline. Its pure
-comparator accepts format 1 as a bootstrap base and rejects contract removal,
-stable workflow ID changes, current-version decreases, accepted-version
-removal, same-version schema hash changes or removal, and a version bump that
-drops the previous current version. Adding a hash where the base had none is
-allowed; semantic compatibility still requires the behavioral layers below.
+The durable-contract registry is also the source of truth for stable workflow
+IDs. Runtime references, workflow bundling, and manifest generation all derive
+their IDs from that registry. Tests compile every stable workflow declaration
+and compare its emitted ID with the registered value, so an accidental function
+rename, removed workflow directive, changed routing key, or stale version
+declaration fails before release.
+
+### Regression gate
+
+The regression gate builds the manifest for both the pull request's base commit
+and candidate commit, then compares the generated artifacts. It does not use a
+checked-in baseline that could be changed in the same pull request to hide a
+breaking change.
+
+The comparison rejects removing a durable contract, changing a stable workflow
+ID, decreasing a current version, removing a previously accepted version, or
+changing or removing the schema fingerprint of an existing version. When a
+contract advances to a new current version, the candidate must continue to
+accept the previous current version.
+
+The comparator accepts the original format-1 manifest as a bootstrap input
+while format 2 adds accepted-version sets and schema fingerprints. A candidate
+may add a fingerprint where none was previously declared, but it may not
+contradict or remove an existing compatibility claim. The manifest gate detects
+structural regressions only; historical fixtures, mixed-version scenarios, and
+suspended-session canaries provide the behavioral checks below.
 
 ## Admission pipeline
 
