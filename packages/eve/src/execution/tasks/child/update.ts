@@ -36,7 +36,7 @@ export async function executeTaskUpdate(input: {
     if (taskId === undefined) {
       return createTaskControlError(input.action, "This session is not owned by a parent task.");
     }
-    return createTaskUpdateResult(input.action, taskId);
+    return createTaskUpdateResult(input.action, taskId, message);
   }
 
   const adapter = input.adapter;
@@ -56,7 +56,7 @@ export async function executeTaskUpdate(input: {
     message,
   };
   await resumeHook(token, update);
-  return createTaskUpdateResult(input.action, taskId);
+  return createTaskUpdateResult(input.action, taskId, message);
 }
 
 function readUpdateMessage(input: Record<string, unknown>): string | undefined {
@@ -68,11 +68,12 @@ function readUpdateMessage(input: Record<string, unknown>): string | undefined {
 function createTaskUpdateResult(
   action: RuntimeToolCallActionRequest,
   taskId: string,
+  message: string,
 ): RuntimeActionResult {
   return {
     callId: action.callId,
     kind: "tool-result",
-    output: { status: "sent", taskId },
+    output: { message, status: "sent", taskId },
     toolName: action.toolName,
   };
 }

@@ -6,11 +6,10 @@ import type {
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
-import { submitActivity } from "#execution/submit-activity.js";
+import { observeTaskActivity } from "#execution/task-activity-projection.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { createLogger } from "#internal/logging.js";
-import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
@@ -44,35 +43,11 @@ export async function appendTaskViewStep(input: {
     writer.releaseLock();
   }
 
-  const events = projectTaskActivitySettlement({
+  void observeTaskActivity({
     activityObserver: input.activityObserver,
     settledAt: new Date().toISOString(),
     view: input.view,
   });
-  void submitActivity({ events, sink: input.activityObserver?.sink });
-}
-
-export function projectTaskActivitySettlement(input: {
-  readonly activityObserver: ActivityObserverConfig | undefined;
-  readonly settledAt: string;
-  readonly view: TaskView;
-}): readonly ActivityEventV1[] {
-  const work = input.activityObserver?.workIdentity;
-  const status = input.view.status;
-  if (
-    work === undefined ||
-    (status !== "completed" && status !== "failed" && status !== "cancelled")
-  )
-    return [];
-  return [
-    {
-      eventId: `${work.id}:settled:${status}`,
-      kind: "work.settled",
-      outcome: status,
-      settledAt: input.settledAt,
-      workId: work.id,
-    },
-  ];
 }
 
 /** Re-emits a task-owned child authorization event through the parent channel. */

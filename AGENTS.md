@@ -142,6 +142,12 @@ line of defense, and every required check must pass before merge.
     why, an invariant, a surprising edge case. Public API docs (principle 1) are
     the exception.
 
+11. **Activity is an event-log projection.** Activity presentation must derive
+    from canonical durable session or task events, not feature code posting ad
+    hoc facts to the activity collector. Keep semantic behavior such as parent
+    notification on its own durable path; observing activity must never become
+    required for it.
+
 Machine-checkable invariants are enforced by `pnpm guard:invariants`, which
 runs in the CI lint job. If the guard fails, fix the violation rather than
 editing the baseline — baselines may only shrink.

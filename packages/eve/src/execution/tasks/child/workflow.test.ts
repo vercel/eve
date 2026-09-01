@@ -42,6 +42,20 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
+const activityObserver = {
+  sink: {
+    url: "https://parent.example/eve/v1/activity/abcdefghijklmnopqrstuvwxyz123456",
+    version: 1 as const,
+  },
+  workIdentity: {
+    id: "work:task",
+    kind: "task" as const,
+    name: "research",
+    rootSessionId: "root",
+    rootTurnId: "turn",
+  },
+};
+
 function createWorkingView(): TaskView {
   return {
     metadata: {
@@ -93,6 +107,7 @@ describe("taskRunWorkflow", () => {
 
     const view = createWorkingView();
     await taskRunWorkflow({
+      activityObserver,
       taskInboxToken: "task-token",
       initialView: view,
       parentContinuationToken: "parent-session-token",

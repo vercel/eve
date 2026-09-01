@@ -143,6 +143,51 @@ describe("projectActivityEvents", () => {
     ]);
   });
 
+  it("projects accepted task_update results as task work updates", () => {
+    const event = {
+      data: {
+        result: {
+          callId: "task-update-1",
+          kind: "tool-result" as const,
+          output: { message: "Working", status: "sent", taskId: "task-1" },
+          toolName: "task_update",
+        },
+        sequence: 1,
+        status: "completed" as const,
+        stepIndex: 2,
+        turnId: "turn",
+      },
+      type: "action.result" as const,
+    };
+    const taskLineage = { ...lineage, id: "work:task", kind: "task" as const };
+    expect(
+      projectActivityEvents({
+        at: "2026-01-01T00:00:00.000Z",
+        event,
+        lineage: taskLineage,
+        sourceEventId: "event-1",
+      }),
+    ).toEqual([
+      {
+        eventId: "event-1",
+        kind: "work.updated",
+        message: "Working",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        workId: "work:task",
+      },
+      {
+        actionId: "action:work:task:task-update-1",
+        eventId: "action:work:task:task-update-1:settled:completed",
+        kind: "action.settled",
+        outcome: "completed",
+        settledAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+    expect(projectActivityEvents({ at: "2026-01-01T00:00:00.000Z", event, lineage })).toEqual([
+      expect.objectContaining({ kind: "action.settled" }),
+    ]);
+  });
+
   it("settles delegated work from its parent action result", () => {
     const workId = deriveChildActivityWorkId({
       callId: "child-1",

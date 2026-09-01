@@ -47,7 +47,9 @@ describe("executeTaskUpdate", () => {
       kind: "task-update",
       message: "Found three matching records.",
     });
-    expect(result).toMatchObject({ output: { status: "sent", taskId: "task_abc" } });
+    expect(result).toMatchObject({
+      output: { message: "Found three matching records.", status: "sent", taskId: "task_abc" },
+    });
   });
 
   it("sends remote updates through the owning task callback", async () => {
@@ -74,6 +76,8 @@ describe("executeTaskUpdate", () => {
       updateEpoch: "turn-child",
       message: "Found three matching records.",
     });
-    expect(result).toMatchObject({ output: { status: "sent", taskId: "task_abc" } });
+    expect(result).toMatchObject({
+      output: { message: "Found three matching records.", status: "sent", taskId: "task_abc" },
+    });
   });
 });

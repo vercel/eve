@@ -12,6 +12,7 @@ import {
 
 export const MAX_ACTIVITY_EVENT_IDS = 1_000;
 export const MAX_ACTIVITY_PENDING_SETTLEMENTS = 500;
+export const MAX_ACTIVITY_PENDING_WORK_UPDATES = 500;
 export const MAX_ACTIVITY_ENTITIES = 500;
 
 export function createActivitySnapshot(): ActivitySnapshotV1 {
@@ -19,6 +20,7 @@ export function createActivitySnapshot(): ActivitySnapshotV1 {
     actions: {},
     blockers: {},
     pendingSettlements: {},
+    pendingWorkUpdates: {},
     revision: 0,
     seenEventIds: [],
     version: 1,
@@ -62,6 +64,8 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return startWork(snapshot, event);
     case "work.settled":
       return settleWork(snapshot, event);
+    case "work.updated":
+      return updateWork(snapshot, event);
     case "action.started":
       return startAction(snapshot, event);
     case "action.settled":
@@ -80,6 +84,7 @@ function startWork(
   const current = snapshot.work[event.work.id];
   if (current !== undefined) return snapshot;
   const pending = pendingFor(snapshot, "work", event.work.id);
+  const pendingUpdate = snapshot.pendingWorkUpdates[event.work.id];
   const parent = event.work.parentId === undefined ? undefined : snapshot.work[event.work.parentId];
   const phase =
     pending?.outcome ??
@@ -90,10 +95,12 @@ function startWork(
     phase: phase as ActivityWorkPhase,
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
     startedAt: event.startedAt,
+    update: pendingUpdate,
   };
   const started = {
     ...snapshot,
     pendingSettlements: removeKey(snapshot.pendingSettlements, pendingKey("work", work.id)),
+    pendingWorkUpdates: removeKey(snapshot.pendingWorkUpdates, work.id),
     work: replaceBounded(snapshot.work, work.id, work),
   };
   return work.phase === "running"
@@ -117,6 +124,36 @@ function settleWork(
     settledAt: event.settledAt,
     workId: event.workId,
   });
+}
+
+function updateWork(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "work.updated" }>,
+): ActivitySnapshotV1 {
+  const update = {
+    eventId: event.eventId,
+    message: normalizeActivityText(event.message),
+    updatedAt: event.updatedAt,
+  };
+  const current = snapshot.work[event.workId];
+  if (current === undefined) {
+    const pending = snapshot.pendingWorkUpdates[event.workId];
+    if (pending !== undefined && !isNewerUpdate(update, pending)) return snapshot;
+    return {
+      ...snapshot,
+      pendingWorkUpdates: replaceBounded(
+        snapshot.pendingWorkUpdates,
+        event.workId,
+        update,
+        MAX_ACTIVITY_PENDING_WORK_UPDATES,
+      ),
+    };
+  }
+  if (current.update !== undefined && !isNewerUpdate(update, current.update)) return snapshot;
+  return {
+    ...snapshot,
+    work: replaceBounded(snapshot.work, event.workId, { ...current, update }),
+  };
 }
 
 function startAction(
@@ -304,6 +341,16 @@ function replaceBounded<T>(
   const overflow = Object.keys(next).length - max;
   for (const oldKey of Object.keys(next).slice(0, Math.max(0, overflow))) delete next[oldKey];
   return next;
+}
+
+function isNewerUpdate(
+  left: { eventId: string; updatedAt: string },
+  right: { eventId: string; updatedAt: string },
+): boolean {
+  return (
+    left.updatedAt > right.updatedAt ||
+    (left.updatedAt === right.updatedAt && left.eventId > right.eventId)
+  );
 }
 
 function removeKey<T>(
