@@ -5,6 +5,8 @@ packages:
   - e2e/fixtures/*
   - packages/*
 
+virtualStoreType: global
+
 packageExtensions:
   "@nuxt/kit@4":
     dependencies:

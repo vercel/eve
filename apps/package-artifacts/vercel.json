@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npx --yes pnpm@12.1.0 --filter eve-package-artifacts build",
-  "installCommand": "pnpm_bin=\"$(command -v pnpm)\" && pnpm_package=\"@pnpm/exe.linux-$(node -p process.arch)\" && npm install --global \"${pnpm_package}@12.1.0\" && cp \"$(npm root -g)/${pnpm_package}/pnpm\" \"$pnpm_bin\" && pnpm install --frozen-lockfile",
+  "buildCommand": "npx --yes pnpm@12.2.0 --filter eve-package-artifacts build",
+  "installCommand": "pnpm_bin=\"$(command -v pnpm)\" && pnpm_package=\"@pnpm/exe.linux-$(node -p process.arch)\" && npm install --global \"${pnpm_package}@12.2.0\" && cp \"$(npm root -g)/${pnpm_package}/pnpm\" \"$pnpm_bin\" && pnpm install --frozen-lockfile",
   "outputDirectory": "public",
   "rewrites": [
     { "source": "/:ref*/eve.tgz", "destination": "/api/package?ref=:ref" },
