@@ -116,11 +116,13 @@ export async function evaluatePendingAttempts(input: {
   readonly policyLookup: HarnessToolMap;
 }): Promise<RequestLedger> {
   let ledger = input.ledger;
-  for (const record of input.ledger.requests) {
-    if (record.outcome !== undefined) continue;
+  const recordIds = input.ledger.requests.map((record) => record.id);
+  for (const recordId of recordIds) {
+    const record = ledger.requests.find((candidate) => candidate.id === recordId);
+    if (record === undefined || record.outcome !== undefined) continue;
     for (const attempt of record.attempts ?? []) {
       if (attempt.status !== "pending") continue;
-      const current = ledger.requests.find((candidate) => candidate.id === record.id);
+      const current = ledger.requests.find((candidate) => candidate.id === recordId);
       if (current === undefined || current.outcome !== undefined) break;
       ledger = await evaluateApprovalAttempt({
         attemptId: attempt.id,
@@ -128,7 +130,7 @@ export async function evaluatePendingAttempts(input: {
         effects: input.effects,
         ledger,
         policyLookup: input.policyLookup,
-        recordId: record.id,
+        recordId,
       });
     }
   }

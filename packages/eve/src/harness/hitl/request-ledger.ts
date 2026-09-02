@@ -346,20 +346,25 @@ export function createRequests(input: {
     return replacement;
   });
 
+  // Internal Authorization requests are ungrouped; only InputRequests open a Group.
+  const groups =
+    input.requests.length === 0
+      ? ledger.groups
+      : [
+          ...ledger.groups,
+          {
+            completion: "waiting" as const,
+            event: input.event,
+            id: groupId,
+            owner: input.owner ?? "session-turn",
+            requestIds: input.requests.map((request) => request.requestId),
+            responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
+            responseMessages: input.responseMessages,
+          },
+        ];
   return writeRequestLedger({
     expectedVersion: ledger.version,
-    groups: [
-      ...ledger.groups,
-      {
-        completion: "waiting",
-        event: input.event,
-        id: groupId,
-        owner: input.owner ?? "session-turn",
-        requestIds: input.requests.map((request) => request.requestId),
-        responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
-        responseMessages: input.responseMessages,
-      },
-    ],
+    groups,
     requests: [...requests, ...durableReplacements.values()],
     session: input.session,
   });

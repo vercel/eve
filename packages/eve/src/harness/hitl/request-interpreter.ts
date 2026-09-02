@@ -168,8 +168,12 @@ export async function interpretRequests(
     stepInput = resolveTextMessageInput(textResolutionGroup, stepInput);
   }
 
-  const canonicalResponses = canonicalizeInputResponses(stepInput?.inputResponses ?? []);
+  // Attributed responses are the delivery boundary's responder-bound form of
+  // the same answers; both feed one canonical response set.
   const deliveredResponses = materializeDeliveredResponses(stepInput, input.delivery.responder);
+  const canonicalResponses = canonicalizeInputResponses(
+    deliveredResponses.map((entry) => entry.response),
+  );
 
   if (
     input.deferMessagesWhileApprovalsPending &&
@@ -204,6 +208,13 @@ export async function interpretRequests(
         (response) => [response.requestId, response] as const,
       ),
     );
+    // A group that carries approvals settles only once every approval is
+    // answered; question answers alone are held. Once the approvals settle,
+    // its unanswered questions are dismissed with the group.
+    const approvals = group.requests.filter((request) => isApprovalRequest(request));
+    const approvalsAnswered =
+      approvals.length > 0 && approvals.every((request) => responseMap.has(request.requestId));
+    if (approvals.length > 0 && !approvalsAnswered) continue;
     for (const request of group.requests) {
       const record = ledger.requests.find((candidate) => candidate.id === request.requestId);
       if (record === undefined || record.outcome !== undefined) continue;
@@ -238,8 +249,8 @@ export async function interpretRequests(
               },
             });
           } else if (
-            openGroups.length === 1 &&
-            normalizeUserContent(stepInput?.message) !== undefined
+            approvalsAnswered ||
+            (openGroups.length === 1 && normalizeUserContent(stepInput?.message) !== undefined)
           ) {
             ledger = updateRecord(ledger, request.requestId, {
               ...record,
@@ -383,11 +394,10 @@ export async function interpretRequests(
     normalizeUserContent(stepInput?.message) !== undefined ||
     (stepInput?.context?.length ?? 0) > 0 ||
     (readClientContext(stepInput)?.length ?? 0) > 0;
-  const hasStructuredResponses = canonicalResponses.length > 0;
-
+  // Responses that resolved nothing this pass (answers to a group still
+  // waiting on its approvals) are held with the step input.
   if (
     !hasForwardableTurnInput &&
-    !hasStructuredResponses &&
     (refreshedStillOpenGroups.length > 0 || deferred.stepInput !== undefined)
   ) {
     return { kind: "wait", ledger, effects, heldInput: deferred.stepInput };

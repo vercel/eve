@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
+import { SessionKey } from "#context/keys.js";
 import { getPendingAuthorization } from "#harness/authorization.js";
-import { settleApprovalRequestResponse } from "#harness/hitl/approval-response-attempts.js";
-import { interpretPendingInputDelivery } from "#harness/hitl/request-interpreter.js";
-import { createRequests, openRequestGroups } from "#harness/hitl/request-ledger.js";
+import type { ApprovalConfiguration } from "#approval/definition.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
+import { interpretRequests } from "#harness/hitl/request-interpreter.js";
+import {
+  acknowledgeReadyRequestGroupDelivery,
+  createRequests,
+  listReadyRequestGroupDeliveries,
+  openRequestGroups,
+  readRequestLedger,
+} from "#harness/hitl/request-ledger.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -28,175 +37,279 @@ const responder: SessionAuthContext = {
   principalType: "user",
 };
 
+function emptySession(): HarnessSession {
+  return {
+    agent: { modelReference: { id: "test" }, system: "", tools: [] },
+    compaction: { recentWindowSize: 10, threshold: 0.8 },
+    continuationToken: "test",
+    history: [],
+    sessionId: "session-1",
+  };
+}
+
 function parkedSession(): HarnessSession {
   return createRequests({
     requests: [request],
     responseAuthRequiredRequestIds: [request.requestId],
     responseMessages: [],
-    session: {
-      agent: { modelReference: { id: "test" }, system: "", tools: [] },
-      compaction: { recentWindowSize: 10, threshold: 0.8 },
-      continuationToken: "test",
-      history: [],
-      sessionId: "session-1",
-    },
+    session: emptySession(),
   });
 }
 
-describe("interpretPendingInputDelivery", () => {
-  it("recovers an allowed settlement before its synthetic response is consumed", async () => {
+function toolWithResponsePolicy(
+  response: ApprovalConfiguration["response"],
+): HarnessToolDefinition {
+  return {
+    approval: { request: () => "user-approval" as const, response },
+    description: "test tool",
+    inputSchema: { properties: {}, type: "object" },
+    name: "gate",
+  } as unknown as HarnessToolDefinition;
+}
+
+function runWithSessionContext<T>(fn: () => Promise<T>): Promise<T> {
+  const ctx = new ContextContainer();
+  ctx.set(SessionKey, {
+    auth: { current: responder, initiator: responder },
+    sessionId: "session-1",
+    turn: { id: "turn-1" } as never,
+  });
+  return contextStorage.run(ctx, fn);
+}
+
+describe("interpretRequests", () => {
+  it("approves a response-authorized approval via policy and emits completion", async () => {
     const parked = parkedSession();
-    const settled = settleApprovalRequestResponse({
-      actor: responder,
-      outcome: "allowed",
-      requestId: request.requestId,
-      settledAt: 100,
-      state: parked.state,
+    const result = await runWithSessionContext(() =>
+      interpretRequests({
+        deferMessagesWhileApprovalsPending: false,
+        delivery: {
+          now: 100,
+          responder,
+          stepInput: {
+            attributedInputResponses: [
+              {
+                auth: responder,
+                deliveryId: "delivery-1",
+                response: { optionId: "approve", requestId: request.requestId },
+              },
+            ],
+          },
+          authorizationResults: [],
+        },
+        history: [],
+        ledger: readRequestLedger(parked.state),
+        policies: new Map([
+          ["gate", toolWithResponsePolicy(async () => ({ status: "allowed" as const }))],
+        ]),
+      }),
+    );
+
+    expect(result.kind).toBe("complete");
+    const record = result.ledger.requests.find((candidate) => candidate.id === request.requestId);
+    expect(record?.outcome).toMatchObject({
+      kind: "approved",
+      actor: expect.objectContaining({ principalId: "user-1" }),
+      attemptId: expect.any(String),
+      at: 100,
     });
-    const result = await interpretPendingInputDelivery({
-      now: 101,
-      session: { ...parked, state: settled.state },
-      tools: new Map(),
-    });
-    if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
-    expect(result.outcome).toBe("resolved");
-    expect(openRequestGroups(result.session.state)).toEqual([]);
-    expect(result.messages.at(-1)).toEqual({
-      content: [
-        expect.objectContaining({
-          approvalId: request.requestId,
-          approved: true,
-          type: "tool-approval-response",
-        }),
+    expect(result.effects).toContainEqual(
+      expect.objectContaining({
+        kind: "approval-settled",
+        outcome: "approved",
+        requestId: request.requestId,
+      }),
+    );
+    if (result.kind === "complete") {
+      expect(result.completions).toEqual([expect.objectContaining({ owner: "session-turn" })]);
+    }
+  });
+
+  it("mixed framework-approval-gate and session-turn groups completing in one pass yield two typed completions under one deliveryKey", async () => {
+    let current = createRequests({
+      owner: "session-turn",
+      requests: [
+        {
+          action: { callId: "call-question", input: {}, kind: "tool-call", toolName: "ask" },
+          display: "text",
+          kind: "question",
+          prompt: "Continue?",
+          requestId: "question-1",
+        },
       ],
-      role: "tool",
+      responseMessages: [],
+      session: emptySession(),
     });
-  });
+    current = createRequests({
+      owner: "framework-approval-gate",
+      requests: [
+        {
+          action: { callId: "call-approval", input: {}, kind: "tool-call", toolName: "bash" },
+          kind: "tool-approval",
+          prompt: "Approve bash",
+          requestId: "approval-1",
+        },
+      ],
+      responseMessages: [],
+      session: current,
+    });
 
-  it("recovers a cancelled settlement before its synthetic response is consumed", async () => {
-    const parked = parkedSession();
-    const settled = settleApprovalRequestResponse({
-      actor: responder,
-      outcome: "cancelled",
-      requestId: request.requestId,
-      settledAt: 100,
-      state: parked.state,
-    });
-    const result = await interpretPendingInputDelivery({
-      now: 101,
-      session: { ...parked, state: settled.state },
-      tools: new Map(),
-    });
-    if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
-    expect(result.outcome).toBe("resolved");
-    expect(openRequestGroups(result.session.state)).toEqual([]);
-    expect(result.messages.at(-1)).toEqual({
-      content: expect.arrayContaining([
-        expect.objectContaining({
-          approvalId: request.requestId,
-          approved: false,
-          type: "tool-approval-response",
-        }),
-        expect.objectContaining({
-          output: expect.objectContaining({ type: "execution-denied" }),
-          type: "tool-result",
-        }),
+    const result = await interpretRequests({
+      deferMessagesWhileApprovalsPending: false,
+      delivery: {
+        now: 10,
+        responder,
+        stepInput: {
+          attributedInputResponses: [
+            {
+              auth: responder,
+              deliveryId: "delivery-approval",
+              response: { optionId: "approve", requestId: "approval-1" },
+            },
+          ],
+          inputResponses: [{ text: "yes", requestId: "question-1" }],
+        },
+        authorizationResults: [],
+      },
+      history: [],
+      ledger: readRequestLedger(current.state),
+      policies: new Map([
+        ["bash", toolWithResponsePolicy(async () => ({ status: "allowed" as const }))],
       ]),
-      role: "tool",
     });
+
+    expect(result.kind).toBe("complete");
+    if (result.kind === "complete") {
+      expect(result.completions).toEqual([
+        expect.objectContaining({ owner: "session-turn" }),
+        expect.objectContaining({ owner: "framework-approval-gate" }),
+      ]);
+      const sessionWithReady = {
+        ...current,
+        state: { "eve.runtime.hitl.requestLedger": result.ledger },
+      };
+      expect(listReadyRequestGroupDeliveries(sessionWithReady.state)).toEqual([
+        {
+          deliveryKey: result.deliveryKey,
+          ownerCompletion: result.completions[0],
+          targets: [
+            { groupId: "session-turn:0", owner: "session-turn" },
+            { groupId: "session-turn:1", owner: "framework-approval-gate" },
+          ],
+        },
+      ]);
+      const acknowledged = acknowledgeReadyRequestGroupDelivery({
+        deliveryKey: result.deliveryKey,
+        session: sessionWithReady,
+      });
+      expect(openRequestGroups(acknowledged.state)).toEqual([]);
+      expect(readRequestLedger(acknowledged.state).groups).toEqual([
+        expect.objectContaining({
+          completion: { deliveryKey: result.deliveryKey, status: "delivered" },
+        }),
+        expect.objectContaining({
+          completion: { deliveryKey: result.deliveryKey, status: "delivered" },
+        }),
+      ]);
+    }
   });
 
-  it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
-    const messageAuth: SessionAuthContext = { ...responder, principalId: "user-2" };
-    const result = await interpretPendingInputDelivery({
-      now: 100,
-      session: parkedSession(),
-      stepInput: {
-        message: "What else can you help with?",
-        messageAuth,
-      },
-      tools: new Map(),
+  it("an authorization callback settles the linked Authorization request and re-runs the held approval", async () => {
+    // Pass 4 parks an approve attempt behind an internal Authorization request
+    // when the response policy demands sign-in; that durable shape is seeded
+    // here so the test exercises pass 2 (callback) and the policy re-run.
+    const parked = parkedSession();
+    const attemptId = `${request.requestId}:delivery-1`;
+    const challenge = {
+      attemptId: "auth-attempt-1",
+      candidateId: attemptId,
+      challenge: { type: "redirect" as const, url: "https://example.com/authorize" },
+      hookUrl: "https://example.com/callback",
+      name: "linear",
+    };
+    const seeded = createRequests({
+      authorizations: [{ challenge, responseAttemptId: attemptId }],
+      requests: [],
+      responseMessages: [],
+      session: parked,
     });
-
-    if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
-    expect(result.outcome).toBe("continue");
-    expect(result.feedback).toEqual([]);
-    expect(
-      openRequestGroups(result.session.state).flatMap((batch) =>
-        batch.requests.map((pending) => pending.requestId),
+    const seededLedger = readRequestLedger(seeded.state);
+    const authorizationRecordId = seededLedger.requests.find(
+      (candidate) => candidate.request.kind === "authorization",
+    )?.id;
+    if (authorizationRecordId === undefined) throw new Error("Expected an Authorization request.");
+    const ledger = {
+      ...seededLedger,
+      requests: seededLedger.requests.map((record) =>
+        record.id === request.requestId
+          ? {
+              ...record,
+              attempts: [
+                {
+                  authorizationRequestIds: [authorizationRecordId],
+                  createdAt: 100,
+                  deliveryId: "delivery-1",
+                  expiresAt: 100 + 10 * 60_000,
+                  id: attemptId,
+                  responder,
+                  status: "awaiting-authorization" as const,
+                },
+              ],
+            }
+          : record,
       ),
-    ).toEqual([request.requestId]);
-  });
+    };
+    expect(
+      getPendingAuthorization({ "eve.runtime.hitl.requestLedger": ledger })?.challenges,
+    ).toEqual([challenge]);
 
-  it("deduplicates replay of the same attributed delivery", async () => {
-    const parked = parkedSession();
-    const first = await interpretPendingInputDelivery({
-      now: 100,
-      session: parked,
-      stepInput: {
-        attributedInputResponses: [
-          {
-            auth: responder,
-            deliveryId: "delivery-1",
-            response: { optionId: "approve", requestId: request.requestId },
-          },
-        ],
-      },
-      tools: new Map(),
-    });
-    const replay = await interpretPendingInputDelivery({
-      now: 101,
-      session: first.session,
-      stepInput: {
-        attributedInputResponses: [
-          {
-            auth: responder,
-            deliveryId: "delivery-1",
-            response: { optionId: "approve", requestId: request.requestId },
-          },
-        ],
-      },
-      tools: new Map(),
-    });
+    const policy = vi.fn(async () => ({ status: "allowed" as const }));
+    const result = await runWithSessionContext(() =>
+      interpretRequests({
+        deferMessagesWhileApprovalsPending: false,
+        delivery: {
+          authorizationResults: [
+            {
+              attemptId: challenge.attemptId,
+              callback: { method: "GET", params: { code: "ok" } },
+              hookUrl: challenge.hookUrl,
+            },
+          ],
+          now: 101,
+          responder: null,
+        },
+        history: [],
+        ledger,
+        policies: new Map([["gate", toolWithResponsePolicy(policy)]]),
+      }),
+    );
 
-    expect(first.session.state).toBeDefined();
-    if ("kind" in replay) throw new Error(`Unexpected coordination result: ${replay.kind}`);
-    expect(replay.outcome).toBe("unresolved");
-  });
-
-  it("creates distinct competing attempts for distinct deliveryIds from the same responder", async () => {
-    const parked = parkedSession();
-    const first = await interpretPendingInputDelivery({
-      now: 100,
-      session: parked,
-      stepInput: {
-        attributedInputResponses: [
-          {
-            auth: responder,
-            deliveryId: "delivery-1",
-            response: { optionId: "approve", requestId: request.requestId },
-          },
-        ],
-      },
-      tools: new Map(),
+    expect(policy).toHaveBeenCalledTimes(1);
+    const authorizationRecord = result.ledger.requests.find(
+      (candidate) => candidate.id === authorizationRecordId,
+    );
+    expect(authorizationRecord?.outcome).toMatchObject({ kind: "authorized", at: 101 });
+    expect(
+      result.ledger.requests.find((candidate) => candidate.id === request.requestId)?.outcome,
+    ).toMatchObject({
+      attemptId,
+      kind: "approved",
     });
-    const second = await interpretPendingInputDelivery({
-      now: 101,
-      session: first.session,
-      stepInput: {
-        attributedInputResponses: [
-          {
-            auth: responder,
-            deliveryId: "delivery-2",
-            response: { optionId: "approve", requestId: request.requestId },
-          },
-        ],
-      },
-      tools: new Map(),
-    });
-
-    const pending = getPendingAuthorization(second.session.state);
-    expect(second.kind).toBe("continue-coordination");
-    expect(pending).toBeUndefined();
+    expect(result.effects).toEqual([
+      expect.objectContaining({
+        kind: "authorization-completed",
+        outcome: "completed",
+        requestId: authorizationRecordId,
+      }),
+      expect.objectContaining({
+        kind: "approval-settled",
+        outcome: "approved",
+        requestId: request.requestId,
+      }),
+    ]);
+    expect(result.kind).toBe("complete");
+    expect(
+      getPendingAuthorization({ "eve.runtime.hitl.requestLedger": result.ledger }),
+    ).toBeUndefined();
   });
 });

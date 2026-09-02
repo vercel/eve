@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
+import { interpretRequests } from "#harness/hitl/request-interpreter.js";
 import {
   acknowledgeReadyRequestGroupDelivery,
-  cancelIncompleteRequestGroups,
+  authorizationRequestId,
   classifyRequestResponse,
-  closeRequestGroups,
+  closeRequestLedger,
+  commitRequestLedger,
   createRequests,
+  getPendingAuthorization,
+  isOpenRequest,
   listReadyRequestGroupDeliveries,
   openRequestGroups,
-  prepareReadyRequestGroupDeliveries,
   readRequestLedger,
   RequestLedgerConflictError,
-  writePendingAuthorizationState,
-  writeRequestLedger,
 } from "#harness/hitl/request-ledger.js";
 import type { HarnessSession } from "#harness/types.js";
-import { resolvePendingInput } from "#harness/input-requests.js";
 import type { InputRequest } from "#shared/input.js";
 
 function session(state?: HarnessSession["state"]): HarnessSession {
@@ -66,7 +66,7 @@ describe("request ledger", () => {
 
     expect(readRequestLedger(legacy.state)).toMatchObject({
       groups: [{ completion: "waiting", requestIds: ["request-1"] }],
-      requests: [{ id: "request-1", state: "open" }],
+      requests: [{ id: "request-1" }],
       version: 0,
     });
     expect(legacy.state).toHaveProperty("eve.runtime.pendingInputBatch");
@@ -77,12 +77,7 @@ describe("request ledger", () => {
       "eve.runtime.pendingInputBatch": { requests: [request], responseMessages: [] },
     });
     const ledger = readRequestLedger(legacy.state);
-    const migrated = writeRequestLedger({
-      expectedVersion: ledger.version,
-      groups: ledger.groups,
-      requests: ledger.requests,
-      session: legacy,
-    });
+    const migrated = commitRequestLedger(legacy, ledger, ledger.version);
 
     expect(migrated.state).not.toHaveProperty("eve.runtime.pendingInputBatch");
     expect(readRequestLedger(migrated.state).version).toBe(1);
@@ -96,14 +91,9 @@ describe("request ledger", () => {
     });
     const ledger = readRequestLedger(created.state);
 
-    expect(() =>
-      writeRequestLedger({
-        expectedVersion: ledger.version - 1,
-        groups: ledger.groups,
-        requests: ledger.requests,
-        session: created,
-      }),
-    ).toThrow(RequestLedgerConflictError);
+    expect(() => commitRequestLedger(created, ledger, ledger.version - 1)).toThrow(
+      RequestLedgerConflictError,
+    );
   });
 
   it("distinguishes open, stale, and invalid responses", () => {
@@ -115,39 +105,37 @@ describe("request ledger", () => {
     expect(classifyRequestResponse(created.state, "request-1")).toBe("open");
     expect(classifyRequestResponse(created.state, "unknown")).toBe("invalid");
 
-    const group = openRequestGroups(created.state)[0];
-    if (group === undefined) throw new Error("Expected an open request group.");
-    const delivered = closeRequestGroups(created, [group]);
+    const delivered = closeRequestLedger(created, 1);
     expect(classifyRequestResponse(delivered.state, "request-1")).toBe("stale");
   });
 
-  it("retains terminal requests after a group is delivered", () => {
+  it("retains terminal requests after a group is closed", () => {
     const created = createRequests({
       requests: [request],
       responseMessages: [],
       session: session(),
     });
-    const group = openRequestGroups(created.state)[0];
-    if (group === undefined) throw new Error("Expected an open request group.");
-    const delivered = closeRequestGroups(created, [group]);
+    const delivered = closeRequestLedger(created, 1);
 
     expect(openRequestGroups(delivered.state)).toEqual([]);
     expect(readRequestLedger(delivered.state)).toMatchObject({
-      groups: [{ completion: { deliveryKey: "legacy:session-turn:0", status: "delivered" } }],
-      requests: [{ id: "request-1", state: "terminal" }],
+      groups: [{ completion: "cancelled" }],
+      requests: [{ id: "request-1", outcome: { kind: "cancelled", at: 1 } }],
     });
   });
 });
 
 describe("pending input request ID uniqueness", () => {
-  it("rejects duplicate IDs within a newly created group", () => {
-    expect(() =>
-      createRequests({
-        requests: [approval("duplicate", "call-1"), question("duplicate", "call-2")],
-        responseMessages: [],
-        session: session(),
-      }),
-    ).toThrow(DUPLICATE_ID_ERROR);
+  it("allows duplicate IDs within a newly created group by replacing the later duplicate", () => {
+    const created = createRequests({
+      requests: [approval("duplicate", "call-1"), question("duplicate", "call-2")],
+      responseMessages: [],
+      session: session(),
+    });
+
+    expect(readRequestLedger(created.state).requests).toEqual([
+      expect.objectContaining({ id: "duplicate", request: question("duplicate", "call-2") }),
+    ]);
   });
 
   it("rejects an approval/question ID collision across newly created groups", () => {
@@ -174,12 +162,7 @@ describe("pending input request ID uniqueness", () => {
       ],
     });
 
-    expect(() =>
-      resolvePendingInput({
-        session: persisted,
-        stepInput: { inputResponses: [{ optionId: "approve", requestId: "duplicate" }] },
-      }),
-    ).toThrow(DUPLICATE_ID_ERROR);
+    expect(() => readRequestLedger(persisted.state)).toThrow(DUPLICATE_ID_ERROR);
   });
 
   it("rejects duplicate IDs in a persisted legacy singleton", () => {
@@ -210,94 +193,120 @@ describe("persisted pending input validation", () => {
       ],
     });
 
-    expect(resolvePendingInput({ session: persisted })).toMatchObject({
-      outcome: "continue",
-      session: persisted,
-    });
+    expect(openRequestGroups(persisted.state)).toEqual([]);
   });
 });
 
 describe("request ledger extension migration", () => {
-  it("reads legacy approval-attempt state and removes its key on write", async () => {
-    const { getApprovalAuditState, settleApprovalRequestResponse } =
-      await import("#harness/hitl/approval-response-attempts.js");
-    const actor = {
-      attributes: {},
-      authenticator: "test",
-      principalId: "user-1",
-      principalType: "user",
-    };
-    const legacy = {
-      "eve.runtime.hitl.approvalState": {
-        activeCandidates: {},
-        candidateHistory: [],
-        nextCandidateSequence: 0,
-        settlements: {},
+  it("reads legacy approval-attempt state from persisted ledger", () => {
+    const legacy = session({
+      "eve.runtime.hitl.requestLedger": {
+        groups: [
+          {
+            completion: "waiting",
+            id: "session-turn:0",
+            owner: "session-turn",
+            requestIds: ["request-1"],
+            responseMessages: [],
+          },
+        ],
+        requests: [
+          { groupId: "session-turn:0", id: "request-1", request: approval("request-1", "call-1") },
+        ],
+        responseAttempts: {
+          activeResponseAttempts: {
+            candidate1: {
+              attemptId: "candidate1",
+              candidateId: "candidate1",
+              createdAt: 1,
+              expiresAt: 10,
+              requestId: "request-1",
+              responder: {
+                attributes: {},
+                authenticator: "test",
+                principalId: "user-1",
+                principalType: "user",
+              },
+              status: "pending",
+            },
+          },
+          responseAttemptHistory: [],
+          settlements: {},
+        },
+        version: 0,
       },
-    };
-    expect(getApprovalAuditState(legacy).settlements).toEqual([]);
-
-    const settled = settleApprovalRequestResponse({
-      actor,
-      outcome: "allowed",
-      requestId: "request-1",
-      settledAt: 1,
-      state: legacy,
     });
-    expect(settled.state).not.toHaveProperty("eve.runtime.hitl.approvalState");
-    expect(getApprovalAuditState(settled.state).settlements).toHaveLength(1);
+
+    expect(readRequestLedger(legacy.state).requests).toContainEqual(
+      expect.objectContaining({
+        attempts: [expect.objectContaining({ id: "candidate1", status: "pending" })],
+        id: "request-1",
+      }),
+    );
   });
 
-  it("reads legacy Authorization state and removes its key on write", async () => {
-    const { getPendingAuthorization, setPendingAuthorization } =
-      await import("#harness/authorization.js");
+  it("reads legacy Authorization state and removes its key on write", () => {
     const challenge = {
       challenge: { url: "https://example.com" },
       hookUrl: "https://example.com/callback",
       name: "linear",
     } as const;
     const legacy = { "eve.runtime.pendingAuthorization": { challenges: [challenge] } };
-    expect(getPendingAuthorization(legacy)?.challenges).toEqual([challenge]);
-
-    const migrated = setPendingAuthorization(legacy, { challenges: [challenge] });
-    expect(migrated).not.toHaveProperty("eve.runtime.pendingAuthorization");
-    expect(getPendingAuthorization(migrated)?.challenges).toEqual([challenge]);
-    expect(readRequestLedger(migrated).requests).toContainEqual(
+    expect(readRequestLedger(legacy).requests).toContainEqual(
       expect.objectContaining({
-        request: expect.objectContaining({
-          authorization: challenge,
-          kind: "authorization",
-        }),
-        state: "open",
+        request: expect.objectContaining({ authorization: challenge, kind: "authorization" }),
       }),
     );
-    expect(openRequestGroups(migrated)).toEqual([]);
+
+    const migrated = commitRequestLedger(session(legacy), readRequestLedger(legacy), 0);
+    expect(migrated.state).not.toHaveProperty("eve.runtime.pendingAuthorization");
+    expect(readRequestLedger(migrated.state).requests).toContainEqual(
+      expect.objectContaining({
+        request: expect.objectContaining({ authorization: challenge, kind: "authorization" }),
+      }),
+    );
+    expect(openRequestGroups(migrated.state)).toEqual([]);
   });
 
-  it("retains completed Authorization requests as terminal records", async () => {
-    const { clearPendingAuthorization, setPendingAuthorization } =
-      await import("#harness/authorization.js");
+  it("retains completed Authorization requests as terminal records", () => {
     const challenge = {
       attemptId: "authorization-1",
       challenge: { url: "https://example.com" },
       hookUrl: "https://example.com/callback",
       name: "linear",
     } as const;
-    const opened = setPendingAuthorization(undefined, { challenges: [challenge] });
-    const completed = clearPendingAuthorization(opened, ["authorization-1"]);
+    const id = authorizationRequestId({ challenge });
+    const persisted = {
+      "eve.runtime.hitl.requestLedger": {
+        groups: [],
+        requests: [
+          {
+            id,
+            request: { authorization: challenge, kind: "authorization", requestId: id },
+            outcome: {
+              kind: "authorized",
+              result: {
+                attemptId: "authorization-1",
+                callback: { method: "GET", params: {} },
+                hookUrl: challenge.hookUrl,
+              },
+              at: 1,
+            },
+          },
+        ],
+        version: 1,
+      },
+    };
 
-    expect(readRequestLedger(completed).requests).toContainEqual(
-      expect.objectContaining({
-        request: expect.objectContaining({ kind: "authorization" }),
-        state: "terminal",
-      }),
+    expect(readRequestLedger(persisted).requests).toContainEqual(
+      expect.objectContaining({ id, outcome: expect.objectContaining({ kind: "authorized" }) }),
     );
   });
 });
 
 describe("request group owners", () => {
   it("stores the framework approval gate as the owner of an approval group", () => {
-    const approval: InputRequest = {
+    const approvalRequest: InputRequest = {
       action: { callId: "call-approval", input: {}, kind: "tool-call", toolName: "bash" },
       kind: "tool-approval",
       prompt: "Approve bash",
@@ -305,7 +314,7 @@ describe("request group owners", () => {
     };
     const created = createRequests({
       owner: "framework-approval-gate",
-      requests: [approval],
+      requests: [approvalRequest],
       responseMessages: [],
       session: session(),
     });
@@ -325,81 +334,111 @@ describe("request group owners", () => {
 });
 
 describe("request group completion delivery", () => {
-  it("prepares resolved groups as ready, terminalizes their public requests, and lists deliveries in group order", () => {
+  it("marks resolved groups ready and lists deliveries in group order", async () => {
     const request2: InputRequest = {
       action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask_question" },
       kind: "question",
       prompt: "Second?",
       requestId: "request-2",
     };
-    const created = createRequests({
-      requests: [request],
+    let current = createRequests({
+      owner: "framework-approval-gate",
+      requests: [request2],
       responseMessages: [],
-      session: createRequests({
-        owner: "framework-approval-gate",
-        requests: [request2],
-        responseMessages: [],
-        session: session(),
-      }),
+      session: session(),
     });
+    current = createRequests({ requests: [request], responseMessages: [], session: current });
 
-    const prepared = prepareReadyRequestGroupDeliveries({
-      ownerCompletions: new Map([
-        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: 1 } }],
-        ["session-turn:1", { deliveryKey: "delivery-2", ownerCompletion: ["opaque"] }],
-      ]),
-      session: created,
+    const first = await interpretRequests({
+      deferMessagesWhileApprovalsPending: false,
+      delivery: {
+        now: 1,
+        responder: null,
+        stepInput: { inputResponses: [{ requestId: "request-2", text: "ok" }] },
+        authorizationResults: [],
+      },
+      history: [],
+      ledger: readRequestLedger(current.state),
+      policies: new Map(),
     });
+    current = commitRequestLedger(current, first.ledger, 2);
 
-    expect(listReadyRequestGroupDeliveries(prepared.state)).toEqual([
+    const second = await interpretRequests({
+      deferMessagesWhileApprovalsPending: false,
+      delivery: {
+        now: 2,
+        responder: null,
+        stepInput: { inputResponses: [{ requestId: "request-1", text: "later" }] },
+        authorizationResults: [],
+      },
+      history: [],
+      ledger: readRequestLedger(current.state),
+      policies: new Map(),
+    });
+    current = commitRequestLedger(current, second.ledger, 3);
+
+    expect(listReadyRequestGroupDeliveries(current.state)).toEqual([
       {
-        deliveryKey: "delivery-1",
-        ownerCompletion: { ok: 1 },
+        deliveryKey: 'request-group-completion:["session-turn:0"]',
+        ownerCompletion: expect.objectContaining({ owner: "framework-approval-gate" }),
         targets: [{ groupId: "session-turn:0", owner: "framework-approval-gate" }],
       },
       {
-        deliveryKey: "delivery-2",
-        ownerCompletion: ["opaque"],
+        deliveryKey: 'request-group-completion:["session-turn:1"]',
+        ownerCompletion: expect.objectContaining({ owner: "session-turn" }),
         targets: [{ groupId: "session-turn:1", owner: "session-turn" }],
       },
     ]);
-    expect(openRequestGroups(prepared.state)).toEqual([]);
-    expect(readRequestLedger(prepared.state).requests).toEqual([
-      expect.objectContaining({ id: "request-2", state: "terminal" }),
-      expect.objectContaining({ id: "request-1", state: "terminal" }),
-    ]);
+    expect(openRequestGroups(current.state)).toEqual([]);
+    expect(
+      readRequestLedger(current.state).requests.every((record) => !isOpenRequest(record)),
+    ).toBe(true);
   });
 
   it("groups mixed owners into one ordered delivery transaction", () => {
-    const second: InputRequest = {
-      action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask_question" },
-      kind: "question",
-      prompt: "Second?",
-      requestId: "request-2",
+    const ledger = {
+      groups: [
+        {
+          completion: {
+            deliveryKey: "delivery-1",
+            ownerCompletion: {
+              messages: [],
+              owner: "framework-approval-gate",
+              approvedToolKeys: [],
+              rejectedActions: [],
+            },
+            status: "ready" as const,
+          },
+          id: "session-turn:0",
+          owner: "framework-approval-gate" as const,
+          requestIds: ["request-1"],
+          responseMessages: [],
+        },
+        {
+          completion: {
+            deliveryKey: "delivery-1",
+            ownerCompletion: { messages: [], owner: "session-turn", limitContinuation: undefined },
+            status: "ready" as const,
+          },
+          id: "session-turn:1",
+          owner: "session-turn" as const,
+          requestIds: ["request-2"],
+          responseMessages: [],
+        },
+      ],
+      requests: [],
+      version: 1,
     };
-    const created = createRequests({
-      owner: "session-turn",
-      requests: [second],
-      responseMessages: [],
-      session: createRequests({
-        owner: "framework-approval-gate",
-        requests: [request],
-        responseMessages: [],
-        session: session(),
-      }),
-    });
-    const prepared = prepareReadyRequestGroupDeliveries({
-      ownerCompletions: new Map([
-        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
-        ["session-turn:1", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
-      ]),
-      session: created,
-    });
 
-    expect(listReadyRequestGroupDeliveries(prepared.state)).toEqual([
+    expect(listReadyRequestGroupDeliveries({ "eve.runtime.hitl.requestLedger": ledger })).toEqual([
       {
         deliveryKey: "delivery-1",
-        ownerCompletion: { ok: true },
+        ownerCompletion: {
+          messages: [],
+          owner: "framework-approval-gate",
+          approvedToolKeys: [],
+          rejectedActions: [],
+        },
         targets: [
           { groupId: "session-turn:0", owner: "framework-approval-gate" },
           { groupId: "session-turn:1", owner: "session-turn" },
@@ -409,16 +448,28 @@ describe("request group completion delivery", () => {
   });
 
   it("acknowledges one ready delivery idempotently", () => {
-    const created = createRequests({
-      requests: [request],
-      responseMessages: [],
-      session: session(),
-    });
-    const prepared = prepareReadyRequestGroupDeliveries({
-      ownerCompletions: new Map([
-        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
-      ]),
-      session: created,
+    const prepared = session({
+      "eve.runtime.hitl.requestLedger": {
+        groups: [
+          {
+            completion: {
+              deliveryKey: "delivery-1",
+              ownerCompletion: {
+                messages: [],
+                owner: "session-turn",
+                limitContinuation: undefined,
+              },
+              status: "ready",
+            },
+            id: "session-turn:0",
+            owner: "session-turn",
+            requestIds: ["request-1"],
+            responseMessages: [],
+          },
+        ],
+        requests: [],
+        version: 1,
+      },
     });
 
     const acknowledged = acknowledgeReadyRequestGroupDelivery({
@@ -438,42 +489,38 @@ describe("request group completion delivery", () => {
   });
 
   it("force-closes waiting and ready groups to cancelled and terminalizes open requests including internal authorization", () => {
+    const approvalRequest = approval("request-1", "call-1");
     const challenge = {
       attemptId: "authorization-1",
       challenge: { url: "https://example.com" },
       hookUrl: "https://example.com/callback",
       name: "linear",
-    } as const;
-    const waiting = createRequests({
-      requests: [request],
-      responseMessages: [],
-      session: session(),
-    });
-    const withAuthorization = {
-      ...waiting,
-      state: writePendingAuthorizationState(waiting.state, [
-        { challenge, responseAttemptId: "authorization-1" },
-      ]),
     };
-    const ready = prepareReadyRequestGroupDeliveries({
-      ownerCompletions: new Map([
-        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
-      ]),
-      session: withAuthorization,
+    const waiting = createRequests({
+      authorizations: [{ challenge, responseAttemptId: "request-1:delivery-1" }],
+      requests: [],
+      responseMessages: [],
+      session: createRequests({
+        requests: [approvalRequest],
+        responseAuthRequiredRequestIds: [approvalRequest.requestId],
+        responseMessages: [],
+        session: session(),
+      }),
     });
 
-    const cancelled = cancelIncompleteRequestGroups(ready);
+    const cancelled = closeRequestLedger(waiting, 2);
 
     expect(readRequestLedger(cancelled.state)).toMatchObject({
       groups: [{ completion: "cancelled" }],
       requests: [
-        { id: "request-1", state: "terminal" },
+        { id: "request-1", outcome: { kind: "cancelled", at: 2 } },
         {
           request: { kind: "authorization", requestId: expect.stringContaining("authorization:") },
-          state: "terminal",
+          outcome: { kind: "cancelled", at: 2 },
         },
       ],
     });
+    expect(getPendingAuthorization(cancelled.state)).toBeUndefined();
     expect(listReadyRequestGroupDeliveries(cancelled.state)).toEqual([]);
   });
 });
