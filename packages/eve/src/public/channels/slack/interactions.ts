@@ -45,8 +45,6 @@ import type {
   SlackInteractionAction,
   SlackInteractionContext,
   SlackInteractionUser,
-  SlackRawInteraction,
-  SlackRawInteractionContext,
   SlackShortcut,
   SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
@@ -54,6 +52,7 @@ import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operat
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseInputResponse } from "#shared/input.js";
+import { handleRawInteraction } from "#public/channels/slack/raw-interaction.js";
 
 const log = createLogger("slack.interactions");
 
@@ -283,16 +282,16 @@ export async function handleInteractionPost(
       dispatchShortcut(shortcut, readInstallationTeamId(payload.raw), ctx, deps);
       return new Response(null, { status: 200 });
     }
-    return handleRawInteraction(payload.raw, payload.type, ctx, deps, ack);
+    return handleRawInteraction(payload.raw, payload.type, ctx.waitUntil, deps.config, ack);
   }
 
   if (payload.kind !== "block_actions") {
-    return handleRawInteraction(payload.raw, payload.kind, ctx, deps, ack);
+    return handleRawInteraction(payload.raw, payload.kind, ctx.waitUntil, deps.config, ack);
   }
 
   const interaction = parseBlockActionsPayload(payload);
   if (!interaction) {
-    return handleRawInteraction(payload.raw, payload.kind, ctx, deps, ack);
+    return handleRawInteraction(payload.raw, payload.kind, ctx.waitUntil, deps.config, ack);
   }
 
   const freeformAction = interaction.actions.find((a) => isFreeformAction(a.actionId));
@@ -369,65 +368,10 @@ export async function handleInteractionPost(
       }
     }
   } else if (customActions.length > 0 && hitlActions.length === 0) {
-    return handleRawInteraction(payload.raw, payload.kind, ctx, deps, ack);
+    return handleRawInteraction(payload.raw, payload.kind, ctx.waitUntil, deps.config, ack);
   }
 
   return ack;
-}
-
-async function handleRawInteraction(
-  raw: unknown,
-  fallbackType: string,
-  ctx: { readonly waitUntil: (task: Promise<unknown>) => void },
-  deps: InteractionHandlerDeps,
-  fallbackResponse: Response,
-): Promise<Response> {
-  const handler = deps.config.onRawInteraction;
-  if (handler === undefined || !isObjectRecord(raw)) {
-    log.warn("unsupported Slack interaction payload ignored", { type: fallbackType });
-    return fallbackResponse;
-  }
-
-  const type = readOptionalString(raw.type) ?? fallbackType;
-  const userBlock = isObjectRecord(raw.user) ? raw.user : undefined;
-  const teamBlock = isObjectRecord(raw.team) ? raw.team : undefined;
-  const enterpriseBlock = isObjectRecord(raw.enterprise) ? raw.enterprise : undefined;
-  const userId = readOptionalString(userBlock?.id);
-  const teamId =
-    readOptionalString(userBlock?.team_id) ??
-    readOptionalString(teamBlock?.id) ??
-    readOptionalString(raw.team_id);
-  const installationTeamId = readInstallationTeamId(raw);
-  const enterpriseId =
-    readOptionalString(enterpriseBlock?.id) ?? readOptionalString(raw.enterprise_id);
-  const rawInteraction: {
-    -readonly [K in keyof SlackRawInteraction]: SlackRawInteraction[K];
-  } = { type, payload: raw };
-  if (userId !== undefined) {
-    rawInteraction.user = {
-      id: userId,
-      username: readOptionalString(userBlock?.username),
-      name: readOptionalString(userBlock?.name),
-    };
-  }
-  if (teamId !== undefined) rawInteraction.teamId = teamId;
-  if (installationTeamId !== undefined) rawInteraction.installationTeamId = installationTeamId;
-  if (enterpriseId !== undefined) rawInteraction.enterpriseId = enterpriseId;
-  const interactionCtx: SlackRawInteractionContext = {
-    slack: buildSlackWorkspaceHandle({
-      botToken: deps.config.credentials?.botToken,
-      installationTeamId,
-      teamId,
-    }),
-    waitUntil: ctx.waitUntil,
-  };
-
-  try {
-    return (await handler(rawInteraction, interactionCtx)) ?? new Response(null, { status: 200 });
-  } catch (error) {
-    log.error("raw interaction handler failed", { error });
-    return fallbackResponse;
-  }
 }
 
 /** Normalizes Slack's two shortcut payload variants. */
@@ -645,7 +589,7 @@ async function handleViewSubmission(
   // Slack view submissions require an empty 200 body to close the modal.
   const ack = new Response(null, { status: 200 });
   if (payload.callbackId !== HITL_FREEFORM_MODAL_CALLBACK_ID) {
-    return handleRawInteraction(payload.raw, payload.kind, ctx, deps, ack);
+    return handleRawInteraction(payload.raw, payload.kind, ctx.waitUntil, deps.config, ack);
   }
 
   let metadata: HitlFreeformModalMetadata;
