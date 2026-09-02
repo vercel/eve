@@ -132,12 +132,8 @@ interface FailedStepPayload {
   readonly message: string;
 }
 
-/**
- * Emits the shared head of both failure cascades: `step.failed` →
- * `turn.failed`. Both terminal and recoverable paths diverge only on
- * the third event (`session.failed` vs. `session.waiting`).
- */
-async function emitStepAndTurnFailed(
+/** Emits a nonterminal failed step without settling its turn. */
+export async function emitStepFailure(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   input: FailedStepPayload,
@@ -150,6 +146,19 @@ async function emitStepAndTurnFailed(
       turnId: state.turnId,
     }),
   );
+}
+
+/**
+ * Emits the shared head of both failure cascades: `step.failed` →
+ * `turn.failed`. Both terminal and recoverable paths diverge only on
+ * the third event (`session.failed` vs. `session.waiting`).
+ */
+async function emitStepAndTurnFailed(
+  emitFn: HarnessEmitFn,
+  state: HarnessEmissionState,
+  input: FailedStepPayload,
+): Promise<void> {
+  await emitStepFailure(emitFn, state, input);
   await emitFn(
     createTurnFailedEvent({
       ...input,

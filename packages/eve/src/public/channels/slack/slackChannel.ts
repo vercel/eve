@@ -565,6 +565,7 @@ export interface SlackChannelEvents {
   readonly "message.appended"?: SlackEventHandler<"message.appended">;
   readonly "reasoning.appended"?: SlackEventHandler<"reasoning.appended">;
   readonly "reasoning.completed"?: SlackEventHandler<"reasoning.completed">;
+  readonly "step.failed"?: SlackEventHandler<"step.failed">;
   readonly "input.requested"?: SlackEventHandler<"input.requested">;
   readonly "turn.failed"?: SlackEventHandler<"turn.failed">;
   readonly "turn.completed"?: SlackEventHandler<"turn.completed">;

@@ -163,6 +163,7 @@ export interface TwilioChannelEvents {
   readonly "action.result"?: TwilioEventHandler<"action.result">;
   readonly "message.completed"?: TwilioEventHandler<"message.completed">;
   readonly "message.appended"?: TwilioEventHandler<"message.appended">;
+  readonly "step.failed"?: TwilioEventHandler<"step.failed">;
   readonly "input.requested"?: TwilioEventHandler<"input.requested">;
   readonly "turn.failed"?: TwilioEventHandler<"turn.failed">;
   readonly "turn.completed"?: TwilioEventHandler<"turn.completed">;

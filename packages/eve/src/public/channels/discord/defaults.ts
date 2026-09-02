@@ -2,6 +2,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { splitDiscordMessageContent } from "#public/channels/discord/api.js";
+import {
+  extractScheduledRecoveryNotice,
+  formatScheduledRecoveryNotice,
+} from "#public/channels/scheduled-recovery.js";
 import type { DiscordCommandInteraction } from "#public/channels/discord/inbound.js";
 import { renderInputRequestComponents } from "#public/channels/discord/hitl.js";
 import type {
@@ -78,6 +82,14 @@ export const defaultEvents: DiscordChannelEvents = {
   async "message.completed"(event, channel, _ctx) {
     if (event.finishReason === "tool-calls" || !event.message) return;
     await channel.discord.post(event.message);
+  },
+
+  async "step.failed"(event, channel, _ctx) {
+    const notice = extractScheduledRecoveryNotice(event);
+    if (notice === null) return;
+    for (const chunk of splitDiscordMessageContent(formatScheduledRecoveryNotice(notice))) {
+      await channel.discord.post(chunk);
+    }
   },
 
   async "session.failed"(event, channel) {

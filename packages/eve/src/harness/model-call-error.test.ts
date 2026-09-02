@@ -8,6 +8,7 @@ import {
   isNoOutputGeneratedError,
   normalizeModelStreamError,
   extractUpstreamRejectionMessage,
+  resolveDurableRetryDelay,
 } from "#harness/model-call-error.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 
@@ -39,6 +40,7 @@ function gatewayModelCallError(input: {
   readonly upstreamMessage?: string;
   readonly upstreamStatusCode?: number;
   readonly upstreamType?: string;
+  readonly responseHeaders?: Headers;
 }): Error {
   const upstreamMessage = input.upstreamMessage ?? "Bad Request";
   const responseBody = JSON.stringify({
@@ -62,6 +64,7 @@ function gatewayModelCallError(input: {
       tools: [{ inputSchema: { description: "large schema ".repeat(500) } }],
     },
     responseBody,
+    responseHeaders: input.responseHeaders,
     statusCode: input.upstreamStatusCode ?? input.statusCode,
   });
   const error = Object.assign(
@@ -121,6 +124,34 @@ describe("isNoOutputGeneratedError", () => {
   });
 });
 
+describe("resolveDurableRetryDelay", () => {
+  const freeTierError = (retryAfter?: string) =>
+    gatewayModelCallError({
+      gatewayName: "GatewayRateLimitError",
+      gatewayType: "rate_limit_exceeded",
+      responseHeaders:
+        retryAfter === undefined ? undefined : new Headers({ "Retry-After": retryAfter }),
+      statusCode: 429,
+      upstreamMessage: "Free tier requests on this model are rate-limited.",
+      upstreamType: "rate_limit_exceeded",
+    });
+
+  it("uses integer Retry-After seconds from a nested API error", () => {
+    expect(resolveDurableRetryDelay(freeTierError("42"), 0)).toEqual({
+      delayMs: 42_000,
+      source: "retry-after-seconds",
+    });
+  });
+
+  it("uses a future Retry-After date and ignores malformed values", () => {
+    expect(resolveDurableRetryDelay(freeTierError("Thu, 01 Jan 1970 00:00:42 GMT"), 0)).toEqual({
+      delayMs: 42_000,
+      source: "retry-after-date",
+    });
+    expect(resolveDurableRetryDelay(freeTierError("-1"), 0)?.source).toBe("policy-default");
+  });
+});
+
 describe("EmptyModelResponseError", () => {
   it("preserves the normalized SDK rejection as cause", () => {
     const sdkError = noOutputGeneratedError();
@@ -168,6 +199,18 @@ describe("classifyModelCallError", () => {
       isRetryable: true,
     });
     expect(classifyModelCallError(wrapped)).toBe("terminal");
+  });
+
+  it("defers a free-tier Gateway rate limit even when the SDK marks it retryable", () => {
+    const error = gatewayModelCallError({
+      gatewayName: "GatewayRateLimitError",
+      gatewayType: "rate_limit_exceeded",
+      statusCode: 429,
+      upstreamMessage: "Free tier requests on this model are rate-limited.",
+      upstreamType: "rate_limit_exceeded",
+    });
+    Object.assign(error, { isRetryable: true });
+    expect(classifyModelCallError(error)).toBe("recoverable");
   });
 
   it("returns retry when the AI SDK marks the error as retryable", () => {

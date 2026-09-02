@@ -2,6 +2,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import {
+  extractScheduledRecoveryNotice,
+  formatScheduledRecoveryNotice,
+} from "#public/channels/scheduled-recovery.js";
+import {
   formatTelegramAuthorizationDisplayName,
   renderTelegramAuthorizationCompleted,
   renderTelegramAuthorizationPrompt,
@@ -171,6 +175,12 @@ export const defaultEvents: TelegramChannelEvents = {
   async "message.completed"(event, channel, _ctx) {
     if (event.finishReason === "tool-calls" || !event.message) return;
     await channel.telegram.post(event.message);
+  },
+
+  async "step.failed"(event, channel, _ctx) {
+    const notice = extractScheduledRecoveryNotice(event);
+    if (notice === null) return;
+    await channel.telegram.post(formatScheduledRecoveryNotice(notice));
   },
 
   async "turn.failed"(event, channel, _ctx) {

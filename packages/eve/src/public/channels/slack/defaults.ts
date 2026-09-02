@@ -2,6 +2,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { describeActionRequests } from "#public/channels/slack/action-status.js";
+import {
+  extractScheduledRecoveryNotice,
+  formatScheduledRecoveryNotice,
+} from "#public/channels/scheduled-recovery.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import {
   buildAuthCompletedText,
@@ -370,6 +374,12 @@ export const defaultEvents: SlackChannelInternalEvents = {
       return;
     }
     await channel.thread.post(event.message);
+  },
+
+  async "step.failed"(event, channel, _ctx) {
+    const notice = extractScheduledRecoveryNotice(event);
+    if (notice === null) return;
+    await channel.thread.post(formatScheduledRecoveryNotice(notice));
   },
 
   async "turn.failed"(event, channel, _ctx) {

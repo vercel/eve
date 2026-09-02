@@ -139,6 +139,7 @@ export interface DiscordChannelEvents {
   readonly "action.result"?: DiscordEventHandler<"action.result">;
   readonly "message.completed"?: DiscordEventHandler<"message.completed">;
   readonly "message.appended"?: DiscordEventHandler<"message.appended">;
+  readonly "step.failed"?: DiscordEventHandler<"step.failed">;
   readonly "input.requested"?: DiscordEventHandler<"input.requested">;
   readonly "turn.failed"?: DiscordEventHandler<"turn.failed">;
   readonly "turn.completed"?: DiscordEventHandler<"turn.completed">;

@@ -2,6 +2,10 @@ import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import { createLinearAgentActivity, type LinearApiOptions } from "#public/channels/linear/api.js";
+import {
+  extractScheduledRecoveryNotice,
+  formatScheduledRecoveryNotice,
+} from "#public/channels/scheduled-recovery.js";
 import type { LinearChannelCredentials } from "#public/channels/linear/auth.js";
 import {
   linearInputRequestSignal,
@@ -203,6 +207,15 @@ export function createDefaultEvents(options: LinearDefaultEventOptions = {}): Li
       await postActivity(channel, options, {
         body: event.message,
         type: "response",
+      });
+    },
+
+    async "step.failed"(event, channel, _ctx) {
+      const notice = extractScheduledRecoveryNotice(event);
+      if (notice === null) return;
+      await postActivity(channel, options, {
+        body: formatScheduledRecoveryNotice(notice),
+        type: "thought",
       });
     },
 

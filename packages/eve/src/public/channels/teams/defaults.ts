@@ -4,6 +4,10 @@ import { extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { ConnectionAuthorizationOutcome } from "#protocol/message.js";
 import { splitTeamsMessageText, type TeamsMention } from "#public/channels/teams/api.js";
 import {
+  extractScheduledRecoveryNotice,
+  formatScheduledRecoveryNotice,
+} from "#public/channels/scheduled-recovery.js";
+import {
   renderAnsweredInputRequestMessage,
   renderInputRequestMessage,
 } from "#public/channels/teams/hitl.js";
@@ -107,6 +111,14 @@ export const defaultEvents: TeamsChannelEvents = {
   async "message.completed"(event, channel, _ctx) {
     if (event.finishReason === "tool-calls" || !event.message) return;
     for (const chunk of splitTeamsMessageText(event.message)) {
+      await channel.thread.post(chunk);
+    }
+  },
+
+  async "step.failed"(event, channel, _ctx) {
+    const notice = extractScheduledRecoveryNotice(event);
+    if (notice === null) return;
+    for (const chunk of splitTeamsMessageText(formatScheduledRecoveryNotice(notice))) {
       await channel.thread.post(chunk);
     }
   },

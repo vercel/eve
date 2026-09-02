@@ -11,7 +11,12 @@ import { SYSTEM_RULES } from "./rules/system.js";
 import { WORKFLOW_RULES } from "./rules/workflow.js";
 
 export type { ErrorLink, ErrorSignals } from "./signals.js";
-export type { LinkPredicate, SemanticErrorRule, SemanticErrorSummary } from "./rule.js";
+export type {
+  LinkPredicate,
+  SemanticErrorDurableRetryPolicy,
+  SemanticErrorRule,
+  SemanticErrorSummary,
+} from "./rule.js";
 
 /**
  * The semantic-error catalog: an ordered list of declarative rules, linter

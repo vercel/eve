@@ -41,6 +41,14 @@ describe("summarizeKnownError (catalog table)", () => {
       id: "gateway-free-tier-rate-limited",
     },
     {
+      title: "current gateway free-tier rate limit",
+      error: Object.assign(new Error("Free tier requests on this model are rate-limited."), {
+        name: "GatewayRateLimitError",
+        type: "rate_limit_exceeded",
+      }),
+      id: "gateway-free-tier-rate-limited",
+    },
+    {
       title: "gateway invalid api key",
       error: named(
         "GatewayAuthenticationError",
@@ -284,6 +292,11 @@ describe("summary tags", () => {
     );
     expect(summarizeKnownError(new TypeError("fetch failed"))?.tags).toContain("transient");
     expect(summarizeKnownError(new TypeError("terminated"))?.tags).toContain("transient");
+    expect(
+      summarizeKnownError(
+        named("GatewayRateLimitError", "Free tier requests on this model are rate-limited."),
+      )?.recovery,
+    ).toMatchObject({ defaultDelayMs: 60_000, kind: "durable-retry", maxAttempts: 1 });
   });
 });
 
