@@ -134,12 +134,12 @@ import {
   markApprovalCandidateHistoryEventEmitted,
   markApprovalCandidatePendingEventEmitted,
   markApprovalSettlementEventEmitted,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/approval-response-attempts.js";
 import {
-  coordinateApprovalDelivery,
-  shouldPrepareApprovalPolicyTools,
+  interpretApprovalResponses,
   shouldPrepareApprovalReplayTools,
-} from "#harness/approval-delivery-coordinator.js";
+  shouldPrepareApprovalResponsePolicies,
+} from "#harness/hitl/approval-response-interpreter.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
@@ -157,7 +157,7 @@ import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
-} from "#harness/stale-input-responses.js";
+} from "#harness/hitl/request-interpreter.js";
 import {
   normalizeModelMessages,
   normalizeUserContent,
@@ -680,7 +680,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       });
     }
     // Only persisted policy work can invoke a dynamic tool's approval.response callback.
-    const responseAuthorizationTools = shouldPrepareApprovalPolicyTools({
+    const responseAuthorizationTools = shouldPrepareApprovalResponsePolicies({
       session,
       stepInput: effectiveStepInput,
     })
@@ -689,7 +689,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           context: approvalContext,
         })
       : config.tools;
-    const coordinated = await coordinateApprovalDelivery({
+    const coordinated = await interpretApprovalResponses({
       session,
       stepInput: effectiveStepInput,
       tools: responseAuthorizationTools,
@@ -2539,6 +2539,7 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
+      owner: approvalRequests.length > 0 ? "framework-approval-gate" : "session-turn",
       requests: inputRequests,
       responseMessages: [],
       session: parkedSession,
@@ -2574,6 +2575,7 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
+      owner: approvalRequests.length > 0 ? "framework-approval-gate" : "session-turn",
       requests: inputRequests,
       responseAuthRequiredRequestIds: approvalRequests
         .filter((request) => {

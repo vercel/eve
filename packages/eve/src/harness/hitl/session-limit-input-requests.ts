@@ -1,20 +1,10 @@
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
-import { buildResolvedInputBatch } from "#harness/input-request-resolution.js";
 import {
   getPendingInputBatches,
-  queueDeferredStepInput,
   removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
-import {
-  appendResolvedBatchTranscript,
-  compactStepInput,
-  finishResolvedInput,
-  responsesForBatches,
-} from "#harness/hitl/pending-input-resolution.js";
-import type {
-  InputDomainResolverInput,
-  ResolvePendingInputResult,
-} from "#harness/hitl/pending-input-resolution.js";
+import { appendResolvedBatchTranscript } from "#harness/hitl/pending-input-resolution.js";
+import type { RequestVerdict, RequestVerdictReducerInput } from "#harness/hitl/request-verdict.js";
 import {
   isSessionLimitContinuationRequest,
   resolveSessionLimitContinuation,
@@ -33,46 +23,37 @@ export function isSessionLimitInputBatch(batch: PendingInputBatch): boolean {
   return hasSessionLimit;
 }
 
-export function resolveSessionLimitInput(
-  input: InputDomainResolverInput & { readonly pendingBatch: PendingInputBatch },
-): ResolvePendingInputResult {
-  const responseIds = new Set(input.responses.map((response) => response.requestId));
-  const answered =
-    input.pendingBatch.requests.some((request) => responseIds.has(request.requestId)) &&
-    input.pendingBatch.requests.every((request) => responseIds.has(request.requestId));
-  if (!answered) {
-    return {
-      deferredMessage: true,
-      outcome: "unresolved",
-      messages: [...input.baseHistory],
-      session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
-    };
-  }
-
-  const openBatches = input.batches.filter((batch) => batch !== input.pendingBatch);
-  const leftoverResponses = responsesForBatches(input.responses, openBatches);
-  const limitBlocked = openBatches.some((batch) =>
-    batch.requests.some((request) => isSessionLimitContinuationRequest(request)),
+export function hasAnsweredSessionLimitBatch(
+  batch: PendingInputBatch,
+  responses: RequestVerdictReducerInput["responses"],
+): boolean {
+  const responseIds = new Set(responses.map((response) => response.requestId));
+  return (
+    batch.requests.some((request) => responseIds.has(request.requestId)) &&
+    batch.requests.every((request) => responseIds.has(request.requestId))
   );
-  const messages = [...input.baseHistory];
-  appendResolvedBatchTranscript(messages, input.pendingBatch, []);
-  const session = removePendingInputBatches(input.session, [input.pendingBatch]);
+}
+
+export function reduceSessionLimitRequestVerdict(
+  input: RequestVerdictReducerInput,
+): RequestVerdict & {
+  readonly limitContinuation: { readonly granted: boolean };
+} {
+  const messages = [...input.messages];
+  appendResolvedBatchTranscript(messages, input.batch, []);
   const limitContinuation = resolveSessionLimitContinuation({
-    requests: input.pendingBatch.requests,
+    requests: input.batch.requests,
     responses: input.responses,
   });
+  if (limitContinuation === undefined) {
+    throw new TypeError("Answered session-limit batches must resolve a continuation verdict.");
+  }
 
-  return finishResolvedInput({
-    deferTurnInput: input.deferTurnInput || limitBlocked,
-    leftoverResponses,
+  return {
     limitContinuation,
     messages,
-    resolvedInputs: [buildResolvedInputBatch(input.pendingBatch, input.responses)].filter(
-      (batch): batch is NonNullable<typeof batch> => batch !== undefined,
-    ),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
-  });
+    session: input.session,
+  };
 }
 
 /** Drops only harness-authored session-limit prompts from a parked session. */

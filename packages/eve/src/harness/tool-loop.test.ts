@@ -66,6 +66,7 @@ import {
   hasPendingInputBatch,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
+import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
@@ -7063,11 +7064,8 @@ describe("createToolLoopHarness", () => {
       { message: "Search, then ask me a question." },
     );
 
-    const pendingResponseMessages = (
-      result.session.state?.["eve.runtime.pendingInputBatches"] as
-        | readonly { responseMessages?: readonly ModelMessage[] }[]
-        | undefined
-    )?.[0]?.responseMessages;
+    const pendingResponseMessages = getPendingInputBatches(result.session.state)[0]
+      ?.responseMessages;
 
     expect(result.next).toBeNull();
     expect(pendingResponseMessages).toEqual([

@@ -15,9 +15,9 @@ import {
   markApprovalCandidateAuthorizationRequired,
   settleAllowedCandidate,
   settleDirectApprovalResponse,
-  type ActiveApprovalCandidate,
+  type ActiveApprovalResponseAttempt,
   type ApprovalSettlementAuditRecord,
-} from "#harness/approval-candidates.js";
+} from "#harness/hitl/approval-response-attempts.js";
 import {
   clearPendingAuthorization,
   getAuthorizationResult,
@@ -42,26 +42,7 @@ export interface ApprovalDeliveryResult {
   readonly stepInput?: StepInput;
 }
 
-/**
- * Advances approval state by one durable phase.
- *
- * | State | Input | Transition |
- * | --- | --- | --- |
- * | pending request | Approve | create responder-bound candidate |
- * | pending request | Cancel | settle cancelled and stale candidates |
- * | pending candidate | coordinator pass | run current authorizer |
- * | pending candidate | allowed | settle approved and stale competitors |
- * | pending candidate | rejected/error/expiry | append terminal history |
- * | pending candidate | authorization required | persist private challenge |
- * | authorization required | matching callback | re-run current authorizer |
- * | settled request | any later response | no state change |
- *
- * Delivery ingestion returns before authorizer work so Cancel and candidate
- * creation commit before long-running policy execution. Candidate results also
- * commit before lifecycle events are projected by the next stack layer.
- */
-/** Returns whether this invocation should prepare tools for persisted policy work. */
-export function shouldPrepareApprovalPolicyTools(input: {
+export function shouldPrepareApprovalResponsePolicies(input: {
   readonly now?: number;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
@@ -85,11 +66,13 @@ export function shouldPrepareApprovalPolicyTools(input: {
 
   const now = input.now ?? Date.now();
   return getApprovalAuditState(input.session.state).activeCandidates.some(
-    (candidate) =>
-      candidate.expiresAt > now &&
-      (candidate.status === "pending" ||
-        (candidate.authorizationChallenges?.some(
-          (challenge) => getAuthorizationResult(challenge.name) !== undefined,
+    (attempt) =>
+      attempt.expiresAt > now &&
+      (attempt.status === "pending" ||
+        (getPendingAuthorization(input.session.state)?.challenges.some(
+          (challenge) =>
+            challenge.candidateId === attempt.candidateId &&
+            getAuthorizationResult(challenge.name) !== undefined,
         ) ??
           false)),
   );
@@ -101,7 +84,7 @@ export function shouldPrepareApprovalReplayTools(input: {
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }): boolean {
-  if (shouldPrepareApprovalPolicyTools(input)) return true;
+  if (shouldPrepareApprovalResponsePolicies(input)) return true;
 
   const approvedRequestIds = new Set(
     [
@@ -118,7 +101,7 @@ export function shouldPrepareApprovalReplayTools(input: {
   );
 }
 
-export async function coordinateApprovalDelivery(input: {
+export async function interpretApprovalResponses(input: {
   readonly now?: number;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
@@ -126,9 +109,12 @@ export async function coordinateApprovalDelivery(input: {
 }): Promise<ApprovalDeliveryResult> {
   const now = input.now ?? Date.now();
   const expiredChallengeNames = getApprovalAuditState(input.session.state)
-    .activeCandidates.filter((candidate) => candidate.expiresAt <= now)
+    .activeCandidates.filter((attempt) => attempt.expiresAt <= now)
     .flatMap(
-      (candidate) => candidate.authorizationChallenges?.map((challenge) => challenge.name) ?? [],
+      (attempt) =>
+        getPendingAuthorization(input.session.state)
+          ?.challenges.filter((challenge) => challenge.candidateId === attempt.candidateId)
+          .map((challenge) => challenge.name) ?? [],
     );
   const expiredState = expireApprovalCandidates({ now, state: input.session.state });
   let session: HarnessSession = {
@@ -167,13 +153,17 @@ export async function coordinateApprovalDelivery(input: {
   const feedback: string[] = [];
   const consumed = new Set<string>();
   let didCommit = false;
-  const candidatesAtStart = getApprovalAuditState(session.state).activeCandidates;
+  const attemptsAtStart = getApprovalAuditState(session.state).activeCandidates;
 
   const deliveredResponses = [
     ...(stepInput?.attributedInputResponses ?? []),
-    ...(stepInput?.inputResponses ?? []).map((response) => ({ auth: undefined, response })),
+    ...(stepInput?.inputResponses ?? []).map((response) => ({
+      auth: undefined,
+      deliveryId: undefined,
+      response,
+    })),
   ];
-  for (const { auth: attributedResponder, response } of deliveredResponses) {
+  for (const { auth: attributedResponder, deliveryId, response } of deliveredResponses) {
     const request = requests.get(response.requestId);
     if (request === undefined || !isApprovalRequest(request)) continue;
 
@@ -236,6 +226,7 @@ export async function coordinateApprovalDelivery(input: {
     const created = createApprovalCandidate({
       candidateIdPrefix: approvalCandidateIdPrefix(request.requestId, responder),
       createdAt: now,
+      deliveryId,
       expiresAt: now + APPROVAL_CANDIDATE_TTL_MS,
       requestId: request.requestId,
       responder,
@@ -259,37 +250,38 @@ export async function coordinateApprovalDelivery(input: {
     return deliveryResult(session, remainingStepInput, "continue", [], feedback);
   }
 
-  // Candidates are persisted in an earlier pass. Run pending candidates and
-  // resume only authorization-required candidates whose callback arrived.
   const parkedChallengeNames = new Set(
     getPendingAuthorization(session.state)?.challenges.map((challenge) => challenge.name) ?? [],
   );
-  for (const candidate of candidatesAtStart) {
-    if (candidate.status === "authorization-required") {
-      const candidateChallenges = candidate.authorizationChallenges ?? [];
-      const hasCallback = candidateChallenges.some(
+  for (const attempt of attemptsAtStart) {
+    if (attempt.status === "authorization-required") {
+      const attemptChallenges =
+        getPendingAuthorization(session.state)?.challenges.filter(
+          (challenge) => challenge.candidateId === attempt.candidateId,
+        ) ?? [];
+      const hasCallback = attemptChallenges.some(
         (challenge) => getAuthorizationResult(challenge.name) !== undefined,
       );
       if (!hasCallback) {
         challenges.push(
-          ...candidateChallenges.filter((challenge) => !parkedChallengeNames.has(challenge.name)),
+          ...attemptChallenges.filter((challenge) => !parkedChallengeNames.has(challenge.name)),
         );
         continue;
       }
     }
 
-    const request = requests.get(candidate.requestId);
+    const request = requests.get(attempt.requestId);
     if (
       request === undefined ||
-      getActiveApprovalCandidate(session.state, candidate.candidateId) === undefined
+      getActiveApprovalCandidate(session.state, attempt.candidateId) === undefined
     ) {
       continue;
     }
     const processed = await authorizeCandidate({
-      candidateId: candidate.candidateId,
+      candidateId: attempt.candidateId,
       now,
       request,
-      responder: candidate.responder,
+      responder: attempt.responder,
       session,
       tools: input.tools,
     });
@@ -297,7 +289,7 @@ export async function coordinateApprovalDelivery(input: {
     didCommit ||= processed.didCommit;
     challenges.push(...processed.challenges);
     const settlement = getApprovalAuditState(session.state).settlements.find(
-      (entry) => entry.requestId === candidate.requestId,
+      (entry) => entry.requestId === attempt.requestId,
     );
     if (settlement !== undefined) pendingSettlements.push(settlement);
   }
@@ -320,7 +312,7 @@ async function authorizeCandidate(input: {
   readonly candidateId: string;
   readonly now: number;
   readonly request: InputRequest;
-  readonly responder: ActiveApprovalCandidate["responder"];
+  readonly responder: ActiveApprovalResponseAttempt["responder"];
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
 }): Promise<{
@@ -328,7 +320,6 @@ async function authorizeCandidate(input: {
   readonly didCommit: boolean;
   readonly session: HarnessSession;
 }> {
-  // Expiry is checked again immediately before callback/policy execution.
   let session = {
     ...input.session,
     state: expireApprovalCandidates({ now: input.now, state: input.session.state }),
@@ -351,26 +342,28 @@ async function authorizeCandidate(input: {
   try {
     const context = buildCallbackContext();
     const outcome = await withAuthorizerTimeout(
-      responsePolicy({
-        auth: buildApprovalResponseAuth({
+      Promise.resolve(
+        responsePolicy({
+          auth: buildApprovalResponseAuth({
+            responder: input.responder,
+            scope: input.candidateId,
+          }),
+          request: {
+            callId: input.request.action.callId,
+            requestId: input.request.requestId,
+            toolInput: input.request.action.input,
+            toolName: input.request.action.toolName,
+          },
+          response: { decision: "approve" },
           responder: input.responder,
-          scope: input.candidateId,
+          session: {
+            id: context.session.id,
+            initiator: context.session.auth.initiator,
+            parent: context.session.parent,
+            turn: context.session.turn,
+          },
         }),
-        request: {
-          callId: input.request.action.callId,
-          requestId: input.request.requestId,
-          toolInput: input.request.action.input,
-          toolName: input.request.action.toolName,
-        },
-        response: { decision: "approve" },
-        responder: input.responder,
-        session: {
-          id: context.session.id,
-          initiator: context.session.auth.initiator,
-          parent: context.session.parent,
-          turn: context.session.turn,
-        },
-      }),
+      ),
     );
     if (outcome.status === "rejected") {
       session = {
@@ -431,18 +424,19 @@ async function authorizeCandidate(input: {
   }
 }
 
-function failCandidate(input: {
+async function failCandidate(input: {
   readonly candidateId: string;
   readonly now: number;
   readonly request: InputRequest;
   readonly reason?: string;
+  readonly responder: ActiveApprovalResponseAttempt["responder"];
   readonly session: HarnessSession;
-}): {
+  readonly tools: HarnessToolMap;
+}): Promise<{
   readonly challenges: readonly AuthorizationChallenge[];
-  readonly didCommit: true;
+  readonly didCommit: boolean;
   readonly session: HarnessSession;
-} {
-  const reason = input.reason ?? "We couldn’t verify your approval. Please try again.";
+}> {
   return {
     challenges: [],
     didCommit: true,
@@ -451,7 +445,7 @@ function failCandidate(input: {
       state: finishApprovalCandidate({
         candidateId: input.candidateId,
         completedAt: input.now,
-        reason,
+        reason: input.reason,
         state: input.session.state,
         status: "failed",
       }),
@@ -459,25 +453,38 @@ function failCandidate(input: {
   };
 }
 
-function hasResponseForRequest(
-  stepInput: StepInput | undefined,
-  requestIds: ReadonlySet<string>,
-): boolean {
-  return (
-    stepInput?.attributedInputResponses?.some(({ response }) =>
-      requestIds.has(response.requestId),
-    ) === true ||
-    stepInput?.inputResponses?.some((response) => requestIds.has(response.requestId)) === true
-  );
+function approvalCandidateIdPrefix(requestId: string, responder: SessionAuthContext): string {
+  return `${requestId}:${responder.authenticator}:${responder.principalType}:${responder.principalId}`;
 }
 
-function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
-  return (
-    stepInput?.message !== undefined ||
-    (stepInput?.attributedInputResponses?.length ?? 0) > 0 ||
-    (stepInput?.inputResponses?.length ?? 0) > 0 ||
-    (stepInput?.runtimeActionResults?.length ?? 0) > 0
+function hasResponseForRequest(stepInput: StepInput | undefined, requestIds: Set<string>): boolean {
+  return [
+    ...(stepInput?.attributedInputResponses ?? []).map(({ response }) => response),
+    ...(stepInput?.inputResponses ?? []),
+  ].some((response) => requestIds.has(response.requestId));
+}
+
+/**
+ * Drops consumed responses and folds the surviving attributed responses into
+ * `inputResponses`. Responder identity is only meaningful to this pass; the
+ * request interpreter downstream reads `inputResponses` alone.
+ */
+function removeConsumedResponses(
+  stepInput: StepInput | undefined,
+  consumedRequestIds: Set<string>,
+): StepInput | undefined {
+  if (stepInput === undefined) return undefined;
+  const attributed = (stepInput.attributedInputResponses ?? []).filter(
+    ({ response }) => !consumedRequestIds.has(response.requestId),
   );
+  const plain = (stepInput.inputResponses ?? []).filter(
+    (response) => !consumedRequestIds.has(response.requestId),
+  );
+  return {
+    ...stepInput,
+    attributedInputResponses: undefined,
+    inputResponses: [...plain, ...attributed.map(({ response }) => response)],
+  };
 }
 
 function appendSettledResponses(
@@ -497,28 +504,18 @@ function appendSettledResponses(
   };
 }
 
-function removeConsumedResponses(
-  stepInput: StepInput | undefined,
-  consumed: ReadonlySet<string>,
-): StepInput | undefined {
-  if (stepInput === undefined) return undefined;
-  const attributed = (stepInput.attributedInputResponses ?? []).filter(
-    ({ response }) => !consumed.has(response.requestId),
+function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
+  return Boolean(
+    stepInput?.message ||
+    (stepInput?.context && stepInput.context.length > 0) ||
+    (stepInput?.inputResponses && stepInput.inputResponses.length > 0) ||
+    (stepInput?.attributedInputResponses && stepInput.attributedInputResponses.length > 0),
   );
-  const plain = (stepInput.inputResponses ?? []).filter(
-    (response) => !consumed.has(response.requestId),
-  );
-  const inputResponses = [...plain, ...attributed.map(({ response }) => response)];
-  return {
-    ...stepInput,
-    attributedInputResponses: undefined,
-    inputResponses,
-  };
 }
 
 function deliveryResult(
   session: HarnessSession,
-  stepInput: StepInput | undefined,
+  stepInput?: StepInput,
   kind: ApprovalDeliveryResult["kind"] = "continue",
   challenges: readonly AuthorizationChallenge[] = [],
   feedback: readonly string[] = [],
@@ -526,33 +523,14 @@ function deliveryResult(
   return { challenges, feedback, kind, session, stepInput };
 }
 
-function approvalCandidateIdPrefix(requestId: string, responder: SessionAuthContext): string {
-  const principal = [
-    responder.authenticator,
-    responder.issuer ?? "",
-    responder.principalType,
-    responder.principalId,
-  ].join(":");
-  return `${encodeCandidateIdPart(requestId)}.${encodeCandidateIdPart(principal)}`;
-}
-
-function encodeCandidateIdPart(value: string): string {
-  return Array.from(value, (character) => character.codePointAt(0)!.toString(36)).join("-");
-}
-
-async function withAuthorizerTimeout<T>(promise: Promise<T> | T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Promise.resolve(promise),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("Approval response authorizer timed out.")),
-          APPROVAL_AUTHORIZER_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
+async function withAuthorizerTimeout<T>(promise: Promise<T>): Promise<T> {
+  return await Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(
+        () => reject(new Error("Approval response policy timed out.")),
+        APPROVAL_AUTHORIZER_TIMEOUT_MS,
+      );
+    }),
+  ]);
 }

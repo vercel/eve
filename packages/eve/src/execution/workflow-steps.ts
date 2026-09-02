@@ -1,5 +1,5 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
+import { callAdapterEventHandler } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
@@ -44,6 +44,7 @@ import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
+import { deliverAttributedStepInput } from "#execution/attribute-delivery-input.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -51,7 +52,6 @@ import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
 import {
   getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
@@ -237,26 +237,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   };
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
-  // Run the adapter's deliver hook for each queued payload and
-  // coalesce the resulting StepInput values.
   let resolved: StepInput | undefined;
   if (input.input?.kind === "deliver") {
-    const results: StepInput[] = [];
     try {
-      for (const payload of input.input.payloads) {
-        const result = adapter.deliver
-          ? await adapter.deliver(payload, adapterCtx)
-          : defaultDeliverResult(payload);
-
-        if (result !== undefined && result !== null) {
-          results.push(result);
-        }
-      }
+      resolved = await deliverAttributedStepInput({ adapter, adapterCtx, delivery: input.input });
     } catch (error) {
       await failChannelDeliveries(error);
       throw error;
     }
-    resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
     if (input.input.acceptedAtMsByCallId !== undefined) {
       ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);

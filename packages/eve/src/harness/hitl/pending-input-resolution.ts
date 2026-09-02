@@ -1,20 +1,12 @@
 import type { ModelMessage } from "ai";
 
-import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { InputResponse } from "#shared/input.js";
-import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
-import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import type { PendingInputBatch } from "#harness/pending-input-batches.js";
 import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
+import type { ResolvedInputActionBatch, ToolResponsePart } from "#harness/hitl/request-verdict.js";
+import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
-
-export type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
-
-/** Action results from one resolved batch, attributed to their originating turn. */
-export interface ResolvedInputActionBatch {
-  readonly event: PendingInputBatchEvent;
-  readonly results: readonly RuntimeToolResultActionResult[];
-}
 
 export type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean };
 

@@ -111,6 +111,34 @@ describe("coalesceTurnInputs", () => {
     });
   });
 
+  it("preserves attributed responses and delivery identity", () => {
+    const result = coalesceTurnInputs(
+      {
+        attributedInputResponses: [
+          {
+            auth: null,
+            deliveryId: "delivery-1",
+            response: { requestId: "r1", optionId: "approve" },
+          },
+        ],
+      },
+      {
+        attributedInputResponses: [
+          {
+            auth: null,
+            deliveryId: "delivery-2",
+            response: { requestId: "r2", text: "yes" },
+          },
+        ],
+      },
+    );
+
+    expect(result.attributedInputResponses).toEqual([
+      expect.objectContaining({ deliveryId: "delivery-1" }),
+      expect.objectContaining({ deliveryId: "delivery-2" }),
+    ]);
+  });
+
   it("coalesces ephemeral context without making it durable context", () => {
     const result = coalesceTurnInputs(
       attachClientContext({}, ["first"]),

@@ -3,6 +3,12 @@ import type { ModelMessage } from "ai";
 import type { InputRequest } from "#shared/input.js";
 import type { HarnessSession, SessionStateMap, StepInput } from "#harness/types.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
+import type { RequestGroupOwner } from "#harness/hitl/request-ledger.js";
+import {
+  completeRequestGroups,
+  createRequestGroup,
+  openRequestGroups,
+} from "#harness/hitl/request-ledger.js";
 
 const PENDING_INPUT_BATCHES_KEY = "eve.runtime.pendingInputBatches";
 /** Pre-collection singleton key; read once for sessions parked before the upgrade. */
@@ -27,6 +33,7 @@ export interface PendingInputBatchEvent {
  */
 export interface PendingInputBatch {
   readonly event?: PendingInputBatchEvent;
+  readonly owner?: RequestGroupOwner;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
@@ -73,6 +80,7 @@ function coercePendingInputBatch(value: unknown): PendingInputBatch | undefined 
 export function getPendingInputBatches(
   state: SessionStateMap | undefined,
 ): readonly PendingInputBatch[] {
+  if (state?.["eve.runtime.hitl.requestLedger"] !== undefined) return openRequestGroups(state);
   const value = state?.[PENDING_INPUT_BATCHES_KEY];
   if (Array.isArray(value)) {
     const batches = value
@@ -114,32 +122,7 @@ export function removePendingInputBatches(
   session: HarnessSession,
   batches: readonly PendingInputBatch[],
 ): HarnessSession {
-  const removed = new Set(batches);
-  return setPendingInputBatches(
-    session,
-    getPendingInputBatches(session.state).filter((batch) => !removed.has(batch)),
-  );
-}
-
-function setPendingInputBatches(
-  session: HarnessSession,
-  batches: readonly PendingInputBatch[],
-): HarnessSession {
-  assertUniqueRequestIds(batches);
-  const state = { ...session.state };
-  delete state[LEGACY_PENDING_INPUT_BATCH_KEY];
-  if (batches.length === 0) {
-    delete state[PENDING_INPUT_BATCHES_KEY];
-  } else {
-    state[PENDING_INPUT_BATCHES_KEY] = batches.map((batch) => ({
-      event: batch.event,
-      responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
-      requests: [...batch.requests],
-      responseMessages: [...batch.responseMessages],
-    }));
-  }
-
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
+  return completeRequestGroups(session, batches);
 }
 
 /**
@@ -148,20 +131,20 @@ function setPendingInputBatches(
  */
 export function appendPendingInputBatch(input: {
   readonly event?: PendingInputBatchEvent;
+  readonly owner?: RequestGroupOwner;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
   readonly session: HarnessSession;
 }): HarnessSession {
-  return setPendingInputBatches(input.session, [
-    ...getPendingInputBatches(input.session.state),
-    {
-      event: input.event,
-      responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
-      requests: input.requests,
-      responseMessages: input.responseMessages,
-    },
-  ]);
+  return createRequestGroup({
+    event: input.event,
+    owner: input.owner,
+    requests: input.requests,
+    responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
+    responseMessages: input.responseMessages,
+    session: input.session,
+  });
 }
 
 // ---------------------------------------------------------------------------
