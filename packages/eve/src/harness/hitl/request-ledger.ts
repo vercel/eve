@@ -1,6 +1,5 @@
 import type { ModelMessage } from "ai";
 
-import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
 import type { AuthorizationChallenge } from "#harness/authorization.js";
 import type { DurableResponseAttemptState } from "#harness/hitl/approval-response-attempts.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
@@ -11,6 +10,12 @@ const LEGACY_BATCHES_KEY = "eve.runtime.pendingInputBatches";
 const LEGACY_BATCH_KEY = "eve.runtime.pendingInputBatch";
 const LEGACY_APPROVAL_STATE_KEY = "eve.runtime.hitl.approvalState";
 const LEGACY_PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
+
+export interface RequestGroupEvent {
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}
 
 export interface InternalAuthorizationRequest {
   readonly authorization: AuthorizationChallenge;
@@ -47,13 +52,15 @@ export interface RequestGroup {
     | "cancelled"
     | RequestGroupCompletionReady
     | RequestGroupCompletionDelivered;
-  readonly event?: PendingInputBatchEvent;
+  readonly event?: RequestGroupEvent;
   readonly id: string;
   readonly owner: RequestGroupOwner;
   readonly requestIds: readonly string[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
   readonly responseMessages: readonly ModelMessage[];
 }
+
+export type OpenRequestGroup = RequestGroup & { readonly requests: readonly InputRequest[] };
 
 export interface ReadyRequestGroupDeliveryTarget {
   readonly groupId: string;
@@ -221,8 +228,8 @@ export function clearPendingAuthorizationState(
   return writePendingAuthorizationState(state, []);
 }
 
-export function createRequestGroup(input: {
-  readonly event?: PendingInputBatchEvent;
+export function createRequests(input: {
+  readonly event?: RequestGroupEvent;
   readonly owner?: RequestGroupOwner;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
@@ -261,9 +268,7 @@ export function createRequestGroup(input: {
   });
 }
 
-export function openRequestGroups(
-  state: SessionStateMap | undefined,
-): readonly PendingInputBatch[] {
+export function openRequestGroups(state: SessionStateMap | undefined): readonly OpenRequestGroup[] {
   const ledger = readRequestLedger(state);
   const requests = new Map(ledger.requests.map((request) => [request.id, request]));
   return ledger.groups.flatMap((group) => {
@@ -272,17 +277,18 @@ export function openRequestGroups(
       const record = requests.get(id);
       return record?.state === "open" && isInputRequest(record.request) ? [record.request] : [];
     });
-    return open.length === 0
-      ? []
-      : [
-          {
-            event: group.event,
-            requests: open,
-            responseAuthRequiredRequestIds: group.responseAuthRequiredRequestIds,
-            responseMessages: group.responseMessages,
-          },
-        ];
+    return open.length === 0 ? [] : [{ ...group, requests: open }];
   });
+}
+
+export function hasOpenRequests(state: SessionStateMap | undefined): boolean {
+  return openRequestGroups(state).length > 0;
+}
+
+export function openRequestIds(state: SessionStateMap | undefined): ReadonlySet<string> {
+  return new Set(
+    openRequestGroups(state).flatMap((group) => group.requests.map((request) => request.requestId)),
+  );
 }
 
 export function prepareReadyRequestGroupDeliveries(input: {
@@ -404,24 +410,17 @@ export function cancelIncompleteRequestGroups(session: HarnessSession): HarnessS
   });
 }
 
-export function completeRequestGroups(
+export function closeRequestGroups(
   session: HarnessSession,
-  batches: readonly PendingInputBatch[],
+  groups: readonly OpenRequestGroup[],
 ): HarnessSession {
   const ledger = readRequestLedger(session.state);
-  const ids = new Set(
-    batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
-  );
-  const groupIds = new Set(
-    ledger.groups
-      .filter((group) => group.requestIds.some((id) => ids.has(id)))
-      .map((group) => group.id),
-  );
-  if (groupIds.size === 0) return session;
+  const ids = new Set(groups.map((group) => group.id));
+  if (ids.size === 0) return session;
   return writeRequestLedger({
     expectedVersion: ledger.version,
     groups: ledger.groups.map((group) =>
-      groupIds.has(group.id)
+      ids.has(group.id)
         ? {
             ...group,
             completion: { deliveryKey: `legacy:${group.id}`, status: "delivered" as const },
@@ -429,7 +428,7 @@ export function completeRequestGroups(
         : group,
     ),
     requests: ledger.requests.map((request) =>
-      request.groupId !== undefined && groupIds.has(request.groupId)
+      request.groupId !== undefined && ids.has(request.groupId)
         ? { ...request, state: "terminal" }
         : request,
     ),
@@ -438,21 +437,28 @@ export function completeRequestGroups(
 }
 
 function importLegacyBatches(state: SessionStateMap | undefined): RequestLedger {
+  type LegacyOpenRequestGroup = {
+    readonly event?: RequestGroupEvent;
+    readonly requests: readonly InputRequest[];
+    readonly responseAuthRequiredRequestIds?: readonly string[];
+    readonly responseMessages: readonly ModelMessage[];
+  };
+
   const collection = state?.[LEGACY_BATCHES_KEY];
   const candidates = Array.isArray(collection) ? collection : [state?.[LEGACY_BATCH_KEY]];
-  const batches = candidates.filter((value): value is PendingInputBatch => {
+  const groups = candidates.filter((value): value is LegacyOpenRequestGroup => {
     if (typeof value !== "object" || value === null) return false;
-    const batch = value as PendingInputBatch;
-    return Array.isArray(batch.requests) && Array.isArray(batch.responseMessages);
+    const group = value as LegacyOpenRequestGroup;
+    return Array.isArray(group.requests) && Array.isArray(group.responseMessages);
   });
   const requests: RequestRecord[] = [];
-  const groups = batches.map((batch, index): RequestGroup => {
+  const importedGroups = groups.map((group, index): RequestGroup => {
     const id =
-      batch.event === undefined
+      group.event === undefined
         ? `session-turn:${String(index)}`
-        : `session-turn:${batch.event.turnId}:${String(batch.event.stepIndex)}`;
+        : `session-turn:${group.event.turnId}:${String(group.event.stepIndex)}`;
     requests.push(
-      ...batch.requests.map((request) => ({
+      ...group.requests.map((request) => ({
         groupId: id,
         id: request.requestId,
         request,
@@ -461,12 +467,12 @@ function importLegacyBatches(state: SessionStateMap | undefined): RequestLedger 
     );
     return {
       completion: "waiting",
-      event: batch.event,
+      event: group.event,
       id,
       owner: "session-turn",
-      requestIds: batch.requests.map((request) => request.requestId),
-      responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
-      responseMessages: batch.responseMessages,
+      requestIds: group.requests.map((request) => request.requestId),
+      responseAuthRequiredRequestIds: group.responseAuthRequiredRequestIds,
+      responseMessages: group.responseMessages,
     };
   });
   const authorizations = readLegacyAuthorizations(state) ?? [];
@@ -486,7 +492,7 @@ function importLegacyBatches(state: SessionStateMap | undefined): RequestLedger 
     }),
   );
   assertUniqueRequestIds(requests);
-  return { groups, requests, responseAttempts: undefined, version: 0 };
+  return { groups: importedGroups, requests, responseAttempts: undefined, version: 0 };
 }
 
 function writeLedgerExtension(

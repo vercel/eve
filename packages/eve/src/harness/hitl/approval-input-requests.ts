@@ -5,7 +5,7 @@ import {
   TOOL_EXECUTION_DENIED_MESSAGE,
 } from "#harness/input-request-resolution.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
-import type { PendingInputBatch } from "#harness/pending-input-batches.js";
+import type { OpenRequestGroup } from "#harness/hitl/request-ledger.js";
 import type {
   ResolvedInputActionBatch,
   RequestVerdict,
@@ -26,7 +26,7 @@ type ToolApprovalInputRequest = InputRequest & { readonly kind: "tool-approval" 
 export { type ResolvedInputActionBatch as RejectedActionBatch } from "#harness/hitl/request-verdict.js";
 
 export function hasAnsweredApprovalBatch(
-  batches: readonly PendingInputBatch[],
+  batches: readonly OpenRequestGroup[],
   responses: readonly InputResponse[],
 ): boolean {
   const responseIds = new Set(responses.map((response) => response.requestId));
@@ -38,9 +38,9 @@ export function hasAnsweredApprovalBatch(
 }
 
 export function findAnsweredApprovalBatches(
-  batches: readonly PendingInputBatch[],
+  batches: readonly OpenRequestGroup[],
   responses: readonly InputResponse[],
-): PendingInputBatch[] {
+): OpenRequestGroup[] {
   const responseIds = new Set(responses.map((response) => response.requestId));
   return batches.filter((batch) =>
     batch.requests.every(
@@ -50,8 +50,8 @@ export function findAnsweredApprovalBatches(
 }
 
 export function limitApprovalTailBatch(
-  resolvedBatches: readonly PendingInputBatch[],
-): PendingInputBatch[] {
+  resolvedBatches: readonly OpenRequestGroup[],
+): OpenRequestGroup[] {
   const firstApprovalIndex = resolvedBatches.findIndex((batch) =>
     batch.requests.some((request) => isApprovalRequest(request)),
   );
@@ -85,7 +85,7 @@ export function getApprovedTools(session: HarnessSession): ReadonlySet<string> {
 }
 
 function recordApprovedTools(input: {
-  readonly pendingBatch: PendingInputBatch;
+  readonly pendingBatch: OpenRequestGroup;
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly responses: readonly InputResponse[];
   readonly session: HarnessSession;
@@ -105,7 +105,7 @@ function recordApprovedTools(input: {
 }
 
 function buildRejectedActionBatch(
-  batch: PendingInputBatch,
+  batch: OpenRequestGroup,
   responses: readonly InputResponse[],
 ): ResolvedInputActionBatch | undefined {
   if (batch.event === undefined) return undefined;
@@ -136,7 +136,7 @@ function buildRejectedActionBatch(
 }
 
 function buildApprovalBatchToolResponseParts(
-  batch: PendingInputBatch,
+  batch: OpenRequestGroup,
   responses: readonly InputResponse[],
 ): ToolResponsePart[] {
   const responseMap = new Map(responses.map((response) => [response.requestId, response]));

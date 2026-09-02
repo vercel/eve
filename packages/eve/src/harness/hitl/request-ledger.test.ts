@@ -4,7 +4,8 @@ import {
   acknowledgeReadyRequestGroupDelivery,
   cancelIncompleteRequestGroups,
   classifyRequestResponse,
-  createRequestGroup,
+  closeRequestGroups,
+  createRequests,
   listReadyRequestGroupDeliveries,
   openRequestGroups,
   prepareReadyRequestGroupDeliveries,
@@ -13,11 +14,8 @@ import {
   writePendingAuthorizationState,
   writeRequestLedger,
 } from "#harness/hitl/request-ledger.js";
-import {
-  appendPendingInputBatch,
-  removePendingInputBatches,
-} from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
+import { resolvePendingInput } from "#harness/input-requests.js";
 import type { InputRequest } from "#shared/input.js";
 
 function session(state?: HarnessSession["state"]): HarnessSession {
@@ -30,6 +28,28 @@ function session(state?: HarnessSession["state"]): HarnessSession {
     state,
   };
 }
+
+function approval(requestId: string, callId: string): InputRequest {
+  return {
+    action: { callId, input: {}, kind: "tool-call", toolName: "bash" },
+    kind: "tool-approval",
+    prompt: "Approve bash",
+    requestId,
+  };
+}
+
+function question(requestId: string, callId: string): InputRequest {
+  return {
+    action: { callId, input: {}, kind: "tool-call", toolName: "ask_question" },
+    display: "text",
+    kind: "question",
+    prompt: "Which option?",
+    requestId,
+  };
+}
+
+const DUPLICATE_ID_ERROR =
+  'Internal pending input invariant violated: requestId must be unique across all pending batches: "duplicate".';
 
 const request: InputRequest = {
   action: { callId: "call-1", input: {}, kind: "tool-call", toolName: "ask_question" },
@@ -69,7 +89,7 @@ describe("request ledger", () => {
   });
 
   it("rejects a stale conditional write", () => {
-    const created = createRequestGroup({
+    const created = createRequests({
       requests: [request],
       responseMessages: [],
       session: session(),
@@ -87,7 +107,7 @@ describe("request ledger", () => {
   });
 
   it("distinguishes open, stale, and invalid responses", () => {
-    const created = appendPendingInputBatch({
+    const created = createRequests({
       requests: [request],
       responseMessages: [],
       session: session(),
@@ -95,26 +115,104 @@ describe("request ledger", () => {
     expect(classifyRequestResponse(created.state, "request-1")).toBe("open");
     expect(classifyRequestResponse(created.state, "unknown")).toBe("invalid");
 
-    const batch = openRequestGroups(created.state)[0];
-    if (batch === undefined) throw new Error("Expected an open request group.");
-    const delivered = removePendingInputBatches(created, [batch]);
+    const group = openRequestGroups(created.state)[0];
+    if (group === undefined) throw new Error("Expected an open request group.");
+    const delivered = closeRequestGroups(created, [group]);
     expect(classifyRequestResponse(delivered.state, "request-1")).toBe("stale");
   });
 
   it("retains terminal requests after a group is delivered", () => {
-    const created = appendPendingInputBatch({
+    const created = createRequests({
       requests: [request],
       responseMessages: [],
       session: session(),
     });
-    const batch = openRequestGroups(created.state)[0];
-    if (batch === undefined) throw new Error("Expected an open request group.");
-    const delivered = removePendingInputBatches(created, [batch]);
+    const group = openRequestGroups(created.state)[0];
+    if (group === undefined) throw new Error("Expected an open request group.");
+    const delivered = closeRequestGroups(created, [group]);
 
     expect(openRequestGroups(delivered.state)).toEqual([]);
     expect(readRequestLedger(delivered.state)).toMatchObject({
       groups: [{ completion: { deliveryKey: "legacy:session-turn:0", status: "delivered" } }],
       requests: [{ id: "request-1", state: "terminal" }],
+    });
+  });
+});
+
+describe("pending input request ID uniqueness", () => {
+  it("rejects duplicate IDs within a newly created group", () => {
+    expect(() =>
+      createRequests({
+        requests: [approval("duplicate", "call-1"), question("duplicate", "call-2")],
+        responseMessages: [],
+        session: session(),
+      }),
+    ).toThrow(DUPLICATE_ID_ERROR);
+  });
+
+  it("rejects an approval/question ID collision across newly created groups", () => {
+    const first = createRequests({
+      requests: [approval("duplicate", "call-1")],
+      responseMessages: [],
+      session: session(),
+    });
+
+    expect(() =>
+      createRequests({
+        requests: [question("duplicate", "call-2")],
+        responseMessages: [],
+        session: first,
+      }),
+    ).toThrow(DUPLICATE_ID_ERROR);
+  });
+
+  it("rejects duplicate IDs in a persisted group collection", () => {
+    const persisted = session({
+      "eve.runtime.pendingInputBatches": [
+        { requests: [approval("duplicate", "call-1")], responseMessages: [] },
+        { requests: [question("duplicate", "call-2")], responseMessages: [] },
+      ],
+    });
+
+    expect(() =>
+      resolvePendingInput({
+        session: persisted,
+        stepInput: { inputResponses: [{ optionId: "approve", requestId: "duplicate" }] },
+      }),
+    ).toThrow(DUPLICATE_ID_ERROR);
+  });
+
+  it("rejects duplicate IDs in a persisted legacy singleton", () => {
+    const persisted = session({
+      "eve.runtime.pendingInputBatch": {
+        requests: [question("duplicate", "call-1"), question("duplicate", "call-2")],
+        responseMessages: [],
+      },
+    });
+
+    expect(() => openRequestGroups(persisted.state)).toThrow(DUPLICATE_ID_ERROR);
+  });
+});
+
+describe("persisted pending input validation", () => {
+  it("ignores a persisted unknown request kind when reading open groups", () => {
+    const persisted = session({
+      "eve.runtime.pendingInputBatches": [
+        {
+          requests: [
+            {
+              ...question("unknown-kind", "call-unknown"),
+              kind: "future-input-kind",
+            },
+          ],
+          responseMessages: [],
+        },
+      ],
+    });
+
+    expect(resolvePendingInput({ session: persisted })).toMatchObject({
+      outcome: "continue",
+      session: persisted,
     });
   });
 });
@@ -205,7 +303,7 @@ describe("request group owners", () => {
       prompt: "Approve bash",
       requestId: "approval-1",
     };
-    const created = createRequestGroup({
+    const created = createRequests({
       owner: "framework-approval-gate",
       requests: [approval],
       responseMessages: [],
@@ -216,7 +314,7 @@ describe("request group owners", () => {
   });
 
   it("defaults non-gate groups to the session-turn owner", () => {
-    const created = createRequestGroup({
+    const created = createRequests({
       requests: [request],
       responseMessages: [],
       session: session(),
@@ -234,10 +332,10 @@ describe("request group completion delivery", () => {
       prompt: "Second?",
       requestId: "request-2",
     };
-    const created = createRequestGroup({
+    const created = createRequests({
       requests: [request],
       responseMessages: [],
-      session: createRequestGroup({
+      session: createRequests({
         owner: "framework-approval-gate",
         requests: [request2],
         responseMessages: [],
@@ -279,11 +377,11 @@ describe("request group completion delivery", () => {
       prompt: "Second?",
       requestId: "request-2",
     };
-    const created = createRequestGroup({
+    const created = createRequests({
       owner: "session-turn",
       requests: [second],
       responseMessages: [],
-      session: createRequestGroup({
+      session: createRequests({
         owner: "framework-approval-gate",
         requests: [request],
         responseMessages: [],
@@ -311,7 +409,7 @@ describe("request group completion delivery", () => {
   });
 
   it("acknowledges one ready delivery idempotently", () => {
-    const created = createRequestGroup({
+    const created = createRequests({
       requests: [request],
       responseMessages: [],
       session: session(),
@@ -346,7 +444,7 @@ describe("request group completion delivery", () => {
       hookUrl: "https://example.com/callback",
       name: "linear",
     } as const;
-    const waiting = createRequestGroup({
+    const waiting = createRequests({
       requests: [request],
       responseMessages: [],
       session: session(),

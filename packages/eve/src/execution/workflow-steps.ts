@@ -49,7 +49,7 @@ import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
-import { hasPendingInputBatch } from "#harness/input-requests.js";
+import { hasOpenRequests } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { coalesceTurnInputs } from "#harness/messages.js";
 import {
@@ -638,7 +638,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     typeof stepResult.next === "object" &&
     "done" in stepResult.next
   ) {
-    if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
+    if (mode === "task" && hasOpenRequests(stepResult.session.state)) {
       writer.releaseLock();
       throw new Error(TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE);
     }

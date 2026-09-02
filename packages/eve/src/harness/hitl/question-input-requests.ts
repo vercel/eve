@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import type { PendingInputBatch } from "#harness/pending-input-batches.js";
+import type { OpenRequestGroup } from "#harness/hitl/request-ledger.js";
 import type {
   RequestVerdict,
   RequestVerdictReducerInput,
@@ -12,9 +12,9 @@ import { appendResolvedBatchTranscript } from "#harness/hitl/pending-input-resol
 export type QuestionInputRequest = InputRequest & { readonly kind: "question" };
 
 export function findAnsweredQuestionBatches(
-  batches: readonly PendingInputBatch[],
+  batches: readonly OpenRequestGroup[],
   responses: readonly InputResponse[],
-): PendingInputBatch[] {
+): OpenRequestGroup[] {
   const responseIds = new Set(responses.map((response) => response.requestId));
   return batches.filter((batch) =>
     batch.requests.some((request) => responseIds.has(request.requestId)),
@@ -57,7 +57,7 @@ export function buildQuestionToolResponsePart(
 }
 
 export function appendQuestionBatchTranscripts(input: {
-  readonly batches: readonly PendingInputBatch[];
+  readonly batches: readonly OpenRequestGroup[];
   readonly messages: ModelMessage[];
   readonly responses: readonly InputResponse[];
 }): ModelMessage[] {

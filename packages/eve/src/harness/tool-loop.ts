@@ -147,13 +147,14 @@ import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import {
   consumeDeferredStepInput,
   getApprovedTools,
-  getPendingInputRequestIds,
+  openRequestIds,
   hasDeferredStepInput,
   hasPendingApprovalBatch,
   hasStepInput,
-  appendPendingInputBatch,
+  createRequests,
 } from "#harness/input-requests.js";
-import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import { openRequestGroups } from "#harness/hitl/request-ledger.js";
+import { queueDeferredStepInput } from "#harness/hitl/deferred-step-input.js";
 import { acknowledgeReadyRequestGroupDelivery } from "#harness/hitl/request-ledger.js";
 import {
   convertStaleResponsesToUserMessage,
@@ -653,7 +654,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     // Stale-response handling is two passes: drop what must never reach the
     // model (session-limit continuation answers), then convert what should
     // reach it as plain text.
-    const pendingRequestIds = getPendingInputRequestIds(session.state);
+    const pendingRequestIds = openRequestIds(session.state);
     const staleConversion = convertStaleResponsesToUserMessage({
       history: resolvedRuntimeActions.messages,
       pendingRequestIds,
@@ -1198,7 +1199,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       currentMessages.add(emissionState.sequence, deliveryPolicy.instruction);
     }
     const pendingApprovals = renderPendingApprovalsInstruction(
-      getPendingInputBatches(session.state).flatMap((batch) => batch.requests),
+      openRequestGroups(session.state).flatMap((batch) => batch.requests),
     );
     if (pendingApprovals !== undefined) {
       currentMessages.add(emissionState.sequence, pendingApprovals, { cacheFriendly: false });
@@ -2502,7 +2503,7 @@ async function handleStepResult(input: {
     });
 
     // The runtime-action batch already owns the shared assistant response.
-    parkedSession = appendPendingInputBatch({
+    parkedSession = createRequests({
       event: {
         sequence: emissionState.sequence,
         stepIndex: emissionState.stepIndex,
@@ -2538,7 +2539,7 @@ async function handleStepResult(input: {
       authoredTools: config.tools,
       context: contextStorage.getStore(),
     });
-    let parkedSession = appendPendingInputBatch({
+    let parkedSession = createRequests({
       event: {
         sequence: emissionState.sequence,
         stepIndex: emissionState.stepIndex,

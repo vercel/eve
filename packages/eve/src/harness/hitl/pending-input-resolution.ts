@@ -1,8 +1,8 @@
 import type { ModelMessage } from "ai";
 
 import type { InputResponse } from "#shared/input.js";
-import type { PendingInputBatch } from "#harness/pending-input-batches.js";
-import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
+import type { OpenRequestGroup } from "#harness/hitl/request-ledger.js";
+import { queueDeferredStepInput } from "#harness/hitl/deferred-step-input.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 import type { ResolvedInputActionBatch, ToolResponsePart } from "#harness/hitl/request-verdict.js";
 import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
@@ -13,7 +13,7 @@ export type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean
 
 export type InputDomainResolverInput = {
   readonly baseHistory: ModelMessage[];
-  readonly batches: readonly PendingInputBatch[];
+  readonly batches: readonly OpenRequestGroup[];
   readonly deferTurnInput: boolean;
   readonly resolvedStepInput: ResolvedStepInput | undefined;
   readonly responses: readonly InputResponse[];
@@ -41,7 +41,7 @@ export type ResolvePendingInputResult = {
 
 export function responsesForBatches(
   responses: readonly InputResponse[],
-  batches: readonly PendingInputBatch[],
+  batches: readonly OpenRequestGroup[],
 ): readonly InputResponse[] {
   return responses.filter((response) =>
     batches.some((batch) =>
@@ -52,7 +52,7 @@ export function responsesForBatches(
 
 export function appendResolvedBatchTranscript(
   messages: ModelMessage[],
-  batch: PendingInputBatch,
+  batch: OpenRequestGroup,
   toolParts: readonly ToolResponsePart[],
 ): void {
   messages.push(...batch.responseMessages);

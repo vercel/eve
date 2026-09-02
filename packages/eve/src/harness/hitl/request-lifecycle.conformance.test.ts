@@ -2,9 +2,9 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 
 import {
-  appendPendingInputBatch,
+  createRequests,
   consumeDeferredStepInput,
-  getPendingInputRequestIds,
+  openRequestIds,
   resolvePendingInput,
 } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
@@ -70,7 +70,7 @@ function responseMessages(requests: readonly InputRequest[]): ModelMessage[] {
 }
 
 function appendGroup(current: HarnessSession, requests: readonly InputRequest[]): HarnessSession {
-  return appendPendingInputBatch({
+  return createRequests({
     requests,
     responseMessages: responseMessages(requests),
     session: current,
@@ -88,9 +88,7 @@ describe("current HITL lifecycle conformance", () => {
     });
 
     expect(result.outcome).toBe("unresolved");
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(
-      new Set(["question-1", "approval-1"]),
-    );
+    expect(openRequestIds(result.session.state)).toEqual(new Set(["question-1", "approval-1"]));
     expect(consumeDeferredStepInput({ session: result.session }).input).toEqual({
       inputResponses: [{ optionId: "yes", requestId: "question-1" }],
     });
@@ -106,7 +104,7 @@ describe("current HITL lifecycle conformance", () => {
     });
 
     expect(result.outcome).toBe("resolved");
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set());
+    expect(openRequestIds(result.session.state)).toEqual(new Set());
     expect(result.messages.at(-1)).toEqual({
       content: expect.arrayContaining([
         expect.objectContaining({
@@ -134,7 +132,7 @@ describe("current HITL lifecycle conformance", () => {
     });
 
     expect(result.outcome).toBe("resolved");
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+    expect(openRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("uses the last response when one delivery repeats a request id", () => {
@@ -201,7 +199,7 @@ describe("current HITL lifecycle conformance", () => {
 
   it("gives an open limit group priority over responses for another group", () => {
     let parked = appendGroup(session(), [approval("approval-1")]);
-    parked = appendPendingInputBatch({
+    parked = createRequests({
       requests: [
         createSessionLimitContinuationRequest({
           sessionId: "session-1",
@@ -218,7 +216,7 @@ describe("current HITL lifecycle conformance", () => {
     });
 
     expect(result.outcome).toBe("unresolved");
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(
+    expect(openRequestIds(result.session.state)).toEqual(
       new Set(["approval-1", "session-1:limit:input:10"]),
     );
     expect(consumeDeferredStepInput({ session: result.session }).input).toEqual({

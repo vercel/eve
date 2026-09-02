@@ -224,7 +224,7 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: true,
-      hasPendingInputBatch: false,
+      hasOpenRequests: false,
       serializedContext: { state: "needs-auth" },
       sessionState,
     });
@@ -252,7 +252,7 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
+      hasOpenRequests: false,
       pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
       serializedContext: { state: "pending-runtime-action" },
       sessionState,
@@ -277,7 +277,7 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: false,
-      hasPendingInputBatch: true,
+      hasOpenRequests: true,
       serializedContext: { state: "pending-input" },
       sessionState,
     });
@@ -306,7 +306,7 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
+      hasOpenRequests: false,
       serializedContext: { state: "task-wait" },
       sessionState,
     });
@@ -631,7 +631,7 @@ describe("turnWorkflow", () => {
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
+        hasOpenRequests: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
         serializedContext: { state: "pending" },
         sessionState: pendingState,
@@ -717,7 +717,7 @@ describe("turnWorkflow", () => {
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
+        hasOpenRequests: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
         serializedContext: { state: "pending" },
         sessionState: pendingState,
@@ -867,7 +867,7 @@ describe("turnWorkflow", () => {
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
+        hasOpenRequests: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
         serializedContext: { state: "pending" },
         sessionState: pendingState,
@@ -949,7 +949,7 @@ describe("turnWorkflow", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
+      hasOpenRequests: false,
       pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
       serializedContext: { state: "pending" },
       sessionState: pendingState,
@@ -1054,7 +1054,7 @@ describe("turnWorkflow", () => {
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
+        hasOpenRequests: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
         serializedContext: { state: "pending" },
         sessionState: pendingState,
@@ -1167,7 +1167,7 @@ describe("turnWorkflow", () => {
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
+        hasOpenRequests: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
         serializedContext: { state: "batch-1" },
         sessionState: pendingState,
@@ -1175,7 +1175,7 @@ describe("turnWorkflow", () => {
       .mockResolvedValueOnce({
         action: "park",
         hasPendingAuthorization: false,
-        hasPendingInputBatch: false,
+        hasOpenRequests: false,
         pendingRuntimeActionKeys: ["subagent-call:delegate:call-2"],
         serializedContext: { state: "batch-2" },
         sessionState: pendingState,

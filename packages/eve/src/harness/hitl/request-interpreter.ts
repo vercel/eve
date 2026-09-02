@@ -58,12 +58,9 @@ import {
   reduceSessionLimitRequestVerdict,
 } from "#harness/hitl/session-limit-input-requests.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
-import type { PendingInputBatch } from "#harness/pending-input-batches.js";
-import {
-  getPendingInputBatches,
-  queueDeferredStepInput,
-  removePendingInputBatches,
-} from "#harness/pending-input-batches.js";
+import type { OpenRequestGroup } from "#harness/hitl/request-ledger.js";
+import { openRequestGroups, closeRequestGroups } from "#harness/hitl/request-ledger.js";
+import { queueDeferredStepInput } from "#harness/hitl/deferred-step-input.js";
 import {
   listReadyRequestGroupDeliveries,
   prepareReadyRequestGroupDeliveries,
@@ -103,7 +100,7 @@ export function interpretRequestDelivery(input: {
       session: input.session,
     };
   }
-  const batches = getPendingInputBatches(input.session.state);
+  const batches = openRequestGroups(input.session.state);
   if (batches.length === 0) {
     return { outcome: "continue", messages: baseHistory, session: input.session };
   }
@@ -168,18 +165,18 @@ export function interpretRequestDelivery(input: {
 }
 
 type PendingInputRoute =
-  | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
+  | { readonly batch: OpenRequestGroup; readonly kind: "session-limit" }
   | {
-      readonly approvalBatches: readonly PendingInputBatch[];
+      readonly approvalBatches: readonly OpenRequestGroup[];
       readonly kind: "approval";
-      readonly questionBatches: readonly PendingInputBatch[];
+      readonly questionBatches: readonly OpenRequestGroup[];
     }
   | { readonly kind: "question" };
 
-type PendingInputBatchDomain = "approval" | "question" | "session-limit";
+type OpenRequestGroupDomain = "approval" | "question" | "session-limit";
 
-function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputRoute {
-  const classified = batches.map((batch) => ({ batch, domain: classifyPendingInputBatch(batch) }));
+function routePendingInput(batches: readonly OpenRequestGroup[]): PendingInputRoute {
+  const classified = batches.map((batch) => ({ batch, domain: classifyOpenRequestGroup(batch) }));
   const limitBatch = classified.find(({ domain }) => domain === "session-limit")?.batch;
   if (limitBatch !== undefined) return { batch: limitBatch, kind: "session-limit" };
 
@@ -198,7 +195,7 @@ function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputR
   return { kind: "question" };
 }
 
-function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchDomain {
+function classifyOpenRequestGroup(batch: OpenRequestGroup): OpenRequestGroupDomain {
   for (const request of batch.requests) {
     switch (request.kind) {
       case "question":
@@ -217,12 +214,12 @@ function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchD
 }
 
 function resolveApprovalRoute(input: {
-  readonly approvalBatches: readonly PendingInputBatch[];
+  readonly approvalBatches: readonly OpenRequestGroup[];
   readonly baseHistory: ModelMessage[];
-  readonly batches: readonly PendingInputBatch[];
+  readonly batches: readonly OpenRequestGroup[];
   readonly deferTurnInput: boolean;
   readonly durableGroupCompletionDelivery?: boolean;
-  readonly questionBatches: readonly PendingInputBatch[];
+  readonly questionBatches: readonly OpenRequestGroup[];
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly resolvedStepInput: ResolvedStepInput | undefined;
   readonly responses: readonly InputResponse[];
@@ -309,7 +306,7 @@ function resolveApprovalRoute(input: {
 
 function resolveQuestionRoute(input: {
   readonly baseHistory: ModelMessage[];
-  readonly batches: readonly PendingInputBatch[];
+  readonly batches: readonly OpenRequestGroup[];
   readonly deferTurnInput: boolean;
   readonly durableGroupCompletionDelivery?: boolean;
   readonly resolvedStepInput: ResolvedStepInput | undefined;
@@ -397,10 +394,10 @@ function resolveQuestionRoute(input: {
 
 function resolveSessionLimitRoute(input: {
   readonly baseHistory: ModelMessage[];
-  readonly batches: readonly PendingInputBatch[];
+  readonly batches: readonly OpenRequestGroup[];
   readonly deferTurnInput: boolean;
   readonly durableGroupCompletionDelivery?: boolean;
-  readonly pendingBatch: PendingInputBatch;
+  readonly pendingBatch: OpenRequestGroup;
   readonly resolvedStepInput: ResolvedStepInput | undefined;
   readonly responses: readonly InputResponse[];
   readonly session: HarnessSession;
@@ -447,7 +444,7 @@ type StoredRequestGroupCompletion = Omit<ResolvePendingInputResult, "session"> &
 };
 
 function prepareResolvedGroupDelivery(input: {
-  readonly batches: readonly PendingInputBatch[];
+  readonly batches: readonly OpenRequestGroup[];
   readonly enabled: boolean;
   readonly result: ResolvePendingInputResult;
 }): ResolvePendingInputResult {
@@ -455,7 +452,7 @@ function prepareResolvedGroupDelivery(input: {
   if (!input.enabled) {
     return {
       ...input.result,
-      session: removePendingInputBatches(input.result.session, input.batches),
+      session: closeRequestGroups(input.result.session, input.batches),
     };
   }
   const requestIds = new Set(
@@ -485,9 +482,9 @@ function prepareResolvedGroupDelivery(input: {
 }
 
 function reduceRequestVerdicts(
-  batches: readonly PendingInputBatch[],
+  batches: readonly OpenRequestGroup[],
   initial: RequestVerdict,
-  reduce: (batch: PendingInputBatch, state: RequestVerdict) => RequestVerdict,
+  reduce: (batch: OpenRequestGroup, state: RequestVerdict) => RequestVerdict,
 ): RequestVerdict {
   let state = initial;
   for (const batch of batches) {
@@ -518,7 +515,7 @@ function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
 }
 
 function resolveTextMessageInput(
-  pendingBatch: PendingInputBatch,
+  pendingBatch: OpenRequestGroup,
   stepInput: StepInput | undefined,
 ): ResolvedStepInput | undefined {
   if (typeof stepInput?.message !== "string") return stepInput;
@@ -800,7 +797,7 @@ export function shouldPrepareApprovalResponsePolicies(input: {
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
 }): boolean {
-  const batches = getPendingInputBatches(input.session.state);
+  const batches = openRequestGroups(input.session.state);
   const responses = [
     ...(input.stepInput?.attributedInputResponses ?? []).map(({ response }) => response),
     ...(input.stepInput?.inputResponses ?? []),
@@ -856,7 +853,7 @@ export async function interpretPendingInputDelivery(input: {
     state: clearPendingAuthorization(expiredState, expiredChallengeNames),
   };
   const audit = getApprovalAuditState(session.state);
-  const batches = getPendingInputBatches(session.state);
+  const batches = openRequestGroups(session.state);
   const pendingRequestIds = new Set(
     batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
   );

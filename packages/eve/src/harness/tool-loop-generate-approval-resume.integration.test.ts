@@ -2,7 +2,7 @@ import { jsonSchema, type LanguageModel, type ModelMessage, simulateReadableStre
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { createRequests } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -87,7 +87,7 @@ function createPendingApprovalSession(history?: readonly ModelMessage[]): Harnes
     sessionId: "generate-approval-resume-session",
   };
 
-  return appendPendingInputBatch({
+  return createRequests({
     requests: [
       {
         action: {
@@ -118,7 +118,7 @@ function createPendingApprovalSession(history?: readonly ModelMessage[]): Harnes
 }
 
 function createTwoPendingApprovalSession(): HarnessSession {
-  return appendPendingInputBatch({
+  return createRequests({
     requests: [
       {
         action: {

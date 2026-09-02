@@ -33,7 +33,7 @@ import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { createRequests } from "#harness/input-requests.js";
 import { readRequestLedger } from "#harness/hitl/request-ledger.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
@@ -1793,7 +1793,7 @@ describe("turnStep", () => {
   });
 
   it("keeps session model selection and force-closes HITL when the first turn is cancelled", async () => {
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -1871,7 +1871,7 @@ describe("turnStep", () => {
   });
 
   it("rejects task completion while input requests remain pending", async () => {
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -2215,7 +2215,7 @@ describe("turnStep", () => {
   });
 
   it("carries a settled turn while an older input batch remains pending", async () => {
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -2253,7 +2253,7 @@ describe("turnStep", () => {
 
     expect(result).toMatchObject({
       action: "park",
-      hasPendingInputBatch: true,
+      hasOpenRequests: true,
       settled: { output: "settled while approval remains open" },
     });
   });
@@ -2282,7 +2282,7 @@ describe("turnStep", () => {
     {
       name: "input batch",
       withPending: (session: HarnessSession): HarnessSession =>
-        appendPendingInputBatch({
+        createRequests({
           requests: [
             {
               action: {

@@ -1,8 +1,5 @@
-import type { PendingInputBatch } from "#harness/pending-input-batches.js";
-import {
-  getPendingInputBatches,
-  removePendingInputBatches,
-} from "#harness/pending-input-batches.js";
+import type { OpenRequestGroup } from "#harness/hitl/request-ledger.js";
+import { openRequestGroups, closeRequestGroups } from "#harness/hitl/request-ledger.js";
 import { appendResolvedBatchTranscript } from "#harness/hitl/pending-input-resolution.js";
 import type { RequestVerdict, RequestVerdictReducerInput } from "#harness/hitl/request-verdict.js";
 import {
@@ -15,7 +12,7 @@ const SESSION_LIMIT_BATCH_INVARIANT_MESSAGE =
   "Session-limit pending input batches must contain only session-limit requests.";
 
 /** Returns whether this is a valid session-limit batch and rejects mixed ownership. */
-export function isSessionLimitInputBatch(batch: PendingInputBatch): boolean {
+export function isSessionLimitInputBatch(batch: OpenRequestGroup): boolean {
   const hasSessionLimit = batch.requests.some((request) => request.kind === "session-limit");
   if (hasSessionLimit && batch.requests.some((request) => request.kind !== "session-limit")) {
     throw new TypeError(SESSION_LIMIT_BATCH_INVARIANT_MESSAGE);
@@ -24,7 +21,7 @@ export function isSessionLimitInputBatch(batch: PendingInputBatch): boolean {
 }
 
 export function hasAnsweredSessionLimitBatch(
-  batch: PendingInputBatch,
+  batch: OpenRequestGroup,
   responses: RequestVerdictReducerInput["responses"],
 ): boolean {
   const responseIds = new Set(responses.map((response) => response.requestId));
@@ -58,7 +55,7 @@ export function reduceSessionLimitRequestVerdict(
 
 /** Drops only harness-authored session-limit prompts from a parked session. */
 export function clearPendingSessionLimitPrompt(session: HarnessSession): HarnessSession {
-  const dropped = getPendingInputBatches(session.state).filter(
+  const dropped = openRequestGroups(session.state).filter(
     (batch) =>
       batch.requests.length > 0 &&
       batch.requests.every((request) => isSessionLimitContinuationRequest(request)),
@@ -66,5 +63,5 @@ export function clearPendingSessionLimitPrompt(session: HarnessSession): Harness
   if (dropped.length === 0) {
     return session;
   }
-  return removePendingInputBatches(session, dropped);
+  return closeRequestGroups(session, dropped);
 }

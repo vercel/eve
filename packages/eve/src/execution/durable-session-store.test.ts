@@ -53,7 +53,7 @@ describe("durable-session-store cross-version contract", () => {
     });
     // Closed contract: pending-batch flags live on `NextDriverAction`
     // arms, not on the driver-visible state.
-    expect(state).not.toHaveProperty("hasPendingInputBatch");
+    expect(state).not.toHaveProperty("hasOpenRequests");
     expect(state).not.toHaveProperty("hasPendingRuntimeActionBatch");
     expect(state).not.toHaveProperty("pendingRuntimeActionKeys");
     expect(state).not.toHaveProperty("snapshot");

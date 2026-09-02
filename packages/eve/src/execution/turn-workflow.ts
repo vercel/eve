@@ -241,7 +241,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       if (result.action === "park") {
         const canPark =
           result.hasPendingAuthorization ||
-          (result.hasPendingInputBatch && input.capabilities?.requestInput === true) ||
+          (result.hasOpenRequests && input.capabilities?.requestInput === true) ||
           input.mode === "conversation";
 
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
@@ -501,7 +501,7 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
         const canPark =
           pendingActionKeys !== undefined ||
           result.hasPendingAuthorization ||
-          (result.hasPendingInputBatch && input.capabilities?.requestInput === true) ||
+          (result.hasOpenRequests && input.capabilities?.requestInput === true) ||
           input.mode === "conversation";
 
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);

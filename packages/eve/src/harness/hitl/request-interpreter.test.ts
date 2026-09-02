@@ -4,7 +4,7 @@ import type { SessionAuthContext } from "#channel/types.js";
 import { getPendingAuthorization } from "#harness/authorization.js";
 import { settleApprovalRequestResponse } from "#harness/hitl/approval-response-attempts.js";
 import { interpretPendingInputDelivery } from "#harness/hitl/request-interpreter.js";
-import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { createRequests, openRequestGroups } from "#harness/hitl/request-ledger.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
 
@@ -29,7 +29,7 @@ const responder: SessionAuthContext = {
 };
 
 function parkedSession(): HarnessSession {
-  return appendPendingInputBatch({
+  return createRequests({
     requests: [request],
     responseAuthRequiredRequestIds: [request.requestId],
     responseMessages: [],
@@ -60,7 +60,7 @@ describe("interpretPendingInputDelivery", () => {
     });
     if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
     expect(result.outcome).toBe("resolved");
-    expect(getPendingInputBatches(result.session.state)).toEqual([]);
+    expect(openRequestGroups(result.session.state)).toEqual([]);
     expect(result.messages.at(-1)).toEqual({
       content: [
         expect.objectContaining({
@@ -89,7 +89,7 @@ describe("interpretPendingInputDelivery", () => {
     });
     if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
     expect(result.outcome).toBe("resolved");
-    expect(getPendingInputBatches(result.session.state)).toEqual([]);
+    expect(openRequestGroups(result.session.state)).toEqual([]);
     expect(result.messages.at(-1)).toEqual({
       content: expect.arrayContaining([
         expect.objectContaining({
@@ -122,7 +122,7 @@ describe("interpretPendingInputDelivery", () => {
     expect(result.outcome).toBe("continue");
     expect(result.feedback).toEqual([]);
     expect(
-      getPendingInputBatches(result.session.state).flatMap((batch) =>
+      openRequestGroups(result.session.state).flatMap((batch) =>
         batch.requests.map((pending) => pending.requestId),
       ),
     ).toEqual([request.requestId]);

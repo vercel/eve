@@ -20,7 +20,7 @@ import {
   setHarnessEmissionState,
   type HarnessEmissionState,
 } from "#harness/emission.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { createRequests } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import {
@@ -143,7 +143,7 @@ async function parkOnSessionTokenLimit(input: {
   });
   let emissionState = input.emissionState;
 
-  const parkedSession = appendPendingInputBatch({
+  const parkedSession = createRequests({
     event: {
       sequence: emissionState.sequence,
       stepIndex: emissionState.stepIndex,
