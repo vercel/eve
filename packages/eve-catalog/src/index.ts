@@ -919,7 +919,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "telemetry.dev",
     kind: "instrumentation",
     tagline: "Send agent traces to telemetry.dev with tokens, cost, and latency on every turn.",
-    surfaces: { scaffoldable: false, gallery: true },
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
     slug: "jaeger",
