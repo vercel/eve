@@ -20,7 +20,6 @@ export default defineEval({
       ].join(" "),
     );
     started.expectOk();
-    started.calledSubagent("agent", { count: 1 });
 
     const completed = await t.target
       .watchTurn(started.sessionId, { startIndex: requireStreamIndex(t) })

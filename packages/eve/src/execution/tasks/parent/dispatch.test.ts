@@ -4,13 +4,19 @@ import { cancelOwnedTask, executeTaskControlAction } from "#execution/tasks/pare
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 
+const { cancelRun, getRun } = vi.hoisted(() => ({
+  cancelRun: vi.fn(),
+  getRun: vi.fn(),
+}));
+
 vi.mock("#execution/tasks/parent/run-parent.js", () => ({
   readLatestTaskView: vi.fn(),
   sendTaskCommand: vi.fn(),
 }));
 vi.mock("#execution/tools/workflow/cancel.js", () => ({ cancelWorkflowToolRun: vi.fn() }));
 vi.mock("#internal/workflow/runtime.js", () => ({
-  cancelRun: vi.fn(),
+  cancelRun,
+  getRun,
   getWorld: vi.fn(() => ({})),
 }));
 
@@ -28,6 +34,7 @@ describe("task cancellation", () => {
     vi.resetAllMocks();
     vi.useFakeTimers();
     vi.mocked(sendTaskCommand).mockResolvedValue("delivered");
+    getRun.mockReturnValue({ status: Promise.resolve("completed") });
   });
 
   afterEach(() => {
@@ -52,6 +59,7 @@ describe("task cancellation", () => {
       { hookToken: "run-hook", runId: "run-1" },
       "Task task-1 was cancelled.",
     );
+    expect(cancelRun).not.toHaveBeenCalled();
   });
 
   it("does not reinterpret an unknown executor binding", async () => {
@@ -66,6 +74,23 @@ describe("task cancellation", () => {
     await vi.runAllTimersAsync();
     await cancelled;
     expect(cancelWorkflowToolRun).not.toHaveBeenCalled();
+  });
+
+  it("hard-cancels a task run that does not unwind cooperatively", async () => {
+    vi.mocked(readLatestTaskView).mockResolvedValue({
+      metadata: entry.metadata,
+      status: "cancelled",
+      taskId: entry.taskId,
+    });
+    getRun.mockReturnValue({ status: Promise.resolve("running") });
+
+    const cancelled = cancelOwnedTask({ entry });
+    await vi.runAllTimersAsync();
+    await cancelled;
+
+    expect(cancelRun).toHaveBeenCalledWith({}, "task-run", {
+      cancelReason: "Task task-1 was cancelled.",
+    });
   });
 });
 

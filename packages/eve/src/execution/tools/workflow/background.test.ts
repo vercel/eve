@@ -1,6 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import { parseWorkflowToolInput } from "./background.js";
+import { jsonSchema } from "ai";
+import { createWorkflowToolHarnessDefinition, parseWorkflowToolInput } from "./background.js";
+
+describe("createWorkflowToolHarnessDefinition", () => {
+  it("marks subagent workflows as callable from Workflow", () => {
+    expect(
+      createWorkflowToolHarnessDefinition({
+        definition: {
+          description: "Delegate research.",
+          execution: "background",
+          execute: () => undefined,
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "research",
+        },
+        resultKind: "subagent",
+        workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+      }),
+    ).toMatchObject({ workflowCallable: true });
+  });
+});
 
 describe("parseWorkflowToolInput", () => {
   it("passes a JSON object through", () => {

@@ -108,9 +108,51 @@ describe("owner agent invocation dispatch", () => {
     ]);
   });
 
-  it("starts a fresh agent with task-owned handle semantics", async () => {
+  it("reuses a continuation claim admitted before the workflow body starts", async () => {
+    const claimed = {
+      ...availableRecord,
+      callId: "call-1",
+      operationId: "admission-operation",
+      phase: "claimed" as const,
+      taskId: "task-1",
+    };
+    const claimedSession = {
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+    };
+    vi.mocked(readDurableSession).mockResolvedValue(claimedSession as never);
     vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
       ...prepared,
+      session: claimedSession,
+      plan: [{ action, agentId: "agent-1", kind: "resume" }],
+    } as never);
+    vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue(called);
+
+    await dispatch();
+
+    expect(dispatchToTaskAgentAddress).toHaveBeenCalledWith(
+      expect.objectContaining({ handle: claimed }),
+    );
+  });
+
+  it("starts a fresh agent with task-owned handle semantics", async () => {
+    const reserved = {
+      callId: "call-1",
+      identity: { id: "agent-receipt", name: "research", nodeId: "subagents/research" },
+      operationId: "receipt-operation",
+      phase: "reserved" as const,
+      taskId: "task-1",
+    };
+    vi.mocked(readDurableSession).mockResolvedValue({
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [reserved] }),
+    } as never);
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      session: {
+        ...session,
+        state: setAgentHandleStore(undefined, { handles: [reserved] }),
+      },
       plan: [{ kind: "start", target: { action, kind: "local", source: { type: "runtime" } } }],
     } as never);
     vi.mocked(startSubagent).mockResolvedValue(called);
@@ -123,7 +165,16 @@ describe("owner agent invocation dispatch", () => {
         taskId: "task-1",
       }),
     );
-    expect(dispatched).toMatchObject({ agentId: expect.any(String) });
+    expect(dispatched).toMatchObject({ agentId: "agent-receipt" });
+    expect(startSubagent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSession: expect.objectContaining({
+          state: expect.objectContaining({
+            "eve.agent.handles": { handles: [reserved] },
+          }),
+        }),
+      }),
+    );
     expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual(
       expect.arrayContaining([expect.objectContaining({ phase: "claimed", taskId: "task-1" })]),
     );

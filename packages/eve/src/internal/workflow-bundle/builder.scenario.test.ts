@@ -140,6 +140,7 @@ describe("WorkflowBundleBuilder", () => {
     expect(builder.snapshot.workingDir).toBe(rootDir);
     expect(builder.snapshot.dirs).toEqual([
       resolvePackageSourceDirectoryPath("src/execution"),
+      resolvePackageSourceDirectoryPath("src/runtime/subagents"),
       resolvePackageSourceDirectoryPath("src/subagents"),
     ]);
   });

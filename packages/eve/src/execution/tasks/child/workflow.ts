@@ -231,7 +231,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
     if (command === undefined) return;
     if (isReady && isTerminalTaskStatus(view.status)) {
-      await flushUpdates();
+      await flushUpdates(true);
       await wakeTaskParentStep({ token: input.parentContinuationToken, view });
       return;
     }
@@ -271,8 +271,8 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (view.status !== "input_required") pendingInputRequest = undefined;
   }
 
-  async function flushUpdates(): Promise<void> {
-    if (!dispatchAcknowledged || isTerminalTaskStatus(view.status)) return;
+  async function flushUpdates(includeTerminal = false): Promise<void> {
+    if (!dispatchAcknowledged || (isTerminalTaskStatus(view.status) && !includeTerminal)) return;
     for (const update of pendingUpdates) {
       await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
     }

@@ -40,7 +40,13 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     );
   }
   if (message.startsWith("TASK-A3-UNKNOWN-VERIFY ")) {
-    return inspectTerminalTask(request, "task-a3-unknown-verify", "TASK-A3-UNKNOWN", message);
+    return inspectTerminalTask(
+      request,
+      "task-a3-unknown-verify",
+      "TASK-A3-UNKNOWN",
+      message,
+      "failed",
+    );
   }
   if (message.startsWith("TASK-D6-PARTIAL-FANOUT-VERIFY ")) {
     return inspectTerminalTask(

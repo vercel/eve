@@ -112,7 +112,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
-    expect(buildDynamicSubagentTools(ctx)[0]?.workflowCallable).toBeUndefined();
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowCallable).toBe(true);
 
     await dispatchDynamicSubagentEvent({
       ctx,
@@ -121,7 +121,7 @@ describe("dynamic subagent lifecycle", () => {
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)[0]?.execution).toBe("background");
-    expect(buildDynamicSubagentTools(ctx)[0]?.workflowCallable).toBeUndefined();
+    expect(buildDynamicSubagentTools(ctx)[0]?.workflowCallable).toBe(true);
   });
 
   it("exposes a dynamic selection without root configuration", async () => {

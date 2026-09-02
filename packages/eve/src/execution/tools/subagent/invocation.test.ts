@@ -28,6 +28,40 @@ vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
 beforeEach(() => vi.resetAllMocks());
 
 describe("background agent invocation routing", () => {
+  it("stops waiting when the workflow body is cancelled", async () => {
+    const controller = new AbortController();
+    mocks.createHook.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      token: "agent-reply",
+    });
+    const ctx = { abortSignal: controller.signal, callId: "call-1" } as ToolContext;
+    attachWorkflowToolRunContext(ctx, {
+      admission: Promise.resolve({ status: "accepted" }),
+      from: {
+        callId: "call-1",
+        execution: "background",
+        input: { message: "Find it" },
+        runId: "run-1",
+        stepIndex: 0,
+        toolName: "research",
+        turnId: "turn-1",
+      },
+      owner: {
+        admission: "owner-admission",
+        outcome: "owner-outcome",
+        report: "owner-report",
+        request: "owner-request",
+      },
+    });
+
+    const result = agent(ctx, { key: "research", message: "Find it", target: "research" });
+    await vi.waitFor(() => expect(mocks.resumeHook).toHaveBeenCalledOnce());
+    controller.abort(new Error("task cancelled"));
+
+    await expect(result).rejects.toThrow("task cancelled");
+    expect(mocks.disposeHook).toHaveBeenCalledOnce();
+  });
+
   it("sends the invocation through the task owner after admission", async () => {
     const result = {
       callId: "call-1:research",

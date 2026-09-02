@@ -29,6 +29,7 @@ export function createWorkflowToolHarnessDefinition(
     executeInput: input.executeInput,
     nodeId: input.nodeId,
     resultKind: input.resultKind,
+    workflowCallable: input.resultKind === "subagent" || undefined,
     workflowId: input.workflowId,
   };
   if (definition.execution !== "background") {

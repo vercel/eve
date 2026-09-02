@@ -361,12 +361,12 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
             ...input.input.definition,
             workflowId: input.input.definition.workflowId,
           };
-    const workflowInput =
+    let workflowInput =
       workflow === undefined
         ? undefined
         : parseWorkflowToolInput(input.input.toolInput, input.input.definition.name);
     const parentTurnId = activeTurnId(input.emission);
-    const subagentProjection =
+    let subagentProjection =
       workflow?.resultKind === "subagent" && workflowInput !== undefined
         ? projectSubagentTask({
             ctx: input.ctx,
@@ -380,6 +380,25 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
             },
           })
         : undefined;
+    if (
+      subagentProjection !== undefined &&
+      subagentProjection.identity === undefined &&
+      !hasAgentHandle(this.agentHandleSession, subagentProjection.metadata.agentId)
+    ) {
+      const { agentId: _unknownAgentId, ...freshWorkflowInput } = workflowInput!;
+      workflowInput = freshWorkflowInput;
+      subagentProjection = projectSubagentTask({
+        ctx: input.ctx,
+        input: freshWorkflowInput,
+        name: input.input.definition.name,
+        nodeId: workflow!.nodeId ?? input.input.definition.name,
+        taskInput: {
+          callId: input.input.options.toolCallId,
+          parentSessionId: this.initialSession.sessionId,
+          parentTurnId,
+        },
+      });
+    }
     const taskInput = {
       callId: input.input.options.toolCallId,
       metadata: subagentProjection?.metadata ?? { kind: "tool", name: input.input.definition.name },
@@ -447,11 +466,12 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       });
       if (!readClaimedHandle(claim)) {
         throwAgentClaimError(subagentProjection.metadata.agentId, claim);
+      } else {
+        input.record.claim = {
+          operationId,
+          taskId: task.taskId,
+        };
       }
-      input.record.claim = {
-        operationId,
-        taskId: task.taskId,
-      };
     }
     await startTaskRun({
       initialView: { metadata: task.metadata, status: "working", taskId: task.taskId },
@@ -535,6 +555,13 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       );
     }
   }
+}
+
+function hasAgentHandle(session: HarnessSession, agentId: string): boolean {
+  return (
+    getAgentHandleStore(session.state)?.handles.some((handle) => handle.identity.id === agentId) ===
+    true
+  );
 }
 
 function projectSubagentTask(input: {

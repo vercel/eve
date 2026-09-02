@@ -13,15 +13,21 @@ export default defineEval({
     "A parked remote child re-messaged in a later parent turn still recalls a fact from its first turn.",
   tags: ["real-model"],
   async test(t) {
-    await t.send(
+    const started = await t.send(
       [
         "Use the remote-loopback agent exactly once with this message (no outputSchema):",
         `"Remember this exact fact: ${MEMORABLE_FACT} Reply only with READY."`,
         "When it returns, reply with the single word: delegated.",
       ].join(" "),
     );
+    started.expectOk();
+    const firstCompletion = t.target.watchTurn(started.sessionId, {
+      startIndex: requireStreamIndex(t),
+    });
+    const firstCompletedTurn = await firstCompletion.result();
+    firstCompletedTurn.expectOk();
 
-    await t.send(
+    const continued = await firstCompletion.session.send(
       [
         "Message that same remote-loopback agent again: call it with the agentId shown in the latest <agents> block",
         'and the message: "What exact fact did I ask you to remember? Reply with only the fact."',
@@ -29,10 +35,15 @@ export default defineEval({
         "When it returns, reply with the agent's exact output and no other text.",
       ].join(" "),
     );
+    continued.expectOk();
+    const secondCompletedTurn = await t.target
+      .watchTurn(started.sessionId, { startIndex: requireStreamIndex(firstCompletion.session) })
+      .result();
+    secondCompletedTurn.expectOk();
+    secondCompletedTurn.messageIncludes(MEMORABLE_FACT);
 
     t.succeeded();
     t.calledSubagent("remote-loopback", { count: 2 });
-    t.calledSubagent("remote-loopback", { output: new RegExp(MEMORABLE_FACT), count: 1 });
     t.eventsSatisfy("both turns continue one remote child session", (events) => {
       const childSessionIds = events.flatMap((event) =>
         event.type === "subagent.called" && event.data.name === "remote-loopback"
@@ -45,7 +56,14 @@ export default defineEval({
         childSessionIds[0] === childSessionIds[1]
       );
     });
-    t.messageIncludes(MEMORABLE_FACT);
     t.noFailedActions();
   },
 });
+
+function requireStreamIndex(session: {
+  readonly state?: { readonly streamIndex?: number };
+}): number {
+  const streamIndex = session.state?.streamIndex;
+  if (streamIndex === undefined) throw new Error("Parent session has no stream index.");
+  return streamIndex;
+}

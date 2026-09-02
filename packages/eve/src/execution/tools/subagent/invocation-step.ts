@@ -77,6 +77,8 @@ export async function dispatchAgentInvocation(input: {
     throw new Error("Agent invocation produced no executable plan entry.");
   }
   let session = prepared.session;
+  const currentAgentHandles = (): readonly import("#subagents/handles/store.js").AgentHandle[] =>
+    getAgentHandleStore(session.state)?.handles ?? [];
   const sessionState = (): DurableSessionState =>
     replaceDurableSessionSnapshot({
       session: projectToDurableSession(session),
@@ -92,29 +94,42 @@ export async function dispatchAgentInvocation(input: {
   let outcome: DispatchOutcome;
   let agentId: string | undefined;
   if (entry.kind === "resume") {
-    const operationId = deriveAgentOperationId({
-      callId: entry.action.callId,
-      parentSessionId: prepared.session.sessionId,
-      parentTurnId: prepared.batch.event.turnId,
-    });
-    const claim = applyHandleCommand({
-      agentId: entry.agentId,
-      callId: entry.action.callId,
-      expectedTarget: entry.action.kind === "remote-agent-call" ? "remote" : "local",
-      invokedName:
-        entry.action.kind === "remote-agent-call"
-          ? entry.action.remoteAgentName
-          : entry.action.subagentName,
-      kind: "claim",
-      operationId,
-      taskId: input.taskId,
-    });
-    const claimed = readClaimedHandle(claim);
+    const existingClaims = currentAgentHandles().filter(
+      (handle): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "claimed" }> =>
+        handle.phase === "claimed" &&
+        handle.taskId === input.taskId &&
+        handle.callId === entry.action.callId &&
+        handle.identity.id === entry.agentId,
+    );
+    if (existingClaims.length > 1) {
+      throw new Error(`Task "${input.taskId}" has multiple claims for "${entry.action.callId}".`);
+    }
+    let claimed = existingClaims[0];
     if (claimed === undefined) {
-      return {
-        result: createTaskClaimError(entry.action, entry.agentId, claim),
-        sessionState: sessionState(),
-      };
+      const operationId = deriveAgentOperationId({
+        callId: entry.action.callId,
+        parentSessionId: prepared.session.sessionId,
+        parentTurnId: prepared.batch.event.turnId,
+      });
+      const claim = applyHandleCommand({
+        agentId: entry.agentId,
+        callId: entry.action.callId,
+        expectedTarget: entry.action.kind === "remote-agent-call" ? "remote" : "local",
+        invokedName:
+          entry.action.kind === "remote-agent-call"
+            ? entry.action.remoteAgentName
+            : entry.action.subagentName,
+        kind: "claim",
+        operationId,
+        taskId: input.taskId,
+      });
+      claimed = readClaimedHandle(claim);
+      if (claimed === undefined) {
+        return {
+          result: createTaskClaimError(entry.action, entry.agentId, claim),
+          sessionState: sessionState(),
+        };
+      }
     }
     const bundle = createAgentContinuationBundle({
       action: entry.action,
@@ -136,23 +151,39 @@ export async function dispatchAgentInvocation(input: {
     agentId = claimed.identity.id;
   } else {
     const action = entry.target.action;
-    const start = createSubagentReceiptIdentity({
-      callId: action.callId,
-      subagentName:
-        action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName,
-      nodeId: action.nodeId,
-      parentSessionId: prepared.session.sessionId,
-      parentTurnId: prepared.batch.event.turnId,
-    });
-    const reservation = applyHandleCommand({
-      identity: start.identity,
-      callId: action.callId,
-      kind: "reserve",
-      operationId: start.operation.id,
-      taskId: input.taskId,
-    });
-    if (reservation.kind !== "ready") {
-      throw new Error(`Agent handle store rejected start operation "${start.operation.id}".`);
+    const reserved = currentAgentHandles().filter(
+      (handle): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "reserved" }> =>
+        handle.phase === "reserved" &&
+        handle.taskId === input.taskId &&
+        handle.callId === action.callId &&
+        handle.identity.name === action.name &&
+        handle.identity.nodeId === action.nodeId,
+    );
+    const start =
+      reserved.length === 1
+        ? { identity: reserved[0]!.identity, operation: { id: reserved[0]!.operationId } }
+        : createSubagentReceiptIdentity({
+            callId: action.callId,
+            subagentName:
+              action.kind === "remote-agent-call" ? action.remoteAgentName : action.subagentName,
+            nodeId: action.nodeId,
+            parentSessionId: prepared.session.sessionId,
+            parentTurnId: prepared.batch.event.turnId,
+          });
+    if (reserved.length > 1) {
+      throw new Error(`Task "${input.taskId}" has multiple reservations for "${action.callId}".`);
+    }
+    if (reserved.length === 0) {
+      const reservation = applyHandleCommand({
+        identity: start.identity,
+        callId: action.callId,
+        kind: "reserve",
+        operationId: start.operation.id,
+        taskId: input.taskId,
+      });
+      if (reservation.kind !== "ready") {
+        throw new Error(`Agent handle store rejected start operation "${start.operation.id}".`);
+      }
     }
     outcome = await startSubagent({
       auth: prepared.auth,

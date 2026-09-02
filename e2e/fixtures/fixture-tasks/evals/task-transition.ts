@@ -37,6 +37,7 @@ type SemanticEvent =
   | "input-requested"
   | "authorization-required"
   | "authorization-completed"
+  | "task-failed-notification"
   | "task-ready-notification"
   | "task-update-notification";
 

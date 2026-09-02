@@ -217,4 +217,94 @@ describe("taskRunWorkflow", () => {
 
     expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
   });
+
+  it("flushes an update queued before readiness ahead of terminal completion", async () => {
+    const update = {
+      callId: "call-1",
+      kind: "task-update" as const,
+      message: "progress",
+      updateEpoch: "task-1",
+      updateIndex: 0,
+    };
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({ channel: "commands", next: { done: false, value: update } })
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: {
+          done: false,
+          value: {
+            command: { data: "done", kind: "complete" },
+            kind: "task-command",
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      });
+
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+    });
+
+    expect(mocks.wakeTaskUpdateParentStep).toHaveBeenCalledWith({
+      token: "parent-token",
+      update,
+      view: expect.objectContaining({ status: "completed" }),
+    });
+    expect(mocks.wakeTaskUpdateParentStep.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("publishes cancellation after the workflow body observes its abort", async () => {
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "cancel" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({
+        channel: "body",
+        next: { done: false, value: { reason: "cancelled", status: "cancelled" } },
+      });
+    mocks.executeWorkflowBody.mockImplementation(
+      async (_input, signal: AbortSignal) =>
+        await new Promise((resolve) => {
+          signal.addEventListener(
+            "abort",
+            () => resolve({ reason: "cancelled", status: "cancelled" }),
+            { once: true },
+          );
+        }),
+    );
+
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+      workflow: {
+        callId: "call-1",
+        input: {},
+        session: {
+          auth: { current: null, initiator: null },
+          id: "session-1",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+        stepIndex: 0,
+        toolName: "worker",
+        workflowId: "workflow//eve//worker",
+      },
+    });
+
+    expect(mocks.wakeTaskParentStep).toHaveBeenCalledWith({
+      token: "parent-token",
+      view: expect.objectContaining({ status: "cancelled" }),
+    });
+  });
 });

@@ -101,7 +101,11 @@ export async function invokeAgent(
       },
     });
 
-    for await (const reply of replies) {
+    const iterator = replies[Symbol.asyncIterator]();
+    while (true) {
+      const next = await nextAgentReply(iterator, ctx.abortSignal);
+      if (next.done) break;
+      const reply = next.value;
       if (reply.kind === "runtime-action-result") {
         const result = reply.results.find(
           (candidate) =>
@@ -167,6 +171,25 @@ export async function invokeAgent(
     }
   }
   throw new Error(`Agent "${input.target}" closed without a result.`);
+}
+
+async function nextAgentReply(
+  iterator: AsyncIterator<AgentInvocationReply>,
+  signal: AbortSignal | undefined,
+): Promise<IteratorResult<AgentInvocationReply>> {
+  if (signal === undefined) return await iterator.next();
+  if (signal.aborted) throw signal.reason;
+  let rejectAbort: ((reason: unknown) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const abort = (): void => rejectAbort?.(signal.reason);
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    return await Promise.race([iterator.next(), aborted]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
 }
 
 export function validateAgentInput(

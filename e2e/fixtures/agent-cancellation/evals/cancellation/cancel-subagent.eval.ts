@@ -10,7 +10,7 @@ export default defineEval({
     // Explicit directive phrasing keeps the delegation deterministic so a
     // scripted mock responder can drive this eval in the world suites.
     const parent = await t.start(
-      "Use the sleeper subagent exactly once with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.'",
+      "Use the Workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
     );
     const called = await parent.waitForEvent("subagent.called", {
       data: { name: "sleeper" },

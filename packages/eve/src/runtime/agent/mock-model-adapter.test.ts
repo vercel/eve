@@ -73,6 +73,40 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("delegates through Workflow when the directive requests blocking orchestration", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Delegate through Workflow to a subagent: use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: { js: { type: "string" } },
+            required: ["js"],
+            type: "object",
+          },
+          name: "Workflow",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({
+          js: 'return await tools.agent({ message: "use the wait_for_cancel tool." });',
+        }),
+        toolCallId: "call_workflow",
+        toolName: "Workflow",
+        type: "tool-call",
+      },
+    ]);
+  });
+
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {

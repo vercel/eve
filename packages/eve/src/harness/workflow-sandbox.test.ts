@@ -47,6 +47,28 @@ function orchestrationTools(): HarnessToolMap {
       },
     ],
     [
+      "agent",
+      {
+        behavior: {
+          availability: ["root-session"],
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "self-agent-call",
+              nodeId: "__root__",
+              subagentName: "agent",
+            },
+          },
+        },
+        description: "Delegate to a root-agent copy.",
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "agent",
+        nodeId: "__root__",
+        resultKind: "subagent",
+        workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+      },
+    ],
+    [
       "bash",
       {
         description: "Run a shell command.",
@@ -82,6 +104,7 @@ describe("applyWorkflowTool", () => {
     expect(modelTools.bash).toBeDefined();
     expect(hostTools.researcher?.execute).toBeDefined();
     expect(hostTools.remote_reviewer?.execute).toBeDefined();
+    expect(hostTools.agent?.execute).toBeDefined();
     expect(hostTools.bash).toBeUndefined();
   });
 
@@ -139,6 +162,7 @@ describe("applyWorkflowTool", () => {
 
     expect(hostTools.researcher).toBeDefined();
     expect(hostTools.remote_reviewer).toBeDefined();
+    expect(hostTools.agent).toBeDefined();
     expect(hostTools.bash).toBeUndefined();
   });
 

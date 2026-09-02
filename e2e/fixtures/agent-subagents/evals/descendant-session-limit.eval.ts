@@ -1,4 +1,4 @@
-import { defineEval } from "eve/evals";
+import { defineEval, type EveEvalContext, type EveEvalSession, type EveEvalTurn } from "eve/evals";
 import { equals, satisfies } from "eve/evals/expect";
 
 const CHILD_TOKEN = "CHILD_LIMIT_CONTINUED";
@@ -22,7 +22,8 @@ export default defineEval({
   timeoutMs: 90_000,
   async test(t) {
     await t.send(DELEGATE_PROMPT);
-    const continueRequest = t.requireInputRequest({
+    const continueSession = await waitForInput(t, t);
+    const continueRequest = continueSession.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
       toolName: "session_limit_continuation",
@@ -39,27 +40,31 @@ export default defineEval({
       ),
     );
 
-    const resumed = await t.respond([
+    const resumed = await continueSession.respond([
       {
         optionId: "continue",
         requestId: continueRequest.requestId,
       },
     ]);
     resumed.expectOk();
+    const completed = resumed.message?.includes(CHILD_TOKEN)
+      ? resumed
+      : await waitForMessage(t, continueSession, CHILD_TOKEN);
+    completed.messageIncludes(CHILD_TOKEN);
     t.succeeded();
-    t.calledSubagent("limited-worker", { count: 1, output: CHILD_TOKEN });
-    t.messageIncludes(CHILD_TOKEN);
+    t.calledSubagent("limited-worker", { count: 1 });
     t.noFailedActions();
 
     const stopSession = t.newSession();
     await stopSession.send(DELEGATE_PROMPT);
-    const stopRequest = stopSession.requireInputRequest({
+    const blockedStopSession = await waitForInput(t, stopSession);
+    const stopRequest = blockedStopSession.requireInputRequest({
       display: "confirmation",
       optionIds: ["continue", "stop"],
       toolName: "session_limit_continuation",
     });
 
-    const stopped = await stopSession.respond([
+    const stopped = await blockedStopSession.respond([
       {
         optionId: "stop",
         requestId: stopRequest.requestId,
@@ -72,7 +77,7 @@ export default defineEval({
     stopSession.event("turn.cancelled");
     t.check(stopped.status, equals("waiting"));
 
-    const recovered = await stopSession.send(
+    const recovered = await blockedStopSession.send(
       `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
     );
     recovered.expectOk();
@@ -81,3 +86,43 @@ export default defineEval({
     stopSession.messageIncludes(ROOT_RECOVERY_TOKEN);
   },
 });
+
+type SessionCursor = Pick<
+  EveEvalSession,
+  "pendingInputRequests" | "requireInputRequest" | "respond" | "send" | "sessionId" | "state"
+>;
+
+async function waitForInput(t: EveEvalContext, initial: SessionCursor): Promise<SessionCursor> {
+  let session = initial;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (session.pendingInputRequests.length > 0) return session;
+    const live = watchNextTurn(t, session, "descendant input wait");
+    const turn = await live.result();
+    turn.noFailedActions();
+    session = live.session;
+  }
+  throw new Error("Descendant did not surface its session-limit request after five turns.");
+}
+
+async function waitForMessage(
+  t: EveEvalContext,
+  initial: SessionCursor,
+  marker: string,
+): Promise<EveEvalTurn> {
+  let session = initial;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const live = watchNextTurn(t, session, "descendant completion wait");
+    const turn = await live.result();
+    turn.noFailedActions();
+    if (turn.message?.includes(marker) === true) return turn;
+    session = live.session;
+  }
+  throw new Error("Descendant result did not reach the parent after five turns.");
+}
+
+function watchNextTurn(t: EveEvalContext, session: SessionCursor, operation: string) {
+  if (session.sessionId === undefined || session.state === undefined) {
+    throw new Error(`${operation} has no parent session cursor.`);
+  }
+  return t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+}
