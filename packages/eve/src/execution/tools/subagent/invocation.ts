@@ -249,10 +249,9 @@ function claimInvocationId(ctx: ToolContext, invocationId: string): void {
   if (ids.has(invocationId)) {
     const separator = invocationId.lastIndexOf(":");
     const key = separator < 0 ? invocationId : invocationId.slice(separator + 1);
-    throw {
-      code: "DUPLICATE_AGENT_INVOCATION_KEY",
-      message: `agent() invocation key "${key}" was already used in this run; keys must be unique per run.`,
-    };
+    throw new TypeError(
+      `agent() invocation key "${key}" was already used in this run; keys must be unique per run.`,
+    );
   }
   ids.add(invocationId);
   if (holder[AGENT_INVOCATION_IDS] === undefined) {

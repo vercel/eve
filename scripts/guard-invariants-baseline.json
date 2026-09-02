@@ -47,6 +47,5 @@
     "packages/eve/src/internal/nitro/routes/runtime-artifacts.test.ts",
     "packages/eve/test/scenarios/load-agent-info-data.scenario.test.ts",
     "packages/eve/test/scenarios/runtime-loaders.scenario.test.ts"
-  ],
-  "rule43_executorConceptByFile": {}
+  ]
 }

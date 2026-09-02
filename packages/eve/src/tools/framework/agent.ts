@@ -10,10 +10,12 @@ export const agent = attachToolBehavior(
     description: AGENT_TOOL_DESCRIPTION,
     execution: "background",
     inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
+    // `defineTool` requires a body, but the runtime tool registry rebinds this
+    // tool to the shared subagent workflow before it can ever run.
     execute() {
       "use workflow";
       throw new Error(
-        "The framework agent tool executes through its shared workflow registration.",
+        'The framework "agent" tool was executed directly. It must be resolved through the runtime tool registry, which dispatches it to the shared subagent workflow.',
       );
     },
   }),

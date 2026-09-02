@@ -1,10 +1,23 @@
 ---
 issue: https://github.com/vercel/eve/pull/2690
-status: draft
-last_updated: "2026-09-01"
+status: in-progress
+last_updated: "2026-09-02"
 ---
 
 # Subagent execution boundaries
+
+## Scope of the current PR
+
+[#2690](https://github.com/vercel/eve/pull/2690) lands sequence steps 1–3
+below, plus the parts of steps 7 and 8 that had no dependency on the
+remaining work: `subagentDepth` is removed, and the vocabulary-count guards
+are replaced by import-direction rules 41–43. Concrete subagent code moves
+under `src/subagents/**` and `src/execution/tools/subagent/**` unchanged.
+
+Not in that PR: steps 4–6 and the rest of 7. `background-tool-execution.ts`
+still branches on `resultKind: "subagent"`, projects subagent tasks, and
+reserves handles inline; `workflowEntry` still carries its existing
+finalizers. Those are follow-ups against this document.
 
 ## Summary
 

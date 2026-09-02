@@ -220,7 +220,7 @@ function isTsLike(relPath) {
  *   rule37: Violation[];
  *   rule41: Violation[];
  *   rule42: Violation[];
- *   rule43: { baseline: Record<string, number>; current: Map<string, number> };
+ *   rule43: Violation[];
  *   symlinks: string[];
  * }} state
  */
@@ -258,7 +258,15 @@ async function scanRepo(state) {
 
 // ---------- Rule 41: executor-neutral task kernel ----------
 
-const SUBAGENT_IMPORT_RE = /from ["']#(?:subagents|execution\/tools\/subagent)(?:\/|\.js)/;
+// Matches both `#` alias specifiers and relative paths into the executor trees.
+const SUBAGENT_IMPORT_RE =
+  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
+
+const RULE43_GENERIC_SESSION_FILES = new Set([
+  "packages/eve/src/execution/session-command-inbox.ts",
+  "packages/eve/src/execution/session-command-router.ts",
+  "packages/eve/src/execution/session-state-cursor.ts",
+]);
 
 /**
  * @param {string} posix
@@ -270,24 +278,17 @@ function checkRule41(posix, lines, violations) {
     posix.startsWith("packages/eve/src/tasks/") ||
     posix.startsWith("packages/eve/src/execution/tasks/");
   if (!inTaskKernel || /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
-
-  lines.forEach((line, idx) => {
-    if (!SUBAGENT_IMPORT_RE.test(line)) return;
-    violations.push({
-      rule: 41,
-      file: posix,
-      line: idx + 1,
-      message:
-        "task-kernel code imports an agent-specific executor. Move presentation and transport composition outside src/tasks and src/execution/tasks.",
-    });
-  });
+  pushSubagentImportViolations(41, posix, lines, violations, "task-kernel code");
 }
 
 // ---------- Rule 42: userspace subagent workflow ----------
 
 const SUBAGENT_WORKFLOW_PATH = "packages/eve/src/runtime/subagents/workflow.ts";
 const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
-  /["']#(?:tasks(?:\/|\.js)|execution(?:\/|\.js)|harness(?:\/|\.js)|context(?:\/|\.js)|shared(?:\/|\.js))/;
+  /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
+// The shared body owns its invocation id, so it consumes the framework-internal
+// entry rather than the public `agent()`; that import is the one exception.
+const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invocation.js"';
 
 /**
  * @param {string} posix
@@ -298,14 +299,8 @@ function checkRule42(posix, lines, violations) {
   if (posix !== SUBAGENT_WORKFLOW_PATH) return;
 
   lines.forEach((line, idx) => {
-    if (
-      !SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) &&
-      !line.includes("Symbol.for(") &&
-      !line.includes('from "eve/workflow"') &&
-      !line.includes('from "eve/tools"')
-    )
-      return;
-    if (line.includes('from "eve/workflow"') || line.includes('from "eve/tools"')) return;
+    if (line.includes(SUBAGENT_WORKFLOW_ALLOWED_IMPORT)) return;
+    if (!SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE.test(line) && !line.includes("Symbol.for(")) return;
     violations.push({
       rule: 42,
       file: posix,
@@ -321,18 +316,30 @@ function checkRule42(posix, lines, violations) {
 /**
  * @param {string} posix
  * @param {string[]} lines
- * @param {{ baseline: Record<string, number>; current: Map<string, number> }} state
+ * @param {Violation[]} violations
  */
-function checkRule43(posix, lines, state) {
-  const genericFiles = new Set([
-    "packages/eve/src/execution/session-command-inbox.ts",
-    "packages/eve/src/execution/session-command-router.ts",
-    "packages/eve/src/execution/session-state-cursor.ts",
-  ]);
-  if (!genericFiles.has(posix)) return;
+function checkRule43(posix, lines, violations) {
+  if (!RULE43_GENERIC_SESSION_FILES.has(posix)) return;
+  pushSubagentImportViolations(43, posix, lines, violations, "generic session plumbing");
+}
 
-  const count = lines.filter((line) => SUBAGENT_IMPORT_RE.test(line)).length;
-  if (count > 0) state.current.set(posix, count);
+/**
+ * @param {41 | 43} rule
+ * @param {string} posix
+ * @param {string[]} lines
+ * @param {Violation[]} violations
+ * @param {string} subject
+ */
+function pushSubagentImportViolations(rule, posix, lines, violations, subject) {
+  lines.forEach((line, idx) => {
+    if (!SUBAGENT_IMPORT_RE.test(line)) return;
+    violations.push({
+      rule,
+      file: posix,
+      line: idx + 1,
+      message: `${subject} imports the subagent executor. Move executor-specific behavior to composition roots or subagent-owned modules.`,
+    });
+  });
 }
 
 // ---------- Rule 13: spread-ternary object composition ----------
@@ -1587,7 +1594,7 @@ async function main() {
     rule37: /** @type {Violation[]} */ ([]),
     rule41: /** @type {Violation[]} */ ([]),
     rule42: /** @type {Violation[]} */ ([]),
-    rule43: { baseline: baseline.rule43_executorConceptByFile ?? {}, current: new Map() },
+    rule43: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
   };
 
@@ -1700,13 +1707,7 @@ async function main() {
   violations.push(...state.rule42);
 
   // Rule 43
-  for (const { file, was, now } of diffCounts(state.rule43.current, state.rule43.baseline)) {
-    violations.push({
-      rule: 43,
-      file,
-      message: `${now} subagent import${now === 1 ? "" : "s"} detected in generic session plumbing (baseline: ${was}). Move executor-specific behavior to composition or subagent-owned modules.`,
-    });
-  }
+  violations.push(...state.rule43);
 
   if (violations.length === 0) {
     process.stdout.write("[eve:guard:invariants] ok — all mechanical lints passed.\n");
