@@ -25,7 +25,6 @@ import {
   createLocalSubagentSourceRef,
   createModuleSourceRef,
 } from "../../src/discover/manifest.js";
-import { sleepToolWorkflowReference } from "../../src/execution/tools/sleep.js";
 import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import {
@@ -177,7 +176,7 @@ describe("compiler artifacts", () => {
           availability: [],
           handling: {
             kind: "workflow-tool",
-            workflowId: sleepToolWorkflowReference.workflowId,
+            workflowId: "workflow//eve//executeSleepTool",
           },
         },
         logicalPath: "tools/sleep.mjs",

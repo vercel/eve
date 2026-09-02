@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
-import { sleepToolWorkflowReference } from "#execution/tools/sleep.js";
-import { readToolBehavior } from "#tools/behavior.js";
 import { sleep } from "#tools/provided/sleep.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
@@ -14,17 +12,11 @@ describe("sleep", () => {
     vi.clearAllMocks();
   });
 
-  it("defines a model-facing workflow tool", () => {
+  it("defines a model-facing tool", () => {
     const definition = sleep();
 
     expect(definition.description).toContain("before continuing");
-    expect(readToolBehavior(definition)).toEqual({
-      availability: [],
-      handling: {
-        kind: "workflow-tool",
-        workflowId: sleepToolWorkflowReference.workflowId,
-      },
-    });
+    expect(definition.execute).toBeTypeOf("function");
   });
 
   it("waits for the requested number of seconds in its workflow body", async () => {

@@ -4,13 +4,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
-import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
+import { prepareAuthoredWorkflowDirectives } from "#internal/workflow-bundle/authored-workflow-directives.js";
 import {
-  createWorkflowId,
   findWorkflowDirectiveFunctions,
   stripJavaScriptExtension,
   transformWorkflowDirectives,
-} from "./workflow-transformer.js";
+} from "#internal/workflow-bundle/workflow-transformer.js";
 
 export type WorkflowManifest = {
   steps?: {
@@ -51,7 +50,7 @@ const projectDepsCache = new Map<string, Set<string>>();
 export async function applyWorkflowTransform(
   filename: string,
   source: string,
-  mode: "workflow" | "step" | "client" | false,
+  mode: "workflow" | "step" | "client" | "metadata" | false,
   absolutePath?: string,
   projectRoot?: string,
   stableWorkflowNames: ReadonlySet<string> = STABLE_WORKFLOW_NAMES,
@@ -116,15 +115,6 @@ function authoredRelativePath(absolutePath: string, appRoot: string): string {
 
 function authoredModuleIdBase(absolutePath: string, appRoot: string): string {
   return `./${stripJavaScriptExtension(authoredRelativePath(absolutePath, appRoot))}`;
-}
-
-/** The id the transform mints for an authored `"use workflow"` function. */
-export function authoredWorkflowId(
-  absolutePath: string,
-  appRoot: string,
-  functionName: string,
-): string {
-  return createWorkflowId(authoredModuleIdBase(absolutePath, appRoot), functionName);
 }
 
 // Bundlers hand back real paths while configuration carries the spelled

@@ -23,6 +23,28 @@ describe("applyWorkflowTransform", () => {
     });
   });
 
+  it("stamps workflow metadata without consuming the framework body", async () => {
+    const filename = "src/execution/turn-workflow.ts";
+    const transformed = await applyWorkflowTransform(
+      filename,
+      [
+        "export async function turnWorkflow(): Promise<string> {",
+        '  "use workflow";',
+        '  return "done";',
+        "}",
+        "",
+      ].join("\n"),
+      "metadata",
+      resolvePackageSourceFilePath(filename),
+      resolvePackageRoot(),
+    );
+
+    expect(transformed.code).toContain('"use workflow";');
+    expect(transformed.code).toContain('return "done";');
+    expect(transformed.code).toContain('turnWorkflow.workflowId = "workflow//eve//turnWorkflow";');
+    expect(transformed.code).not.toContain("__private_workflows.set");
+  });
+
   it("registers step functions in step mode", async () => {
     const transformed = await applyWorkflowTransform(
       "steps/ping.ts",

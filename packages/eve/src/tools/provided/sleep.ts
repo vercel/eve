@@ -4,11 +4,9 @@ import {
   SLEEP_INPUT_SCHEMA,
   SLEEP_OUTPUT_SCHEMA,
   SLEEP_TOOL_DESCRIPTION,
-  sleepToolWorkflowReference,
   type SleepToolInput,
   type SleepToolOutput,
 } from "#execution/tools/sleep.js";
-import { attachToolBehavior } from "#tools/behavior.js";
 
 export type { SleepToolInput, SleepToolOutput };
 
@@ -27,16 +25,10 @@ export type { SleepToolInput, SleepToolOutput };
  * application runtime open.
  */
 export function sleep(): ToolDefinition<SleepToolInput, SleepToolOutput> {
-  return attachToolBehavior(
-    defineTool({
-      description: SLEEP_TOOL_DESCRIPTION,
-      execute: executeSleepTool,
-      inputSchema: SLEEP_INPUT_SCHEMA,
-      outputSchema: SLEEP_OUTPUT_SCHEMA,
-    }),
-    {
-      availability: [],
-      handling: { kind: "workflow-tool", workflowId: sleepToolWorkflowReference.workflowId },
-    },
-  );
+  return defineTool({
+    description: SLEEP_TOOL_DESCRIPTION,
+    execute: executeSleepTool,
+    inputSchema: SLEEP_INPUT_SCHEMA,
+    outputSchema: SLEEP_OUTPUT_SCHEMA,
+  });
 }

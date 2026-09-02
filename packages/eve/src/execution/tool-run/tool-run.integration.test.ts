@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
-import {
-  executeSleepTool,
-  SLEEP_INPUT_SCHEMA,
-  sleepToolWorkflowReference,
-} from "#execution/tools/sleep.js";
+import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
@@ -133,7 +129,7 @@ function eventsText(events: readonly { readonly data?: unknown }[]): string {
 
 describe("workflow tools", () => {
   it("runs the framework sleep tool through the workflow tool path", async () => {
-    expect(Reflect.get(executeSleepTool, "workflowId")).toBe(sleepToolWorkflowReference.workflowId);
+    expect(Reflect.get(executeSleepTool, "workflowId")).toBe("workflow//eve//executeSleepTool");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-sleep",
       execute: executeSleepTool,
