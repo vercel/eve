@@ -18,7 +18,7 @@ export interface LinkCliLogger {
 export interface LinkCommandDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal(): boolean;
-  isEveProject: typeof isEveProject;
+  isEveProject?: typeof isEveProject;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<LinkFlowDeps>;
 }
@@ -50,7 +50,10 @@ export async function runLinkCommand(
     process.exitCode = 1;
     return;
   }
-  if (!(await dependencies.isEveProject(appRoot)) && projectContext.kind === "standalone") {
+  if (
+    !(await (dependencies.isEveProject ?? isEveProject)(appRoot)) &&
+    projectContext.kind === "standalone"
+  ) {
     logger.error(NOT_AN_AGENT_MESSAGE);
     process.exitCode = 1;
     return;

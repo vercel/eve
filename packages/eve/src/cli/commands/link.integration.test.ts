@@ -9,6 +9,7 @@ import type { ApplyAiGatewayCredentialDeps } from "#setup/boxes/apply-ai-gateway
 import type { LinkProjectDeps } from "#setup/boxes/link-project.js";
 import type { ResolveProvisioningDeps } from "#setup/boxes/resolve-provisioning.js";
 import type { LinkFlowDeps } from "#setup/flows/link.js";
+import { isEveProject } from "#setup/scaffold/index.js";
 
 import { runLinkCommand, type LinkCliLogger } from "./link.js";
 

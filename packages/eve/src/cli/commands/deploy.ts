@@ -18,7 +18,7 @@ export interface DeployCliLogger {
 export interface DeployCommandDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal(): boolean;
-  isEveProject: typeof isEveProject;
+  isEveProject?: typeof isEveProject;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<DeployFlowDeps>;
 }
@@ -49,7 +49,10 @@ export async function runDeployCommand(
     process.exitCode = 1;
     return;
   }
-  if (!(await dependencies.isEveProject(appRoot)) && projectContext.kind === "standalone") {
+  if (
+    !(await (dependencies.isEveProject ?? isEveProject)(appRoot)) &&
+    projectContext.kind === "standalone"
+  ) {
     logger.error(NOT_AN_AGENT_MESSAGE);
     process.exitCode = 1;
     return;

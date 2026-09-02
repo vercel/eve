@@ -8,6 +8,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { DeploymentInfo } from "#setup/project-resolution.js";
+import { isEveProject } from "#setup/scaffold/index.js";
 
 import { runDeployCommand, type DeployCliLogger } from "./deploy.js";
 
