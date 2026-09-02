@@ -97,6 +97,20 @@ describe("Slack activity activity", () => {
 
     expect(activityMessages(labeled).get("turn")).toContain("Search Slack docs");
     expect(selectSlackActivityStatus(labeled)).toBe("Search Slack docs");
+
+    const completed = reduceActivityBatch(labeled, {
+      events: [
+        {
+          actionId: `${grandchild.id}:search`,
+          eventId: "search-complete-label",
+          kind: "action.label.updated",
+          label: "Found Slack docs",
+        },
+      ],
+      version: 1,
+    });
+    expect(activityMessages(completed).get("turn")).toContain("Found Slack docs");
+    expect(selectSlackActivityStatus(completed)).toBe("Found Slack docs");
   });
 
   it("renders a background task instead of its duplicate initiating tool action", () => {

@@ -92,7 +92,23 @@ describe("Slack activity plan", () => {
       snapshot: started,
       state: undefined,
     });
-    const expanded = reduceActivityBatch(started, {
+    const updated = reduceActivityBatch(started, {
+      version: 1,
+      events: [
+        {
+          actionId: "verify-action",
+          eventId: "verify-action-delta",
+          kind: "action.label.updated",
+          label: "Verifying tests",
+        },
+      ],
+    });
+    const updatedState = await renderer.render({
+      destination: { channelId: "C1", threadTs: "T1", teamId: "TEAM", triggeringUserId: "USER" },
+      snapshot: updated,
+      state,
+    });
+    const expanded = reduceActivityBatch(updated, {
       version: 1,
       events: [
         { eventId: "reviewer", kind: "work.started", startedAt: "3", work: reviewer },
@@ -102,7 +118,7 @@ describe("Slack activity plan", () => {
     const expandedState = await renderer.render({
       destination: { channelId: "C1", threadTs: "T1", teamId: "TEAM", triggeringUserId: "USER" },
       snapshot: expanded,
-      state,
+      state: updatedState,
     });
     const settled = reduceActivityBatch(expanded, {
       version: 1,
@@ -154,16 +170,18 @@ describe("Slack activity plan", () => {
       "chat.appendStream",
       "chat.appendStream",
       "chat.appendStream",
+      "chat.appendStream",
       "chat.stopStream",
       "chat.update",
     ]);
     expect(requests[1]!.body.get("chunks")).toContain("• verify_stage\\n");
     expect(requests[1]!.body.get("chunks")).toContain("• Verify release\\n");
-    expect(requests[2]!.body.get("chunks")).toContain('"id":"reviewer"');
-    expect(requests[2]!.body.get("chunks")).toContain("• review_stage\\n");
-    expect(requests[3]!.body.get("chunks")).toContain("✓ verify_stage\\n");
-    expect(requests[3]!.body.get("chunks")).toContain("✓ review_stage\\n");
-    expect(requests[5]!.body.get("blocks")).not.toContain("verify_stage");
-    expect(requests[5]!.body.get("blocks")).toContain("verifier");
+    expect(requests[2]!.body.get("chunks")).toContain("• Verifying tests\\n");
+    expect(requests[3]!.body.get("chunks")).toContain('"id":"reviewer"');
+    expect(requests[3]!.body.get("chunks")).toContain("• review_stage\\n");
+    expect(requests[4]!.body.get("chunks")).toContain("✓ verify_stage\\n");
+    expect(requests[4]!.body.get("chunks")).toContain("✓ review_stage\\n");
+    expect(requests[6]!.body.get("blocks")).not.toContain("verify_stage");
+    expect(requests[6]!.body.get("blocks")).toContain("verifier");
   });
 });
