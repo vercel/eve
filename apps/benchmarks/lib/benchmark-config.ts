@@ -32,6 +32,13 @@ export const benchmarkModels = [
     model: "anthropic/claude-fable-5",
     displayName: "Claude Fable 5",
     harness: "Claude Code",
+    support: "superseded",
+  },
+  {
+    id: "claude-fable-5-1",
+    model: "anthropic/claude-fable-5.1",
+    displayName: "Claude Fable 5.1",
+    harness: "Claude Code",
     support: "supported",
   },
   {
@@ -66,6 +73,13 @@ export const benchmarkModels = [
     id: "glm-5-2",
     model: "zai/glm-5.2",
     displayName: "GLM 5.2",
+    harness: "OpenCode",
+    support: "superseded",
+  },
+  {
+    id: "glm-5-3",
+    model: "zai/glm-5.3",
+    displayName: "GLM 5.3",
     harness: "OpenCode",
     support: "supported",
   },
