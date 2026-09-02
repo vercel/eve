@@ -108,7 +108,8 @@
  *             module, and identify its highest version as current. Wire versions
  *             are append-only protocol history: change the contract by adding a
  *             version and migration, never by updating historical data and its
- *             snapshot together.
+ *             snapshot together. The workflow-safe decoder must not import
+ *             schemas or validation libraries at runtime.
  *   rule 42 — The shared subagent workflow body is framework-authored
  *             userspace. It must not import task, harness, or context
  *             internals or recover private state through `Symbol.for`.
@@ -609,6 +610,7 @@ function importSpecifier(node) {
 
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
 const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
+const SESSION_INBOX_WIRE_DECODER = `${WIRE_FAMILY_DIR}/session-inbox-wire.ts`;
 const VERSIONED_WIRE_HISTORY_RE = new RegExp(
   `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
 );
@@ -727,6 +729,58 @@ function checkRule40MigrationPurity(path, source) {
   return violations;
 }
 
+function checkRule40WorkflowDecoderImports(source) {
+  const sourceFile = ts.createSourceFile(
+    SESSION_INBOX_WIRE_DECODER,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  /** @type {Violation[]} */
+  const violations = [];
+  const visit = (node) => {
+    const specifier = importSpecifier(node);
+    if (
+      specifier !== undefined &&
+      isRuntimeImportReference(node) &&
+      (specifier.text.startsWith("#compiled/") ||
+        specifier.text === "#runtime/validation.js" ||
+        /^#execution\/wire\/session-inbox-wire\.v[1-9]\d*\.js$/.test(specifier.text))
+    ) {
+      violations.push({
+        rule: 40,
+        file: SESSION_INBOX_WIRE_DECODER,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" at runtime. The session-inbox decoder is embedded with inline sources in every workflow driver; keep schema and validation dependencies in the encoder and import only the inferred wire type here.`,
+      });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
+function isRuntimeImportReference(node) {
+  if (ts.isImportTypeNode(node)) return false;
+  if (ts.isImportDeclaration(node)) {
+    const clause = node.importClause;
+    if (clause?.isTypeOnly === true) return false;
+    if (clause?.namedBindings !== undefined && ts.isNamedImports(clause.namedBindings)) {
+      return clause.namedBindings.elements.some((element) => !element.isTypeOnly);
+    }
+    return true;
+  }
+  if (ts.isExportDeclaration(node)) {
+    if (node.isTypeOnly) return false;
+    if (node.exportClause !== undefined && ts.isNamedExports(node.exportClause)) {
+      return node.exportClause.elements.some((element) => !element.isTypeOnly);
+    }
+    return true;
+  }
+  return true;
+}
+
 async function checkRule40WireContracts() {
   const violations = checkRule40ImmutableWireHistory();
   let entries;
@@ -759,6 +813,8 @@ async function checkRule40WireContracts() {
   }
 
   const contractSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_CONTRACT), "utf8");
+  const decoderSource = await readFile(join(REPO_ROOT, SESSION_INBOX_WIRE_DECODER), "utf8");
+  violations.push(...checkRule40WorkflowDecoderImports(decoderSource));
   const registryMatch = contractSource.match(
     /SESSION_INBOX_WIRE_VERSIONS\s*=\s*\[([^\]]*)\]\s*as const/,
   );
