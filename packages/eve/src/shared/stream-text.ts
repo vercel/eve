@@ -10,6 +10,7 @@ export function appendStreamTextDelta(
   offset: number,
   delta: string,
 ): string | undefined {
+  if (!Number.isSafeInteger(offset) || offset < 0) return undefined;
   if (offset === 0) return delta;
   if (text?.length !== offset) return undefined;
   return text + delta;

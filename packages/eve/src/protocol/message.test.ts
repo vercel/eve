@@ -22,12 +22,83 @@ import {
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
+import {
+  normalizeMessageStreamEvent,
+  normalizePersistedMessageStreamEvent,
+  type MessageStreamEventForVersion,
+} from "#protocol/message-version.js";
 import { isEventId } from "#protocol/event-id.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 
 describe("message stream protocol", () => {
   it("pins the stream version for timed session events", () => {
     expect(EVE_MESSAGE_STREAM_VERSION).toBe("25");
+  });
+
+  it("normalizes v24 cumulative appends into the v25 offset contract", () => {
+    const legacyMessage = {
+      data: {
+        messageDelta: "lo",
+        messageSoFar: "Hello",
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_legacy_message" },
+      type: "message.appended",
+    } satisfies MessageStreamEventForVersion<"24">;
+    const legacyReasoning = {
+      data: {
+        reasoningDelta: "ink",
+        reasoningSoFar: "think",
+        sequence: 4,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.001Z", id: "evt_legacy_reasoning" },
+      type: "reasoning.appended",
+    } satisfies MessageStreamEventForVersion<"24">;
+
+    expect(normalizeMessageStreamEvent("24", legacyMessage)).toEqual({
+      data: {
+        messageDelta: "lo",
+        messageOffset: 3,
+        sequence: 3,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      meta: legacyMessage.meta,
+      type: "message.appended",
+    });
+    expect(normalizePersistedMessageStreamEvent(legacyReasoning)).toEqual({
+      data: {
+        reasoningDelta: "ink",
+        reasoningOffset: 2,
+        sequence: 4,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      meta: legacyReasoning.meta,
+      type: "reasoning.appended",
+    });
+  });
+
+  it("rejects an append that does not match its declared stream version", () => {
+    const malformed = {
+      data: {
+        messageDelta: "Hel",
+        messageOffset: undefined as never,
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_malformed" },
+      type: "message.appended",
+    } satisfies MessageStreamEventForVersion<"25">;
+
+    expect(() => normalizeMessageStreamEvent("25", malformed)).toThrow(
+      "Invalid message append offset for stream version 25.",
+    );
   });
 
   it("creates authoritative input resolution batches", () => {

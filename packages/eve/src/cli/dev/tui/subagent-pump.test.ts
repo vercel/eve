@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client, type MessageStreamEvent } from "#client/index.js";
 import { stampTestEvent } from "#internal/testing/events.js";
-import type { UnstampedMessageStreamEvent, SubagentCalledStreamEvent } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  type SubagentCalledStreamEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 
 import { SubagentPump, type SubagentView } from "./subagent-pump.js";
 
@@ -51,6 +56,9 @@ function pushableChildStream() {
             );
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     },
     get aborted() {
@@ -83,6 +91,9 @@ function responseOf(events: readonly MessageStreamEvent[]): Response {
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 

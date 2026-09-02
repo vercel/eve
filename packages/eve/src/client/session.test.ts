@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClientError } from "#client/client-error.js";
 import { ClientSession } from "#client/session.js";
 import type { ClientSessionState } from "#client/types.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -78,6 +79,9 @@ function createStreamResponse(events: readonly unknown[]) {
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
@@ -624,7 +628,9 @@ describe("ClientSession", () => {
         return createAcceptedResponse();
       }
 
-      return new Response(stream);
+      return new Response(stream, {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      });
     });
     const session = createSession();
 
@@ -757,6 +763,9 @@ describe("ClientSession", () => {
             controller.error(new Error("socket disconnected"));
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     });
     const session = createSession({ sessionId: "session_1", streamIndex: 0 });
@@ -876,6 +885,9 @@ describe("ClientSession", () => {
               controller.error(new Error("socket disconnected"));
             },
           }),
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         );
       }
 
@@ -1032,6 +1044,9 @@ describe("ClientSession", () => {
             });
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     });
     const session = createSession();

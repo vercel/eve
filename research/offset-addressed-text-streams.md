@@ -50,20 +50,24 @@ The API is pure: replay produces the same state without hidden accumulator ident
 
 ## Consumer migration
 
-| Consumer                    | Cumulative state                                    | Projection                                                                                                                             |
-| --------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Default message reducer     | Latest streaming text/reasoning/tool-input part     | Calls `appendStreamTextDelta` before upserting the part.                                                                               |
-| Chat SDK channel            | In-memory text keyed by channel-state identity      | Posts the first accepted block, then replaces that post with accumulated text.                                                         |
-| Slack channel               | In-memory reasoning keyed by channel-state identity | Preserves progressive reasoning status and throttling behavior.                                                                        |
-| TUI                         | Text per turn, step, type, and generation           | Emits accepted suffixes and blocks unsafe deltas after a restart or discontinuity because emitted terminal output cannot be retracted. |
-| ACP and subagent pump       | None                                                | Continue forwarding each raw delta; no migration is required.                                                                          |
-| Authored channels and hooks | Consumer-owned                                      | Use the helper when cumulative text is required, or handle raw deltas directly.                                                        |
+| Consumer                    | Cumulative state                                    | Projection                                                                                                                                 |
+| --------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Default message reducer     | Latest streaming text/reasoning/tool-input part     | Calls `appendStreamTextDelta` before upserting the part.                                                                                   |
+| Chat SDK channel            | In-memory text keyed by channel-state identity      | Posts the first accepted block, then replaces that post with accumulated text.                                                             |
+| Slack channel               | In-memory reasoning keyed by channel-state identity | Preserves progressive reasoning status and throttling behavior.                                                                            |
+| TUI                         | Text per turn, step, type, and generation           | Emits accepted suffixes and blocks unsafe deltas after a restart or discontinuity because emitted terminal output cannot be retracted.     |
+| Next.js trace viewer        | Text per trace step                                 | Uses the public `MessageStreamEvent` union and `appendStreamTextDelta`, so stream schema changes fail its compile rather than its runtime. |
+| ACP and subagent pump       | None                                                | Continue forwarding each raw delta; no migration is required.                                                                              |
+| Authored channels and hooks | Consumer-owned                                      | Use the helper when cumulative text is required, or handle raw deltas directly.                                                            |
+| Published extensions        | Compiled capability contracts                       | Rebuild and republish packages whose manifest uses an epoch advanced by this stream event change.                                          |
 
 ## Retry and reconnect semantics
 
 A durable step retry reuses its turn and step coordinates. Its first offset-`0` event restarts replaceable projections such as the default reducer and channel posts. The TUI cannot retract text already emitted to its renderer, so a restart or discontinuity blocks further deltas for that visible part. A completed event may still extend the visible prefix; otherwise the next step boundary closes the old part without splicing attempts.
 
 A consumer that reconnects with both its prior accumulator and stream cursor continues normally. A consumer that retained only the cursor cannot reconstruct a block from a later nonzero delta; it must replay from the start of that block or wait for its completed event. This is the capability removed with cumulative append snapshots.
+
+The client reads the stream version header on every connection. It normalizes v24 cumulative appends into the v25 offset contract before reducers see them, including when a reconnect crosses deployments. A current server performs the same normalization when replaying v24 events persisted by an earlier deployment. Missing, unsupported, or shape-inconsistent versions fail instead of being cast to the current event union.
 
 Built-in channel accumulators live in weak maps keyed by in-memory channel-state identity, not as properties of persisted channel state. The runtime serializes `channel.state` at the durable turn-step boundary, so putting cumulative text there would reintroduce an unnecessary snapshot write even though it would not repeat once per append event.
 
@@ -72,4 +76,6 @@ Built-in channel accumulators live in weak maps keyed by in-memory channel-state
 - Protocol and emission tests assert offsets and coalescing boundaries.
 - Shared helper and default reducer tests cover starts, contiguous appends, UTF-16 offsets, gaps, overlaps, and restarts.
 - Chat SDK, Slack, and TUI regressions cover their cumulative projections and retry behavior.
-- Extension-contract reports identify authored hooks and channels as breaking migration surfaces.
+- A reconnect regression starts with a v24 cumulative append and completes the same block from a v25 offset append.
+- The Next.js trace aliases the public event union, making stale append-field reads a compile-time error.
+- Extension-contract reports identify every capability epoch that extension authors must rebuild.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/index.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 import { createDevelopmentRuntimeArtifactRefresher } from "#services/dev-client.js";
 
 const encoder = new TextEncoder();
@@ -305,6 +306,9 @@ function createDevFetchMock(input: {
           controller.close();
         },
       }),
+      {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      },
     );
   });
 }

@@ -12,7 +12,11 @@ import { getApplicationInfo } from "#internal/application/paths.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
@@ -461,6 +465,9 @@ function messageStreamResponseOf(events: readonly MessageStreamEvent[]): Respons
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
@@ -1320,6 +1327,9 @@ describe("EveTUIRunner development session continuity", () => {
               controller.close();
             },
           }),
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         );
       }),
     );
@@ -3193,6 +3203,9 @@ describe("EveTUIRunner renderer teardown", () => {
             signal.addEventListener("abort", () => controller.close(), { once: true });
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     });
 
@@ -4221,6 +4234,9 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
               init?.signal?.addEventListener("abort", () => controller.close(), { once: true });
             },
           }),
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         ),
     );
 

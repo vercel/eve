@@ -14,5 +14,7 @@ describe("appendStreamTextDelta", () => {
     expect(appendStreamTextDelta("Hel", 4, "lo")).toBeUndefined();
     expect(appendStreamTextDelta("Hel", 2, "lo")).toBeUndefined();
     expect(appendStreamTextDelta(undefined, 3, "lo")).toBeUndefined();
+    expect(appendStreamTextDelta(undefined, undefined as never, "Hel")).toBeUndefined();
+    expect(appendStreamTextDelta(undefined, -1, "Hel")).toBeUndefined();
   });
 });

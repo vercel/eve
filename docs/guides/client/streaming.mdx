@@ -94,6 +94,8 @@ for await (const event of response) {
 
 Offset `0` starts or restarts a text block. A later delta must begin exactly at the accumulated string's length; the helper returns `undefined` for a gap or overlap so a consumer does not project corrupt text. Apply the same helper to `reasoningDelta` and `reasoningOffset`, or `inputTextDelta` and `inputTextOffset`.
 
+The eve client validates the stream version on every connection. It accepts v24 cumulative append events and v25 offset append events, then exposes both as the current offset-based `MessageStreamEvent` contract. This also applies when an automatic reconnect reaches a newer deployment. A missing or unsupported `x-eve-stream-version` header fails the stream instead of treating unknown JSON as the current event type.
+
 ## Handle event types
 
 Import event types from `eve/client` when you want exhaustiveness or helpers. Events read from a stream are `MessageStreamEvent`: the same union, with the `meta` envelope guaranteed present.
