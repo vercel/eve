@@ -458,6 +458,7 @@ function hasDispatchTarget(tools: HarnessToolMap, kind: PreparedDispatchTarget["
 
 export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
   const baseEmit = config.handleEvent;
+  const resolveApprovalKey = resolveApprovalKeyFromTools(config.tools);
 
   async function runStep(
     initialSession: Readonly<Parameters<StepFn>[0]>,
@@ -819,7 +820,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
     const pending = resolvePendingInput({
       deferMessagesWhileApprovalsPending: config.mode !== "conversation",
       history: resolvedRuntimeActions.messages,
-      resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
+      resolveApprovalKey,
       session,
       stepInput: coordinated.stepInput,
     });
@@ -1145,7 +1146,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         projectedMessages,
       );
     }
-    const approvedTools = getApprovedTools(session, resolveApprovalKeyFromTools(config.tools));
+    const approvedTools = getApprovedTools(session, resolveApprovalKey);
 
     const isFirstTurn = emissionState.sequence === 0;
     const hasScheduleProvenance = isFirstTurn && ctx?.get(ScheduleIdKey) !== undefined;

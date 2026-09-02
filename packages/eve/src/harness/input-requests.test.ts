@@ -1217,17 +1217,35 @@ describe("pending input batch collection", () => {
       responseMessages: [batchOutput("call-2", "notion__notion-update-page")],
       session,
     });
+    session = appendPendingInputBatch({
+      requests: [scopedApproval("approval-3", "call-3", "workspace-a")],
+      responseMessages: [batchOutput("call-3", "notion__notion-update-page")],
+      session,
+    });
 
-    const result = resolvePendingInput({
+    const first = resolvePendingInput({
       resolveApprovalKey,
       session,
       stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
     });
 
-    expect(getApprovedTools(result.session, resolveApprovalKey)).toEqual(
+    // approval-3 shares the workspace-a key, so the grant stays masked; the
+    // bare tool name would not mask it, which is what makes the resolver matter.
+    expect(getApprovedTools(first.session, resolveApprovalKey)).toEqual(new Set());
+    expect(getPendingInputRequestIds(first.session.state)).toEqual(
+      new Set(["approval-2", "approval-3"]),
+    );
+
+    const second = resolvePendingInput({
+      resolveApprovalKey,
+      session: first.session,
+      stepInput: { inputResponses: [{ requestId: "approval-3", optionId: "cancel" }] },
+    });
+
+    expect(getApprovedTools(second.session, resolveApprovalKey)).toEqual(
       new Set(["notion__notion-update-page:workspace-a"]),
     );
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-2"]));
+    expect(getPendingInputRequestIds(second.session.state)).toEqual(new Set(["approval-2"]));
   });
 
   it("leaves every batch open when a message arrives with several batches pending", () => {
