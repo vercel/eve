@@ -1,3 +1,4 @@
+import type { AgentExperimentalDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { compileFromMemory, type CompileFromMemoryInput } from "#compiler/compile-from-memory.js";
@@ -39,6 +40,7 @@ import { mockSandbox, type MockSandbox } from "#internal/testing/mocks/mock-sand
  */
 export interface TestAppDescriptor {
   readonly agent?: {
+    readonly experimental?: AgentExperimentalDefinition;
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
@@ -164,9 +166,20 @@ const TEST_SANDBOX_BACKEND: SandboxBackend = {
 };
 
 export async function createTestRuntime(descriptor: TestAppDescriptor = {}): Promise<TestRuntime> {
+  const model = descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID;
   const compileInput: CompileFromMemoryInput = {
     name: descriptor.agent?.name ?? DEFAULT_AGENT_NAME,
-    model: descriptor.agent?.model ?? TEST_DEFAULT_MODEL_ID,
+    model,
+    ...(descriptor.agent?.experimental === undefined
+      ? {}
+      : {
+          agent: {
+            experimental: descriptor.agent.experimental,
+            limits: descriptor.agent.limits,
+            model,
+            outputSchema: descriptor.agent.outputSchema,
+          },
+        }),
     limits: descriptor.agent?.limits,
     modules: [
       {

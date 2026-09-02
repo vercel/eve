@@ -219,6 +219,41 @@ describe("normalizeAgentDefinition", () => {
     expect(definition.experimental?.workflow).toEqual({ world: "@workflow/world-postgres" });
   });
 
+  it("accepts a positive workflow agent-step limit", () => {
+    const definition = normalizeAgentDefinition(
+      {
+        model: "openai/gpt-5.5",
+        experimental: {
+          workflow: {
+            agentStepsPerWorkflowStep: 10,
+          },
+        },
+      },
+      FAILURE_MESSAGE,
+    );
+
+    expect(definition.experimental?.workflow).toEqual({ agentStepsPerWorkflowStep: 10 });
+  });
+
+  it.each([0, -1, 1.5, "10"])(
+    "rejects invalid workflow agent-step limit %s",
+    (agentStepsPerWorkflowStep) => {
+      expect(() =>
+        normalizeAgentDefinition(
+          {
+            model: "openai/gpt-5.5",
+            experimental: {
+              workflow: {
+                agentStepsPerWorkflowStep,
+              },
+            },
+          },
+          FAILURE_MESSAGE,
+        ),
+      ).toThrow('"experimental.workflow.agentStepsPerWorkflowStep" must be a positive integer.');
+    },
+  );
+
   it("rejects non-string workflow world values", () => {
     expect(() =>
       normalizeAgentDefinition(

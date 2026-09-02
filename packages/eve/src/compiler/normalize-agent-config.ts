@@ -186,6 +186,7 @@ function normalizeExperimentalDefinition(
 
   if (experimental.workflow !== undefined) {
     compiledExperimental.workflow = {
+      agentStepsPerWorkflowStep: experimental.workflow.agentStepsPerWorkflowStep,
       world: experimental.workflow.world,
     };
   }

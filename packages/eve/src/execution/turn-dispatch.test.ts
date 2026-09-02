@@ -339,6 +339,46 @@ describe("dispatchAndAwaitTurn", () => {
     );
   });
 
+  it("hands a batched background-task commit barrier to the child workflow", async () => {
+    const state = createState("http:test");
+    const result = {
+      action: "continue" as const,
+      commitBarrier: {
+        effect: {
+          kind: "release-background-tasks" as const,
+          tasks: [{ taskId: "task-1", taskInboxToken: "inbox-1", taskRunId: "run-1" }],
+        },
+        transition: { serializedContext: { state: "committed" }, sessionState: state },
+      },
+      serializedContext: { state: "continued" },
+      sessionState: state,
+    };
+    vi.mocked(turnStep).mockResolvedValueOnce(result);
+    installControlHook([
+      {
+        action: { kind: "park", serializedContext: result.serializedContext, sessionState: state },
+        kind: "turn-result",
+      },
+    ]);
+
+    await dispatchAndAwaitTurn({
+      bufferedDeliveries: [],
+      bufferedSessionControls: [],
+      commandInbox: createCommandInbox(),
+      controlToken: "turn-control",
+      delivery: createAcceptedDelivery(),
+      mode: "conversation",
+      parentWritable: new WritableStream<Uint8Array>(),
+      serializedContext: { state: "start" },
+      sessionState: state,
+    });
+
+    expect(turnStep).toHaveBeenCalledTimes(1);
+    expect(dispatchTurnStep).toHaveBeenCalledWith(
+      expect.objectContaining({ initialStep: { beforeStep: expect.any(Object), result } }),
+    );
+  });
+
   it("defers a guarded deployment mismatch without consuming the delivery", async () => {
     const state = createState("http:test");
     vi.mocked(turnStep).mockResolvedValueOnce({

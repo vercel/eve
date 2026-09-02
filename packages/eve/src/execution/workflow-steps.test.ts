@@ -14,11 +14,13 @@ import {
   AuthKey,
   ChannelInstrumentationKey,
   ContinuationTokenKey,
+  DynamicSkillManifestKey,
   DynamicSubagentAgentConfigKey,
   ModeKey,
   SessionCallbackKey,
   SessionDynamicSubagentRuntimeRevisionKey,
   SessionDynamicSubagentSelectionsKey,
+  SessionDynamicInstructionsKey,
   SessionDynamicModelReferenceKey,
   SessionDynamicToolMetadataKey,
   SessionDynamicToolRuntimeRevisionKey,
@@ -36,7 +38,7 @@ import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
-import type { HarnessSession, StepResult } from "#harness/types.js";
+import type { HarnessSession, StepInput, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
 import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-cache.js";
@@ -62,6 +64,7 @@ import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-c
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
 import { resolveEffectiveOutputSchema } from "#execution/effective-output-schema.js";
+import { writeAgentLoopCheckpoint } from "#execution/agent-loop-checkpoint.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import { turnWorkflowReference, workflowEntryReference } from "#execution/workflow-runtime.js";
@@ -77,6 +80,30 @@ vi.mock("#instrumentation/runtime.js", async (importOriginal) => {
     },
   };
 });
+
+const mockAgentLoopCheckpoint = vi.hoisted(() => ({ latest: undefined as unknown }));
+vi.mock("./agent-loop-checkpoint.js", () => ({
+  readAgentLoopCheckpoint: vi.fn(async () => mockAgentLoopCheckpoint.latest),
+  resumeAgentLoopCheckpoint: vi.fn(async ({ enabled, rawInput }) =>
+    enabled && mockAgentLoopCheckpoint.latest !== undefined
+      ? {
+          checkpoint: mockAgentLoopCheckpoint.latest,
+          stepInput: {
+            ...rawInput,
+            input: undefined,
+            serializedContext: (mockAgentLoopCheckpoint.latest as { serializedContext: unknown })
+              .serializedContext,
+            sessionState: (mockAgentLoopCheckpoint.latest as { sessionState: unknown })
+              .sessionState,
+          },
+        }
+      : { stepInput: rawInput },
+  ),
+  writeAgentLoopCheckpoint: vi.fn(async (checkpoint) => {
+    mockAgentLoopCheckpoint.latest = structuredClone({ ...checkpoint, version: 1 });
+    return mockAgentLoopCheckpoint.latest;
+  }),
+}));
 
 vi.mock("./durable-session-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./durable-session-store.js")>();
@@ -182,6 +209,9 @@ vi.mock("#compiled/@workflow/core/runtime.js", () => ({
 }));
 
 const ThreadKey = new ContextKey<string>("test.workflow.thread");
+const NestedCheckpointKey = new ContextKey<{ nested: { value: string } }>(
+  "test.workflow.nestedCheckpoint",
+);
 const TestTurnAgent = {
   id: "test-agent",
   instructions: ["You are a test agent."],
@@ -216,12 +246,8 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
   };
 }
 
-function createSerializedContext(
-  mode: "conversation" | "task" = "conversation",
-): Record<string, unknown> {
-  const ctx = new ContextContainer();
-  ctx.set(AuthKey, null);
-  ctx.set(BundleKey, {
+function createTestCompiledBundle(agentStepsPerWorkflowStep?: number) {
+  return {
     adapterRegistry: {
       adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
     },
@@ -234,11 +260,25 @@ function createSerializedContext(
       },
     },
     hookRegistry: createEmptyHookRegistry(),
-    resolvedAgent: { config: {} },
+    resolvedAgent: {
+      config:
+        agentStepsPerWorkflowStep === undefined
+          ? {}
+          : { experimental: { workflow: { agentStepsPerWorkflowStep } } },
+    },
     subagentRegistry: {},
     toolRegistry: {},
     turnAgent: TestTurnAgent,
-  } as never);
+  } as never;
+}
+
+function createSerializedContext(
+  mode: "conversation" | "task" = "conversation",
+  agentStepsPerWorkflowStep?: number,
+): Record<string, unknown> {
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, null);
+  ctx.set(BundleKey, createTestCompiledBundle(agentStepsPerWorkflowStep));
   ctx.set(ChannelKey, threadContextAdapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, mode);
@@ -248,6 +288,8 @@ function createSerializedContext(
 
 afterEach(() => {
   delete (globalThis as Record<symbol, unknown>)[Symbol.for("eve.instrumentation-runtime")];
+  mockAgentLoopCheckpoint.latest = undefined;
+  vi.mocked(writeAgentLoopCheckpoint).mockClear();
   getRunMock.mockReset();
   resumeHookMock.mockReset();
   startMock.mockReset();
@@ -1889,6 +1931,171 @@ describe("turnStep", () => {
     );
   });
 
+  it("runs agent-loop continuations up to the configured workflow-step limit", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTestCompiledBundle(3));
+    vi.mocked(createExecutionNodeStep).mockClear();
+    const sessions = [0, 1, 2, 3].map((index) =>
+      createStubSession({ history: [{ content: `step ${index}`, role: "assistant" }] }),
+    );
+    installSessionStoreMocks([sessions[0]!]);
+    const sessionModel = { id: "openai/gpt-5.6-sol", contextWindowTokens: 1_000_000 };
+    const run = vi.fn(async (_session: HarnessSession, _input?: StepInput): Promise<StepResult> => {
+      const index = run.mock.calls.length;
+      if (index === 3) {
+        const ctx = loadContext();
+        ctx.set(SessionDynamicModelReferenceKey, sessionModel);
+        ctx.set(DynamicSkillManifestKey, { skills: [{ description: "Skill", name: "skill" }] });
+        ctx.set(SessionDynamicInstructionsKey, {
+          instructions: [{ content: "Session instruction", role: "system" }],
+        });
+      }
+      return {
+        next: index < 4 ? run : { done: true, output: "done" },
+        session: sessions[index]!,
+      };
+    });
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => run);
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "request" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext("conversation", 3),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(createExecutionNodeStep).toHaveBeenCalledTimes(3);
+    expect(writeAgentLoopCheckpoint).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({ message: expect.any(String) }),
+      undefined,
+      undefined,
+    ]);
+    expect(result).toMatchObject({ action: "continue" });
+    expect(result.sessionState.snapshot?.session.history).toEqual(sessions[3]!.history);
+    expect(result.cancellationTransition?.sessionState.snapshot?.session.history).toEqual(
+      sessions[2]!.history,
+    );
+    expect(result.cancellationTransition?.serializedContext).toMatchObject({
+      [DynamicSkillManifestKey.name]: {
+        skills: [{ description: "Skill", name: "skill" }],
+      },
+      [SessionDynamicInstructionsKey.name]: {
+        instructions: [{ content: "Session instruction", role: "system" }],
+      },
+      [SessionDynamicModelReferenceKey.name]: sessionModel,
+    });
+  });
+
+  it("resumes a physical retry from the durable logical checkpoint", async () => {
+    const bundle = createTestCompiledBundle(3);
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    const checkpointSession = createStubSession({
+      history: [{ content: "completed step", role: "assistant" }],
+    });
+    installSessionStoreMocks([checkpointSession]);
+    mockAgentLoopCheckpoint.latest = {
+      completedSteps: 1,
+      serializedContext: createSerializedContext(),
+      sessionState: createStubSessionState(),
+      version: 1,
+    };
+    let observedInput: StepInput | undefined;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (session, input): Promise<StepResult> => {
+        observedInput = input;
+        return { next: { done: true, output: "done" }, session };
+      };
+    });
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "must not redeliver" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext("conversation", 3),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(observedInput).toBeUndefined();
+    expect(result.action).toBe("done");
+    expect(result.sessionState.snapshot?.session.history).toEqual(checkpointSession.history);
+  });
+
+  it("rebuilds channel adapter context for each agent-loop step", async () => {
+    const createAdapterContext = vi.fn((base) => base);
+    const adapter = { ...threadContextAdapter, createAdapterContext } as ChannelAdapter;
+    const bundle = Object.assign({}, createTestCompiledBundle(3), {
+      adapterRegistry: { adaptersByKind: new Map([[adapter.kind, adapter]]) },
+    }) as never;
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(bundle);
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, null);
+    ctx.set(BundleKey, bundle);
+    ctx.set(ChannelKey, adapter);
+    ctx.set(ContinuationTokenKey, "http:thread-context");
+    ctx.set(ModeKey, "conversation");
+    ctx.set(SessionIdKey, "session-1");
+    const session = createStubSession();
+    installSessionStoreMocks([session]);
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => ({
+        next: async () => ({ next: null, session: stepSession }),
+        session: stepSession,
+      });
+    });
+
+    await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "request" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: serializeContext(ctx),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(createAdapterContext).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps completed agent-loop checkpoints when a later step is cancelled", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue(createTestCompiledBundle(3));
+    const initial = createStubSession();
+    const checkpoint = createStubSession({
+      history: [
+        { content: "request", role: "user" },
+        { content: "completed step", role: "assistant" },
+      ],
+    });
+    installSessionStoreMocks([initial]);
+    let stepCount = 0;
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (): Promise<StepResult> => {
+        stepCount += 1;
+        if (stepCount === 1) {
+          loadContext().set(ThreadKey, "completed checkpoint");
+          loadContext().set(NestedCheckpointKey, { nested: { value: "completed checkpoint" } });
+          return { next: async () => ({ next: null, session: checkpoint }), session: checkpoint };
+        }
+        loadContext().set(ThreadKey, "interrupted mutation");
+        loadContext().require(NestedCheckpointKey).nested.value = "interrupted mutation";
+        throw new TurnCancelledError();
+      };
+    });
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "request" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext("conversation", 3),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(result.action).toBe("cancelled");
+    expect(result.serializedContext[ThreadKey.name]).toBe("completed checkpoint");
+    expect(result.serializedContext[NestedCheckpointKey.name]).toEqual({
+      nested: { value: "completed checkpoint" },
+    });
+    expect(result.sessionState.snapshot?.session.history).toEqual([
+      { content: "request", role: "user" },
+      { content: "completed step", role: "assistant" },
+    ]);
+  });
+
   it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
     const session = createStubSession();
     installSessionStoreMocks([session]);
@@ -2613,14 +2820,12 @@ describe("turnStep", () => {
 
   it("projects a requested sleep onto the durable step result", async () => {
     const session = createStubSession();
+    const next = vi.fn(async () => ({ next: null, session }) as const);
     installSessionStoreMocks([session]);
     vi.mocked(createExecutionNodeStep).mockImplementation(() => {
       return async (stepSession): Promise<StepResult> => {
         requestTurnSleep(2_500);
-        return {
-          next: async () => ({ next: null, session: stepSession }),
-          session: stepSession,
-        };
+        return { next, session: stepSession };
       };
     });
 
@@ -2630,7 +2835,7 @@ describe("turnStep", () => {
         payloads: [{ message: "wait before checking" }],
       },
       parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
+      serializedContext: createSerializedContext("conversation", 3),
       sessionState: createStubSessionState(),
     });
 
@@ -2638,7 +2843,54 @@ describe("turnStep", () => {
       action: "continue",
       sleepDurationMs: 2_500,
     });
+    expect(next).not.toHaveBeenCalled();
     expect(result.serializedContext).not.toHaveProperty("eve.pendingTurnSleepDuration");
+  });
+
+  it("returns after a step starts background tasks", async () => {
+    const session = createStubSession();
+    const next = vi.fn(async () => ({ next: null, session }) as const);
+    const taskSession = createStubSession({ continuationToken: "background-checkpoint" });
+    installSessionStoreMocks([session]);
+    const sessionModel = { id: "anthropic/claude-opus-4.6", contextWindowTokens: 1_000_000 };
+    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
+      return async (stepSession): Promise<StepResult> => {
+        loadContext().set(SessionDynamicModelReferenceKey, sessionModel);
+        return {
+          backgroundTaskSession: taskSession,
+          backgroundTasks: [
+            { taskId: "task-1", taskInboxToken: "task-inbox-1", taskRunId: "task-run-1" },
+          ],
+          next,
+          session: stepSession,
+        };
+      };
+    });
+
+    const result = await turnStep({
+      input: { kind: "deliver", payloads: [{ message: "start work" }] },
+      parentWritable: createTestWritable(),
+      serializedContext: createSerializedContext("conversation", 3),
+      sessionState: createStubSessionState(),
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      action: "continue",
+      commitBarrier: {
+        effect: {
+          kind: "release-background-tasks",
+          tasks: [{ taskId: "task-1" }],
+        },
+      },
+    });
+    expect(result.commitBarrier?.transition.sessionState.snapshot?.session.continuationToken).toBe(
+      "background-checkpoint",
+    );
+    expect(result.commitBarrier?.transition.serializedContext).toMatchObject({
+      [SessionDynamicModelReferenceKey.name]: sessionModel,
+    });
+    expect(result.cancellationTransition).toEqual(result.commitBarrier?.transition);
   });
 
   it("persists onDeliver context into the next durable step", async () => {

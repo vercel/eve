@@ -231,8 +231,21 @@ function normalizeAgentWorkflowDefinition(
   message: string,
 ): AgentWorkflowDefinition {
   const record = expectObjectRecord(value, message);
-  expectOnlyKnownKeys(record, ["world"], message);
+  expectOnlyKnownKeys(record, ["agentStepsPerWorkflowStep", "world"], message);
   const normalizedDefinition: Mutable<AgentWorkflowDefinition> = {};
+
+  if (record.agentStepsPerWorkflowStep !== undefined) {
+    if (
+      typeof record.agentStepsPerWorkflowStep !== "number" ||
+      !Number.isInteger(record.agentStepsPerWorkflowStep) ||
+      record.agentStepsPerWorkflowStep <= 0
+    ) {
+      throw new Error(
+        `${message} "experimental.workflow.agentStepsPerWorkflowStep" must be a positive integer.`,
+      );
+    }
+    normalizedDefinition.agentStepsPerWorkflowStep = record.agentStepsPerWorkflowStep;
+  }
 
   if (record.world !== undefined) {
     normalizedDefinition.world = normalizeAgentWorkflowWorldDefinition(record.world, message);

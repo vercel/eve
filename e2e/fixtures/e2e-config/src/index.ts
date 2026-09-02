@@ -40,6 +40,11 @@ export type E2EModel = string | ReturnType<typeof mockModel>;
 /** Options for {@link e2eAgentConfig} and {@link e2eModel}. */
 export interface E2EModelOptions {
   /**
+   * Number of agent steps per Workflow step. Defaults to 5 for root agents;
+   * `false` omits the setting for compatibility fixtures.
+   */
+  readonly agentStepsPerWorkflowStep?: number | false;
+  /**
    * Responder (or static reply) used when the harness requests mock models
    * via `EVE_E2E_MODEL=mock`. Defaults to a deterministic echo of the last
    * user message.
@@ -65,16 +70,28 @@ export function e2eModel(options?: E2EModelOptions): E2EModel {
 /**
  * Returns the harness-owned configuration shared by e2e fixture root agents:
  * the matrix model from `EVE_E2E_MODEL` (or a mock when the world suite
- * requests one) and the workflow world override from `EVE_E2E_WORKFLOW_WORLD`.
+ * requests one), five agent steps per Workflow step, and the workflow world
+ * override from `EVE_E2E_WORKFLOW_WORLD` when set.
  */
 export function e2eAgentConfig(options?: E2EModelOptions): E2EAgentConfig {
   const base = e2eSubagentConfig(options);
-  const workflowWorld = process.env.EVE_E2E_WORKFLOW_WORLD;
-  if (workflowWorld === undefined) {
+  const agentStepsPerWorkflowStep = options?.agentStepsPerWorkflowStep ?? 5;
+  const world = process.env.EVE_E2E_WORKFLOW_WORLD;
+
+  if (agentStepsPerWorkflowStep === false && world === undefined) {
     return base;
   }
 
-  return { ...base, experimental: { workflow: { world: workflowWorld } } };
+  return {
+    ...base,
+    experimental: {
+      workflow: {
+        agentStepsPerWorkflowStep:
+          agentStepsPerWorkflowStep === false ? undefined : agentStepsPerWorkflowStep,
+        world,
+      },
+    },
+  };
 }
 
 /**

@@ -52,6 +52,7 @@ function buildSerializedContext(input: {
  */
 async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
+  readonly agentStepsPerWorkflowStep?: number;
   readonly execute: (...args: never[]) => unknown;
   readonly toolName: string;
 }): Promise<TestRuntime> {
@@ -65,7 +66,16 @@ async function createWorkflowToolRuntime(input: {
     sourceId: `tools/${input.toolName}.ts`,
     sourceKind: "module",
   };
-  const runtime = await createTestRuntime({ agent: { name: input.agentName }, tools: [tool] });
+  const runtime = await createTestRuntime({
+    agent: {
+      experimental:
+        input.agentStepsPerWorkflowStep === undefined
+          ? undefined
+          : { workflow: { agentStepsPerWorkflowStep: input.agentStepsPerWorkflowStep } },
+      name: input.agentName,
+    },
+    tools: [tool],
+  });
   const manifestTool = runtime.manifest.tools.find((entry) => entry.name === input.toolName);
   if (manifestTool === undefined) {
     throw new Error(`Expected ${input.toolName} to be present in the test manifest.`);
@@ -139,6 +149,34 @@ describe("workflow tools", () => {
           input: { message: 'Run deploy_service with service "api"' },
           serializedContext: buildSerializedContext({
             continuationToken: "schedule:workflow-tool-wait",
+            mode: "task",
+          }),
+        },
+      ]);
+      const result = await run.returnValue;
+      return String(result.output);
+    });
+
+    expect(output).toContain('"plan":"plan:api"');
+    expect(output).toContain('"callId":"call_deploy_service');
+  });
+
+  it("dispatches and resumes a workflow tool when agent steps are batched", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-batched",
+      agentStepsPerWorkflowStep: 5,
+      execute: deployServiceWorkflow,
+      toolName: "deploy_service",
+    });
+
+    expect(runtime.manifest.config.experimental?.workflow?.agentStepsPerWorkflowStep).toBe(5);
+
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: 'Run deploy_service with service "api"' },
+          serializedContext: buildSerializedContext({
+            continuationToken: "schedule:workflow-tool-batched",
             mode: "task",
           }),
         },

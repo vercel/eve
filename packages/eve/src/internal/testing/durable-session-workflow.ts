@@ -12,6 +12,10 @@ import {
   type DurableSessionState,
   readDurableSession,
 } from "#execution/durable-session-store.js";
+import {
+  readAgentLoopCheckpoint,
+  writeAgentLoopCheckpoint,
+} from "#execution/agent-loop-checkpoint.js";
 import type { HarnessSession } from "#harness/types.js";
 
 /** Synthetic minimal session for storage-layer round-trips. */
@@ -87,6 +91,58 @@ export async function durableSessionWriteWithRetryStep(input: {
   const sessionState = createDurableSessionState({ session });
 
   return { attempt: meta.attempt, sessionState };
+}
+
+export async function agentLoopCheckpointRetryStep(input: {
+  readonly sessionState: DurableSessionState;
+  readonly writeBeforeFailure: boolean;
+}): Promise<{
+  readonly attempt: number;
+  readonly completedSteps: number;
+  readonly resumed: boolean;
+}> {
+  "use step";
+
+  const { attempt } = getStepMetadata();
+  let checkpoint = await readAgentLoopCheckpoint();
+  const resumed = checkpoint !== undefined;
+  if (attempt === 1) {
+    if (input.writeBeforeFailure) {
+      await writeAgentLoopCheckpoint({
+        completedSteps: 3,
+        serializedContext: { marker: "checkpoint" },
+        sessionState: input.sessionState,
+      });
+    }
+    throw new Error("agent-loop-checkpoint: intentional retry");
+  }
+  checkpoint ??= await writeAgentLoopCheckpoint({
+    completedSteps: 0,
+    serializedContext: { marker: "seed" },
+    sessionState: input.sessionState,
+  });
+  return { attempt, completedSteps: checkpoint.completedSteps, resumed };
+}
+
+export async function agentLoopCheckpointRetryFixtureWorkflow(input: {
+  readonly writeBeforeFailure: boolean;
+}): Promise<{
+  readonly attempt: number;
+  readonly completedSteps: number;
+  readonly resumed: boolean;
+}> {
+  "use workflow";
+
+  const { workflowRunId: sessionId } = getWorkflowMetadata();
+  const sessionState = await durableSessionWriteStep({
+    historyDepth: 0,
+    marker: "seed",
+    sessionId,
+  });
+  return agentLoopCheckpointRetryStep({
+    sessionState,
+    writeBeforeFailure: input.writeBeforeFailure,
+  });
 }
 
 /** Reads the latest snapshot and projects the fields the test asserts on. */
