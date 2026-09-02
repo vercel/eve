@@ -175,7 +175,7 @@ function project(snapshot: ActivitySnapshotV1, rootTurnId: string): View {
 }
 function detailUpdates(view: View, seen: Readonly<Record<string, Phase>>) {
   const parentUpdates = view.parents
-    .filter((parent) => seen[parent.id] !== undefined && seen[parent.id] !== parent.phase)
+    .filter((parent) => seen[parent.id] !== parent.phase)
     .map(taskChunk);
   const descendantUpdates = view.entities
     .filter((entity) => seen[entity.id] !== entity.phase)

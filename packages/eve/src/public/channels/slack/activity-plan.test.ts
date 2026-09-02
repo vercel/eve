@@ -27,6 +27,22 @@ const stage = {
   rootSessionId: "session",
   rootTurnId: "turn",
 };
+const reviewer = {
+  id: "reviewer",
+  kind: "subagent" as const,
+  name: "reviewer",
+  parentId: root.id,
+  rootSessionId: "session",
+  rootTurnId: "turn",
+};
+const reviewStage = {
+  id: "review-stage",
+  kind: "task" as const,
+  name: "review_stage",
+  parentId: reviewer.id,
+  rootSessionId: "session",
+  rootTurnId: "turn",
+};
 
 describe("Slack activity plan", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -57,7 +73,19 @@ describe("Slack activity plan", () => {
       snapshot: started,
       state: undefined,
     });
-    const settled = reduceActivityBatch(started, {
+    const expanded = reduceActivityBatch(started, {
+      version: 1,
+      events: [
+        { eventId: "reviewer", kind: "work.started", startedAt: "3", work: reviewer },
+        { eventId: "review-stage", kind: "work.started", startedAt: "3", work: reviewStage },
+      ],
+    });
+    const expandedState = await renderer.render({
+      destination: { channelId: "C1", threadTs: "T1", teamId: "TEAM", triggeringUserId: "USER" },
+      snapshot: expanded,
+      state,
+    });
+    const settled = reduceActivityBatch(expanded, {
       version: 1,
       events: [
         {
@@ -68,11 +96,25 @@ describe("Slack activity plan", () => {
           workId: stage.id,
         },
         {
+          eventId: "review-stage-done",
+          kind: "work.settled",
+          outcome: "completed",
+          settledAt: "4",
+          workId: reviewStage.id,
+        },
+        {
           eventId: "verifier-done",
           kind: "work.settled",
           outcome: "completed",
           settledAt: "5",
           workId: verifier.id,
+        },
+        {
+          eventId: "reviewer-done",
+          kind: "work.settled",
+          outcome: "completed",
+          settledAt: "5",
+          workId: reviewer.id,
         },
         {
           eventId: "root-done",
@@ -86,18 +128,22 @@ describe("Slack activity plan", () => {
     await renderer.render({
       destination: { channelId: "C1", threadTs: "T1", teamId: "TEAM", triggeringUserId: "USER" },
       snapshot: settled,
-      state,
+      state: expandedState,
     });
     expect(requests.map((r) => r.operation)).toEqual([
       "chat.startStream",
+      "chat.appendStream",
       "chat.appendStream",
       "chat.appendStream",
       "chat.stopStream",
       "chat.update",
     ]);
     expect(requests[1]!.body.get("chunks")).toContain("• verify_stage\\n");
-    expect(requests[2]!.body.get("chunks")).toContain("✓ verify_stage\\n");
-    expect(requests[4]!.body.get("blocks")).not.toContain("verify_stage");
-    expect(requests[4]!.body.get("blocks")).toContain("verifier");
+    expect(requests[2]!.body.get("chunks")).toContain('"id":"reviewer"');
+    expect(requests[2]!.body.get("chunks")).toContain("• review_stage\\n");
+    expect(requests[3]!.body.get("chunks")).toContain("✓ verify_stage\\n");
+    expect(requests[3]!.body.get("chunks")).toContain("✓ review_stage\\n");
+    expect(requests[5]!.body.get("blocks")).not.toContain("verify_stage");
+    expect(requests[5]!.body.get("blocks")).toContain("verifier");
   });
 });
