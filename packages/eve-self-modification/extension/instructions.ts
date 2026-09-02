@@ -1,7 +1,6 @@
-import { defineInstructions } from "eve/instructions";
+import { defineDynamic, defineInstructions } from "eve/instructions";
 
-export default defineInstructions({
-  markdown: `You are an expert coding assistant operating inside of an eve agent. You help users by reading files, editing code, and writing new files that shape the behavior of the agent itself.
+const instructions = `You are an expert coding assistant operating inside of an eve agent. You help users by reading files, editing code, and writing new files that shape the behavior of the agent itself.
 
 The source code of the eve agent is mounted read-write at /source. Use bash only for read-only discovery and available validation commands. Never modify source files with bash, sed, awk, redirection, or scripting. /source is the authored agent directory.
 
@@ -17,5 +16,36 @@ The eve framework documentation is mounted read-only at /eve-docs. Read the eve 
 
 You cannot access application files outside the authored agent directory or run host binaries such as git, node, pnpm, or tsc.
 
-Treat a successful file-edit tool result as confirmation; do not reread a file solely to verify that the edit succeeded. Do not approximate unavailable build or test commands with broad source searches.`,
+Treat a successful file-edit tool result as confirmation; do not reread a file solely to verify that the edit succeeded. Do not approximate unavailable build or test commands with broad source searches.
+
+Local trace segments are mounted read-only at /traces when available. Inspect other traces only when the user asks about another session or broader behavior.`;
+
+function readTrace(
+  event: unknown,
+): { readonly traceFlags: number; readonly traceId: string } | undefined {
+  return (
+    event as {
+      readonly data?: {
+        readonly trace?: { readonly traceFlags: number; readonly traceId: string };
+      };
+    }
+  ).data?.trace;
+}
+
+export default defineDynamic({
+  events: {
+    "session.started": (event) => {
+      const trace = readTrace(event);
+      if (trace === undefined) return defineInstructions({ markdown: instructions });
+
+      const availability =
+        (trace.traceFlags & 1) === 1
+          ? "If local segments were captured,"
+          : "This trace was not sampled, so local segments may be absent. If any are present,";
+
+      return defineInstructions({
+        markdown: `${instructions}\n\nThe invoking trace has ID ${trace.traceId}. ${availability} inspect them at /traces/${trace.traceId}.`,
+      });
+    },
+  },
 });

@@ -33,7 +33,7 @@ export { default } from "@eve/self-modification/sandbox";
 export { default } from "@eve/self-modification";
 ```
 
-Set `model` in the agent definition to choose the self-modification subagent's model; it defaults to `anthropic/claude-sonnet-5`. The sandbox mounts the application's authored `agent/` directory read-write at `/source` and the installed eve package's version-matched documentation read-only at `/eve-docs`.
+Set `model` in the agent definition to choose the self-modification subagent's model; it defaults to `anthropic/claude-sonnet-5`. The sandbox mounts the application's authored `agent/` directory read-write at `/source`, local trace segments read-only at `/traces`, and the installed eve package's version-matched documentation read-only at `/eve-docs`.
 
 The extension contributes `selfmod__edit_file` for one or more exact targeted edits to an existing file without rewriting it. Its instructions direct independent discovery calls to run concurrently and reserve `write_file` for new files or complete rewrites.
 
