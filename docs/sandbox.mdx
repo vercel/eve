@@ -53,6 +53,38 @@ The handle does more than `run` and `writeTextFile`. In every method, relative p
 | `resolvePath(path)`                      | anchor a relative path to its absolute `/workspace/...` form                                    |
 | `setNetworkPolicy(policy)`               | change egress policy mid-turn (backend-dependent; see [Network policy](#network-policy))        |
 
+### Export files from the sandbox
+
+`sandbox.readFile()` resolves to `ReadableStream<Uint8Array> | null`. Use this byte stream to copy a generated file out of `/workspace` without buffering the complete file in memory. A missing file returns `null`.
+
+The following helper streams a sandbox file into the app runtime filesystem:
+
+```ts
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import type { SandboxSession } from "eve/sandbox";
+
+export async function copySandboxFile(
+  sandbox: SandboxSession,
+  sandboxPath: string,
+  destinationPath: string,
+): Promise<boolean> {
+  const stream = await sandbox.readFile({ path: sandboxPath });
+  if (stream === null) return false;
+
+  await pipeline(stream, createWriteStream(destinationPath));
+  return true;
+}
+```
+
+Choose the reader based on how the application uses the file:
+
+- Use `readTextFile()` to decode text and optionally select a range of lines.
+- Use `readBinaryFile()` when the complete file is small enough to buffer as a `Uint8Array`.
+- Use `readFile()` when the file size is unknown or the destination accepts a byte stream.
+
+The app runtime filesystem does not create a browser-accessible URL. To expose an artifact in a frontend, upload the stream to storage and return its HTTPS URL, or return an explicitly size-limited file as a JSON-safe data URL in a tool result. A `ReadableStream` cannot cross the durable event stream as a tool output. See [Render generated images and file downloads](./guides/frontend/overview#render-generated-images-and-file-downloads) for the browser side.
+
 Since `run` blocks until the command exits, use `spawn` when the process should keep running while the agent does other work:
 
 ```ts

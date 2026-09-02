@@ -89,6 +89,61 @@ Most chat UIs only need `data.messages` and `status`. Drop down to `events` when
 
 When the root agent delegates, its stream emits `subagent.called` with the child's `childSessionId`, then `subagent.completed` when the child returns. Detailed child progress lives on the child session's stream instead of being flattened into the root `data.messages`. Use the lower-level [TypeScript client](../client/overview#sessions) to attach to that ID when your UI needs live subagent activity. See [What the parent sees](../../subagents#what-the-parent-sees) for the complete contract.
 
+## Render generated images and file downloads
+
+An authored tool can use [`sandbox.readFile()`](../../sandbox#export-files-from-the-sandbox) to export a generated file, then return a JSON-safe artifact descriptor. Use an HTTPS URL for a file uploaded to storage. For an explicitly size-limited file, the tool can return a base64 `data:` URL instead.
+
+The default reducer exposes a completed tool result as a `dynamic-tool` part with `state: "output-available"`. Each tool owns its output shape, so validate `part.output` before using it in the DOM:
+
+```tsx
+import type { EveDynamicToolPart } from "eve/react";
+
+interface FileArtifact {
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly url: string;
+}
+
+const INLINE_IMAGE_MEDIA_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function isFileArtifact(output: unknown): output is FileArtifact {
+  if (typeof output !== "object" || output === null) return false;
+  if (!("filename" in output) || typeof output.filename !== "string") return false;
+  if (!("mediaType" in output) || typeof output.mediaType !== "string") return false;
+  if (!("url" in output) || typeof output.url !== "string") return false;
+
+  return (
+    output.url.startsWith("https://") || output.url.startsWith(`data:${output.mediaType};base64,`)
+  );
+}
+
+export function ToolArtifact({ part }: { readonly part: EveDynamicToolPart }) {
+  if (part.state !== "output-available" || !isFileArtifact(part.output)) return null;
+
+  const artifact = part.output;
+  if (INLINE_IMAGE_MEDIA_TYPES.has(artifact.mediaType)) {
+    return (
+      <figure>
+        <img alt={artifact.filename} src={artifact.url} />
+        <a download={artifact.filename} href={artifact.url}>
+          Download image
+        </a>
+      </figure>
+    );
+  }
+
+  return (
+    <a download={artifact.filename} href={artifact.url}>
+      Download {artifact.filename}
+    </a>
+  );
+}
+```
+
+Render `ToolArtifact` from the `dynamic-tool` branch of your message-part component. The `download` attribute supplies a filename for same-origin and `data:` URLs. For a cross-origin storage URL, set `Content-Disposition: attachment` on the file response.
+
+Tool outputs are part of the durable event stream. Keep inline artifacts bounded, and prefer an expiring or authenticated storage URL for larger or sensitive files. A tool's [`toModelOutput`](../../tools) can send a small summary to the model while the full artifact descriptor remains available to the frontend.
+
 ## Sending and streaming
 
 Pass the message first and optional per-turn settings second. Use `respond()` for HITL answers:
