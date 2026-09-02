@@ -33,14 +33,19 @@
       "type": "registry:item",
       "title": "Self-modification (Experimental)",
       "description": "Add an experimental, development-only source editing subagent to an eve project.",
-      "dependencies": ["@eve/self-modification"],
+      "dependencies": [
+        "@eve/self-modification"
+      ],
       "meta": {
         "eve": {
           "install": {
             "pnpm": {
               "buildScripts": [
                 {
-                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
+                  "packages": [
+                    "node-liblzma",
+                    "@mongodb-js/zstd"
+                  ],
                   "optional": true,
                   "recommendedAction": "ignore-optional",
                   "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
@@ -217,7 +222,7 @@
               "file-memory"
             ]
           },
-          "requires": ">=0.49.0",
+          "requires": ">=0.49.1",
           "docs": "/docs/memory/file"
         }
       },
