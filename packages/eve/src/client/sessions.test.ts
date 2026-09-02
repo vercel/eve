@@ -35,10 +35,14 @@ describe("Client.sessions", () => {
   });
 
   it("attaches without I/O and sends every operation through ID-only routes", async () => {
-    const requests: Array<{ readonly body?: string; readonly url: string }> = [];
+    const requests: Array<{
+      readonly body?: string;
+      readonly signal?: AbortSignal | null;
+      readonly url: string;
+    }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url = String(request);
-      requests.push({ body: init?.body as string | undefined, url });
+      requests.push({ body: init?.body as string | undefined, signal: init?.signal, url });
       const path = new URL(url).pathname;
       if (path === "/eve/v1/session/wrun_A") {
         return Response.json(
@@ -58,6 +62,7 @@ describe("Client.sessions", () => {
       return Response.json({ ok: true, previousSessionId: "wrun_A", status: "reset" });
     });
     const client = new Client({ host: "https://eve.test" });
+    const resetController = new AbortController();
 
     const session = client.sessions.attach("wrun_A");
     expect(requests).toHaveLength(0);
@@ -65,7 +70,7 @@ describe("Client.sessions", () => {
     await session.cancel();
     await session.compact();
     await session.clear();
-    await session.reset({ reason: "fresh start" });
+    await session.reset({ reason: "fresh start", signal: resetController.signal });
 
     expect(requests.map(({ url }) => new URL(url).pathname)).toEqual([
       "/eve/v1/session/wrun_A",
@@ -76,6 +81,7 @@ describe("Client.sessions", () => {
     ]);
     expect(JSON.parse(requests[0]!.body!)).toEqual({ message: "follow-up" });
     expect(JSON.parse(requests[4]!.body!)).toEqual({ reason: "fresh start" });
+    expect(requests[4]!.signal).toBe(resetController.signal);
     expect(session.state).toEqual({ sessionId: "wrun_A", streamIndex: 0 });
   });
 });

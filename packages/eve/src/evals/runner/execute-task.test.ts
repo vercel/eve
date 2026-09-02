@@ -54,6 +54,142 @@ describe("executeTask", () => {
     expect(outcome.error).toMatch(/timed out|timeout/i);
   });
 
+  it("terminally resets eval-created sessions before returning after a timeout", async () => {
+    const resetResponse = createDeferred();
+    const requestController = new AbortController();
+    const server = createScriptedServer(
+      [
+        {
+          sessionId: "parent-session",
+          events: [
+            turnStarted("parent-turn"),
+            subagentCalled("parent-turn", "child-session", "sleeper"),
+          ],
+        },
+      ],
+      { openStreams: true, resetResponse: resetResponse.promise },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    let settled = false;
+    const execution = executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("delegate in the background", {
+          headers: { authorization: "Bearer eval-run" },
+          signal: requestController.signal,
+        });
+      }, "timeout-with-background-task"),
+      timeoutMs: 10,
+    }).then((outcome) => {
+      settled = true;
+      return outcome;
+    });
+
+    await vi.waitFor(() => expect(server.resets).toEqual(["parent-session"]));
+    expect(settled).toBe(false);
+
+    resetResponse.resolve();
+    const outcome = await execution;
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(requestController.signal.aborted).toBe(false);
+    expect(server.postSignals[0]?.aborted).toBe(false);
+    expect(server.resetHeaders[0]?.get("authorization")).toBe("Bearer eval-run");
+    expect(server.streamSignals[0]?.aborted).toBe(true);
+  });
+
+  it("preserves caller cancellation for an initial session request", async () => {
+    const createResponse = createDeferred();
+    const controller = new AbortController();
+    const server = createScriptedServer([{ sessionId: "cancelled-create", events: [] }], {
+      createResponse: createResponse.promise,
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const execution = executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        const sending = t.send("start", { signal: controller.signal });
+        controller.abort(new Error("caller stopped"));
+        await sending;
+      }, "caller-cancelled-create"),
+    });
+
+    const outcome = await execution;
+    expect(outcome.error).toContain("caller stopped");
+    expect(server.postSignals[0]?.aborted).toBe(true);
+    expect(server.resets).toEqual([]);
+  });
+
+  it("retires a session whose create response crosses the eval timeout", async () => {
+    const createResponse = createDeferred();
+    const server = createScriptedServer(
+      [
+        {
+          sessionId: "late-parent-session",
+          events: [turnStarted("late-turn"), turnCompleted("late-turn"), sessionWaiting()],
+        },
+      ],
+      { createResponse: createResponse.promise },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    let settled = false;
+    const execution = executeTask({
+      cleanupTimeoutMs: 1_000,
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("start slowly");
+        await new Promise<void>(() => {});
+      }, "timeout-during-create"),
+      timeoutMs: 10,
+    }).then((outcome) => {
+      settled = true;
+      return outcome;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(settled).toBe(false);
+    expect(server.postSignals[0]?.aborted).toBe(false);
+    createResponse.resolve();
+
+    const outcome = await execution;
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(server.resets).toEqual(["late-parent-session"]);
+  });
+
+  it("bounds settlement when timed-out session cleanup stalls", async () => {
+    const server = createScriptedServer(
+      [
+        {
+          sessionId: "stalled-cleanup-session",
+          events: [turnStarted("turn"), turnCompleted("turn"), sessionWaiting()],
+        },
+      ],
+      { resetResponse: new Promise<void>(() => {}) },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation(server.fetch);
+
+    const outcome = await executeTask({
+      cleanupTimeoutMs: 10,
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("start");
+        await new Promise<void>(() => {});
+      }, "stalled-timeout-cleanup"),
+      timeoutMs: 10,
+    });
+
+    expect(server.resets).toEqual(["stalled-cleanup-session"]);
+    expect(outcome.error).toMatch(/timed out|timeout/i);
+    expect(outcome.error).toContain("Timed-out eval cleanup failed");
+    expect(server.resetSignals[0]?.aborted).toBe(true);
+  });
+
   it("exposes a sleep helper with a one-second default", async () => {
     vi.useFakeTimers();
     let settled = false;
@@ -721,6 +857,9 @@ function createScriptedServer(
   turns: readonly { events: readonly UnstampedMessageStreamEvent[]; sessionId: string }[],
   options: {
     readonly cancelStatus?: "accepted" | "no_active_turn";
+    readonly createResponse?: Promise<void>;
+    readonly openStreams?: boolean;
+    readonly resetResponse?: Promise<void>;
     readonly streams?: readonly {
       readonly events: readonly UnstampedMessageStreamEvent[];
       readonly sessionId: string;
@@ -730,7 +869,12 @@ function createScriptedServer(
   const pendingTurns = [...turns];
   const streamQueues = new Map<string, UnstampedMessageStreamEvent[][]>();
   const posts: Array<{ body: unknown; method: string; url: string }> = [];
+  const postSignals: AbortSignal[] = [];
+  const resetHeaders: Headers[] = [];
+  const resetSignals: AbortSignal[] = [];
   const cancels: string[] = [];
+  const resets: string[] = [];
+  const streamSignals: AbortSignal[] = [];
 
   for (const stream of options.streams ?? []) {
     const queue = streamQueues.get(stream.sessionId) ?? [];
@@ -741,6 +885,11 @@ function createScriptedServer(
   return {
     cancels,
     posts,
+    postSignals,
+    resetHeaders,
+    resetSignals,
+    resets,
+    streamSignals,
     async fetch(request: string | URL | Request, init?: RequestInit): Promise<Response> {
       const url =
         typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
@@ -759,6 +908,15 @@ function createScriptedServer(
         );
       }
 
+      if (method === "POST" && pathname.endsWith("/reset")) {
+        const sessionId = decodeURIComponent(pathname.split("/").at(-2) ?? "");
+        resets.push(sessionId);
+        resetHeaders.push(new Headers(init?.headers));
+        if (init?.signal != null) resetSignals.push(init.signal);
+        await waitForResponse(options.resetResponse, init?.signal);
+        return Response.json({ ok: true, previousSessionId: sessionId, status: "reset" });
+      }
+
       if (method === "POST") {
         const next = pendingTurns.shift();
         if (next === undefined) {
@@ -766,9 +924,11 @@ function createScriptedServer(
         }
 
         posts.push({ body: JSON.parse(String(init?.body)), method, url });
+        if (init?.signal != null) postSignals.push(init.signal);
         const queue = streamQueues.get(next.sessionId) ?? [];
         queue.push([...next.events]);
         streamQueues.set(next.sessionId, queue);
+        await waitForResponse(options.createResponse, init?.signal);
 
         return Response.json(
           {
@@ -785,12 +945,16 @@ function createScriptedServer(
         return Response.json({ error: "No stream.", ok: false }, { status: 404 });
       }
 
-      return streamResponse(events);
+      if (init?.signal != null) streamSignals.push(init.signal);
+      return streamResponse(events, options.openStreams ? init?.signal : undefined);
     },
   };
 }
 
-function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Response {
+function streamResponse(
+  events: readonly UnstampedMessageStreamEvent[],
+  closeSignal?: AbortSignal | null,
+): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -798,7 +962,13 @@ function streamResponse(events: readonly UnstampedMessageStreamEvent[]): Respons
         for (const event of stampTestEvents(events)) {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
-        controller.close();
+        if (closeSignal == null) {
+          controller.close();
+        } else if (closeSignal.aborted) {
+          controller.close();
+        } else {
+          closeSignal.addEventListener("abort", () => controller.close(), { once: true });
+        }
       },
     }),
   );
@@ -921,4 +1091,35 @@ function subagentCalled(
     },
     type: "subagent.called",
   };
+}
+
+function createDeferred(): { readonly promise: Promise<void>; resolve(): void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
+async function waitForResponse(
+  response: Promise<void> | undefined,
+  signal: AbortSignal | null | undefined,
+): Promise<void> {
+  if (response === undefined) return;
+  if (signal == null) return await response;
+  signal.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void response.then(
+      () => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }

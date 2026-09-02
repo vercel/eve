@@ -21,7 +21,7 @@ import {
 interface SessionControlContext {
   readonly host: string;
   readonly redirect?: ClientRedirectPolicy;
-  resolveHeaders(): Promise<Headers>;
+  resolveHeaders(perRequest?: Readonly<Record<string, string>>): Promise<Headers>;
 }
 
 export async function cancelClientSession(input: {
@@ -91,14 +91,18 @@ export async function compactClientSession(input: {
 
 export async function resetClientSession(input: {
   readonly context: SessionControlContext;
+  readonly headers?: Readonly<Record<string, string>>;
   readonly options?: { readonly reason?: string };
+  readonly signal?: AbortSignal;
   readonly sessionId: string;
 }): Promise<ResetResult> {
   const { payload } = await postJson({
     body: input.options,
     context: input.context,
+    headers: input.headers,
     operation: "Reset",
     path: createEveSessionResetRoutePath(input.sessionId),
+    signal: input.signal,
   });
   const result = ResetResponseSchema.safeParse(payload);
   if (
@@ -115,10 +119,12 @@ export async function resetClientSession(input: {
 async function postJson(input: {
   readonly body?: object;
   readonly context: SessionControlContext;
+  readonly headers?: Readonly<Record<string, string>>;
   readonly operation: string;
   readonly path: string;
+  readonly signal?: AbortSignal;
 }): Promise<{ readonly payload: unknown; readonly response: Response }> {
-  const headers = await input.context.resolveHeaders();
+  const headers = await input.context.resolveHeaders(input.headers);
   headers.set("content-type", "application/json");
   const response = await fetch(
     createClientUrl(input.context.host, input.path),
@@ -127,6 +133,7 @@ async function postJson(input: {
         body: input.body === undefined ? undefined : JSON.stringify(input.body),
         headers,
         method: "POST",
+        signal: input.signal,
       },
       input.context.redirect,
     ),
