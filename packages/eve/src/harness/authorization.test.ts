@@ -95,7 +95,11 @@ describe("authorization callback results", () => {
   });
 });
 
-function challenge(name: string, attemptId: string, principal: ConnectionPrincipal = { type: "app" }) {
+function challenge(
+  name: string,
+  attemptId: string,
+  principal: ConnectionPrincipal = { type: "app" },
+) {
   return {
     attemptId,
     challenge: { url: `https://idp.example/${attemptId}` },
@@ -115,10 +119,7 @@ describe("authorization challenge reduction", () => {
         challenge("linear", "linear-a", userA),
         challenge("linear", "linear-b", userB),
       ]),
-    ).toEqual([
-      challenge("linear", "linear-a", userA),
-      challenge("linear", "linear-b", userB),
-    ]);
+    ).toEqual([challenge("linear", "linear-a", userA), challenge("linear", "linear-b", userB)]);
   });
 
   it("merges distinct names and replaces only the same name+principal", () => {
@@ -148,7 +149,10 @@ describe("authorization challenge reduction", () => {
   it("reports superseded challenges by exact replacement scope", () => {
     const userA = { id: "user-a", issuer: "idp", type: "user" } as const;
     const userB = { id: "user-b", issuer: "idp", type: "user" } as const;
-    const previous = [challenge("linear", "linear-a-1", userA), challenge("linear", "linear-b-1", userB)];
+    const previous = [
+      challenge("linear", "linear-a-1", userA),
+      challenge("linear", "linear-b-1", userB),
+    ];
     const replacements = [challenge("linear", "linear-a-2", userA)];
 
     expect(getSupersededAuthorizationChallenges(previous, replacements)).toEqual([

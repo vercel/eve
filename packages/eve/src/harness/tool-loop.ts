@@ -127,10 +127,8 @@ import {
 } from "#harness/hitl/approval-prompt.js";
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import {
-  hasPendingApprovalPolicyWork,
-  interpretRequests,
-} from "#harness/hitl/request-interpreter.js";
+import { hasPendingApprovalPolicyWork } from "#harness/hitl/approval-attempts.js";
+import { interpretRequests } from "#harness/hitl/request-interpreter.js";
 import {
   convertStaleResponsesToUserMessage,
   dropStaleSessionLimitContinuationResponses,
@@ -2356,7 +2354,6 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
-      owner: approvalRequests.length > 0 ? "framework-approval-gate" : "session-turn",
       requests: inputRequests,
       responseMessages: [],
       session: parkedSession,
@@ -2392,7 +2389,6 @@ async function handleStepResult(input: {
         stepIndex: emissionState.stepIndex,
         turnId: emissionState.turnId,
       },
-      owner: approvalRequests.length > 0 ? "framework-approval-gate" : "session-turn",
       requests: inputRequests,
       responseAuthRequiredRequestIds: approvalRequests
         .filter((request) => {

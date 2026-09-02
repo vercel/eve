@@ -202,6 +202,10 @@ export async function interpretRequests(
     }
   }
 
+  // AI SDK collects approval responses from the tail tool message only, so at
+  // most one approval-bearing group settles per pass; later answered approval
+  // groups wait for the next step with their responses held.
+  let approvalGroupSettledThisPass = false;
   for (const group of openGroups) {
     const responseMap = new Map<string, InputResponse>(
       (groupResponses.get(group.id) ?? []).map(
@@ -214,7 +218,8 @@ export async function interpretRequests(
     const approvals = group.requests.filter((request) => isApprovalRequest(request));
     const approvalsAnswered =
       approvals.length > 0 && approvals.every((request) => responseMap.has(request.requestId));
-    if (approvals.length > 0 && !approvalsAnswered) continue;
+    if (approvals.length > 0 && (!approvalsAnswered || approvalGroupSettledThisPass)) continue;
+    if (approvalsAnswered) approvalGroupSettledThisPass = true;
     for (const request of group.requests) {
       const record = ledger.requests.find((candidate) => candidate.id === request.requestId);
       if (record === undefined || record.outcome !== undefined) continue;
@@ -365,7 +370,9 @@ export async function interpretRequests(
   const limitStillOpen = materializeOpenGroups(ledger).some((group) =>
     group.requests.some((request) => isSessionLimitContinuationRequestId(request.requestId)),
   );
+  const stillOpenAfterPass = materializeOpenGroups(ledger).length > 0;
   const deferred = finishStepInput({
+    deferContextOnly: stillOpenAfterPass && normalizeUserContent(stepInput?.message) === undefined,
     deferTurnInput:
       completedGroups.some((group) =>
         group.requests.some((request) => isApprovalRequest(request)),
@@ -390,10 +397,9 @@ export async function interpretRequests(
   }
 
   const refreshedStillOpenGroups = materializeOpenGroups(ledger);
-  const hasForwardableTurnInput =
-    normalizeUserContent(stepInput?.message) !== undefined ||
-    (stepInput?.context?.length ?? 0) > 0 ||
-    (readClientContext(stepInput)?.length ?? 0) > 0;
+  // Only a message advances a turn past open requests; context alone is held
+  // with them.
+  const hasForwardableTurnInput = normalizeUserContent(stepInput?.message) !== undefined;
   // Responses that resolved nothing this pass (answers to a group still
   // waiting on its approvals) are held with the step input.
   if (
@@ -411,38 +417,6 @@ export async function interpretRequests(
     messages,
     stepInput: deferred.stepInput,
   };
-}
-
-export function hasPendingApprovalPolicyWork(
-  ledger: RequestLedger,
-  now: number,
-  authorizationResults: readonly AuthorizationResult[],
-): boolean {
-  const satisfied = new Set(
-    authorizationResults.map((result) => result.attemptId ?? result.hookUrl),
-  );
-  return ledger.requests.some((record) => {
-    if (
-      !isInputRequest(record.request) ||
-      !isApprovalRequest(record.request) ||
-      record.outcome !== undefined
-    ) {
-      return false;
-    }
-    return (record.attempts ?? []).some((attempt) => {
-      if (attempt.expiresAt <= now) return false;
-      if (attempt.status === "pending") return true;
-      return attempt.authorizationRequestIds.some((requestId) => {
-        const authRecord = ledger.requests.find((candidate) => candidate.id === requestId);
-        return (
-          authRecord?.request.kind === "authorization" &&
-          satisfied.has(
-            authRecord.request.authorization.attemptId ?? authRecord.request.authorization.hookUrl,
-          )
-        );
-      });
-    });
-  });
 }
 
 export function appendResolvedBatchTranscript(
@@ -609,6 +583,7 @@ function classifyResolutionOutcome(
 }
 
 function finishStepInput(input: {
+  readonly deferContextOnly?: boolean;
   readonly deferTurnInput: boolean;
   readonly heldResponses: readonly InputResponse[];
   readonly resolvedStepInput: ResolvedStepInput | undefined;
@@ -624,6 +599,13 @@ function finishStepInput(input: {
   } = {};
   let clientContext: readonly string[] | undefined;
   if (input.heldResponses.length > 0) deferredInput.inputResponses = input.heldResponses;
+  if (input.deferContextOnly === true && !input.deferTurnInput) {
+    if ((input.resolvedStepInput?.context?.length ?? 0) > 0) {
+      deferredInput.context = input.resolvedStepInput?.context;
+    }
+    const resolvedClientContext = readClientContext(input.resolvedStepInput);
+    if ((resolvedClientContext?.length ?? 0) > 0) clientContext = resolvedClientContext;
+  }
   if (input.deferTurnInput) {
     if ((input.resolvedStepInput?.context?.length ?? 0) > 0) {
       deferredInput.context = input.resolvedStepInput?.context;

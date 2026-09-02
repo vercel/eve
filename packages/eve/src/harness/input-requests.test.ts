@@ -8,19 +8,125 @@ import type { InputRequest } from "#shared/input.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   clearPendingSessionLimitPrompt,
-  consumeDeferredStepInput,
   createRuntimeToolCallActionFromToolCall,
+  createRequests,
   getApprovedTools,
-  openRequestIds,
-  hasDeferredStepInput,
   hasOpenRequests,
   hasStepInput,
-  resolvePendingInput,
-  createRequests,
 } from "#harness/input-requests.js";
+import { recordApprovedToolKeys } from "#harness/hitl/approval-input-requests.js";
+import {
+  consumeDeferredStepInput,
+  hasDeferredStepInput,
+  queueDeferredStepInput,
+} from "#harness/hitl/deferred-step-input.js";
+import { interpretRequests } from "#harness/hitl/request-interpreter.js";
+import {
+  acknowledgeReadyRequestGroupDelivery,
+  commitRequestLedger,
+  openRequestIds,
+  readRequestLedger,
+  type GroupCompletion,
+} from "#harness/hitl/request-ledger.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { buildToolApproval, buildToolSet } from "#harness/tools.js";
-import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
+import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
+
+async function resolvePendingInput(input: {
+  session: HarnessSession;
+  stepInput?: StepInput;
+  deferMessagesWhileApprovalsPending?: boolean;
+  resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  policies?: HarnessToolMap;
+  responder?: import("#channel/types.js").SessionAuthContext | null;
+}): Promise<{
+  outcome: "resolved" | "continue" | "unresolved";
+  messages: ModelMessage[];
+  session: HarnessSession;
+  deferredMessage?: boolean;
+  deferredContext?: boolean;
+  consumedMessage?: boolean;
+  rejectedActions?: Extract<
+    GroupCompletion,
+    { owner: "framework-approval-gate" }
+  >["rejectedActions"];
+  limitContinuation?: Extract<GroupCompletion, { owner: "session-turn" }>["limitContinuation"];
+  completions?: GroupCompletion[];
+}> {
+  const now = 1234567890;
+  const ledger = readRequestLedger(input.session.state);
+  const interpreted = await interpretRequests({
+    deferMessagesWhileApprovalsPending: input.deferMessagesWhileApprovalsPending ?? false,
+    delivery: {
+      authorizationResults: [],
+      now,
+      responder: input.responder ?? null,
+      stepInput: input.stepInput,
+    },
+    history: input.session.history,
+    ledger,
+    policies: input.policies ?? new Map(),
+    resolveApprovalKey: input.resolveApprovalKey,
+  });
+
+  let session = commitRequestLedger(input.session, interpreted.ledger, ledger.version);
+  let limitContinuation: { readonly granted: boolean } | undefined;
+  let rejectedActions:
+    | Extract<GroupCompletion, { owner: "framework-approval-gate" }>["rejectedActions"]
+    | undefined;
+
+  if (interpreted.kind === "wait") {
+    if (interpreted.heldInput !== undefined) {
+      session = queueDeferredStepInput(session, interpreted.heldInput);
+    }
+    return {
+      messages: [...input.session.history],
+      outcome: "unresolved",
+      session,
+    };
+  }
+
+  if (interpreted.kind === "complete") {
+    for (const completion of interpreted.completions) {
+      if (completion.owner === "framework-approval-gate") {
+        session = recordApprovedToolKeys(session, completion.approvedToolKeys);
+        if (completion.rejectedActions.length > 0) {
+          rejectedActions = completion.rejectedActions;
+        }
+      } else {
+        limitContinuation = completion.limitContinuation ?? limitContinuation;
+      }
+    }
+    session = acknowledgeReadyRequestGroupDelivery({
+      deliveryKey: interpreted.deliveryKey,
+      session,
+    });
+  }
+
+  if (interpreted.stepInput !== undefined) {
+    session = queueDeferredStepInput(session, interpreted.stepInput);
+  }
+
+  return {
+    completions: interpreted.kind === "complete" ? [...interpreted.completions] : undefined,
+    consumedMessage: interpreted.messageConsumed === true ? true : undefined,
+    deferredContext:
+      interpreted.stepInput?.context !== undefined ||
+      (interpreted.stepInput as { clientContext?: unknown } | undefined)?.clientContext !==
+        undefined
+        ? true
+        : undefined,
+    deferredMessage: interpreted.stepInput?.message !== undefined ? true : undefined,
+    limitContinuation,
+    messages:
+      interpreted.kind === "complete"
+        ? [...interpreted.completions.at(-1)!.messages]
+        : [...interpreted.messages],
+    outcome: interpreted.kind === "continue" ? "continue" : "resolved",
+    rejectedActions,
+    session,
+  };
+}
 
 function createHarnessSession(): HarnessSession {
   return {
@@ -120,7 +226,7 @@ describe("createRuntimeToolCallActionFromToolCall", () => {
 });
 
 describe("resolvePendingInput", () => {
-  it("keeps approvals pending when another request is answered first", () => {
+  it("keeps approvals pending when another request is answered first", async () => {
     const session = createRequests({
       requests: [
         {
@@ -170,7 +276,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         inputResponses: [
           {
@@ -197,7 +303,7 @@ describe("resolvePendingInput", () => {
     });
   });
 
-  it("resolves freeform question input from a follow-up message", () => {
+  it("resolves freeform question input from a follow-up message", async () => {
     const session = createRequests({
       requests: [
         {
@@ -230,7 +336,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         message: "Ignore that and continue.",
       },
@@ -258,7 +364,7 @@ describe("resolvePendingInput", () => {
     });
   });
 
-  it("defers a follow-up message until after tool approvals are resolved", () => {
+  it("defers a follow-up message until after tool approvals are resolved", async () => {
     const session = createRequests({
       requests: [
         {
@@ -301,7 +407,7 @@ describe("resolvePendingInput", () => {
     });
 
     // Deliver an approval response AND a message simultaneously.
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
         message: "Ignore that and say hi instead.",
@@ -326,7 +432,7 @@ describe("resolvePendingInput", () => {
     expect(hasDeferredStepInput(deferred.session)).toBe(false);
   });
 
-  it("defers channel context until after tool approvals are resolved", () => {
+  it("defers channel context until after tool approvals are resolved", async () => {
     const session = createRequests({
       requests: [
         {
@@ -369,7 +475,7 @@ describe("resolvePendingInput", () => {
     });
 
     const context = "<linear_context>issue metadata</linear_context>";
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         context: [context],
         inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
@@ -386,7 +492,7 @@ describe("resolvePendingInput", () => {
     expect(hasDeferredStepInput(deferred.session)).toBe(false);
   });
 
-  it("resolves approval when follow-up text matches an option", () => {
+  it("resolves approval when follow-up text matches an option", async () => {
     const session = createRequests({
       requests: [
         {
@@ -428,7 +534,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: { message: "approve" },
       session,
     });
@@ -451,7 +557,7 @@ describe("resolvePendingInput", () => {
     expect(hasDeferredStepInput(result.session)).toBe(false);
   });
 
-  it("records compound approval key when resolveApprovalKey is provided", () => {
+  it("records compound approval key when resolveApprovalKey is provided", async () => {
     const session = createRequests({
       requests: [
         {
@@ -493,7 +599,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       resolveApprovalKey: (request) => {
         const team = request.action.input?.teamId;
         return typeof team === "string" ? `${request.action.toolName}:${team}` : undefined;
@@ -510,7 +616,7 @@ describe("resolvePendingInput", () => {
     expect(approved.has("vercel__list_projects")).toBe(false);
   });
 
-  it("emits a matching execution-denied tool-result when the user explicitly denies an approval", () => {
+  it("emits a matching execution-denied tool-result when the user explicitly denies an approval", async () => {
     /*
      * AI SDK's `streamText` synthesizes an `execution-denied`
      * tool-result for the current turn only — on subsequent turns the
@@ -560,7 +666,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
       },
@@ -587,7 +693,7 @@ describe("resolvePendingInput", () => {
     });
   });
 
-  it("returns a rejected action for an ACP denial", () => {
+  it("returns a rejected action for an ACP denial", async () => {
     const session = createRequests({
       event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
       requests: [
@@ -613,7 +719,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         inputResponses: [{ requestId: "approval-1", optionId: "deny" }],
       },
@@ -645,21 +751,19 @@ describe("resolvePendingInput", () => {
         ],
       },
     ]);
-    expect(result.resolvedInputs).toMatchObject([
+    expect(result.completions).toMatchObject([
       {
-        event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
-        inputs: [
+        owner: "framework-approval-gate",
+        rejectedActions: [
           {
-            outcome: "denied",
-            request: { requestId: "approval-1" },
-            response: { optionId: "deny", requestId: "approval-1" },
+            event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
           },
         ],
       },
     ]);
   });
 
-  it("does not return a rejected action when an approval is granted", () => {
+  it("does not return a rejected action when an approval is granted", async () => {
     const session = createRequests({
       event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
       requests: [
@@ -685,7 +789,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
       },
@@ -694,21 +798,10 @@ describe("resolvePendingInput", () => {
 
     expect(result.outcome).toBe("resolved");
     expect(result.rejectedActions).toBeUndefined();
-    expect(result.resolvedInputs).toMatchObject([
-      {
-        event: { sequence: 5, stepIndex: 1, turnId: "turn_0" },
-        inputs: [
-          {
-            outcome: "approved",
-            request: { requestId: "approval-1" },
-            response: { optionId: "approve", requestId: "approval-1" },
-          },
-        ],
-      },
-    ]);
+    expect(result.completions).toMatchObject([{ owner: "framework-approval-gate" }]);
   });
 
-  it("does not retain approval when a deferred response is superseded", () => {
+  it("does not retain approval when a deferred response is superseded", async () => {
     const approval = (requestId: string, callId: string): InputRequest => ({
       action: { callId, input: { command: "pwd" }, kind: "tool-call", toolName: "bash" },
       allowFreeform: false,
@@ -728,7 +821,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const partial = resolvePendingInput({
+    const partial = await resolvePendingInput({
       session,
       stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
     });
@@ -741,7 +834,7 @@ describe("resolvePendingInput", () => {
       },
       session: partial.session,
     });
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       resolveApprovalKey: (request) => request.requestId,
       session: deferred.session,
       stepInput: deferred.input,
@@ -755,7 +848,7 @@ describe("resolvePendingInput", () => {
     ]);
   });
 
-  it("keeps a pending approval open while an unrelated follow-up message continues", () => {
+  it("keeps a pending approval open while an unrelated follow-up message continues", async () => {
     const session = createRequests({
       event: { sequence: 7, stepIndex: 2, turnId: "turn_1" },
       requests: [
@@ -781,7 +874,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: { message: "Never mind, do something else." },
       session,
     });
@@ -794,7 +887,7 @@ describe("resolvePendingInput", () => {
     expect(openRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
-  it("preserves context-only input while a pending batch stays open", () => {
+  it("preserves context-only input while a pending batch stays open", async () => {
     const session = createRequests({
       requests: [
         {
@@ -813,7 +906,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       session,
       stepInput: { context: ["channel context"] },
     });
@@ -823,7 +916,7 @@ describe("resolvePendingInput", () => {
     expect(deferred.input).toEqual({ context: ["channel context"] });
   });
 
-  it("falls back to tool name when no approvalKey is provided", () => {
+  it("falls back to tool name when no approvalKey is provided", async () => {
     const session = createRequests({
       requests: [
         {
@@ -865,7 +958,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
       },
@@ -877,7 +970,7 @@ describe("resolvePendingInput", () => {
     expect(approved.has("bash")).toBe(true);
   });
 
-  it("approval survives the authorization park so an auth+approval tool is not approved twice", () => {
+  it("approval survives the authorization park so an auth+approval tool is not approved twice", async () => {
     // A tool requiring both approval and auth is approved first, then its
     // execute parks for sign-in. On resume the step re-runs and the toolset
     // is rebuilt from the persisted approvedTools. The recorded approval must
@@ -925,7 +1018,7 @@ describe("resolvePendingInput", () => {
       session: createHarnessSession(),
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       stepInput: {
         inputResponses: [{ requestId: "approval-1", optionId: "approve" }],
       },
@@ -1023,7 +1116,7 @@ describe("pending input batch collection", () => {
     };
   }
 
-  it("reads a legacy singleton batch and rewrites it as a list", () => {
+  it("reads a legacy singleton batch and rewrites it as a list", async () => {
     const legacySession: HarnessSession = {
       ...createHarnessSession(),
       state: {
@@ -1044,7 +1137,7 @@ describe("pending input batch collection", () => {
     expect(appended.state?.["eve.runtime.pendingInputBatch"]).toBeUndefined();
     expect(openRequestIds(appended.state)).toEqual(new Set(["approval-1", "question-1"]));
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       session: legacySession,
       stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
     });
@@ -1053,7 +1146,7 @@ describe("pending input batch collection", () => {
     expect(hasOpenRequests(result.session.state)).toBe(false);
   });
 
-  it("keeps earlier batches open while a later batch resolves", () => {
+  it("keeps earlier batches open while a later batch resolves", async () => {
     let session = createRequests({
       requests: [approvalRequest("approval-1", "call-1")],
       responseMessages: [batchOutput("call-1", "bash")],
@@ -1065,7 +1158,7 @@ describe("pending input batch collection", () => {
       session,
     });
 
-    const answered = resolvePendingInput({
+    const answered = await resolvePendingInput({
       session,
       stepInput: { inputResponses: [{ requestId: "question-1", optionId: "red" }] },
     });
@@ -1091,7 +1184,7 @@ describe("pending input batch collection", () => {
       },
     ]);
 
-    const approved = resolvePendingInput({
+    const approved = await resolvePendingInput({
       session: answered.session,
       stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
     });
@@ -1099,7 +1192,7 @@ describe("pending input batch collection", () => {
     expect(hasOpenRequests(approved.session.state)).toBe(false);
   });
 
-  it("resolves only the first approval-bearing batch and defers later responses", () => {
+  it("resolves only the first approval-bearing batch and defers later responses", async () => {
     let session = createRequests({
       requests: [approvalRequest("approval-1", "call-1")],
       responseMessages: [batchOutput("call-1", "bash")],
@@ -1111,7 +1204,7 @@ describe("pending input batch collection", () => {
       session,
     });
 
-    const first = resolvePendingInput({
+    const first = await resolvePendingInput({
       session,
       stepInput: {
         inputResponses: [
@@ -1144,7 +1237,10 @@ describe("pending input batch collection", () => {
       inputResponses: [{ requestId: "approval-2", optionId: "approve" }],
     });
 
-    const second = resolvePendingInput({ session: deferred.session, stepInput: deferred.input });
+    const second = await resolvePendingInput({
+      session: deferred.session,
+      stepInput: deferred.input,
+    });
     expect(second.outcome).toBe("resolved");
     expect(second.messages.at(-1)).toMatchObject({
       content: [{ approvalId: "approval-2", approved: true }],
@@ -1153,7 +1249,7 @@ describe("pending input batch collection", () => {
     expect(hasOpenRequests(second.session.state)).toBe(false);
   });
 
-  it("leaves every batch open when a message arrives with several batches pending", () => {
+  it("leaves every batch open when a message arrives with several batches pending", async () => {
     let session = createRequests({
       requests: [approvalRequest("approval-1", "call-1")],
       responseMessages: [batchOutput("call-1", "bash")],
@@ -1165,7 +1261,7 @@ describe("pending input batch collection", () => {
       session,
     });
 
-    const result = resolvePendingInput({ session, stepInput: { message: "keep going" } });
+    const result = await resolvePendingInput({ session, stepInput: { message: "keep going" } });
 
     expect(result.outcome).toBe("continue");
     expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
@@ -1203,7 +1299,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     });
   }
 
-  it("rejects a session-limit batch containing a model-anchored request", () => {
+  it("rejects a session-limit batch containing a model-anchored request", async () => {
     const session = createRequests({
       requests: [
         createSessionLimitContinuationRequest({
@@ -1216,13 +1312,13 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       session: createHarnessSession(),
     });
 
-    expect(() => resolvePendingInput({ session })).toThrow(
+    await expect(resolvePendingInput({ session })).rejects.toThrow(
       "Session-limit pending input batches must contain only session-limit requests.",
     );
   });
 
-  it("resolves a continue answer without appending tool messages", () => {
-    const result = resolvePendingInput({
+  it("resolves a continue answer without appending tool messages", async () => {
+    const result = await resolvePendingInput({
       session: createLimitBatchSession(),
       stepInput: {
         inputResponses: [{ optionId: "continue", requestId: "sess-test:limit:input:12" }],
@@ -1236,8 +1332,8 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
   });
 
-  it("resolves a stop answer as not granted", () => {
-    const result = resolvePendingInput({
+  it("resolves a stop answer as not granted", async () => {
+    const result = await resolvePendingInput({
       session: createLimitBatchSession(),
       stepInput: {
         inputResponses: [{ optionId: "stop", requestId: "sess-test:limit:input:12" }],
@@ -1249,8 +1345,8 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(result.messages).toEqual([{ content: "previous", role: "user" }]);
   });
 
-  it("keeps the prompt pending and queues a plain follow-up message", () => {
-    const result = resolvePendingInput({
+  it("keeps the prompt pending and queues a plain follow-up message", async () => {
+    const result = await resolvePendingInput({
       session: createLimitBatchSession(),
       stepInput: { message: "also do this other thing" },
     });
@@ -1264,7 +1360,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(deferred.input).toEqual({ message: "also do this other thing" });
   });
 
-  it("matches text against the limit batch while an approval batch is also open", () => {
+  it("matches text against the limit batch while an approval batch is also open", async () => {
     let session = createRequests({
       requests: [approvalRequest()],
       responseMessages: [],
@@ -1281,7 +1377,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       session,
     });
 
-    const result = resolvePendingInput({ session, stepInput: { message: "continue" } });
+    const result = await resolvePendingInput({ session, stepInput: { message: "continue" } });
 
     expect(result.outcome).toBe("resolved");
     expect(result.limitContinuation).toEqual({ granted: true });
@@ -1290,7 +1386,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
     expect(hasDeferredStepInput(result.session)).toBe(false);
   });
 
-  it("defers an approval response while the limit batch remains open", () => {
+  it("defers an approval response while the limit batch remains open", async () => {
     let session = createRequests({
       requests: [approvalRequest()],
       responseMessages: [],
@@ -1307,7 +1403,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
       session,
     });
 
-    const result = resolvePendingInput({
+    const result = await resolvePendingInput({
       session,
       stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
     });
@@ -1324,7 +1420,7 @@ describe("resolvePendingInput with a session-limit continuation batch", () => {
 });
 
 describe("clearPendingSessionLimitPrompt", () => {
-  it("drops a pending batch made only of session-limit continuation prompts", () => {
+  it("drops a pending batch made only of session-limit continuation prompts", async () => {
     const session = createRequests({
       requests: [
         createSessionLimitContinuationRequest({
@@ -1337,7 +1433,10 @@ describe("clearPendingSessionLimitPrompt", () => {
     });
 
     const cleared = clearPendingSessionLimitPrompt(session);
-    const result = resolvePendingInput({ session: cleared, stepInput: { message: "try again" } });
+    const result = await resolvePendingInput({
+      session: cleared,
+      stepInput: { message: "try again" },
+    });
 
     // No stale batch left: the follow-up message flows to the step (where
     // the pre-model gate re-raises the prompt) instead of deferring forever.
@@ -1345,7 +1444,7 @@ describe("clearPendingSessionLimitPrompt", () => {
     expect(hasDeferredStepInput(cleared)).toBe(false);
   });
 
-  it("keeps model-anchored batches (tool approvals) intact", () => {
+  it("keeps model-anchored batches (tool approvals) intact", async () => {
     const session = createRequests({
       requests: [
         {
@@ -1371,7 +1470,10 @@ describe("clearPendingSessionLimitPrompt", () => {
     });
 
     const kept = clearPendingSessionLimitPrompt(session);
-    const result = resolvePendingInput({ session: kept, stepInput: { message: "and then this" } });
+    const result = await resolvePendingInput({
+      session: kept,
+      stepInput: { message: "and then this" },
+    });
 
     // The approval batch survives the limit-prompt sweep and stays
     // answerable; the follow-up message continues as an ordinary turn.
@@ -1380,7 +1482,7 @@ describe("clearPendingSessionLimitPrompt", () => {
     expect(hasDeferredStepInput(result.session)).toBe(false);
   });
 
-  it("is a no-op without a pending batch", () => {
+  it("is a no-op without a pending batch", async () => {
     const session = createHarnessSession();
     expect(clearPendingSessionLimitPrompt(session)).toBe(session);
   });

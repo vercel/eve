@@ -482,3 +482,35 @@ export async function reduceApprovalRecord(input: {
   });
   return ledger;
 }
+
+export function hasPendingApprovalPolicyWork(
+  ledger: RequestLedger,
+  now: number,
+  authorizationResults: readonly AuthorizationResult[],
+): boolean {
+  const satisfied = new Set(
+    authorizationResults.map((result) => result.attemptId ?? result.hookUrl),
+  );
+  return ledger.requests.some((record) => {
+    if (
+      !isInputRequest(record.request) ||
+      !isApprovalRequest(record.request) ||
+      record.outcome !== undefined
+    ) {
+      return false;
+    }
+    return (record.attempts ?? []).some((attempt) => {
+      if (attempt.expiresAt <= now) return false;
+      if (attempt.status === "pending") return true;
+      return attempt.authorizationRequestIds.some((requestId) => {
+        const authRecord = ledger.requests.find((candidate) => candidate.id === requestId);
+        return (
+          authRecord?.request.kind === "authorization" &&
+          satisfied.has(
+            authRecord.request.authorization.attemptId ?? authRecord.request.authorization.hookUrl,
+          )
+        );
+      });
+    });
+  });
+}

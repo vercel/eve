@@ -165,7 +165,9 @@ describe("current HITL lifecycle conformance", () => {
       }),
     );
     if (result.kind === "complete") {
-      expect(result.completions).toEqual([expect.objectContaining({ owner: "session-turn" })]);
+      expect(result.completions).toEqual([
+        expect.objectContaining({ owner: "framework-approval-gate", approvedToolKeys: ["bash"] }),
+      ]);
     }
   });
 

@@ -356,7 +356,7 @@ export function createRequests(input: {
             completion: "waiting" as const,
             event: input.event,
             id: groupId,
-            owner: input.owner ?? "session-turn",
+            owner: input.owner ?? defaultGroupOwner(input.requests),
             requestIds: input.requests.map((request) => request.requestId),
             responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
             responseMessages: input.responseMessages,
@@ -496,4 +496,14 @@ function assertUniqueRequestIds(requests: readonly RequestRecord[]): void {
     }
     seen.add(request.id);
   }
+}
+
+/**
+ * An Approval in a Group means the framework approval gate is what waits on
+ * it; every other Group resumes the session turn.
+ */
+function defaultGroupOwner(requests: readonly InputRequest[]): RequestGroupOwner {
+  return requests.some((request) => request.kind === "tool-approval")
+    ? "framework-approval-gate"
+    : "session-turn";
 }
