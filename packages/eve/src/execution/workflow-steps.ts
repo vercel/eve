@@ -376,7 +376,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await writer.write(encodeMessageStreamEvent(stamped));
     return stamped;
   };
-
   const handleEvent: HandleEventFn = async (event, messages, activityLabels): Promise<void> => {
     // A remote task's parent owns its HITL. Forward blocking events over
     // the task callback and keep them out of the child's local channel;
