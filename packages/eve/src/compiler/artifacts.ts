@@ -120,6 +120,7 @@ interface WriteCompilerArtifactsInput {
   artifactLocations: CompilerArtifactLocations;
   diagnostics: readonly DiscoverDiagnostic[];
   manifest: AgentSourceManifest;
+  workspace?: import("#compiler/workspace-context.js").CompileWorkspaceContext;
 }
 
 /**
@@ -241,7 +242,10 @@ export async function writeCompilerArtifacts(
   );
   const compiledManifest = await materializeWorkspaceResources({
     compileDirectoryPath: paths.compileDirectoryPath,
-    manifest: await compileAgentManifest(input.manifest, { diagnostics }),
+    manifest: await compileAgentManifest(input.manifest, {
+      diagnostics,
+      workspace: input.workspace,
+    }),
   });
   const diagnosticsArtifact = createCompilerDiagnosticsArtifact(diagnostics);
   const compiledManifestJson = serializeArtifactJson(compiledManifest);
