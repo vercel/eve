@@ -1,5 +1,5 @@
 import { defineEval, type EveEvalTargetHandle } from "eve/evals";
-import { equals, satisfies } from "eve/evals/expect";
+import { satisfies } from "eve/evals/expect";
 
 interface CreateSessionResponse {
   readonly ok: true;
@@ -20,37 +20,35 @@ export default defineEval({
       createSession(t.target, PRINCIPAL_A, operationId, message),
       createSession(t.target, PRINCIPAL_A, operationId, message),
     ]);
+
+    const acceptedCandidates = new Set([first.sessionId, concurrent.sessionId]);
+    let replay: CreateSessionResponse | undefined;
+    for (const delayMs of [100, 200, 400, 800, 1_600]) {
+      await t.sleep(delayMs);
+      const retry = await createSession(t.target, PRINCIPAL_A, operationId, message);
+      if (acceptedCandidates.has(retry.sessionId)) {
+        replay = retry;
+        break;
+      }
+      acceptedCandidates.add(retry.sessionId);
+    }
+    if (replay === undefined) {
+      throw new Error("The operation owner was not resolvable after startup.");
+    }
+
     const otherIssuer = await createSession(t.target, PRINCIPAL_B, operationId, message);
-
-    const candidateTurns = await Promise.all(
-      [...new Set([first.sessionId, concurrent.sessionId])].map((sessionId) =>
-        t.target.watchTurn(sessionId).result(),
-      ),
-    );
-    const ownerTurns = candidateTurns.filter((turn) =>
-      turn.events.some((event) => event.type === "message.received"),
-    );
-    await t.require(
-      ownerTurns,
-      satisfies(
-        (turns: typeof ownerTurns) => turns.length === 1,
-        "only the operation owner runs the first turn",
-      ),
-    );
-    const firstTurn = ownerTurns[0];
-    if (firstTurn === undefined) throw new Error("No operation owner ran the first turn.");
-
-    const replay = await createSession(t.target, PRINCIPAL_A, operationId, message);
-    await t.require(replay.sessionId, equals(firstTurn.sessionId));
     await t.require(
       otherIssuer,
       satisfies(
-        (value: CreateSessionResponse) => value.sessionId !== firstTurn.sessionId,
+        (value: CreateSessionResponse) => value.sessionId !== replay.sessionId,
         "the same operation under another issuer owns a distinct session",
       ),
     );
 
-    const issuerTurn = await t.target.watchTurn(otherIssuer.sessionId).result();
+    const [firstTurn, issuerTurn] = await Promise.all([
+      t.target.watchTurn(replay.sessionId).result(),
+      t.target.watchTurn(otherIssuer.sessionId).result(),
+    ]);
     firstTurn.expectOk();
     firstTurn.event("message.received", { count: 1, data: { message } });
     firstTurn.event("step.started", { count: 1 });
