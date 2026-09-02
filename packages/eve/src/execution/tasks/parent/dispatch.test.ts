@@ -12,7 +12,7 @@ import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { readLatestTaskView, sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
-import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import type { PendingTaskControlAction } from "#shared/dispatch-action.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { SESSION_TASKS_STATE_KEY } from "#tasks/session-index.js";
 
@@ -35,10 +35,11 @@ vi.mock("#execution/remote-agent-dispatch.js", async (importOriginal) => ({
   resolveRemoteAgentStreamHeaders: vi.fn(),
 }));
 
-const action: RuntimeToolCallActionRequest = {
+const action: PendingTaskControlAction = {
   callId: "call-cancel",
+  description: "Cancel tasks.",
   input: { taskIds: ["task-1"] },
-  kind: "tool-call",
+  target: { kind: "task-cancel" },
   toolName: "task_cancel",
 };
 

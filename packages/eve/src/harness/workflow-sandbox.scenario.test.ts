@@ -20,6 +20,17 @@ function orchestrationTools(): HarnessToolMap {
     [
       "echo-marker",
       {
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "subagent-call",
+              nodeId: "subagents/echo-marker",
+              subagentName: "echo-marker",
+            },
+          },
+        },
         description: "Echo one marker.",
         inputSchema: jsonSchema({
           properties: { message: { type: "string" } },
@@ -27,11 +38,6 @@ function orchestrationTools(): HarnessToolMap {
           type: "object",
         }),
         name: "echo-marker",
-        runtimeAction: {
-          kind: "subagent-call",
-          nodeId: "subagents/echo-marker",
-          subagentName: "echo-marker",
-        },
       },
     ],
   ]);

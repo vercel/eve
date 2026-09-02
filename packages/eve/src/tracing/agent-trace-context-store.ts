@@ -12,7 +12,14 @@ import type {
   AgentTurnTraceState,
 } from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
-import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import {
+  type InstrumentationDecision,
+  readInstrumentationDecision,
+} from "#shared/instrumentation-decision.js";
+import {
+  decisionToTraceContentCeiling,
+  resolveForwardedTraceSeed,
+} from "#shared/forwarded-trace-policy.js";
 
 interface AgentTraceContextState {
   readonly actions: Readonly<Record<string, AgentActionTraceState>>;
@@ -102,8 +109,28 @@ function withTraceDecision(
   storedDecision?: InstrumentationDecision,
 ): SessionTraceContext {
   const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
-  const decision = storedDecision ?? seed?.decision;
-  return decision === undefined ? context : { ...context, decision };
+  const traceState = resolveForwardedTraceSeed({
+    decision: storedDecision ?? seed?.decision,
+    forwardedTracePolicy: seed?.forwardedTracePolicy,
+    traceFlags: context.traceFlags,
+  })!;
+  const decision = traceState.decision;
+  const forwardedTracePolicy = traceState.forwardedTracePolicy;
+  const ceiling = decisionToTraceContentCeiling(decision);
+  const resolvedContext = { ...context, traceFlags: traceState.traceFlags };
+  if (forwardedTracePolicy === undefined) {
+    return decision === undefined ? resolvedContext : { ...resolvedContext, decision };
+  }
+  const narrowedForwardedTracePolicy =
+    ceiling === undefined ? forwardedTracePolicy : { ...forwardedTracePolicy, ceiling };
+  if (decision === undefined) {
+    return { ...resolvedContext, forwardedTracePolicy: narrowedForwardedTracePolicy };
+  }
+  return {
+    ...resolvedContext,
+    decision,
+    forwardedTracePolicy: narrowedForwardedTracePolicy,
+  };
 }
 
 /** Durable trace state backed by eve's serialized Workflow context. */
@@ -245,7 +272,7 @@ function deserializeState(data: unknown): AgentTraceContextState {
       channelAudience: normalizeChannelAudience(value.channelAudience),
       channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
       context: value.context,
-      decision: deserializeInstrumentationDecision(value.decision),
+      decision: readInstrumentationDecision(value.decision),
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
     } satisfies AgentSessionTraceState;
   });
@@ -379,20 +406,6 @@ function isTurnTerminalType(
   value: string,
 ): value is "turn.cancelled" | "turn.completed" | "turn.failed" {
   return value === "turn.cancelled" || value === "turn.completed" || value === "turn.failed";
-}
-
-function deserializeInstrumentationDecision(value: unknown): InstrumentationDecision | undefined {
-  if (!isRecord(value)) return undefined;
-  if (value.action === "drop") return { action: "drop" };
-  return value.action === "record" &&
-    typeof value.recordInputs === "boolean" &&
-    typeof value.recordOutputs === "boolean"
-    ? {
-        action: "record",
-        recordInputs: value.recordInputs,
-        recordOutputs: value.recordOutputs,
-      }
-    : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

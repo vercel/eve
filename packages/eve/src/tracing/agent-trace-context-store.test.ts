@@ -134,6 +134,10 @@ describe("readSessionTraceContext", () => {
     await contextStorage.run(context, () => {
       context.set(SessionTraceSeedKey, {
         decision: { action: "record", recordInputs: true, recordOutputs: false },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: true, recordOutputs: true },
+          originAudience: "private",
+        },
         spanId: "2".repeat(16),
         traceFlags: 1,
         traceId: "1".repeat(32),
@@ -148,6 +152,10 @@ describe("readSessionTraceContext", () => {
     expect(readSessionTraceContext(serialized, "session-1")).toEqual({
       ...spanContext("1", "2"),
       decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
     });
     expect(readSessionTraceContext(serialized, "session-2")).toBeUndefined();
     expect(readSessionTraceContext({}, "session-1")).toBeUndefined();
@@ -191,6 +199,10 @@ describe("readActionTraceContext", () => {
     await contextStorage.run(context, () => {
       context.set(SessionTraceSeedKey, {
         decision: { action: "record", recordInputs: true, recordOutputs: false },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: true, recordOutputs: true },
+          originAudience: "private",
+        },
         spanId: "2".repeat(16),
         traceFlags: 1,
         traceId: "1".repeat(32),
@@ -213,6 +225,10 @@ describe("readActionTraceContext", () => {
 
     expect(readActionTraceContext(serialized, "session-1", "turn-1", "call-1")).toEqual({
       decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
       isRemote: false,
       spanId: "3".repeat(16),
       traceFlags: 1,

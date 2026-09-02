@@ -37,7 +37,7 @@ import {
   queueDeferredStepInput,
   removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
-import type { HarnessSession, StepInput } from "#harness/types.js";
+import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
 import { readClientContext } from "#internal/client-context.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
@@ -506,6 +506,7 @@ export function convertStaleResponsesToUserMessage(input: {
   readonly history: readonly ModelMessage[];
   readonly pendingRequestIds: ReadonlySet<string>;
   readonly stepInput?: StepInput;
+  readonly tools: HarnessToolMap;
 }): StaleResponseConversion {
   if (input.stepInput === undefined) return { kind: "unchanged" };
   const responses = input.stepInput.inputResponses ?? [];
@@ -537,6 +538,7 @@ export function convertStaleResponsesToUserMessage(input: {
   const requests = extractHistoricalInputRequests({
     history: input.history,
     requestIds: new Set(staleResponses.map((response) => response.requestId)),
+    tools: input.tools,
   });
   const modelMessage = appendOptionalUserContent(
     input.stepInput.message,

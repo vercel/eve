@@ -36,7 +36,7 @@ jobs:
           fi
           # HEAD is the PR merge commit; HEAD^1 is the base branch tip, so
           # this diff is exactly the PR's changed files.
-          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
+          if git diff --name-only HEAD^1 HEAD | grep -qE '^(packages/eve/|apps/fixtures/|e2e/|pnpm-workspace\.yaml$|pnpm-lock\.yaml$|scripts/build-profile-report\.mjs$|scripts/workflow-stress-report\.(mjs|test\.mjs)$|\.github/workflows/e2e-vercel\.yml$|\.github/scripts/discover-e2e-fixtures\.mjs$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -121,6 +121,10 @@ jobs:
           pnpm --filter "./e2e/fixtures/*-extension" run --if-present build
           pnpm --filter dist-extensions update gizmo-extension gadget-extension
 
+      - name: Test Workflow stress reporting
+        if: needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'
+        run: node --test scripts/workflow-stress-report.test.mjs
+
       - name: Stage workspace extension fixtures as dist-only
         if: needs.changes.outputs.relevant == 'true'
         # Removing author source proves the deployment consumes the same
@@ -195,6 +199,28 @@ jobs:
             --sandbox-prewarm included \
             --require-phase sandbox.prewarm \
             --output-format build-time
+
+      - name: Report Workflow stress performance
+        if: success() && needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'
+        run: |
+          node ./scripts/workflow-stress-report.mjs \
+            --artifacts e2e/fixtures/agent-workflow-stress/.eve/evals \
+            --json .artifacts/workflow-stress-report.json \
+            --markdown .artifacts/workflow-stress-report.md
+          cat .artifacts/workflow-stress-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Workflow stress performance
+        if: success() && needs.changes.outputs.relevant == 'true' && matrix.name == 'agent-workflow-stress'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workflow-stress-performance
+          path: |
+            .artifacts/workflow-stress-report.json
+            .artifacts/workflow-stress-report.md
+            e2e/fixtures/agent-workflow-stress/.eve/evals
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload eval artifacts
         if: (failure()) && needs.changes.outputs.relevant == 'true'

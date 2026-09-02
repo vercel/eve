@@ -303,7 +303,7 @@ function parseTailIndexHeader(headers: Headers): number | undefined {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
     return;
   }

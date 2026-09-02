@@ -8,6 +8,7 @@ packages:
 allowBuilds:
   "@google/genai": false # No-op preinstall.
   "@parcel/watcher": false # Builds from source only when explicitly requested.
+  "@swc/core": false # Only its pure transform-utils module is vendored (via @workflow/builders); eve never runs SWC.
   braintrust: false # Installs an optional CLI binary; the SDK does not need it.
   bufferutil: false # The package already includes the supported prebuilt bindings.
   cpu-features: false # Optional ssh2 acceleration; JavaScript fallback is sufficient.
@@ -44,7 +45,7 @@ catalog:
   "@vercel/sandbox": "2.8.0"
   "@vercel/sandbox-delete": "npm:@vercel/sandbox@3.2.0"
   "@vercel/sandbox-drives": "npm:@vercel/sandbox@2.10.0-beta.0"
-  "@workflow/world-postgres": "5.0.0-beta.35"
+  "@workflow/world-postgres": "5.0.0-beta.39"
   ai: "^7.0.82"
   better-auth: "1.6.26"
   marked: "17.0.6"

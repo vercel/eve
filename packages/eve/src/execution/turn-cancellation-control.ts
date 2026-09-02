@@ -34,6 +34,7 @@ export interface TurnCancellationControl {
 export async function createTurnCancellationControl(input: {
   readonly controlToken: string;
   readonly expectedTurnId: string;
+  readonly initialPayload?: TurnCancelPayload;
 }): Promise<TurnCancellationControl | undefined> {
   const hook = createHook<TurnCancelPayload>({
     token: turnCancellationHookToken(input.controlToken),
@@ -55,9 +56,14 @@ export async function createTurnCancellationControl(input: {
   // `.then` — so the signal is already flipped when a same-drain
   // continuation (the turn loop's settle check) reads it; one microtask
   // later and an ordinary completion swallows the cancel.
-  const requested = consumeMatchingCancel(iterator, input.expectedTurnId, () => {
-    controller.abort(new TurnCancelledError());
-  }).then(() => "cancel" as const);
+  const abort = () => controller.abort(new TurnCancelledError());
+  const initiallyCancelled =
+    input.initialPayload !== undefined &&
+    matchesActiveTurn(input.initialPayload, input.expectedTurnId);
+  if (initiallyCancelled) abort();
+  const requested = initiallyCancelled
+    ? Promise.resolve("cancel" as const)
+    : consumeMatchingCancel(iterator, input.expectedTurnId, abort).then(() => "cancel" as const);
 
   let disposed = false;
   return {

@@ -41,6 +41,18 @@ describe("integration catalog", () => {
     }
   });
 
+  it("catalogs Neon with its official MCP endpoint", () => {
+    expect(getIntegrationEntry("neon")).toMatchObject({
+      name: "Neon",
+      kind: "connection",
+      surfaces: { scaffoldable: false, registry: true, gallery: true },
+      connection: {
+        description: "Neon: manage projects, run queries, and make schema changes.",
+        mcp: { url: "https://mcp.neon.tech/mcp" },
+      },
+    });
+  });
+
   it("keeps channels free of connection identity", () => {
     for (const entry of channelEntries()) {
       expect(entry.connection).toBeUndefined();

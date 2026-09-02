@@ -38,33 +38,39 @@ export interface ApiKeySpec {
   header: string;
 }
 
+interface ConnectorSpec {
+  /** Vercel Connect connector UID; defaults to the integration slug. */
+  uid?: string;
+  /** Service passed to `vercel connect create`; defaults to the connector UID. */
+  service?: string;
+  /** Optional `--name` value passed to `vercel connect create`. */
+  name?: string;
+}
+
+interface ConnectionSetupSpec {
+  /** Supported auth modes in display order; the first is the default. */
+  authModes: AuthMode[];
+  /** API-key wiring when `authModes` includes `apiKey`. */
+  apiKey?: ApiKeySpec;
+  /** Auth-mode-specific connector references and creation arguments. */
+  connectors?: Partial<Record<Exclude<AuthMode, "apiKey">, ConnectorSpec>>;
+  /** Optional provider-specific configure guidance, rendered as markdown. */
+  configureNote?: string;
+  /** Auth-mode-specific configure guidance, rendered as markdown. */
+  configureNotes?: Partial<Record<AuthMode, string>>;
+}
+
 /**
  * Structured description of a connection consumed by the detail page to
  * generate Install, Quick start, and Configure content. Transport (`mcp`,
  * `openapi`) and `description` are filled from the shared catalog identity;
  * Auth modes, connectors, and configure notes are the docs-only overlay.
  */
-export interface ConnectionSpec {
-  /** Vercel Connect connector UID; defaults to the integration slug. */
-  connector?: string;
-  /** Auth-mode-specific connector UIDs when one service needs separate connectors. */
-  connectors?: Partial<Record<AuthMode, string>>;
-  /** Service passed to `vercel connect create` when it differs from the connector UID. */
-  connectorService?: string;
-  /** Auth-mode-specific services passed to `vercel connect create`. */
-  connectorServices?: Partial<Record<AuthMode, string>>;
-  /** Supported auth modes in display order; the first is the default. */
-  authModes: AuthMode[];
-  /** API-key wiring when `authModes` includes `apiKey`. */
-  apiKey?: ApiKeySpec;
+export interface ConnectionSpec extends ConnectionSetupSpec {
   /** Model-facing description; defaults to the integration tagline. */
   description?: string;
   mcp?: ConnectionIdentity["mcp"];
   openapi?: ConnectionIdentity["openapi"];
-  /** Optional provider-specific configure guidance, rendered as markdown. */
-  configureNote?: string;
-  /** Auth-mode-specific configure guidance, rendered as markdown. */
-  configureNotes?: Partial<Record<AuthMode, string>>;
 }
 
 export interface Integration {
@@ -122,17 +128,9 @@ type ExtensionPresentation = PackagePresentation;
 type MemoryPresentation = PackagePresentation;
 
 /** Connection overlay: presentation plus Connect auth/config details. */
-interface ConnectionPresentation extends Presentation {
-  authModes: AuthMode[];
+interface ConnectionPresentation extends Omit<Presentation, "badge">, ConnectionSetupSpec {
   quickStart?: string;
   configure?: string;
-  apiKey?: ApiKeySpec;
-  connector?: string;
-  connectors?: Partial<Record<AuthMode, string>>;
-  connectorService?: string;
-  connectorServices?: Partial<Record<AuthMode, string>>;
-  configureNote?: string;
-  configureNotes?: Partial<Record<AuthMode, string>>;
 }
 
 const channelPresentations: Record<string, ChannelPresentation> = {
@@ -1766,10 +1764,10 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     docsHref: "https://vercel.com/docs/agent-resources/vercel-mcp",
     keywords: ["mcp", "projects", "deployments", "logs", "oauth", "connect"],
     authModes: ["user", "app"],
-    connector: "vercel",
-    connectors: { app: "vercel/your-connector" },
-    connectorService: "vercel",
-    connectorServices: { app: "api-key" },
+    connectors: {
+      user: { name: "vercel" },
+      app: { uid: "vercel/your-connector", service: "api-key", name: "vercel" },
+    },
     configureNotes: {
       user: "Select None when prompted for a token authentication method. Each user completes OAuth when needed.",
       app: "Enter a team-scoped [Vercel token](https://vercel.com/kb/guide/how-do-i-use-a-vercel-api-access-token) when prompted, then copy the returned connector UID into the App example. This avoids per-user OAuth, though the Vercel token still belongs to the user who created it.",
@@ -1848,7 +1846,7 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
   context: {
     logo: "context",
     docsHref: "https://docs.context.dev/install-mcp",
-    connectorService: "mcp.context.dev",
+    connectors: { user: { service: "mcp.context.dev", name: "context" } },
     keywords: [
       "mcp",
       "web search",
@@ -1925,6 +1923,15 @@ const connectionPresentations: Record<string, ConnectionPresentation> = {
     authModes: ["user"],
     configureNote:
       "Natural moves real money. Add an approval gate or tool filters before allowing unattended payment actions.",
+  },
+  neon: {
+    logo: "neon",
+    docsHref: "https://neon.com/docs/ai/neon-mcp-server",
+    keywords: ["mcp", "postgres", "databases", "branches", "sql", "oauth", "connect"],
+    authModes: ["app"],
+    connectors: { app: { uid: "neon/neon", service: "neon" } },
+    configureNote:
+      "Neon's MCP server can modify projects and databases. Use a development or test project, review tool calls, and append `?readonly=true` or `?projectId=<project-id>` to scope access.",
   },
   netlify: {
     logo: "netlify",
@@ -2418,34 +2425,24 @@ function buildConnection(entry: IntegrationEntry): Integration {
     throw new Error(`Catalog connection "${entry.slug}" is missing its connection identity.`);
   }
   const identity: ConnectionIdentity = entry.connection;
+  const { logo, docsHref, keywords, quickStart, configure, ...setup } = presentation;
   const spec: ConnectionSpec = {
-    authModes: presentation.authModes,
+    ...setup,
     description: identity.description,
   };
-  if (presentation.apiKey !== undefined) spec.apiKey = presentation.apiKey;
-  if (presentation.connector !== undefined) spec.connector = presentation.connector;
-  if (presentation.connectors !== undefined) spec.connectors = presentation.connectors;
-  if (presentation.connectorService !== undefined) {
-    spec.connectorService = presentation.connectorService;
-  }
-  if (presentation.connectorServices !== undefined) {
-    spec.connectorServices = presentation.connectorServices;
-  }
   if (identity.mcp !== undefined) spec.mcp = identity.mcp;
   if (identity.openapi !== undefined) spec.openapi = identity.openapi;
-  if (presentation.configureNote !== undefined) spec.configureNote = presentation.configureNote;
-  if (presentation.configureNotes !== undefined) spec.configureNotes = presentation.configureNotes;
   return {
     slug: entry.slug,
     name: entry.name,
     type: "connection",
     tagline: entry.tagline,
     protocols: protocolsForIdentity(identity),
-    logo: presentation.logo,
-    docsHref: presentation.docsHref,
-    keywords: presentation.keywords,
-    quickStart: presentation.quickStart,
-    configure: presentation.configure,
+    logo,
+    docsHref,
+    keywords,
+    quickStart,
+    configure,
     connection: spec,
   };
 }

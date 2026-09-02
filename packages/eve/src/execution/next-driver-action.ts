@@ -1,7 +1,8 @@
 /**
- * Closed-contract dispatch surface between session-mutating step
- * bodies (latest deployment) and the durable driver workflow (pinned
- * to whichever deployment called `start()`).
+ * Closed-contract dispatch surface between session-mutating step bodies
+ * (the accepting deployment when stamped, otherwise the driver's deployment)
+ * and the durable driver workflow (pinned to whichever deployment called
+ * `start()`).
  *
  * The driver matches on `kind` and follows a fixed playbook per arm.
  * Adding a new arm is breaking (pinned drivers can't dispatch an
@@ -18,11 +19,13 @@ import type { TokenUsage } from "#shared/token-usage.js";
 interface DurableStepResultFields {
   readonly backgroundTaskState?: DurableSessionState;
   readonly backgroundTasks?: StepResult["backgroundTasks"];
+  /** The guarded inline step deferred before mutating state. */
+  readonly requiresChildDispatch?: true;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
 }
 
-/** Result returned by the latest turn step to its durable driver workflow. */
+/** Result returned by a turn step to its durable driver workflow. */
 export type DurableStepResult = (
   | {
       readonly action: "continue" | "done";
@@ -40,6 +43,8 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingRuntimeActionKeys?: readonly string[];
+      /** The batch starts workflow tool runs, which report to the turn's run channels. */
+      readonly startsWorkflowToolRuns?: boolean;
       readonly tasksEnabled?: boolean;
       readonly sleepDurationMs?: number;
       readonly settled?: SettledTurn;

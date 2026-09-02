@@ -143,6 +143,31 @@ Forwarding is explicit on both sides. The receiver names which forwarders it tru
 
 A receiver on an eve version that predates all principal forwarding may instead drop the unknown field and run the session as your app's service identity; per-user connections there fail with `principal_required`. On remote requests where the dispatching turn has no auth, the field is omitted and the call proceeds on transport trust alone.
 
+## Preserving trace content
+
+With `forwardPrincipal: true`, a sampled trace carries its original audience and the maximum content the next hop may record. For example, `eve.audience=private;ceiling=i0o1` allows outputs but not inputs. eve sends this as [W3C Baggage](https://www.w3.org/TR/baggage/).
+
+The receiver uses it only after `trustedForwarders` accepts the authenticated calling deployment:
+
+```ts title="agent/channels/eve.ts"
+import { eveChannel } from "eve/channels/eve";
+import { vercelOidc, vercelSubject } from "eve/channels/auth";
+
+export default eveChannel({
+  auth: [vercelOidc()],
+  trustedForwarders: (forwarder) =>
+    forwarder.subject === vercelSubject({ teamSlug: "acme", projectName: "router" }),
+});
+```
+
+The request must also include a callback and a valid sampled `traceparent`. Those fields identify a remote call, but they do not establish trust. `trustedForwarders` is the authorization boundary.
+
+The receiver combines the incoming ceiling with its own trace policy. Each hop may narrow the result, but it cannot restore inputs or outputs removed earlier. The original audience stays the same across remote and local subagent hops. Public origins may include content by default; private and unknown origins stay metadata-only unless both deployments explicitly allow them.
+
+The live delivery audience still matters. An unknown callback delivery, or one matching the origin, uses the session decision. A different explicit audience applies its own hard ceiling, so a private delivery stays redacted even when the trace began in public.
+
+Missing, malformed, duplicate, unsampled, untrusted, and mixed-version assertions fall back to metadata-only tracing. Dropped traces use only the unsampled trace flag. The decision is fixed when the remote session starts and reused by continuations. Agent Runs shows Workflow content only when both inputs and outputs are allowed.
+
 ## How remote dispatch and callbacks work
 
 A local subagent runs inline. A remote one runs in its own deployment, so dispatch is asynchronous:

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
 import { hydrateWorkflowArguments } from "@workflow/core/serialization";
 
@@ -30,6 +30,7 @@ import { toInputSchema } from "#tools/schema.js";
 import { defineHook } from "#public/definitions/hook.js";
 
 function buildSerializedContext(overrides: {
+  acceptedDeploymentId?: string;
   audience?: "public" | "private" | "unknown";
   auth?: Record<string, unknown>;
   channelKind: string;
@@ -59,6 +60,14 @@ function buildSerializedContext(overrides: {
     "eve.channel": channel,
     "eve.mode": overrides.mode,
   };
+  if (overrides.acceptedDeploymentId !== undefined) {
+    context["eve.channelDelivery"] = {
+      acceptedDeploymentId: overrides.acceptedDeploymentId,
+      channelKind: overrides.channelKind,
+      channelName: "test",
+      deliveryId: "delivery-initial",
+    };
+  }
   if (overrides.continuationToken !== undefined) {
     context["eve.continuationToken"] = overrides.continuationToken;
   }
@@ -67,6 +76,10 @@ function buildSerializedContext(overrides: {
   }
   return context;
 }
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 interface WeatherAuthRuntime {
   completeCalls(): number;
@@ -683,6 +696,7 @@ describe("workflowEntry integration", () => {
   });
 
   it("parks in conversation mode and resumes via runtime delivery", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
 
@@ -691,6 +705,7 @@ describe("workflowEntry integration", () => {
         {
           input: { message: "hello there" },
           serializedContext: buildSerializedContext({
+            acceptedDeploymentId: "dpl_inline",
             channelKind: "http",
             continuationToken,
             mode: "conversation",
@@ -699,6 +714,7 @@ describe("workflowEntry integration", () => {
       ]);
 
       const stream = captureTurnEvents(run);
+      let completed = false;
       const hook = await waitForHook(
         { runId: run.runId },
         {
@@ -728,7 +744,17 @@ describe("workflowEntry integration", () => {
         });
         await expect(
           workflowRuntime.dispatchContinuation({
-            command: { auth: null, kind: "send", payload: { message: "follow up" } },
+            command: {
+              auth: null,
+              delivery: {
+                acceptedDeploymentId: "dpl_inline",
+                channelKind: "http",
+                channelName: "test",
+                deliveryId: "delivery-followup",
+              },
+              kind: "send",
+              payload: { message: "follow up" },
+            },
             continuationToken,
           }),
         ).resolves.toEqual({ sessionId: run.runId, status: "accepted" });
@@ -744,9 +770,20 @@ describe("workflowEntry integration", () => {
               event.data.message?.includes("follow up") === true,
           ),
         ).toBe(true);
+
+        await workflowRuntime.dispatchSession({
+          command: { kind: "reset", reason: "Test step inventory" },
+          sessionId: run.runId,
+        });
+        await expect(run.returnValue).resolves.toEqual({ output: "" });
+        completed = true;
+        expect(await listCallerStepNames(run.runId)).toEqual([]);
+        const stepNames = await listStepNames(run.runId);
+        expect(stepNames.filter((name) => name === "turnStep")).toHaveLength(2);
+        expect(stepNames).not.toContain("dispatchTurnStep");
       } finally {
         stream.dispose();
-        await run.cancel();
+        if (!completed) await run.cancel();
       }
     });
   });
@@ -978,6 +1015,13 @@ describe("workflowEntry integration", () => {
             },
           ],
         });
+        expect(await listCallerStepNames(child.runId)).toEqual([
+          "bindTurnCallerContextStep",
+          "bindTurnCallerContextStep",
+          "notifyTurnCallerStep",
+          "notifyTurnCallerStep",
+          "resolveInitialTurnCallerStep",
+        ]);
       } finally {
         stream.dispose();
         await child.cancel();
@@ -1008,6 +1052,11 @@ describe("workflowEntry integration", () => {
 
       const contender = await start(workflowEntry, [
         {
+          continuationConflictCommand: {
+            auth: null,
+            kind: "send",
+            payload: { message: "contending message" },
+          },
           input: { message: "contending message" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1018,11 +1067,6 @@ describe("workflowEntry integration", () => {
       ]);
       try {
         await expect(contender.returnValue).resolves.toEqual({ output: "" });
-
-        await resumeHook(continuationToken, {
-          kind: "send",
-          payload: { message: "owner follow up" },
-        });
         const ownerFollowUp = await ownerStream.nextTurn();
 
         expect(ownerFollowUp.at(-1)?.type).toBe("session.waiting");
@@ -1030,7 +1074,7 @@ describe("workflowEntry integration", () => {
           ownerFollowUp.some(
             (event) =>
               event.type === "message.completed" &&
-              event.data.message?.includes("owner follow up") === true,
+              event.data.message?.includes("contending message") === true,
           ),
         ).toBe(true);
       } finally {
@@ -1303,6 +1347,26 @@ describe("workflowEntry integration", () => {
     });
   });
 });
+
+const CALLER_STEP_NAMES = new Set([
+  "bindTurnCallerContextStep",
+  "notifyTurnCallerStep",
+  "resolveInitialTurnCallerStep",
+]);
+
+async function listCallerStepNames(runId: string): Promise<string[]> {
+  return (await listStepNames(runId)).filter((name) => CALLER_STEP_NAMES.has(name)).sort();
+}
+
+async function listStepNames(runId: string): Promise<string[]> {
+  const world = await getWorld();
+  const steps = await world.steps.list({
+    pagination: { limit: 1_000 },
+    resolveData: "none",
+    runId,
+  });
+  return steps.data.map((step) => step.stepName.split("//").at(-1) ?? "");
+}
 
 interface CapturedEventStream {
   dispose(): void;

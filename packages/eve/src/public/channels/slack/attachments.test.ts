@@ -233,7 +233,9 @@ describe("createSlackFetchFile", () => {
 
     const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
 
-    await expect(fetchFile("https://files.slack.com/locked.csv")).rejects.toThrow("HTTP 403");
+    const result = fetchFile("https://files.slack.com/locked.csv?sig=PRIVATE");
+    await expect(result).rejects.toThrow("HTTP 403");
+    await expect(result).rejects.not.toThrow("PRIVATE");
   });
 
   it("rejects HTML returned for a private Slack file", async () => {
@@ -246,9 +248,9 @@ describe("createSlackFetchFile", () => {
 
     const fetchFile = createSlackFetchFile({ botToken: "xoxb-test-token" });
 
-    await expect(fetchFile("https://files.slack.com/locked.png")).rejects.toThrow(
-      /files:read.*reinstall/is,
-    );
+    const result = fetchFile("https://files.slack.com/locked.png?sig=PRIVATE");
+    await expect(result).rejects.toThrow(/files:read.*reinstall/is);
+    await expect(result).rejects.not.toThrow("PRIVATE");
   });
 });
 

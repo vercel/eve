@@ -130,6 +130,12 @@ export interface Meter {
 
 export declare const metrics: {
   getMeter(name: string, version?: string): Meter;
+  /**
+   * The globally registered meter provider, shared across API copies. The
+   * instance comes from whichever metrics SDK registered it, so callers must
+   * feature-detect lifecycle methods before invoking them.
+   */
+  getMeterProvider(): unknown;
 };
 
 export declare enum SpanKind {

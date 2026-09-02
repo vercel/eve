@@ -1,7 +1,6 @@
-import type { SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
-import { isRuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import {
   handleConnectionCallbackRequest,
   handleLegacyConnectionCallbackRequest,
@@ -9,6 +8,10 @@ import {
 import { handleActivityRequest } from "#execution/activity-route.js";
 import { handleSessionCallbackRequest } from "#execution/session-callback-route.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
+import {
+  handleWorkflowWebhookRequest,
+  WORKFLOW_WEBHOOK_ROUTE_PATTERN,
+} from "#execution/workflow-webhook-route.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   readAgentInfoRouteResponse,
@@ -46,9 +49,14 @@ import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
+import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
+import {
+  FAIL_CLOSED_FORWARDED_TRACE_ASSERTION,
+  formatTraceContentCeiling,
+} from "#shared/forwarded-trace-policy.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
-import { defineChannel, GET, HEAD, POST } from "#public/definitions/channel.js";
+import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
   checkUploadPolicy,
   createSessionStreamResponse,
@@ -118,6 +126,11 @@ export function eveChannel(input: EveChannelInput): EveChannel {
       POST(EVE_ACTIVITY_ROUTE_PATTERN, handleActivityRequest),
       POST(EVE_CALLBACK_ROUTE_PATTERN, handleSessionCallbackRequest),
       POST(EVE_TASK_INPUT_ROUTE_PATTERN, handleTaskInputResponseRequest),
+      GET(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      POST(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      PUT(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      PATCH(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
+      DELETE(WORKFLOW_WEBHOOK_ROUTE_PATTERN, handleWorkflowWebhookRequest),
 
       POST(EVE_SESSION_ROUTE_PATH, async (req, args) => {
         const authResult = await routeAuth(req, input.auth);
@@ -139,7 +152,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (body instanceof Response) return body;
         // Top-level sessions own their trace. Callback sessions are delegated
         // remote agents and intentionally continue the dispatching agent trace.
-        const parentTraceContext =
+        const parsedParentTraceContext =
           body.callback === undefined
             ? undefined
             : parseTraceparent(req.headers.get("traceparent"));
@@ -173,6 +186,46 @@ export function eveChannel(input: EveChannelInput): EveChannel {
                 status: 202,
               },
             );
+          }
+        }
+
+        const forwardedTraceAssertion =
+          parsedParentTraceContext === undefined
+            ? "absent"
+            : readForwardedAudienceBaggage(req.headers.get("baggage"));
+        const acceptsForwardedTracePolicy =
+          forwarded.accepted &&
+          parsedParentTraceContext !== undefined &&
+          (parsedParentTraceContext.traceFlags & 1) === 1;
+        const acceptedForwardedTracePolicy = !acceptsForwardedTracePolicy
+          ? undefined
+          : typeof forwardedTraceAssertion === "object"
+            ? forwardedTraceAssertion
+            : forwardedTraceAssertion === "malformed"
+              ? FAIL_CLOSED_FORWARDED_TRACE_ASSERTION
+              : undefined;
+        let parentTraceContext: SessionTraceContext | undefined = parsedParentTraceContext;
+        if (acceptedForwardedTracePolicy !== undefined && parsedParentTraceContext !== undefined) {
+          parentTraceContext = {
+            ...parsedParentTraceContext,
+            forwardedTracePolicy: acceptedForwardedTracePolicy,
+          };
+        }
+        if (forwardedTraceAssertion === "malformed") {
+          log.warn("using metadata-only policy for malformed forwarded audience baggage", {
+            forwarder: authResult.principalId,
+          });
+        } else if (typeof forwardedTraceAssertion === "object") {
+          if (acceptedForwardedTracePolicy !== undefined) {
+            log.info("accepted forwarded trace policy", {
+              audience: forwardedTraceAssertion.originAudience,
+              ceiling: formatTraceContentCeiling(forwardedTraceAssertion.ceiling),
+              forwarder: authResult.principalId,
+            });
+          } else {
+            log.warn("ignoring forwarded trace policy without an accepted sampled principal", {
+              forwarder: authResult.principalId,
+            });
           }
         }
 
@@ -214,20 +267,6 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             title: messageResult.title,
           });
         } catch (error) {
-          // A concurrent create-once request won the token: adopt its session
-          // without delivering this duplicate input.
-          if (operationToken !== undefined && isRuntimeSessionOwnershipConflictError(error)) {
-            return Response.json(
-              { ok: true, sessionId: error.ownerSessionId, status: "accepted" },
-              {
-                headers: {
-                  "cache-control": "no-store",
-                  [EVE_SESSION_ID_HEADER]: error.ownerSessionId,
-                },
-                status: 202,
-              },
-            );
-          }
           const errorId = logError(log, "session-create request failed", error);
           return Response.json(
             { error: "Failed to create the session.", errorId, ok: false },

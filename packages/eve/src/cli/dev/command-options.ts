@@ -12,6 +12,8 @@ export interface DevelopmentCliOptions {
   header?: DevelopmentRequestHeaders;
   host?: string;
   input?: string;
+  /** Internal fresh-agent handoff from `eve init`. */
+  onboard?: boolean;
   logs?: LogDisplayMode;
   name?: string;
   port?: number;

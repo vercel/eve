@@ -78,6 +78,29 @@ export function shouldPrepareApprovalResponsePolicies(input: {
   );
 }
 
+/** Returns whether this invocation can replay a previously approved tool call. */
+export function shouldPrepareApprovalReplayTools(input: {
+  readonly now?: number;
+  readonly session: HarnessSession;
+  readonly stepInput?: StepInput;
+}): boolean {
+  if (shouldPrepareApprovalResponsePolicies(input)) return true;
+
+  const approvedRequestIds = new Set(
+    [
+      ...(input.stepInput?.attributedInputResponses ?? []).map(({ response }) => response),
+      ...(input.stepInput?.inputResponses ?? []),
+    ]
+      .filter((response) => response.optionId === "approve")
+      .map((response) => response.requestId),
+  );
+  return getPendingInputBatches(input.session.state).some((batch) =>
+    batch.requests.some(
+      (request) => isApprovalRequest(request) && approvedRequestIds.has(request.requestId),
+    ),
+  );
+}
+
 export async function interpretApprovalResponses(input: {
   readonly now?: number;
   readonly session: HarnessSession;
@@ -441,24 +464,26 @@ function hasResponseForRequest(stepInput: StepInput | undefined, requestIds: Set
   ].some((response) => requestIds.has(response.requestId));
 }
 
+/**
+ * Drops consumed responses and folds the surviving attributed responses into
+ * `inputResponses`. Responder identity is only meaningful to this pass; the
+ * request interpreter downstream reads `inputResponses` alone.
+ */
 function removeConsumedResponses(
   stepInput: StepInput | undefined,
   consumedRequestIds: Set<string>,
 ): StepInput | undefined {
-  if (stepInput === undefined || consumedRequestIds.size === 0) return stepInput;
-  const attributedInputResponses = stepInput.attributedInputResponses?.filter(
+  if (stepInput === undefined) return undefined;
+  const attributed = (stepInput.attributedInputResponses ?? []).filter(
     ({ response }) => !consumedRequestIds.has(response.requestId),
   );
-  const inputResponses = stepInput.inputResponses?.filter(
+  const plain = (stepInput.inputResponses ?? []).filter(
     (response) => !consumedRequestIds.has(response.requestId),
   );
   return {
     ...stepInput,
-    attributedInputResponses:
-      attributedInputResponses && attributedInputResponses.length > 0
-        ? attributedInputResponses
-        : undefined,
-    inputResponses: inputResponses && inputResponses.length > 0 ? inputResponses : undefined,
+    attributedInputResponses: undefined,
+    inputResponses: [...plain, ...attributed.map(({ response }) => response)],
   };
 }
 

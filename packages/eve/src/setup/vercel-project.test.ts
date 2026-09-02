@@ -112,8 +112,12 @@ describe("getVercelAuthStatus", () => {
     );
   });
 
-  it("reports logged-out when whoami ran but exited non-zero", async () => {
-    mockedCaptureVercel.mockResolvedValueOnce(failedCapture("", "Error: Not authenticated"));
+  it.each([
+    "Error: Not authenticated",
+    "Error: The specified token is not valid. Use `vercel login` to generate a new token.",
+    "Error: You do not have access to the specified account\nLearn More: https://err.sh/vercel/scope-not-accessible",
+  ])("reports logged-out for an authentication-recovery diagnostic: %s", async (stderr) => {
+    mockedCaptureVercel.mockResolvedValueOnce(failedCapture("", stderr));
     await expect(getVercelAuthStatus("/tmp/eve-agent")).resolves.toBe("logged-out");
   });
 

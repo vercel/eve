@@ -34,10 +34,13 @@ describe("catalog integrity", () => {
     expect(new Set(slugs).size).toBe(slugs.length);
   });
 
-  test("every curated entry authenticates via Connect", () => {
-    for (const entry of CONNECTION_CATALOG) {
-      expect(entry.auth.kind).toBe("connect");
-    }
+  test("includes Browser Use with static API-key authentication", () => {
+    expect(getCatalogEntry("browser-use")).toMatchObject({
+      auth: {
+        kind: "header",
+        headers: [{ header: "x-browser-use-api-key", envVar: "BROWSER_USE_API_KEY" }],
+      },
+    });
   });
 
   test("gallery-only connections stay out of the scaffolder catalog", () => {
@@ -49,7 +52,7 @@ describe("catalog integrity", () => {
   });
 
   test("every Connect entry resolves a `vercel connect create` service", () => {
-    for (const entry of CONNECTION_CATALOG) {
+    for (const entry of CONNECTION_CATALOG.filter((entry) => entry.auth.kind === "connect")) {
       expect(connectorServiceForEntry(entry)).toBeTruthy();
       expect(canonicalConnectorNameForEntry(entry)).toBeTruthy();
     }

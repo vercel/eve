@@ -354,7 +354,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Browser Use",
     kind: "connection",
     tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
-    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description:
         "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
@@ -632,6 +632,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
       description:
         "Natural: agentic payments — send and request payments, check balances, and move funds.",
       mcp: { url: "https://mcp.natural.com/mcp" },
+    },
+  },
+  {
+    slug: "neon",
+    name: "Neon",
+    kind: "connection",
+    tagline: "Manage Neon projects, run queries, and make schema changes.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Neon: manage projects, run queries, and make schema changes.",
+      mcp: { url: "https://mcp.neon.tech/mcp" },
     },
   },
   {

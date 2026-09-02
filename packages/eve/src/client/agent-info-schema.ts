@@ -254,13 +254,14 @@ const remoteAgent = entry
 
 const kernelEffect = z
   .object({
-    action: z.enum(["subagent-call", "task-update", "task-cancel"]).optional(),
+    action: z
+      .enum(["subagent-call", "task-update", "task-cancel", "workflow-tool-call"])
+      .optional(),
     audience: z.array(
       z.enum([
         "root-session",
         "delegated-task-child",
         "requires-request-input",
-        "requires-loadable-skill",
         "below-subagent-depth",
       ]),
     ),

@@ -119,6 +119,24 @@ export function createPreparedRuntimeSubagentTool(
     throw new Error(`Static subagent "${definition.name}" is missing a description.`);
   }
   return {
+    behavior: {
+      availability: [],
+      handling: {
+        kind: "dispatch",
+        target:
+          definition.kind === "remote"
+            ? {
+                kind: "remote-agent-call",
+                nodeId: definition.nodeId,
+                remoteAgentName: definition.name,
+              }
+            : {
+                kind: "subagent-call",
+                nodeId: definition.nodeId,
+                subagentName: definition.name,
+              },
+      },
+    },
     description: definition.description,
     inputSchema,
     kind: definition.kind,

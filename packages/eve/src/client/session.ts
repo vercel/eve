@@ -3,7 +3,7 @@ import { EVE_SESSION_ID_HEADER, isCurrentTurnBoundaryEvent } from "#protocol/mes
 import { EVE_SESSION_ROUTE_PATH, createEveSessionRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { MessageResponse } from "#client/message-response.js";
-import { followStreamIterable } from "#client/open-stream.js";
+import { followStreamIterable, sleep } from "#client/open-stream.js";
 import {
   cancelClientSession,
   clearClientSession,
@@ -27,6 +27,9 @@ import type {
   SessionSnapshot,
   StreamOptions,
 } from "#client/types.js";
+
+const SESSION_SEND_RETRY_COUNT = 3;
+const SESSION_SEND_RETRY_BASE_DELAY_MS = 250;
 
 /**
  * Internal interface that a {@link ClientSession} uses to access client-level
@@ -94,7 +97,7 @@ export class ClientSession {
     message: SendTurnInput<TOutput>["message"],
     options: SendTurnOptions<TOutput> = {},
   ): Promise<MessageResponse<TOutput>> {
-    return await this.#send({ ...options, message });
+    return await this.#send({ ...options, message }, true);
   }
 
   /** Answers pending input requests on this exact session ID. */
@@ -105,19 +108,18 @@ export class ClientSession {
     if (inputResponses.length === 0) {
       throw new Error("ClientSession.respond() requires at least one input response.");
     }
-    return await this.#send({ ...options, inputResponses });
+    return await this.#send({ ...options, inputResponses }, false);
   }
 
   async #send<TOutput = unknown>(
     input: SendTurnPayload<TOutput>,
+    retrySessionNotActive: boolean,
   ): Promise<MessageResponse<TOutput>> {
     const initialStreamIndex = this.#state.streamIndex;
-    const response = await postTurn(
-      this.#context,
-      createEveSessionRoutePath(this.#state.sessionId),
-      input,
-      false,
-    );
+    const path = createEveSessionRoutePath(this.#state.sessionId);
+    const response = retrySessionNotActive
+      ? await postSessionSend(this.#context, path, input)
+      : await postTurn(this.#context, path, input, false);
     const responseSessionId = await readSessionId(response, this.#state.sessionId);
     if (responseSessionId !== this.#state.sessionId) {
       throw new Error("Message route returned a different session id.");
@@ -255,6 +257,31 @@ export class ClientSession {
       streamReconnectPolicy: input.streamReconnectPolicy,
     });
   }
+}
+
+async function postSessionSend(
+  context: ClientSessionContext,
+  path: string,
+  input: SendTurnPayload,
+): Promise<Response> {
+  let retryDelayMs = SESSION_SEND_RETRY_BASE_DELAY_MS;
+  for (let retry = 0; ; retry += 1) {
+    try {
+      return await postTurn(context, path, input, false);
+    } catch (error) {
+      if (!isSessionNotActive(error) || retry >= SESSION_SEND_RETRY_COUNT) throw error;
+    }
+
+    await sleep(retryDelayMs, input.signal);
+    input.signal?.throwIfAborted();
+    retryDelayMs *= 2;
+  }
+}
+
+function isSessionNotActive(error: unknown): error is ClientError {
+  return (
+    error instanceof ClientError && error.status === 409 && error.code === "session_not_active"
+  );
 }
 
 function shouldKeepActiveTurnAlive(policy: StreamOptions["streamReconnectPolicy"]): boolean {

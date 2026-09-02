@@ -28,6 +28,10 @@ describe("createSessionStep", () => {
         ...TestTurnAgent,
         tools: [
           {
+            behavior: {
+              availability: ["delegated-task-child"],
+              handling: { kind: "dispatch", target: { kind: "task-update" } },
+            },
             description: "Report task progress.",
             inputSchema: null,
             kind: "authored-tool",

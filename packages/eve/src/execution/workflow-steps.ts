@@ -1,5 +1,5 @@
 import { buildAdapterContext } from "#channel/adapter-context.js";
-import { callAdapterEventHandler, defaultDeliverResult } from "#channel/adapter.js";
+import { callAdapterEventHandler } from "#channel/adapter.js";
 import type { DeliverHookPayload } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
 import { dispatchStreamEventHooks } from "#context/hook-lifecycle.js";
@@ -44,6 +44,7 @@ import { bindSessionInstrumentation } from "#instrumentation/runtime.js";
 import { preserveSerializedInstrumentationState } from "#instrumentation/state.js";
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
+import { deliverAttributedStepInput } from "#execution/attribute-delivery-input.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
 import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
@@ -51,7 +52,6 @@ import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
 import { hasPendingInputBatch } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { coalesceTurnInputs } from "#harness/messages.js";
 import {
   getRuntimeActionKeysFromWorkflowInterrupt,
   isWorkflowRuntimeActionInterrupt,
@@ -104,7 +104,7 @@ import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
-import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
+import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
   "Task mode cannot complete while input requests remain pending.";
@@ -122,6 +122,9 @@ export type { TurnStepInput };
 /** Runs one atomic harness step inside a durable `"use step"` boundary. */
 export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResult> {
   "use step";
+
+  const deferred = deferMismatchedInlineTurnStep(rawInput);
+  if (deferred !== undefined) return deferred;
 
   let input = rawInput;
 
@@ -142,8 +145,8 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     effectiveAgent.turnAgent.tools.some(
       (tool) =>
         tool.kind === "authored-tool" &&
-        tool.owner.kind === "framework" &&
-        tool.name === TASK_UPDATE_TOOL_NAME,
+        tool.behavior?.handling?.kind === "dispatch" &&
+        tool.behavior.handling.target.kind === "task-update",
     );
 
   // Populate the callback base URL so getHookUrl() works during tool
@@ -234,44 +237,14 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   };
   const adapterCtx = buildAdapterContext(adapter, ctx);
 
-  // Run the adapter's deliver hook for each queued payload and
-  // coalesce the resulting StepInput values.
   let resolved: StepInput | undefined;
   if (input.input?.kind === "deliver") {
-    const results: StepInput[] = [];
     try {
-      for (const [payloadIndex, payload] of input.input.payloads.entries()) {
-        const result = adapter.deliver
-          ? await adapter.deliver(payload, adapterCtx)
-          : defaultDeliverResult(payload);
-
-        if (result !== undefined && result !== null) {
-          const deliveryId = input.input.deliveryMetadata?.find(
-            (entry) => entry.payloadIndex === payloadIndex,
-          )?.deliveryId;
-          results.push({
-            ...result,
-            attributedInputResponses: [
-              ...(result.attributedInputResponses ?? []),
-              ...(result.inputResponses ?? []).map((response) => ({
-                auth: input.input?.kind === "deliver" ? (input.input.auth ?? null) : null,
-                deliveryId,
-                response,
-              })),
-            ],
-            inputResponses: undefined,
-            messageAuth:
-              result.message === undefined
-                ? result.messageAuth
-                : (input.input.auth ?? result.messageAuth ?? null),
-          });
-        }
-      }
+      resolved = await deliverAttributedStepInput({ adapter, adapterCtx, delivery: input.input });
     } catch (error) {
       await failChannelDeliveries(error);
       throw error;
     }
-    resolved = results.length === 0 ? undefined : results.reduce(coalesceTurnInputs);
   } else if (input.input?.kind === "runtime-action-result") {
     if (input.input.acceptedAtMsByCallId !== undefined) {
       ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);

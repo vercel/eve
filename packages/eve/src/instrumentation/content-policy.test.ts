@@ -72,6 +72,17 @@ describe("instrumentationEventForTraceDecision", () => {
     ).toMatchObject({ input: undefined });
   });
 
+  it("uses an already-intersected forwarded decision without reapplying origin audience", () => {
+    expect(
+      instrumentationEventForTraceDecision(
+        event,
+        { action: "record", recordInputs: true, recordOutputs: false },
+        "private",
+        { applyAudienceCeiling: false },
+      ),
+    ).toMatchObject({ input: { instructions: "private prompt" } });
+  });
+
   it("removes content from dropped OTel traces", () => {
     expect(instrumentationEventForTraceDecision(event, { action: "drop" }, "public")).toMatchObject(
       { input: undefined },

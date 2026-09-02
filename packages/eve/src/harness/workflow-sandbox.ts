@@ -95,7 +95,14 @@ function createWorkflowHostTools(tools: HarnessToolMap, names: Iterable<string>)
 
   for (const name of names) {
     const tool = tools.get(name);
-    if (tool?.runtimeAction !== undefined) {
+    if (tool === undefined) continue;
+    const target =
+      tool.behavior?.handling?.kind === "dispatch" ? tool.behavior.handling.target : undefined;
+    if (
+      target?.kind === "self-agent-call" ||
+      target?.kind === "subagent-call" ||
+      target?.kind === "remote-agent-call"
+    ) {
       hostTools[name] = createWorkflowRuntimeActionHostTool(tool);
     }
   }
@@ -112,8 +119,11 @@ function createWorkflowRuntimeActionHostTool(harnessTool: HarnessToolDefinition)
       if (resolution !== undefined) return resolution;
 
       return requestWorkflowSandboxInterrupt({
+        dispatchTarget:
+          harnessTool.behavior?.handling?.kind === "dispatch"
+            ? harnessTool.behavior.handling.target
+            : undefined,
         kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
-        runtimeAction: harnessTool.runtimeAction,
         toolInput,
         toolName: harnessTool.name,
       });

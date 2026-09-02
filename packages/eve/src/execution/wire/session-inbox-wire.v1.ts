@@ -5,6 +5,7 @@ import type {
   DeliverHookPayload,
   SessionCommand,
   SessionTimeoutHookPayload,
+  TurnCaller,
 } from "#channel/types.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
@@ -198,6 +199,7 @@ const callerSchema = z
     taskId: z.string().optional(),
   })
   .strict();
+const callerProjectionSchema = callerSchema.strip();
 const traceContextSchema = z
   .object({ spanId: z.string(), traceFlags: z.number(), traceId: z.string() })
   .strict();
@@ -250,29 +252,47 @@ export type SessionInboxWireV1 = z.infer<typeof sessionInboxWireV1Schema>;
 export function encodeSessionCommandV1(
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): SessionInboxWireV1 {
+  const input = toV1Command(command);
   const wire =
-    command.kind === "send"
+    input.kind === "send"
       ? {
-          auth: command.auth,
-          caller: command.caller,
+          auth: input.auth,
+          caller: input.caller,
           deliveryMetadata:
-            command.delivery === undefined ? undefined : [{ ...command.delivery, payloadIndex: 0 }],
+            input.delivery === undefined ? undefined : [{ ...input.delivery, payloadIndex: 0 }],
           kind: "deliver" as const,
-          payload: command.payload,
-          payloads: [command.payload],
-          requestId: command.requestId,
-          taskDeliveryId: command.taskDeliveryId,
-          turnPolicy: command.turnPolicy,
+          payload: input.payload,
+          payloads: [input.payload],
+          requestId: input.requestId,
+          taskDeliveryId: input.taskDeliveryId,
+          turnPolicy: input.turnPolicy,
           version: VERSION,
         }
-      : command.kind === "deliver"
+      : input.kind === "deliver"
         ? {
-            ...command,
-            payload: coalesceDeliverPayloads(command.payloads),
+            ...input,
+            payload: coalesceDeliverPayloads(input.payloads),
             version: VERSION,
           }
-        : { ...command, version: VERSION };
+        : { ...input, version: VERSION };
   const parsed = sessionInboxWireV1Schema.safeParse(wire);
+  if (!parsed.success) {
+    throw new SessionInboxWireError(
+      `Produced a session inbox payload that does not match wire version ${VERSION}: ${formatValidationError(parsed.error)}`,
+    );
+  }
+  return parsed.data;
+}
+
+function toV1Command(
+  command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
+): DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload {
+  if (!("caller" in command) || command.caller === undefined) return command;
+  return { ...command, caller: toV1Caller(command.caller) };
+}
+
+function toV1Caller(caller: TurnCaller) {
+  const parsed = callerProjectionSchema.safeParse(caller);
   if (!parsed.success) {
     throw new SessionInboxWireError(
       `Produced a session inbox payload that does not match wire version ${VERSION}: ${formatValidationError(parsed.error)}`,

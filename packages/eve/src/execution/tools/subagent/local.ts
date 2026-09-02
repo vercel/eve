@@ -8,10 +8,8 @@ import {
 } from "#execution/agent-handle-dispatch.js";
 import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
-import {
-  prepareAgentActionDispatch,
-  startSubagent,
-} from "#execution/dispatch-runtime-actions-shared.js";
+import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
+import { startSubagent } from "#execution/dispatch-runtime-actions-start.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import {
   checkTaskContinuationAvailability,
@@ -27,6 +25,8 @@ import type {
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
 } from "#shared/action-types.js";
+import type { PendingAgentDispatchAction } from "#shared/dispatch-action.js";
+import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
 import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
 import { parseJsonObject } from "#shared/json.js";
@@ -41,11 +41,12 @@ type SubagentCallAction = RuntimeRemoteAgentCallActionRequest | RuntimeSubagentC
 interface SubagentDefinitionInput {
   readonly description: string;
   readonly name: string;
-  readonly nodeId: string;
+  readonly target: PendingAgentDispatchAction["target"];
 }
 
 interface SubagentDispatchInput {
   readonly action: SubagentCallAction;
+  readonly dispatchAction: PendingAgentDispatchAction;
   readonly batch: TaskExec["batch"];
   readonly callbackBaseUrl?: string;
   readonly ctx: AlsContext;
@@ -69,8 +70,6 @@ interface SubagentDispatchResult {
   readonly session: RuntimeSession;
 }
 
-/** Transitional PR 1 classifier, replaced by declared dispatch effects in PR 2. */
-const localSubagentExecutors = new WeakSet<object>();
 const batchAgentClaims = new WeakMap<TaskExec["batch"], Map<string, string>>();
 const log = createLogger("runtime.framework-tools.subagent");
 
@@ -81,24 +80,27 @@ export function defineSubagent(input: SubagentDefinitionInput) {
     inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
     outputSchema: SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA,
     execute: (toolInput, ctx, task) =>
-      executeSubagentTool({ definition: input, kind: "local", task, toolContext: ctx, toolInput }),
+      executeSubagentTool({ definition: input, task, toolContext: ctx, toolInput }),
   });
   return definition;
 }
 
-export function registerLocalSubagentExecutor(execute: object): void {
-  localSubagentExecutors.add(execute);
-}
-
 export function countLocalSubagentCalls(
-  calls: readonly { readonly definition: { readonly execute: object } }[],
+  calls: readonly {
+    readonly definition: { readonly behavior?: import("#tools/behavior.js").PreparedToolBehavior };
+  }[],
 ): number {
-  return calls.filter((call) => localSubagentExecutors.has(call.definition.execute)).length;
+  return calls.filter((call) => {
+    const handling = call.definition.behavior?.handling;
+    return (
+      handling?.kind === "dispatch" &&
+      (handling.target.kind === "self-agent-call" || handling.target.kind === "subagent-call")
+    );
+  }).length;
 }
 
 export async function executeSubagentTool(input: {
   readonly definition: SubagentDefinitionInput;
-  readonly kind: "local" | "remote";
   readonly task: TaskExec;
   readonly toolContext: ToolContext;
   readonly toolInput: unknown;
@@ -106,30 +108,20 @@ export async function executeSubagentTool(input: {
   const ctx = loadContext();
   const { batch, session, task } = input.task;
   const emission = getHarnessEmissionState(session.state);
-  const commonAction = {
+  const dispatchAction: PendingAgentDispatchAction = {
     callId: input.toolContext.callId,
     description: input.definition.description,
     input: parseJsonObject(SUBAGENT_TOOL_INPUT_SCHEMA.parse(input.toolInput)),
-    name: input.definition.name,
-    nodeId: input.definition.nodeId,
+    target: input.definition.target,
+    toolName: input.definition.name,
   };
-  const action: SubagentCallAction =
-    input.kind === "remote"
-      ? {
-          ...commonAction,
-          kind: "remote-agent-call",
-          remoteAgentName: input.definition.name,
-        }
-      : {
-          ...commonAction,
-          kind: "subagent-call",
-          subagentName: input.definition.name,
-        };
+  const action: SubagentCallAction = resolvePreparedAgentAction(dispatchAction).action;
   const dispatched = await dispatchSubagent({
     action,
     batch,
     callbackBaseUrl: ctx.get(CallbackBaseUrlKey),
     ctx,
+    dispatchAction,
     event: { ...emission, turnId: activeTurnId(emission) },
     localFanoutSize: countLocalSubagentCalls(batch),
     serializedContext: serializeContext(ctx),
@@ -178,7 +170,7 @@ export async function executeSubagentTool(input: {
 
 async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentDispatchResult> {
   const prepared = await prepareAgentActionDispatch({
-    action: input.action,
+    action: input.dispatchAction,
     ctx: input.ctx,
     event: input.event,
     localFanoutSize: input.localFanoutSize,
@@ -186,7 +178,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
     sessionState: input.sessionState,
   });
   const entry = prepared.plan[0];
-  if (entry === undefined || entry.kind === "task-control") {
+  if (entry === undefined || entry.kind === "task-control" || entry.kind === "workflow-tool") {
     throw new Error("Subagent tool dispatch produced no executable plan entry.");
   }
   if (entry.kind === "reject") {
@@ -250,6 +242,7 @@ async function dispatchSubagent(input: SubagentDispatchInput): Promise<SubagentD
           currentSession: prepared.session,
           fanoutSize: prepared.fanoutSize,
           initiatorAuth: prepared.initiatorAuth,
+          localDevRequest: prepared.localDevRequest,
           parentContinuationToken: input.task.taskInboxToken,
           parentTraceContext: prepared.parentTraceContext,
           activityObserver: prepared.activityObserver,

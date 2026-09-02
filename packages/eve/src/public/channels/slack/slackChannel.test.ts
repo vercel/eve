@@ -3722,7 +3722,7 @@ describe("slackChannel().receive", () => {
     const [continuationToken, input] = send.mock.calls[0]!;
     expect(continuationToken).toBe("C123:1700000000.000001");
     expect(input.message).toBe("do the thing");
-    expect(input.state).toEqual({
+    expect(input.state).toMatchObject({
       channelId: "C123",
       installationTeamId: null,
       threadTs: "1700000000.000001",
@@ -3730,6 +3730,46 @@ describe("slackChannel().receive", () => {
       triggeringUserId: null,
     });
     expect(input.auth.principalId).toBe("p");
+  });
+
+  it("persists an explicit public audience on the proactive send state", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s" });
+    await buildReceive()(
+      {
+        message: "do the thing",
+        target: { audience: "public", channelId: "C123", threadTs: "1700000000.000001" },
+        auth: null,
+      },
+      mockChannelContext(send),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(send.mock.calls[0]![1].state).toMatchObject({ audience: "public" });
+  });
+
+  it("persists an explicit private audience on the proactive send state", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s" });
+    await buildReceive()(
+      {
+        message: "do the thing",
+        target: { audience: "private", channelId: "C_PRIVATE", threadTs: "1700000000.000001" },
+        auth: null,
+      },
+      mockChannelContext(send),
+    );
+    expect(send.mock.calls[0]![1].state).toMatchObject({ audience: "private" });
+  });
+
+  it("omits audience from proactive send state when the target does not supply one", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "s" });
+    await buildReceive()(
+      {
+        message: "do the thing",
+        target: { channelId: "C123", threadTs: "1700000000.000001" },
+        auth: null,
+      },
+      mockChannelContext(send),
+    );
+    expect(send.mock.calls[0]![1].state).not.toHaveProperty("audience");
   });
 
   it("selects and persists the installation workspace for proactive sends", async () => {

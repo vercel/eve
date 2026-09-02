@@ -361,6 +361,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "parallel" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -433,6 +437,10 @@ describe("buildToolSet", () => {
         [
           "web_search",
           {
+            behavior: {
+              availability: [],
+              handling: { kind: "provider-tool", provider: "exa" },
+            },
             description: "Web search.",
             inputSchema: jsonSchema({}),
             name: "web_search",
@@ -454,6 +462,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "parallel" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -464,7 +476,6 @@ describe("buildToolSet", () => {
     const result = await buildToolSetWithProviderTools({
       modelReference: { id: "openai/gpt-5.4" },
       tools,
-      webSearchProvider: "parallel",
     });
 
     expect(getOutputJsonSchema(result.web_search)).toEqual(WEB_SEARCH_PARALLEL_OUTPUT_SCHEMA);
@@ -475,6 +486,10 @@ describe("buildToolSet", () => {
       [
         "web_search",
         {
+          behavior: {
+            availability: [],
+            handling: { kind: "provider-tool", provider: "exa" },
+          },
           description: "Web search.",
           inputSchema: jsonSchema({}),
           name: "web_search",
@@ -503,6 +518,10 @@ describe("buildToolSet", () => {
       [
         "ask_question",
         {
+          behavior: {
+            availability: ["requires-request-input"],
+            handling: { kind: "request-input", request: "question" },
+          },
           description: "Ask the user a question.",
           inputSchema: jsonSchema({}),
           name: "ask_question",

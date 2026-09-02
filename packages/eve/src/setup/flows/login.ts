@@ -26,6 +26,10 @@ export type LoginFlowResult =
  */
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
+function vercelLoginUrl(text: string): string | undefined {
+  return text.match(/https:\/\/vercel\.com\/oauth\/device\?[^\s]+/u)?.[0];
+}
+
 /** Injected for tests; defaults to the real auth probe and `vercel login`. */
 export interface LoginFlowDeps {
   getVercelAuthStatus: typeof getVercelAuthStatus;
@@ -114,7 +118,16 @@ export async function runLoginFlow(input: {
 }): Promise<LoginFlowResult> {
   const { appRoot, prompter, signal } = input;
   const deps: LoginFlowDeps = { ...defaultDeps, ...input.deps };
-  const onOutput = createPromptCommandOutput(prompter.log);
+  const commandOutput = createPromptCommandOutput(prompter.log);
+  let shownLoginUrl: string | undefined;
+  const onOutput: ReturnType<typeof createPromptCommandOutput> = (line) => {
+    commandOutput(line);
+    const url = vercelLoginUrl(line.text);
+    if (url !== undefined && url !== shownLoginUrl) {
+      shownLoginUrl = url;
+      prompter.log.info(`Open ${url}`);
+    }
+  };
 
   const probeAuth = (): Promise<VercelAuthStatus> => deps.getVercelAuthStatus(appRoot, { signal });
 

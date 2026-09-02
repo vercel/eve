@@ -2,14 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { SessionAuthContext } from "#channel/types.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
-import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
+  getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
@@ -31,8 +32,10 @@ import {
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  type LocalDevRequestProvenance,
   SessionIdKey,
   SessionKey,
+  SessionTraceSeedKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -54,7 +57,8 @@ const mocks = vi.hoisted(() => ({
   resumeHook: vi.fn(),
   createSession: vi.fn(),
   startRemoteAgentSession: vi.fn(),
-  startWorkflowPreferLatest: vi.fn(),
+  startWorkflowOnCurrentDeployment: vi.fn(),
+  waitForCommandHookOwner: vi.fn(),
 }));
 
 vi.mock("#context/serialize.js", () => ({
@@ -82,9 +86,9 @@ vi.mock("#execution/workflow-runtime.js", () => ({
     dispatchSession: mocks.dispatchSession,
   }),
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
-  startWorkflowPreferLatest: mocks.startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment: mocks.startWorkflowOnCurrentDeployment,
   taskRunWorkflowReference: { workflowId: "workflow//eve//taskRun" },
-  waitForCommandHookOwner: vi.fn().mockResolvedValue({ runId: "task-run-1" }),
+  waitForCommandHookOwner: mocks.waitForCommandHookOwner,
 }));
 
 // Only the network calls are mocked; error classification and registry
@@ -165,12 +169,15 @@ const REMOTE_REGISTRY_DEFINITION = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
+  mocks.waitForCommandHookOwner.mockImplementation(async (token: string) => ({
+    runId: token.startsWith("subagent:") ? CHILD_SESSION_ID : "task-run-1",
+  }));
   mocks.dispatchSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID, status: "accepted" });
   mocks.continueRemoteAgentSession.mockResolvedValue(undefined);
   mocks.startRemoteAgentSession.mockResolvedValue({
     sessionId: "remote-session-123456789012",
   });
-  mocks.startWorkflowPreferLatest.mockResolvedValue({ runId: "task-run-1" });
+  mocks.startWorkflowOnCurrentDeployment.mockResolvedValue({ runId: "task-run-1" });
   mocks.resumeHook.mockResolvedValue({ runId: "task-run-1" });
   mocks.hydrateDurableSession.mockImplementation(({ durable }) => durable);
   mocks.createDurableSessionState.mockImplementation(({ session }) => ({
@@ -221,10 +228,12 @@ describe("dispatchRuntimeActionsStep child starts", () => {
         callId: "call-1",
         description: "Research",
         input: { message: "research this" },
-        kind: "remote-agent-call",
-        name: "research",
-        nodeId: "remote/research",
-        remoteAgentName: "research",
+        target: {
+          kind: "remote-agent-call",
+          nodeId: "remote/research",
+          remoteAgentName: "research",
+        },
+        toolName: "research",
       },
       ctx,
       event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
@@ -319,6 +328,111 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(writes).toHaveLength(1);
   });
 
+  it("carries verified local-dev provenance into a local child start", async () => {
+    const session = createStartSession({ kind: "local" });
+    const localDevRequest: LocalDevRequestProvenance = {
+      address: "127.0.0.1",
+      interactiveClient: true,
+      signature: "parent-signed",
+    };
+    installContext(session, undefined, false, null, localDevRequest);
+    mocks.createSession.mockImplementation(async () => {
+      expect(loadContext().localDevRequest).toEqual(localDevRequest);
+      return { sessionId: CHILD_SESSION_ID };
+    });
+
+    await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: BASE_STATE,
+    });
+
+    expect(mocks.createSession).toHaveBeenCalledOnce();
+  });
+
+  it("uses the active session turn when pending batch metadata has an empty turn id", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(session, {
+      definition: { description: "Research", kind: "subagent" },
+      nodeId: "subagents/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getAgentHandleStore(resultState)).toMatchObject({
+      handles: [{ operation: { parentTurnId: "turn_3" } }],
+    });
+  });
+
+  it("persists the active turn when dispatch leaves agent handles unchanged", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "remote",
+    });
+    installContext(session, {
+      definition: REMOTE_REGISTRY_DEFINITION,
+      nodeId: "remote/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getAgentHandleStore(resultState)).toBeUndefined();
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(mocks.createDurableSessionState).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the active session turn for task-mode dispatch", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(
+      session,
+      { definition: { description: "Research", kind: "subagent" }, nodeId: "subagents/research" },
+      true,
+    );
+    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
+
+    const result = await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getSessionTaskIndex(resultState)).toEqual([
+      expect.objectContaining({ createdByTurnId: "turn_3" }),
+    ]);
+  });
+
   it("opens a shared parent sandbox with session context and durable backend tags", async () => {
     const session = createStartSession({ kind: "local" });
     const observedSessionIds: string[] = [];
@@ -410,12 +524,16 @@ describe("dispatchRuntimeActionsStep child starts", () => {
 
     expect(create).not.toHaveBeenCalled();
     expect(mocks.createSession).toHaveBeenCalledTimes(1);
+    const childInput = mocks.createSession.mock.calls[0]?.[0];
+    expect(childInput?.adapter.state).not.toHaveProperty("parentSandboxState");
+    expect(childInput?.adapter.state).not.toHaveProperty("sandboxSessionId");
   });
 
   it("rejects recursive self-delegation before opening the parent sandbox", async () => {
     const session = createNamedStartSession({
       name: "agent",
       nodeId: "__root__",
+      selfAgent: true,
       session: { rootSessionId: "root-session", subagentDepth: 1 },
     });
     const { backend, create } = createSandboxBackend();
@@ -527,13 +645,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     // A retried dispatch step re-derives the same deterministic child
     // continuation token, so the first attempt's child owns it.
-    mocks.createSession.mockRejectedValue(
-      new RuntimeSessionOwnershipConflictError({
-        continuationToken: "subagent:parent-session:call-1",
-        ownerSessionId: CHILD_SESSION_ID,
-        sessionId: "duplicate-child",
-      }),
-    );
+    mocks.createSession.mockResolvedValue({ sessionId: "duplicate-child" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
@@ -582,13 +694,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     // A retried dispatch step re-derives the same deterministic child
     // continuation token, so the first attempt's child owns it.
-    mocks.createSession.mockRejectedValue(
-      new RuntimeSessionOwnershipConflictError({
-        continuationToken: "subagent:parent-session:call-1",
-        ownerSessionId: CHILD_SESSION_ID,
-        sessionId: "duplicate-child",
-      }),
-    );
+    mocks.createSession.mockResolvedValue({ sessionId: "duplicate-child" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
@@ -616,16 +722,33 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     const session = createStartSession({ kind: "remote" });
     const traceId = "4".repeat(32);
     const actionSpanId = "5".repeat(16);
-    installContext(session, {
-      definition: REMOTE_REGISTRY_DEFINITION,
-      nodeId: "remote/research",
-    });
+    installContext(
+      session,
+      {
+        definition: REMOTE_REGISTRY_DEFINITION,
+        nodeId: "remote/research",
+      },
+      false,
+      null,
+      undefined,
+      "private",
+    );
 
     const result = await dispatchRuntimeActionsStep({
       callbackBaseUrl: "https://caller.example.com",
       parentContinuationToken: "turn-inbox",
       parentWritable: createWritable(),
       serializedContext: {
+        [SessionTraceSeedKey.name]: {
+          decision: { action: "record", recordInputs: true, recordOutputs: true },
+          forwardedTracePolicy: {
+            ceiling: { recordInputs: true, recordOutputs: true },
+            originAudience: "public",
+          },
+          spanId: "3".repeat(16),
+          traceFlags: 1,
+          traceId,
+        },
         "eve.harness.agentTrace": {
           actions: {
             "action-1": {
@@ -652,7 +775,18 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     expect(result.results).toEqual([]);
     expect(mocks.startRemoteAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        parentTraceContext: { isRemote: false, spanId: actionSpanId, traceFlags: 1, traceId },
+        originAudience: "public",
+        parentTraceContext: expect.objectContaining({
+          decision: { action: "record", recordInputs: false, recordOutputs: false },
+          forwardedTracePolicy: {
+            ceiling: { recordInputs: true, recordOutputs: true },
+            originAudience: "public",
+          },
+          isRemote: false,
+          spanId: actionSpanId,
+          traceFlags: 1,
+          traceId,
+        }),
       }),
     );
     expect(getAgentHandleStore(readResultSessionState(result, session))).toEqual({
@@ -820,7 +954,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       output: { code: "AGENT_BUSY", message: expect.stringContaining("task_active") },
     });
     expect(mocks.dispatchSession).not.toHaveBeenCalled();
-    expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
+    expect(mocks.startWorkflowOnCurrentDeployment).not.toHaveBeenCalled();
   });
 
   it("passes the active turn principal to a tasks-mode continuation", async () => {
@@ -1027,10 +1161,12 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
         callId: `call-${n}`,
         description: "Research",
         input: { agentId: LOCAL_PARKED_HANDLE.identity.id, message: `continue ${n}` },
-        kind: "subagent-call" as const,
-        name: "research",
-        nodeId: "subagents/research",
-        subagentName: "research",
+        target: {
+          kind: "subagent-call" as const,
+          nodeId: "subagents/research",
+          subagentName: "research",
+        },
+        toolName: "research",
       })),
       event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
       responseMessages: [],
@@ -1216,19 +1352,23 @@ function createStartSession(input: {
             callId: "call-1",
             description: "Research",
             input: { message: "research this" },
-            kind: "subagent-call",
-            name: "research",
-            nodeId: "subagents/research",
-            subagentName: "research",
+            target: {
+              kind: "subagent-call",
+              nodeId: "subagents/research",
+              subagentName: "research",
+            },
+            toolName: "research",
           }
         : {
             callId: "call-1",
             description: "Research",
             input: { message: "research this" },
-            kind: "remote-agent-call",
-            name: "research",
-            nodeId: "remote/research",
-            remoteAgentName: "research",
+            target: {
+              kind: "remote-agent-call",
+              nodeId: "remote/research",
+              remoteAgentName: "research",
+            },
+            toolName: "research",
           },
     ],
     event: input.event ?? { sequence: 1, stepIndex: 2, turnId: "turn-1" },
@@ -1240,6 +1380,7 @@ function createStartSession(input: {
 function createNamedStartSession(input: {
   readonly name: string;
   readonly nodeId: string;
+  readonly selfAgent?: boolean;
   readonly session?: Partial<HarnessSession>;
 }): HarnessSession {
   return setPendingRuntimeActionBatch({
@@ -1248,10 +1389,18 @@ function createNamedStartSession(input: {
         callId: "call-1",
         description: `Delegate to ${input.name}`,
         input: { message: "research this" },
-        kind: "subagent-call",
-        name: input.name,
-        nodeId: input.nodeId,
-        subagentName: input.name,
+        target: input.selfAgent
+          ? {
+              kind: "self-agent-call",
+              nodeId: input.nodeId,
+              subagentName: input.name,
+            }
+          : {
+              kind: "subagent-call",
+              nodeId: input.nodeId,
+              subagentName: input.name,
+            },
+        toolName: input.name,
       },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
@@ -1270,10 +1419,12 @@ function createPendingSession(input: {
         callId: "call-1",
         description: "Research",
         input: { agentId: input.agentId, message: "continue with raw input" },
-        kind: "subagent-call",
-        name: "research",
-        nodeId: "subagents/research",
-        subagentName: "research",
+        target: {
+          kind: "subagent-call",
+          nodeId: "subagents/research",
+          subagentName: "research",
+        },
+        toolName: "research",
       },
     ],
     event: { sequence: 1, stepIndex: 2, turnId: "turn-1" },
@@ -1287,6 +1438,8 @@ function installContext(
   remote?: { readonly definition: unknown; readonly nodeId: string },
   tasks = false,
   auth: SessionAuthContext | null = null,
+  localDevRequest?: LocalDevRequestProvenance,
+  channelAudience?: ChannelAudience,
 ): void {
   const subagentsByNodeId = new Map<string, { definition: unknown }>();
   if (remote !== undefined) {
@@ -1311,11 +1464,19 @@ function installContext(
     [AuthKey, auth],
     [BundleKey, bundle],
     [CapabilitiesKey, undefined],
-    [ChannelInstrumentationKey, undefined],
+    [
+      ChannelInstrumentationKey,
+      channelAudience === undefined
+        ? undefined
+        : { kind: "slack", metadata: { audience: channelAudience } },
+    ],
     [InitiatorAuthKey, null],
     [ChannelKey, ADAPTER],
   ]);
   mocks.deserializeContext.mockResolvedValue({
+    get localDevRequest() {
+      return localDevRequest;
+    },
     get: (key: unknown) => values.get(key),
     require: (key: unknown) => {
       if (!values.has(key)) throw new Error("missing context key");

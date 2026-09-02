@@ -148,6 +148,10 @@ describe("createChannelAddress", () => {
       expect.objectContaining({
         adapter: expect.objectContaining({ state: { channelId: "C1", threadTs: "T1" } }),
         capabilities: { requestInput: true },
+        continuationConflictCommand: expect.objectContaining({
+          kind: "send",
+          payload: { message: "hello" },
+        }),
       }),
     );
     const created = vi.mocked(runtime.createSession).mock.calls[0]?.[0].adapter;

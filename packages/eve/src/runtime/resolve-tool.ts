@@ -29,6 +29,7 @@ export async function resolveToolDefinition(
 ): Promise<ResolvedToolDefinition> {
   if (!definition.hasExecute) {
     return {
+      behavior: definition.behavior,
       description: definition.description,
       inputSchema: toInputSchema(definition.inputSchema),
       logicalPath: definition.logicalPath,
@@ -75,6 +76,7 @@ export async function resolveToolDefinition(
       : toOutputSchema(definition.outputSchema);
 
     return {
+      behavior: definition.behavior,
       description: definition.description,
       execute,
       execution: definition.execution,

@@ -2,10 +2,20 @@ import { jsonSchema, type LanguageModel, type ModelMessage, simulateReadableStre
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
+import { ContextContainer, contextStorage } from "#context/container.js";
+import {
+  dispatchDynamicToolEvent,
+  preparePersistedStepDynamicToolMetadata,
+} from "#context/dynamic-tool-lifecycle.js";
+import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
+import { AuthKey, SessionKey, StepDynamicToolMetadataKey } from "#context/keys.js";
+import { setHarnessEmissionState } from "#harness/emission.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { defineTool } from "#tools/definition.js";
+import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
 const usage = {
   inputTokens: {
@@ -68,7 +78,10 @@ const secondApprovalRequest = {
   type: "tool-approval-request" as const,
 };
 
-function createPendingApprovalSession(history?: readonly ModelMessage[]): HarnessSession {
+function createPendingApprovalSession(
+  history?: readonly ModelMessage[],
+  responseAuthorization = false,
+): HarnessSession {
   const session: HarnessSession = {
     agent: {
       modelReference: { id: "generate-approval-resume-model" },
@@ -107,6 +120,9 @@ function createPendingApprovalSession(history?: readonly ModelMessage[]): Harnes
         requestId: approvalRequest.approvalId,
       },
     ],
+    responseAuthRequiredRequestIds: responseAuthorization
+      ? [approvalRequest.approvalId]
+      : undefined,
     responseMessages: [
       {
         content: [toolCall, approvalRequest],
@@ -207,6 +223,236 @@ function findPart(
 }
 
 describe("tool loop generate approval resume (real AI SDK)", () => {
+  it.each([
+    { label: "direct", responseAuthorization: false },
+    { label: "response-authorized", responseAuthorization: true },
+  ])("keeps a migrated step callback binding through $label approval", async (testCase) => {
+    const order: string[] = [];
+    const executeCallback = vi.fn(async (closure: unknown) => {
+      const version = (closure as { version: string }).version;
+      order.push(`execute:${version}`);
+      return "/workspace";
+    });
+    const approvalResponseCallback = vi.fn(async (closure: unknown) => {
+      const version = (closure as { version: string }).version;
+      order.push(`authorize:${version}`);
+      return { status: "allowed" as const };
+    });
+    const handler = vi.fn((event: { data?: { stepIndex?: number; turnId?: string } }) => {
+      order.push(`resolve:${String(event.data?.turnId)}:${String(event.data?.stepIndex)}`);
+      return {
+        bash: defineTool({
+          approval: {
+            request: stampDurableDynamicCallback(() => "user-approval" as const, {
+              callback: () => "user-approval" as const,
+              closure: { version: "current-request" },
+            }),
+            response: stampDurableDynamicCallback(() => ({ status: "allowed" as const }), {
+              callback: approvalResponseCallback,
+              closure: { version: "current-response" },
+            }),
+          },
+          description: "Run a shell command.",
+          execute: stampDurableDynamicCallback(async () => "/current-workspace", {
+            callback: executeCallback,
+            closure: { version: "current-execute" },
+          }),
+          inputSchema: { type: "object" },
+        }),
+      };
+    });
+    const resolver = {
+      eventNames: ["step.started"],
+      events: {
+        "step.started": handler,
+      },
+      logicalPath: "agent/tools/bash.ts",
+      slug: "legacy",
+      sourceId: "test:legacy-bash",
+      sourceKind: "module",
+    } as never;
+    const ctx = new ContextContainer();
+    const responder = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    ctx.set(AuthKey, responder);
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: null },
+      sessionId: "generate-approval-resume-session",
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          approvalRequest: {
+            closure: { version: "persisted-request" },
+            stepId: "eve:dynamic-tool//old/approval-request/0-100",
+          },
+          approvalResponse: {
+            closure: { version: "persisted-response" },
+            stepId: "eve:dynamic-tool//old/approval-response/0-100",
+          },
+          execute: {
+            closure: { version: "persisted-execute" },
+            stepId: "eve:dynamic-tool//old/execute/0-100",
+          },
+        },
+        description: "Old shell tool.",
+        entryKey: "bash",
+        inputSchema: { type: "object" },
+        name: "bash",
+        resolverSlug: "legacy",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ]);
+
+    const model = new MockLanguageModelV4({
+      doStream: textStreamResult("The command completed."),
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const config = {
+      handleEvent: async (event, messages) => {
+        await dispatchDynamicToolEvent({
+          ctx,
+          event,
+          messages: messages ?? [],
+          resolvers: [resolver],
+        });
+        if (event.type === "step.started") {
+          const metadata = ctx.get(StepDynamicToolMetadataKey) ?? [];
+          const version = (
+            metadata[0]?.callbacks?.execute?.closure as { version?: string } | undefined
+          )?.version;
+          order.push(`step.started:${String(version)}`);
+        }
+      },
+      mode: "conversation",
+      prepareStepDynamicTools: (input) =>
+        preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [resolver] }),
+      resolveModel: async (): Promise<LanguageModel> => model,
+      tools: new Map(),
+    } satisfies ToolLoopHarnessConfig;
+    const session = setHarnessEmissionState(
+      createPendingApprovalSession(undefined, testCase.responseAuthorization),
+      {
+        sequence: 1,
+        sessionStarted: true,
+        stepIndex: 1,
+        turnId: "turn-1",
+      },
+    );
+    const runStep = createToolLoopHarness(config);
+
+    const first = await contextStorage.run(ctx, () =>
+      runStep(session, {
+        attributedInputResponses: [
+          {
+            auth: responder,
+            response: { optionId: "approve", requestId: approvalRequest.approvalId },
+          },
+        ],
+      }),
+    );
+    if (testCase.responseAuthorization) {
+      if (typeof first.next !== "function") {
+        throw new TypeError("Expected response authorization to schedule a continuation.");
+      }
+      const next = first.next;
+      await contextStorage.run(ctx, () => next(first.session));
+    } else {
+      expect(first.next).toBeNull();
+    }
+
+    expect(order).toEqual(
+      testCase.responseAuthorization
+        ? [
+            "resolve:turn-1:1",
+            "authorize:persisted-response",
+            "step.started:persisted-execute",
+            "execute:persisted-execute",
+          ]
+        : ["resolve:turn-1:1", "step.started:persisted-execute", "execute:persisted-execute"],
+    );
+    expect(handler).toHaveBeenCalledOnce();
+    if (testCase.responseAuthorization) {
+      expect(approvalResponseCallback).toHaveBeenCalledWith(
+        { version: "persisted-response" },
+        expect.anything(),
+      );
+    } else {
+      expect(approvalResponseCallback).not.toHaveBeenCalled();
+    }
+    expect(executeCallback).toHaveBeenCalledWith(
+      { version: "persisted-execute" },
+      toolCall.input,
+      expect.objectContaining({ callId: toolCall.toolCallId }),
+    );
+    const metadata = ctx.get(StepDynamicToolMetadataKey) ?? [];
+    expect(metadata[0]?.callbacks?.execute).toEqual({
+      closure: { version: "persisted-execute" },
+    });
+  });
+
+  it("does not resolve removed dynamic tools when an approval is cancelled", async () => {
+    const responder = {
+      attributes: {},
+      authenticator: "test",
+      issuer: "test",
+      principalId: "user-1",
+      principalType: "user" as const,
+    };
+    const ctx = new ContextContainer();
+    ctx.set(AuthKey, responder);
+    ctx.set(SessionKey, {
+      auth: { current: responder, initiator: null },
+      sessionId: "generate-approval-resume-session",
+      turn: { id: "turn-1", sequence: 1 },
+    });
+    ctx.set(StepDynamicToolMetadataKey, [
+      {
+        callbacks: {
+          execute: {
+            closure: { version: "persisted-execute" },
+            stepId: "eve:dynamic-tool//old/execute/0-100",
+          },
+        },
+        description: "Removed shell tool.",
+        entryKey: "bash",
+        inputSchema: { type: "object" },
+        name: "bash",
+        resolverSlug: "removed",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ]);
+    const execute = vi.fn(async () => "/workspace");
+    const prepareStepDynamicTools = vi.fn((input) =>
+      preparePersistedStepDynamicToolMetadata({ ...input, resolvers: [] }),
+    );
+    const runStep = createToolLoopHarness({
+      ...createConfig(createModel(), execute),
+      prepareStepDynamicTools,
+    });
+
+    await expect(
+      contextStorage.run(ctx, () =>
+        runStep(createPendingApprovalSession(undefined, true), {
+          attributedInputResponses: [
+            {
+              auth: responder,
+              response: { optionId: "cancel", requestId: approvalRequest.approvalId },
+            },
+          ],
+        }),
+      ),
+    ).resolves.toBeDefined();
+
+    expect(prepareStepDynamicTools).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("executes two approvals delivered together exactly once each", async () => {
     const execute = vi.fn(async (input: unknown) =>
       (input as { command: string }).command === "pwd" ? "/workspace" : "eve",

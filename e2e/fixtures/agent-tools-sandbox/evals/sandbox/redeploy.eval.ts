@@ -13,15 +13,9 @@ import type { EveEvalContext } from "eve/evals";
 // each redeploy repoints the alias, so the runner's client — and the durable
 // session it drives — lands on the new deployment without any URL swap.
 //
-// Deployment adoption is dispatch-dependent. Turn dispatch routes parked
-// sessions' turns to the latest deployment only where the workflow world can
-// resolve "latest" (production; branch-carrying previews). Branch-less CLI
-// preview deploys — which is what this eval pushes — pin turn execution to
-// the deployment that created the session (see shouldRouteToLatestDeployment
-// in execution/workflow-runtime.ts). The timeline below asserts exactly the
-// preview contract; the pinned-turn gate at t3 is a deliberate tripwire that
-// must be flipped when dispatch gains preview latest-routing
-// (https://github.com/vercel/eve/issues/582).
+// Each inbound request stamps the exact deployment that accepted it. The
+// parked driver dispatches that request's turn to the stamped deployment, so
+// repointing the alias adopts new code without resolving a "latest" sentinel.
 //
 // Timeline under test:
 //   t0  session A writes a file into its sandbox workspace
@@ -32,9 +26,8 @@ import type { EveEvalContext } from "eve/evals";
 //   t1' push a deployment update that adds a skill — skills materialize into
 //       the sandbox workspace resources, so the sandbox version hash rotates
 //       for anything executing the new code
-//   t3  session A still sees the file: its turns are pinned to the original
-//       deployment on preview, so neither the new manifest nor the rotated
-//       sandbox key applies to it
+//   t3  session A no longer sees the file: its next request runs on the new
+//       deployment, whose changed sandbox resources rotate the sandbox key
 //   t4  a NEW session B adopts the new deployment: the added skill loads and
 //       shapes the reply
 //
@@ -43,6 +36,7 @@ import type { EveEvalContext } from "eve/evals";
 // everywhere else.
 
 const ALIAS_ENV = "EVE_E2E_REDEPLOY_ALIAS";
+const ALIAS_SETTLE_MATCHES = 5;
 
 const FILE_PATH = "/workspace/redeploy-note.txt";
 const FILE_TOKEN = "sandbox-redeploy-ok-K4W";
@@ -72,7 +66,7 @@ const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
 export default defineEval({
   description:
-    "Sandbox: a parked session survives redeploys with its workspace intact (pinned on preview), and new sessions adopt the new deployment.",
+    "Sandbox: a parked session adopts request-serving deployments, preserving or rotating its workspace according to the sandbox version.",
   tags: ["redeploy"],
   timeoutMs: 20 * 60_000,
   async test(t) {
@@ -119,18 +113,15 @@ export default defineEval({
       await deployToAlias(t, alias, "skill");
       await waitForAliasToServe(t, `"${SKILL_NAME}"`);
 
-      // t3: TRIPWIRE — on preview, session A's turns stay pinned to the
-      // deployment that created it, so its sandbox key never rotates and the
-      // file is still present. When turn dispatch gains preview
-      // latest-routing (issue #582), this gate flips to /absent/ (and the
-      // skill becomes loadable in session A too).
+      // t3: the next request is accepted by the new deployment. Its changed
+      // sandbox resources rotate the versioned key, so the old file is absent.
       const probe = await t.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
       );
       probe.expectOk();
-      probe.calledTool("bash", { output: /present/ });
-      probe.messageIncludes("present");
+      probe.calledTool("bash", { output: /absent/ });
+      probe.messageIncludes("absent");
 
       // t4: a fresh session adopts the new deployment — the added skill is
       // advertised and usable.
@@ -191,15 +182,22 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 }
 
 /**
- * Polls `/eve/v1/info` until the alias serves a deployment whose manifest
- * contains `marker`, so post-redeploy turns cannot hit a stale deployment.
+ * Polls `/eve/v1/info` until the alias repeatedly serves a deployment whose
+ * manifest contains `marker`. One matching response is insufficient while an
+ * alias update is propagating and could race the next request.
  */
 async function waitForAliasToServe(t: EveEvalContext, marker: string): Promise<void> {
   const deadline = Date.now() + 120_000;
+  let consecutiveMatches = 0;
   while (Date.now() < deadline) {
-    const response = await t.target.fetch("/eve/v1/info");
+    const response = await t.target.fetch("/eve/v1/info", { cache: "no-store" });
     if (response.ok && JSON.stringify(await response.json()).includes(marker)) {
-      return;
+      consecutiveMatches += 1;
+      if (consecutiveMatches >= ALIAS_SETTLE_MATCHES) {
+        return;
+      }
+    } else {
+      consecutiveMatches = 0;
     }
     await t.sleep(1_000);
   }

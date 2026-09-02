@@ -82,6 +82,10 @@ part of the authored channel API.
 
 Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
+Cold-start sends return their accepted candidate without waiting for address
+ownership. If simultaneous sends race, eve forwards the losing candidate's
+message to the winner; resolve the address after startup when you need a fixed
+handle to the canonical owner.
 
 ```ts
 const source = from(threadId);
@@ -404,6 +408,8 @@ defineChannel({
   ],
 });
 ```
+
+If `fetchFile` throws, eve replaces that attachment with a model-visible error note and continues the turn. Built-in channels include safe details such as the upstream HTTP status. Custom channel errors use a generic note, while eve keeps the original error in operator logs.
 
 The `URL` object survives the queue boundary as a string and is reconstituted inside the workflow step. The staging pipeline calls `fetchFile` with the URL serialized as a string (the URL's `href`), which is why the example matches on `url.startsWith(...)`. Return bytes to stage the file to the sandbox, or `null` to let the URL pass through to the model provider.
 

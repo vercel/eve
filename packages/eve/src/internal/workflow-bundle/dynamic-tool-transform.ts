@@ -43,6 +43,7 @@ interface ScopeEntry {
 export async function transformDynamicToolExecute(
   filename: string,
   source: string,
+  workflowFunctions: ReadonlySet<string> = NO_WORKFLOW_FUNCTIONS,
 ): Promise<{ code: string } | null> {
   if (!source.includes("defineTool")) return null;
 
@@ -51,8 +52,20 @@ export async function transformDynamicToolExecute(
   if (defineToolAliases.size === 0) return null;
 
   const callbacks: CallbackInfo[] = [];
-  walkForCallbacks(source, ast, callbacks, [], defineToolAliases);
+  walkForCallbacks(source, ast, callbacks, [], { defineToolAliases, workflowFunctions });
   return callbacks.length === 0 ? null : applyTransform(source, callbacks);
+}
+
+const NO_WORKFLOW_FUNCTIONS: ReadonlySet<string> = new Set();
+
+interface WalkContext {
+  readonly defineToolAliases: ReadonlySet<string>;
+  /**
+   * Top-level `"use workflow"` functions the directive transform already
+   * hoisted and stubbed. A tool whose `execute` is one never runs as a
+   * callback, so it keeps its identity and is not stamped.
+   */
+  readonly workflowFunctions: ReadonlySet<string>;
 }
 
 // Keep the old export name for backward compatibility with the plugin.
@@ -85,7 +98,7 @@ function walkForCallbacks(
   node: AstNode | null | undefined,
   results: CallbackInfo[],
   nestedScopes: readonly ScopeEntry[],
-  defineToolAliases: ReadonlySet<string>,
+  context: WalkContext,
 ): void {
   if (!node) return;
 
@@ -99,7 +112,7 @@ function walkForCallbacks(
         vars: collectScopeVarDeclarations(bodyNode),
       },
     ];
-    walkForCallbacks(source, bodyNode, results, extended, defineToolAliases);
+    walkForCallbacks(source, bodyNode, results, extended, context);
     return;
   }
 
@@ -107,11 +120,11 @@ function walkForCallbacks(
     node.type === "CallExpression" &&
     node.callee?.type === "Identifier" &&
     node.callee.name !== undefined &&
-    defineToolAliases.has(node.callee.name) &&
+    context.defineToolAliases.has(node.callee.name) &&
     node.arguments?.length === 1 &&
     node.arguments[0]?.type === "ObjectExpression"
   ) {
-    collectToolCallbacks(source, node.arguments[0], results, nestedScopes);
+    collectToolCallbacks(source, node.arguments[0], results, nestedScopes, context);
     return;
   }
 
@@ -119,13 +132,22 @@ function walkForCallbacks(
     if (Array.isArray(value)) {
       for (const child of value) {
         if (isAstNode(child)) {
-          walkForCallbacks(source, child, results, nestedScopes, defineToolAliases);
+          walkForCallbacks(source, child, results, nestedScopes, context);
         }
       }
     } else if (isAstNode(value)) {
-      walkForCallbacks(source, value, results, nestedScopes, defineToolAliases);
+      walkForCallbacks(source, value, results, nestedScopes, context);
     }
   }
+}
+
+function isWorkflowExecute(property: AstNode | undefined, context: WalkContext): boolean {
+  const value = property?.value as AstNode | undefined;
+  return (
+    value?.type === "Identifier" &&
+    value.name !== undefined &&
+    context.workflowFunctions.has(value.name)
+  );
 }
 
 function collectToolCallbacks(
@@ -133,15 +155,12 @@ function collectToolCallbacks(
   tool: AstNode,
   results: CallbackInfo[],
   nestedScopes: readonly ScopeEntry[],
+  context: WalkContext,
 ): void {
-  collectCallbackProperty(
-    source,
-    findProperty(tool, "execute"),
-    "execute",
-    "execute",
-    results,
-    nestedScopes,
-  );
+  const execute = findProperty(tool, "execute");
+  if (!isWorkflowExecute(execute, context)) {
+    collectCallbackProperty(source, execute, "execute", "execute", results, nestedScopes);
+  }
   collectCallbackProperty(
     source,
     findProperty(tool, "toModelOutput"),

@@ -15,7 +15,12 @@ import {
   readScheduleId,
   readSessionTraceId,
 } from "#execution/eve-workflow-attributes.js";
-import { ChannelRequestIdKey, ScheduleIdKey } from "#context/keys.js";
+import {
+  ChannelInstrumentationKey,
+  ChannelRequestIdKey,
+  ScheduleIdKey,
+  SessionTraceSeedKey,
+} from "#context/keys.js";
 import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
 
 const slackChannelCtx = {
@@ -63,6 +68,82 @@ describe("isWorkflowTraceContentVisible", () => {
         [CHANNEL_CONTEXT_KEY_NAME]: { audience: "public", kind: "slack" },
       }),
     ).toBe(true);
+  });
+
+  it("uses the effective decision from a forwarded trace seed", () => {
+    const serializedContext = {
+      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+      [SessionTraceSeedKey.name]: {
+        decision: { action: "record", recordInputs: true, recordOutputs: true },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: true, recordOutputs: true },
+          originAudience: "public",
+        },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      },
+      [ChannelInstrumentationKey.name]: {
+        kind: "eve",
+        metadata: { audience: "public" },
+      },
+    };
+
+    expect(isWorkflowTraceContentVisible(serializedContext)).toBe(true);
+    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+      "$eve.is_trace_content_visible": true,
+    });
+  });
+
+  it("does not infer forwarded acceptance from projected metadata", () => {
+    const serializedContext = {
+      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "unknown", kind: "http" },
+      [ChannelInstrumentationKey.name]: {
+        kind: "eve",
+        metadata: { audience: "public" },
+      },
+    };
+
+    expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
+    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+      "$eve.is_trace_content_visible": false,
+    });
+  });
+
+  it("keeps workflow content hidden for a directional forwarded ceiling", () => {
+    const serializedContext = {
+      [CHANNEL_CONTEXT_KEY_NAME]: { audience: "private", kind: "eve" },
+      [SessionTraceSeedKey.name]: {
+        decision: { action: "record", recordInputs: false, recordOutputs: true },
+        forwardedTracePolicy: {
+          ceiling: { recordInputs: false, recordOutputs: true },
+          originAudience: "private",
+        },
+        spanId: "1".repeat(16),
+        traceFlags: 1,
+        traceId: "2".repeat(32),
+      },
+    };
+
+    expect(isWorkflowTraceContentVisible(serializedContext)).toBe(false);
+    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+      "$eve.is_trace_content_visible": false,
+    });
+  });
+
+  it("keeps workflow content hidden for malformed forwarded seed state", () => {
+    expect(
+      isWorkflowTraceContentVisible({
+        [CHANNEL_CONTEXT_KEY_NAME]: { audience: "public", kind: "eve" },
+        [SessionTraceSeedKey.name]: {
+          decision: { action: "record", recordInputs: true, recordOutputs: true },
+          forwardedTracePolicy: { originAudience: "public" },
+          spanId: "1".repeat(16),
+          traceFlags: 1,
+          traceId: "2".repeat(32),
+        },
+      }),
+    ).toBe(false);
   });
 });
 
@@ -381,6 +462,19 @@ describe("readSessionTraceId", () => {
     expect(
       readSessionTraceId({
         "eve.sessionTraceSeed": { spanId: "a".repeat(16), traceFlags: 0, traceId: "b".repeat(32) },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when a malformed durable decision resolves to drop", () => {
+    expect(
+      readSessionTraceId({
+        "eve.sessionTraceSeed": {
+          decision: { action: "record", recordInputs: "yes", recordOutputs: true },
+          spanId: "a".repeat(16),
+          traceFlags: 1,
+          traceId: "b".repeat(32),
+        },
       }),
     ).toBeUndefined();
   });

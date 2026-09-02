@@ -14,10 +14,9 @@ import {
 } from "#execution/wire/session-inbox-contract.js";
 import type { SessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.v0.js";
-import {
-  normalizeSessionInboxWireV2,
-  sessionInboxWireV1Migration,
-} from "#execution/wire/session-inbox-wire.v2-migration.js";
+import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
+import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.v2.migration.js";
+import { sessionInboxWireV2Migration } from "#execution/wire/session-inbox-wire.v3.migration.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -45,6 +44,7 @@ const WIRE_LABEL = "session inbox payload";
 const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
+  sessionInboxWireV2Migration,
 ];
 
 /**
@@ -59,6 +59,11 @@ function decode(value: unknown): DecodedSessionInbox {
     typeof value === "object" && value !== null && "version" in value
       ? (value as { readonly version?: unknown }).version
       : undefined;
+  const hasDeclaredVersion = typeof value === "object" && value !== null && "version" in value;
+  if (hasDeclaredVersion && typeof declaredVersion !== "number") {
+    throw new SessionInboxWireError(`${WIRE_LABEL}: value has no numeric "version" field.`);
+  }
+  const normalized = normalizeSessionInboxWireV2(value);
   let migrated: unknown;
   try {
     migrated = runMigrationChain({
@@ -66,7 +71,7 @@ function decode(value: unknown): DecodedSessionInbox {
       label: WIRE_LABEL,
       migrations: sessionInboxMigrations,
       targetVersion: SESSION_INBOX_WIRE_VERSION,
-      value,
+      value: normalized,
     });
   } catch (error) {
     throw new SessionInboxWireError(error instanceof Error ? error.message : String(error));
@@ -78,8 +83,15 @@ function decode(value: unknown): DecodedSessionInbox {
       `${WIRE_LABEL} declares version ${JSON.stringify(wire.version)}, expected ${SESSION_INBOX_WIRE_VERSION}.`,
     );
   }
-  if (declaredVersion === 2 && wire.kind === "deliver" && !("payload" in wire)) {
-    throw new SessionInboxWireError(`${WIRE_LABEL} does not match wire version 2.`);
+  if (
+    typeof declaredVersion === "number" &&
+    declaredVersion >= 2 &&
+    wire.kind === "deliver" &&
+    !("payload" in wire)
+  ) {
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
+    );
   }
   return normalizeWire(wire as SessionInboxWire);
 }

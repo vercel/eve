@@ -1,10 +1,16 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { STABLE_WORKFLOW_NAMES } from "#execution/workflow-runtime.js";
+import { STABLE_WORKFLOW_NAMES } from "#execution/stable-workflow-names.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
-import { transformWorkflowDirectives } from "./workflow-transformer.js";
+import { prepareAuthoredWorkflowDirectives } from "./authored-workflow-directives.js";
+import {
+  createWorkflowId,
+  findWorkflowDirectiveFunctions,
+  stripJavaScriptExtension,
+  transformWorkflowDirectives,
+} from "./workflow-transformer.js";
 
 export type WorkflowManifest = {
   steps?: {
@@ -65,6 +71,27 @@ export async function applyWorkflowTransform(
     resolvedProjectRoot,
   );
 
+  if (
+    absolutePath !== undefined &&
+    isAuthoredApplicationModule(absolutePath, resolvedProjectRoot)
+  ) {
+    const prepared =
+      mode === false
+        ? undefined
+        : await prepareAuthoredWorkflowDirectives({ filePath: absolutePath, source });
+    // Ids derive from the app root so the driver bundle (built from eve's
+    // package directory) and the server bundle (built from the app) agree.
+    return transformWorkflowDirectives({
+      authored: true,
+      filename: authoredRelativePath(absolutePath, resolvedProjectRoot),
+      mode: prepared?.hasDirectives === true ? mode : false,
+      moduleSpecifier: authoredModuleIdBase(absolutePath, resolvedProjectRoot),
+      source: prepared?.source ?? source,
+      stableModuleSpecifier: undefined,
+      stableWorkflowNames,
+    });
+  }
+
   return transformWorkflowDirectives({
     filename,
     mode,
@@ -75,19 +102,71 @@ export async function applyWorkflowTransform(
   });
 }
 
-export function detectWorkflowPatterns(source: string): {
+export function isAuthoredApplicationModule(absolutePath: string, appRoot: string): boolean {
+  const normalizedRoot = toRealPath(appRoot).replace(/\\/g, "/").replace(/\/$/, "");
+  const normalizedPath = toRealPath(absolutePath).replace(/\\/g, "/");
+  if (!normalizedPath.startsWith(`${normalizedRoot}/`)) return false;
+  if (isInNodeModules(normalizedPath)) return false;
+  return findPackageJson(normalizedPath)?.name !== EVE_PACKAGE_NAME;
+}
+
+function authoredRelativePath(absolutePath: string, appRoot: string): string {
+  return toRelativeImportPath(toRealPath(absolutePath), toRealPath(appRoot)).replace(/^\.\//, "");
+}
+
+function authoredModuleIdBase(absolutePath: string, appRoot: string): string {
+  return `./${stripJavaScriptExtension(authoredRelativePath(absolutePath, appRoot))}`;
+}
+
+/** The id the transform mints for an authored `"use workflow"` function. */
+export function authoredWorkflowId(
+  absolutePath: string,
+  appRoot: string,
+  functionName: string,
+): string {
+  return createWorkflowId(authoredModuleIdBase(absolutePath, appRoot), functionName);
+}
+
+// Bundlers hand back real paths while configuration carries the spelled
+// path (for example macOS `/var` → `/private/var`); compare like with like.
+function toRealPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+// Reads the manifest directly: applications need not declare a `version`,
+// which the package-specifier cache requires.
+export function isAuthoredApplicationRoot(appRoot: string): boolean {
+  const packageJsonPath = join(appRoot, "package.json");
+  if (!existsSync(packageJsonPath)) return false;
+  try {
+    const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { name?: unknown };
+    return parsed.name !== EVE_PACKAGE_NAME;
+  } catch {
+    return false;
+  }
+}
+
+export async function findWorkflowPatterns(
+  filename: string,
+  source: string,
+): Promise<{
   hasSerde: boolean;
   hasUseStep: boolean;
   hasUseWorkflow: boolean;
-} {
+}> {
+  const directives = await findWorkflowDirectiveFunctions(filename, source);
   return {
     hasSerde:
       source.includes("workflow.serde") ||
       source.includes("@serde") ||
       source.includes("workflowSerde") ||
       source.includes("__workflow_serde"),
-    hasUseStep: /["']use step["']/.test(source),
-    hasUseWorkflow: /["']use workflow["']/.test(source),
+    hasUseStep: directives.some((fn) => fn.directive === "use step"),
+    hasUseWorkflow: directives.some((fn) => fn.directive === "use workflow"),
   };
 }
 

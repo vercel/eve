@@ -1,4 +1,5 @@
 export const SHA_PATTERN = /^[0-9a-f]{40}$/i;
+const PACKAGE_VERSION_SHA_LENGTH = 16;
 
 export function packageArtifactPath(sourceSha) {
   return `packages/${sourceSha}/eve.tgz`;
@@ -18,7 +19,7 @@ export function packageDependencyUrl(baseUrl, sourceSha) {
 export function packageVersion(stableVersion, sourceSha) {
   const match = stableVersion.match(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/);
   if (match === null) throw new Error(`Expected a stable eve version, received ${stableVersion}.`);
-  return `${stableVersion}+main.${sourceSha}`;
+  return `${stableVersion}+main.${sourceSha.slice(0, PACKAGE_VERSION_SHA_LENGTH)}`;
 }
 
 export function preparePackageJson(packageJson, sourceSha) {
