@@ -1,5 +1,5 @@
 import type { DiscordInstrumentationMetadata } from "#public/channels/discord/index.js";
-import type { ChannelFrom } from "#channel/channel-operations.js";
+import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operations.js";
 import type { SessionHandle } from "#channel/session.js";
 import type { SessionAuthContext, TurnPolicy } from "#channel/types.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
@@ -11,6 +11,7 @@ import {
   createDiscordFollowupMessage,
   discordContinuationToken,
   editDiscordOriginalResponse,
+  resolveDiscordApplicationId,
   resolveDiscordBotToken,
   sendDiscordChannelMessage,
   splitDiscordMessageContent,
@@ -47,6 +48,14 @@ import {
 } from "#public/channels/discord/responses.js";
 import { type DiscordWebhookVerifier } from "#public/channels/discord/verify.js";
 import { verifyDiscordInbound } from "#public/channels/discord/verifyInbound.js";
+import {
+  DiscordGatewayRequestError,
+  parseDiscordGatewayMessage,
+  verifyDiscordGatewayRequest,
+  type DiscordGatewayConfig,
+  type DiscordGatewayMessageResult,
+  type DiscordMessage,
+} from "#public/channels/discord/gateway.js";
 import { readNonEmptyString } from "#shared/guards.js";
 import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
@@ -158,6 +167,8 @@ export interface DiscordChannelConfig {
   readonly route?: string;
   /** Policy for accepted messages that arrive while a turn is active. */
   readonly turnPolicy?: TurnPolicy;
+  /** Authenticated experimental ingestion of ordinary Discord Gateway messages. */
+  readonly gateway?: DiscordGatewayConfig;
 
   /** Inbound command hook. Defaults to user-scoped Discord auth and dispatch. Return `{ auth }` to dispatch, or `null` to acknowledge without running the agent. */
   onCommand?(
@@ -266,6 +277,15 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
           });
         },
       ),
+      ...(config.gateway === undefined
+        ? []
+        : [
+            POST<DiscordChannelState>(
+              config.gateway.route ?? "/eve/v1/discord/gateway",
+              async (request, { from, resolveSession }) =>
+                await handleGatewayMessage({ config, from, request, resolveSession }),
+            ),
+          ]),
     ],
 
     async receive(input, { from }) {
@@ -316,6 +336,161 @@ export function discordChannel(config: DiscordChannelConfig = {}): DiscordChanne
   });
 }
 
+async function handleGatewayMessage(input: {
+  readonly config: DiscordChannelConfig;
+  readonly from: ChannelFrom<DiscordChannelState>;
+  readonly request: Request;
+  readonly resolveSession: ChannelResolveSession;
+}): Promise<Response> {
+  const gateway = input.config.gateway!;
+  let envelope;
+  try {
+    const applicationId = await resolveDiscordApplicationId(
+      input.config.credentials?.applicationId,
+    );
+    ({ envelope } = await verifyDiscordGatewayRequest(input.request, {
+      applicationId,
+      secret: gateway.secret,
+    }));
+  } catch (error) {
+    if (error instanceof DiscordGatewayRequestError) {
+      return Response.json({ accepted: false, reason: error.reason }, { status: error.status });
+    }
+    return Response.json({ accepted: false, reason: "invalid_request" }, { status: 400 });
+  }
+  const message = parseDiscordGatewayMessage(envelope.data);
+  if (message === null) return Response.json({ accepted: false, reason: "invalid_message" });
+  if (message.guildId && !message.threadId && message.referencedMessage?.id !== undefined) {
+    const anchor = `${envelope.applicationId}:message:${message.referencedMessage.id}`;
+    if ((await input.resolveSession(anchor)) === undefined) {
+      return Response.json({ accepted: false, reason: "anchor_not_ready" }, { status: 409 });
+    }
+  }
+  const state = gatewayMessageState(envelope.applicationId, message);
+  const context: DiscordContext = { discord: buildDiscordHandle({ config: input.config, state }) };
+  const result =
+    gateway.onMessage === undefined
+      ? await defaultGatewayMessageResult({
+          config: input.config,
+          message,
+          resolveSession: input.resolveSession,
+        })
+      : await gateway.onMessage(context, message);
+  if (result === null || result === undefined)
+    return Response.json({ accepted: false, reason: "ignored" });
+  const token = await gatewayContinuationToken({
+    applicationId: envelope.applicationId,
+    message,
+    resolveSession: input.resolveSession,
+  });
+  if (token === null)
+    return Response.json({ accepted: false, reason: "anchor_not_ready" }, { status: 409 });
+  try {
+    const session = await input.from(token).send(message.content, {
+      auth: result.auth,
+      context: result.context ?? [formatGatewayContext(message)],
+      state,
+      title: result.title,
+    });
+    return Response.json({ accepted: true, sessionId: session.id }, { status: 202 });
+  } catch (error) {
+    log.error("Gateway message delivery failed", { error });
+    return Response.json({ accepted: false, reason: "delivery_failed" }, { status: 503 });
+  }
+}
+
+async function defaultGatewayMessageResult(input: {
+  readonly config: DiscordChannelConfig;
+  readonly message: DiscordMessage;
+  readonly resolveSession: ChannelResolveSession;
+}): Promise<DiscordGatewayMessageResult> {
+  const message = input.message;
+  if (message.author.isBot) return null;
+  if (!message.guildId) return { auth: defaultDiscordGatewayAuth(message) };
+  if (message.referencedMessage?.id !== undefined) {
+    const applicationId = await resolveDiscordApplicationId(
+      input.config.credentials?.applicationId,
+    );
+    const token = `${applicationId}:message:${message.referencedMessage.id}`;
+    return (await input.resolveSession(token)) === undefined
+      ? null
+      : { auth: defaultDiscordGatewayAuth(message) };
+  }
+  const applicationId = await resolveGatewayApplicationId(input.config.credentials);
+  if (message.mentions.some((mention) => mention.id === applicationId)) {
+    return { auth: defaultDiscordGatewayAuth(message) };
+  }
+  return null;
+}
+
+async function gatewayContinuationToken(input: {
+  readonly applicationId: string;
+  readonly message: DiscordMessage;
+  readonly resolveSession: ChannelResolveSession;
+}): Promise<string | null> {
+  if (!input.message.guildId) return `${input.applicationId}:dm:${input.message.channelId}`;
+  if (input.message.threadId) return `${input.applicationId}:thread:${input.message.threadId}`;
+  if (input.message.referencedMessage?.id !== undefined) {
+    const anchor = `${input.applicationId}:message:${input.message.referencedMessage.id}`;
+    return (await input.resolveSession(anchor)) === undefined ? null : anchor;
+  }
+  return `${input.applicationId}:message:${input.message.id}`;
+}
+
+function gatewayMessageState(applicationId: string, message: DiscordMessage): DiscordChannelState {
+  return {
+    applicationId,
+    channelId: message.channelId,
+    conversationId: message.id,
+    guildId: message.guildId ?? null,
+    hasMessageAnchor: false,
+    initialResponseSent: true,
+    interactionToken: null,
+  };
+}
+
+function defaultDiscordGatewayAuth(message: DiscordMessage): SessionAuthContext {
+  const attributes: Record<string, string> = {
+    channel_id: message.channelId,
+    message_id: message.id,
+    user_id: message.author.id,
+  };
+  if (message.guildId) attributes.guild_id = message.guildId;
+  if (message.author.username) attributes.username = message.author.username;
+  return {
+    attributes,
+    authenticator: "discord-gateway",
+    issuer: message.guildId ? `discord:${message.guildId}` : "discord",
+    principalId: message.guildId
+      ? `discord:${message.guildId}:${message.author.id}`
+      : `discord:${message.author.id}`,
+    principalType: "user",
+  };
+}
+
+async function resolveGatewayApplicationId(
+  credentials: DiscordChannelCredentials | undefined,
+): Promise<string | undefined> {
+  try {
+    return await resolveDiscordApplicationId(credentials?.applicationId);
+  } catch {
+    return undefined;
+  }
+}
+
+function formatGatewayContext(message: DiscordMessage): string {
+  return [
+    "<discord_context>",
+    "response_medium: discord",
+    "response_instructions: Reply for Discord in concise Markdown. Avoid mass mentions.",
+    `user_id: ${message.author.id}`,
+    `channel_id: ${message.channelId}`,
+    ...(message.guildId ? [`guild_id: ${message.guildId}`] : []),
+    `message_id: ${message.id}`,
+    "</discord_context>",
+  ].join("\n");
+}
+
 function rebuildDiscordContext(
   state: DiscordChannelState,
   session: SessionHandle,
@@ -337,11 +512,16 @@ function buildDiscordHandle(input: {
   const credentials = mergeCredentials(input.config.credentials, state);
 
   function anchor(posted: DiscordPostedMessage): void {
-    if (!posted.id || state.hasMessageAnchor) return;
+    const gatewayMessageChain = input.config.gateway !== undefined && state.guildId !== null;
+    if (!posted.id || (state.hasMessageAnchor && !gatewayMessageChain)) return;
     state.conversationId = posted.id;
     state.hasMessageAnchor = true;
     if (state.channelId) {
-      input.session?.continuation?.rekey(discordContinuationToken(state.channelId, posted.id));
+      if (input.config.gateway !== undefined && state.guildId === null) return;
+      const token = gatewayMessageChain
+        ? `${state.applicationId}:message:${posted.id}`
+        : discordContinuationToken(state.channelId, posted.id);
+      input.session?.continuation?.rekey(token);
     }
   }
 
@@ -487,12 +667,14 @@ async function handleInteraction(input: {
   }
   if (input.interaction.type === DISCORD_INTERACTION_TYPE.MESSAGE_COMPONENT) {
     return handleComponentInteraction({
+      config: input.config,
       interaction: input.interaction,
       from: input.from,
       waitUntil: input.waitUntil,
     });
   }
   return handleModalSubmitInteraction({
+    config: input.config,
     interaction: input.interaction,
     from: input.from,
     waitUntil: input.waitUntil,
@@ -532,12 +714,14 @@ async function handleCommandInteraction(input: {
       result,
       from: input.from,
       state,
+      config: input.config,
     }),
   );
   return discordDeferredJson(result.ephemeral === true);
 }
 
 function handleComponentInteraction(input: {
+  readonly config: DiscordChannelConfig;
   readonly interaction: DiscordComponentInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
@@ -556,6 +740,7 @@ function handleComponentInteraction(input: {
   if (inputResponses.length > 0) {
     input.waitUntil(
       dispatchInputResponses({
+        config: input.config,
         conversationId: input.interaction.messageId,
         inputResponses,
         interaction: input.interaction,
@@ -567,6 +752,7 @@ function handleComponentInteraction(input: {
 }
 
 function handleModalSubmitInteraction(input: {
+  readonly config: DiscordChannelConfig;
   readonly interaction: DiscordModalSubmitInteraction;
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly waitUntil: (task: Promise<unknown>) => void;
@@ -575,6 +761,7 @@ function handleModalSubmitInteraction(input: {
   if (inputResponses.length > 0) {
     input.waitUntil(
       dispatchInputResponses({
+        config: input.config,
         conversationId: input.interaction.messageId ?? input.interaction.id,
         inputResponses,
         interaction: input.interaction,
@@ -590,6 +777,7 @@ async function dispatchCommand(input: {
   readonly result: Exclude<DiscordCommandResult, null>;
   readonly from: ChannelFrom<DiscordChannelState>;
   readonly state: DiscordChannelState;
+  readonly config: DiscordChannelConfig;
 }): Promise<void> {
   const turnMessage = commandInteractionMessage(input.interaction);
   const contextBlock = formatDiscordContextBlock({
@@ -604,20 +792,19 @@ async function dispatchCommand(input: {
   const channelContext = input.result.context ?? [];
 
   try {
-    await input
-      .from(discordContinuationToken(input.interaction.channelId, input.interaction.id))
-      .send(turnMessage, {
-        auth: input.result.auth,
-        context: [contextBlock, ...channelContext],
-        state: input.state,
-        title: input.result.title,
-      });
+    await input.from(commandContinuationToken(input.config, input.interaction)).send(turnMessage, {
+      auth: input.result.auth,
+      context: [contextBlock, ...channelContext],
+      state: input.state,
+      title: input.result.title,
+    });
   } catch (error) {
     log.error("command delivery failed", { error });
   }
 }
 
 async function dispatchInputResponses(input: {
+  readonly config: DiscordChannelConfig;
   readonly conversationId: string;
   readonly inputResponses: readonly ValidatedInputResponse[];
   readonly interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction;
@@ -625,13 +812,34 @@ async function dispatchInputResponses(input: {
 }): Promise<void> {
   try {
     await input
-      .from(discordContinuationToken(input.interaction.channelId, input.conversationId))
+      .from(interactionContinuationToken(input.config, input.interaction, input.conversationId))
       .respond(input.inputResponses, {
         auth: null,
       });
   } catch (error) {
     log.error("interaction response delivery failed", { error });
   }
+}
+
+function commandContinuationToken(
+  config: DiscordChannelConfig,
+  interaction: DiscordCommandInteraction,
+): string {
+  if (config.gateway === undefined) {
+    return discordContinuationToken(interaction.channelId, interaction.id);
+  }
+  if (!interaction.guildId) return `${interaction.applicationId}:dm:${interaction.channelId}`;
+  return `${interaction.applicationId}:message:${interaction.id}`;
+}
+
+function interactionContinuationToken(
+  config: DiscordChannelConfig,
+  interaction: DiscordComponentInteraction | DiscordModalSubmitInteraction,
+  messageId: string,
+): string {
+  return config.gateway !== undefined && interaction.guildId
+    ? `${interaction.applicationId}:message:${messageId}`
+    : discordContinuationToken(interaction.channelId, messageId);
 }
 
 function stateFromInteraction(

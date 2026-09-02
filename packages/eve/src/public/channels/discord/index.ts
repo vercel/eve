@@ -90,6 +90,14 @@ export {
 export { defaultDiscordAuth } from "#public/channels/discord/defaults.js";
 
 export {
+  parseDiscordGatewayMessage,
+  type DiscordGatewayConfig,
+  type DiscordGatewayEnvelopeV1,
+  type DiscordGatewayMessageResult,
+  type DiscordMessage,
+} from "#public/channels/discord/gateway.js";
+
+export {
   verifyDiscordRequest,
   verifyDiscordSignature,
   type DiscordPublicKey,
