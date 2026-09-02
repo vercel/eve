@@ -191,10 +191,18 @@ describe("emitStreamContent empty delivery", () => {
     expect(appended.map((event) => event.data.messageDelta.length)).toEqual([
       1, 64, 64, 64, 64, 64, 47,
     ]);
-    const lastAppend = appended.at(-1);
-    expect(
-      (lastAppend?.data.messageOffset ?? 0) + (lastAppend?.data.messageDelta.length ?? 0),
-    ).toBe(deltaCount);
+    expect(appended.map((event) => event.data.startsBlock)).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+    expect(appended.reduce((total, event) => total + event.data.messageDelta.length, 0)).toBe(
+      deltaCount,
+    );
     expect(events.at(-1)?.type).toBe("message.completed");
   });
 
@@ -327,8 +335,8 @@ describe("emitStreamContent action requests", () => {
       {
         callId: "call-render",
         inputTextDelta: "",
-        inputTextOffset: 0,
         sequence: 0,
+        startsBlock: true,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_0",
@@ -336,8 +344,8 @@ describe("emitStreamContent action requests", () => {
       {
         callId: "call-render",
         inputTextDelta: '{"title":"Hel',
-        inputTextOffset: 0,
         sequence: 0,
+        startsBlock: false,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_0",
@@ -345,8 +353,8 @@ describe("emitStreamContent action requests", () => {
       {
         callId: "call-render",
         inputTextDelta: 'lo"}',
-        inputTextOffset: 13,
         sequence: 0,
+        startsBlock: false,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_0",

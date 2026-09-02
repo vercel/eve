@@ -103,8 +103,8 @@ function reasoningEvent(delta: string, index = 0): MessageStreamEvent {
       type: "reasoning.appended",
       data: {
         reasoningDelta: delta,
-        reasoningOffset: 0,
         sequence: 2,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "child-turn",
       },

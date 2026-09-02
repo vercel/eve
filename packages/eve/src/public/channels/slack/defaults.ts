@@ -29,7 +29,7 @@ import type {
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
 import type { InputRequest } from "#shared/input.js";
-import { appendStreamTextDelta } from "#shared/stream-text.js";
+import { applyStreamTextDelta } from "#shared/stream-text.js";
 
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
@@ -329,9 +329,9 @@ export const defaultEvents: SlackChannelInternalEvents = {
   },
 
   async "reasoning.appended"(event, channel, _ctx) {
-    const reasoning = appendStreamTextDelta(
+    const reasoning = applyStreamTextDelta(
       reasoningTextByState.get(channel.state),
-      event.reasoningOffset,
+      event.startsBlock,
       event.reasoningDelta,
     );
     if (reasoning === undefined) return;

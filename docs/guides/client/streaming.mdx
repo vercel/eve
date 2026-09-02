@@ -75,26 +75,27 @@ for await (const event of response) {
 }
 ```
 
-`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. Each carries its new text and the zero-based UTF-16 code-unit offset where that text begins. eve may combine adjacent deltas for the same text block or tool call while a durable stream write is in flight, but preserves their text and event ordering. A different event type, tool `callId`, or stream coordinate is a barrier. The completed text forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
+`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. Each carries its new text and a `startsBlock` boolean. `startsBlock: true` marks the first delta of a block, including a replacement block started by a model retry; `false` marks a continuation. eve may combine adjacent continuation deltas for the same text block or tool call while a durable stream write is in flight, but preserves their text and event ordering. A block start, different event type, tool `callId`, or stream coordinate is a barrier. The completed text forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
 
-The default message reducer accumulates these events for you. A raw stream consumer can use the same `appendStreamTextDelta` API:
+The default message reducer accumulates these events for you. A raw stream consumer can apply the same rule directly:
 
 ```ts
-import { appendStreamTextDelta } from "eve/client";
-
 let message: string | undefined;
 
 for await (const event of response) {
   if (event.type !== "message.appended") continue;
 
-  const next = appendStreamTextDelta(message, event.data.messageOffset, event.data.messageDelta);
-  if (next !== undefined) message = next;
+  if (event.data.startsBlock) {
+    message = event.data.messageDelta;
+  } else if (message !== undefined) {
+    message += event.data.messageDelta;
+  }
 }
 ```
 
-Offset `0` starts or restarts a text block. A later delta must begin exactly at the accumulated string's length; the helper returns `undefined` for a gap or overlap so a consumer does not project corrupt text. Apply the same helper to `reasoningDelta` and `reasoningOffset`, or `inputTextDelta` and `inputTextOffset`.
+A continuation is useful only when the consumer has already accumulated that block. After reconnecting without local state, replay from the block start or wait for its completed event instead of appending a continuation to an empty value. Apply the same rule to `reasoningDelta` and `inputTextDelta`.
 
-The eve client validates the stream version on every connection. It accepts v21–v24 cumulative append events and v25 offset append events, then exposes both as the current offset-based `MessageStreamEvent` contract. This also applies when an automatic reconnect reaches a newer deployment. A missing or unsupported `x-eve-stream-version` header fails the stream instead of treating unknown JSON as the current event type.
+The eve client validates the stream version on every connection. It accepts v21–v24 cumulative message and reasoning append events and v24 offset-based tool-input appends, then exposes them through the current `startsBlock`-based `MessageStreamEvent` contract. This also applies when an automatic reconnect reaches a newer deployment. A missing or unsupported `x-eve-stream-version` header fails the stream instead of treating unknown JSON as the current event type.
 
 ## Handle event types
 

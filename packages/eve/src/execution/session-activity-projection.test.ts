@@ -191,8 +191,8 @@ describe("observeSessionActivity", () => {
     const event: MessageStreamEvent = {
       data: {
         messageDelta: "hello",
-        messageOffset: 0,
         sequence: 0,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn-1",
       },

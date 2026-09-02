@@ -16,7 +16,6 @@ import {
   type MessageStreamEvent,
   type SubagentCalledStreamEvent,
   type SubagentCompletedStreamEvent,
-  appendStreamTextDelta,
   Client,
   ClientSession,
 } from "#client/index.js";
@@ -31,6 +30,7 @@ import {
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
+import { applyStreamTextDelta } from "#shared/stream-text.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
   SubagentRun,
@@ -2184,18 +2184,19 @@ async function* eveEventsToTUIStream(
           // message generation so it renders as its own block.
           state.generation += 1;
           state.text = "";
+          state.started = false;
           state.completed = false;
           state.blocked = false;
         }
 
         if (state.blocked) break;
-        if (appended.data.messageOffset === 0 && state.text.length > 0) {
+        if (appended.data.startsBlock && state.started) {
           state.blocked = true;
           break;
         }
-        const next = appendStreamTextDelta(
-          state.text,
-          appended.data.messageOffset,
+        const next = applyStreamTextDelta(
+          state.started ? state.text : undefined,
+          appended.data.startsBlock,
           appended.data.messageDelta,
         );
         if (next === undefined) {
@@ -2208,6 +2209,7 @@ async function* eveEventsToTUIStream(
 
         const delta = next.slice(state.text.length);
         state.text = next;
+        state.started = true;
         yield { type: "assistant-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2267,18 +2269,19 @@ async function* eveEventsToTUIStream(
           if (stepEpoch <= state.completedEpoch) break;
           state.generation += 1;
           state.text = "";
+          state.started = false;
           state.completed = false;
           state.blocked = false;
         }
 
         if (state.blocked) break;
-        if (appended.data.reasoningOffset === 0 && state.text.length > 0) {
+        if (appended.data.startsBlock && state.started) {
           state.blocked = true;
           break;
         }
-        const next = appendStreamTextDelta(
-          state.text,
-          appended.data.reasoningOffset,
+        const next = applyStreamTextDelta(
+          state.started ? state.text : undefined,
+          appended.data.startsBlock,
           appended.data.reasoningDelta,
         );
         if (next === undefined) {
@@ -2291,6 +2294,7 @@ async function* eveEventsToTUIStream(
 
         const delta = next.slice(state.text.length);
         state.text = next;
+        state.started = true;
         yield { type: "reasoning-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2601,6 +2605,8 @@ type StreamPartState = {
   /** Whether a restart or discontinuity makes future deltas unsafe to append. */
   blocked: boolean;
   generation: number;
+  /** Whether the current generation has received its block-start delta. */
+  started: boolean;
   /** Accumulated text of the current generation. */
   text: string;
   completed: boolean;
@@ -2611,7 +2617,14 @@ type StreamPartState = {
 function partStateFor(parts: Map<string, StreamPartState>, base: string): StreamPartState {
   let state = parts.get(base);
   if (state === undefined) {
-    state = { blocked: false, generation: 0, text: "", completed: false, completedEpoch: 0 };
+    state = {
+      blocked: false,
+      generation: 0,
+      started: false,
+      text: "",
+      completed: false,
+      completedEpoch: 0,
+    };
     parts.set(base, state);
   }
   return state;

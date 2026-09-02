@@ -865,8 +865,8 @@ describe("createWorkflowRuntime#createSession", () => {
       value: {
         data: {
           messageDelta: "lo",
-          messageOffset: 3,
           sequence: 2,
+          startsBlock: false,
           stepIndex: 0,
           turnId: "turn-1",
         },

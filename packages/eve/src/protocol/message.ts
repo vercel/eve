@@ -415,9 +415,9 @@ export interface SubagentCompletedStreamEvent {
 export interface MessageAppendedStreamEvent {
   data: {
     messageDelta: string;
-    /** Zero-based UTF-16 code-unit offset where `messageDelta` begins. */
-    messageOffset: number;
     sequence: number;
+    /** Whether this delta starts or restarts the current message block. */
+    startsBlock: boolean;
     stepIndex: number;
     turnId: string;
   };
@@ -432,9 +432,9 @@ export interface ActionInputAppendedStreamEvent {
   data: {
     callId: string;
     inputTextDelta: string;
-    /** Zero-based UTF-16 code-unit offset where `inputTextDelta` begins. */
-    inputTextOffset: number;
     sequence: number;
+    /** Whether this delta starts or restarts the current tool-input block. */
+    startsBlock: boolean;
     stepIndex: number;
     toolName: string;
     turnId: string;
@@ -449,9 +449,9 @@ export interface ActionInputAppendedStreamEvent {
 export interface ReasoningAppendedStreamEvent {
   data: {
     reasoningDelta: string;
-    /** Zero-based UTF-16 code-unit offset where `reasoningDelta` begins. */
-    reasoningOffset: number;
     sequence: number;
+    /** Whether this delta starts or restarts the current reasoning block. */
+    startsBlock: boolean;
     stepIndex: number;
     turnId: string;
   };
@@ -1106,8 +1106,8 @@ export function createActionsRequestedEvent(input: {
 export function createActionInputAppendedEvent(input: {
   readonly callId: string;
   readonly inputTextDelta: string;
-  readonly inputTextOffset: number;
   readonly sequence: number;
+  readonly startsBlock: boolean;
   readonly stepIndex: number;
   readonly toolName: string;
   readonly turnId: string;
@@ -1116,8 +1116,8 @@ export function createActionInputAppendedEvent(input: {
     data: {
       callId: input.callId,
       inputTextDelta: input.inputTextDelta,
-      inputTextOffset: input.inputTextOffset,
       sequence: input.sequence,
+      startsBlock: input.startsBlock,
       stepIndex: input.stepIndex,
       toolName: input.toolName,
       turnId: input.turnId,
@@ -1359,16 +1359,16 @@ export function createSubagentCalledEvent(input: {
  */
 export function createMessageAppendedEvent(input: {
   readonly messageDelta: string;
-  readonly messageOffset: number;
   readonly sequence: number;
+  readonly startsBlock: boolean;
   readonly stepIndex: number;
   readonly turnId: string;
 }): MessageAppendedStreamEvent {
   return {
     data: {
       messageDelta: input.messageDelta,
-      messageOffset: input.messageOffset,
       sequence: input.sequence,
+      startsBlock: input.startsBlock,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
@@ -1381,16 +1381,16 @@ export function createMessageAppendedEvent(input: {
  */
 export function createReasoningAppendedEvent(input: {
   readonly reasoningDelta: string;
-  readonly reasoningOffset: number;
   readonly sequence: number;
+  readonly startsBlock: boolean;
   readonly stepIndex: number;
   readonly turnId: string;
 }): ReasoningAppendedStreamEvent {
   return {
     data: {
       reasoningDelta: input.reasoningDelta,
-      reasoningOffset: input.reasoningOffset,
       sequence: input.sequence,
+      startsBlock: input.startsBlock,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
     },

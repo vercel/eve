@@ -42,15 +42,15 @@ function streamingTurnEvents(): MessageStreamEvent[] {
     createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
     createMessageAppendedEvent({
       messageDelta: "Hel",
-      messageOffset: 0,
       sequence: 2,
+      startsBlock: true,
       stepIndex: 0,
       turnId: "turn_1",
     }),
     createMessageAppendedEvent({
       messageDelta: "lo",
-      messageOffset: 3,
       sequence: 3,
+      startsBlock: false,
       stepIndex: 0,
       turnId: "turn_1",
     }),

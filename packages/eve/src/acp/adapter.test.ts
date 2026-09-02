@@ -137,14 +137,14 @@ describe("EveAcpAdapter", () => {
     const events: TestStreamEvent[] = [
       {
         type: "message.appended",
-        data: { messageDelta: "Hi", messageOffset: 0, sequence: 1, stepIndex: 0, turnId: "t1" },
+        data: { messageDelta: "Hi", sequence: 1, startsBlock: true, stepIndex: 0, turnId: "t1" },
       },
       {
         type: "reasoning.appended",
         data: {
           reasoningDelta: "Think",
-          reasoningOffset: 0,
           sequence: 2,
+          startsBlock: true,
           stepIndex: 0,
           turnId: "t1",
         },

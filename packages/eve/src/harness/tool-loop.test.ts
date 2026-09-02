@@ -10010,8 +10010,8 @@ describe("createToolLoopHarness", () => {
     ]);
     expect(events.find((event) => event.type === "reasoning.appended")?.data).toEqual({
       reasoningDelta: "Need to check the known constraints first.",
-      reasoningOffset: 0,
       sequence: 0,
+      startsBlock: true,
       stepIndex: 0,
       turnId: "turn_0",
     });
@@ -10023,8 +10023,8 @@ describe("createToolLoopHarness", () => {
     });
     expect(events.find((event) => event.type === "message.appended")?.data).toEqual({
       messageDelta: "Answer ready.",
-      messageOffset: 0,
       sequence: 0,
+      startsBlock: true,
       stepIndex: 0,
       turnId: "turn_0",
     });
@@ -10068,15 +10068,15 @@ describe("createToolLoopHarness", () => {
     ).toEqual([
       {
         messageDelta: "Hello",
-        messageOffset: 0,
         sequence: 0,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_0",
       },
       {
         messageDelta: " there.",
-        messageOffset: 5,
         sequence: 0,
+        startsBlock: false,
         stepIndex: 0,
         turnId: "turn_0",
       },

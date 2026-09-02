@@ -36,7 +36,7 @@ describe("message stream protocol", () => {
   });
 
   it.each(["21", "22", "23", "24"] as const)(
-    "normalizes v%s cumulative appends into the v25 offset contract",
+    "normalizes v%s cumulative appends into the v25 block contract",
     (version) => {
       const legacyMessage = {
         data: {
@@ -64,8 +64,8 @@ describe("message stream protocol", () => {
       expect(normalizeMessageStreamEvent(version, legacyMessage)).toEqual({
         data: {
           messageDelta: "lo",
-          messageOffset: 3,
           sequence: 3,
+          startsBlock: false,
           stepIndex: 0,
           turnId: "turn_1",
         },
@@ -75,8 +75,8 @@ describe("message stream protocol", () => {
       expect(normalizePersistedMessageStreamEvent(legacyReasoning)).toEqual({
         data: {
           reasoningDelta: "ink",
-          reasoningOffset: 2,
           sequence: 4,
+          startsBlock: false,
           stepIndex: 0,
           turnId: "turn_1",
         },
@@ -86,12 +86,42 @@ describe("message stream protocol", () => {
     },
   );
 
+  it("normalizes v24 tool-input offsets into block boundaries", () => {
+    const legacy = {
+      data: {
+        callId: "call_1",
+        inputTextDelta: "lo",
+        inputTextOffset: 3,
+        sequence: 4,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.001Z", id: "evt_legacy_input" },
+      type: "action.input.appended",
+    } satisfies MessageStreamEventForVersion<"24">;
+
+    expect(normalizeMessageStreamEvent("24", legacy)).toEqual({
+      data: {
+        callId: "call_1",
+        inputTextDelta: "lo",
+        sequence: 4,
+        startsBlock: false,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      },
+      meta: legacy.meta,
+      type: "action.input.appended",
+    });
+  });
+
   it("rejects an append that does not match its declared stream version", () => {
     const malformed = {
       data: {
         messageDelta: "Hel",
-        messageOffset: undefined as never,
         sequence: 1,
+        startsBlock: undefined as never,
         stepIndex: 0,
         turnId: "turn_1",
       },
@@ -100,7 +130,7 @@ describe("message stream protocol", () => {
     } satisfies MessageStreamEventForVersion<"25">;
 
     expect(() => normalizeMessageStreamEvent("25", malformed)).toThrow(
-      "Invalid message append offset for stream version 25.",
+      "Invalid message block boundary for stream version 25.",
     );
   });
 
@@ -272,19 +302,18 @@ describe("message stream protocol", () => {
       let bytes = 0;
 
       for (let index = 0; index < chunkCount; index += 1) {
-        const offset = index * delta.length;
         const events = [
           createMessageAppendedEvent({
             messageDelta: delta,
-            messageOffset: offset,
             sequence: 0,
+            startsBlock: index === 0,
             stepIndex: 0,
             turnId: "turn_0",
           }),
           createReasoningAppendedEvent({
             reasoningDelta: delta,
-            reasoningOffset: offset,
             sequence: 0,
+            startsBlock: index === 0,
             stepIndex: 0,
             turnId: "turn_0",
           }),

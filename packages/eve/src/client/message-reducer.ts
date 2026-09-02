@@ -28,7 +28,7 @@ import {
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
 import { messageRun } from "#client/message-run-parts.js";
-import { appendStreamTextDelta } from "#shared/stream-text.js";
+import { applyStreamTextDelta } from "#shared/stream-text.js";
 import type { InputResponse } from "#shared/input.js";
 import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
 
@@ -126,7 +126,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
           delta: event.data.reasoningDelta,
-          offset: event.data.reasoningOffset,
+          startsBlock: event.data.startsBlock,
           stepIndex: event.data.stepIndex,
           type: "reasoning",
         }),
@@ -146,9 +146,9 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       const existing = findToolPart(data, event.data.callId);
       if (existing !== undefined && existing.state !== "input-streaming") return data;
 
-      const inputText = appendStreamTextDelta(
+      const inputText = applyStreamTextDelta(
         existing?.state === "input-streaming" ? existing.inputText : undefined,
-        event.data.inputTextOffset,
+        event.data.startsBlock,
         event.data.inputTextDelta,
       );
       if (inputText === undefined) return data;
@@ -358,7 +358,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
       return updateAssistantMessage(data, event.data.turnId, (message) =>
         messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
           delta: event.data.messageDelta,
-          offset: event.data.messageOffset,
+          startsBlock: event.data.startsBlock,
           stepIndex: event.data.stepIndex,
           type: "text",
         }),

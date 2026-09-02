@@ -1,17 +1,10 @@
-/**
- * Applies one offset-addressed stream delta to accumulated text.
- *
- * An offset of `0` starts or restarts a block. Later deltas must begin exactly
- * where the accumulated text ends; a gap or overlap returns `undefined` so the
- * consumer does not project corrupt text.
- */
-export function appendStreamTextDelta(
+/** Applies one stream delta, replacing accumulated text at a block boundary. */
+export function applyStreamTextDelta(
   text: string | undefined,
-  offset: number,
+  startsBlock: boolean,
   delta: string,
 ): string | undefined {
-  if (!Number.isSafeInteger(offset) || offset < 0) return undefined;
-  if (offset === 0) return delta;
-  if (text?.length !== offset) return undefined;
+  if (startsBlock) return delta;
+  if (text === undefined) return undefined;
   return text + delta;
 }

@@ -181,13 +181,14 @@ function mergeAdjacentEmissions(
       leftAppendKey !== rightAppendKey ||
       !isAppendEvent(left.event) ||
       !isAppendEvent(right) ||
-      !sameCoordinates(left.event, right)
+      !sameCoordinates(left.event, right) ||
+      right.data.startsBlock
     ) {
       return false;
     }
     left.deltaParts ??= [appendDelta(left.event)];
     left.deltaParts.push(appendDelta(right));
-    left.event = retainFirstAppendOffset(left.event, right);
+    left.event = retainFirstBlockBoundary(left.event, right);
     left.messages = messages;
     return true;
   }
@@ -202,18 +203,18 @@ function mergeAdjacentEmissions(
   return false;
 }
 
-function retainFirstAppendOffset(
+function retainFirstBlockBoundary(
   left: AppendStreamEvent,
   right: AppendStreamEvent,
 ): AppendStreamEvent {
   if (left.type === "message.appended" && right.type === "message.appended") {
-    return { ...right, data: { ...right.data, messageOffset: left.data.messageOffset } };
+    return { ...right, data: { ...right.data, startsBlock: left.data.startsBlock } };
   }
   if (left.type === "reasoning.appended" && right.type === "reasoning.appended") {
-    return { ...right, data: { ...right.data, reasoningOffset: left.data.reasoningOffset } };
+    return { ...right, data: { ...right.data, startsBlock: left.data.startsBlock } };
   }
   if (left.type === "action.input.appended" && right.type === "action.input.appended") {
-    return { ...right, data: { ...right.data, inputTextOffset: left.data.inputTextOffset } };
+    return { ...right, data: { ...right.data, startsBlock: left.data.startsBlock } };
   }
   return right;
 }

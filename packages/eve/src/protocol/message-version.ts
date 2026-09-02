@@ -1,5 +1,6 @@
 import {
   EVE_MESSAGE_STREAM_VERSION,
+  type ActionInputAppendedStreamEvent,
   type MessageAppendedStreamEvent,
   type MessageStreamEvent,
   type MessageStreamEventMeta,
@@ -29,12 +30,28 @@ interface ReasoningAppendedStreamEventV24 {
   type: "reasoning.appended";
 }
 
+interface ActionInputAppendedStreamEventV24 {
+  data: {
+    callId: string;
+    inputTextDelta: string;
+    inputTextOffset: number;
+    sequence: number;
+    stepIndex: number;
+    toolName: string;
+    turnId: string;
+  };
+  type: "action.input.appended";
+}
+
 interface MessageStreamAppendEventsByVersion {
   "21": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
   "22": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
   "23": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
-  "24": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
-  "25": MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
+  "24":
+    | ActionInputAppendedStreamEventV24
+    | MessageAppendedStreamEventV24
+    | ReasoningAppendedStreamEventV24;
+  "25": ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
 }
 
 export type MessageStreamVersion = keyof MessageStreamAppendEventsByVersion;
@@ -42,7 +59,7 @@ type LegacyMessageStreamVersion = Exclude<MessageStreamVersion, "25">;
 
 type VersionIndependentMessageStreamEvent = Exclude<
   UnstampedMessageStreamEvent,
-  MessageAppendedStreamEvent | ReasoningAppendedStreamEvent
+  ActionInputAppendedStreamEvent | MessageAppendedStreamEvent | ReasoningAppendedStreamEvent
 >;
 
 type UnstampedMessageStreamEventForVersion<Version extends MessageStreamVersion> =
@@ -89,7 +106,8 @@ export function normalizePersistedMessageStreamEvent(
 ): MessageStreamEvent {
   if (
     (event.type === "message.appended" && "messageSoFar" in event.data) ||
-    (event.type === "reasoning.appended" && "reasoningSoFar" in event.data)
+    (event.type === "reasoning.appended" && "reasoningSoFar" in event.data) ||
+    (event.type === "action.input.appended" && "inputTextOffset" in event.data)
   ) {
     return normalizeLegacyMessageStreamEvent(
       undefined,
@@ -110,7 +128,7 @@ function normalizeLegacyMessageStreamEvent(
     return {
       data: {
         messageDelta: event.data.messageDelta,
-        messageOffset: legacyAppendOffset(
+        startsBlock: legacyAppendStartsBlock(
           event.data.messageSoFar,
           event.data.messageDelta,
           "message",
@@ -129,7 +147,7 @@ function normalizeLegacyMessageStreamEvent(
     return {
       data: {
         reasoningDelta: event.data.reasoningDelta,
-        reasoningOffset: legacyAppendOffset(
+        startsBlock: legacyAppendStartsBlock(
           event.data.reasoningSoFar,
           event.data.reasoningDelta,
           "reasoning",
@@ -144,6 +162,23 @@ function normalizeLegacyMessageStreamEvent(
     };
   }
 
+  if (event.type === "action.input.appended") {
+    assertLegacyActionInputOffset(event.data.inputTextOffset, version);
+    return {
+      data: {
+        callId: event.data.callId,
+        inputTextDelta: event.data.inputTextDelta,
+        sequence: event.data.sequence,
+        startsBlock: event.data.inputTextOffset === 0,
+        stepIndex: event.data.stepIndex,
+        toolName: event.data.toolName,
+        turnId: event.data.turnId,
+      },
+      meta: event.meta,
+      type: "action.input.appended",
+    };
+  }
+
   return event;
 }
 
@@ -151,9 +186,11 @@ function validateCurrentMessageStreamEvent(
   event: MessageStreamEventForVersion<"25">,
 ): MessageStreamEvent {
   if (event.type === "message.appended") {
-    assertCurrentAppendOffset(event.data.messageOffset, "message");
+    assertCurrentStartsBlock(event.data.startsBlock, "message");
   } else if (event.type === "reasoning.appended") {
-    assertCurrentAppendOffset(event.data.reasoningOffset, "reasoning");
+    assertCurrentStartsBlock(event.data.startsBlock, "reasoning");
+  } else if (event.type === "action.input.appended") {
+    assertCurrentStartsBlock(event.data.startsBlock, "action input");
   }
   return event;
 }
@@ -162,22 +199,35 @@ function assertNever(value: never): never {
   throw new TypeError(`Unsupported message stream version: ${String(value)}.`);
 }
 
-function assertCurrentAppendOffset(offset: unknown, stream: "message" | "reasoning"): void {
-  if (!Number.isSafeInteger(offset) || (offset as number) < 0) {
-    throw new TypeError(`Invalid ${stream} append offset for stream version 25.`);
+function assertCurrentStartsBlock(
+  startsBlock: unknown,
+  stream: "action input" | "message" | "reasoning",
+): void {
+  if (typeof startsBlock !== "boolean") {
+    throw new TypeError(`Invalid ${stream} block boundary for stream version 25.`);
   }
 }
 
-function legacyAppendOffset(
+function assertLegacyActionInputOffset(
+  offset: unknown,
+  version: LegacyMessageStreamVersion | undefined,
+): void {
+  if (!Number.isSafeInteger(offset) || (offset as number) < 0) {
+    const source = version === undefined ? "persisted stream" : `stream version ${version}`;
+    throw new TypeError(`Invalid action input append offset for ${source}.`);
+  }
+}
+
+function legacyAppendStartsBlock(
   snapshot: string,
   delta: string,
   stream: "message" | "reasoning",
   version: LegacyMessageStreamVersion | undefined,
-): number {
+): boolean {
   const offset = snapshot.length - delta.length;
   if (offset < 0 || snapshot.slice(offset) !== delta) {
     const source = version === undefined ? "persisted stream" : `stream version ${version}`;
     throw new TypeError(`Invalid cumulative ${stream} append for ${source}.`);
   }
-  return offset;
+  return offset === 0;
 }

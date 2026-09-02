@@ -14,7 +14,7 @@ import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { InputRequest } from "#shared/input.js";
-import { appendStreamTextDelta } from "#shared/stream-text.js";
+import { applyStreamTextDelta } from "#shared/stream-text.js";
 import type {
   ActionEvent,
   Adapter,
@@ -377,7 +377,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
         channel.state.streamStepIndex === event.stepIndex
           ? streamTextByState.get(channel.state)
           : undefined;
-      const message = appendStreamTextDelta(currentText, event.messageOffset, event.messageDelta);
+      const message = applyStreamTextDelta(currentText, event.startsBlock, event.messageDelta);
       if (!message) return;
       streamTextByState.set(channel.state, message);
       const anchor = channel.state.anchorMessageId;

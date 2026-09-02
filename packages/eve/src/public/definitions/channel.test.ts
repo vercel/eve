@@ -474,8 +474,8 @@ describe("defineChannel", () => {
           type: "reasoning.appended",
           data: {
             reasoningDelta: "Need",
-            reasoningOffset: 0,
             sequence: 0,
+            startsBlock: true,
             stepIndex: 0,
             turnId: "turn-1",
           },
@@ -499,7 +499,7 @@ describe("defineChannel", () => {
 
     expect(appendedData).toMatchObject({
       reasoningDelta: "Need",
-      reasoningOffset: 0,
+      startsBlock: true,
       turnId: "turn-1",
     });
     expect(completedData).toMatchObject({

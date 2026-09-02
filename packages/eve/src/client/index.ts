@@ -10,7 +10,6 @@ export { HealthResponseError } from "#client/health-response-error.js";
 export { HealthResultSchema } from "#client/health-schema.js";
 export { ClientError } from "#client/client-error.js";
 export { defaultMessageReducer } from "#client/message-reducer.js";
-export { appendStreamTextDelta } from "#shared/stream-text.js";
 export { createDataUrlFilePart, createTextWithFileContent } from "#client/file-parts.js";
 export { MessageResponse } from "#client/message-response.js";
 export { ClientSession } from "#client/session.js";

@@ -1,5 +1,5 @@
 import type { EveMessage, EveMessagePart } from "#client/message-reducer-types.js";
-import { appendStreamTextDelta } from "#shared/stream-text.js";
+import { applyStreamTextDelta } from "#shared/stream-text.js";
 
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
 type EveRunPart = Extract<EveMessagePart, { readonly type: "text" | "reasoning" }>;
@@ -8,13 +8,13 @@ function append(
   message: EveAssistantMessage,
   append: {
     readonly delta: string;
-    readonly offset: number;
+    readonly startsBlock: boolean;
     readonly stepIndex: number;
     readonly type: EveRunPart["type"];
   },
 ): EveAssistantMessage {
   const current = latestStreamingRun(message, append.type, append.stepIndex);
-  const text = appendStreamTextDelta(current?.text, append.offset, append.delta);
+  const text = applyStreamTextDelta(current?.text, append.startsBlock, append.delta);
   if (text === undefined) return message;
   return upsert(message, {
     state: "streaming",

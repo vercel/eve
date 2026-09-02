@@ -35,41 +35,41 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
-  it("accumulates contiguous message and reasoning deltas and rejects gaps", () => {
+  it("accumulates block deltas and ignores a continuation without its start", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "I",
-        reasoningOffset: 0,
         sequence: 0,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createReasoningAppendedEvent({
         reasoningDelta: " can",
-        reasoningOffset: 1,
         sequence: 0,
+        startsBlock: false,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "missing start",
+        sequence: 0,
+        startsBlock: false,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Hel",
-        messageOffset: 0,
         sequence: 0,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      createMessageAppendedEvent({
-        messageDelta: "gap",
-        messageOffset: 99,
-        sequence: 0,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "lo",
-        messageOffset: 3,
         sequence: 0,
+        startsBlock: false,
         stepIndex: 0,
         turnId: "turn_1",
       }),
@@ -82,14 +82,48 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
+  it("replaces an unfinished message when a retry starts a new block", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageAppendedEvent({
+        messageDelta: "abandoned",
+        sequence: 0,
+        startsBlock: true,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "replacement",
+        sequence: 0,
+        startsBlock: true,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: " complete",
+        sequence: 0,
+        startsBlock: false,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "streaming",
+      stepIndex: 0,
+      text: "replacement complete",
+      type: "text",
+    });
+  });
+
   it("projects streamed tool input and upgrades it to the validated request", () => {
     const reducer = defaultMessageReducer();
     let data = reduceServerEvents(reducer, reducer.initial(), [
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "",
-        inputTextOffset: 0,
         sequence: 1,
+        startsBlock: true,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -97,8 +131,8 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: '{"title":"Hel',
-        inputTextOffset: 0,
         sequence: 1,
+        startsBlock: false,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -116,19 +150,20 @@ describe("defaultMessageReducer", () => {
       type: "dynamic-tool",
     });
 
-    const contiguous = data;
     data = reduceServerEvents(reducer, data, [
       createActionInputAppendedEvent({
         callId: "call_render",
-        inputTextDelta: "gap",
-        inputTextOffset: 99,
+        inputTextDelta: 'lo"}',
         sequence: 1,
+        startsBlock: false,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
       }),
     ]);
-    expect(data).toBe(contiguous);
+    expect(data.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ inputText: '{"title":"Hello"}' }),
+    );
 
     data = reduceServerEvents(reducer, data, [
       createActionsRequestedEvent({
@@ -161,8 +196,8 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "late",
-        inputTextOffset: 0,
         sequence: 1,
+        startsBlock: true,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -177,8 +212,8 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "{",
-        inputTextOffset: 0,
         sequence: 1,
+        startsBlock: true,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -1075,8 +1110,8 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageAppendedEvent({
         messageDelta: "Checking Vienna",
-        messageOffset: 0,
         sequence: 0,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_0",
       }),
@@ -1102,8 +1137,8 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "Now Berlin",
-        messageOffset: 0,
         sequence: 3,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_0",
       }),
@@ -1128,15 +1163,15 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
-        reasoningOffset: 0,
         sequence: 0,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Partial",
-        messageOffset: 0,
         sequence: 1,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
@@ -1181,8 +1216,8 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "<eve-empty-delivery/>",
-        messageOffset: 0,
         sequence: 1,
+        startsBlock: true,
         stepIndex: 1,
         turnId: "turn_1",
       }),

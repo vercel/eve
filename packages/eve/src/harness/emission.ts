@@ -333,7 +333,7 @@ async function consumeStreamContent(
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
-  const streamingActionInputs = new Map<string, { offset: number; toolName: string }>();
+  const streamingActionInputs = new Map<string, { toolName: string }>();
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -355,14 +355,14 @@ async function consumeStreamContent(
     callId: string,
     toolName: string,
     inputTextDelta: string,
-    inputTextOffset: number,
+    startsBlock: boolean,
   ): Promise<void> =>
     emitFn(
       createActionInputAppendedEvent({
         callId,
         inputTextDelta,
-        inputTextOffset,
         sequence: state.sequence,
+        startsBlock,
         stepIndex: state.stepIndex,
         toolName,
         turnId: state.turnId,
@@ -487,13 +487,13 @@ async function consumeStreamContent(
     switch (part.type) {
       case "reasoning-delta":
         await providerActionBatch.flush();
-        const reasoningOffset = currentReasoning.length;
+        const startsReasoningBlock = currentReasoning.length === 0;
         currentReasoning += part.text;
         await emitFn(
           createReasoningAppendedEvent({
             reasoningDelta: part.text,
-            reasoningOffset,
             sequence: state.sequence,
+            startsBlock: startsReasoningBlock,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
           }),
@@ -513,13 +513,13 @@ async function consumeStreamContent(
           );
           currentReasoning = "";
         }
-        const messageOffset = currentMessage.length;
+        const startsMessageBlock = currentMessage.length === 0;
         currentMessage += part.text;
         await emitFn(
           createMessageAppendedEvent({
             messageDelta: part.text,
-            messageOffset,
             sequence: state.sequence,
+            startsBlock: startsMessageBlock,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
           }),
@@ -538,8 +538,8 @@ async function consumeStreamContent(
         if (currentMessage.trim().length > 0) {
           await flushCurrentMessage();
         }
-        streamingActionInputs.set(part.id, { offset: 0, toolName: part.toolName });
-        await emitActionInput(part.id, part.toolName, "", 0);
+        streamingActionInputs.set(part.id, { toolName: part.toolName });
+        await emitActionInput(part.id, part.toolName, "", true);
         break;
       }
       case "tool-input-delta": {
@@ -548,9 +548,7 @@ async function consumeStreamContent(
           break;
         }
         await providerActionBatch.flush();
-        const inputTextOffset = input.offset;
-        input.offset += part.delta.length;
-        await emitActionInput(part.id, input.toolName, part.delta, inputTextOffset);
+        await emitActionInput(part.id, input.toolName, part.delta, false);
         break;
       }
       case "tool-input-end":

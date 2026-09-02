@@ -1,5 +1,3 @@
-import { appendStreamTextDelta } from "eve/client";
-
 import type {
   TraceAction,
   TraceActionError,
@@ -423,9 +421,9 @@ export function buildTraceTurnsFromTranscript(
     }
 
     if (event.type === "reasoning.appended" && step !== undefined) {
-      const reasoning = appendStreamTextDelta(
+      const reasoning = applyStreamTextDelta(
         step.reasoningText,
-        event.data.reasoningOffset,
+        event.data.startsBlock,
         event.data.reasoningDelta,
       );
       if (reasoning !== undefined) step.reasoningText = reasoning;
@@ -438,9 +436,9 @@ export function buildTraceTurnsFromTranscript(
     }
 
     if (event.type === "message.appended" && step !== undefined) {
-      const response = appendStreamTextDelta(
+      const response = applyStreamTextDelta(
         step.responseText,
-        event.data.messageOffset,
+        event.data.startsBlock,
         event.data.messageDelta,
       );
       if (response !== undefined) step.responseText = response;
@@ -684,4 +682,14 @@ export function buildTraceTurnsFromTranscript(
   }
 
   return orderedTurns.map(toReadonlyTurn);
+}
+
+function applyStreamTextDelta(
+  current: string | undefined,
+  startsBlock: boolean,
+  delta: string,
+): string | undefined {
+  if (startsBlock) return delta;
+  if (current === undefined) return undefined;
+  return current + delta;
 }

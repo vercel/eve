@@ -517,9 +517,22 @@ describe("chatSdkChannel", () => {
     await callEvent(
       channelAdapter,
       makeEvent("message.appended", {
-        messageDelta: "Hel",
-        messageOffset: 0,
+        messageDelta: "missing start",
         sequence: 1,
+        startsBlock: false,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+    expect(adapter.posted).toEqual([]);
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.appended", {
+        messageDelta: "Hel",
+        sequence: 1,
+        startsBlock: true,
         stepIndex: 0,
         turnId: "turn-1",
       }),
@@ -531,23 +544,9 @@ describe("chatSdkChannel", () => {
     await callEvent(
       channelAdapter,
       makeEvent("message.appended", {
-        messageDelta: "gap",
-        messageOffset: 99,
-        sequence: 2,
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-      ctx,
-    );
-    expect(adapter.edited).toEqual([]);
-    expect(state).not.toHaveProperty("streamText");
-
-    await callEvent(
-      channelAdapter,
-      makeEvent("message.appended", {
         messageDelta: "lo",
-        messageOffset: 3,
         sequence: 2,
+        startsBlock: false,
         stepIndex: 0,
         turnId: "turn-1",
       }),
