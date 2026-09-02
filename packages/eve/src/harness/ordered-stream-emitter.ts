@@ -187,16 +187,7 @@ function mergeAdjacentEmissions(
     }
     left.deltaParts ??= [appendDelta(left.event)];
     left.deltaParts.push(appendDelta(right));
-    left.event =
-      left.event.type === "action.input.appended" && right.type === "action.input.appended"
-        ? {
-            ...right,
-            data: {
-              ...right.data,
-              inputTextOffset: left.event.data.inputTextOffset,
-            },
-          }
-        : right;
+    left.event = retainFirstAppendOffset(left.event, right);
     left.messages = messages;
     return true;
   }
@@ -209,6 +200,22 @@ function mergeAdjacentEmissions(
   }
 
   return false;
+}
+
+function retainFirstAppendOffset(
+  left: AppendStreamEvent,
+  right: AppendStreamEvent,
+): AppendStreamEvent {
+  if (left.type === "message.appended" && right.type === "message.appended") {
+    return { ...right, data: { ...right.data, messageOffset: left.data.messageOffset } };
+  }
+  if (left.type === "reasoning.appended" && right.type === "reasoning.appended") {
+    return { ...right, data: { ...right.data, reasoningOffset: left.data.reasoningOffset } };
+  }
+  if (left.type === "action.input.appended" && right.type === "action.input.appended") {
+    return { ...right, data: { ...right.data, inputTextOffset: left.data.inputTextOffset } };
+  }
+  return right;
 }
 
 function appendKey(event: UnstampedMessageStreamEvent): string | undefined {

@@ -16,6 +16,7 @@ import {
   type MessageStreamEvent,
   type SubagentCalledStreamEvent,
   type SubagentCompletedStreamEvent,
+  appendStreamTextDelta,
   Client,
   ClientSession,
 } from "#client/index.js";
@@ -2174,7 +2175,6 @@ async function* eveEventsToTUIStream(
         const appended = event as MessageAppendedStreamEvent;
         const base = textPartId(appended.data.turnId, appended.data.stepIndex);
         const state = partStateFor(textParts, base);
-        const next = appended.data.messageSoFar;
 
         if (state.completed) {
           // No intervening `step.started`: a retry of the same model call.
@@ -2185,8 +2185,23 @@ async function* eveEventsToTUIStream(
           state.generation += 1;
           state.text = "";
           state.completed = false;
+          state.blocked = false;
         }
 
+        if (state.blocked) break;
+        if (appended.data.messageOffset === 0 && state.text.length > 0) {
+          state.blocked = true;
+          break;
+        }
+        const next = appendStreamTextDelta(
+          state.text,
+          appended.data.messageOffset,
+          appended.data.messageDelta,
+        );
+        if (next === undefined) {
+          state.blocked = true;
+          break;
+        }
         if (!next.startsWith(state.text) || next.length <= state.text.length) {
           break;
         }
@@ -2247,15 +2262,29 @@ async function* eveEventsToTUIStream(
         const appended = event as ReasoningAppendedStreamEvent;
         const base = reasoningPartId(appended.data.turnId, appended.data.stepIndex);
         const state = partStateFor(reasoningParts, base);
-        const next = appended.data.reasoningSoFar;
 
         if (state.completed) {
           if (stepEpoch <= state.completedEpoch) break;
           state.generation += 1;
           state.text = "";
           state.completed = false;
+          state.blocked = false;
         }
 
+        if (state.blocked) break;
+        if (appended.data.reasoningOffset === 0 && state.text.length > 0) {
+          state.blocked = true;
+          break;
+        }
+        const next = appendStreamTextDelta(
+          state.text,
+          appended.data.reasoningOffset,
+          appended.data.reasoningDelta,
+        );
+        if (next === undefined) {
+          state.blocked = true;
+          break;
+        }
         if (!next.startsWith(state.text) || next.length <= state.text.length) {
           break;
         }
@@ -2569,6 +2598,8 @@ function reasoningPartId(turnId: string, stepIndex: number): string {
  * completed key opens generation N+1, which renders as its own block.
  */
 type StreamPartState = {
+  /** Whether a restart or discontinuity makes future deltas unsafe to append. */
+  blocked: boolean;
   generation: number;
   /** Accumulated text of the current generation. */
   text: string;
@@ -2580,7 +2611,7 @@ type StreamPartState = {
 function partStateFor(parts: Map<string, StreamPartState>, base: string): StreamPartState {
   let state = parts.get(base);
   if (state === undefined) {
-    state = { generation: 0, text: "", completed: false, completedEpoch: 0 };
+    state = { blocked: false, generation: 0, text: "", completed: false, completedEpoch: 0 };
     parts.set(base, state);
   }
   return state;

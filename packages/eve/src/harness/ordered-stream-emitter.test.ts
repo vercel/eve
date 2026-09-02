@@ -19,20 +19,20 @@ function deferred(): { readonly promise: Promise<void>; resolve(): void } {
   return { promise, resolve };
 }
 
-function message(delta: string, soFar: string, stepIndex = 0) {
+function message(delta: string, offset: number, stepIndex = 0) {
   return createMessageAppendedEvent({
     messageDelta: delta,
-    messageSoFar: soFar,
+    messageOffset: offset,
     sequence: 1,
     stepIndex,
     turnId: "turn_1",
   });
 }
 
-function reasoning(delta: string, soFar: string) {
+function reasoning(delta: string, offset: number) {
   return createReasoningAppendedEvent({
     reasoningDelta: delta,
-    reasoningSoFar: soFar,
+    reasoningOffset: offset,
     sequence: 1,
     stepIndex: 0,
     turnId: "turn_1",
@@ -70,15 +70,15 @@ describe("createOrderedStreamEmitter", () => {
     });
     const emitter = createOrderedStreamEmitter(emitFn);
 
-    await emitter.emit(message("A", "A"));
-    await emitter.emit(message("B", "AB"));
-    await emitter.emit(message("C", "ABC"));
+    await emitter.emit(message("A", 0));
+    await emitter.emit(message("B", 1));
+    await emitter.emit(message("C", 2));
 
     expect(emitFn).toHaveBeenCalledTimes(1);
     firstWrite.resolve();
     await emitter.closeAndDrain();
 
-    expect(events).toEqual([message("A", "A"), message("BC", "ABC")]);
+    expect(events).toEqual([message("A", 0), message("BC", 1)]);
   });
 
   it("coalesces adjacent input deltas for the same tool call", async () => {
@@ -90,7 +90,7 @@ describe("createOrderedStreamEmitter", () => {
     });
     const emitter = createOrderedStreamEmitter(emitFn);
 
-    await emitter.emit(message("A", "A"));
+    await emitter.emit(message("A", 0));
     await emitter.emit(input("call_1", "{", 0));
     await emitter.emit(input("call_1", '"title":', 1));
     await emitter.emit(input("call_1", '"Hello"}', 9));
@@ -100,7 +100,7 @@ describe("createOrderedStreamEmitter", () => {
     await emitter.closeAndDrain();
 
     expect(events).toEqual([
-      message("A", "A"),
+      message("A", 0),
       input("call_1", '{"title":"Hello"}', 0),
       input("call_2", "{}", 0),
     ]);
@@ -121,22 +121,22 @@ describe("createOrderedStreamEmitter", () => {
       turnId: "turn_1",
     });
 
-    await emitter.emit(message("A", "A"));
-    await emitter.emit(message("B", "AB"));
-    await emitter.emit(message("C", "C", 1));
-    await emitter.emit(message("D", "CD", 1));
-    await emitter.emit(reasoning("R", "R"));
-    await emitter.emit(reasoning("S", "RS"));
+    await emitter.emit(message("A", 0));
+    await emitter.emit(message("B", 1));
+    await emitter.emit(message("C", 0, 1));
+    await emitter.emit(message("D", 1, 1));
+    await emitter.emit(reasoning("R", 0));
+    await emitter.emit(reasoning("S", 1));
     await emitter.emit(completed);
 
     firstWrite.resolve();
     await emitter.closeAndDrain();
 
     expect(events).toEqual([
-      message("A", "A"),
-      message("B", "AB"),
-      message("CD", "CD", 1),
-      reasoning("RS", "RS"),
+      message("A", 0),
+      message("B", 1),
+      message("CD", 0, 1),
+      reasoning("RS", 0),
       completed,
     ]);
   });
@@ -181,10 +181,10 @@ describe("createOrderedStreamEmitter", () => {
       throw writeError;
     });
 
-    await emitter.emit(message("A", "A"));
+    await emitter.emit(message("A", 0));
 
     await expect(emitter.closeAndDrain()).rejects.toBe(writeError);
-    await expect(emitter.emit(message("B", "AB"))).rejects.toBe(writeError);
+    await expect(emitter.emit(message("B", 1))).rejects.toBe(writeError);
   });
 
   it("rejects emissions after closing", async () => {
@@ -192,7 +192,7 @@ describe("createOrderedStreamEmitter", () => {
 
     await emitter.closeAndDrain();
 
-    await expect(emitter.emit(message("A", "A"))).rejects.toThrow(/closed/);
+    await expect(emitter.emit(message("A", 0))).rejects.toThrow(/closed/);
   });
 
   it("counts merged empty deltas toward the pending-event limit", async () => {
@@ -206,10 +206,10 @@ describe("createOrderedStreamEmitter", () => {
       { maxPendingEvents: 2 },
     );
 
-    await emitter.emit(message("A", "A"));
-    await emitter.emit(reasoning("", ""));
+    await emitter.emit(message("A", 0));
+    await emitter.emit(reasoning("", 0));
     let accepted = false;
-    const limited = emitter.emit(reasoning("", "")).then(() => {
+    const limited = emitter.emit(reasoning("", 0)).then(() => {
       accepted = true;
     });
     await Promise.resolve();
@@ -218,6 +218,6 @@ describe("createOrderedStreamEmitter", () => {
     firstWrite.resolve();
     await limited;
     await emitter.closeAndDrain();
-    expect(events).toEqual([message("A", "A"), reasoning("", "")]);
+    expect(events).toEqual([message("A", 0), reasoning("", 0)]);
   });
 });

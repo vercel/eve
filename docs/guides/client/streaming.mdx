@@ -75,7 +75,24 @@ for await (const event of response) {
 }
 ```
 
-`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. eve may combine adjacent deltas for the same text block or tool call while a durable stream write is in flight, but preserves their text and event ordering. A different event type, tool `callId`, or stream coordinate is a barrier. The completed text forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
+`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. Each carries its new text and the zero-based UTF-16 code-unit offset where that text begins. eve may combine adjacent deltas for the same text block or tool call while a durable stream write is in flight, but preserves their text and event ordering. A different event type, tool `callId`, or stream coordinate is a barrier. The completed text forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
+
+The default message reducer accumulates these events for you. A raw stream consumer can use the same `appendStreamTextDelta` API:
+
+```ts
+import { appendStreamTextDelta } from "eve/client";
+
+let message: string | undefined;
+
+for await (const event of response) {
+  if (event.type !== "message.appended") continue;
+
+  const next = appendStreamTextDelta(message, event.data.messageOffset, event.data.messageDelta);
+  if (next !== undefined) message = next;
+}
+```
+
+Offset `0` starts or restarts a text block. A later delta must begin exactly at the accumulated string's length; the helper returns `undefined` for a gap or overlap so a consumer does not project corrupt text. Apply the same helper to `reasoningDelta` and `reasoningOffset`, or `inputTextDelta` and `inputTextOffset`.
 
 ## Handle event types
 
@@ -116,7 +133,7 @@ The most common UI events are:
 
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
 
-Each `action.input.appended` event stores `inputTextDelta` and its zero-based UTF-16 code-unit `inputTextOffset`, so consumers can reject a gap instead of concatenating corrupt input. The default message reducer starts or restarts at offset `0` and ignores a nonzero offset that is not contiguous. It accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
+For `action.input.appended`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
 
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and

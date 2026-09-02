@@ -35,6 +35,53 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("accumulates contiguous message and reasoning deltas and rejects gaps", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createReasoningAppendedEvent({
+        reasoningDelta: "I",
+        reasoningOffset: 0,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createReasoningAppendedEvent({
+        reasoningDelta: " can",
+        reasoningOffset: 1,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "Hel",
+        messageOffset: 0,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "gap",
+        messageOffset: 99,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "lo",
+        messageOffset: 3,
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toEqual([
+      { type: "step-start" },
+      { state: "streaming", stepIndex: 0, text: "I can", type: "reasoning" },
+      { state: "streaming", stepIndex: 0, text: "Hello", type: "text" },
+    ]);
+  });
+
   it("projects streamed tool input and upgrades it to the validated request", () => {
     const reducer = defaultMessageReducer();
     let data = reduceServerEvents(reducer, reducer.initial(), [
@@ -1028,7 +1075,7 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageAppendedEvent({
         messageDelta: "Checking Vienna",
-        messageSoFar: "Checking Vienna",
+        messageOffset: 0,
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_0",
@@ -1055,7 +1102,7 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "Now Berlin",
-        messageSoFar: "Now Berlin",
+        messageOffset: 0,
         sequence: 3,
         stepIndex: 0,
         turnId: "turn_0",
@@ -1081,14 +1128,14 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
-        reasoningSoFar: "Thinking",
+        reasoningOffset: 0,
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Partial",
-        messageSoFar: "Partial",
+        messageOffset: 0,
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",
@@ -1134,7 +1181,7 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "<eve-empty-delivery/>",
-        messageSoFar: "<eve-empty-delivery/>",
+        messageOffset: 0,
         sequence: 1,
         stepIndex: 1,
         turnId: "turn_1",

@@ -24,14 +24,17 @@ import {
 import type {
   SlackChannelEvents,
   SlackChannelInternalEvents,
+  SlackChannelState,
   SlackContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
 import type { InputRequest } from "#shared/input.js";
+import { appendStreamTextDelta } from "#shared/stream-text.js";
 
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
 const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
+const reasoningTextByState = new WeakMap<SlackChannelState, string>();
 
 interface SlackSemanticErrorSummary {
   readonly hint?: string;
@@ -321,11 +324,19 @@ export const defaultEvents: SlackChannelInternalEvents = {
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
     channel.state.lastReasoningTypingStatus = null;
+    reasoningTextByState.delete(channel.state);
     await channel.thread.startTyping("Working...");
   },
 
   async "reasoning.appended"(event, channel, _ctx) {
-    const line = firstNonEmptyLine(event.reasoningSoFar);
+    const reasoning = appendStreamTextDelta(
+      reasoningTextByState.get(channel.state),
+      event.reasoningOffset,
+      event.reasoningDelta,
+    );
+    if (reasoning === undefined) return;
+    reasoningTextByState.set(channel.state, reasoning);
+    const line = firstNonEmptyLine(reasoning);
     if (line === undefined) return;
 
     const status = truncateTypingStatus(line);

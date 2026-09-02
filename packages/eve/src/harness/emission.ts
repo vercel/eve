@@ -487,11 +487,12 @@ async function consumeStreamContent(
     switch (part.type) {
       case "reasoning-delta":
         await providerActionBatch.flush();
+        const reasoningOffset = currentReasoning.length;
         currentReasoning += part.text;
         await emitFn(
           createReasoningAppendedEvent({
             reasoningDelta: part.text,
-            reasoningSoFar: currentReasoning,
+            reasoningOffset,
             sequence: state.sequence,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
@@ -512,11 +513,12 @@ async function consumeStreamContent(
           );
           currentReasoning = "";
         }
+        const messageOffset = currentMessage.length;
         currentMessage += part.text;
         await emitFn(
           createMessageAppendedEvent({
             messageDelta: part.text,
-            messageSoFar: currentMessage,
+            messageOffset,
             sequence: state.sequence,
             stepIndex: state.stepIndex,
             turnId: state.turnId,

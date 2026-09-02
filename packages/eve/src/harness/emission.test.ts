@@ -191,7 +191,10 @@ describe("emitStreamContent empty delivery", () => {
     expect(appended.map((event) => event.data.messageDelta.length)).toEqual([
       1, 64, 64, 64, 64, 64, 47,
     ]);
-    expect(appended.at(-1)?.data.messageSoFar).toBe("x".repeat(deltaCount));
+    const lastAppend = appended.at(-1);
+    expect(
+      (lastAppend?.data.messageOffset ?? 0) + (lastAppend?.data.messageDelta.length ?? 0),
+    ).toBe(deltaCount);
     expect(events.at(-1)?.type).toBe("message.completed");
   });
 

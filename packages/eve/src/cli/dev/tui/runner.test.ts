@@ -930,7 +930,7 @@ describe("EveTUIRunner idle session follow", () => {
         type: "message.appended",
         data: {
           messageDelta: "Background research finished.",
-          messageSoFar: "Background research finished.",
+          messageOffset: 0,
           sequence: 1,
           stepIndex: 1,
           turnId: "wake-turn",
@@ -974,7 +974,7 @@ describe("EveTUIRunner idle session follow", () => {
           type: "message.appended",
           data: {
             messageDelta: "Follow-up answer.",
-            messageSoFar: "Follow-up answer.",
+            messageOffset: 0,
             sequence: 2,
             stepIndex: 0,
             turnId: "follow-up-turn",
@@ -2172,7 +2172,7 @@ describe("EveTUIRunner reused step indexes", () => {
         type: "message.appended",
         data: {
           messageDelta: "I'll call the subagent.",
-          messageSoFar: "I'll call the subagent.",
+          messageOffset: 0,
           sequence: 0,
           stepIndex: 0,
           turnId: "t0",
@@ -2194,7 +2194,7 @@ describe("EveTUIRunner reused step indexes", () => {
         type: "message.appended",
         data: {
           messageDelta: "The subagent returned TOKEN-123.",
-          messageSoFar: "The subagent returned TOKEN-123.",
+          messageOffset: 0,
           sequence: 0,
           stepIndex: 0,
           turnId: "t0",
@@ -2249,7 +2249,7 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: "Sunny.",
-          messageSoFar: "Sunny.",
+          messageOffset: 0,
           sequence: 0,
           stepIndex: 0,
           turnId: "turn_0",
@@ -2379,7 +2379,7 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: "Using",
-          messageSoFar: "Using",
+          messageOffset: 0,
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
@@ -2389,7 +2389,7 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: " the first",
-          messageSoFar: "Using the first",
+          messageOffset: 5,
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
@@ -2399,7 +2399,17 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: " the retry",
-          messageSoFar: "Using the retry",
+          messageOffset: 5,
+          sequence: 0,
+          stepIndex: 1,
+          turnId: "turn_0",
+        },
+      },
+      {
+        type: "message.appended",
+        data: {
+          messageDelta: " collision",
+          messageOffset: 15,
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
@@ -2410,16 +2420,6 @@ describe("EveTUIRunner replay guards", () => {
         data: {
           finishReason: "stop",
           message: "Using the first answer.",
-          sequence: 0,
-          stepIndex: 1,
-          turnId: "turn_0",
-        },
-      },
-      {
-        type: "message.appended",
-        data: {
-          messageDelta: " answer.",
-          messageSoFar: "Using the retry answer.",
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
