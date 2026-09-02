@@ -63,12 +63,12 @@ describe("definition helper exact inputs", () => {
   it("accepts async-generator tool executors", () => {
     const streamedTool = defineTool({
       label: {
-        label: () => "Build report",
-        result(output) {
+        start: () => "Build report",
+        complete(_input, output) {
           expectTypeOf(output.phase).toEqualTypeOf<string>();
           return `Report ${output.phase}`;
         },
-        update(partial) {
+        delta(_input, partial) {
           expectTypeOf(partial.phase).toEqualTypeOf<string>();
           return partial.phase;
         },

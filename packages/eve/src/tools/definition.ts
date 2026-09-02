@@ -63,7 +63,9 @@ export interface InternalToolLabelDefinition {
 }
 
 export interface InternalToolDefinition extends ToolDefinitionBase {
-  label?: InternalToolLabelDefinition;
+  activityLabel?: (input: unknown) => string;
+  activityResult?: (input: unknown, output: unknown) => string;
+  activityUpdate?: (input: unknown, partial: unknown) => string;
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
