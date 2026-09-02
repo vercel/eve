@@ -19,14 +19,6 @@ const LOCAL_SERVER_URL_PATTERN = /https?:\/\/(?:\[[^\]\s]+\]|[^\s/:[\]]+)(?::\d+
 const TERMINATE_GRACE_MS = 20_000;
 const WILDCARD_LISTEN_HOSTNAMES: ReadonlySet<string> = new Set(["[::]", "::", "0.0.0.0"]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isAddressInUseError(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "EADDRINUSE";
-}
-
 function resolveOutputServerEntry(appRoot: string): string {
   return join(resolve(appRoot), ".output", "server", "index.mjs");
 }
