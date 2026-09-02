@@ -49,7 +49,7 @@ import { microsandbox } from "eve/sandbox/microsandbox";
 import { Drive, vercel } from "eve/sandbox/vercel";
 
 const fallback = defaultBackend({
-  docker: { image: "ghcr.io/vercel/eve:latest" },
+  docker: { image: "ubuntu:24.04" },
   justBash: {},
   microsandbox: {},
   vercel: { resources: { vcpus: 2 } },

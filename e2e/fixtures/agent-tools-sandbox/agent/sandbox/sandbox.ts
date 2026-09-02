@@ -18,9 +18,10 @@ import { vercel } from "eve/sandbox/vercel";
  * Backend is left as the framework default so this fixture works both
  * locally (where `defaultBackend()` resolves to `docker()`) and on Vercel
  * deployments (where it resolves to `vercel()`). Both run the published
- * `ghcr.io/vercel/eve:latest` base image, which ships Python, Node, and git;
- * the bootstrap below assumes that real-binary environment and is not meant
- * to run against the dependency-free `just-bash` fallback.
+ * `vcr.vercel.com/vercel/eve/base` image tagged with the installed eve version,
+ * which ships Python, Node, and git; the bootstrap below assumes that
+ * real-binary environment and is not meant to run against the dependency-free
+ * `just-bash` fallback.
  *
  * `EVE_TEST_AUTHOR_SNAPSHOT_ID`, when set, overrides the backend with
  * `vercel({ source: { type: "snapshot", snapshotId } })` so the
