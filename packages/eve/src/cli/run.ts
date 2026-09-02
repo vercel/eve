@@ -46,12 +46,7 @@ import {
   parseStatsMode,
 } from "#cli/option-parsers.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
-import { resolveTuiTitle, type DevelopmentTuiTarget } from "#cli/dev/tui/target.js";
 import { resolveEveProjectContext } from "#internal/project-context.js";
-import {
-  resumeDevelopmentRuntimeArtifacts,
-  suspendDevelopmentRuntimeArtifacts,
-} from "#services/dev-client/runtime-artifacts.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
