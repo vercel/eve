@@ -27,7 +27,7 @@ import {
   removeStreamingToolPartsForTurn,
   upsertMessage,
 } from "#client/message-reducer-primitives.js";
-import { appendRun, upsertRun } from "#client/message-run-parts.js";
+import { messageRun } from "#client/message-run-parts.js";
 import { appendStreamTextDelta } from "#shared/stream-text.js";
 import type { InputResponse } from "#shared/input.js";
 import type { AuthorizationCompletedStreamEvent, InputResolution } from "#protocol/message.js";
@@ -124,7 +124,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        appendRun(ensureStepStartPart(message, event.data.stepIndex), {
+        messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
           delta: event.data.reasoningDelta,
           offset: event.data.reasoningOffset,
           stepIndex: event.data.stepIndex,
@@ -134,7 +134,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "reasoning.completed":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
+        messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.reasoning,
@@ -356,7 +356,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
 
     case "message.appended":
       return updateAssistantMessage(data, event.data.turnId, (message) =>
-        appendRun(ensureStepStartPart(message, event.data.stepIndex), {
+        messageRun.append(ensureStepStartPart(message, event.data.stepIndex), {
           delta: event.data.messageDelta,
           offset: event.data.messageOffset,
           stepIndex: event.data.stepIndex,
@@ -370,7 +370,7 @@ function reduceMessageData(data: EveMessageData, event: EveAgentReducerEvent): E
           return removeTextPart(message, event.data.stepIndex);
         }
 
-        return upsertRun(ensureStepStartPart(message, event.data.stepIndex), {
+        return messageRun.upsert(ensureStepStartPart(message, event.data.stepIndex), {
           state: "done",
           stepIndex: event.data.stepIndex,
           text: event.data.message,

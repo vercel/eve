@@ -4,7 +4,7 @@ import { appendStreamTextDelta } from "#shared/stream-text.js";
 type EveAssistantMessage = EveMessage & { readonly role: "assistant" };
 type EveRunPart = Extract<EveMessagePart, { readonly type: "text" | "reasoning" }>;
 
-export function appendRun(
+function append(
   message: EveAssistantMessage,
   append: {
     readonly delta: string;
@@ -16,7 +16,7 @@ export function appendRun(
   const current = latestStreamingRun(message, append.type, append.stepIndex);
   const text = appendStreamTextDelta(current?.text, append.offset, append.delta);
   if (text === undefined) return message;
-  return upsertRun(message, {
+  return upsert(message, {
     state: "streaming",
     stepIndex: append.stepIndex,
     text,
@@ -40,7 +40,7 @@ function latestStreamingRun(
 
 // One step can produce text, call tools, then produce more text. Replace its
 // open run in place; after completion, append a new run in arrival order.
-export function upsertRun(message: EveAssistantMessage, next: EveRunPart): EveAssistantMessage {
+function upsert(message: EveAssistantMessage, next: EveRunPart): EveAssistantMessage {
   let lastIndex = -1;
   for (let index = message.parts.length - 1; index >= 0; index -= 1) {
     const part = message.parts[index];
@@ -65,3 +65,5 @@ export function upsertRun(message: EveAssistantMessage, next: EveRunPart): EveAs
     parts,
   };
 }
+
+export const messageRun = { append, upsert } as const;
