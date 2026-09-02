@@ -5,12 +5,15 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  clearPendingRuntimeActionBatch,
   createRuntimeActionRequestFromToolCall,
   getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   resolveToolCallInputObject,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { deriveAgentOperationId } from "#harness/handles/operation-id.js";
 import { deriveAgentId, getAgentHandleStore } from "#harness/handles/store.js";
 import {
@@ -154,6 +157,143 @@ describe("runtime action batch identity", () => {
         session: createParkedSession(),
       }),
     ).toThrow('duplicate callId "duplicate-call"');
+  });
+
+  it("drops an input batch whose assistant response is owned by a cancelled runtime action batch", () => {
+    const event = { sequence: 1, stepIndex: 2, turnId: "turn_1" };
+    const question = {
+      action: {
+        callId: "question-1",
+        input: { allowFreeform: true, prompt: "Which option?" },
+        kind: "tool-call" as const,
+        toolName: "ask_question",
+      },
+      allowFreeform: true,
+      display: "text" as const,
+      kind: "question" as const,
+      prompt: "Which option?",
+      requestId: "question-1",
+    };
+    const withPreviousQuestion = appendPendingInputBatch({
+      event: { sequence: 0, stepIndex: 0, turnId: "turn_0" },
+      requests: [{ ...question, requestId: "question-0" }],
+      responseMessages: [],
+      session: createParkedSession(),
+    });
+    const withRuntimeAction = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "delegate-1",
+          description: "research subagent",
+          input: { message: "go" },
+          target: {
+            kind: "subagent-call",
+            nodeId: "subagents/researcher",
+            subagentName: "researcher",
+          },
+          toolName: "researcher",
+        },
+      ],
+      event,
+      responseMessages: [
+        {
+          content: [
+            {
+              input: { message: "go" },
+              toolCallId: "delegate-1",
+              toolName: "researcher",
+              type: "tool-call",
+            },
+            {
+              input: question.action.input,
+              toolCallId: question.action.callId,
+              toolName: question.action.toolName,
+              type: "tool-call",
+            },
+          ],
+          role: "assistant",
+        },
+      ],
+      session: withPreviousQuestion,
+    });
+    const collision = appendPendingInputBatch({
+      event,
+      requests: [question],
+      responseMessages: [],
+      session: withRuntimeAction,
+    });
+
+    const cleared = clearPendingRuntimeActionBatch(collision);
+
+    expect(getPendingRuntimeActionBatch(cleared.state)).toBeUndefined();
+    expect(
+      getPendingInputBatches(cleared.state).flatMap((batch) =>
+        batch.requests.map((request) => request.requestId),
+      ),
+    ).toEqual(["question-0"]);
+  });
+
+  it("drops the durable approval notice owned by a cancelled runtime action batch", () => {
+    const event = { sequence: 1, stepIndex: 2, turnId: "turn_1" };
+    const approval = {
+      action: {
+        callId: "gate-1",
+        input: { operation: "delete" },
+        kind: "tool-call" as const,
+        toolName: "gate",
+      },
+      display: "confirmation" as const,
+      kind: "tool-approval" as const,
+      prompt: "Allow gate?",
+      requestId: "approval-1",
+    };
+    const previousApproval = { ...approval, requestId: "approval-0" };
+    const notice = renderPendingApprovalsSnippet([approval]);
+    const previousNotice = renderPendingApprovalsSnippet([previousApproval]);
+    if (notice === undefined || previousNotice === undefined) {
+      throw new Error("Expected approval notices");
+    }
+    const base = createParkedSession();
+    const withRuntimeAction = setPendingRuntimeActionBatch({
+      actions: [
+        {
+          callId: "delegate-1",
+          description: "research subagent",
+          input: { message: "go" },
+          target: {
+            kind: "subagent-call",
+            nodeId: "subagents/researcher",
+            subagentName: "researcher",
+          },
+          toolName: "researcher",
+        },
+      ],
+      event,
+      responseMessages: [],
+      session: {
+        ...base,
+        history: [
+          ...base.history,
+          { content: notice, role: "user" },
+          { content: previousNotice, role: "user" },
+          { content: notice, role: "user" },
+        ],
+      },
+    });
+    const collision = appendPendingInputBatch({
+      event,
+      requests: [approval],
+      responseMessages: [],
+      session: withRuntimeAction,
+    });
+
+    const cleared = clearPendingRuntimeActionBatch(collision);
+
+    expect(cleared.history).toEqual([
+      ...base.history,
+      { content: notice, role: "user" },
+      { content: previousNotice, role: "user" },
+    ]);
   });
 });
 

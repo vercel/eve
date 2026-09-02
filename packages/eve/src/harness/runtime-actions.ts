@@ -13,6 +13,11 @@ import {
   clearProxyInputRequestsForChild,
   clearProxyInputRequestsWhere,
 } from "#harness/proxy-input-requests.js";
+import {
+  getPendingInputBatches,
+  removePendingInputBatches,
+} from "#harness/pending-input-batches.js";
+import { renderPendingApprovalsSnippet } from "#harness/hitl/approval-prompt.js";
 import { findToolRun, removeToolRun } from "#harness/tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
@@ -113,9 +118,33 @@ export function clearPendingRuntimeActionBatch(session: HarnessSession): Harness
   if (session.state?.[PENDING_RUNTIME_ACTION_BATCH_KEY] === undefined) {
     return session;
   }
-  const state = { ...session.state };
+
+  const runtimeBatch = getPendingRuntimeActionBatch(session.state);
+  const coOwnedInputBatches = getPendingInputBatches(session.state).filter(
+    (inputBatch) =>
+      runtimeBatch !== undefined &&
+      inputBatch.event?.sequence === runtimeBatch.event.sequence &&
+      inputBatch.event.stepIndex === runtimeBatch.event.stepIndex &&
+      inputBatch.event.turnId === runtimeBatch.event.turnId,
+  );
+  const pendingApprovalSnippets = new Set(
+    coOwnedInputBatches
+      .map((batch) => renderPendingApprovalsSnippet(batch.requests))
+      .filter((snippet): snippet is string => snippet !== undefined),
+  );
+  const history = [...session.history];
+  const lastMessage = history.at(-1);
+  if (
+    lastMessage?.role === "user" &&
+    typeof lastMessage.content === "string" &&
+    pendingApprovalSnippets.has(lastMessage.content)
+  ) {
+    history.pop();
+  }
+  const clearedSession = removePendingInputBatches({ ...session, history }, coOwnedInputBatches);
+  const state = { ...clearedSession.state };
   delete state[PENDING_RUNTIME_ACTION_BATCH_KEY];
-  return { ...session, state: Object.keys(state).length > 0 ? state : undefined };
+  return { ...clearedSession, state: Object.keys(state).length > 0 ? state : undefined };
 }
 
 /**
