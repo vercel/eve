@@ -2231,16 +2231,10 @@ async function* eveEventsToTUIStream(
             state.completedEpoch = stepEpoch;
             yield { type: "assistant-complete", id };
           } else {
-            yield { type: "assistant-complete", id };
-            state.generation += 1;
             state.text = message;
             state.completed = true;
             state.completedEpoch = stepEpoch;
-            yield {
-              type: "assistant-complete",
-              id: partGenerationId(base, state.generation),
-              text: message,
-            };
+            yield { type: "assistant-complete", id, text: message };
           }
         } else if (state.text.length > 0) {
           state.completed = true;

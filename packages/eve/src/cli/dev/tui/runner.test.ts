@@ -2300,7 +2300,7 @@ describe("EveTUIRunner replay guards", () => {
     expect(deltas).toEqual([{ type: "assistant-delta", id: "text:turn_0:0", delta: "Sunny." }]);
   });
 
-  it("deduplicates repeated call IDs and renders the canonical completed text", async () => {
+  it("deduplicates repeated call IDs and replaces retried text with the completed text", async () => {
     const prompts: Array<string | undefined> = ["weather", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -2478,15 +2478,18 @@ describe("EveTUIRunner replay guards", () => {
       .filter((event) => event.type === "assistant-delta")
       .map((event) => event.delta)
       .join("");
-    const completedText = emitted
-      .filter((event) => event.type === "assistant-complete")
-      .map((event) => event.text)
-      .filter((text): text is string => text !== undefined);
+    const assistantCompletes = emitted.filter((event) => event.type === "assistant-complete");
 
     expect(toolCalls.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
     expect(toolResults.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
     expect(streamedText).toContain("the retry collision");
-    expect(completedText).toContain("Using the first answer.");
+    expect(assistantCompletes).toEqual([
+      {
+        type: "assistant-complete",
+        id: "text:turn_0:1",
+        text: "Using the first answer.",
+      },
+    ]);
     expect(emitted.filter((event) => event.type === "finish")).toHaveLength(1);
   });
 

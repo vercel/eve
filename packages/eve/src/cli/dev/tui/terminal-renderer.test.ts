@@ -249,6 +249,23 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(snapshot).toContain("It's 73°F in SF.");
   });
 
+  it("replaces discarded retry text with the authoritative completed message", async () => {
+    const { screen, renderer } = makeRenderer();
+    await renderer.renderStream(
+      streamOf([
+        { type: "assistant-delta", id: "t1", delta: "Discard this partial response." },
+        { type: "assistant-delta", id: "t1", delta: "Recovered answer." },
+        { type: "assistant-complete", id: "t1", text: "Recovered answer." },
+        { type: "finish" },
+      ]),
+      { submittedPrompt: "continue", continueSession: false },
+    );
+
+    const snapshot = screen.snapshot();
+    expect(snapshot).not.toContain("Discard this partial response.");
+    expect(snapshot.match(/Recovered answer\./gu)).toHaveLength(1);
+  });
+
   it("renders rejected tools as denied", async () => {
     const { screen, renderer } = makeRenderer();
     await renderer.renderStream(
