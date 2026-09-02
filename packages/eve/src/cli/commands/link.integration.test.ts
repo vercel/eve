@@ -29,11 +29,7 @@ class TestLogger implements LinkCliLogger {
 async function createWorkspaceProject(): Promise<string> {
   const projectRoot = await mkdtemp(join(tmpdir(), "eve-link-workspace-"));
   await mkdir(join(projectRoot, "agents/support/agent"), { recursive: true });
-  await writeFile(
-    join(projectRoot, "package.json"),
-    JSON.stringify({ eve: { agents: ["agents/*"] }, private: true }),
-    "utf8",
-  );
+  await writeFile(join(projectRoot, "package.json"), JSON.stringify({ private: true }), "utf8");
   return projectRoot;
 }
 

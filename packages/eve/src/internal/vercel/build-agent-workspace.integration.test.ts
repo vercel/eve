@@ -15,7 +15,7 @@ async function createWorkspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "eve-workspace-build-"));
   await writeFile(
     join(root, "package.json"),
-    JSON.stringify({ eve: { agents: ["agents/*"] }, packageManager: "pnpm@10.0.0", private: true }),
+    JSON.stringify({ packageManager: "pnpm@10.0.0", private: true }),
   );
   await Promise.all([
     mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
@@ -36,11 +36,11 @@ describe("buildAgentWorkspace", () => {
     expect(config.routes).toEqual([
       {
         destination: { service: "eve-research", type: "service" },
-        src: "^/eve/agents/research/eve/v1/(.*)$",
+        src: "^/research/eve/v1/(.*)$",
       },
       {
         destination: { service: "eve-support", type: "service" },
-        src: "^/eve/agents/support/eve/v1/(.*)$",
+        src: "^/support/eve/v1/(.*)$",
       },
     ]);
     await expect(
@@ -49,13 +49,13 @@ describe("buildAgentWorkspace", () => {
 
     expect(config.services["eve-support"]).toEqual({
       buildCommand:
-        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/eve/agents/support' && node 'node_modules/eve/bin/eve.js' build",
+        "cd '../../../agents/support' && export EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY='../../.eve/vercel-services/eve-support/.vercel/output' && export EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY='../../.vercel/output' && export EVE_PUBLIC_ROUTE_PREFIX='/support' && node 'node_modules/eve/bin/eve.js' build",
       framework: "eve",
       root: ".eve/vercel-services/eve-support",
-      routePrefix: "/eve/agents/support",
+      routePrefix: "/support",
       routes: [
         {
-          src: "^/eve/agents/support/eve/v1/(.*)$",
+          src: "^/support/eve/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
         },
       ],
@@ -75,7 +75,7 @@ describe("buildAgentWorkspace", () => {
     expect(supportServiceName).toMatch(/^eve-support-[a-z]+$/);
     expect(config.routes).toContainEqual({
       destination: { service: supportServiceName, type: "service" },
-      src: "^/eve/agents/support2/eve/v1/(.*)$",
+      src: "^/support2/eve/v1/(.*)$",
     });
   });
 

@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Deploy strict, single-package `agents/<name>/agent/` workspaces as declaratively inferred peer Vercel services, with no generated `vercel.json` step.
+Deploy conventional `agents/<name>/agent/` workspaces as inferred peer Vercel services at `/<name>/eve/v1/*`, with no generated `vercel.json` step.

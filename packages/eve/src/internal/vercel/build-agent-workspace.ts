@@ -24,7 +24,7 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
         toVercelRelativePath(member.appRoot, resolveEveBinaryPath(member.appRoot)),
       )} build`,
       name: member.name,
-      publicRoutePrefix: `/eve/agents/${member.name}`,
+      publicRoutePrefix: `/${member.name}`,
     },
     target: {
       hostOutputDirectory: join(workspace.root, ".vercel", "output"),
