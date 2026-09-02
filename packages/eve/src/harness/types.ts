@@ -1,3 +1,4 @@
+import type { AuthorizationResult } from "#harness/authorization.js";
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
@@ -173,6 +174,11 @@ export interface StepInput {
    * produced by channels.
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
+  /**
+   * Authorization callbacks matched at the delivery boundary. Internal: the
+   * request interpreter terminalizes the matching Authorization requests.
+   */
+  readonly authorizationResults?: readonly AuthorizationResult[];
 }
 
 /**
@@ -286,8 +292,6 @@ export interface ToolLoopHarnessConfig {
   readonly clearOnly?: boolean;
   /** Forces one context-compaction pass without running a model turn. */
   readonly compactOnly?: boolean;
-  /** Checkpoints resolved HITL Groups before delivering their owner completion. */
-  readonly durableGroupCompletionDelivery?: boolean;
   /**
    * Exposes the `Workflow` orchestration tool — an isolated JavaScript sandbox
    * whose only callable operations are this agent's subagents and remote

@@ -41,9 +41,6 @@ export function hasPendingApprovalBatch(session: HarnessSession): boolean {
   );
 }
 
-/** Resolves one delivery through the authoritative HITL request interpreter. */
-export { interpretRequestDelivery as resolvePendingInput } from "#harness/hitl/request-interpreter.js";
-
 /** Creates a runtime tool-call action shape from an AI SDK tool call. */
 export function createRuntimeToolCallActionFromToolCall(input: {
   readonly toolCall: {
