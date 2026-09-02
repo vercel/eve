@@ -22,7 +22,11 @@ describe("parseConnectPrincipalType", () => {
     registerIntegrationCommands({
       program,
       logger: { error: vi.fn(), log: vi.fn() },
-      applicationContext: { root: "/workspace", resolve: vi.fn(async () => {}) },
+      applicationContext: {
+        root: "/workspace",
+        resolve: vi.fn(async () => {}),
+        resolveAgent: vi.fn(),
+      },
     });
 
     expect(program.helpInformation()).toContain("integration");
