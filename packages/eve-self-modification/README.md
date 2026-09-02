@@ -39,6 +39,8 @@ The extension contributes `selfmod__edit_file` for one or more exact targeted ed
 
 The extension also provides `selfmod__search_registry` to search the eve registry for channels, connections, extensions, and other integrations the project can add. Registry search is read-only: it reports each item's address, whether the authored tree already holds it, and the eve version it requires.
 
+The extension provides `selfmod__search_models` to search the model catalog and returns exact model IDs.
+
 ## Installing registry items
 
 `selfmod__registry_add` installs an item from the configured eve registry — `eve add <address> --non-interactive --skip-setup` in the application root — so the subagent can add an existing integration instead of hand-writing one. It runs only under `eve dev`, requires approval the first time per session, and holds the authored-source watcher suspended for the whole install.
