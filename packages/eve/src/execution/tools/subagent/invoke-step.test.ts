@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   dispatchAgentInvocation,
   settleTaskAgentInvocationStep,
-} from "#execution/tools/subagent/invocation-step.js";
+} from "#execution/tools/subagent/invoke-step.js";
 import { dispatchToTaskAgentAddress } from "#subagents/handle-dispatch.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
-import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invocation-preparation.js";
+import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
 import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/store.js";
 
@@ -20,7 +20,7 @@ vi.mock("#subagents/continuation-bundle.js", () => ({
 vi.mock("#execution/tools/subagent/start.js", () => ({
   startSubagent: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/invocation-preparation.js", () => ({
+vi.mock("#execution/tools/subagent/invoke-preparation.js", () => ({
   prepareOwnerAgentInvocation: vi.fn(),
 }));
 vi.mock("#execution/durable-session-store.js", async (importOriginal) => ({
@@ -98,7 +98,7 @@ describe("owner agent invocation dispatch", () => {
         taskId: "task-1",
       }),
     );
-    expect(dispatched).toMatchObject({ agentId: "agent-1" });
+    expect(dispatched).toMatchObject({ agentId: "agent-1", kind: "dispatched" });
     expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual([
       expect.objectContaining({
         identity: availableRecord.identity,
@@ -165,7 +165,7 @@ describe("owner agent invocation dispatch", () => {
         taskId: "task-1",
       }),
     );
-    expect(dispatched).toMatchObject({ agentId: "agent-receipt" });
+    expect(dispatched).toMatchObject({ agentId: "agent-receipt", kind: "dispatched" });
     expect(startSubagent).toHaveBeenCalledWith(
       expect.objectContaining({
         currentSession: expect.objectContaining({
@@ -231,8 +231,7 @@ async function dispatch() {
     request: {
       input: { message: "Find it", target: "research" },
       invocationId: "call-1",
-      kind: "effect",
-      name: "agent.invoke",
+      kind: "agent-invoke",
     },
     serializedContext: {},
     sessionState: {} as never,

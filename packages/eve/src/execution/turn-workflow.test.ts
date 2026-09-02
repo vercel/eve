@@ -932,8 +932,10 @@ describe("turnWorkflow", () => {
     const workflowRequest = {
       from: {
         callId: "call-1",
+        execution: "blocking" as const,
         input: { service: "api" },
         runId: "run-1",
+        sequence: 0,
         stepIndex: 1,
         toolName: "confirm_deploy",
         turnId: "turn_0",

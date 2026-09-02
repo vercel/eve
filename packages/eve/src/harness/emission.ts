@@ -17,6 +17,7 @@ import type {
 } from "#protocol/message.js";
 import {
   createActionsRequestedEvent,
+  createActionInputAppendedEvent,
   createActionPartialEvent,
   createActionResultEvent,
   createMessageAppendedEvent,
@@ -352,6 +353,7 @@ async function consumeStreamContent(
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
+  const streamingActionInputs = new Map<string, { offset: number; toolName: string }>();
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -368,6 +370,24 @@ async function consumeStreamContent(
     );
     currentMessage = "";
   };
+
+  const emitActionInput = async (
+    callId: string,
+    toolName: string,
+    inputTextDelta: string,
+    inputTextOffset: number,
+  ): Promise<void> =>
+    emitFn(
+      createActionInputAppendedEvent({
+        callId,
+        inputTextDelta,
+        inputTextOffset,
+        sequence: state.sequence,
+        stepIndex: state.stepIndex,
+        toolName,
+        turnId: state.turnId,
+      }),
+    );
 
   const emitActionRequest = async (action: RuntimeActionRequest): Promise<void> => {
     if (emittedActionCallIds.has(action.callId)) {
@@ -535,8 +555,40 @@ async function consumeStreamContent(
           }),
         );
         break;
+      case "tool-input-start": {
+        if (
+          options === undefined ||
+          part.providerExecuted === true ||
+          options.excludedActionToolNames.has(part.toolName)
+        ) {
+          streamingActionInputs.delete(part.id);
+          break;
+        }
+        await providerActionBatch.flush();
+        if (currentMessage.trim().length > 0) {
+          await flushCurrentMessage();
+        }
+        streamingActionInputs.set(part.id, { offset: 0, toolName: part.toolName });
+        await emitActionInput(part.id, part.toolName, "", 0);
+        break;
+      }
+      case "tool-input-delta": {
+        const input = streamingActionInputs.get(part.id);
+        if (input === undefined) {
+          break;
+        }
+        await providerActionBatch.flush();
+        const inputTextOffset = input.offset;
+        input.offset += part.delta.length;
+        await emitActionInput(part.id, input.toolName, part.delta, inputTextOffset);
+        break;
+      }
+      case "tool-input-end":
+        streamingActionInputs.delete(part.id);
+        break;
       case "tool-call": {
         const toolCall = part as TypedToolCall<ToolSet>;
+        streamingActionInputs.delete(toolCall.toolCallId);
         toolCallIdsSeenInStream.add(toolCall.toolCallId);
         if (toolCall.providerExecuted === true) {
           await collectProviderToolCall(toolCall);

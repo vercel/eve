@@ -13,7 +13,12 @@ import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
-import type { TaskEffectDelivery, TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
+import type {
+  TaskAgentRequestDelivery,
+  TaskAuthorizationEventDelivery,
+  TaskInputRequestDelivery,
+  TaskView,
+} from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -175,8 +180,10 @@ export interface DeliverPayload {
   readonly task?: {
     /** Task HITL input-request batches for the parent's pre-model router. */
     readonly inputRequests?: readonly TaskInputRequestDelivery[];
-    /** Task workflow effects projected through the parent channel. */
-    readonly effects?: readonly TaskEffectDelivery[];
+    /** Agent spawn/settlement requests a task-owned workflow run needs the parent to apply. */
+    readonly agentRequests?: readonly TaskAgentRequestDelivery[];
+    /** Task child authorization events re-emitted through the parent channel. */
+    readonly authorizationEvents?: readonly TaskAuthorizationEventDelivery[];
     /** Terminal views cached before task-run retention expires. */
     readonly views?: readonly TaskView[];
   };

@@ -1,8 +1,8 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
 import type { SessionAuthContext, SessionCommand } from "#channel/types.js";
-import {
-  isWorkflowToolEffectRequest,
-  type WorkflowToolRunRequestMessage,
+import type {
+  WorkflowToolAuthorizationRequest,
+  WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { WorkflowToolRunTaskInputRequest } from "./workflow.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
@@ -10,13 +10,15 @@ import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
-import { parseJsonValue, type JsonValue } from "#shared/json.js";
+import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
   TASK_VIEW_STREAM_NAMESPACE,
+  taskAuthorizationRequestId,
+  type TaskAgentRequestDelivery,
+  type TaskAuthorizationEventDelivery,
   type TaskInboundAnswerInput,
   type TaskInboundUpdate,
-  type TaskEffectDelivery,
   type TaskInputRequestDelivery,
   type TaskView,
 } from "#tasks/types.js";
@@ -100,33 +102,58 @@ export async function wakeTaskUpdateParentStep(input: {
   }
 }
 
-/** Forwards one task-owned workflow effect to the parent session. */
-export async function wakeTaskEffectParentStep(input: {
+/** Forwards one agent spawn or settlement request to the parent session. */
+export async function wakeTaskAgentRequestParentStep(input: {
   readonly request: WorkflowToolRunRequestMessage;
   readonly taskId: string;
   readonly token: string;
 }): Promise<void> {
   "use step";
 
-  const effect = input.request.request;
-  if (!isWorkflowToolEffectRequest(effect)) {
-    throw new Error("Cannot forward task input as a workflow effect.");
+  const request = input.request.request;
+  if (request.kind !== "agent-invoke" && request.kind !== "agent-settled") {
+    throw new Error("Cannot forward task input as an agent request.");
   }
-  const delivery: { -readonly [K in keyof TaskEffectDelivery]: TaskEffectDelivery[K] } = {
-    input: parseJsonValue(effect.input),
-    name: effect.name,
+  const delivery: TaskAgentRequestDelivery = {
     replyTo: input.request.replyTo,
+    request,
     taskId: input.taskId,
   };
-  if (effect.invocationId !== undefined) delivery.invocationId = effect.invocationId;
+  const invocationId =
+    request.kind === "agent-invoke" ? request.invocationId : `${request.result.callId}:settled`;
   const command: SessionCommand = {
     kind: "send",
-    payload: {
-      task: {
-        effects: [delivery],
-      },
-    },
-    taskDeliveryId: `${input.taskId}:effect:${input.request.from.runId}:${effect.invocationId ?? effect.name}`,
+    payload: { task: { agentRequests: [delivery] } },
+    taskDeliveryId: `${input.taskId}:agent:${input.request.from.runId}:${invocationId}`,
+  };
+  try {
+    await resumeSessionInbox(input.token, command);
+  } catch (error) {
+    if (!isTaskWorkflowTargetGone(error)) throw error;
+  }
+}
+
+/** Re-emits a task child's authorization event through the parent channel. */
+export async function wakeTaskAuthorizationParentStep(input: {
+  readonly request: WorkflowToolAuthorizationRequest;
+  readonly taskId: string;
+  readonly token: string;
+}): Promise<void> {
+  "use step";
+
+  const { event: hookPayload } = input.request;
+  const data = hookPayload.event.data;
+  const payload: {
+    message?: string;
+    task: { authorizationEvents: TaskAuthorizationEventDelivery[] };
+  } = { task: { authorizationEvents: [{ hookPayload, taskId: input.taskId }] } };
+  if (hookPayload.event.type === "authorization.required") {
+    payload.message = `Background task ${input.taskId} needs authorization.`;
+  }
+  const command: SessionCommand = {
+    kind: "send",
+    payload,
+    taskDeliveryId: `${input.taskId}:authorization:${hookPayload.event.type}:${data.turnId}:${data.stepIndex}:${data.sequence}:${taskAuthorizationRequestId(hookPayload.event)}`,
   };
   try {
     await resumeSessionInbox(input.token, command);

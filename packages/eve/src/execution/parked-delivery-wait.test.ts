@@ -8,7 +8,6 @@ import type {
   SessionInboxPayload,
   SessionInboxSource,
 } from "#execution/session-command-inbox.js";
-import { createSessionCommandRouter } from "#execution/session-command-router.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 
@@ -102,7 +101,6 @@ function waitInput(inbox: SessionCommandInbox): Parameters<typeof nextTurnDelive
     bufferedDeliveries: [],
     bufferedSessionControls: [],
     commandInbox: inbox,
-    commandRouter: createSessionCommandRouter(),
     driverWritable: new WritableStream<Uint8Array>(),
     stateCursor: new SessionStateCursor({ serializedContext: {}, sessionState }),
   };
@@ -264,7 +262,6 @@ describe("nextTurnDelivery routing", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
-      commandRouter: createSessionCommandRouter(),
       driverWritable: new WritableStream<Uint8Array>(),
       stateCursor,
     });

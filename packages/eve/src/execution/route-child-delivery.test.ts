@@ -5,27 +5,27 @@ import {
   emitRecordedTaskInputRequestStep,
   runProxySubagentEventStep,
 } from "#subagents/event-proxy-step.js";
-import {
-  acceptTaskAgentEventStep,
-  recordTaskInputRequestStep,
-} from "#execution/task-hitl-proxy-steps.js";
+import { recordTaskInputRequestStep } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
 import { routeProxiedDeliverStep } from "#execution/proxied-deliver-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
-import { dispatchTaskAgentInvocationStep } from "#execution/tools/subagent/invocation-step.js";
+import { dispatchTaskAgentInvocationStep } from "#execution/tools/subagent/invoke-step.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 
 vi.mock("#subagents/event-proxy-step.js", () => ({
   emitRecordedTaskInputRequestStep: vi.fn(),
   runProxySubagentEventStep: vi.fn(),
 }));
-vi.mock("#execution/task-hitl-proxy-steps.js", () => ({
-  acceptTaskAgentEventStep: vi.fn(),
+vi.mock("#execution/tasks/parent/hitl-proxy-steps.js", () => ({
   recordTaskInputRequestStep: vi.fn(),
+}));
+vi.mock("#execution/tools/subagent/accept-event-step.js", () => ({
+  acceptTaskAuthorizationEventStep: vi.fn(),
 }));
 vi.mock("#execution/proxied-deliver-step.js", () => ({
   routeProxiedDeliverStep: vi.fn(),
 }));
-vi.mock("#execution/tools/subagent/invocation-step.js", () => ({
+vi.mock("#execution/tools/subagent/invoke-step.js", () => ({
   dispatchTaskAgentInvocationStep: vi.fn(),
 }));
 vi.mock("#execution/tools/workflow/resume-hook-step.js", () => ({
@@ -141,10 +141,7 @@ describe("task HITL delivery routing", () => {
       serializedContext: { adapter: "updated" },
       sessionState: nextState,
     });
-    vi.mocked(acceptTaskAgentEventStep).mockResolvedValue({
-      accepted: true,
-      hookPayload: event,
-    });
+    vi.mocked(acceptTaskAuthorizationEventStep).mockResolvedValue(true);
 
     const result = await routeDeliverToChildren({
       delivery: {
@@ -152,14 +149,7 @@ describe("task HITL delivery routing", () => {
         payloads: [
           {
             task: {
-              effects: [
-                {
-                  input: event,
-                  name: "agent.event",
-                  replyTo: "agent-reply",
-                  taskId: "task-1",
-                },
-              ],
+              authorizationEvents: [{ hookPayload: event, taskId: "task-1" }],
             },
           },
         ],
@@ -169,8 +159,10 @@ describe("task HITL delivery routing", () => {
       sessionState: state(false),
     });
 
-    expect(acceptTaskAgentEventStep).toHaveBeenCalledWith(
-      expect.objectContaining({ effect: expect.objectContaining({ taskId: "task-1" }) }),
+    expect(acceptTaskAuthorizationEventStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        delivery: { hookPayload: event, taskId: "task-1" },
+      }),
     );
     expect(runProxySubagentEventStep).toHaveBeenCalledWith(
       expect.objectContaining({ hookPayload: event }),
@@ -193,7 +185,7 @@ describe("task HITL delivery routing", () => {
       subagentName: "research",
     };
     vi.mocked(dispatchTaskAgentInvocationStep).mockResolvedValue({
-      accepted: true,
+      kind: "failed",
       result,
       sessionState: nextState,
     });
@@ -205,12 +197,14 @@ describe("task HITL delivery routing", () => {
         payloads: [
           {
             task: {
-              effects: [
+              agentRequests: [
                 {
-                  input: { message: "Find it", target: "research" },
-                  invocationId: "call-1:research",
-                  name: "agent.invoke",
                   replyTo: "agent-reply",
+                  request: {
+                    input: { message: "Find it", target: "research" },
+                    invocationId: "call-1:research",
+                    kind: "agent-invoke" as const,
+                  },
                   taskId: "task-1",
                 },
               ],
@@ -229,8 +223,7 @@ describe("task HITL delivery routing", () => {
       request: {
         input: { message: "Find it", target: "research" },
         invocationId: "call-1:research",
-        kind: "effect",
-        name: "agent.invoke",
+        kind: "agent-invoke",
       },
       serializedContext: { source: "parent" },
       sessionState: state(false),
@@ -240,7 +233,7 @@ describe("task HITL delivery routing", () => {
       kind: "runtime-action-result",
       results: [result],
     });
-    expect(acceptTaskAgentEventStep).not.toHaveBeenCalled();
+    expect(acceptTaskAuthorizationEventStep).not.toHaveBeenCalled();
     expect(routed).toMatchObject({ sessionState: nextState });
   });
 

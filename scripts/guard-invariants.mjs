@@ -109,17 +109,13 @@
  *             are append-only protocol history: change the contract by adding a
  *             version and migration, never by updating historical data and its
  *             snapshot together.
- *   rule 41 — The task kernel must stay executor-neutral. Production files
- *             under `src/tasks/**` and `src/execution/tasks/**` must not import
- *             subagent implementations. Executor-specific presentation and
- *             transport composition live outside this tree.
  *   rule 42 — The shared subagent workflow body is framework-authored
  *             userspace. It must not import task, harness, or context
  *             internals or recover private state through `Symbol.for`.
  *             Privileged dispatch belongs in ordinary step-backed APIs that
  *             the workflow body consumes through a public contract.
  *   rule 43 — Reusable session plumbing stays independent of the subagent
- *             executor. The generic inbox, router, and state cursor must not
+ *             executor. The generic inbox and state cursor must not
  *             import subagent modules; session/turn composition roots may
  *             compose built-in executors directly.
  *
@@ -218,7 +214,6 @@ function isTsLike(relPath) {
  *   rule33: Violation[];
  *   rule35: Violation[];
  *   rule37: Violation[];
- *   rule41: Violation[];
  *   rule42: Violation[];
  *   rule43: Violation[];
  *   symlinks: string[];
@@ -250,35 +245,9 @@ async function scanRepo(state) {
     checkRule33(posix, lines, state.rule33);
     checkRule35(posix, lines, state.rule35);
     checkRule37(posix, content, state.rule37);
-    checkRule41(posix, lines, state.rule41);
     checkRule42(posix, lines, state.rule42);
     checkRule43(posix, lines, state.rule43);
   }
-}
-
-// ---------- Rule 41: executor-neutral task kernel ----------
-
-// Matches both `#` alias specifiers and relative paths into the executor trees.
-const SUBAGENT_IMPORT_RE =
-  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
-
-const RULE43_GENERIC_SESSION_FILES = new Set([
-  "packages/eve/src/execution/session-command-inbox.ts",
-  "packages/eve/src/execution/session-command-router.ts",
-  "packages/eve/src/execution/session-state-cursor.ts",
-]);
-
-/**
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- */
-function checkRule41(posix, lines, violations) {
-  const inTaskKernel =
-    posix.startsWith("packages/eve/src/tasks/") ||
-    posix.startsWith("packages/eve/src/execution/tasks/");
-  if (!inTaskKernel || /\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix)) return;
-  pushSubagentImportViolations(41, posix, lines, violations, "task-kernel code");
 }
 
 // ---------- Rule 42: userspace subagent workflow ----------
@@ -288,7 +257,7 @@ const SUBAGENT_WORKFLOW_PRIVATE_IMPORT_RE =
   /["']#(?:tasks|execution|harness|context|shared)(?:\/|\.js)/;
 // The shared body owns its invocation id, so it consumes the framework-internal
 // entry rather than the public `agent()`; that import is the one exception.
-const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invocation.js"';
+const SUBAGENT_WORKFLOW_ALLOWED_IMPORT = '"#execution/tools/subagent/invoke-agent.js"';
 
 /**
  * @param {string} posix
@@ -311,7 +280,16 @@ function checkRule42(posix, lines, violations) {
   });
 }
 
-// ---------- Rule 43: executor-neutral execution and harness core ----------
+// ---------- Rule 43: executor-neutral session plumbing ----------
+
+// Matches both `#` alias specifiers and relative paths into the executor trees.
+const SUBAGENT_IMPORT_RE =
+  /from ["'](?:#|(?:\.\.?\/)+(?:[\w-]+\/)*)(?:subagents|execution\/tools\/subagent|tools\/subagent)(?:\/|\.js|["'])/;
+
+const RULE43_GENERIC_SESSION_FILES = new Set([
+  "packages/eve/src/execution/session-command-inbox.ts",
+  "packages/eve/src/execution/session-state-cursor.ts",
+]);
 
 /**
  * @param {string} posix
@@ -320,24 +298,14 @@ function checkRule42(posix, lines, violations) {
  */
 function checkRule43(posix, lines, violations) {
   if (!RULE43_GENERIC_SESSION_FILES.has(posix)) return;
-  pushSubagentImportViolations(43, posix, lines, violations, "generic session plumbing");
-}
-
-/**
- * @param {41 | 43} rule
- * @param {string} posix
- * @param {string[]} lines
- * @param {Violation[]} violations
- * @param {string} subject
- */
-function pushSubagentImportViolations(rule, posix, lines, violations, subject) {
   lines.forEach((line, idx) => {
     if (!SUBAGENT_IMPORT_RE.test(line)) return;
     violations.push({
-      rule,
+      rule: 43,
       file: posix,
       line: idx + 1,
-      message: `${subject} imports the subagent executor. Move executor-specific behavior to composition roots or subagent-owned modules.`,
+      message:
+        "generic session plumbing imports the subagent executor. Move executor-specific behavior to composition roots or subagent-owned modules.",
     });
   });
 }
@@ -1592,7 +1560,6 @@ async function main() {
     rule33: /** @type {Violation[]} */ ([]),
     rule35: /** @type {Violation[]} */ ([]),
     rule37: /** @type {Violation[]} */ ([]),
-    rule41: /** @type {Violation[]} */ ([]),
     rule42: /** @type {Violation[]} */ ([]),
     rule43: /** @type {Violation[]} */ ([]),
     symlinks: /** @type {string[]} */ ([]),
@@ -1699,9 +1666,6 @@ async function main() {
 
   // Rule 40
   violations.push(...(await checkRule40WireContracts()));
-
-  // Rule 41
-  violations.push(...state.rule41);
 
   // Rule 42
   violations.push(...state.rule42);

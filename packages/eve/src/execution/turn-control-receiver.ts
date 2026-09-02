@@ -7,9 +7,13 @@ import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.j
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
-import type { SessionCommandRouter } from "#execution/session-command-router.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
-import type { DecodedSessionInbox } from "#execution/wire/session-inbox-wire.js";
+import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
+import {
+  sessionInboxWire,
+  SessionInboxWireError,
+  type DecodedSessionInbox,
+} from "#execution/wire/session-inbox-wire.js";
 import { rebuildSerializableError } from "#execution/workflow-errors.js";
 
 type DeliveryRequest = Extract<TurnControlPayload, { readonly kind: "turn-delivery-request" }>;
@@ -21,7 +25,6 @@ export class TurnControlReceiver {
   private readonly bufferedDeliveries: DeliverHookPayload[];
   private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   private readonly commandInbox: SessionCommandInbox;
-  private readonly commandRouter: SessionCommandRouter;
   private readonly control: Hook<TurnControlPayload>;
   private readonly controlIterator: AsyncIterator<TurnControlPayload>;
   private readonly expectedTurnId: string;
@@ -34,7 +37,6 @@ export class TurnControlReceiver {
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
-    readonly commandRouter: SessionCommandRouter;
     readonly expectedTurnId: string;
     readonly seenTaskDeliveries?: Set<string>;
     readonly token: string;
@@ -43,7 +45,6 @@ export class TurnControlReceiver {
     this.bufferedSessionControls = input.bufferedSessionControls;
     this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
-    this.commandRouter = input.commandRouter;
     this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
@@ -166,10 +167,20 @@ export class TurnControlReceiver {
         throw new Error("Session command inbox closed before the active turn settled.");
       }
       this.commandInbox.consumeNext();
-      const command = await this.commandRouter.route(winner.value.value);
-      return command === undefined
-        ? await this.nextControlOrCommand()
-        : { command, kind: "command" };
+      // Runtime-action results belong to the active turn's private inbox. A
+      // late value on a retired session alias stays ignorable, but it is not
+      // part of the versioned session-command wire family.
+      if (winner.value.value.kind === "runtime-action-result") {
+        return await this.nextControlOrCommand();
+      }
+      try {
+        return { command: sessionInboxWire.decode(winner.value.value), kind: "command" };
+      } catch (error) {
+        if (!(error instanceof SessionInboxWireError)) throw error;
+        // Drop loudly and keep servicing the turn; see sessionInboxWire.decode.
+        await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+        return await this.nextControlOrCommand();
+      }
     }
 
     this.consumeControl();
@@ -229,8 +240,18 @@ export class TurnControlReceiver {
       }
 
       this.commandInbox.consumeNext();
-      const decoded = await this.commandRouter.route(winner.value.value);
-      if (decoded === undefined) continue;
+      if (winner.value.value.kind === "runtime-action-result") {
+        continue;
+      }
+      let decoded: DecodedSessionInbox;
+      try {
+        decoded = sessionInboxWire.decode(winner.value.value);
+      } catch (error) {
+        if (!(error instanceof SessionInboxWireError)) throw error;
+        // Drop loudly and keep servicing the request; see sessionInboxWire.decode.
+        await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+        continue;
+      }
       if (decoded.kind === "deliver") {
         if (!this.acceptTaskDelivery(decoded)) continue;
         if (deliveryHasMessage(decoded)) {

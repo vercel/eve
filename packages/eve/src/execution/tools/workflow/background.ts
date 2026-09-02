@@ -4,7 +4,6 @@ import { parseJsonObject, type JsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
 import { UNSPECIFIED_INPUT_SCHEMA, toInputSchema, toOutputSchema } from "#tools/schema.js";
-import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
 
 export interface WorkflowToolHarnessDefinitionInput {
   readonly definition: HarnessToolDefinition;
@@ -17,19 +16,11 @@ export interface WorkflowToolHarnessDefinitionInput {
 export function createWorkflowToolHarnessDefinition(
   input: WorkflowToolHarnessDefinitionInput,
 ): HarnessToolDefinition {
-  const definition =
-    input.resultKind === "subagent"
-      ? {
-          ...input.definition,
-          description: `${input.definition.description}\n\nThis call starts a background task and returns a task receipt immediately.`,
-          outputSchema: toOutputSchema(SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA),
-        }
-      : input.definition;
+  const definition = input.definition;
   const workflow = {
     executeInput: input.executeInput,
     nodeId: input.nodeId,
     resultKind: input.resultKind,
-    workflowCallable: input.resultKind === "subagent" || undefined,
     workflowId: input.workflowId,
   };
   if (definition.execution !== "background") {

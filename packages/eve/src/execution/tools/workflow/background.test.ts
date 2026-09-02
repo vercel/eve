@@ -4,7 +4,7 @@ import { jsonSchema } from "ai";
 import { createWorkflowToolHarnessDefinition, parseWorkflowToolInput } from "./background.js";
 
 describe("createWorkflowToolHarnessDefinition", () => {
-  it("marks subagent workflows as callable from Workflow", () => {
+  it("preserves subagent resultKind on workflow-backed tools", () => {
     expect(
       createWorkflowToolHarnessDefinition({
         definition: {
@@ -17,7 +17,7 @@ describe("createWorkflowToolHarnessDefinition", () => {
         resultKind: "subagent",
         workflowId: "workflow//eve//subagentToolExecuteWorkflow",
       }),
-    ).toMatchObject({ workflowCallable: true });
+    ).toMatchObject({ resultKind: "subagent" });
   });
 });
 

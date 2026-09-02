@@ -11,7 +11,7 @@ last_updated: "2026-09-02"
 [#2690](https://github.com/vercel/eve/pull/2690) lands sequence steps 1–3
 below, plus the parts of steps 7 and 8 that had no dependency on the
 remaining work: `subagentDepth` is removed, and the vocabulary-count guards
-are replaced by import-direction rules 41–43. Concrete subagent code moves
+are replaced by import-direction rules 42–43. Concrete subagent code moves
 under `src/subagents/**` and `src/execution/tools/subagent/**` unchanged.
 
 Not in that PR: steps 4–6 and the rest of 7. `background-tool-execution.ts`
@@ -240,8 +240,9 @@ Drop per-subagent workflow IDs, manifest v48, generated subagent workflow
 registrations, and flattened workflow metadata. Reconsider the separate
 session-command router: splitting one handle command path across an inbox,
 router, command protocol, and store adds code while the driver retains the same
-mutation responsibility. Do not move the background executor into
-`execution/tasks/**`; that makes the task boundary false.
+mutation responsibility. The neutral boundary is `src/tasks/**`;
+`execution/tasks/**` is parent/child task composition and may compose the
+subagent executor directly.
 
 ## Compatibility and validation
 
@@ -262,7 +263,6 @@ mutation responsibility. Do not move the background executor into
 Mechanical guards enforce dependency direction:
 
 - `src/tasks/**` imports neither `src/subagents/**` nor executor code.
-- `src/execution/tasks/**` receives opaque executor bindings.
 - `taskRunWorkflow` does not parse agent effects or mutate agent handles.
 - Generic inbox and cursor modules import no subagent types.
 - Immutable wire history is exempt from vocabulary counts.

@@ -233,7 +233,7 @@ export type RuntimeSubagentChildResult = z.infer<typeof runtimeSubagentChildResu
 /**
  * Zod schema for one child-produced subagent result.
  */
-const runtimeSubagentChildResultSchema = z
+export const runtimeSubagentChildResultSchema = z
   .object({
     backgroundTask: z
       .strictObject({

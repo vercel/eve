@@ -313,9 +313,42 @@ describe("emitStreamContent action requests", () => {
     );
 
     const events = vi.mocked(emit).mock.calls.map(([event]) => event);
-    expect(events.map((event) => event.type)).toEqual(["actions.requested"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "action.input.appended",
+      "action.input.appended",
+      "action.input.appended",
+      "actions.requested",
+    ]);
     const inputEvents = events.filter((event) => event.type === "action.input.appended");
-    expect(inputEvents).toEqual([]);
+    expect(inputEvents.map((event) => event.data)).toEqual([
+      {
+        callId: "call-render",
+        inputTextDelta: "",
+        inputTextOffset: 0,
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
+      },
+      {
+        callId: "call-render",
+        inputTextDelta: '{"title":"Hel',
+        inputTextOffset: 0,
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
+      },
+      {
+        callId: "call-render",
+        inputTextDelta: 'lo"}',
+        inputTextOffset: 13,
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_0",
+      },
+    ]);
   });
 
   it("does not expose streamed input for excluded actions", async () => {
@@ -483,6 +516,8 @@ describe("emitStreamContent action requests", () => {
     expect(events.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
+      "action.input.appended",
+      "action.input.appended",
       "actions.requested",
     ]);
     expect(events[1]).toMatchObject({

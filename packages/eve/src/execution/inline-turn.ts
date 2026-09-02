@@ -6,11 +6,15 @@ import type {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { DurableStepResult, NextDriverAction } from "#execution/next-driver-action.js";
+import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
-import type { SessionCommandRouter } from "#execution/session-command-router.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
-import type { DecodedSessionInbox } from "#execution/wire/session-inbox-wire.js";
+import {
+  sessionInboxWire,
+  SessionInboxWireError,
+  type DecodedSessionInbox,
+} from "#execution/wire/session-inbox-wire.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -31,7 +35,6 @@ export async function runInlineTurn(input: {
   readonly cancelledTaskIds?: Set<string>;
   readonly capabilities?: SessionCapabilities;
   readonly commandInbox: SessionCommandInbox;
-  readonly commandRouter: SessionCommandRouter;
   readonly delivery: HookPayload;
   readonly mode: RunMode;
   readonly parentWritable: WritableStream<Uint8Array>;
@@ -47,7 +50,6 @@ export async function runInlineTurn(input: {
     bufferedSessionControls: input.bufferedSessionControls,
     cancelledTaskIds: input.cancelledTaskIds,
     commandInbox: input.commandInbox,
-    commandRouter: input.commandRouter,
     expectedTurnId: activeTurnId(input.sessionState.emissionState),
     seenTaskDeliveries: input.seenTaskDeliveries,
   });
@@ -156,7 +158,6 @@ class InlineTurnControl {
   private readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   private readonly cancelledTaskIds: Set<string>;
   private readonly commandInbox: SessionCommandInbox;
-  private readonly commandRouter: SessionCommandRouter;
   private readonly controller = new AbortController();
   private readonly expectedTurnId: string;
   private readonly seenTaskDeliveries: Set<string>;
@@ -167,7 +168,6 @@ class InlineTurnControl {
     readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
     readonly cancelledTaskIds?: Set<string>;
     readonly commandInbox: SessionCommandInbox;
-    readonly commandRouter: SessionCommandRouter;
     readonly expectedTurnId: string;
     readonly seenTaskDeliveries?: Set<string>;
   }) {
@@ -175,7 +175,6 @@ class InlineTurnControl {
     this.bufferedSessionControls = input.bufferedSessionControls;
     this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
-    this.commandRouter = input.commandRouter;
     this.expectedTurnId = input.expectedTurnId;
     this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
   }
@@ -220,8 +219,15 @@ class InlineTurnControl {
   }
 
   private async handle(value: SessionInboxPayload): Promise<void> {
-    const command: DecodedSessionInbox | undefined = await this.commandRouter.route(value);
-    if (command === undefined) return;
+    if (value.kind === "runtime-action-result") return;
+    let command: DecodedSessionInbox;
+    try {
+      command = sessionInboxWire.decode(value);
+    } catch (error) {
+      if (!(error instanceof SessionInboxWireError)) throw error;
+      await reportDroppedWirePayloadStep({ detail: error.message, family: "session-inbox" });
+      return;
+    }
 
     if (command.kind === "deliver") {
       if (!this.acceptTaskDelivery(command)) return;

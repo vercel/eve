@@ -6,7 +6,6 @@ import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
-import { createSessionCommandRouter } from "#execution/session-command-router.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { turnStep } from "#execution/workflow-steps.js";
 
@@ -50,7 +49,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -85,7 +83,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -151,7 +148,6 @@ describe("dispatchAndAwaitTurn", () => {
           },
         }),
       }),
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -195,7 +191,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries,
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -222,7 +217,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: { kind: "deliver", payloads: [{ message: "start" }] },
       mode: "conversation",
@@ -254,7 +248,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: createAcceptedDelivery(),
       mode: "conversation",
@@ -292,7 +285,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: createAcceptedDelivery(),
       mode: "conversation",
@@ -329,7 +321,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: createAcceptedDelivery(),
       mode: "conversation",
@@ -367,7 +358,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox: createCommandInbox(),
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: createAcceptedDelivery(),
       mode: "conversation",
@@ -412,7 +402,6 @@ describe("dispatchAndAwaitTurn", () => {
       bufferedDeliveries: [],
       bufferedSessionControls: [],
       commandInbox,
-      commandRouter: createSessionCommandRouter(),
       controlToken: "turn-control",
       delivery: createAcceptedDelivery(),
       mode: "conversation",

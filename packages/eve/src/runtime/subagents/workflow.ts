@@ -1,7 +1,7 @@
 // The shared body owns the invocation id (the tool call id itself), so it uses
 // the framework entry rather than the public `agent()` which derives ids from a
 // user-supplied key. This is the only internal import rule 42 permits here.
-import { invokeAgent } from "#execution/tools/subagent/invocation.js";
+import { invokeAgent } from "#execution/tools/subagent/invoke-agent.js";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 interface JsonObject {

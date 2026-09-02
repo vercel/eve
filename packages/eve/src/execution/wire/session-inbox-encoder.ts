@@ -116,7 +116,11 @@ function encode(
 
 function withoutCurrentTaskMessages(command: SessionInboxCommand): SessionInboxCommand {
   if (command.kind !== "send" || command.payload.task === undefined) return command;
-  const { effects: _effects, inputRequests: _inputRequests, ...task } = command.payload.task;
+  const {
+    agentRequests: _agentRequests,
+    inputRequests: _inputRequests,
+    ...task
+  } = command.payload.task;
   return { ...command, payload: { ...command.payload, task } };
 }
 

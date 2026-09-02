@@ -62,39 +62,53 @@ describe("coalesceDeliverPayloads", () => {
     });
   });
 
-  it("preserves task effects across queued payloads", () => {
-    const effects = [
+  it("preserves task agent requests and authorization events across queued payloads", () => {
+    const agentRequests = [
       {
-        input: {
-          callId: "call-1",
-          childSessionId: "child-1",
-          event: { data: { index: 1 }, type: "authorization.required" },
-          kind: "subagent-authorization-event" as const,
-          subagentName: "first",
-        },
-        name: "agent.event",
         replyTo: "agent-reply-1",
+        request: {
+          input: { message: "Find it", target: "first" },
+          invocationId: "call-1:first",
+          kind: "agent-invoke" as const,
+        },
         taskId: "task-1",
       },
       {
-        input: {
-          callId: "call-2",
-          childSessionId: "child-2",
-          event: { data: { index: 2 }, type: "authorization.required" },
-          kind: "subagent-authorization-event" as const,
-          subagentName: "second",
-        },
-        name: "agent.event",
         replyTo: "agent-reply-2",
+        request: {
+          input: { message: "Find it", target: "second" },
+          invocationId: "call-2:second",
+          kind: "agent-invoke" as const,
+        },
         taskId: "task-2",
       },
     ];
+    const authorizationEvents = [1, 2].map((index) => ({
+      hookPayload: {
+        callId: `call-${index}`,
+        childSessionId: `child-${index}`,
+        event: { data: { index }, type: "authorization.required" } as never,
+        kind: "subagent-authorization-event" as const,
+        subagentName: `agent-${index}`,
+      },
+      taskId: `task-${index}`,
+    }));
 
     expect(
       coalesceDeliverPayloads([
-        { task: { effects: [effects[0]!] } },
-        { task: { effects: [effects[1]!] } },
+        {
+          task: {
+            agentRequests: [agentRequests[0]!],
+            authorizationEvents: [authorizationEvents[0]!],
+          },
+        },
+        {
+          task: {
+            agentRequests: [agentRequests[1]!],
+            authorizationEvents: [authorizationEvents[1]!],
+          },
+        },
       ]),
-    ).toEqual({ task: { effects } });
+    ).toEqual({ task: { agentRequests, authorizationEvents } });
   });
 });

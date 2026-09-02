@@ -4,7 +4,8 @@ import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution
 import {
   appendTaskViewStep,
   deliverTaskInputResponsesStep,
-  wakeTaskEffectParentStep,
+  wakeTaskAgentRequestParentStep,
+  wakeTaskAuthorizationParentStep,
   wakeTaskParentStep,
   wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep,
@@ -16,8 +17,6 @@ import {
 } from "#execution/tools/workflow/body.js";
 import {
   deriveWorkflowToolRunOwner,
-  isWorkflowToolEffectRequest,
-  type WorkflowToolEffectRequest,
   type WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import { createChannelReader, raceChannelReads } from "#execution/tools/workflow/owner-channels.js";
@@ -64,7 +63,7 @@ export type WorkflowToolRunTaskInputRequest = WorkflowToolRunTaskInputRequestBas
   );
 
 interface PendingWorkflowToolTraffic {
-  readonly effects: WorkflowToolRunRequestMessage[];
+  readonly ownerRequests: WorkflowToolRunRequestMessage[];
 }
 
 /** Owns lifecycle for one background task and consumes its executor traffic. */
@@ -84,7 +83,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
   let pendingUpdates: TaskInboundUpdate[] = [];
   let updateIndex = 0;
-  const pendingTraffic: PendingWorkflowToolTraffic = { effects: [] };
+  const pendingTraffic: PendingWorkflowToolTraffic = { ownerRequests: [] };
   const answerHooks = new Map<string, AnswerHookRoute>();
   const bodyController = new AbortController();
   let bodyReader:
@@ -142,8 +141,13 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       }
       if (read.channel === "request") {
         const request = read.next.value;
-        if (isWorkflowToolEffectRequest(request.request)) {
-          await handleEffect(request, request.request);
+        const kind = request.request.kind;
+        if (
+          kind === "agent-invoke" ||
+          kind === "agent-settled" ||
+          kind === "authorization-request"
+        ) {
+          await handleOwnerRequest(request);
           continue;
         }
         if (request.requestCoordinates === undefined) {
@@ -279,28 +283,35 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     pendingUpdates = [];
   }
 
-  async function handleEffect(
-    message: WorkflowToolRunRequestMessage,
-    _effect: WorkflowToolEffectRequest,
-  ): Promise<void> {
+  // Agent requests and authorization events both target the parent session
+  // directly and must wait until the parent has acknowledged the task dispatch.
+  async function handleOwnerRequest(message: WorkflowToolRunRequestMessage): Promise<void> {
     if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
     if (!dispatchAcknowledged) {
-      pendingTraffic.effects.push(message);
+      pendingTraffic.ownerRequests.push(message);
       return;
     }
-    await wakeTaskEffectParent(message);
+    await wakeTaskOwnerRequestParent(message);
   }
 
   async function flushPendingTraffic(): Promise<void> {
     if (!dispatchRejected) {
-      for (const request of pendingTraffic.effects) await wakeTaskEffectParent(request);
+      for (const request of pendingTraffic.ownerRequests) await wakeTaskOwnerRequestParent(request);
     }
-    pendingTraffic.effects.length = 0;
+    pendingTraffic.ownerRequests.length = 0;
   }
 
-  async function wakeTaskEffectParent(request: WorkflowToolRunRequestMessage): Promise<void> {
-    await wakeTaskEffectParentStep({
-      request,
+  async function wakeTaskOwnerRequestParent(message: WorkflowToolRunRequestMessage): Promise<void> {
+    if (message.request.kind === "authorization-request") {
+      await wakeTaskAuthorizationParentStep({
+        request: message.request,
+        taskId: view.taskId,
+        token: input.parentContinuationToken,
+      });
+      return;
+    }
+    await wakeTaskAgentRequestParentStep({
+      request: message,
       taskId: view.taskId,
       token: input.parentContinuationToken,
     });

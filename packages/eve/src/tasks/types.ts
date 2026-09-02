@@ -1,3 +1,8 @@
+import type {
+  SubagentAuthorizationEvent,
+  SubagentAuthorizationEventHookPayload,
+} from "#channel/types.js";
+import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
 import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 
@@ -177,12 +182,32 @@ export type TaskInputRequestDelivery = TaskInputRequestDeliveryBase &
     | { readonly request?: never; readonly requests: readonly TaskInputRequest[] }
   );
 
-/** Opaque workflow-owner effect forwarded to the parent session after task admission. */
-export interface TaskEffectDelivery {
-  readonly input: JsonValue;
-  readonly invocationId?: string;
-  readonly name: string;
+/**
+ * Child authorization event projected through the parent channel. Display
+ * only: the authorization callback completes against the child directly.
+ */
+export interface TaskAuthorizationEventDelivery {
+  readonly hookPayload: SubagentAuthorizationEventHookPayload;
+  readonly taskId: string;
+}
+
+const TASK_AUTHORIZATION_REQUEST_ID_PREFIX = "task:authorization";
+
+/** Stable id shared by one authorization attempt's events, used to dedupe deliveries. */
+export function taskAuthorizationRequestId(event: SubagentAuthorizationEvent): string {
+  if (event.type === "approval.candidate" || event.type === "approval.settled") {
+    return `${TASK_AUTHORIZATION_REQUEST_ID_PREFIX}:${event.data.requestId}`;
+  }
+  return `${TASK_AUTHORIZATION_REQUEST_ID_PREFIX}:${event.data.attemptId ?? event.data.name}`;
+}
+
+/**
+ * Agent spawn or settlement a task-owned workflow tool run asks its parent to
+ * apply, forwarded after task admission. `replyTo` is the run's reply hook.
+ */
+export interface TaskAgentRequestDelivery {
   readonly replyTo: string;
+  readonly request: WorkflowToolAgentRequest;
   readonly taskId: string;
 }
 

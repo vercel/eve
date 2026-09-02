@@ -12,7 +12,7 @@ import { hydrateDurableSession } from "#execution/session.js";
 import { executeTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
 import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
-import { deliverTaskUpdate } from "#execution/task-update-delivery.js";
+import { deliverTaskUpdate } from "#execution/tasks/child/update.js";
 import { startWorkflowTask } from "#execution/tools/workflow/start.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
 import { dispatchToAgentAddress } from "#subagents/handle-dispatch.js";

@@ -7,7 +7,7 @@ import { readDurableSession, type DurableSessionState } from "#execution/durable
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { getHarnessEmissionState } from "#harness/emission.js";
 import type { RuntimeAgentDispatchRequest } from "#shared/action-types.js";
-import type { AgentInvocationRequest } from "#execution/tools/subagent/invocation.js";
+import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";

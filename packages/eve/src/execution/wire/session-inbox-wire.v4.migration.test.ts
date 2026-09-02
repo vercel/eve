@@ -67,7 +67,7 @@ describe("session inbox wire v4 migration", () => {
       payloads: [
         {
           task: {
-            effects: [{ input: authorization, name: "agent.event", replyTo: "", taskId: "task-1" }],
+            authorizationEvents: [{ hookPayload: authorization, taskId: "task-1" }],
             inputRequests: [
               {
                 replyTo: "answer-hook",

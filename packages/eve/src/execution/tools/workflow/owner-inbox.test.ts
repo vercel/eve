@@ -7,8 +7,10 @@ import {
 
 const from = {
   callId: "call-1",
+  execution: "background" as const,
   input: { message: "Find it" },
   runId: "run-1",
+  sequence: 0,
   stepIndex: 0,
   toolName: "research",
   turnId: "turn-1",
@@ -74,19 +76,18 @@ describe("workflow-tool task input", () => {
     });
   });
 
-  it("does not normalize workflow effects as human input", () => {
+  it("does not normalize workflow agent requests as human input", () => {
     expect(() =>
       workflowToolRunRequestToTaskInputRequest({
         from,
         replyTo: "subagent:parent:call-1",
         request: {
-          input: { kind: "internal-event" },
+          input: { message: "Find it", target: "research" },
           invocationId: "call-1",
-          kind: "effect",
-          name: "internal.event",
+          kind: "agent-invoke",
         },
       }),
-    ).toThrow("A workflow owner effect cannot be normalized as human input.");
+    ).toThrow("A workflow agent request cannot be normalized as human input.");
   });
 });
 

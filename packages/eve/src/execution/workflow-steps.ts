@@ -85,7 +85,7 @@ import {
 import {
   readRetainedBackgroundToolResult,
   runBackgroundStep,
-} from "#execution/background-tool-execution.js";
+} from "#execution/tasks/parent/tool-execution.js";
 import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
 import { prepareWorkflowPreambleTrace } from "#execution/workflow-trace-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";

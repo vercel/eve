@@ -3,12 +3,14 @@ import type {
   WorkflowToolRunOutcomeMessage,
   WorkflowToolRunReport,
   WorkflowToolRunRef,
+  WorkflowToolInputRequestBatch,
   WorkflowToolRequest,
   WorkflowToolRunRequestMessage,
 } from "#execution/tools/workflow/messages.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { InputRequest } from "#shared/input.js";
+import type { ToolInputRequest } from "#tools/definition.js";
 import type { WorkflowToolRunTaskInputRequest } from "#execution/tasks/child/workflow.js";
 import type { TaskCommand, TaskInboundUpdate } from "#tasks/types.js";
 import { SUBAGENT_EXECUTION_FAILED } from "#subagents/agent-handle-errors.js";
@@ -144,8 +146,11 @@ export function workflowToolRunRequestToInputRequestPayload(
     childContinuationToken: replyTo,
     childSessionId: from.runId,
     event: {
-      requests: [normalizeInputRequest(request, from, replyTo)],
-      sequence: requestCoordinates?.sequence ?? 0,
+      requests:
+        request.kind === "input-batch"
+          ? request.requests
+          : [normalizeInputRequest(request, from, replyTo)],
+      sequence: requestCoordinates?.sequence ?? from.sequence,
       stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
       turnId: requestCoordinates?.turnId ?? from.turnId,
     },
@@ -161,25 +166,38 @@ export function workflowToolRunRequestToTaskInputRequest(
   const base = {
     kind: "task-input-request" as const,
     replyTo,
-    sequence: requestCoordinates?.sequence ?? 0,
+    sequence: requestCoordinates?.sequence ?? from.sequence,
     stepIndex: requestCoordinates?.stepIndex ?? from.stepIndex,
     turnId: requestCoordinates?.turnId ?? from.turnId,
   };
-  return "kind" in request && request.kind === "input-batch"
+  return request.kind === "input-batch"
     ? { ...base, requests: request.requests }
     : { ...base, request: normalizeInputRequest(request, from, replyTo) };
 }
 
 function normalizeInputRequest(
-  request: WorkflowToolRequest,
+  request: Exclude<WorkflowToolRequest, WorkflowToolInputRequestBatch>,
   from: WorkflowToolRunRef,
   requestId: string,
 ): InputRequest {
-  if ("action" in request && "requestId" in request) return request as InputRequest;
-  if (isEffectRequest(request)) {
-    throw new TypeError("A workflow owner effect cannot be normalized as human input.");
+  switch (request.kind) {
+    case "agent-invoke":
+    case "agent-settled":
+      throw new TypeError("A workflow agent request cannot be normalized as human input.");
+    case "authorization-request":
+      throw new TypeError("A workflow authorization event cannot be normalized as human input.");
+    case "ask":
+      return normalizeAskRequest(request.request, from, requestId);
+    default:
+      return request;
   }
-  const authored = request as import("#tools/definition.js").ToolInputRequest;
+}
+
+function normalizeAskRequest(
+  authored: ToolInputRequest,
+  from: WorkflowToolRunRef,
+  requestId: string,
+): InputRequest {
   if (typeof authored.prompt !== "string" || authored.prompt.length === 0) {
     throw new TypeError("A workflow tool run request needs a non-empty `prompt`.");
   }
@@ -193,15 +211,4 @@ function normalizeInputRequest(
   if (authored.display !== undefined) normalized.display = authored.display;
   if (authored.options !== undefined) normalized.options = [...authored.options];
   return normalized;
-}
-
-function isEffectRequest(
-  request: WorkflowToolRequest,
-): request is Extract<WorkflowToolRequest, { readonly kind: "effect" }> {
-  return (
-    typeof request === "object" &&
-    request !== null &&
-    "kind" in request &&
-    request.kind === "effect"
-  );
 }

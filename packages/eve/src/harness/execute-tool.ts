@@ -45,5 +45,4 @@ export interface HarnessToolDefinition {
   readonly toModelOutput?: (output: unknown) => unknown;
   /** Present when this tool starts an associated durable workflow. */
   readonly workflowId?: string;
-  readonly workflowCallable?: boolean;
 }

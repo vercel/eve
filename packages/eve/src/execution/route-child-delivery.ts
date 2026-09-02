@@ -10,22 +10,11 @@ import {
   runProxySubagentEventStep,
 } from "#subagents/event-proxy-step.js";
 import {
-  acceptTaskAgentEventStep,
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
-} from "#execution/task-hitl-proxy-steps.js";
-import {
-  dispatchTaskAgentInvocationStep,
-  settleTaskAgentInvocationStep,
-} from "#execution/tools/subagent/invocation-step.js";
-import {
-  isAgentInvocationRequest,
-  type AgentInvocationRequest,
-} from "#execution/tools/subagent/invocation.js";
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import type { TaskEffectDelivery } from "#tasks/types.js";
-import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { emitTaskSubagentCalledStep } from "#execution/tools/subagent/emit-called-step.js";
+} from "#execution/tasks/parent/hitl-proxy-steps.js";
+import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
+import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -65,61 +54,24 @@ export async function routeDeliverToChildren(input: {
     sessionState = emitted.sessionState;
   }
 
-  for (const effect of payload.task?.effects ?? []) {
-    if (isSubagentCalledEffect(effect)) {
-      const emitted = await emitTaskSubagentCalledStep({
-        event: effect.input,
-        parentWritable: input.parentWritable,
-        serializedContext,
-      });
-      serializedContext = emitted.serializedContext;
-      continue;
-    }
-    const settlement = readAgentSettlement(effect);
-    if (settlement !== undefined) {
-      const settled = await settleTaskAgentInvocationStep({
-        result: settlement,
-        sessionState,
-        taskId: effect.taskId,
-      });
-      sessionState = settled.sessionState;
-      continue;
-    }
-    const invocation = readAgentInvocation(effect);
-    if (invocation !== undefined) {
-      const dispatched = await dispatchTaskAgentInvocationStep({
-        callbackBaseUrl: input.callbackBaseUrl,
-        replyTo: effect.replyTo,
-        request: invocation,
-        serializedContext,
-        sessionState,
-        taskId: effect.taskId,
-      });
-      sessionState = dispatched.sessionState;
-      if (dispatched.accepted && dispatched.calledEvent !== undefined) {
-        const emitted = await emitTaskSubagentCalledStep({
-          event: dispatched.calledEvent,
-          parentWritable: input.parentWritable,
-          serializedContext,
-        });
-        serializedContext = emitted.serializedContext;
-      }
-      if (dispatched.accepted && dispatched.result !== undefined) {
-        await resumeHookStep(effect.replyTo, {
-          kind: "runtime-action-result",
-          results: [dispatched.result],
-        });
-      }
-      continue;
-    }
-
-    const accepted = await acceptTaskAgentEventStep({
-      effect,
+  for (const request of payload.task?.agentRequests ?? []) {
+    const applied = await applyTaskAgentRequest(request, {
+      callbackBaseUrl: input.callbackBaseUrl,
+      parentWritable: input.parentWritable,
+      serializedContext,
       sessionState,
     });
-    if (!accepted.accepted) continue;
+    serializedContext = applied.serializedContext;
+    sessionState = applied.sessionState;
+  }
+
+  // Authorization is display-only: the callback completes against the child,
+  // so the parent re-emits the event without recording a proxy input request.
+  for (const delivery of payload.task?.authorizationEvents ?? []) {
+    const accepted = await acceptTaskAuthorizationEventStep({ delivery, sessionState });
+    if (!accepted) continue;
     const emitted = await runProxySubagentEventStep({
-      hookPayload: accepted.hookPayload,
+      hookPayload: delivery.hookPayload,
       parentWritable: input.parentWritable,
       serializedContext,
       sessionState,
@@ -178,35 +130,4 @@ export async function routeDeliverToChildren(input: {
     serializedContext,
     sessionState,
   });
-}
-
-function isSubagentCalledEffect(effect: TaskEffectDelivery): effect is TaskEffectDelivery & {
-  readonly input: Extract<
-    import("#protocol/message.js").UnstampedMessageStreamEvent,
-    { type: "subagent.called" }
-  >;
-} {
-  return (
-    effect.name === "agent.called" &&
-    typeof effect.input === "object" &&
-    effect.input !== null &&
-    !Array.isArray(effect.input) &&
-    Reflect.get(effect.input, "type") === "subagent.called"
-  );
-}
-
-function readAgentSettlement(effect: TaskEffectDelivery): RuntimeSubagentChildResult | undefined {
-  if (effect.name !== "agent.settled") return undefined;
-  const result = effect.input as RuntimeSubagentChildResult;
-  return result.kind === "subagent-result" && result.origin === "child" ? result : undefined;
-}
-
-function readAgentInvocation(effect: TaskEffectDelivery): AgentInvocationRequest | undefined {
-  const request = {
-    input: effect.input,
-    invocationId: effect.invocationId,
-    kind: "effect" as const,
-    name: effect.name,
-  };
-  return isAgentInvocationRequest(request) ? request : undefined;
 }

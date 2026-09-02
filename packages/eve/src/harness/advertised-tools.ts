@@ -136,7 +136,7 @@ function filterWorkflowHostToolsForRootSession(
   }
 
   for (const [name, tool] of tools) {
-    if (tool.workflowCallable === true) {
+    if (tool.resultKind === "subagent") {
       filteredTools.set(name, tool);
     }
   }

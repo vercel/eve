@@ -23,7 +23,7 @@ import { createDelegatedSubagentErrorResult } from "#subagents/parent-result.js"
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { nextTurnDelivery, type NextTurnInstruction } from "#execution/parked-delivery-wait.js";
 import { SessionStateCursor } from "#execution/session-state-cursor.js";
-import { rebaseTaskAgentHandleMutations } from "#execution/agent-handle-state-rebase.js";
+import { rebaseTaskAgentHandleMutations } from "#subagents/handles/rebase.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { dispatchAndAwaitTurn } from "#execution/turn-dispatch.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
@@ -38,10 +38,6 @@ import {
   createSessionCommandInbox,
   type SessionCommandInbox,
 } from "#execution/session-command-inbox.js";
-import {
-  createSessionCommandRouter,
-  type SessionCommandRouter,
-} from "#execution/session-command-router.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
@@ -121,8 +117,16 @@ interface CrashCleanupState {
   // turn that crashed mid-flight are absent from this snapshot and escape
   // crash cleanup.
   lastSessionState: DurableSessionState | undefined;
+  // The latest context adopted from a completed turn, which carries provider
+  // and trace state needed by terminal instrumentation.
   serializedContext: Record<string, unknown>;
+  // Whether the session already emitted a terminal protocol and instrumentation
+  // event (set here on the crash path, or by the finalization steps via
+  // `terminalState`), so later callback or teardown failures cannot contradict it.
   terminalEmitted: boolean;
+  // The most recently dispatched turn, derived from the dispatch index so the
+  // durable workflow body does not import the harness. Never cleared on settle:
+  // a crash between turns is attributed to the last dispatched turn.
   turnId?: string;
 }
 
@@ -176,7 +180,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       | undefined;
 
     const commandInbox = createSessionCommandInbox();
-    const commandRouter = createSessionCommandRouter();
     const stableCommandToken = sessionCommandHookToken(sessionId);
     const authorizationHookToken = `${sessionId}:auth`;
     let sessionState: DurableSessionState;
@@ -204,8 +207,10 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       if (stableClaim.status === "rejected") throw stableClaim.reason;
       if (authorizationClaim.status === "rejected") throw authorizationClaim.reason;
       if (continuationClaim.status === "rejected") {
-        // Only the durable alias owner runs a first turn; a losing candidate
-        // hands its address delivery to that owner before exiting.
+        // Two runs can race for the same continuation alias (e.g. two messages
+        // hit one thread before either session owns it). Only the winner runs
+        // a turn; the loser forwards its `send` to the owner and exits with an
+        // empty result, since it produced nothing.
         if (isHookConflictError(continuationClaim.reason)) {
           if (
             input.activityCollectorRunId !== undefined ||
@@ -236,7 +241,6 @@ export async function workflowEntry(input: WorkflowEntryInput): Promise<Workflow
       outcome = await runDriverLoop({
         capabilities,
         commandInbox,
-        commandRouter,
         driverWritable,
         initialInput: {
           deliveryMetadata:
@@ -375,7 +379,6 @@ function createSafeOuterWorkflowError(): Error {
 async function runDriverLoop(input: {
   readonly capabilities?: SessionCapabilities;
   readonly commandInbox: SessionCommandInbox;
-  readonly commandRouter: SessionCommandRouter;
   readonly driverWritable: WritableStream<Uint8Array>;
   readonly initialInput: HookPayload;
   readonly crashCleanupState: CrashCleanupState;
@@ -386,7 +389,6 @@ async function runDriverLoop(input: {
   readonly stableCommandToken: string;
 }): Promise<DriverLoopOutcome> {
   const commandInbox = input.commandInbox;
-  const commandRouter = input.commandRouter;
   // One payload per exact authorization attempt accumulates across
   // intervening turns. Replaced attempts are pruned at each park.
   const collectedAuthPayloads = new Map<string, DeliverPayload>();
@@ -430,7 +432,6 @@ async function runDriverLoop(input: {
         callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
         cancelledTaskIds,
         commandInbox,
-        commandRouter,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,
         driverWritable: input.driverWritable,
         seenTaskDeliveries,
@@ -502,7 +503,6 @@ async function runDriverLoop(input: {
       cancelledTaskIds,
       capabilities: input.capabilities,
       commandInbox,
-      commandRouter,
       controlToken: nextTurnControlToken(),
       delivery,
       mode: input.mode,

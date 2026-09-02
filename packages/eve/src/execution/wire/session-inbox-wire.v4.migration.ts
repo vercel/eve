@@ -1,7 +1,7 @@
 import type { VersionMigration } from "#execution/durable-session-migrations/chain.js";
 import { isObject } from "#shared/guards.js";
 
-/** Translates v3 task envelopes into generic requests and effects. */
+/** Translates v3 task envelopes into typed workflow-run requests. */
 export const sessionInboxWireV3Migration: VersionMigration = {
   from: 3,
   migrate(prior) {
@@ -23,29 +23,12 @@ function migratePayload(payload: unknown): unknown {
   return {
     ...payload,
     task: {
+      agentRequests: task.agentRequests,
       authorizationEvents: task.authorizationEvents,
-      effects: task.effects ?? migrateAuthorizationEvents(task.authorizationEvents),
       inputRequests: migrateInputRequests(task.inputRequests),
       views: Array.isArray(task.views) ? task.views.map(migrateTaskView) : task.views,
     },
   };
-}
-
-function migrateAuthorizationEvents(value: unknown): unknown {
-  if (!Array.isArray(value)) return undefined;
-  return value.flatMap((entry) => {
-    if (!isObject(entry) || !isObject(entry.hookPayload) || typeof entry.taskId !== "string") {
-      return [];
-    }
-    return [
-      {
-        input: entry.hookPayload,
-        name: "agent.event",
-        replyTo: "",
-        taskId: entry.taskId,
-      },
-    ];
-  });
 }
 
 function migrateInputRequests(value: unknown): unknown {

@@ -5,11 +5,11 @@ import {
 } from "#subagents/handle-dispatch.js";
 import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
-import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invocation-preparation.js";
-import type { AgentInvocationRequest } from "#execution/tools/subagent/invocation.js";
+import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
+import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
 import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
-import { createSubagentCalledEvent } from "#protocol/message.js";
+import { createSubagentCalledEvent, type SubagentCalledStreamEvent } from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
@@ -23,6 +23,7 @@ import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import {
   getAgentHandleStore,
   writeHandles,
+  type AgentHandle,
   type AgentHandleStoreCommand,
   type AgentHandleStoreCommandResult,
   type TaskOwnedAgentHandle,
@@ -39,19 +40,22 @@ import {
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
 
-export interface AgentInvocationDispatchResult {
-  readonly agentId?: string;
-  readonly calledEvent?: Extract<
-    import("#protocol/message.js").UnstampedMessageStreamEvent,
-    { type: "subagent.called" }
-  >;
-  readonly result?: RuntimeSubagentResult;
-  readonly sessionState: DurableSessionState;
-}
+export type AgentInvocationDispatchResult =
+  | {
+      readonly kind: "dispatched";
+      readonly agentId: string;
+      readonly event: SubagentCalledStreamEvent;
+      readonly sessionState: DurableSessionState;
+    }
+  | {
+      readonly kind: "failed";
+      readonly result: RuntimeSubagentResult;
+      readonly sessionState: DurableSessionState;
+    };
 
 export type TaskAgentInvocationDispatchResult =
-  | { readonly accepted: false; readonly sessionState: DurableSessionState }
-  | ({ readonly accepted: true } & AgentInvocationDispatchResult);
+  | { readonly kind: "not-admitted"; readonly sessionState: DurableSessionState }
+  | AgentInvocationDispatchResult;
 
 /** Dispatches one task-owned local or remote agent invocation. */
 export async function dispatchAgentInvocation(input: {
@@ -77,7 +81,7 @@ export async function dispatchAgentInvocation(input: {
     throw new Error("Agent invocation produced no executable plan entry.");
   }
   let session = prepared.session;
-  const currentAgentHandles = (): readonly import("#subagents/handles/store.js").AgentHandle[] =>
+  const currentAgentHandles = (): readonly AgentHandle[] =>
     getAgentHandleStore(session.state)?.handles ?? [];
   const sessionState = (): DurableSessionState =>
     replaceDurableSessionSnapshot({
@@ -89,10 +93,12 @@ export async function dispatchAgentInvocation(input: {
     session = applied.session;
     return applied.result;
   };
-  if (entry.kind === "reject") return { result: entry.result, sessionState: sessionState() };
+  if (entry.kind === "reject") {
+    return { kind: "failed", result: entry.result, sessionState: sessionState() };
+  }
 
   let outcome: DispatchOutcome;
-  let agentId: string | undefined;
+  let agentId: string;
   if (entry.kind === "resume") {
     const existingClaims = currentAgentHandles().filter(
       (handle): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "claimed" }> =>
@@ -126,6 +132,7 @@ export async function dispatchAgentInvocation(input: {
       claimed = readClaimedHandle(claim);
       if (claimed === undefined) {
         return {
+          kind: "failed",
           result: createTaskClaimError(entry.action, entry.agentId, claim),
           sessionState: sessionState(),
         };
@@ -222,7 +229,9 @@ export async function dispatchAgentInvocation(input: {
     }
   }
 
-  if (outcome.kind === "error") return { result: outcome.result, sessionState: sessionState() };
+  if (outcome.kind === "error") {
+    return { kind: "failed", result: outcome.result, sessionState: sessionState() };
+  }
 
   const action = entry.kind === "resume" ? entry.action : entry.target.action;
   const dynamicRemoteAgent =
@@ -231,7 +240,7 @@ export async function dispatchAgentInvocation(input: {
       : entry.target.kind === "remote"
         ? entry.target.dynamicRemoteAgent
         : undefined;
-  const calledEvent = createSubagentCalledEvent({
+  const event = createSubagentCalledEvent({
     agentId,
     callId: outcome.callId,
     childSessionId: outcome.address.sessionId,
@@ -253,9 +262,9 @@ export async function dispatchAgentInvocation(input: {
     workflowId: workflowEntryReference.workflowId,
   });
   if (input.emit !== undefined) {
-    await input.emit(calledEvent);
+    await input.emit(event);
   }
-  return { agentId, calledEvent, sessionState: sessionState() };
+  return { kind: "dispatched", agentId, event, sessionState: sessionState() };
 }
 
 /** Dispatches one task-owned agent request after the task is admitted. */
@@ -266,12 +275,12 @@ export async function dispatchTaskAgentInvocationStep(
 
   const session = await readDurableSession(input.sessionState);
   const entry = findSessionTaskEntry(session.state, input.taskId);
-  if (entry === undefined) return { accepted: false, sessionState: input.sessionState };
+  if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
   const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
   if (view === undefined || isTerminalTaskStatus(view.status)) {
-    return { accepted: false, sessionState: input.sessionState };
+    return { kind: "not-admitted", sessionState: input.sessionState };
   }
-  return { accepted: true, ...(await dispatchAgentInvocation(input)) };
+  return await dispatchAgentInvocation(input);
 }
 
 /** Applies a task-owned child settlement to the parent session's canonical state. */

@@ -5,8 +5,17 @@ import { sessionInboxWire } from "#execution/wire/session-inbox-encoder.js";
 import { sessionInboxWire as sessionInboxWireDecoder } from "#execution/wire/session-inbox-wire.js";
 import { sessionInboxWireV4Schema } from "#execution/wire/session-inbox-wire.v4.js";
 
-const effect = {
-  input: {
+const agentRequest = {
+  replyTo: "agent-reply",
+  request: {
+    input: { message: "Find it", target: "research" },
+    invocationId: "call-1:research",
+    kind: "agent-invoke" as const,
+  },
+  taskId: "task-1",
+};
+const authorizationEvent = {
+  hookPayload: {
     callId: "call-1",
     childSessionId: "child-1",
     event: {
@@ -22,9 +31,6 @@ const effect = {
     kind: "subagent-authorization-event" as const,
     subagentName: "research",
   },
-  invocationId: "call-1:research:event:0",
-  name: "agent.event",
-  replyTo: "agent-reply",
   taskId: "task-1",
 };
 const inputRequest = {
@@ -37,38 +43,51 @@ const inputRequest = {
 };
 
 describe("session inbox wire v4", () => {
-  it("round-trips task-owned workflow effects and input requests", () => {
-    const wire = sessionInboxWire.encode(
-      {
-        kind: "send",
-        payload: { task: { effects: [effect], inputRequests: [inputRequest] } },
-      },
-      { version: 4 },
-    );
+  it("round-trips task-owned agent requests, authorization events, and input requests", () => {
+    const task = {
+      agentRequests: [agentRequest],
+      authorizationEvents: [authorizationEvent],
+      inputRequests: [inputRequest],
+    };
+    const wire = sessionInboxWire.encode({ kind: "send", payload: { task } }, { version: 4 });
 
     expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
       kind: "deliver",
-      payloads: [{ task: { effects: [effect], inputRequests: [inputRequest] } }],
+      payloads: [{ task }],
     });
   });
 
-  it.each([1, 2, 3] as const)("keeps v%i strict for task workflow effects", (version) => {
+  it("rejects malformed task authorization events", () => {
     expect(() =>
       sessionInboxWire.encode(
-        { kind: "send", payload: { task: { effects: [effect] } } },
+        {
+          kind: "send",
+          payload: {
+            task: { authorizationEvents: [{ hookPayload: { kind: "other" }, taskId: "task-1" }] },
+          } as never,
+        },
+        { version: 4 },
+      ),
+    ).toThrow(/wire version 4/);
+  });
+
+  it.each([1, 2, 3] as const)("keeps v%i strict for task agent requests", (version) => {
+    expect(() =>
+      sessionInboxWire.encode(
+        { kind: "send", payload: { task: { agentRequests: [agentRequest] } } },
         { version },
       ),
     ).toThrow(new RegExp(`wire version ${version}`));
   });
 
   it.each([1, 2, 3] as const)(
-    "rejects v4 task effects falsely declared as immutable v%i",
+    "rejects v4 task agent requests falsely declared as immutable v%i",
     (version) => {
       expect(() =>
         sessionInboxWireDecoder.decode({
           kind: "deliver",
-          payload: { task: { effects: [effect] } },
-          payloads: [{ task: { effects: [effect] } }],
+          payload: { task: { agentRequests: [agentRequest] } },
+          payloads: [{ task: { agentRequests: [agentRequest] } }],
           version,
         }),
       ).toThrow(new RegExp(`does not match wire version ${version}`));
@@ -95,18 +114,18 @@ describe("session inbox wire v4", () => {
     const wire = sessionInboxWire.encode(
       {
         kind: "send",
-        payload: { task: { effects: [effect], inputRequests: [inputRequest] } },
+        payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
       },
       { variant: "send", version: 0 },
     );
 
     expect(wire).toMatchObject({
       kind: "send",
-      payload: { task: { effects: [effect], inputRequests: [inputRequest] } },
+      payload: { task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } },
     });
     expect(sessionInboxWireDecoder.decode(wire)).toMatchObject({
       kind: "deliver",
-      payloads: [{ task: { effects: [effect], inputRequests: [inputRequest] } }],
+      payloads: [{ task: { agentRequests: [agentRequest], inputRequests: [inputRequest] } }],
     });
   });
 

@@ -3,10 +3,6 @@ import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { createTaskInputCapabilityToken } from "#execution/task-input-capability.js";
 import { createRemoteTaskInputCallbackUrl } from "#execution/workflow-callback-url.js";
 import {
-  type AgentInvocationEvent,
-  isAgentInvocationEventEffect,
-} from "#execution/tools/subagent/invocation.js";
-import {
   createTaskInputRequestId,
   upsertProxyInputRequestState,
   type ProxyInputRequest,
@@ -16,12 +12,7 @@ import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
 import { createEveTaskInputRoutePath } from "#protocol/routes.js";
 import { cacheTerminalTaskView, findSessionTaskEntry } from "#tasks/session-index.js";
-import {
-  isTerminalTaskStatus,
-  type TaskEffectDelivery,
-  type TaskInputRequestDelivery,
-  type TaskView,
-} from "#tasks/types.js";
+import type { TaskInputRequestDelivery, TaskView } from "#tasks/types.js";
 
 /** Validates and records a generic task-owned workflow request. */
 export async function recordTaskInputRequestStep(input: {
@@ -105,55 +96,6 @@ export async function recordTaskInputRequestStep(input: {
       },
     },
   };
-}
-
-/** Validates one task-owned agent event before the parent channel sees it. */
-export async function acceptTaskAgentEventStep(input: {
-  readonly effect: TaskEffectDelivery;
-  readonly sessionState: DurableSessionState;
-}): Promise<
-  | { readonly accepted: false }
-  | {
-      readonly accepted: true;
-      readonly hookPayload: AgentInvocationEvent;
-    }
-> {
-  "use step";
-
-  const effect = { input: input.effect.input, name: input.effect.name };
-  if (
-    !isAgentInvocationEventEffect(effect) ||
-    effect.input.kind !== "subagent-authorization-event"
-  ) {
-    return { accepted: false };
-  }
-
-  const durableSession = await readDurableSession(input.sessionState);
-  const entry = findSessionTaskEntry(durableSession.state, input.effect.taskId);
-  if (entry === undefined) return { accepted: false };
-
-  const handles = getAgentHandleStore(durableSession.state)?.handles ?? [];
-  const claimed = handles.find(
-    (candidate) =>
-      candidate.phase === "claimed" &&
-      candidate.taskId === input.effect.taskId &&
-      candidate.identity.name === effect.input.subagentName &&
-      candidate.address.sessionId === effect.input.childSessionId,
-  );
-  // A just-started task child can emit authorization before the parent session
-  // has processed the matching confirm command. Accept only an unambiguous
-  // reservation; confirmed children still bind by child session id.
-  const reserved = handles.filter(
-    (candidate) =>
-      candidate.phase === "reserved" &&
-      candidate.taskId === input.effect.taskId &&
-      candidate.identity.name === effect.input.subagentName,
-  );
-  if (claimed === undefined && reserved.length !== 1) return { accepted: false };
-
-  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-  if (view === undefined || isTerminalTaskStatus(view.status)) return { accepted: false };
-  return { accepted: true, hookPayload: effect.input };
 }
 
 /** Caches terminal task views before their workflow runs expire. */

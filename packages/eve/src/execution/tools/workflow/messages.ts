@@ -1,10 +1,13 @@
-import { createHook, defineHook, type Hook } from "#compiled/@workflow/core/index.js";
+import { defineHook } from "#compiled/@workflow/core/index.js";
 
-import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import { workflowToolRunAnswerToken } from "#harness/workflow-tool-runs.js";
+import type { SubagentAuthorizationEventHookPayload } from "#channel/types.js";
+import type {
+  AgentInvocationRequest,
+  AgentSettlementRequest,
+} from "#execution/tools/subagent/invoke-agent.js";
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
-import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
+import type { ToolInputRequest } from "#tools/definition.js";
 
 export interface WorkflowToolRunOwner {
   readonly admission: string;
@@ -13,33 +16,52 @@ export interface WorkflowToolRunOwner {
   readonly request: string;
 }
 
-export interface WorkflowToolEffectRequest {
-  readonly input: unknown;
-  readonly invocationId?: string;
-  readonly kind: "effect";
-  readonly name: string;
+/**
+ * Requests the owner must apply on the run's behalf because they touch
+ * owner-held state: spawning an agent and releasing its handle afterwards.
+ */
+export type WorkflowToolAgentRequest = AgentInvocationRequest | AgentSettlementRequest;
+
+/**
+ * A child authorization event the owner should display. Unlike input requests
+ * it has no answer: the authorization callback completes against the child
+ * directly, so the owner only re-emits it.
+ */
+export interface WorkflowToolAuthorizationRequest {
+  readonly event: SubagentAuthorizationEventHookPayload;
+  readonly kind: "authorization-request";
+}
+
+/** A question authored with `ask()` from `eve/workflow`, before owner normalization. */
+export interface WorkflowToolAskRequest {
+  readonly kind: "ask";
+  readonly request: ToolInputRequest;
+}
+
+/**
+ * A child subagent's pending input requests for one step, forwarded as a unit
+ * so the owner resolves them against the same child step they came from.
+ */
+export interface WorkflowToolInputRequestBatch {
+  readonly kind: "input-batch";
+  readonly requests: readonly InputRequest[];
 }
 
 export type WorkflowToolRequest =
-  | WorkflowToolEffectRequest
-  | ToolInputRequest
+  | WorkflowToolAgentRequest
+  | WorkflowToolAuthorizationRequest
+  | WorkflowToolAskRequest
   | InputRequest
-  | { readonly kind: "input-batch"; readonly requests: readonly InputRequest[] };
-
-export function isWorkflowToolEffectRequest(
-  value: WorkflowToolRequest,
-): value is WorkflowToolEffectRequest {
-  return typeof value === "object" && value !== null && "kind" in value && value.kind === "effect";
-}
+  | WorkflowToolInputRequestBatch;
 
 /** Identifies the sending workflow tool run to an owner shared by many runs. */
 export interface WorkflowToolRunRef {
   readonly callId: string;
-  readonly execution?: "background" | "blocking";
+  readonly execution: "background" | "blocking";
   readonly input: JsonObject;
   readonly resultKind?: "subagent" | "tool";
   readonly runId: string;
-  readonly sequence?: number;
+  readonly sequence: number;
   readonly stepIndex: number;
   readonly toolName: string;
   readonly turnId: string;
@@ -92,66 +114,4 @@ export function isWorkflowToolRunControlMessage(
   if (typeof value !== "object" || value === null) return false;
   const { kind, reason } = value as { kind?: unknown; reason?: unknown };
   return kind === "cancel" && typeof reason === "string";
-}
-
-const WORKFLOW_TOOL_RUN_CONTEXT = Symbol.for("eve.workflow-tool-run.context");
-
-interface WorkflowToolRunContext {
-  /** Compatibility for already-started two-run background workflows. */
-  readonly admission?: Promise<
-    { readonly status: "accepted" } | { readonly status: "rejected"; readonly reason: string }
-  >;
-  answerSeq: number;
-  readonly from: WorkflowToolRunRef;
-  readonly owner: WorkflowToolRunOwner;
-}
-
-export function attachWorkflowToolRunContext(
-  ctx: ToolContext,
-  context: Omit<WorkflowToolRunContext, "answerSeq">,
-): void {
-  Object.defineProperty(ctx, WORKFLOW_TOOL_RUN_CONTEXT, {
-    enumerable: false,
-    value: { ...context, answerSeq: 0 },
-  });
-}
-
-function readWorkflowToolRunContext(ctx: ToolContext): WorkflowToolRunContext {
-  const context = (ctx as { [WORKFLOW_TOOL_RUN_CONTEXT]?: WorkflowToolRunContext })[
-    WORKFLOW_TOOL_RUN_CONTEXT
-  ];
-  if (context === undefined) {
-    throw new Error(
-      'ask() must be called with the context of a workflow tool body ("use workflow").',
-    );
-  }
-  return context;
-}
-
-export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
-  return readWorkflowToolRunContext(ctx).from;
-}
-
-export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
-  return readWorkflowToolRunContext(ctx).owner;
-}
-
-export function readWorkflowToolRunAdmission(
-  ctx: ToolContext,
-): WorkflowToolRunContext["admission"] {
-  return readWorkflowToolRunContext(ctx).admission;
-}
-
-/** Returns an answer hook which may be awaited or raced with another workflow operation. */
-export function ask(ctx: ToolContext, request: ToolInputRequest): Hook<ToolInputResponse> {
-  const context = readWorkflowToolRunContext(ctx);
-  const answer = createHook<ToolInputResponse>({
-    token: workflowToolRunAnswerToken(context.from.runId, context.answerSeq++),
-  });
-  void resumeHookStep(context.owner.request, {
-    from: context.from,
-    replyTo: answer.token,
-    request,
-  });
-  return answer;
 }

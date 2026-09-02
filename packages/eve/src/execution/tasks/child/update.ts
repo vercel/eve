@@ -1,5 +1,5 @@
 import type { ChannelAdapter } from "#channel/adapter.js";
-import { forwardLocalTaskUpdateStep } from "#execution/task-update-proxy-step.js";
+import { forwardLocalTaskUpdateStep } from "#execution/tasks/child/update-step.js";
 import { fireTaskUpdateCallbackStep } from "#subagents/callback-step.js";
 import { isSubagentAdapterState, SUBAGENT_ADAPTER_KIND } from "#subagents/adapter-state.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";

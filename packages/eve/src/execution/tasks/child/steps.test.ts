@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   deliverTaskInputResponsesStep,
   formatTaskNotification,
-  wakeTaskEffectParentStep,
+  wakeTaskAgentRequestParentStep,
 } from "#execution/tasks/child/steps.js";
 import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { TaskView } from "#tasks/types.js";
@@ -150,14 +150,15 @@ describe("deliverTaskInputResponsesStep", () => {
   });
 });
 
-describe("wakeTaskEffectParentStep", () => {
-  it("forwards an agent invocation through the task effect envelope", async () => {
+describe("wakeTaskAgentRequestParentStep", () => {
+  it("forwards an agent invocation through the typed task envelope", async () => {
     const request = {
       from: {
         callId: "call-1",
         execution: "background" as const,
         input: {},
         runId: "run-1",
+        sequence: 0,
         stepIndex: 0,
         toolName: "research",
         turnId: "turn-1",
@@ -166,29 +167,30 @@ describe("wakeTaskEffectParentStep", () => {
       request: {
         input: { message: "Find it", target: "research" },
         invocationId: "call-1:research",
-        kind: "effect" as const,
-        name: "workflow.event",
+        kind: "agent-invoke" as const,
       },
     };
 
-    await wakeTaskEffectParentStep({ request, taskId: "task-1", token: "parent-token" });
+    await wakeTaskAgentRequestParentStep({ request, taskId: "task-1", token: "parent-token" });
 
     expect(resumeSessionInbox).toHaveBeenCalledWith("parent-token", {
       kind: "send",
       payload: {
         task: {
-          effects: [
+          agentRequests: [
             {
-              input: { message: "Find it", target: "research" },
-              invocationId: "call-1:research",
-              name: "workflow.event",
               replyTo: "agent-reply",
+              request: {
+                input: { message: "Find it", target: "research" },
+                invocationId: "call-1:research",
+                kind: "agent-invoke",
+              },
               taskId: "task-1",
             },
           ],
         },
       },
-      taskDeliveryId: "task-1:effect:run-1:call-1:research",
+      taskDeliveryId: "task-1:agent:run-1:call-1:research",
     });
   });
 });

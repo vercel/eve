@@ -1,8 +1,8 @@
 import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { SessionContext } from "#context/session-context.js";
+import { attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
 import {
-  attachWorkflowToolRunContext,
   type WorkflowToolRunOutcome,
   type WorkflowToolRunOwner,
   type WorkflowToolRunRef,

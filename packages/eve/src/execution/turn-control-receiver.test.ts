@@ -6,10 +6,6 @@ import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellatio
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import type { SessionCommandInbox, SessionInboxPayload } from "#execution/session-command-inbox.js";
-import {
-  createSessionCommandRouter,
-  type SessionCommandRouter,
-} from "#execution/session-command-router.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 
@@ -284,7 +280,6 @@ function runReceiver(
   options: {
     readonly bufferedSessionControls?: Array<"clear" | "compact" | "expired" | "reset">;
     readonly commandInbox?: SessionCommandInbox;
-    readonly commandRouter?: SessionCommandRouter;
     readonly seenTaskDeliveries?: Set<string>;
   } = {},
 ): ReturnType<TurnControlReceiver["waitForAction"]> {
@@ -292,7 +287,6 @@ function runReceiver(
     bufferedDeliveries,
     bufferedSessionControls: options.bufferedSessionControls ?? [],
     commandInbox: options.commandInbox ?? createCommandInbox(),
-    commandRouter: options.commandRouter ?? createSessionCommandRouter(),
     expectedTurnId: "turn_0",
     seenTaskDeliveries: options.seenTaskDeliveries,
     token: "turn-control",

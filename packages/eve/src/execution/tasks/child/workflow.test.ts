@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   openWorkflowToolRunOwnerChannels: vi.fn(() => ({ dispose: vi.fn(), readers: [] })),
   raceChannelReads: vi.fn(),
   resumeHookStep: vi.fn(),
-  wakeTaskEffectParentStep: vi.fn(),
+  wakeTaskAgentRequestParentStep: vi.fn(),
   wakeTaskParentStep: vi.fn(),
   wakeTaskUpdateParentStep: vi.fn(),
   wakeWorkflowTaskInputRequestParentStep: vi.fn(),
@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     execution: input.execution,
     input: input.input,
     runId: "task-run",
+    sequence: input.session.turn.sequence,
     stepIndex: input.stepIndex,
     toolName: input.toolName,
     turnId: input.session.turn.id,
@@ -43,7 +44,8 @@ vi.mock("#execution/hook-ownership.js", () => ({
 vi.mock("#execution/tasks/child/steps.js", () => ({
   appendTaskViewStep: mocks.appendTaskViewStep,
   deliverTaskInputResponsesStep: mocks.deliverTaskInputResponsesStep,
-  wakeTaskEffectParentStep: mocks.wakeTaskEffectParentStep,
+  wakeTaskAgentRequestParentStep: mocks.wakeTaskAgentRequestParentStep,
+  wakeTaskAuthorizationParentStep: vi.fn(),
   wakeTaskParentStep: mocks.wakeTaskParentStep,
   wakeTaskUpdateParentStep: mocks.wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep: mocks.wakeWorkflowTaskInputRequestParentStep,
@@ -72,32 +74,31 @@ const initialView = {
   taskId: "task-1",
 } satisfies TaskView;
 
-const bufferedEffectRequest = {
+const bufferedAgentRequest = {
   from: {
     callId: "tool-call-1",
     execution: "background",
     input: { message: "authorize" },
     runId: "run-1",
+    sequence: 0,
     stepIndex: 0,
     toolName: "approval-worker",
     turnId: "turn-parent",
   },
   replyTo: "agent-reply",
   request: {
-    input: { phase: "waiting" },
-    invocationId: "tool-call-1:approval:event:0",
-    kind: "effect",
-    name: "workflow.event",
+    input: { message: "authorize", target: "approver" },
+    invocationId: "tool-call-1:approver",
+    kind: "agent-invoke",
   },
 } satisfies WorkflowToolRunRequestMessage;
 
-const workflowEffectRequest = {
-  ...bufferedEffectRequest,
+const workflowAgentRequest = {
+  ...bufferedAgentRequest,
   request: {
-    input: { phase: "waiting" },
-    invocationId: "tool-call-1:event",
-    kind: "effect",
-    name: "workflow.event",
+    input: { message: "authorize", target: "approver" },
+    invocationId: "tool-call-1:approver:2",
+    kind: "agent-invoke",
   },
 } satisfies WorkflowToolRunRequestMessage;
 
@@ -109,11 +110,11 @@ describe("taskRunWorkflow", () => {
     mocks.executeWorkflowBody.mockResolvedValue({ output: "done", status: "completed" });
   });
 
-  it("buffers workflow effects until task dispatch is acknowledged", async () => {
+  it("buffers agent requests until task dispatch is acknowledged", async () => {
     mocks.raceChannelReads
       .mockResolvedValueOnce({
         channel: "request",
-        next: { done: false, value: bufferedEffectRequest },
+        next: { done: false, value: bufferedAgentRequest },
       })
       .mockResolvedValueOnce({
         channel: "commands",
@@ -127,17 +128,17 @@ describe("taskRunWorkflow", () => {
       taskInboxToken: "task-token",
     });
 
-    expect(mocks.wakeTaskEffectParentStep).toHaveBeenCalledWith({
-      request: bufferedEffectRequest,
+    expect(mocks.wakeTaskAgentRequestParentStep).toHaveBeenCalledWith({
+      request: bufferedAgentRequest,
       taskId: "task-1",
       token: "parent-token",
     });
     expect(mocks.raceChannelReads.mock.invocationCallOrder[1]).toBeLessThan(
-      mocks.wakeTaskEffectParentStep.mock.invocationCallOrder[0]!,
+      mocks.wakeTaskAgentRequestParentStep.mock.invocationCallOrder[0]!,
     );
   });
 
-  it("forwards admitted workflow effects through the task's owner channel", async () => {
+  it("forwards admitted agent requests through the task's owner channel", async () => {
     mocks.raceChannelReads
       .mockResolvedValueOnce({
         channel: "commands",
@@ -145,7 +146,7 @@ describe("taskRunWorkflow", () => {
       })
       .mockResolvedValueOnce({
         channel: "request",
-        next: { done: false, value: workflowEffectRequest },
+        next: { done: false, value: workflowAgentRequest },
       })
       .mockResolvedValueOnce({ channel: "commands", next: { done: true, value: undefined } });
 
@@ -155,8 +156,8 @@ describe("taskRunWorkflow", () => {
       taskInboxToken: "task-token",
     });
 
-    expect(mocks.wakeTaskEffectParentStep).toHaveBeenCalledWith({
-      request: workflowEffectRequest,
+    expect(mocks.wakeTaskAgentRequestParentStep).toHaveBeenCalledWith({
+      request: workflowAgentRequest,
       taskId: "task-1",
       token: "parent-token",
     });

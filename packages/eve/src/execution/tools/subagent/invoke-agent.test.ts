@@ -1,10 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  attachWorkflowToolRunContext,
-  type WorkflowToolRunRef,
-} from "#execution/tools/workflow/messages.js";
-import { agent, type AgentInvocationReply } from "#execution/tools/subagent/invocation.js";
+import { attachWorkflowToolRunContext } from "#execution/tools/workflow/ask.js";
+import type { WorkflowToolRunRef } from "#execution/tools/workflow/messages.js";
+import { agent, type AgentInvocationReply } from "#execution/tools/subagent/invoke-agent.js";
 import type { ToolContext } from "#tools/definition.js";
 
 const mocks = vi.hoisted(() => ({
@@ -42,6 +40,7 @@ describe("background agent invocation routing", () => {
         execution: "background",
         input: { message: "Find it" },
         runId: "run-1",
+        sequence: 0,
         stepIndex: 0,
         toolName: "research",
         turnId: "turn-1",
@@ -96,6 +95,7 @@ describe("background agent invocation routing", () => {
       execution: "background",
       input: { message: "Find it" },
       runId: "run-1",
+      sequence: 0,
       stepIndex: 0,
       toolName: "research",
       turnId: "turn-1",
@@ -128,8 +128,7 @@ describe("background agent invocation routing", () => {
       request: {
         input: { message: "Find it", target: "research" },
         invocationId: "call-1:research",
-        kind: "effect",
-        name: "agent.invoke",
+        kind: "agent-invoke",
       },
     });
   });
@@ -167,6 +166,7 @@ describe("background agent invocation routing", () => {
         execution: "background",
         input: { message: "Find it" },
         runId: "run-1",
+        sequence: 0,
         stepIndex: 0,
         toolName: "research",
         turnId: "turn-1",
@@ -193,8 +193,10 @@ describe("background agent invocation routing", () => {
     attachWorkflowToolRunContext(ctx, {
       from: {
         callId: "call-1",
+        execution: "blocking",
         input: { message: "Find it" },
         runId: "run-1",
+        sequence: 0,
         stepIndex: 0,
         toolName: "research",
         turnId: "turn-1",
@@ -274,6 +276,7 @@ describe("background agent invocation routing", () => {
       execution: "background",
       input: { message: "Find it" },
       runId: "run-1",
+      sequence: 0,
       stepIndex: 0,
       toolName: "research",
       turnId: "turn-parent",
@@ -314,7 +317,7 @@ describe("background agent invocation routing", () => {
     });
   });
 
-  it("forwards background authorization as an owner effect", async () => {
+  it("forwards background authorization as an owner authorization request", async () => {
     const replies: AgentInvocationReply[] = [
       {
         callId: "call-1",
@@ -360,6 +363,7 @@ describe("background agent invocation routing", () => {
       execution: "background",
       input: { message: "Find it", target: "research" },
       runId: "run-1",
+      sequence: 0,
       stepIndex: 2,
       toolName: "research",
       turnId: "turn-1",
@@ -384,12 +388,8 @@ describe("background agent invocation routing", () => {
       from,
       replyTo: "agent-reply",
       request: {
-        input: expect.objectContaining({
-          kind: "subagent-authorization-event",
-        }),
-        invocationId: "call-1:research:event:0",
-        kind: "effect",
-        name: "agent.event",
+        event: expect.objectContaining({ kind: "subagent-authorization-event" }),
+        kind: "authorization-request",
       },
     });
     expect(mocks.resumeHook).not.toHaveBeenCalledWith("owner-report", expect.anything());
@@ -432,6 +432,7 @@ describe("background agent invocation routing", () => {
       execution: "background",
       input: { message: "Find it", target: "research" },
       runId: "run-1",
+      sequence: 0,
       stepIndex: 2,
       toolName: "research",
       turnId: "turn-1",

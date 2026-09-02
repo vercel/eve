@@ -9,8 +9,9 @@ import {
   readWorkflowToolRunAdmission,
   readWorkflowToolRunOwner,
   readWorkflowToolRunRef,
-} from "#execution/tools/workflow/messages.js";
+} from "#execution/tools/workflow/ask.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
@@ -32,11 +33,24 @@ export interface AgentInput {
   readonly target: string;
 }
 
+/**
+ * Asks the owning session to spawn an agent for a workflow tool run. Spawning
+ * needs owner-held material (auth, capabilities, admission, the agent handle
+ * store) that a workflow tool body never has.
+ */
 export interface AgentInvocationRequest {
   readonly input: InternalAgentInput;
   readonly invocationId: string;
-  readonly kind: "effect";
-  readonly name: "agent.invoke";
+  readonly kind: "agent-invoke";
+}
+
+/**
+ * Tells the owning session that an owner-spawned agent replied to the run, so
+ * the owner can release the handle it reserved for `agent-invoke`.
+ */
+export interface AgentSettlementRequest {
+  readonly kind: "agent-settled";
+  readonly result: RuntimeSubagentChildResult;
 }
 
 export type AgentInvocationEvent =
@@ -48,7 +62,6 @@ export type AgentInvocationReply =
   | RuntimeActionResultHookPayload
   | TaskInboundUpdate;
 
-export const AGENT_INVOCATION_EVENT_EFFECT = "agent.event";
 const AGENT_INVOCATION_IDS = Symbol.for("eve.workflow-tool-run.agent-invocation-ids");
 
 /** Invokes an agent from a task-owned background workflow tool. */
@@ -82,7 +95,6 @@ export async function invokeAgent(
   claimInvocationId(ctx, options.invocationId);
   const replies = createHook<AgentInvocationReply>();
   let ownsReplies = false;
-  let eventIndex = 0;
   try {
     await claimHookOwnership(replies);
     ownsReplies = true;
@@ -93,12 +105,7 @@ export async function invokeAgent(
     await resumeHookStep(owner.request, {
       from: run,
       replyTo: replies.token,
-      request: {
-        input,
-        invocationId: options.invocationId,
-        kind: "effect",
-        name: "agent.invoke",
-      },
+      request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
     });
 
     const iterator = replies[Symbol.asyncIterator]();
@@ -108,19 +115,16 @@ export async function invokeAgent(
       const reply = next.value;
       if (reply.kind === "runtime-action-result") {
         const result = reply.results.find(
-          (candidate) =>
-            candidate.kind === "subagent-result" && candidate.callId === options.invocationId,
+          (candidate): candidate is RuntimeSubagentChildResult =>
+            candidate.kind === "subagent-result" &&
+            candidate.origin === "child" &&
+            candidate.callId === options.invocationId,
         );
         if (result !== undefined) {
           await resumeHookStep(owner.request, {
             from: run,
             replyTo: replies.token,
-            request: {
-              input: JSON.parse(JSON.stringify(result)) as JsonValue,
-              invocationId: `${options.invocationId}:settled`,
-              kind: "effect",
-              name: "agent.settled",
-            },
+            request: { kind: "agent-settled", result },
           });
           if (result.isError === true) throw result.output;
           return result.output;
@@ -153,12 +157,7 @@ export async function invokeAgent(
       await resumeHookStep(owner.request, {
         from: run,
         replyTo: replies.token,
-        request: {
-          input: toJsonValue(reply),
-          invocationId: `${options.invocationId}:event:${eventIndex++}`,
-          kind: "effect",
-          name: AGENT_INVOCATION_EVENT_EFFECT,
-        },
+        request: { event: reply, kind: "authorization-request" },
       });
     }
   } finally {
@@ -210,39 +209,6 @@ export function validateAgentInput(
   }
 }
 
-function toJsonValue(value: AgentInvocationEvent): JsonValue {
-  return JSON.parse(JSON.stringify(value)) as JsonValue;
-}
-
-export function isAgentInvocationEvent(value: unknown): value is AgentInvocationEvent {
-  if (typeof value !== "object" || value === null) return false;
-  const kind = Reflect.get(value, "kind");
-  return kind === "subagent-authorization-event" || kind === "subagent-input-request";
-}
-
-export function isAgentInvocationRequest(value: unknown): value is AgentInvocationRequest {
-  if (typeof value !== "object" || value === null) return false;
-  const request = value as {
-    input?: unknown;
-    invocationId?: unknown;
-    kind?: unknown;
-    name?: unknown;
-  };
-  if (
-    request.kind !== "effect" ||
-    request.name !== "agent.invoke" ||
-    typeof request.invocationId !== "string" ||
-    typeof request.input !== "object" ||
-    request.input === null
-  ) {
-    return false;
-  }
-  return (
-    typeof Reflect.get(request.input, "target") === "string" &&
-    typeof Reflect.get(request.input, "message") === "string"
-  );
-}
-
 function claimInvocationId(ctx: ToolContext, invocationId: string): void {
   const holder = ctx as ToolContext & { [AGENT_INVOCATION_IDS]?: Set<string> };
   const ids = holder[AGENT_INVOCATION_IDS] ?? new Set<string>();
@@ -257,11 +223,4 @@ function claimInvocationId(ctx: ToolContext, invocationId: string): void {
   if (holder[AGENT_INVOCATION_IDS] === undefined) {
     Object.defineProperty(holder, AGENT_INVOCATION_IDS, { enumerable: false, value: ids });
   }
-}
-
-export function isAgentInvocationEventEffect(value: {
-  readonly input: unknown;
-  readonly name: string;
-}): value is { readonly input: AgentInvocationEvent; readonly name: "agent.event" } {
-  return value.name === AGENT_INVOCATION_EVENT_EFFECT && isAgentInvocationEvent(value.input);
 }
