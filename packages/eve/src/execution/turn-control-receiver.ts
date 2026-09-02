@@ -2,6 +2,7 @@ import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
+import { decodeTurnControlPayload } from "#execution/turn-control-codec.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
@@ -187,7 +188,7 @@ export class TurnControlReceiver {
     if (winner.value.done) {
       throw new Error("Turn control hook closed before delivering a result.");
     }
-    const payload = winner.value.value;
+    const payload = decodeTurnControlPayload(winner.value.value);
     if (payload.kind === "turn-error") throw rebuildSerializableError(payload.error);
     if (payload.kind === "turn-continuation-token") {
       await this.commandInbox.rekeyContinuation(payload.continuationToken);
@@ -224,12 +225,10 @@ export class TurnControlReceiver {
           await this.commandInbox.rekeyContinuation(winner.value.value.continuationToken);
           continue;
         }
-        const terminal = this.readTerminalControl(winner.value.value);
+        const payload = decodeTurnControlPayload(winner.value.value);
+        const terminal = this.readTerminalControl(payload);
         if (terminal !== undefined) return terminal;
-        if (
-          winner.value.value.kind === "turn-delivery-cancelled" &&
-          winner.value.value.requestId === request.requestId
-        ) {
+        if (payload.kind === "turn-delivery-cancelled" && payload.requestId === request.requestId) {
           return undefined;
         }
         continue;

@@ -50,6 +50,7 @@ import { activeTurnId } from "#harness/active-turn-id.js";
 import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
 import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import { isObject } from "#shared/guards.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
@@ -67,7 +68,18 @@ export type { TurnWorkflowInput };
 export async function turnWorkflow(rawInput: unknown): Promise<void> {
   "use workflow";
 
-  const input = migrateTurnWorkflowInput(rawInput);
+  let input: TurnWorkflowInput;
+  try {
+    input = migrateTurnWorkflowInput(rawInput);
+  } catch (error) {
+    if (isObject(rawInput) && typeof rawInput.completionToken === "string") {
+      await sendTurnControlStep({
+        controlToken: rawInput.completionToken,
+        payload: { error: normalizeSerializableError(error), kind: "turn-error" },
+      });
+    }
+    throw error;
+  }
 
   if (input.driverCapabilities?.turnInbox !== true) {
     return runLegacyTurnWorkflow(input);

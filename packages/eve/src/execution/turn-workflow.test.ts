@@ -396,6 +396,21 @@ describe("turnWorkflow", () => {
     );
   });
 
+  it("reports malformed cross-version input to the pinned driver", async () => {
+    await expect(turnWorkflow({ completionToken: "turn-token", version: 999 })).rejects.toThrow(
+      "newer than the supported version",
+    );
+
+    expect(resumeHookMock.mock.calls.map((call) => call[1])).toEqual([
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: expect.stringContaining("newer than the supported version"),
+        }),
+        kind: "turn-error",
+      }),
+    ]);
+  });
+
   it("reports task-mode waits as turn errors", async () => {
     const sessionState = createSessionState();
     vi.mocked(turnStep).mockResolvedValueOnce({

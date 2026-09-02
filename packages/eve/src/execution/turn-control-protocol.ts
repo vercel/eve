@@ -1,5 +1,6 @@
 import type { DeliverHookPayload, HookPayload } from "#channel/types.js";
 import { HookNotFoundError } from "#compiled/@workflow/errors/index.js";
+import { decodeTurnControlPayload } from "#execution/turn-control-codec.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
@@ -38,7 +39,8 @@ export async function sendTurnControlStep(input: {
   "use step";
 
   try {
-    await resumeHook(input.controlToken, input.payload);
+    const payload = decodeTurnControlPayload(input.payload);
+    await resumeHook(input.controlToken, payload);
   } catch (error) {
     // Reset and timeout terminally stop the session driver while its child
     // turn may still be unwinding. A final at-least-once control send then

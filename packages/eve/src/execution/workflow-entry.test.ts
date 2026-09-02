@@ -730,6 +730,38 @@ describe("workflowEntry", () => {
     expect(createSessionTimeoutControl).not.toHaveBeenCalled();
   });
 
+  it("surfaces an incompatible newer turn protocol as a terminal session failure", async () => {
+    const sessionState = createBaseSessionState();
+    vi.mocked(createSessionStep).mockResolvedValue(createSessionStepResultForMock(sessionState));
+    installHookMocks({
+      turnControls: [{ kind: "future-terminal-control" } as never],
+    });
+
+    await expect(
+      workflowEntry({
+        input: { message: "resume old thread" },
+        serializedContext: createSerializedContext(),
+      }),
+    ).rejects.toMatchObject({
+      message: "Agent workflow failed. Inspect the private session trace for details.",
+      name: "EveWorkflowFailure",
+    });
+
+    expect(emitTerminalSessionFailureStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: expect.stringContaining('unsupported control kind "future-terminal-control"'),
+        }),
+      }),
+    );
+    expect(notifyTurnCallerStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lifecycle: "terminal",
+        settled: expect.objectContaining({ isError: true }),
+      }),
+    );
+  });
+
   it("notifies a delegated parent once when a turn fails terminally", async () => {
     const sessionState = createBaseSessionState();
     const caller = {
