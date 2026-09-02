@@ -202,6 +202,34 @@
       ]
     },
     {
+      "name": "memory/file",
+      "type": "registry:item",
+      "title": "File memory",
+      "description": "Store durable per-principal memory in a private Vercel Blob store. Setup connects production, preview, and development in the project's primary function region; Blob usage may incur charges.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "package": "eve",
+            "bin": "eve",
+            "args": [
+              "integration",
+              "setup",
+              "file-memory"
+            ]
+          },
+          "requires": ">=0.49.0",
+          "docs": "/docs/memory/file"
+        }
+      },
+      "files": [
+        {
+          "path": "registry/memory/file.ts",
+          "type": "registry:file",
+          "target": "agent/memory/file.ts"
+        }
+      ]
+    },
+    {
       "name": "memory/supermemory",
       "type": "registry:item",
       "title": "Supermemory",

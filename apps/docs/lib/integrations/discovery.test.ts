@@ -148,6 +148,17 @@ describe("integration discovery", () => {
     expect(integrationSearchText(supermemory!)).toContain("Memory provider");
   });
 
+  it("renders built-in file-memory provisioning guidance", () => {
+    const file = getIntegration("file");
+    expect(file).toBeDefined();
+
+    const markdown = integrationMarkdown(file!);
+    expect(markdown).toContain("eve add memory/file");
+    expect(markdown).toContain("eve integration setup file-memory");
+    expect(markdown).toContain("EVE_MEMORY_BLOB_STORE_ID");
+    expect(integrationSearchText(file!)).toContain("Memory provider");
+  });
+
   it("renders the Hindsight memory extension setup", () => {
     const hindsight = getIntegration("hindsight");
     expect(hindsight).toBeDefined();

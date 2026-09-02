@@ -1,4 +1,5 @@
 import { DISCORD_SETUP } from "./discord/setup.js";
+import { FILE_MEMORY_SETUP } from "./file-memory/setup.js";
 import { GITHUB_SETUP } from "./github/setup.js";
 import { LINEAR_SETUP } from "./linear/setup.js";
 import { LINQ_SETUP } from "./linq/setup.js";
@@ -11,6 +12,7 @@ import { WEB_SETUP } from "./web/setup.js";
 /** Built-in registry setup integrations in canonical picker order. */
 export const SETUP_INTEGRATIONS: readonly SetupIntegration[] = [
   WEB_SETUP,
+  FILE_MEMORY_SETUP,
   SLACK_SETUP,
   DISCORD_SETUP,
   GITHUB_SETUP,

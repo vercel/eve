@@ -142,6 +142,11 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("supermemory")?.connection).toBeUndefined();
   });
 
+  it("exposes file memory as a memory provider", () => {
+    expect(getIntegrationEntry("file")?.kind).toBe("memory");
+    expect(getIntegrationEntry("file")?.connection).toBeUndefined();
+  });
+
   it("exposes Buzz as a gallery-only channel", () => {
     expect(getIntegrationEntry("buzz")).toMatchObject({
       kind: "channel",
