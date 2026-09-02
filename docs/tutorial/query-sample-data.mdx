@@ -35,8 +35,12 @@ Store a small in-memory dataset under `agent/lib/`. Keep it tiny. This is throwa
 
 ```ts title="agent/lib/sample-db.ts"
 // A toy SQLite-in-memory stand-in. Swap for your real warehouse in Step 4.
-import initSqlJs from "sql.js";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import initSqlJs from "sql.js"; // npm install this package first, this is not included in "npx eve@latest init"
 
+// define the WASM path, there are case sql.js failed to find the WASM
+const wasmPath = createRequire(import.meta.url).resolve("sql.js/dist/sql-wasm.wasm");
 const SEED = `
   CREATE TABLE orders (id INTEGER, customer_id INTEGER, amount_cents INTEGER, created_at TEXT);
   INSERT INTO orders VALUES
@@ -50,7 +54,8 @@ const SEED = `
 let dbPromise: Promise<import("sql.js").Database> | null = null;
 
 async function db() {
-  dbPromise ??= initSqlJs().then((SQL) => {
+  // init the in-memory database with the WASM path defined.
+  dbPromise ??= initSqlJs({ wasmBinary: await readFile(wasmPath) }).then((SQL) => {
     const database = new SQL.Database();
     database.run(SEED);
     return database;
