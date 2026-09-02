@@ -37,8 +37,7 @@ import {
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import { parseJsonObject, type JsonObject } from "#shared/json.js";
-import { normalizeActivityText } from "#shared/activity-text.js";
+import type { JsonObject } from "#shared/json.js";
 import {
   createRuntimeToolResultFromStepResult,
   createRuntimeToolResultFromToolError,
@@ -55,6 +54,7 @@ import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
 } from "#harness/action-presentation.js";
+import { projectResultActivity, projectUpdateActivity } from "#harness/activity-presentation.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -70,10 +70,6 @@ export {
   setHarnessEmissionState,
 } from "#harness/emission-state.js";
 export type { HarnessEmissionState } from "#harness/emission-state.js";
-
-// ---------------------------------------------------------------------------
-// Turn lifecycle helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Emits `session.started` (once), `turn.started`, and `message.received` at the
@@ -243,10 +239,6 @@ export async function emitTurnEpilogue(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Stream content emission
-// ---------------------------------------------------------------------------
-
 /**
  * Result of consuming one step's `fullStream`.
  *
@@ -279,20 +271,6 @@ function readSubagentBackgroundTaskReceipt(
   const status = Reflect.get(result.output, "status");
   const taskId = Reflect.get(result.output, "taskId");
   return status === "working" && typeof taskId === "string" ? { status, taskId } : undefined;
-}
-
-function resolveActivityText(
-  project: ((input: unknown, value: unknown) => string) | undefined,
-  input: JsonObject | undefined,
-  value: unknown,
-): string | undefined {
-  if (project === undefined || input === undefined) return undefined;
-  try {
-    const text = normalizeActivityText(project(parseJsonObject(input), value));
-    return text === "" ? undefined : text;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -461,8 +439,9 @@ async function consumeStreamContent(
     const activityResult =
       result.isError === true
         ? undefined
-        : resolveActivityText(
-            options?.tools.get(result.toolName)?.activityResult,
+        : projectResultActivity(
+            options?.tools.get(result.toolName),
+            result.callId,
             actionInputs.get(result.callId),
             result.output,
           );
@@ -474,13 +453,14 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
       undefined,
-      activityResult === undefined ? undefined : { [result.callId]: activityResult },
+      activityResult,
     );
   };
 
   const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
-    const activityUpdate = resolveActivityText(
-      options?.tools.get(result.toolName)?.activityUpdate,
+    const activityUpdate = projectUpdateActivity(
+      options?.tools.get(result.toolName),
+      result.callId,
       actionInputs.get(result.callId),
       result.output,
     );
@@ -492,7 +472,7 @@ async function consumeStreamContent(
         turnId: state.turnId,
       }),
       undefined,
-      activityUpdate === undefined ? undefined : { [result.callId]: activityUpdate },
+      activityUpdate,
     );
   };
 
