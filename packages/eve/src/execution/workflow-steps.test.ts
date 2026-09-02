@@ -947,6 +947,7 @@ describe("dispatchCoordinationStep", () => {
       continuationToken: "http:parent",
       sessionId: "parent-session",
     });
+    startMock.mockResolvedValue({ runId: "child-run" });
 
     await expect(
       dispatchCoordinationStep({
@@ -956,18 +957,8 @@ describe("dispatchCoordinationStep", () => {
         serializedContext: createSerializedContext(),
         sessionState,
       }),
-    ).resolves.toMatchObject({
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          origin: "dispatch",
-          subagentName: "agent",
-        },
-      ],
-      pendingTasks: [],
-    });
+    ).resolves.toMatchObject({ results: [], pendingTasks: [] });
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeDefined();
   });
 
   it("blocks a stale recursive agent call from a delegated session", async () => {

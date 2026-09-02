@@ -11,7 +11,7 @@ import { toError } from "#shared/errors.js";
 import type { WorkflowToolRunInput } from "#execution/tools/workflow/types.js";
 import { deriveWorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
 import {
-  startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
   waitForCommandHookOwner,
 } from "#execution/workflow-runtime.js";
@@ -41,7 +41,7 @@ export async function startWorkflowToolRun(
       parentTurnId: input.session.turn.id,
     });
   const workflowToolRunInput = { ...input, hookToken } as WorkflowToolRunInput;
-  await startWorkflowPreferLatest(workflowToolRunWorkflowReference, [workflowToolRunInput]);
+  await startWorkflowOnCurrentDeployment(workflowToolRunWorkflowReference, [workflowToolRunInput]);
   const owner = await waitForCommandHookOwner(hookToken);
   return { hookToken, runId: owner.runId };
 }

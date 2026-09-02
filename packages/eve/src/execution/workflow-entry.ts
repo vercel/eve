@@ -49,8 +49,6 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
-import { CHANNEL_CONTEXT_KEY_NAME, SESSION_CALLBACK_CONTEXT_KEY_NAME } from "#context/key-names.js";
-import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 
 const SAFE_OUTER_WORKFLOW_FAILURE_MESSAGE =

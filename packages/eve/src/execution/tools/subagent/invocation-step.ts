@@ -195,6 +195,7 @@ export async function dispatchAgentInvocation(input: {
       currentSession: session,
       fanoutSize: prepared.fanoutSize,
       initiatorAuth: prepared.initiatorAuth,
+      localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
       parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,

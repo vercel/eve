@@ -218,6 +218,7 @@ export async function dispatchCoordinationStep(
       currentSession: nextSession,
       fanoutSize: prepared.fanoutSize,
       initiatorAuth: prepared.initiatorAuth,
+      localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.parentContinuationToken,
       parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
