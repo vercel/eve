@@ -81,7 +81,7 @@ export function searchGatewayModels(models: readonly GatewayModel[], query: stri
 
 export default defineTool({
   description:
-    "Search the list of available models. Call this to get the list of available models or to resolve a model to its exact ID.",
+    "Search the Vercel AI Gateway model catalog. Call this to list available AI Gateway models or resolve a model to its exact ID.",
   inputSchema,
   outputSchema,
   async execute(input, ctx) {
