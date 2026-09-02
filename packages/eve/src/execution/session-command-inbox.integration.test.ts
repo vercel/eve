@@ -5,7 +5,13 @@ import { sessionCommandInboxWorkflow } from "#internal/testing/session-command-i
 import { legacySessionDeliveryWorkflow } from "#internal/testing/legacy-session-delivery-workflow.js";
 import { midCohortSessionDeliveryWorkflow } from "#internal/testing/mid-cohort-session-delivery-workflow.js";
 import { waitForHook } from "#internal/testing/workflow-test-helpers.js";
-import { getHookByToken, getWorld, resumeHook, start } from "#internal/workflow/runtime.js";
+import {
+  cancelRun,
+  getHookByToken,
+  getWorld,
+  resumeHook,
+  start,
+} from "#internal/workflow/runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
@@ -116,6 +122,32 @@ describe("session command inbox integration", () => {
       });
 
       await expect(run.returnValue).resolves.toEqual(["by id", "by channel"]);
+    } finally {
+      const status = await run.status;
+      if (status === "pending" || status === "running") await run.cancel();
+    }
+  });
+
+  it("releases session inbox tokens when the run is cancelled directly", async () => {
+    const channelToken = "http:session-command-inbox:direct-cancel";
+    const run = await start(sessionCommandInboxWorkflow, [{ token: channelToken }]);
+    const stableToken = sessionCommandHookToken(run.runId);
+
+    try {
+      await Promise.all([
+        waitForHook({ runId: run.runId }, { token: stableToken }),
+        waitForHook({ runId: run.runId }, { token: channelToken }),
+      ]);
+
+      await cancelRun(await getWorld(), run.runId, { cancelReason: "Force session recovery" });
+
+      await expect(run.status).resolves.toBe("cancelled");
+      await expect(getHookByToken(stableToken)).rejects.toMatchObject({
+        name: "HookNotFoundError",
+      });
+      await expect(getHookByToken(channelToken)).rejects.toMatchObject({
+        name: "HookNotFoundError",
+      });
     } finally {
       const status = await run.status;
       if (status === "pending" || status === "running") await run.cancel();

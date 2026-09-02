@@ -159,8 +159,11 @@ address's current owner as a fixed handle.
   success emits `compaction.requested`, `compaction.completed`, then `session.waiting`.
 - `clear` removes model-message history in place. It preserves the system prompt,
   skills, tools, durable state, limits, address ownership, and session sandbox.
-- `reset` terminally retires the current session. A later address `send()` creates
-  a fresh session; a fixed `Session` handle remains pinned to the retired ID.
+- `reset` terminally retires the current session. If the workflow cannot consume
+  the reset command and release its inbox, eve directly cancels the run so the
+  address can be reclaimed without replaying that session. This fallback cannot
+  run the session's normal finalizers. A later address `send()` creates a fresh
+  session; a fixed `Session` handle remains pinned to the retired ID.
 
 Control operations never create a session. Unknown or inactive targets return a
 benign no-active status. Authenticate and deduplicate command webhooks before

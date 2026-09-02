@@ -303,6 +303,33 @@ describe("createWorkflowRuntime command dispatch", () => {
     });
     expect(getHookByTokenMock).toHaveBeenCalledWith(sessionCommandHookToken("session-1"));
   });
+
+  it("force-cancels a session whose reset cannot release the stable command inbox", async () => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = "session-1";
+      const stableToken = sessionCommandHookToken(sessionId);
+      resumeHookMock.mockResolvedValue({ runId: sessionId });
+      getHookByTokenMock.mockResolvedValue({ runId: sessionId, token: stableToken });
+
+      const reset = buildRuntime().dispatchSession({
+        command: { kind: "reset", reason: "r".repeat(513) },
+        sessionId,
+      });
+      const result = expect(reset).resolves.toEqual({
+        previousSessionId: sessionId,
+        status: "reset",
+      });
+      await vi.advanceTimersByTimeAsync(30_020);
+
+      await result;
+      expect(cancelRunMock).toHaveBeenCalledWith("world", sessionId, {
+        cancelReason: "Session reset timed out waiting for command inbox release",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function currentSessionHook(token: string) {
