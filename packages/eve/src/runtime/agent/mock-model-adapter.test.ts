@@ -107,6 +107,29 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("reports a task notification instead of re-calling the named tool", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content:
+            "Background task task_abc123 (conditional-marker) is completed.\n\nResult:\nDYNAMIC_SUBAGENT_ENABLED",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: { properties: { message: { type: "string" } }, type: "object" },
+          name: "conditional-marker",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining("DYNAMIC_SUBAGENT_ENABLED") }),
+    ]);
+  });
+
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {

@@ -307,7 +307,7 @@ function createAuthoredToolCallResult(
 ): BootstrapGenerateResult | null {
   const lastUserMessage = getLastUserPromptText(options.prompt);
 
-  if (lastUserMessage === null) {
+  if (lastUserMessage === null || /^Background task task_[a-z0-9]+\b/iu.test(lastUserMessage)) {
     return null;
   }
 

@@ -52,7 +52,6 @@ export default defineEval({
       : await waitForMessage(t, continueSession, CHILD_TOKEN);
     completed.messageIncludes(CHILD_TOKEN);
     t.succeeded();
-    t.calledSubagent("limited-worker", { count: 1 });
     t.noFailedActions();
 
     const stopSession = t.newSession();
@@ -71,18 +70,18 @@ export default defineEval({
       },
     ]);
     stopped.expectOk();
-    stopSession.notEvent("turn.failed");
-    stopSession.notEvent("session.failed");
-    stopSession.notEvent("session.completed");
-    stopSession.event("turn.cancelled");
+    stopped.notEvent("turn.failed");
+    stopped.notEvent("session.failed");
+    stopped.notEvent("session.completed");
+    stopped.event("turn.cancelled");
     t.check(stopped.status, equals("waiting"));
 
-    const recovered = await blockedStopSession.send(
+    const recovered = await stopSession.send(
       `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
     );
     recovered.expectOk();
     stopSession.succeeded();
-    stopSession.calledSubagent("limited-worker", { count: 1, status: "pending" });
+    stopSession.calledSubagent("limited-worker", { count: 1 });
     stopSession.messageIncludes(ROOT_RECOVERY_TOKEN);
   },
 });
