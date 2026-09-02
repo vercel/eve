@@ -48,12 +48,8 @@ import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt
 import { parseJsonObject } from "#shared/json.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-import {
-  AGENT_BUSY,
-  AGENT_MISMATCH,
-  AGENT_UNREACHABLE,
-  formatAgentBusyMessage,
-} from "#subagents/agent-handle-errors.js";
+import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
+import { formatAgentBusyMessage } from "#subagents/agent-handle-errors.js";
 import {
   getAgentHandleStore,
   writeHandles,
