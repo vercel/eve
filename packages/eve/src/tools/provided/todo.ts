@@ -28,6 +28,10 @@ export const todo = defineTool({
     "- Mark tasks in_progress when you start, completed when done",
     "- Only have ONE task in_progress at a time",
   ].join("\n"),
+  activity: {
+    label: (input) => (input.todos === undefined ? "Read todo list" : "Update todo list"),
+    state: { key: "todo", project: (output) => output.todos },
+  },
   execute: async (input) => executeTodoTool((input ?? {}) as TodoToolInput),
   inputSchema: TODO_INPUT_SCHEMA,
   outputSchema: TODO_OUTPUT_SCHEMA,
