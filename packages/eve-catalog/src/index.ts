@@ -344,9 +344,9 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
   {
     slug: "arcana",
     name: "Kybernesis Arcana",
-    kind: "extension",
+    kind: "memory",
     tagline:
-      "Give your agent workspace-scoped long-term memory with recall, storage, and brain notes.",
+      "Give your agents workspace-scoped long-term memory with automatic recall and deliberate storage.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {

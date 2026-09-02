@@ -46,6 +46,20 @@ for (const item of items) {
   }
   await access(join(docsRoot, expectedPath));
 
+  if (slug === "arcana") {
+    if (!item.dependencies?.includes("@kybernesis/arcana")) {
+      throw new Error('Registry item "memory/arcana" must depend on @kybernesis/arcana.');
+    }
+    if (
+      !("ARCANA_API_KEY" in (item.envVars ?? {})) ||
+      !("ARCANA_WORKSPACE" in (item.envVars ?? {}))
+    ) {
+      throw new Error(
+        'Registry item "memory/arcana" must declare ARCANA_API_KEY and ARCANA_WORKSPACE as environment variables.',
+      );
+    }
+  }
+
   if (slug === "supermemory") {
     if (!item.dependencies?.includes("@supermemory/eve")) {
       throw new Error('Registry item "memory/supermemory" must depend on @supermemory/eve.');

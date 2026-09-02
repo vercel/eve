@@ -226,10 +226,10 @@
       ]
     },
     {
-      "name": "extension/arcana",
+      "name": "memory/arcana",
       "type": "registry:item",
       "title": "Kybernesis Arcana",
-      "description": "Give an eve agent a workspace-scoped long-term memory with recall, storage, and brain notes.",
+      "description": "Give your agents workspace-scoped long-term memory with automatic recall and deliberate storage.",
       "dependencies": [
         "@kybernesis/arcana"
       ],
@@ -237,11 +237,16 @@
         "ARCANA_API_KEY": "",
         "ARCANA_WORKSPACE": ""
       },
+      "meta": {
+        "eve": {
+          "requires": ">=0.49.0"
+        }
+      },
       "files": [
         {
-          "path": "registry/extensions/arcana.ts",
+          "path": "registry/memory/arcana.ts",
           "type": "registry:file",
-          "target": "agent/extensions/arcana.ts"
+          "target": "agent/memory/arcana.ts"
         }
       ]
     },
