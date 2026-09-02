@@ -23,11 +23,9 @@ import type { EveEvalContext } from "eve/evals";
 //   t2  session A still reads the file: the parked session keeps working when
 //       its messages route through the new deployment, and its sandbox
 //       (keyed per durable session, not per deployment) is untouched
-//   t1' push a deployment update that adds a skill — skills materialize into
-//       the sandbox workspace resources, so the sandbox version hash rotates
-//       for anything executing the new code
-//   t3  session A no longer sees the file: its next request runs on the new
-//       deployment, whose changed sandbox resources rotate the sandbox key
+//   t1' push another deployment update that adds a skill
+//   t3  session A still reads the file: exact deployment routing does not
+//       discard the durable workspace owned by the existing session
 //   t4  a NEW session B adopts the new deployment: the added skill loads and
 //       shapes the reply
 //
@@ -65,7 +63,7 @@ const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
 export default defineEval({
   description:
-    "Sandbox: a parked session adopts request-serving deployments, preserving or rotating its workspace according to the sandbox version.",
+    "Sandbox: a parked session follows request-serving deployments without losing its durable workspace, and new sessions adopt new resources.",
   tags: ["redeploy"],
   timeoutMs: 20 * 60_000,
   async test(t) {
@@ -106,21 +104,21 @@ export default defineEval({
       persist.calledTool("bash", { output: new RegExp(FILE_TOKEN) });
       persist.messageIncludes(FILE_TOKEN);
 
-      // t1': deployment update that adds a skill, rotating the sandbox key.
+      // t1': deployment update that adds a skill.
       await mkdir(SKILLS_DIR, { recursive: true });
       await writeFile(SKILL_PATH, SKILL_MARKDOWN);
       await deployToAlias(t, alias, "skill");
       await waitForAliasToServe(t, `"${SKILL_NAME}"`);
 
-      // t3: the next request is accepted by the new deployment. Its changed
-      // sandbox resources rotate the versioned key, so the old file is absent.
+      // t3: the next request is accepted by the new deployment, while the
+      // existing session retains ownership of its durable workspace.
       const probe = await t.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
       );
       probe.expectOk();
-      probe.calledTool("bash", { output: /absent/ });
-      probe.messageIncludes("absent");
+      probe.calledTool("bash", { output: /present/ });
+      probe.messageIncludes("present");
 
       // t4: a fresh session adopts the new deployment — the added skill is
       // advertised and usable.
