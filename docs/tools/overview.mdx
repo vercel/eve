@@ -67,9 +67,9 @@ export default defineTool({
   description: "Build a project report.",
   inputSchema: z.object({ project: z.string() }),
   label: {
-    label: ({ project }) => `Build report for ${project}`,
-    update: (partial) => partial.phase,
-    result: (output) => `Report ready with ${output.report.sections.length} sections`,
+    start: ({ project }) => `Build report for ${project}`,
+    delta: (_input, partial) => partial.phase,
+    complete: (_input, output) => `Report ready with ${output.report.sections.length} sections`,
   },
   async *execute({ project }) {
     yield { phase: "Collecting sources", report: null };
@@ -96,7 +96,7 @@ action complete.
 
 eve normalizes and bounds projected text before rendering it. If either
 callback throws or returns an empty string, eve keeps the existing activity
-label. `activity.result` does not run for failed or rejected tool calls. The
+label. `label.complete` does not run for failed or rejected tool calls. The
 full values remain available in `action.partial` and `action.result`; renderers
 receive only the projected text.
 
