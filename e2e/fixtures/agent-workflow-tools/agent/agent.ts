@@ -11,6 +11,21 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   const roles = request.messages.map((entry) => entry.role);
   const turnHasToolResult = roles.lastIndexOf("tool") > roles.lastIndexOf("user");
 
+  if (message.includes("WORKFLOW-MIXED-AGENTS-START")) {
+    const mixedResults = request.toolResults.filter(
+      (result) => result.id === "blocking-agent-call" || result.id === "background-agent-call",
+    );
+    if (mixedResults.length < 2) {
+      return {
+        toolCalls: [
+          { id: "blocking-agent-call", input: { service: "api" }, name: "blocking_agent" },
+          { id: "background-agent-call", input: { service: "api" }, name: "background_agent" },
+        ],
+      };
+    }
+    return "WORKFLOW-MIXED-AGENTS-INITIAL-RESULT";
+  }
+
   for (const [directive, tool] of [
     ["WORKFLOW-DEPLOY-START", "deploy_service"],
     ["WORKFLOW-CONFIRM-START", "confirm_deploy"],
@@ -36,6 +51,9 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
   if (message.includes("is completed") && message.includes("WORKFLOW-REPORT-COMPLETE")) {
     return "WORKFLOW-REPORT-DONE";
+  }
+  if (message.includes("is completed") && message.includes("WORKFLOW-CHILD:api:background")) {
+    return "WORKFLOW-MIXED-AGENTS-BACKGROUND-DONE";
   }
   if (message.startsWith("Background task ")) {
     return "WORKFLOW-REPORT-ACK";

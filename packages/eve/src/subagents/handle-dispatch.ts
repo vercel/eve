@@ -85,7 +85,7 @@ export async function dispatchToClaimedAgentAddress(input: {
 }
 
 /** Delivers a continuation to an already-claimed local or remote agent address. */
-export async function dispatchToAgentAddress(input: {
+async function dispatchToAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
