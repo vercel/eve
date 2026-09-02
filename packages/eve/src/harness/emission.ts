@@ -333,7 +333,7 @@ async function consumeStreamContent(
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
-  const streamingActionInputs = new Map<string, { offset: number; toolName: string }>();
+  const streamingActionInputs = new Map<string, { toolName: string }>();
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -355,13 +355,11 @@ async function consumeStreamContent(
     callId: string,
     toolName: string,
     inputTextDelta: string,
-    inputTextOffset: number,
   ): Promise<void> =>
     emitFn(
       createActionInputAppendedEvent({
         callId,
         inputTextDelta,
-        inputTextOffset,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         toolName,
@@ -491,7 +489,6 @@ async function consumeStreamContent(
         await emitFn(
           createReasoningAppendedEvent({
             reasoningDelta: part.text,
-            reasoningSoFar: currentReasoning,
             sequence: state.sequence,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
@@ -516,7 +513,6 @@ async function consumeStreamContent(
         await emitFn(
           createMessageAppendedEvent({
             messageDelta: part.text,
-            messageSoFar: currentMessage,
             sequence: state.sequence,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
@@ -536,8 +532,7 @@ async function consumeStreamContent(
         if (currentMessage.trim().length > 0) {
           await flushCurrentMessage();
         }
-        streamingActionInputs.set(part.id, { offset: 0, toolName: part.toolName });
-        await emitActionInput(part.id, part.toolName, "", 0);
+        streamingActionInputs.set(part.id, { toolName: part.toolName });
         break;
       }
       case "tool-input-delta": {
@@ -546,9 +541,7 @@ async function consumeStreamContent(
           break;
         }
         await providerActionBatch.flush();
-        const inputTextOffset = input.offset;
-        input.offset += part.delta.length;
-        await emitActionInput(part.id, input.toolName, part.delta, inputTextOffset);
+        await emitActionInput(part.id, input.toolName, part.delta);
         break;
       }
       case "tool-input-end":

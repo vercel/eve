@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useEveAgent } from "#svelte/use-eve-agent.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_SESSION_ID_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -31,6 +35,9 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 

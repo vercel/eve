@@ -24,6 +24,7 @@ import {
 import type {
   SlackChannelEvents,
   SlackChannelInternalEvents,
+  SlackChannelState,
   SlackContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
@@ -32,6 +33,12 @@ import type { InputRequest } from "#shared/input.js";
 const log = createLogger("slack.defaults");
 const REASONING_TYPING_REFRESH_INTERVAL_MS = 5_000;
 const REASONING_TYPING_MIN_PROGRESS_CHARS = 4;
+interface ReasoningAccumulator {
+  readonly stepIndex: number;
+  readonly text: string;
+  readonly turnId: string;
+}
+const reasoningByState = new WeakMap<SlackChannelState, ReasoningAccumulator>();
 
 interface SlackSemanticErrorSummary {
   readonly hint?: string;
@@ -321,11 +328,25 @@ export const defaultEvents: SlackChannelInternalEvents = {
     channel.state.pendingToolCallMessage = null;
     channel.state.lastReasoningTypingAtMs = null;
     channel.state.lastReasoningTypingStatus = null;
+    reasoningByState.delete(channel.state);
     await channel.thread.startTyping("Working...");
   },
 
   async "reasoning.appended"(event, channel, _ctx) {
-    const line = firstNonEmptyLine(event.reasoningSoFar);
+    const current = reasoningByState.get(channel.state);
+    const continuesCurrentBlock =
+      current?.turnId === event.turnId && current.stepIndex === event.stepIndex;
+    if (!continuesCurrentBlock) {
+      channel.state.lastReasoningTypingAtMs = null;
+      channel.state.lastReasoningTypingStatus = null;
+    }
+    const reasoning = (continuesCurrentBlock ? current.text : "") + event.reasoningDelta;
+    reasoningByState.set(channel.state, {
+      stepIndex: event.stepIndex,
+      text: reasoning,
+      turnId: event.turnId,
+    });
+    const line = firstNonEmptyLine(reasoning);
     if (line === undefined) return;
 
     const status = truncateTypingStatus(line);
@@ -345,6 +366,14 @@ export const defaultEvents: SlackChannelInternalEvents = {
     await channel.thread.startTyping(status);
     channel.state.lastReasoningTypingAtMs = now;
     channel.state.lastReasoningTypingStatus = status;
+  },
+
+  async "reasoning.completed"(event, channel, _ctx) {
+    const current = reasoningByState.get(channel.state);
+    if (current?.turnId !== event.turnId || current.stepIndex !== event.stepIndex) return;
+    reasoningByState.delete(channel.state);
+    channel.state.lastReasoningTypingAtMs = null;
+    channel.state.lastReasoningTypingStatus = null;
   },
 
   async "actions.requested"(event, channel, _ctx) {

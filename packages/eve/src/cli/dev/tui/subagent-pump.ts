@@ -8,6 +8,7 @@
 
 import type { Client } from "#client/index.js";
 import { readNdjsonStream } from "#client/ndjson.js";
+import { readMessageStreamVersion } from "#client/stream-version.js";
 import { createEventDeduper, type EventDeduper } from "#protocol/event-dedupe.js";
 import {
   isCurrentTurnBoundaryEvent,
@@ -287,7 +288,9 @@ export class SubagentPump {
               throw new Error(`Child stream returned ${response.status}.`);
             }
 
-            for await (const event of readNdjsonStream(response.body)) {
+            for await (const event of readNdjsonStream(response.body, {
+              streamVersion: readMessageStreamVersion(response.headers),
+            })) {
               if (controller.signal.aborted) return;
               deliveredEvent = true;
               run.childStreamIndex += 1;

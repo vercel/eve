@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+
 import { resolveInvokeOperation, runInvoke, type RunInvokeInput } from "./invoke.js";
 import { parseInvokeResumeInput } from "./result.js";
 
@@ -320,5 +322,8 @@ function streamResponse(events: readonly unknown[]): Response {
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }

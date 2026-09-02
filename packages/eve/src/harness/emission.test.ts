@@ -191,7 +191,9 @@ describe("emitStreamContent empty delivery", () => {
     expect(appended.map((event) => event.data.messageDelta.length)).toEqual([
       1, 64, 64, 64, 64, 64, 47,
     ]);
-    expect(appended.at(-1)?.data.messageSoFar).toBe("x".repeat(deltaCount));
+    expect(appended.reduce((total, event) => total + event.data.messageDelta.length, 0)).toBe(
+      deltaCount,
+    );
     expect(events.at(-1)?.type).toBe("message.completed");
   });
 
@@ -316,24 +318,13 @@ describe("emitStreamContent action requests", () => {
     expect(events.map((event) => event.type)).toEqual([
       "action.input.appended",
       "action.input.appended",
-      "action.input.appended",
       "actions.requested",
     ]);
     const inputEvents = events.filter((event) => event.type === "action.input.appended");
     expect(inputEvents.map((event) => event.data)).toEqual([
       {
         callId: "call-render",
-        inputTextDelta: "",
-        inputTextOffset: 0,
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "render",
-        turnId: "turn_0",
-      },
-      {
-        callId: "call-render",
         inputTextDelta: '{"title":"Hel',
-        inputTextOffset: 0,
         sequence: 0,
         stepIndex: 0,
         toolName: "render",
@@ -342,7 +333,6 @@ describe("emitStreamContent action requests", () => {
       {
         callId: "call-render",
         inputTextDelta: 'lo"}',
-        inputTextOffset: 13,
         sequence: 0,
         stepIndex: 0,
         toolName: "render",
@@ -525,7 +515,6 @@ describe("emitStreamContent action requests", () => {
     expect(events.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
-      "action.input.appended",
       "action.input.appended",
       "actions.requested",
     ]);

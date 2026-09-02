@@ -1,4 +1,9 @@
-import type { MessageStreamEvent } from "#protocol/message.js";
+import { type MessageStreamEvent } from "#protocol/message.js";
+import {
+  normalizeMessageStreamEvent,
+  type MessageStreamEventForVersion,
+  type MessageStreamVersion,
+} from "#protocol/message-version.js";
 
 /**
  * Returns true when an error looks like a stream socket disconnection that
@@ -35,7 +40,10 @@ export function isStreamDisconnectError(error: unknown): boolean {
  */
 export async function* readNdjsonStream(
   body: ReadableStream<Uint8Array>,
-  options?: { readonly idleTimeoutMs?: number },
+  options: {
+    readonly idleTimeoutMs?: number;
+    readonly streamVersion: MessageStreamVersion;
+  },
 ): AsyncGenerator<MessageStreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -64,7 +72,7 @@ export async function* readNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1);
 
         if (line.length > 0) {
-          yield JSON.parse(line) as MessageStreamEvent;
+          yield parseMessageStreamEvent(line, options.streamVersion);
         }
 
         newlineIndex = buffer.indexOf("\n");
@@ -74,7 +82,7 @@ export async function* readNdjsonStream(
     // Yield any trailing content without a final newline.
     const trailing = buffer.trim();
     if (trailing.length > 0) {
-      yield JSON.parse(trailing) as MessageStreamEvent;
+      yield parseMessageStreamEvent(trailing, options.streamVersion);
     }
   } finally {
     if (!reachedEof) {
@@ -84,6 +92,14 @@ export async function* readNdjsonStream(
     }
     reader.releaseLock();
   }
+}
+
+function parseMessageStreamEvent<Version extends MessageStreamVersion>(
+  line: string,
+  version: Version,
+): MessageStreamEvent {
+  const event = JSON.parse(line) as MessageStreamEventForVersion<Version>;
+  return normalizeMessageStreamEvent(version, event);
 }
 
 async function readWithIdleTimeout(

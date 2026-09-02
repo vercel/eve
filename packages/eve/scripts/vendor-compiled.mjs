@@ -9,6 +9,7 @@
  * `scripts/vendor-compiled/declarations/`, and importing the config from
  * `scripts/vendor-compiled/index.mjs`.
  */
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,6 +18,7 @@ import { collectFilesRecursively, runVendor } from "./vendor-compiled/_shared.mj
 import { MODULES } from "./vendor-compiled/index.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const packageRoot = dirname(here);
 const compiledRoot = join(packageRoot, ".generated", "compiled");
 const vendorCompiledDir = join(here, "vendor-compiled");
@@ -37,5 +39,8 @@ await runVendor({
   compiledRoot,
   modules: MODULES,
   scriptFiles,
-  toolVersions: { rolldown: resolveNitroRolldownVersion() },
+  toolVersions: {
+    rolldown: resolveNitroRolldownVersion(),
+    typescript: require("typescript/package.json").version,
+  },
 });

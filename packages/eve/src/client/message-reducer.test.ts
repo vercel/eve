@@ -35,13 +35,95 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
+  it("accumulates message and reasoning deltas without a start marker", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createReasoningAppendedEvent({
+        reasoningDelta: "I",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createReasoningAppendedEvent({
+        reasoningDelta: " can",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "Hel",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "lo",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toEqual([
+      { type: "step-start" },
+      { state: "streaming", stepIndex: 0, text: "I can", type: "reasoning" },
+      { state: "streaming", stepIndex: 0, text: "Hello", type: "text" },
+    ]);
+  });
+
+  it("uses the canonical completion after an interrupted attempt", () => {
+    const reducer = defaultMessageReducer();
+    let data = reduceServerEvents(reducer, reducer.initial(), [
+      createMessageAppendedEvent({
+        messageDelta: "abandoned",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: "replacement",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+      createMessageAppendedEvent({
+        messageDelta: " complete",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "streaming",
+      stepIndex: 0,
+      text: "abandonedreplacement complete",
+      type: "text",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createMessageCompletedEvent({
+        message: "replacement complete",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "replacement complete",
+      type: "text",
+    });
+  });
+
   it("projects streamed tool input and upgrades it to the validated request", () => {
     const reducer = defaultMessageReducer();
     let data = reduceServerEvents(reducer, reducer.initial(), [
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "",
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -50,7 +132,6 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: '{"title":"Hel',
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -69,19 +150,19 @@ describe("defaultMessageReducer", () => {
       type: "dynamic-tool",
     });
 
-    const contiguous = data;
     data = reduceServerEvents(reducer, data, [
       createActionInputAppendedEvent({
         callId: "call_render",
-        inputTextDelta: "gap",
-        inputTextOffset: 99,
+        inputTextDelta: 'lo"}',
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
       }),
     ]);
-    expect(data).toBe(contiguous);
+    expect(data.messages[0]?.parts).toContainEqual(
+      expect.objectContaining({ inputText: '{"title":"Hello"}' }),
+    );
 
     data = reduceServerEvents(reducer, data, [
       createActionsRequestedEvent({
@@ -114,7 +195,6 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "late",
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -130,7 +210,6 @@ describe("defaultMessageReducer", () => {
       createActionInputAppendedEvent({
         callId: "call_render",
         inputTextDelta: "{",
-        inputTextOffset: 0,
         sequence: 1,
         stepIndex: 0,
         toolName: "render",
@@ -1028,7 +1107,6 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageAppendedEvent({
         messageDelta: "Checking Vienna",
-        messageSoFar: "Checking Vienna",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_0",
@@ -1055,7 +1133,6 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "Now Berlin",
-        messageSoFar: "Now Berlin",
         sequence: 3,
         stepIndex: 0,
         turnId: "turn_0",
@@ -1081,14 +1158,12 @@ describe("defaultMessageReducer", () => {
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
-        reasoningSoFar: "Thinking",
         sequence: 0,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Partial",
-        messageSoFar: "Partial",
         sequence: 1,
         stepIndex: 0,
         turnId: "turn_1",
@@ -1134,7 +1209,6 @@ describe("defaultMessageReducer", () => {
       }),
       createMessageAppendedEvent({
         messageDelta: "<eve-empty-delivery/>",
-        messageSoFar: "<eve-empty-delivery/>",
         sequence: 1,
         stepIndex: 1,
         turnId: "turn_1",

@@ -27,7 +27,7 @@ export const EVE_STREAM_TAIL_INDEX_HEADER = "x-eve-stream-tail-index";
 export const EVE_STREAM_VERSION_HEADER = "x-eve-stream-version";
 export const EVE_MESSAGE_STREAM_CONTENT_TYPE = "application/x-ndjson; charset=utf-8";
 export const EVE_MESSAGE_STREAM_FORMAT = "ndjson";
-export const EVE_MESSAGE_STREAM_VERSION = "24";
+export const EVE_MESSAGE_STREAM_VERSION = "25";
 
 /**
  * eve-owned finish reason for one completed assistant step.
@@ -415,7 +415,6 @@ export interface SubagentCompletedStreamEvent {
 export interface MessageAppendedStreamEvent {
   data: {
     messageDelta: string;
-    messageSoFar: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -431,8 +430,6 @@ export interface ActionInputAppendedStreamEvent {
   data: {
     callId: string;
     inputTextDelta: string;
-    /** Zero-based UTF-16 code-unit offset where `inputTextDelta` begins. */
-    inputTextOffset: number;
     sequence: number;
     stepIndex: number;
     toolName: string;
@@ -448,7 +445,6 @@ export interface ActionInputAppendedStreamEvent {
 export interface ReasoningAppendedStreamEvent {
   data: {
     reasoningDelta: string;
-    reasoningSoFar: string;
     sequence: number;
     stepIndex: number;
     turnId: string;
@@ -1104,7 +1100,6 @@ export function createActionsRequestedEvent(input: {
 export function createActionInputAppendedEvent(input: {
   readonly callId: string;
   readonly inputTextDelta: string;
-  readonly inputTextOffset: number;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly toolName: string;
@@ -1114,7 +1109,6 @@ export function createActionInputAppendedEvent(input: {
     data: {
       callId: input.callId,
       inputTextDelta: input.inputTextDelta,
-      inputTextOffset: input.inputTextOffset,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       toolName: input.toolName,
@@ -1357,7 +1351,6 @@ export function createSubagentCalledEvent(input: {
  */
 export function createMessageAppendedEvent(input: {
   readonly messageDelta: string;
-  readonly messageSoFar: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1365,7 +1358,6 @@ export function createMessageAppendedEvent(input: {
   return {
     data: {
       messageDelta: input.messageDelta,
-      messageSoFar: input.messageSoFar,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
@@ -1379,7 +1371,6 @@ export function createMessageAppendedEvent(input: {
  */
 export function createReasoningAppendedEvent(input: {
   readonly reasoningDelta: string;
-  readonly reasoningSoFar: string;
   readonly sequence: number;
   readonly stepIndex: number;
   readonly turnId: string;
@@ -1387,7 +1378,6 @@ export function createReasoningAppendedEvent(input: {
   return {
     data: {
       reasoningDelta: input.reasoningDelta,
-      reasoningSoFar: input.reasoningSoFar,
       sequence: input.sequence,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
