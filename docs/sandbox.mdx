@@ -156,7 +156,7 @@ With `backend` omitted, eve uses `defaultBackend()`, which resolves on first use
 3. **microsandbox** when the host supports it: macOS on Apple Silicon, or glibc Linux with KVM enabled.
 4. **just-bash** as the dependency-free fallback.
 
-By default, Docker and microsandbox pull `ghcr.io/vercel/eve` while Vercel Sandbox pulls `vcr.vercel.com/vercel/eve/base`. Each image tag matches the installed eve version.
+By default, Docker and microsandbox pull `ghcr.io/vercel/eve` while Vercel Sandbox pulls `vcr.vercel.com/vercel/eve/base`. Each image tag matches the installed eve version. Set `EVE_SANDBOX_IMAGE_TAG` to replace the version-derived tag for these default images. An explicit `image` passed to `docker()` or `microsandbox()` still takes precedence.
 
 `defaultBackend()` also accepts a keyed bag so each inner backend gets its own typed create options:
 

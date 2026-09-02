@@ -18,8 +18,9 @@ import { vercel } from "eve/sandbox/vercel";
  * Backend is left as the framework default so this fixture works both
  * locally (where `defaultBackend()` resolves to `docker()`) and on Vercel
  * deployments (where it resolves to `vercel()`). Both run the published eve
- * base image tagged with the installed eve version: GHCR locally and VCR on
- * Vercel. The image ships Python, Node, and git; the bootstrap below assumes
+ * base image: GHCR locally and VCR on Vercel. CI sets `EVE_SANDBOX_IMAGE_TAG`
+ * to `latest` so release PRs can run before their versioned image exists. The
+ * image ships Python, Node, and git; the bootstrap below assumes
  * that real-binary environment and is not meant to run against the
  * dependency-free `just-bash` fallback.
  *
