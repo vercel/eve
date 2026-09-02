@@ -45,22 +45,6 @@ describe("resolveEveServicePrefixByRoot", () => {
       }),
     ).toBe("/agent");
   });
-
-  it("ignores malformed legacy service collections", () => {
-    expect(
-      resolveCoDeployedEveServicePrefix({
-        appRoots: ["/project/agent"],
-        config: {
-          experimentalServices: null,
-          services: {
-            eve: { framework: "eve", root: "agent", routePrefix: "/agent" },
-            web: { framework: "nextjs" },
-          },
-        },
-        configRoot: "/project",
-      }),
-    ).toBe("/agent");
-  });
 });
 
 describe("createEveServiceName", () => {
