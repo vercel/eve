@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { accessSync, constants } from "node:fs";
 import { access } from "node:fs/promises";
 
 import { MICROSANDBOX_USER } from "#execution/sandbox/bindings/microsandbox-options.js";
@@ -7,8 +7,8 @@ import type { Sandbox as MicrosandboxSandbox } from "microsandbox";
 
 /**
  * Synchronously reports whether this host can run microsandbox at all:
- * macOS on Apple Silicon, or Linux (glibc) with KVM available. Used by
- * `defaultSandbox()`'s availability chain.
+ * macOS on Apple Silicon, or Linux (glibc) with KVM accessible to the
+ * current user. Used by `defaultSandbox()`'s availability chain.
  */
 export function isMicrosandboxPlatformSupported(): boolean {
   if (process.platform === "darwin" && process.arch === "arm64") {
@@ -18,7 +18,7 @@ export function isMicrosandboxPlatformSupported(): boolean {
     if (!isGlibcLinux()) {
       return false;
     }
-    return process.env.MSB_PATH !== undefined || existsSync("/dev/kvm");
+    return process.env.MSB_PATH !== undefined || canAccessKvmSync();
   }
   return false;
 }
@@ -52,13 +52,13 @@ export async function assertMicrosandboxPlatformCandidate(): Promise<void> {
           "hosts are not supported. Use docker() or vercel() instead.",
       );
     }
-    if (process.env.MSB_PATH !== undefined || (await doesPathExist("/dev/kvm"))) {
+    if (process.env.MSB_PATH !== undefined || (await canAccessKvm())) {
       return;
     }
     throw new Error(
-      "The microsandbox sandbox backend requires Linux with KVM enabled. `/dev/kvm` is not " +
-        "available on this host. Enable KVM, set MSB_PATH for a custom runtime, or use " +
-        "docker() / vercel().",
+      "The microsandbox sandbox backend requires Linux with KVM enabled and read/write " +
+        "access to `/dev/kvm`. Grant the current user access, set MSB_PATH for a custom " +
+        "runtime, or use docker() / vercel().",
     );
   }
 
@@ -69,9 +69,18 @@ export async function assertMicrosandboxPlatformCandidate(): Promise<void> {
   );
 }
 
-async function doesPathExist(path: string): Promise<boolean> {
+function canAccessKvmSync(): boolean {
   try {
-    await access(path);
+    accessSync("/dev/kvm", constants.R_OK | constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function canAccessKvm(): Promise<boolean> {
+  try {
+    await access("/dev/kvm", constants.R_OK | constants.W_OK);
     return true;
   } catch {
     return false;

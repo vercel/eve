@@ -153,7 +153,7 @@ With `backend` omitted, eve uses `defaultBackend()`, which resolves on first use
 
 1. **Vercel Sandbox** when deploying on Vercel (`process.env.VERCEL` is set), since local container/VM runtimes can't run there.
 2. **Docker** when a daemon is reachable through a Docker-compatible `docker` CLI (Docker Desktop, OrbStack, Colima, Podman via its docker-compatible CLI; override the binary with `EVE_DOCKER_PATH`).
-3. **microsandbox** when the host supports it: macOS on Apple Silicon, or glibc Linux with KVM enabled.
+3. **microsandbox** when the host supports it: macOS on Apple Silicon, or glibc Linux where the current user can read and write `/dev/kvm`.
 4. **just-bash** as the dependency-free fallback.
 
 `defaultBackend()` also accepts a keyed bag so each inner backend gets its own typed create options:
@@ -176,7 +176,7 @@ export default defineSandbox({
 
 ### microsandbox
 
-`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
+`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) where the current user can read and write `/dev/kvm`; exposing the device inside a nested guest is not enough without those permissions. Set `MSB_PATH` to use an explicit custom runtime executable instead of this local KVM probe. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
 
 ### just-bash
 

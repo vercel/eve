@@ -7,7 +7,9 @@ import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
  * [microsandbox](https://www.npmjs.com/package/microsandbox). Options
  * are eve-owned rather than a raw passthrough so the public surface can
  * stay stable while the underlying runtime evolves. Supported hosts:
- * macOS on Apple Silicon, or Linux (glibc) with KVM enabled.
+ * macOS on Apple Silicon, or Linux (glibc) where the current user can
+ * read and write `/dev/kvm`. Setting `MSB_PATH` explicitly selects a
+ * custom runtime executable instead of this local KVM probe.
  */
 export interface MicrosandboxSandboxCreateOptions {
   /**
