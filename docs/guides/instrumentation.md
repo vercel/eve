@@ -21,8 +21,16 @@ The two configurable surfaces send AI SDK spans to your OpenTelemetry backend. W
 
 ## Define instrumentation
 
+Install the OpenTelemetry wrapper, your exporter, and the trace SDK used to
+select the span processor:
+
+```bash
+npm install @braintrust/otel @opentelemetry/sdk-trace-base@^2 @vercel/otel
+```
+
 ```ts title="agent/instrumentation.ts"
 import { BraintrustExporter } from "@braintrust/otel";
+import { SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { defineInstrumentation } from "eve/instrumentation";
 import { registerOTel } from "@vercel/otel";
 
@@ -30,10 +38,14 @@ export default defineInstrumentation({
   setup: ({ agentName }) =>
     registerOTel({
       serviceName: agentName,
-      traceExporter: new BraintrustExporter({
-        parent: `project_name:${agentName}`,
-        filterAISpans: true,
-      }),
+      spanProcessors: [
+        new SimpleSpanProcessor(
+          new BraintrustExporter({
+            parent: `project_name:${agentName}`,
+            filterAISpans: true,
+          }),
+        ),
+      ],
     }),
 });
 ```
@@ -45,6 +57,14 @@ Export the result of `defineInstrumentation` as the default export.
 Use the `setup` callback to register your OTel provider (for example `registerOTel` from `@vercel/otel`). The framework invokes it at server startup with the resolved agent name. `context.agentName` is resolved at compile time from your project (the package's `name`, falling back to the app directory name), so you never hard-code a service name.
 
 Any OTel-compatible backend works (Braintrust, PostHog, Raindrop, Arize, Honeycomb, Datadog, Jaeger). Install the exporter package you need and configure it in the callback. The [PostHog AI Observability integration](/integrations/posthog-instrumentation) provides a ready-to-install exporter and optional user identification.
+
+On Vercel Workflow and other serverless runtimes, use a `SimpleSpanProcessor`
+as shown above. Passing a custom `traceExporter` to `registerOTel` wraps it in
+a `BatchSpanProcessor`; completed spans can remain buffered behind a timer when
+the instance freezes outside a normal HTTP request lifecycle. A simple processor
+starts export as each span ends instead. Install
+`@opentelemetry/sdk-trace-base` directly and keep it on the OpenTelemetry 2.x
+line required by `@vercel/otel`.
 
 Three more fields control what the AI SDK records inside those spans (see the AI SDK's [telemetry reference](https://ai-sdk.dev/docs/ai-sdk-core/telemetry)):
 
