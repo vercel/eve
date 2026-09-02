@@ -169,6 +169,7 @@ describe("compiler artifacts", () => {
     );
 
     const result = await compileAgent({ startPath: appRoot });
+    const packageInfo = resolveInstalledPackageInfo();
 
     expect(result.manifest.tools).toContainEqual(
       expect.objectContaining({
@@ -176,7 +177,7 @@ describe("compiler artifacts", () => {
           availability: [],
           handling: {
             kind: "workflow-tool",
-            workflowId: "workflow//eve//executeSleepTool",
+            workflowId: `workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool`,
           },
         },
         logicalPath: "tools/sleep.mjs",

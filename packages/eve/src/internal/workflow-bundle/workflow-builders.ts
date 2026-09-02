@@ -68,6 +68,7 @@ export async function applyWorkflowTransform(
   const { moduleSpecifier, stableModuleSpecifier } = resolveModuleSpecifier(
     absoluteFilename,
     resolvedProjectRoot,
+    mode === "metadata",
   );
 
   if (
@@ -198,6 +199,7 @@ export function getImportPath(
 function resolveModuleSpecifier(
   filePath: string,
   projectRoot: string,
+  packageBuild: boolean = false,
 ): {
   moduleSpecifier: string | undefined;
   stableModuleSpecifier: string | undefined;
@@ -205,6 +207,13 @@ function resolveModuleSpecifier(
   const inNodeModules = isInNodeModules(filePath);
   const inWorkspace = !inNodeModules && isWorkspacePackage(filePath, projectRoot);
   const pkg = findPackageJson(filePath);
+
+  if (packageBuild && pkg !== null) {
+    return {
+      moduleSpecifier: `${pkg.name}@${pkg.version}`,
+      stableModuleSpecifier: pkg.name,
+    };
+  }
 
   if (!inNodeModules && !inWorkspace) {
     return {

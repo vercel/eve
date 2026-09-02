@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
+import {
+  resolveInstalledPackageInfo,
+  resolvePackageRoot,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
@@ -23,12 +27,12 @@ describe("applyWorkflowTransform", () => {
     });
   });
 
-  it("stamps workflow metadata without consuming the framework body", async () => {
-    const filename = "src/execution/turn-workflow.ts";
+  it("stamps versioned package workflow metadata without consuming the framework body", async () => {
+    const filename = "src/execution/tools/sleep.ts";
     const transformed = await applyWorkflowTransform(
       filename,
       [
-        "export async function turnWorkflow(): Promise<string> {",
+        "export async function executeSleepTool(): Promise<string> {",
         '  "use workflow";',
         '  return "done";',
         "}",
@@ -41,7 +45,10 @@ describe("applyWorkflowTransform", () => {
 
     expect(transformed.code).toContain('"use workflow";');
     expect(transformed.code).toContain('return "done";');
-    expect(transformed.code).toContain('turnWorkflow.workflowId = "workflow//eve//turnWorkflow";');
+    const packageInfo = resolveInstalledPackageInfo();
+    expect(transformed.code).toContain(
+      `executeSleepTool.workflowId = "workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool";`,
+    );
     expect(transformed.code).not.toContain("__private_workflows.set");
   });
 

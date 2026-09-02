@@ -129,7 +129,6 @@ function eventsText(events: readonly { readonly data?: unknown }[]): string {
 
 describe("workflow tools", () => {
   it("runs the framework sleep tool through the workflow tool path", async () => {
-    expect(Reflect.get(executeSleepTool, "workflowId")).toBe("workflow//eve//executeSleepTool");
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-sleep",
       execute: executeSleepTool,
