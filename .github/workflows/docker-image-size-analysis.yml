@@ -99,6 +99,8 @@ jobs:
             set -euo pipefail
             test "$(id -un)" = vercel-sandbox
             test "$(stat -c %U /workspace)" = vercel-sandbox
+            test "$(npm prefix -g)" = "$HOME/.local"
+            test "$(pnpm bin -g)" = "$PNPM_HOME/bin"
             git init --quiet /workspace
             git -C /workspace remote add origin https://github.com/vercel/eve.git
             sudo -n true
