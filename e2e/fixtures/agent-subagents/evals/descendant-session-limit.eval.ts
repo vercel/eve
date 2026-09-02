@@ -50,8 +50,8 @@ export default defineEval({
     const completed = resumed.message?.includes(CHILD_TOKEN)
       ? resumed
       : await waitForMessage(t, continueSession, CHILD_TOKEN);
+    completed.expectOk();
     completed.messageIncludes(CHILD_TOKEN);
-    t.succeeded();
     t.noFailedActions();
 
     const stopSession = t.newSession();
@@ -76,13 +76,12 @@ export default defineEval({
     stopped.event("turn.cancelled");
     t.check(stopped.status, equals("waiting"));
 
-    const recovered = await stopSession.send(
+    const recovered = await blockedStopSession.send(
       `Do not call any tool or subagent. Reply with exactly ${ROOT_RECOVERY_TOKEN} and nothing else.`,
     );
     recovered.expectOk();
-    stopSession.succeeded();
     stopSession.calledSubagent("limited-worker", { count: 1 });
-    stopSession.messageIncludes(ROOT_RECOVERY_TOKEN);
+    recovered.messageIncludes(ROOT_RECOVERY_TOKEN);
   },
 });
 
