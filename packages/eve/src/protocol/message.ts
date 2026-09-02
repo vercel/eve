@@ -416,8 +416,6 @@ export interface MessageAppendedStreamEvent {
   data: {
     messageDelta: string;
     sequence: number;
-    /** Whether this delta starts or restarts the current message block. */
-    startsBlock: boolean;
     stepIndex: number;
     turnId: string;
   };
@@ -433,8 +431,6 @@ export interface ActionInputAppendedStreamEvent {
     callId: string;
     inputTextDelta: string;
     sequence: number;
-    /** Whether this delta starts or restarts the current tool-input block. */
-    startsBlock: boolean;
     stepIndex: number;
     toolName: string;
     turnId: string;
@@ -450,8 +446,6 @@ export interface ReasoningAppendedStreamEvent {
   data: {
     reasoningDelta: string;
     sequence: number;
-    /** Whether this delta starts or restarts the current reasoning block. */
-    startsBlock: boolean;
     stepIndex: number;
     turnId: string;
   };
@@ -1107,7 +1101,6 @@ export function createActionInputAppendedEvent(input: {
   readonly callId: string;
   readonly inputTextDelta: string;
   readonly sequence: number;
-  readonly startsBlock: boolean;
   readonly stepIndex: number;
   readonly toolName: string;
   readonly turnId: string;
@@ -1117,7 +1110,6 @@ export function createActionInputAppendedEvent(input: {
       callId: input.callId,
       inputTextDelta: input.inputTextDelta,
       sequence: input.sequence,
-      startsBlock: input.startsBlock,
       stepIndex: input.stepIndex,
       toolName: input.toolName,
       turnId: input.turnId,
@@ -1360,7 +1352,6 @@ export function createSubagentCalledEvent(input: {
 export function createMessageAppendedEvent(input: {
   readonly messageDelta: string;
   readonly sequence: number;
-  readonly startsBlock: boolean;
   readonly stepIndex: number;
   readonly turnId: string;
 }): MessageAppendedStreamEvent {
@@ -1368,7 +1359,6 @@ export function createMessageAppendedEvent(input: {
     data: {
       messageDelta: input.messageDelta,
       sequence: input.sequence,
-      startsBlock: input.startsBlock,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
     },
@@ -1382,7 +1372,6 @@ export function createMessageAppendedEvent(input: {
 export function createReasoningAppendedEvent(input: {
   readonly reasoningDelta: string;
   readonly sequence: number;
-  readonly startsBlock: boolean;
   readonly stepIndex: number;
   readonly turnId: string;
 }): ReasoningAppendedStreamEvent {
@@ -1390,7 +1379,6 @@ export function createReasoningAppendedEvent(input: {
     data: {
       reasoningDelta: input.reasoningDelta,
       sequence: input.sequence,
-      startsBlock: input.startsBlock,
       stepIndex: input.stepIndex,
       turnId: input.turnId,
     },

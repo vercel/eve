@@ -97,7 +97,7 @@ describe("stream following over real sockets", () => {
   it("reconnects an open stream that goes idle and continues from its cursor", async () => {
     const events = [
       { type: "step.started", data: {} },
-      { type: "message.appended", data: { messageDelta: "hello", startsBlock: true } },
+      { type: "message.appended", data: { messageDelta: "hello" } },
       { type: "session.completed", data: {} },
     ];
     let connections = 0;

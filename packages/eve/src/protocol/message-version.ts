@@ -125,15 +125,15 @@ function normalizeLegacyMessageStreamEvent(
   event: MessageStreamEventForVersion<LegacyMessageStreamVersion>,
 ): MessageStreamEvent {
   if (event.type === "message.appended") {
+    assertLegacyAppendSnapshot(
+      event.data.messageSoFar,
+      event.data.messageDelta,
+      "message",
+      version,
+    );
     return {
       data: {
         messageDelta: event.data.messageDelta,
-        startsBlock: legacyAppendStartsBlock(
-          event.data.messageSoFar,
-          event.data.messageDelta,
-          "message",
-          version,
-        ),
         sequence: event.data.sequence,
         stepIndex: event.data.stepIndex,
         turnId: event.data.turnId,
@@ -144,15 +144,15 @@ function normalizeLegacyMessageStreamEvent(
   }
 
   if (event.type === "reasoning.appended") {
+    assertLegacyAppendSnapshot(
+      event.data.reasoningSoFar,
+      event.data.reasoningDelta,
+      "reasoning",
+      version,
+    );
     return {
       data: {
         reasoningDelta: event.data.reasoningDelta,
-        startsBlock: legacyAppendStartsBlock(
-          event.data.reasoningSoFar,
-          event.data.reasoningDelta,
-          "reasoning",
-          version,
-        ),
         sequence: event.data.sequence,
         stepIndex: event.data.stepIndex,
         turnId: event.data.turnId,
@@ -172,7 +172,6 @@ function normalizeLegacyMessageStreamEvent(
         callId: event.data.callId,
         inputTextDelta: event.data.inputTextDelta,
         sequence: event.data.sequence,
-        startsBlock: event.data.inputTextOffset === 0,
         stepIndex: event.data.stepIndex,
         toolName: event.data.toolName,
         turnId: event.data.turnId,
@@ -189,21 +188,30 @@ function validateCurrentMessageStreamEvent(
   event: MessageStreamEventForVersion<"25">,
 ): MessageStreamEvent {
   if (event.type === "message.appended") {
-    assertNoLegacyAppendField(event.data, "messageOffset", "message");
-    assertNoLegacyAppendField(event.data, "messageSoFar", "message");
-    assertCurrentStartsBlock(event.data.startsBlock, "message");
+    assertCurrentAppendDelta(event.data.messageDelta, "message");
+    assertUnsupportedAppendField(event.data, "messageOffset", "message");
+    assertUnsupportedAppendField(event.data, "messageSoFar", "message");
   } else if (event.type === "reasoning.appended") {
-    assertNoLegacyAppendField(event.data, "reasoningOffset", "reasoning");
-    assertNoLegacyAppendField(event.data, "reasoningSoFar", "reasoning");
-    assertCurrentStartsBlock(event.data.startsBlock, "reasoning");
+    assertCurrentAppendDelta(event.data.reasoningDelta, "reasoning");
+    assertUnsupportedAppendField(event.data, "reasoningOffset", "reasoning");
+    assertUnsupportedAppendField(event.data, "reasoningSoFar", "reasoning");
   } else if (event.type === "action.input.appended") {
-    assertNoLegacyAppendField(event.data, "inputTextOffset", "action input");
-    assertCurrentStartsBlock(event.data.startsBlock, "action input");
+    assertCurrentAppendDelta(event.data.inputTextDelta, "action input");
+    assertUnsupportedAppendField(event.data, "inputTextOffset", "action input");
   }
   return event;
 }
 
-function assertNoLegacyAppendField(
+function assertCurrentAppendDelta(
+  delta: unknown,
+  stream: "action input" | "message" | "reasoning",
+): void {
+  if (typeof delta !== "string") {
+    throw new TypeError(`Invalid ${stream} append delta for stream version 25.`);
+  }
+}
+
+function assertUnsupportedAppendField(
   data: object,
   field: string,
   stream: "action input" | "message" | "reasoning",
@@ -217,15 +225,6 @@ function assertNever(value: never): never {
   throw new TypeError(`Unsupported message stream version: ${String(value)}.`);
 }
 
-function assertCurrentStartsBlock(
-  startsBlock: unknown,
-  stream: "action input" | "message" | "reasoning",
-): void {
-  if (typeof startsBlock !== "boolean") {
-    throw new TypeError(`Invalid ${stream} block boundary for stream version 25.`);
-  }
-}
-
 function assertLegacyActionInputOffset(
   offset: unknown,
   version: LegacyMessageStreamVersion | undefined,
@@ -236,16 +235,15 @@ function assertLegacyActionInputOffset(
   }
 }
 
-function legacyAppendStartsBlock(
+function assertLegacyAppendSnapshot(
   snapshot: string,
   delta: string,
   stream: "message" | "reasoning",
   version: LegacyMessageStreamVersion | undefined,
-): boolean {
+): void {
   const offset = snapshot.length - delta.length;
   if (offset < 0 || snapshot.slice(offset) !== delta) {
     const source = version === undefined ? "persisted stream" : `stream version ${version}`;
     throw new TypeError(`Invalid cumulative ${stream} append for ${source}.`);
   }
-  return offset === 0;
 }

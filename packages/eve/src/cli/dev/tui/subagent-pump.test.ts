@@ -104,7 +104,6 @@ function reasoningEvent(delta: string, index = 0): MessageStreamEvent {
       data: {
         reasoningDelta: delta,
         sequence: 2,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "child-turn",
       },

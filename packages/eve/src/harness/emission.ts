@@ -355,14 +355,12 @@ async function consumeStreamContent(
     callId: string,
     toolName: string,
     inputTextDelta: string,
-    startsBlock: boolean,
   ): Promise<void> =>
     emitFn(
       createActionInputAppendedEvent({
         callId,
         inputTextDelta,
         sequence: state.sequence,
-        startsBlock,
         stepIndex: state.stepIndex,
         toolName,
         turnId: state.turnId,
@@ -487,13 +485,11 @@ async function consumeStreamContent(
     switch (part.type) {
       case "reasoning-delta":
         await providerActionBatch.flush();
-        const startsReasoningBlock = currentReasoning.length === 0;
         currentReasoning += part.text;
         await emitFn(
           createReasoningAppendedEvent({
             reasoningDelta: part.text,
             sequence: state.sequence,
-            startsBlock: startsReasoningBlock,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
           }),
@@ -513,13 +509,11 @@ async function consumeStreamContent(
           );
           currentReasoning = "";
         }
-        const startsMessageBlock = currentMessage.length === 0;
         currentMessage += part.text;
         await emitFn(
           createMessageAppendedEvent({
             messageDelta: part.text,
             sequence: state.sequence,
-            startsBlock: startsMessageBlock,
             stepIndex: state.stepIndex,
             turnId: state.turnId,
           }),
@@ -539,7 +533,6 @@ async function consumeStreamContent(
           await flushCurrentMessage();
         }
         streamingActionInputs.set(part.id, { toolName: part.toolName });
-        await emitActionInput(part.id, part.toolName, "", true);
         break;
       }
       case "tool-input-delta": {
@@ -548,7 +541,7 @@ async function consumeStreamContent(
           break;
         }
         await providerActionBatch.flush();
-        await emitActionInput(part.id, input.toolName, part.delta, false);
+        await emitActionInput(part.id, input.toolName, part.delta);
         break;
       }
       case "tool-input-end":

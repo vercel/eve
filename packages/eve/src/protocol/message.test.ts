@@ -36,7 +36,7 @@ describe("message stream protocol", () => {
   });
 
   it.each(["21", "22", "23", "24"] as const)(
-    "normalizes v%s cumulative appends into the v25 block contract",
+    "normalizes v%s cumulative appends into the v25 delta contract",
     (version) => {
       const legacyMessage = {
         data: {
@@ -65,7 +65,6 @@ describe("message stream protocol", () => {
         data: {
           messageDelta: "lo",
           sequence: 3,
-          startsBlock: false,
           stepIndex: 0,
           turnId: "turn_1",
         },
@@ -76,7 +75,6 @@ describe("message stream protocol", () => {
         data: {
           reasoningDelta: "ink",
           sequence: 4,
-          startsBlock: false,
           stepIndex: 0,
           turnId: "turn_1",
         },
@@ -86,7 +84,7 @@ describe("message stream protocol", () => {
     },
   );
 
-  it("normalizes v24 tool-input offsets into block boundaries", () => {
+  it("normalizes v24 tool-input appends into plain deltas", () => {
     const legacy = {
       data: {
         callId: "call_1",
@@ -106,7 +104,6 @@ describe("message stream protocol", () => {
         callId: "call_1",
         inputTextDelta: "lo",
         sequence: 4,
-        startsBlock: false,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -116,7 +113,7 @@ describe("message stream protocol", () => {
     });
   });
 
-  it("preserves repeated v24 tool-input resets as idempotent block starts", () => {
+  it("strips repeated v24 zero offsets without adding stream markers", () => {
     const normalize = (inputTextDelta: string) => {
       const event = normalizeMessageStreamEvent("24", {
         data: {
@@ -137,8 +134,22 @@ describe("message stream protocol", () => {
       return event;
     };
 
-    expect(normalize("").data).toMatchObject({ inputTextDelta: "", startsBlock: true });
-    expect(normalize("{").data).toMatchObject({ inputTextDelta: "{", startsBlock: true });
+    expect(normalize("").data).toEqual({
+      callId: "call_1",
+      inputTextDelta: "",
+      sequence: 4,
+      stepIndex: 0,
+      toolName: "render",
+      turnId: "turn_1",
+    });
+    expect(normalize("{").data).toEqual({
+      callId: "call_1",
+      inputTextDelta: "{",
+      sequence: 4,
+      stepIndex: 0,
+      toolName: "render",
+      turnId: "turn_1",
+    });
   });
 
   it("rejects append variants that contradict their declared stream version", () => {
@@ -158,9 +169,8 @@ describe("message stream protocol", () => {
     const hybridV25 = {
       data: {
         messageDelta: "Hel",
-        messageOffset: 0,
+        messageSoFar: "Hel",
         sequence: 1,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       },
@@ -180,21 +190,21 @@ describe("message stream protocol", () => {
     );
   });
 
-  it("rejects an append that does not match its declared stream version", () => {
-    const malformed = {
-      data: {
-        messageDelta: "Hel",
-        sequence: 1,
-        startsBlock: undefined as never,
-        stepIndex: 0,
-        turnId: "turn_1",
-      },
-      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_malformed" },
-      type: "message.appended",
-    } satisfies MessageStreamEventForVersion<"25">;
+  it("rejects a v25 append without its delta", () => {
+    const malformed = JSON.parse(
+      JSON.stringify({
+        data: {
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_malformed" },
+        type: "message.appended",
+      }),
+    ) as MessageStreamEventForVersion<"25">;
 
     expect(() => normalizeMessageStreamEvent("25", malformed)).toThrow(
-      "Invalid message block boundary for stream version 25.",
+      "Invalid message append delta for stream version 25.",
     );
   });
 
@@ -370,14 +380,12 @@ describe("message stream protocol", () => {
           createMessageAppendedEvent({
             messageDelta: delta,
             sequence: 0,
-            startsBlock: index === 0,
             stepIndex: 0,
             turnId: "turn_0",
           }),
           createReasoningAppendedEvent({
             reasoningDelta: delta,
             sequence: 0,
-            startsBlock: index === 0,
             stepIndex: 0,
             turnId: "turn_0",
           }),

@@ -35,41 +35,30 @@ function reduceServerEvents(
 }
 
 describe("defaultMessageReducer", () => {
-  it("accumulates block deltas and ignores a continuation without its start", () => {
+  it("accumulates message and reasoning deltas without a start marker", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [
       createReasoningAppendedEvent({
         reasoningDelta: "I",
         sequence: 0,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createReasoningAppendedEvent({
         reasoningDelta: " can",
         sequence: 0,
-        startsBlock: false,
-        stepIndex: 0,
-        turnId: "turn_1",
-      }),
-      createMessageAppendedEvent({
-        messageDelta: "missing start",
-        sequence: 0,
-        startsBlock: false,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Hel",
         sequence: 0,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "lo",
         sequence: 0,
-        startsBlock: false,
         stepIndex: 0,
         turnId: "turn_1",
       }),
@@ -82,27 +71,24 @@ describe("defaultMessageReducer", () => {
     ]);
   });
 
-  it("replaces an unfinished message when a retry starts a new block", () => {
+  it("uses the canonical completion after an interrupted attempt", () => {
     const reducer = defaultMessageReducer();
-    const data = reduceServerEvents(reducer, reducer.initial(), [
+    let data = reduceServerEvents(reducer, reducer.initial(), [
       createMessageAppendedEvent({
         messageDelta: "abandoned",
         sequence: 0,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "replacement",
         sequence: 0,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: " complete",
         sequence: 0,
-        startsBlock: false,
         stepIndex: 0,
         turnId: "turn_1",
       }),
@@ -110,6 +96,22 @@ describe("defaultMessageReducer", () => {
 
     expect(data.messages[0]?.parts).toContainEqual({
       state: "streaming",
+      stepIndex: 0,
+      text: "abandonedreplacement complete",
+      type: "text",
+    });
+
+    data = reduceServerEvents(reducer, data, [
+      createMessageCompletedEvent({
+        message: "replacement complete",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      state: "done",
       stepIndex: 0,
       text: "replacement complete",
       type: "text",
@@ -123,7 +125,6 @@ describe("defaultMessageReducer", () => {
         callId: "call_render",
         inputTextDelta: "",
         sequence: 1,
-        startsBlock: true,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -132,7 +133,6 @@ describe("defaultMessageReducer", () => {
         callId: "call_render",
         inputTextDelta: '{"title":"Hel',
         sequence: 1,
-        startsBlock: false,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -155,7 +155,6 @@ describe("defaultMessageReducer", () => {
         callId: "call_render",
         inputTextDelta: 'lo"}',
         sequence: 1,
-        startsBlock: false,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -197,7 +196,6 @@ describe("defaultMessageReducer", () => {
         callId: "call_render",
         inputTextDelta: "late",
         sequence: 1,
-        startsBlock: true,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -213,7 +211,6 @@ describe("defaultMessageReducer", () => {
         callId: "call_render",
         inputTextDelta: "{",
         sequence: 1,
-        startsBlock: true,
         stepIndex: 0,
         toolName: "render",
         turnId: "turn_1",
@@ -1111,7 +1108,6 @@ describe("defaultMessageReducer", () => {
       createMessageAppendedEvent({
         messageDelta: "Checking Vienna",
         sequence: 0,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_0",
       }),
@@ -1138,7 +1134,6 @@ describe("defaultMessageReducer", () => {
       createMessageAppendedEvent({
         messageDelta: "Now Berlin",
         sequence: 3,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_0",
       }),
@@ -1164,14 +1159,12 @@ describe("defaultMessageReducer", () => {
       createReasoningAppendedEvent({
         reasoningDelta: "Thinking",
         sequence: 0,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
       createMessageAppendedEvent({
         messageDelta: "Partial",
         sequence: 1,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn_1",
       }),
@@ -1217,7 +1210,6 @@ describe("defaultMessageReducer", () => {
       createMessageAppendedEvent({
         messageDelta: "<eve-empty-delivery/>",
         sequence: 1,
-        startsBlock: true,
         stepIndex: 1,
         turnId: "turn_1",
       }),

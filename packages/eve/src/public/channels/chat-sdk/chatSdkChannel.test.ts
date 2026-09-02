@@ -517,22 +517,8 @@ describe("chatSdkChannel", () => {
     await callEvent(
       channelAdapter,
       makeEvent("message.appended", {
-        messageDelta: "missing start",
-        sequence: 1,
-        startsBlock: false,
-        stepIndex: 0,
-        turnId: "turn-1",
-      }),
-      ctx,
-    );
-    expect(adapter.posted).toEqual([]);
-
-    await callEvent(
-      channelAdapter,
-      makeEvent("message.appended", {
         messageDelta: "Hel",
         sequence: 1,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn-1",
       }),
@@ -546,7 +532,6 @@ describe("chatSdkChannel", () => {
       makeEvent("message.appended", {
         messageDelta: "lo",
         sequence: 2,
-        startsBlock: false,
         stepIndex: 0,
         turnId: "turn-1",
       }),
@@ -555,6 +540,50 @@ describe("chatSdkChannel", () => {
     expect(adapter.edited).toEqual([
       { message: { markdown: "Hello" }, messageId: "posted-1", threadId: THREAD_ID },
     ]);
+  });
+
+  it("finalizes a retried stream from the canonical completed message", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      streamingEditIntervalMs: 0,
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread() };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    for (const messageDelta of ["abandoned", "replacement"]) {
+      await callEvent(
+        channelAdapter,
+        makeEvent("message.appended", {
+          messageDelta,
+          sequence: 1,
+          stepIndex: 0,
+          turnId: "turn-1",
+        }),
+        ctx,
+      );
+    }
+    await callEvent(
+      channelAdapter,
+      makeEvent("message.completed", {
+        finishReason: "stop",
+        message: "replacement",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.edited.at(-1)).toEqual({
+      message: { markdown: "replacement" },
+      messageId: "posted-1",
+      threadId: THREAD_ID,
+    });
+    expect(state.anchorMessageId).toBeNull();
   });
 
   it("falls back to a fresh post when streaming edits are not implemented", async () => {

@@ -938,7 +938,6 @@ describe("EveTUIRunner idle session follow", () => {
         data: {
           messageDelta: "Background research finished.",
           sequence: 1,
-          startsBlock: true,
           stepIndex: 1,
           turnId: "wake-turn",
         },
@@ -982,7 +981,6 @@ describe("EveTUIRunner idle session follow", () => {
           data: {
             messageDelta: "Follow-up answer.",
             sequence: 2,
-            startsBlock: true,
             stepIndex: 0,
             turnId: "follow-up-turn",
           },
@@ -2183,7 +2181,6 @@ describe("EveTUIRunner reused step indexes", () => {
         data: {
           messageDelta: "I'll call the subagent.",
           sequence: 0,
-          startsBlock: true,
           stepIndex: 0,
           turnId: "t0",
         },
@@ -2205,7 +2202,6 @@ describe("EveTUIRunner reused step indexes", () => {
         data: {
           messageDelta: "The subagent returned TOKEN-123.",
           sequence: 0,
-          startsBlock: true,
           stepIndex: 0,
           turnId: "t0",
         },
@@ -2260,7 +2256,6 @@ describe("EveTUIRunner replay guards", () => {
         data: {
           messageDelta: "Sunny.",
           sequence: 0,
-          startsBlock: true,
           stepIndex: 0,
           turnId: "turn_0",
         },
@@ -2305,7 +2300,7 @@ describe("EveTUIRunner replay guards", () => {
     expect(deltas).toEqual([{ type: "assistant-delta", id: "text:turn_0:0", delta: "Sunny." }]);
   });
 
-  it("deduplicates repeated call IDs and divergent text attempts in one turn", async () => {
+  it("deduplicates repeated call IDs and renders the canonical completed text", async () => {
     const prompts: Array<string | undefined> = ["weather", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -2390,7 +2385,6 @@ describe("EveTUIRunner replay guards", () => {
         data: {
           messageDelta: "Using",
           sequence: 0,
-          startsBlock: true,
           stepIndex: 1,
           turnId: "turn_0",
         },
@@ -2400,7 +2394,6 @@ describe("EveTUIRunner replay guards", () => {
         data: {
           messageDelta: " the first",
           sequence: 0,
-          startsBlock: false,
           stepIndex: 1,
           turnId: "turn_0",
         },
@@ -2410,7 +2403,6 @@ describe("EveTUIRunner replay guards", () => {
         data: {
           messageDelta: " the retry",
           sequence: 0,
-          startsBlock: true,
           stepIndex: 1,
           turnId: "turn_0",
         },
@@ -2420,7 +2412,6 @@ describe("EveTUIRunner replay guards", () => {
         data: {
           messageDelta: " collision",
           sequence: 0,
-          startsBlock: false,
           stepIndex: 1,
           turnId: "turn_0",
         },
@@ -2483,15 +2474,19 @@ describe("EveTUIRunner replay guards", () => {
 
     const toolCalls = emitted.filter((event) => event.type === "tool-call");
     const toolResults = emitted.filter((event) => event.type === "tool-result");
-    const assistantText = emitted
+    const streamedText = emitted
       .filter((event) => event.type === "assistant-delta")
       .map((event) => event.delta)
       .join("");
+    const completedText = emitted
+      .filter((event) => event.type === "assistant-complete")
+      .map((event) => event.text)
+      .filter((text): text is string => text !== undefined);
 
     expect(toolCalls.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
     expect(toolResults.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
-    expect(assistantText).toBe("Using the first answer.");
-    expect(assistantText).not.toContain("retry");
+    expect(streamedText).toContain("the retry collision");
+    expect(completedText).toContain("Using the first answer.");
     expect(emitted.filter((event) => event.type === "finish")).toHaveLength(1);
   });
 

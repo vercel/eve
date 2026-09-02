@@ -421,12 +421,7 @@ export function buildTraceTurnsFromTranscript(
     }
 
     if (event.type === "reasoning.appended" && step !== undefined) {
-      const reasoning = applyStreamTextDelta(
-        step.reasoningText,
-        event.data.startsBlock,
-        event.data.reasoningDelta,
-      );
-      if (reasoning !== undefined) step.reasoningText = reasoning;
+      step.reasoningText = (step.reasoningText ?? "") + event.data.reasoningDelta;
       continue;
     }
 
@@ -436,12 +431,7 @@ export function buildTraceTurnsFromTranscript(
     }
 
     if (event.type === "message.appended" && step !== undefined) {
-      const response = applyStreamTextDelta(
-        step.responseText,
-        event.data.startsBlock,
-        event.data.messageDelta,
-      );
-      if (response !== undefined) step.responseText = response;
+      step.responseText = (step.responseText ?? "") + event.data.messageDelta;
       continue;
     }
 
@@ -682,14 +672,4 @@ export function buildTraceTurnsFromTranscript(
   }
 
   return orderedTurns.map(toReadonlyTurn);
-}
-
-function applyStreamTextDelta(
-  current: string | undefined,
-  startsBlock: boolean,
-  delta: string,
-): string | undefined {
-  if (startsBlock) return delta;
-  if (current === undefined) return undefined;
-  return current + delta;
 }

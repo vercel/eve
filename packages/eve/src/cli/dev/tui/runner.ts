@@ -30,7 +30,6 @@ import {
 } from "#services/dev-client.js";
 import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { applyStreamTextDelta } from "#shared/stream-text.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
   SubagentRun,
@@ -2184,32 +2183,12 @@ async function* eveEventsToTUIStream(
           // message generation so it renders as its own block.
           state.generation += 1;
           state.text = "";
-          state.started = false;
           state.completed = false;
-          state.blocked = false;
         }
 
-        if (state.blocked) break;
-        if (appended.data.startsBlock && state.started) {
-          state.blocked = true;
-          break;
-        }
-        const next = applyStreamTextDelta(
-          state.started ? state.text : undefined,
-          appended.data.startsBlock,
-          appended.data.messageDelta,
-        );
-        if (next === undefined) {
-          state.blocked = true;
-          break;
-        }
-        if (!next.startsWith(state.text) || next.length <= state.text.length) {
-          break;
-        }
-
-        const delta = next.slice(state.text.length);
-        state.text = next;
-        state.started = true;
+        const delta = appended.data.messageDelta;
+        if (delta.length === 0) break;
+        state.text += delta;
         yield { type: "assistant-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2251,6 +2230,17 @@ async function* eveEventsToTUIStream(
             state.completed = true;
             state.completedEpoch = stepEpoch;
             yield { type: "assistant-complete", id };
+          } else {
+            yield { type: "assistant-complete", id };
+            state.generation += 1;
+            state.text = message;
+            state.completed = true;
+            state.completedEpoch = stepEpoch;
+            yield {
+              type: "assistant-complete",
+              id: partGenerationId(base, state.generation),
+              text: message,
+            };
           }
         } else if (state.text.length > 0) {
           state.completed = true;
@@ -2269,32 +2259,12 @@ async function* eveEventsToTUIStream(
           if (stepEpoch <= state.completedEpoch) break;
           state.generation += 1;
           state.text = "";
-          state.started = false;
           state.completed = false;
-          state.blocked = false;
         }
 
-        if (state.blocked) break;
-        if (appended.data.startsBlock && state.started) {
-          state.blocked = true;
-          break;
-        }
-        const next = applyStreamTextDelta(
-          state.started ? state.text : undefined,
-          appended.data.startsBlock,
-          appended.data.reasoningDelta,
-        );
-        if (next === undefined) {
-          state.blocked = true;
-          break;
-        }
-        if (!next.startsWith(state.text) || next.length <= state.text.length) {
-          break;
-        }
-
-        const delta = next.slice(state.text.length);
-        state.text = next;
-        state.started = true;
+        const delta = appended.data.reasoningDelta;
+        if (delta.length === 0) break;
+        state.text += delta;
         yield { type: "reasoning-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2321,6 +2291,14 @@ async function* eveEventsToTUIStream(
           state.text = next;
           yield { type: "reasoning-delta", id, delta: next };
         } else if (next.length > 0 && !next.startsWith(state.text)) {
+          yield { type: "reasoning-complete", id };
+          state.generation += 1;
+          state.text = next;
+          state.completed = true;
+          state.completedEpoch = stepEpoch;
+          const replacementId = partGenerationId(base, state.generation);
+          yield { type: "reasoning-delta", id: replacementId, delta: next };
+          yield { type: "reasoning-complete", id: replacementId };
           break;
         }
 
@@ -2602,11 +2580,7 @@ function reasoningPartId(turnId: string, stepIndex: number): string {
  * completed key opens generation N+1, which renders as its own block.
  */
 type StreamPartState = {
-  /** Whether a restart or discontinuity makes future deltas unsafe to append. */
-  blocked: boolean;
   generation: number;
-  /** Whether the current generation has received its block-start delta. */
-  started: boolean;
   /** Accumulated text of the current generation. */
   text: string;
   completed: boolean;
@@ -2618,9 +2592,7 @@ function partStateFor(parts: Map<string, StreamPartState>, base: string): Stream
   let state = parts.get(base);
   if (state === undefined) {
     state = {
-      blocked: false,
       generation: 0,
-      started: false,
       text: "",
       completed: false,
       completedEpoch: 0,

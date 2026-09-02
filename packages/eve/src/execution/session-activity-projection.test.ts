@@ -192,7 +192,6 @@ describe("observeSessionActivity", () => {
       data: {
         messageDelta: "hello",
         sequence: 0,
-        startsBlock: true,
         stepIndex: 0,
         turnId: "turn-1",
       },

@@ -30,21 +30,21 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     current: 22,
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22],
     dropped: {
-      21: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   channel: {
     current: 13,
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13],
     dropped: {
-      12: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   schedule: {
     current: 6,
     supported: [1, 2, 3, 4, 6],
     dropped: {
-      5: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   subagent: {
@@ -53,7 +53,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
-      5: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   connection: {
@@ -61,7 +61,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 11],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
-      10: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   hook: {
@@ -77,7 +77,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       7: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
-      16: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
@@ -85,7 +85,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     current: 14,
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14],
     dropped: {
-      13: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
@@ -93,7 +93,7 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     current: 15,
     supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15],
     dropped: {
-      14: "Message and reasoning append events now expose deltas and block starts instead of cumulative snapshots.",
+      14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   config: { current: 1, supported: [1], dropped: {} },
