@@ -14,6 +14,10 @@ const FAILURE_MESSAGE = "Expected the tool export to match the public eve shape.
 describe("normalizeToolDefinition", () => {
   it("returns a tool entry for a real defineTool default export", () => {
     const tool = defineTool({
+      activity: {
+        label: () => "Echo input",
+        state: { key: "echo", project: (output) => output },
+      },
       description: "Echoes the input back to the caller.",
       inputSchema: z.object({}),
       execute(input) {

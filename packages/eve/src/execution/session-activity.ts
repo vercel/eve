@@ -21,6 +21,7 @@ export function createActivitySnapshot(): ActivitySnapshotV1 {
     pendingSettlements: {},
     revision: 0,
     seenEventIds: [],
+    states: {},
     version: 1,
     work: {},
   };
@@ -52,7 +53,10 @@ export function reduceActivityBatch(
 
 function presentationDiffers(left: ActivitySnapshotV1, right: ActivitySnapshotV1): boolean {
   return (
-    left.actions !== right.actions || left.blockers !== right.blockers || left.work !== right.work
+    left.actions !== right.actions ||
+    left.blockers !== right.blockers ||
+    left.states !== right.states ||
+    left.work !== right.work
   );
 }
 
@@ -72,6 +76,8 @@ function reduceEvent(snapshot: ActivitySnapshotV1, event: ActivityEventV1): Acti
       return startBlocker(snapshot, event);
     case "blocker.settled":
       return settleBlocker(snapshot, event);
+    case "state.replaced":
+      return replaceStructuredState(snapshot, event);
   }
 }
 
@@ -225,6 +231,25 @@ function settleBlocker(
       phase: event.outcome,
       settledAt: event.settledAt,
     }),
+  };
+}
+
+function replaceStructuredState(
+  snapshot: ActivitySnapshotV1,
+  event: Extract<ActivityEventV1, { readonly kind: "state.replaced" }>,
+): ActivitySnapshotV1 {
+  const id = `${event.state.parentWorkId}:${event.state.key}`;
+  const current = snapshot.states[id];
+  if (
+    current !== undefined &&
+    (current.replacedAt > event.state.replacedAt ||
+      (current.replacedAt === event.state.replacedAt &&
+        current.sourceEventId >= event.state.sourceEventId))
+  )
+    return snapshot;
+  return {
+    ...snapshot,
+    states: replaceBounded(snapshot.states, id, event.state),
   };
 }
 
