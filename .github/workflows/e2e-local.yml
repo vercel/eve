@@ -78,6 +78,7 @@ jobs:
       AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
       EVE_E2E_MODEL: ${{ matrix.model_id }}
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+      EVE_SANDBOX_IMAGE_TAG: latest
 
     steps:
       - name: Checkout code

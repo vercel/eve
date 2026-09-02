@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SandboxTemplateNotProvisionedError } from "#public/definitions/sandbox-backend.js";
 import { vercel } from "#public/sandbox/backends/vercel.js";
-import { DEFAULT_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
+import { VERCEL_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import { createVercelSandbox } from "#execution/sandbox/bindings/vercel.js";
 
 // The credential fallback consults the developer's Vercel CLI auth and the
@@ -179,7 +179,7 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledTimes(1);
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        image: DEFAULT_EVE_SANDBOX_IMAGE,
+        image: VERCEL_EVE_SANDBOX_IMAGE,
         name: "template-key",
         networkPolicy: "allow-all",
         persistent: false,
@@ -216,7 +216,7 @@ describe("createVercelSandbox", () => {
     expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
       expect.objectContaining({
         __experimentalFlag: "enabled",
-        image: DEFAULT_EVE_SANDBOX_IMAGE,
+        image: VERCEL_EVE_SANDBOX_IMAGE,
       }),
     );
   });
