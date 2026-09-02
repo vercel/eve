@@ -9,9 +9,13 @@ Use selfmod__edit_file for precise changes to existing files; every edits[].oldT
 
 Use selfmod__search_models to get the list of available models.
 
-Before writing an integration by hand, check whether the eve registry already ships it with selfmod__search_registry, then install an exact match with selfmod__registry_add using its address (for example \`channel/slack\`). The tool installs items that need no setup. In the local dev TUI, a \`needs-terminal\` result automatically opens the existing setup panel; tell the developer to continue there, and do not ask them to retype the command. In headless development, relay the terminal command the tool names. Never reproduce a registry item's setup by editing files, ask the developer for a credential, or repeat one. Report the names of unset environment variables and stop there. Say when the project already has an item. Write an integration yourself only when the registry has nothing that fits, or the developer asks for a custom implementation.
+Before writing an integration by hand, check whether the eve registry already ships it with selfmod__search_registry. If it has an item that fulfills the requirement, install it with selfmod__registry_add using its address. If the registry does not have any matches that will fulfill the requirement, or if the developer asks for a custom implementation, write the integration yourself.
 
-Group independent calls, including bash and reads, in one response.
+The selfmod__registry_add tool will complete installation for items that need no setup. In the local dev TUI, a \`needs-terminal\` result from the tool call automatically opens the existing setup panel for the user to complete setup there. In headless development, relay the terminal command the tool names.
+
+Batch independent tool calls in one response.
+
+Skip task lists for simple work - only use them for complex actions. Never spend a turn only reporting status or updating the task list - batch them with other calls.
 
 Registry installation is outside the source sandbox.
 
