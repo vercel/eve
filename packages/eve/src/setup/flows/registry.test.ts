@@ -5,7 +5,7 @@ import { HumanActionRequiredError } from "#setup/human-action.js";
 import { PlannerNavigationError } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 
-import { runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
+import { planRegistryFlow, runRegistryFlow, type RegistryFlowDeps } from "./registry.js";
 
 const APP_ROOT = "/tmp/agent";
 
@@ -39,6 +39,60 @@ function deps(overrides: Partial<RegistryFlowDeps> = {}): RegistryFlowDeps {
 }
 
 describe("runRegistryFlow", () => {
+  it("collects and reviews a plan without installing", async () => {
+    const order: string[] = [];
+    const fake = createFakePrompter({
+      multiple: (options) => {
+        order.push(options.message);
+        return options.message === "Where should people reach your agent?" ? ["channel/web"] : [];
+      },
+      single: (options) => {
+        order.push(options.message);
+        return "install";
+      },
+    });
+    const flowDeps = deps();
+
+    await expect(
+      planRegistryFlow({
+        appRoot: APP_ROOT,
+        prompter: fake.prompter,
+        deps: flowDeps,
+      }),
+    ).resolves.toMatchObject({
+      kind: "done",
+      items: [{ address: "channel/web" }],
+    });
+
+    expect(order).toEqual([
+      "Where should people reach your agent?",
+      "What should your agent be able to work with?",
+      "Review additions",
+    ]);
+    expect(flowDeps.installRegistryItem).not.toHaveBeenCalled();
+  });
+
+  it("installs a reviewed plan without browsing or prompting again", async () => {
+    const fake = createFakePrompter();
+    const flowDeps = deps();
+
+    await runRegistryFlow({
+      appRoot: APP_ROOT,
+      prompter: fake.prompter,
+      initialItems: [
+        { address: "channel/web", name: "channel/web", title: "Web Chat", source: "Vercel" },
+      ],
+      deps: flowDeps,
+    });
+
+    expect(flowDeps.browseRegistryCatalog).not.toHaveBeenCalled();
+    expect(flowDeps.installRegistryItem).toHaveBeenCalledWith(
+      APP_ROOT,
+      "channel/web",
+      expect.objectContaining({ silent: true }),
+    );
+  });
+
   it("plans channels and integrations together, then installs the full plan in order", async () => {
     const answers = ["install"];
     const selections = [["channel/web"], ["connection/linear"]];

@@ -125,6 +125,18 @@ describe("TerminalRenderer (inline scrollback)", () => {
     expect(idle.screen.snapshot()).not.toContain("☰eve");
   });
 
+  it("can restore an interactive terminal without printing a parting line", async () => {
+    const { screen, input, renderer } = makeRenderer();
+    const prompt = renderer.readPrompt();
+    input.ctrlC();
+    input.ctrlC();
+    await expect(prompt).rejects.toThrow("Interrupted");
+
+    renderer.shutdown({ partingLine: false });
+
+    expect(screen.snapshot()).not.toContain("☰eve");
+  });
+
   it("names the session in the parting line once the runner reports it", async () => {
     const { screen, input, renderer } = makeRenderer();
     renderer.setSessionId("ses_0123456789");

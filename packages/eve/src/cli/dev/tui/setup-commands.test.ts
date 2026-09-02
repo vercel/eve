@@ -81,6 +81,7 @@ function run(input: {
   flows: TuiSetupFlows;
   renderer?: TuiSetupCommandRenderer;
   initialModelStep?: "provider";
+  initialProviderChoice?: TuiSetupCommandInput["initialProviderChoice"];
   useDefaultPrompter?: boolean;
   upgradeChoice?: "upgrade" | "later";
   withExclusiveTerminal?: TuiSetupCommandInput["withExclusiveTerminal"];
@@ -98,6 +99,9 @@ function run(input: {
   if (input.useDefaultPrompter !== true) commandInput.createPrompter = () => fake.prompter;
   if (input.initialModelStep !== undefined) {
     commandInput.initialModelStep = input.initialModelStep;
+  }
+  if (input.initialProviderChoice !== undefined) {
+    commandInput.initialProviderChoice = input.initialProviderChoice;
   }
   if (input.withExclusiveTerminal !== undefined) {
     commandInput.withExclusiveTerminal = input.withExclusiveTerminal;
@@ -257,11 +261,30 @@ describe("runTuiSetupCommand", () => {
     ]);
   });
 
-  it("forwards an automatic provider entry to the model flow", async () => {
-    const flows = fakeFlows();
+  it("replays an initial provider choice through the existing provider flow", async () => {
+    const renderer = fakePanelRenderer();
+    const flows = fakeFlows({
+      runModelFlow: vi.fn<TuiSetupFlows["runModelFlow"]>(async (input) => {
+        const result = await input.deps?.runProviderFlow?.({
+          appRoot: APP_ROOT,
+          prompter: createFakePrompter().prompter,
+          availableProviders: [],
+          selectedProvider: "ai-gateway-project",
+        });
+        expect(result).toEqual({ kind: "chatgpt" });
+        return { kind: "done", accessChanged: false };
+      }),
+    });
 
-    await run({ command: "model", flows, initialModelStep: "provider" });
+    await run({
+      command: "model",
+      flows,
+      renderer,
+      initialModelStep: "provider",
+      initialProviderChoice: { kind: "chatgpt" },
+    });
 
+    expect(renderer.readProviderPicker).not.toHaveBeenCalled();
     expect(flows.runModelFlow).toHaveBeenCalledWith(
       expect.objectContaining({ appRoot: APP_ROOT, initialStep: "provider" }),
     );

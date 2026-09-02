@@ -69,11 +69,15 @@ function dependencies(
   detectInvokingPackageManager: ReturnType<
     typeof vi.fn<InitCommandDependencies["detectInvokingPackageManager"]>
   >;
+  hasInteractiveTerminal: ReturnType<
+    typeof vi.fn<InitCommandDependencies["hasInteractiveTerminal"]>
+  >;
   isCodingAgentLaunch: ReturnType<typeof vi.fn<InitCommandDependencies["isCodingAgentLaunch"]>>;
   now: ReturnType<typeof vi.fn<InitCommandDependencies["now"]>>;
   runPackageManagerInstall: ReturnType<
     typeof vi.fn<InitCommandDependencies["runPackageManagerInstall"]>
   >;
+  runInitOnboarding: ReturnType<typeof vi.fn<InitCommandDependencies["runInitOnboarding"]>>;
   selectInitHandoff: ReturnType<typeof vi.fn<InitCommandDependencies["selectInitHandoff"]>>;
   spawnCodingAgentRepl: ReturnType<typeof vi.fn<InitCommandDependencies["spawnCodingAgentRepl"]>>;
   spawnPackageManager: ReturnType<typeof vi.fn<InitCommandDependencies["spawnPackageManager"]>>;
@@ -109,7 +113,12 @@ function dependencies(
         ...options,
         webPackageVersions: { ...WEB_VERSIONS, ...options.webPackageVersions },
       }),
+    hasInteractiveTerminal: vi.fn(() => false),
     runPackageManagerInstall: vi.fn(async () => packageInstallResult()),
+    runInitOnboarding: vi.fn(async ({ install }) => ({
+      install: await install,
+      onboarded: true,
+    })),
     selectInitHandoff: vi.fn(async () => "eve-dev"),
     spawnCodingAgentRepl: vi.fn(async () => true),
     spawnPackageManager: vi.fn(async () => packageProcessResult()),
@@ -191,6 +200,59 @@ describe("runInitCommand", () => {
     expect(output.messages[2]).toContain("in 13.2s");
     expect(output.messages[3]).toContain("$ eve dev");
     expect(output.messages.join("\n")).not.toContain("Instructions ");
+  });
+
+  it("starts fresh interactive onboarding before the base install settles", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-overlap-"));
+    const output = logger();
+    const deps = dependencies();
+    const install = Promise.withResolvers<ReturnType<typeof packageInstallResult>>();
+    const order: string[] = [];
+    deps.hasInteractiveTerminal.mockReturnValue(true);
+    deps.runPackageManagerInstall.mockImplementation(() => {
+      order.push("install-started");
+      return install.promise;
+    });
+    deps.runInitOnboarding.mockImplementation(async ({ install: installPromise, afterInstall }) => {
+      order.push("onboarding-started");
+      expect(order).toEqual(["install-started", "onboarding-started"]);
+      install.resolve(packageInstallResult());
+      const result = await installPromise;
+      await afterInstall?.();
+      order.push("onboarding-finished");
+      return { install: result, onboarded: true };
+    });
+
+    await runInitCommand(output, parentDirectory, "my-agent", {}, deps);
+
+    const projectPath = join(parentDirectory, "my-agent");
+    expect(order).toEqual(["install-started", "onboarding-started", "onboarding-finished"]);
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      projectPath,
+      expect.objectContaining({ nonInteractive: true }),
+    );
+    expect(deps.tryInitializeGit).toHaveBeenCalledOnce();
+    expect(deps.spawnPackageManager).toHaveBeenCalledWith("pnpm", projectPath, [
+      "exec",
+      "eve",
+      "dev",
+    ]);
+  });
+
+  it("keeps prefilled fresh init on the serial path", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-prefilled-"));
+    const deps = dependencies();
+    deps.hasInteractiveTerminal.mockReturnValue(true);
+
+    await runInitCommand(logger(), parentDirectory, "my-agent", { model: "openai/gpt-5.5" }, deps);
+
+    expect(deps.runInitOnboarding).not.toHaveBeenCalled();
+    expect(deps.runPackageManagerInstall).toHaveBeenCalledWith(
+      "pnpm",
+      join(parentDirectory, "my-agent"),
+      expect.objectContaining({ nonInteractive: false }),
+    );
   });
 
   it("creates a new agent with model settings selected by init options", async () => {

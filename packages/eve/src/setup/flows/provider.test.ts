@@ -8,6 +8,7 @@ import {
   EXTERNAL_PROVIDER_INSTRUCTIONS,
   EXTERNAL_PROVIDER_INSTRUCTIONS_TITLE,
   PROVIDER_QUESTION,
+  planProviderChoice,
   runProviderFlow,
   type ProviderFlowDeps,
   type ProviderPicker,
@@ -45,6 +46,25 @@ function runTestProviderFlow(
 }
 
 describe("runProviderFlow", () => {
+  it("plans a provider choice without running any provider effects", async () => {
+    const deps = createDeps();
+
+    await expect(
+      planProviderChoice({
+        selectedProvider: "ai-gateway-project",
+        selectionExplicit: false,
+        picker: async (request) => {
+          expect(request.options.every((option) => option.checked !== true)).toBe(true);
+          return { kind: "ai-gateway-project" };
+        },
+      }),
+    ).resolves.toEqual({ kind: "ai-gateway-project" });
+
+    expect(deps.getVercelAuthStatus).not.toHaveBeenCalled();
+    expect(deps.runLinkFlow).not.toHaveBeenCalled();
+    expect(deps.appendEnv).not.toHaveBeenCalled();
+  });
+
   it("hands the Dev TUI one menu and lets the active project be replaced", async () => {
     const fake = createFakePrompter();
     const deps = createDeps();

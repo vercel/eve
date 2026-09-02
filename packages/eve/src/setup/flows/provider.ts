@@ -158,6 +158,30 @@ async function selectProvider(input: {
   return choice;
 }
 
+/** Collects a provider choice without authenticating, linking, or writing project files. */
+export async function planProviderChoice(input: {
+  picker?: ProviderPicker;
+  selectedProvider: ProviderSelection;
+  selectionExplicit?: boolean;
+}): Promise<ProviderPickerChoice | undefined> {
+  try {
+    return await selectProvider({
+      picker: input.picker,
+      options: providerOptions(
+        undefined,
+        input.selectedProvider,
+        input.selectionExplicit !== false,
+        true,
+      ),
+      initialValue: input.selectedProvider,
+      validateInlineKey: validateGatewayApiKey,
+    });
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return undefined;
+    throw error;
+  }
+}
+
 /**
  * THE PROVIDER FLOW behind the dev TUI `/model` menu's provider row
  * (`eve link` keeps {@link runLinkFlow}'s shape). One question chooses a

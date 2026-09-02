@@ -1,4 +1,5 @@
 import { HumanActionRequiredError } from "#setup/human-action.js";
+import type { RegistryCatalogItem } from "#cli/commands/registry.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import {
   runInstallVercelCliFlow,
@@ -7,7 +8,11 @@ import {
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
-import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
+import {
+  runProviderFlow,
+  type ProviderPicker,
+  type ProviderPickerChoice,
+} from "#setup/flows/provider.js";
 import {
   RegistryFlowFailedError,
   runRegistryFlow,
@@ -59,8 +64,12 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** A provider choice collected by fresh-init onboarding before dependencies settled. */
+  initialProviderChoice?: ProviderPickerChoice;
   /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
+  /** Registry choices collected by fresh-init onboarding before dependencies settled. */
+  initialRegistryItems?: readonly RegistryCatalogItem[];
   /** Presentation and navigation supplied by an enclosing setup journey. */
   registryPlannerContext?: RegistryPlannerContext;
   /** Live ChatGPT identity shown only inside model configuration UI. */
@@ -254,7 +263,13 @@ async function executeSetupCommand(
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
       case "model": {
-        const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
+        let initialProviderChoice = input.initialProviderChoice;
+        const pickProvider: ProviderPicker = (request) => {
+          if (initialProviderChoice === undefined) return renderer.readProviderPicker(request);
+          const choice = initialProviderChoice;
+          initialProviderChoice = undefined;
+          return Promise.resolve(choice);
+        };
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
           appRoot,
           prompter,
@@ -316,6 +331,7 @@ async function executeSetupCommand(
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
+          initialItems: input.initialRegistryItems,
           plannerContext: input.registryPlannerContext,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,
