@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionAuthContext } from "#channel/types.js";
 import { getPendingAuthorization } from "#harness/authorization.js";
 import { settleDirectApprovalResponse } from "#harness/hitl/approval-response-attempts.js";
-import { interpretApprovalResponses } from "#harness/hitl/approval-response-interpreter.js";
+import { interpretApprovalResponses } from "#harness/hitl/request-interpreter.js";
 import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";

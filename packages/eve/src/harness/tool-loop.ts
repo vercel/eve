@@ -139,7 +139,7 @@ import {
 import {
   interpretApprovalResponses,
   shouldPrepareApprovalResponsePolicies,
-} from "#harness/hitl/approval-response-interpreter.js";
+} from "#harness/hitl/request-interpreter.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
 import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { TASK_UPDATE_TOOL_NAME } from "#tools/framework/task-contract.js";
