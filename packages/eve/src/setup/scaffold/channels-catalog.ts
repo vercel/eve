@@ -10,7 +10,7 @@
  * overlay and the catalog cannot drift apart.
  */
 
-import { channelEntries } from "@eve/catalog";
+import { channelEntries } from "#compiled/@eve/catalog/index.js";
 import type { ChannelKind } from "./update/channels.js";
 
 /** Scaffolder overlay for one catalog channel the CLI can scaffold. */
