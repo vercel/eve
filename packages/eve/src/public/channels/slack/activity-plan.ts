@@ -1,5 +1,5 @@
 import type { ChannelActivityRenderer } from "#channel/activity-renderer.js";
-import type { ActivitySnapshotV1 } from "#protocol/activity.js";
+import type { ActivitySnapshotV1, ActivityWorkStateV1 } from "#protocol/activity.js";
 import { callSlackApi, type SlackBotToken } from "#public/channels/slack/api.js";
 
 export const SLACK_ACTIVITY_PLAN_RENDERER_ID = "slack.experimental.plan.v1";
@@ -22,7 +22,7 @@ interface PlanState {
 
 interface PlanTask {
   readonly id: string;
-  readonly status: TodoStatus;
+  readonly status: TodoStatus | ActivityPhase;
   readonly title: string;
 }
 
@@ -30,15 +30,17 @@ interface ActivityDetail {
   readonly id: string;
   readonly name: string;
   readonly phase: ActivityPhase;
+  readonly taskId?: string;
 }
 
 interface PlanView {
   readonly details: readonly ActivityDetail[];
   readonly settled: boolean;
   readonly tasks: readonly PlanTask[];
+  readonly title: string;
 }
 
-/** Creates a native Slack plan backed by the built-in todo tool's projected state. */
+/** Creates a native Slack plan from todo state, falling back to the activity hierarchy. */
 export function createSlackPlanRenderer(
   botToken: SlackBotToken | undefined,
 ): ChannelActivityRenderer {
@@ -77,7 +79,7 @@ export function createSlackPlanRenderer(
             "chat.startStream",
             {
               channel,
-              chunks: [{ type: "plan_update", title: "Agent plan" }, ...view.tasks.map(taskChunk)],
+              chunks: [{ type: "plan_update", title: view.title }, ...view.tasks.map(taskChunk)],
               recipient_team_id: team,
               recipient_user_id: user,
               task_display_mode: "plan",
@@ -128,7 +130,7 @@ export function createSlackPlanRenderer(
                     title: task.title,
                     type: "task_card",
                   })),
-                  title: "Agent plan",
+                  title: view.title,
                   type: "plan",
                 },
               ],
@@ -166,10 +168,11 @@ function projectPlan(snapshot: ActivitySnapshotV1, rootTurnId: string): PlanView
         : left.replacedAt.localeCompare(right.replacedAt),
     )
     .at(-1);
-  if (planState === undefined) return undefined;
+  const todos = planState === undefined ? undefined : parseTodos(planState.value);
+  if (planState === undefined || todos === undefined) {
+    return projectActivityPlan(snapshot, rootTurnId);
+  }
 
-  const todos = parseTodos(planState.value);
-  if (todos === undefined) return undefined;
   const tasks = todos.map((todo, index) => ({
     id: `${planState.parentWorkId}:todo:${index}`,
     status: todo.status,
@@ -204,7 +207,81 @@ function projectPlan(snapshot: ActivitySnapshotV1, rootTurnId: string): PlanView
   const settled = [...work, ...actions, ...blockers].every(
     (entity) => entity.phase !== "running" && entity.phase !== "blocked",
   );
-  return { details, settled, tasks };
+  return { details, settled, tasks, title: "Agent plan" };
+}
+
+function projectActivityPlan(
+  snapshot: ActivitySnapshotV1,
+  rootTurnId: string,
+): PlanView | undefined {
+  const work = Object.values(snapshot.work).filter((item) => item.rootTurnId === rootTurnId);
+  if (work.length === 0) return undefined;
+  const roots = work.filter((item) => item.kind === "root-turn");
+  const rootIds = new Set(roots.map((item) => item.id));
+  let parents = work.filter((item) => item.parentId && rootIds.has(item.parentId));
+  if (parents.length === 0) parents = roots;
+
+  const owner = (workId: string): ActivityWorkStateV1 | undefined => {
+    let item = work.find((candidate) => candidate.id === workId);
+    while (item?.parentId && !parents.some((parent) => parent.id === item!.id)) {
+      item = work.find((candidate) => candidate.id === item!.parentId);
+    }
+    return item && parents.find((parent) => parent.id === item!.id);
+  };
+  const details: ActivityDetail[] = [];
+  for (const child of work) {
+    if (parents.some((parent) => parent.id === child.id) || rootIds.has(child.id)) continue;
+    const parent = owner(child.id);
+    if (parent !== undefined) {
+      details.push({
+        id: child.id,
+        name: child.name ?? "Agent work",
+        phase: child.phase,
+        taskId: parent.id,
+      });
+    }
+  }
+  const actions = Object.values(snapshot.actions).filter(
+    (action) => action.rootTurnId === rootTurnId,
+  );
+  for (const action of actions) {
+    const parent = owner(action.parentWorkId);
+    if (parent !== undefined) {
+      details.push({
+        id: action.id,
+        name: action.label ?? action.name,
+        phase: action.phase,
+        taskId: parent.id,
+      });
+    }
+  }
+  const blockers = Object.values(snapshot.blockers).filter(
+    (blocker) => blocker.rootTurnId === rootTurnId,
+  );
+  for (const blocker of blockers) {
+    const parent = owner(blocker.parentWorkId);
+    if (parent !== undefined) {
+      details.push({
+        id: blocker.id,
+        name: blocker.label ?? blockerLabel(blocker.kind),
+        phase: blocker.phase,
+        taskId: parent.id,
+      });
+    }
+  }
+  const settled = [...work, ...actions, ...blockers].every(
+    (entity) => entity.phase !== "running" && entity.phase !== "blocked",
+  );
+  return {
+    details,
+    settled,
+    tasks: parents.map((parent) => ({
+      id: parent.id,
+      status: parent.phase,
+      title: parent.kind === "root-turn" ? "Agent turn" : (parent.name ?? "Agent work"),
+    })),
+    title: "Agent activity",
+  };
 }
 
 function parseTodos(
@@ -236,20 +313,26 @@ function planUpdates(view: PlanView, seen: Readonly<Record<string, string>>) {
   const taskUpdates = view.tasks
     .filter((task) => seen[task.id] !== taskVersion(task))
     .map(taskChunk);
-  const detailTask =
-    view.tasks.find((task) => task.status === "in_progress") ??
+  const activeTask =
+    view.tasks.find((task) => task.status === "in_progress" || task.status === "running") ??
     view.tasks.find((task) => task.status === "pending") ??
     view.tasks.at(-1);
-  if (detailTask === undefined) return taskUpdates;
   const detailUpdates = view.details
     .filter((detail) => seen[detail.id] !== detailVersion(detail))
-    .map((detail) => ({
-      details: `${phaseIcon(detail.phase)} ${detail.name}\n`,
-      id: safeId(detailTask.id),
-      status: slackTaskStatus(detailTask.status),
-      title: detailTask.title,
-      type: "task_update",
-    }));
+    .flatMap((detail) => {
+      const detailTask = view.tasks.find((task) => task.id === detail.taskId) ?? activeTask;
+      return detailTask === undefined
+        ? []
+        : [
+            {
+              details: `${phaseIcon(detail.phase)} ${detail.name}\n`,
+              id: safeId(detailTask.id),
+              status: slackTaskStatus(detailTask.status),
+              title: detailTask.title,
+              type: "task_update",
+            },
+          ];
+    });
   return [...taskUpdates, ...detailUpdates];
 }
 
@@ -270,15 +353,21 @@ function detailVersion(detail: ActivityDetail): string {
   return `${detail.phase}:${detail.name}`;
 }
 
-function slackTaskStatus(status: TodoStatus): "pending" | "in_progress" | "complete" | "error" {
+function slackTaskStatus(
+  status: TodoStatus | ActivityPhase,
+): "pending" | "in_progress" | "complete" | "error" {
   switch (status) {
     case "pending":
       return "pending";
     case "in_progress":
+    case "running":
+    case "blocked":
       return "in_progress";
     case "completed":
       return "complete";
     case "cancelled":
+    case "failed":
+    case "rejected":
       return "error";
   }
 }
