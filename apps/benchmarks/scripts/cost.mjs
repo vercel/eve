@@ -25,6 +25,14 @@ export const modelPricing = {
     cacheRead: 1,
     cacheWrite: 12.5,
   },
+  "anthropic/claude-fable-5.1": {
+    effectiveDate: "2026-09-02",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 10,
+    output: 50,
+    cacheRead: 0.25,
+    cacheWrite: 12.5,
+  },
   "xai/grok-4.6": {
     effectiveDate: "2026-08-17",
     source: "https://docs.x.ai/developers/models",
@@ -71,6 +79,14 @@ export const modelPricing = {
     input: 1.4,
     output: 4.4,
     cacheRead: 0.26,
+    cacheWrite: 0,
+  },
+  "zai/glm-5.3": {
+    effectiveDate: "2026-09-02",
+    source: "https://ai-gateway.vercel.sh/v1/models",
+    input: 1.4,
+    output: 4.4,
+    cacheRead: 0.14,
     cacheWrite: 0,
   },
   "google/gemini-3.1-pro-preview": {
