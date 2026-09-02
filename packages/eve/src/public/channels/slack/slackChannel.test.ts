@@ -38,6 +38,7 @@ import {
   type SlackInputResponseContext,
   type SlackInputResponseSubmission,
   type SlackInteractionContext,
+  type SlackRawInteractionContext,
   type SlackChannelState,
   type SlackEventContext,
 } from "#public/channels/slack/slackChannel.js";
@@ -2933,6 +2934,118 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
   });
 
+  it("falls shortcuts through to onRawInteraction when onShortcut is absent", async () => {
+    const onRawInteraction = vi.fn(() => new Response("raw-shortcut", { status: 202 }));
+    const channel = slackChannel({ onRawInteraction });
+
+    const { response, waitUntil } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "shortcut",
+        callback_id: "new_request",
+        trigger_id: "trigger-456",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", name: "ada", team_id: "T_ACTOR" },
+        enterprise: { id: "E01" },
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.text()).resolves.toBe("raw-shortcut");
+    expect(waitUntil).not.toHaveBeenCalled();
+    expect(onRawInteraction).toHaveBeenCalledWith(
+      {
+        type: "shortcut",
+        payload: expect.objectContaining({ callback_id: "new_request" }),
+        user: { id: "U01", name: "ada", username: undefined },
+        teamId: "T_ACTOR",
+        installationTeamId: "T_INSTALLATION",
+        enterpriseId: "E01",
+      },
+      expect.objectContaining({ slack: expect.any(Object), waitUntil: expect.any(Function) }),
+    );
+  });
+
+  it("gives onShortcut precedence over onRawInteraction", async () => {
+    const onShortcut = vi.fn();
+    const onRawInteraction = vi.fn();
+    const channel = slackChannel({ onRawInteraction, onShortcut });
+
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "shortcut",
+        callback_id: "new_request",
+        trigger_id: "trigger-456",
+        team: { id: "T01" },
+        user: { id: "U01" },
+      }),
+    );
+
+    expect(onShortcut).toHaveBeenCalledOnce();
+    expect(onRawInteraction).not.toHaveBeenCalled();
+  });
+
+  it("handles view-backed block actions through onRawInteraction inline", async () => {
+    const detached = Promise.resolve();
+    const botToken = vi.fn((_context: { readonly teamId?: string }) => "xoxb-test");
+    const onRawInteraction = vi.fn(async (interaction, ctx: SlackRawInteractionContext) => {
+      expect(interaction.type).toBe("block_actions");
+      expect(interaction.payload).toMatchObject({
+        actions: [{ action_id: "configure" }],
+        trigger_id: "trigger-123",
+        view: { id: "V01", type: "home" },
+      });
+      expect(ctx.slack.teamId).toBe("T_ACTOR");
+      ctx.waitUntil(detached);
+      await ctx.slack.request("views.open", {
+        trigger_id: "trigger-123",
+        view: { type: "modal", title: { type: "plain_text", text: "Configure" } },
+      });
+    });
+    const channel = slackChannel({ credentials: { botToken }, onRawInteraction });
+
+    const { response, waitUntil } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        trigger_id: "trigger-123",
+        team: { id: "T_INSTALLATION" },
+        user: { id: "U01", username: "ada", team_id: "T_ACTOR" },
+        view: { id: "V01", type: "home" },
+        actions: [{ action_id: "configure", type: "button", value: "hours" }],
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+    expect(onRawInteraction).toHaveBeenCalledOnce();
+    expect(waitUntil).toHaveBeenCalledWith(detached);
+    expect(botToken).toHaveBeenCalledWith({ teamId: "T_INSTALLATION" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://slack.com/api/views.open");
+  });
+
+  it("gives message-backed onInteraction precedence over onRawInteraction", async () => {
+    const onInteraction = vi.fn();
+    const onRawInteraction = vi.fn();
+    const channel = slackChannel({ onInteraction, onRawInteraction });
+
+    await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U01" },
+        channel: { id: "C01" },
+        message: { ts: "1700000000.000010", blocks: [] },
+        actions: [{ action_id: "inspect", type: "button" }],
+      }),
+    );
+
+    expect(onInteraction).toHaveBeenCalledOnce();
+    expect(onRawInteraction).not.toHaveBeenCalled();
+  });
+
   it("cancels the interaction's Slack thread from onInteraction", async () => {
     const channel = slackChannel({
       credentials: { botToken: "xoxb-test" },
@@ -3145,6 +3258,74 @@ describe("slackChannel() HITL interaction pipeline", () => {
     };
     expect(JSON.parse(body.view.private_metadata)).toMatchObject({
       installationTeamId: "T_INSTALLATION",
+    });
+  });
+
+  it("returns custom view submission acknowledgements from onRawInteraction", async () => {
+    const onRawInteraction = vi.fn(() =>
+      Response.json({
+        response_action: "errors",
+        errors: { review_hours: "Choose at least one hour" },
+      }),
+    );
+    const channel = slackChannel({ onRawInteraction });
+
+    const { response, waitUntil } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "view_submission",
+        team: { id: "T01" },
+        user: { id: "U01", team_id: "T01" },
+        view: {
+          callback_id: "configure_review_hours",
+          private_metadata: "settings-1",
+          state: { values: {} },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      response_action: "errors",
+      errors: { review_hours: "Choose at least one hour" },
+    });
+    expect(waitUntil).not.toHaveBeenCalled();
+    expect(onRawInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "view_submission",
+        payload: expect.objectContaining({
+          view: expect.objectContaining({ callback_id: "configure_review_hours" }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("returns dynamic select options from onRawInteraction", async () => {
+    const channel = slackChannel({
+      onRawInteraction(interaction) {
+        expect(interaction.type).toBe("block_suggestion");
+        expect(interaction.payload).toMatchObject({ action_id: "reviewer", value: "ad" });
+        return Response.json({
+          options: [{ text: { type: "plain_text", text: "Ada" }, value: "U01" }],
+        });
+      },
+    });
+
+    const { response } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_suggestion",
+        action_id: "reviewer",
+        block_id: "reviewers",
+        value: "ad",
+        team: { id: "T01" },
+        user: { id: "U01" },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      options: [{ text: { type: "plain_text", text: "Ada" }, value: "U01" }],
     });
   });
 

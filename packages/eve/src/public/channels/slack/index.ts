@@ -43,6 +43,8 @@ export {
   type SlackMentionResult,
   type SlackMentionResultOrPromise,
   type SlackReceiveTarget,
+  type SlackRawInteraction,
+  type SlackRawInteractionContext,
   type SlackSessionTarget,
   type SlackRespondOptions,
   type SlackSendOptions,

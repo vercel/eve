@@ -414,6 +414,30 @@ export interface SlackShortcutContext {
   readonly slack: SlackWorkspaceHandle;
 }
 
+/** A decoded Slack interactive callback that no more specific handler claimed. */
+export interface SlackRawInteraction {
+  /** Slack's interaction payload type, such as `block_actions` or `view_submission`. */
+  readonly type: string;
+  /** The complete decoded payload, preserving Slack's field names and nesting. */
+  readonly payload: Readonly<Record<string, unknown>>;
+  /** Actor when the payload identifies a Slack user. */
+  readonly user?: SlackInteractionUser;
+  /** Workspace associated with the actor or interaction. */
+  readonly teamId?: string;
+  /** Workspace whose app installation supplies credentials for {@link SlackRawInteractionContext.slack}. */
+  readonly installationTeamId?: string;
+  /** Enterprise Grid organization when Slack supplies one. */
+  readonly enterpriseId?: string;
+}
+
+/** Workspace-scoped context handed to `slackChannel({ onRawInteraction })`. */
+export interface SlackRawInteractionContext {
+  /** Slack workspace identity and raw Web API escape hatch. */
+  readonly slack: SlackWorkspaceHandle;
+  /** Keeps work alive after the handler returns its acknowledgement. */
+  readonly waitUntil: (task: Promise<unknown>) => void;
+}
+
 /** Workspace-scoped context handed to `slackChannel({ onSlashCommand })`. */
 export interface SlackSlashCommandContext {
   /** Slack workspace identity and raw Web API escape hatch. */
@@ -731,6 +755,26 @@ export interface SlackChannelConfig {
    * `waitUntil()`. Errors are caught and logged.
    */
   onShortcut?(shortcut: SlackShortcut, ctx: SlackShortcutContext): void | Promise<void>;
+
+  /**
+   * Fallback for signed Slack interactive callbacks not claimed by eve's HITL
+   * handling or a more specific authored hook. The input contains Slack's
+   * complete decoded payload plus normalized actor and workspace identity.
+   * Use `interaction.type` to narrow the raw payload against Slack's docs.
+   *
+   * This hook runs inline because its returned {@link Response} may acknowledge
+   * a `view_submission` with validation errors or answer a `block_suggestion`.
+   * Returning `void` sends an empty `200 OK`. Use `ctx.waitUntil(...)` for work
+   * that does not affect the acknowledgement.
+   *
+   * Handler precedence matches `onEvent`: `onInteraction` claims eligible
+   * message-backed `block_actions`, and `onShortcut` claims shortcuts. Returning
+   * from either specific hook does not fall through to this hook.
+   */
+  onRawInteraction?(
+    interaction: SlackRawInteraction,
+    ctx: SlackRawInteractionContext,
+  ): void | Response | Promise<void | Response>;
 
   /**
    * Handles Slack slash commands configured with this channel's webhook route.
