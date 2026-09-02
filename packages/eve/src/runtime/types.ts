@@ -175,9 +175,9 @@ export type ResolvedToolDefinition = Readonly<
     /** Human-readable action label derived from validated tool input. */
     readonly activityLabel?: (input: unknown) => string;
     /** Presentation-safe text projected from the successful final output. */
-    readonly activityResult?: (output: unknown) => string;
+    readonly activityResult?: (input: unknown, output: unknown) => string;
     /** Presentation-safe text projected from one preliminary output snapshot. */
-    readonly activityUpdate?: (partial: unknown) => string;
+    readonly activityUpdate?: (input: unknown, partial: unknown) => string;
     /**
      * Optional validated runtime output schema.
      */

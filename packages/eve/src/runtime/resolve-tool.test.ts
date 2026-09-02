@@ -35,8 +35,9 @@ describe("resolveToolDefinition", () => {
       moduleMap({
         label: {
           start: (input: { environment: string }) => `Deploy to ${input.environment}`,
-          complete: (_input, output: { url: string }) => `Deployed to ${output.url}`,
-          delta: (_input, partial: { phase: string }) => partial.phase,
+          complete: (_input: { environment: string }, output: { url: string }) =>
+            `Deployed to ${output.url}`,
+          delta: (_input: { environment: string }, partial: { phase: string }) => partial.phase,
         },
         description: definition.description,
         execute: () => null,

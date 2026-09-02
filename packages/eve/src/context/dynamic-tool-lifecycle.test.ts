@@ -1487,9 +1487,9 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     registerTestCallback(
       "deploy",
       "activityResult",
-      (_closure, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
+      (_closure, _input, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
     );
-    registerTestCallback("deploy", "activityUpdate", (_closure, partial) =>
+    registerTestCallback("deploy", "activityUpdate", (_closure, _input, partial) =>
       String((partial as { phase: unknown }).phase),
     );
     ctx.set(TurnDynamicToolMetadataKey, [
@@ -1510,10 +1510,12 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
 
     const tool = buildDynamicTools(ctx)[0];
     expect(tool?.activityLabel?.({ environment: "preview" })).toBe("Deploy to preview");
-    expect(tool?.activityResult?.({ url: "preview.example.com" })).toBe(
+    expect(tool?.activityResult?.({ environment: "preview" }, { url: "preview.example.com" })).toBe(
       "Deployed to preview.example.com",
     );
-    expect(tool?.activityUpdate?.({ phase: "Uploading" })).toBe("Uploading");
+    expect(tool?.activityUpdate?.({ environment: "preview" }, { phase: "Uploading" })).toBe(
+      "Uploading",
+    );
     getDynamicCallbackRegistry().delete("deploy");
   });
 
