@@ -52,9 +52,9 @@ async function transformAndEval(
     stampDurableDynamicToolCallbacks(
       entry,
       collectDurableDynamicToolCallbacks({
-        activityLabel: (entry.activity as { label?: never } | undefined)?.label,
-        activityResult: (entry.activity as { result?: never } | undefined)?.result,
-        activityUpdate: (entry.activity as { update?: never } | undefined)?.update,
+        activityLabel: (entry.label as { start?: never } | undefined)?.start,
+        activityResult: (entry.label as { complete?: never } | undefined)?.complete,
+        activityUpdate: (entry.label as { delta?: never } | undefined)?.delta,
         approval: entry.approval as never,
         approvalKey: entry.approvalKey as never,
         execute: entry.execute as never,
@@ -118,14 +118,14 @@ export default defineDynamic({
         guarded: defineTool({
           description: "Guarded",
           inputSchema: { type: "object" },
-          activity: {
-            label(input) {
+          label: {
+            start(input) {
               return activityPrefix + " " + input.value;
             },
-            result(output) {
+            complete(_input, output) {
               return resultPrefix + " " + output.url;
             },
-            update(partial) {
+            delta(_input, partial) {
               return partial.phase + updateSuffix;
             },
           },

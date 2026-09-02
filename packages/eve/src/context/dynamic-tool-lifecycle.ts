@@ -226,14 +226,14 @@ export function validateDurableDynamicToolCallbacks(
     owner,
     phase: "activityResult",
     stamped: raw.activityResult,
-    required: entry.activity?.result !== undefined,
+    required: entry.label?.complete !== undefined,
   });
   const activityUpdate = validateReference({
     name,
     owner,
     phase: "activityUpdate",
     stamped: raw.activityUpdate,
-    required: entry.activity?.update !== undefined,
+    required: entry.label?.delta !== undefined,
   });
   const approvalKey = validateReference({
     name,

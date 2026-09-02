@@ -66,7 +66,7 @@ yield is the normal tool result the model receives:
 export default defineTool({
   description: "Build a project report.",
   inputSchema: z.object({ project: z.string() }),
-  activity: {
+  label: {
     label: ({ project }) => `Build report for ${project}`,
     update: (partial) => partial.phase,
     result: (output) => `Report ready with ${output.report.sections.length} sections`,
@@ -87,10 +87,10 @@ can retry a step and replay overlapping snapshots. A generator `return` value is
 the result in this mode; yield the final output. Workflow and background generators have
 different result rules, described under [yield and return](#yield-and-return).
 
-Use `activity.update(partial)` to project preliminary snapshots into
-user-facing activity, and `activity.result(output)` to describe successful
-settlement differently. Both callbacks receive the typed value yielded by
-`execute`. Each non-empty update replaces the previous activity label; the
+Use `label.delta(input, partial)` to project preliminary snapshots into
+user-facing activity, and `label.complete(input, output)` to describe successful
+settlement differently. Both callbacks receive the validated input first and the typed value yielded by
+`execute` second. Each non-empty update replaces the previous activity label; the
 result projection replaces the latest update immediately before eve marks the
 action complete.
 
