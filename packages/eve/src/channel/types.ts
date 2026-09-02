@@ -294,7 +294,7 @@ export interface ClearSessionHookPayload {
 
 /**
  * Results resumed back into a parked parent workflow by the work it
- * dispatched: child-produced subagent results and authored workflow tool
+ * dispatched: child-produced subagent results and workflow tool
  * results. Parent-produced dispatch results never travel through this hook.
  */
 export interface RuntimeActionResultHookPayload {

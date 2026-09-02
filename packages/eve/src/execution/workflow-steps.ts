@@ -45,7 +45,6 @@ import { preserveSerializedInstrumentationState } from "#instrumentation/state.j
 import { RuntimeActionSettlementTimesKey } from "#harness/runtime-action-settlement-state.js";
 import { preserveSerializedAgentTraceState } from "#tracing/agent-trace-context-store.js";
 import { matchAuthorizationCallbacks } from "#execution/authorization-callback-match.js";
-import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
@@ -597,8 +596,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   stepResult = { ...stepResult, session: rekeyed };
 
   const nextState = createDurableSessionState({ session: stepResult.session });
-  const sleepDurationMs = readTurnSleepDurationMs(ctx);
-  const sleepTransition = sleepDurationMs === undefined ? {} : { sleepDurationMs };
   const backgroundTransition =
     stepResult.backgroundTasks === undefined || stepResult.backgroundTaskSession === undefined
       ? {}
@@ -625,7 +622,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ...backgroundTransition,
       output: stepResult.next.output,
       isError: stepResult.next.isError,
-      ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
       usage: sessionTotals === undefined ? undefined : toUsage(sessionTotals),
@@ -647,7 +643,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         pendingRuntimeActionKeys: getRuntimeActionKeysFromWorkflowInterrupt(
           workflowInterrupt.interrupt,
         ),
-        ...sleepTransition,
         serializedContext: nextSerializedContext,
         sessionState: nextState,
       };
@@ -665,7 +660,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
         action: "park",
         ...backgroundTransition,
         ...pending,
-        ...sleepTransition,
         serializedContext: nextSerializedContext,
         sessionState: createDurableSessionState({ session: reportedSession }),
         settled: {
@@ -681,7 +675,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       action: "park",
       ...backgroundTransition,
       ...pending,
-      ...sleepTransition,
       serializedContext: nextSerializedContext,
       sessionState: nextState,
       tasksEnabled,
@@ -692,7 +685,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
   return {
     action: "continue",
     ...backgroundTransition,
-    ...sleepTransition,
     serializedContext: nextSerializedContext,
     sessionState: nextState,
   };

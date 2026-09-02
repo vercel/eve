@@ -1,6 +1,8 @@
+import { sleep } from "#compiled/@workflow/core/index.js";
 import { z } from "#compiled/zod/index.js";
 
-import { requestTurnSleep } from "#harness/turn-sleep.js";
+import { SLEEP_TOOL_WORKFLOW_NAME } from "#execution/stable-workflow-names.js";
+import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 
 const MAX_SLEEP_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
 
@@ -18,11 +20,14 @@ export const SLEEP_OUTPUT_SCHEMA = z.strictObject({
 export type SleepToolInput = z.infer<typeof SLEEP_INPUT_SCHEMA>;
 export type SleepToolOutput = z.infer<typeof SLEEP_OUTPUT_SCHEMA>;
 
-/**
- * Records a durable wait for the owning turn workflow to fulfill after the
- * current atomic step finishes.
- */
-export function executeSleepTool(input: SleepToolInput): SleepToolOutput {
-  requestTurnSleep(Math.ceil(input.seconds * 1_000));
+export const sleepToolWorkflowReference = {
+  workflowId: `workflow//${EVE_PACKAGE_NAME}//${SLEEP_TOOL_WORKFLOW_NAME}`,
+};
+
+/** Waits durably in a workflow dedicated to this tool call. */
+export async function executeSleepTool(input: SleepToolInput): Promise<SleepToolOutput> {
+  "use workflow";
+
+  await sleep(Math.ceil(input.seconds * 1_000));
   return { waitedSeconds: input.seconds };
 }

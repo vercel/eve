@@ -1,32 +1,49 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ContextContainer, contextStorage } from "#context/container.js";
-import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
+import { sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
+import { sleepToolWorkflowReference } from "#execution/tools/sleep.js";
+import { readToolBehavior } from "#tools/behavior.js";
 import { sleep } from "#tools/provided/sleep.js";
 
+vi.mock("#compiled/@workflow/core/index.js", () => ({
+  sleep: vi.fn(),
+}));
+
 describe("sleep", () => {
-  it("defines a model-facing tool that requests a turn sleep in seconds", async () => {
-    const definition = sleep();
-    const ctx = new ContextContainer();
-
-    const output = await contextStorage.run(ctx, () =>
-      definition.execute({ seconds: 2.5 }, {} as never),
-    );
-
-    expect(definition.description).toContain("before continuing");
-    expect(output).toEqual({ waitedSeconds: 2.5 });
-    expect(readTurnSleepDurationMs(ctx)).toBe(2_500);
+  afterEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("shares concurrent waits by keeping the longest duration", async () => {
+  it("defines a model-facing workflow tool", () => {
     const definition = sleep();
-    const ctx = new ContextContainer();
 
-    await contextStorage.run(ctx, async () => {
-      await definition.execute({ seconds: 4 }, {} as never);
-      await definition.execute({ seconds: 1 }, {} as never);
+    expect(definition.description).toContain("before continuing");
+    expect(readToolBehavior(definition)).toEqual({
+      availability: [],
+      handling: {
+        kind: "workflow-tool",
+        workflowId: sleepToolWorkflowReference.workflowId,
+      },
+    });
+  });
+
+  it("waits for the requested number of seconds in its workflow body", async () => {
+    let wake: (() => void) | undefined;
+    vi.mocked(workflowSleep).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          wake = resolve;
+        }),
+    );
+    const definition = sleep();
+    const output = definition.execute({ seconds: 2.5001 }, {} as never);
+
+    await vi.waitFor(() => {
+      expect(workflowSleep).toHaveBeenCalledExactlyOnceWith(2_501);
     });
 
-    expect(readTurnSleepDurationMs(ctx)).toBe(4_000);
+    wake?.();
+
+    await expect(output).resolves.toEqual({ waitedSeconds: 2.5001 });
   });
 });

@@ -31,7 +31,6 @@ export type DurableStepResult = (
       readonly action: "continue" | "done";
       readonly output?: unknown;
       readonly isError?: boolean;
-      readonly sleepDurationMs?: number;
       readonly usage?: TokenUsage;
       readonly usageDelta?: TokenUsage;
     }
@@ -46,13 +45,11 @@ export type DurableStepResult = (
       /** The batch starts workflow tool runs, which report to the turn's run channels. */
       readonly startsWorkflowToolRuns?: boolean;
       readonly tasksEnabled?: boolean;
-      readonly sleepDurationMs?: number;
       readonly settled?: SettledTurn;
     }
   | {
       readonly action: "dispatch-workflow-runtime-actions";
       readonly pendingRuntimeActionKeys: readonly string[];
-      readonly sleepDurationMs?: number;
     }
 ) &
   DurableStepResultFields;

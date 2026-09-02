@@ -28,7 +28,7 @@ type WorkflowToolExecute = (
 ) => Promise<JsonValue> | WorkflowToolStream;
 
 /**
- * Runs one authored workflow tool call. The run's own hook is its identity
+ * Runs one workflow-backed tool call. The run's own hook is its identity
  * claim and its control inbox: a duplicate start loses the claim and exits; a
  * `cancel` message aborts `ctx.abortSignal`, and the run waits up to
  * {@link CANCEL_GRACE} for the body to unwind before ending as cancelled, so a

@@ -215,7 +215,7 @@ import { sleep } from "eve/tools/sleep";
 export default sleep();
 ```
 
-The model calls it with `{ seconds }` when it is useful to wait before checking progress or status again. The pause sleeps the durable turn workflow, so it does not hold an application runtime open, and the same turn continues automatically when the duration elapses. If one model response makes concurrent `sleep` calls, eve waits for the longest requested duration.
+The model calls it with `{ seconds }` when it is useful to wait before checking progress or status again. Each call runs as a durable tool workflow, so it does not hold an application runtime open, and the same turn continues automatically when the duration elapses. Concurrent `sleep` calls run in parallel, so the turn continues after the longest requested duration.
 
 ## What to read next
 

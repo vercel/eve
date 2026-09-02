@@ -118,7 +118,7 @@ export const activityCollectorWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
 };
 
-/** Stable workflow reference for authored workflow tool runs. */
+/** Stable workflow reference for workflow-backed tool runs. */
 export const toolRunWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TOOL_RUN_WORKFLOW_NAME}`,
 };

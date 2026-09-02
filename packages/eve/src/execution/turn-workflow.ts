@@ -1,10 +1,6 @@
 import { isInboxSubagentResultFromRunningHandle } from "#harness/handles/query.js";
 import { isInboxToolResultFromRecordedRun } from "#harness/tool-runs.js";
-import {
-  createHook,
-  getWorkflowMetadata,
-  sleep as workflowSleep,
-} from "#compiled/@workflow/core/index.js";
+import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
@@ -185,14 +181,6 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         return;
       }
 
-      if (result.sleepDurationMs !== undefined) {
-        const outcome = await waitForTurnSleep(result.sleepDurationMs, cancellation);
-        if (outcome === "cancel") {
-          await finishCancelledTurn({ bufferedDeliveries, cancellation, cursor });
-          return;
-        }
-      }
-
       if (result.action === "done") {
         await cancellation?.dispose();
         await cursor.finish(
@@ -326,15 +314,6 @@ async function finishCancelledTurn(input: {
     { cancelled: true, kind: "park" },
     input.bufferedDeliveries,
   );
-}
-
-async function waitForTurnSleep(
-  durationMs: number,
-  cancellation: TurnCancellationControl | undefined,
-): Promise<"cancel" | "slept"> {
-  if (cancellation?.signal.aborted === true) return "cancel";
-  const slept = workflowSleep(durationMs).then(() => "slept" as const);
-  return cancellation === undefined ? slept : Promise.race([slept, cancellation.requested]);
 }
 
 // These sentinels stay outside `RuntimeActionResult`. That union is the
@@ -516,10 +495,6 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
   try {
     while (true) {
       const result = await turnStep(currentStepInput);
-
-      if (result.action !== "cancelled" && result.sleepDurationMs !== undefined) {
-        await workflowSleep(result.sleepDurationMs);
-      }
 
       if (result.action === "done") {
         await sendTurnControlStep({

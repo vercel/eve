@@ -25,6 +25,7 @@ import {
   createLocalSubagentSourceRef,
   createModuleSourceRef,
 } from "../../src/discover/manifest.js";
+import { sleepToolWorkflowReference } from "../../src/execution/tools/sleep.js";
 import { resolveInstalledPackageInfo } from "../../src/internal/application/package.js";
 import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
 import {
@@ -153,6 +154,37 @@ describe("compiler artifacts", () => {
     await writeFile(join(agentRoot, "agent.mjs"), "export default {};\n");
     await expect(compileAgent({ startPath: appRoot })).rejects.toThrow(
       'The "model" field is required.',
+    );
+  });
+
+  it("compiles the provided sleep definition as a workflow tool", async () => {
+    const { agentRoot, appRoot } = await createAppRoot(
+      "eve-compiler-workflow-sleep-",
+      APP_ROOT_OPTIONS,
+    );
+    await mkdir(join(agentRoot, "tools"), { recursive: true });
+    await writeFile(join(agentRoot, "instructions.md"), "Wait when requested.");
+    await writeFile(
+      join(agentRoot, "tools", "sleep.mjs"),
+      'import { sleep } from "eve/tools/sleep";\nexport default sleep();\n',
+    );
+
+    const result = await compileAgent({ startPath: appRoot });
+
+    expect(result.manifest.tools).toContainEqual(
+      expect.objectContaining({
+        behavior: {
+          availability: [],
+          handling: {
+            kind: "workflow-tool",
+            workflowId: sleepToolWorkflowReference.workflowId,
+          },
+        },
+        logicalPath: "tools/sleep.mjs",
+        name: "sleep",
+        sourceId: "tools/sleep.mjs",
+        sourceKind: "module",
+      }),
     );
   });
 
