@@ -2,7 +2,7 @@ import type { Command } from "#compiled/commander/index.js";
 import type { AgentWorkspace } from "#internal/agent-workspace.js";
 import { createPrompter } from "#setup/prompter.js";
 
-import { applicationCommand, type CliApplicationContext } from "./application-command.js";
+import type { CliApplicationContext } from "./application-command.js";
 
 export type AgentCommandRequirement = (command: Command) => boolean;
 
@@ -41,22 +41,34 @@ export function agentCommand(
   requirement: AgentCommandRequirement = () => true,
 ): Command {
   command.option("--agent <name>", "Select an agent from an agents/ workspace");
-  return applicationCommand(command, applicationContext, requirement).hook(
-    "preAction",
-    async (_command, actionCommand) => {
-      const requestedName = actionCommand.opts<{ agent?: string }>().agent;
-      if (!requirement(actionCommand)) {
-        if (requestedName !== undefined) {
-          throw new Error("--agent cannot be combined with a remote URL target.");
-        }
-        return;
+  return command.hook("preAction", async (_command, actionCommand) => {
+    const requestedName = actionCommand.opts<{ agent?: string }>().agent;
+    if (!requirement(actionCommand)) {
+      if (requestedName !== undefined) {
+        throw new Error("--agent cannot be combined with a remote URL target.");
       }
-      const selection = await applicationContext.resolveAgent();
-      if (selection.kind === "workspace") {
-        applicationContext.root = await selectWorkspaceAgent(selection.workspace, requestedName);
-      } else if (requestedName !== undefined) {
-        throw new Error("--agent can only be used from an agents/ workspace.");
+      return;
+    }
+
+    const initialSelection = await applicationContext.resolveAgent();
+    if (initialSelection.kind === "workspace") {
+      applicationContext.root = await selectWorkspaceAgent(
+        initialSelection.workspace,
+        requestedName,
+      );
+      await applicationContext.resolve();
+      return;
+    }
+
+    await applicationContext.resolve();
+    const resolvedSelection = await applicationContext.resolveAgent();
+    if (requestedName !== undefined) {
+      if (
+        resolvedSelection.kind !== "workspace-member" ||
+        resolvedSelection.member.name !== requestedName
+      ) {
+        throw new Error("--agent can only select a member of the enclosing agents/ workspace.");
       }
-    },
-  );
+    }
+  });
 }
