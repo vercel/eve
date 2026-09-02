@@ -5,6 +5,7 @@ import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-a
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
+import { recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import {
   AGENT_HANDLES_STATE_KEY,
@@ -84,6 +85,23 @@ const PARKED_HANDLE: AgentHandle = {
   phase: "parked",
 };
 
+const CLAIMED_HANDLE: AgentHandle = {
+  address: {
+    continuationToken: "subagent:child-claimed",
+    kind: "agent/local",
+    sessionId: "child-session-claimed",
+  },
+  callId: "workflow-call",
+  identity: {
+    id: "ag_research:workflow",
+    name: "research",
+    nodeId: "subagents/research",
+  },
+  operationId: "workflow-operation",
+  ownerId: "workflow-run",
+  phase: "claimed",
+};
+
 function createCancelledTurnSession(handles: readonly AgentHandle[]): HarnessSession {
   return setHarnessEmissionState(
     {
@@ -139,6 +157,36 @@ describe("settleCancelledTurnStep handle store", () => {
       expect(bindSessionInstrumentationSpy).toHaveBeenCalledWith(
         expect.objectContaining({ agentName: "settle-cancel-handles" }),
       );
+    });
+  });
+
+  it("releases a cancelled workflow claim with a resumable cancelled status", async () => {
+    const runtime = await createTestRuntime({ agent: { name: "settle-cancel-claim" } });
+
+    await runtime.run(async () => {
+      const session = recordWorkflowToolRun(createCancelledTurnSession([CLAIMED_HANDLE]), {
+        callId: "workflow-call",
+        hookToken: "workflow-hook",
+        resultKind: "tool",
+        runId: "workflow-run",
+        toolName: "Workflow",
+      });
+      const result = await settleCancelledTurnStep({
+        parentWritable: new WritableStream<Uint8Array>({ write() {} }),
+        serializedContext: buildSerializedContext(),
+        sessionState: createDurableSessionState({ session }),
+      });
+
+      expect(getAgentHandleStore(result.sessionState.snapshot?.session.state)).toEqual({
+        handles: [
+          {
+            address: CLAIMED_HANDLE.address,
+            identity: CLAIMED_HANDLE.identity,
+            lastStatus: "(cancelled)",
+            phase: "available",
+          },
+        ],
+      });
     });
   });
 });

@@ -342,6 +342,15 @@ describe("agent handle store task leases", () => {
       ownerId: "task-1",
     });
     expect(released.store.handles).toEqual([{ address, identity, phase: "available" }]);
+
+    const cancelled = applyAgentHandleStoreCommand(confirmed.store, {
+      kind: "release-owner",
+      lastStatus: "(cancelled)",
+      ownerId: "task-1",
+    });
+    expect(cancelled.store.handles).toEqual([
+      { address, identity, lastStatus: "(cancelled)", phase: "available" },
+    ]);
   });
 
   it("allows only one task to claim an available session agent", () => {

@@ -201,6 +201,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
             availability: "available" as const,
             id: handle.identity.id,
             name: handle.identity.name,
+            statusLine: handle.lastStatus,
           },
         ];
       }

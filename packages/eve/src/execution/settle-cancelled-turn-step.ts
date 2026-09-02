@@ -146,6 +146,7 @@ export async function settleCancelledTurnStep(input: {
   for (const run of workflowToolRuns) {
     session = applyTaskAgentHandleCommand(session, {
       kind: "release-owner",
+      lastStatus: "(cancelled)",
       ownerId: run.runId,
     }).session;
   }

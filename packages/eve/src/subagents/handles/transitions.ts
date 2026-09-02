@@ -353,7 +353,14 @@ export function applyAgentHandleStoreCommand(
       const handles = store.handles.flatMap((handle): readonly AgentHandle[] => {
         if (handle.phase === "reserved" && handle.ownerId === command.ownerId) return [];
         if (handle.phase !== "claimed" || handle.ownerId !== command.ownerId) return [handle];
-        return [{ address: handle.address, identity: handle.identity, phase: "available" }];
+        const available: {
+          address: typeof handle.address;
+          identity: typeof handle.identity;
+          lastStatus?: string;
+          phase: "available";
+        } = { address: handle.address, identity: handle.identity, phase: "available" };
+        if (command.lastStatus !== undefined) available.lastStatus = command.lastStatus;
+        return [available];
       });
       return {
         result: { kind: "ready" },

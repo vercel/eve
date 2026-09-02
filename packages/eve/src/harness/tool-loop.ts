@@ -1044,7 +1044,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
                 availability: "available" as const,
                 id: handle.identity.id,
                 name: handle.identity.name,
-                statusLine: handle.phase === "parked" ? handle.lastStatus : undefined,
+                statusLine: handle.lastStatus,
               })),
               ...taskAgentViews,
             ];
