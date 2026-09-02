@@ -10,7 +10,7 @@ export {
   isDisabledToolSentinel,
   type TaskExec,
   type TaskReceipt,
-  type ToolActivityDefinition,
+  type ToolLabelDefinition,
   type ToolAuthOptions,
   type ToolAuthProvider,
   type ToolDefinition,

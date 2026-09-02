@@ -118,7 +118,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
   expectOnlyKnownKeys(
     record,
     [
-      "activity",
+      "label",
       "auth",
       "description",
       "execute",
@@ -177,10 +177,10 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
    * references are captured later by `resolve-agent.ts` when it materializes
    * the module export and attaches them to the ResolvedToolDefinition.
    */
-  if (record.activity !== undefined) {
-    const activity = expectObjectRecord(record.activity, message);
-    expectOnlyKnownKeys(activity, ["label"], message);
-    expectFunction(activity.label, message);
+  if (record.label !== undefined) {
+    const label = expectObjectRecord(record.label, message);
+    expectOnlyKnownKeys(label, ["start"], message);
+    expectFunction(label.start, message);
   }
 
   if (record.approval !== undefined) {

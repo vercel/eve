@@ -29,7 +29,7 @@ export type WriteFileToolOutput = z.infer<typeof WRITE_FILE_OUTPUT_SCHEMA>;
  * Framework-owned executor that delegates to the default sandbox.
  */
 export const writeFile: ToolDefinition<WriteFileToolInput, WriteFileToolOutput> = defineTool({
-  activity: { label: (input) => activityLabel("Write", input.filePath) },
+  label: { start: (input) => activityLabel("Write", input.filePath) },
   description: [
     "Writes a file to the local filesystem.",
     "",

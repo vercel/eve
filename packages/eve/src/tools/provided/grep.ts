@@ -65,7 +65,7 @@ export type GrepToolOutput = z.infer<typeof GREP_OUTPUT_SCHEMA>;
  * Framework-owned executor that delegates to the default sandbox.
  */
 export const grep: ToolDefinition<GrepToolInput, GrepToolOutput> = defineTool({
-  activity: { label: (input) => activityLabel("Search", input.pattern) },
+  label: { start: (input) => activityLabel("Search", input.pattern) },
   description: [
     "Fast content search tool that works with any codebase size.",
     "",

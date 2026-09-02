@@ -69,7 +69,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
     });
   });
 
-  it("uses the tool-authored activity label without exposing it in event data", () => {
+  it("uses the tool-authored label start callback without exposing it in event data", () => {
     const action = createRuntimeActionRequestFromToolCall({
       toolCall: {
         input: { environment: "production", secret: "hidden" },
@@ -102,7 +102,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
     });
   });
 
-  it("does not let the activity label callback mutate the action input", () => {
+  it("does not let the label start callback callback mutate the action input", () => {
     const result = createRuntimeActionRequestFromToolCall({
       toolCall: {
         input: { nested: { value: "original" } },
@@ -138,7 +138,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
     });
   });
 
-  it("ignores an activity label callback that fails", () => {
+  it("ignores an label start callback callback that fails", () => {
     expect(
       createRuntimeActionRequestFromToolCall({
         toolCall: {

@@ -136,10 +136,10 @@ describe("normalizeToolDefinition", () => {
 
   it("accepts and types authored activity labels", () => {
     const tool = defineTool({
-      activity: {
-        label(input) {
+      label: {
+        start(input) {
           const city: string = input.city;
-          // @ts-expect-error activity label input is schema-typed.
+          // @ts-expect-error label start callback input is schema-typed.
           const missing = input.missing;
           void missing;
           return `Fetch ${city}`;
@@ -157,7 +157,7 @@ describe("normalizeToolDefinition", () => {
     expect(() =>
       normalizeToolDefinition(
         {
-          activity: { label: "Fetch weather" },
+          label: { start: "Fetch weather" },
           description: "Fetch weather.",
           execute: () => null,
           inputSchema: { type: "object" },

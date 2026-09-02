@@ -191,7 +191,7 @@ export function validateDurableDynamicToolCallbacks(
     );
   }
 
-  const hasActivityLabel = entry.activity?.label !== undefined;
+  const hasLabelStart = entry.label?.start !== undefined;
   const hasApproval = entry.approval !== undefined;
   const hasApprovalResponse =
     entry.approval !== undefined &&
@@ -207,7 +207,7 @@ export function validateDurableDynamicToolCallbacks(
     name,
     phase: "activityLabel",
     stamped: raw.activityLabel,
-    required: hasActivityLabel,
+    required: hasLabelStart,
   });
   const approvalRequest = validateReference({
     name,

@@ -33,7 +33,7 @@ export type BashToolOutput = z.infer<typeof BASH_OUTPUT_SCHEMA>;
  * top-level import here does not force those backends to initialize eagerly.
  */
 export const bash: ToolDefinition<BashToolInput, BashToolOutput> = defineTool({
-  activity: { label: (input) => activityLabel("Run", input.command) },
+  label: { start: (input) => activityLabel("Run", input.command) },
   description: "Execute a shell command in the shared workspace environment.",
   async execute(input, ctx) {
     return await executeBashOnSandbox(await ctx.getSandbox(), input as BashInput);

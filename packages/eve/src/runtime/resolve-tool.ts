@@ -125,14 +125,14 @@ function extractOptionalHooks(
 ): OptionalResolvedFields {
   const optional: OptionalResolvedFields = {};
 
-  if (record.activity !== undefined) {
-    const activity = expectObjectRecord(
-      record.activity,
-      describe(definition, "to provide a valid activity definition"),
+  if (record.label !== undefined) {
+    const label = expectObjectRecord(
+      record.label,
+      describe(definition, "to provide a valid label definition"),
     );
     optional.activityLabel = expectFunction(
-      activity.label,
-      describe(definition, "to provide an activity label function"),
+      label.start,
+      describe(definition, "to provide an label start callback function"),
     ) as ResolvedToolDefinition["activityLabel"];
   }
 

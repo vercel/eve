@@ -29,12 +29,12 @@ function moduleMap(value: unknown): CompiledModuleMap {
 }
 
 describe("resolveToolDefinition", () => {
-  it("reattaches the authored activity label callback", async () => {
+  it("reattaches the authored label start callback callback", async () => {
     const resolved = await resolveToolDefinition(
       definition,
       moduleMap({
-        activity: {
-          label: (input: { environment: string }) => `Deploy to ${input.environment}`,
+        label: {
+          start: (input: { environment: string }) => `Deploy to ${input.environment}`,
         },
         description: definition.description,
         execute: () => null,

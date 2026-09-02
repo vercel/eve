@@ -34,7 +34,7 @@ When a tool returns structured data, add an optional `outputSchema`. With Zod or
 
 ### Label tool activity
 
-Use `activity.label(input)` to describe a call in user-facing activity. The callback receives the validated tool input, so it can select the useful fields without exposing the full argument object:
+Use `label.start(input)` to describe a call in user-facing activity. The callback receives the validated tool input, so it can select the useful fields without exposing the full argument object:
 
 ```ts title="agent/tools/deploy.ts"
 export default defineTool({
@@ -43,8 +43,8 @@ export default defineTool({
     project: z.string(),
     environment: z.enum(["preview", "production"]),
   }),
-  activity: {
-    label: ({ project, environment }) => `Deploy ${project} to ${environment}`,
+  label: {
+    start: ({ project, environment }) => `Deploy ${project} to ${environment}`,
   },
   async execute(input) {
     return deploy(input);

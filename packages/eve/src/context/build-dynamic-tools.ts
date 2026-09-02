@@ -91,9 +91,9 @@ export function replayDynamicTools(
   return metadata.map((entry) => {
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
-    const activityLabelReference = entry.callbacks.activityLabel;
+    const labelStartReference = entry.callbacks.activityLabel;
     const activityLabel =
-      activityLabelReference === undefined
+      labelStartReference === undefined
         ? undefined
         : lookupDurableDynamicCallback(entry.name, "activityLabel");
     const toModelOutputReference = entry.callbacks.toModelOutput;
@@ -144,12 +144,12 @@ export function replayDynamicTools(
       approval: buildReplayedApproval(entry),
       outputSchema: toOutputSchema(entry.outputSchema),
     };
-    if (activityLabelReference !== undefined) {
+    if (labelStartReference !== undefined) {
       replayed.activityLabel = (input: unknown) => {
         if (activityLabel === undefined) throw missingCallbackError(entry, "activityLabel");
         return callDurableDynamicCallback(
           activityLabel,
-          activityLabelReference.closure,
+          labelStartReference.closure,
           input,
         ) as string;
       };
