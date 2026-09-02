@@ -58,7 +58,7 @@ Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_fil
 
 ### Project structured activity state
 
-Use `activity.state` when a successful tool result should replace structured state that a channel renderer can present. The state key identifies the renderer contract; eve stores the projected JSON value without interpreting its schema:
+Return `renderingState` from `label.complete` when a successful tool result should replace structured state that a channel renderer can present. The state key identifies the renderer contract; eve stores the projected JSON value without interpreting its schema:
 
 ```ts title="agent/tools/project_plan.ts"
 import { defineTool } from "eve/tools";
@@ -73,12 +73,11 @@ export default defineTool({
   description: "Replace the current project plan.",
   inputSchema: z.object({ tasks: z.array(taskSchema) }),
   outputSchema: z.object({ tasks: z.array(taskSchema) }),
-  activity: {
-    label: () => "Update project plan",
-    state: {
-      key: "project-plan",
-      project: (output) => output.tasks,
-    },
+  label: {
+    start: () => "Update project plan",
+    complete: (_input, output) => ({
+      renderingState: { key: "project-plan", value: output.tasks },
+    }),
   },
   execute({ tasks }) {
     return { tasks };
@@ -133,8 +132,7 @@ action complete.
 eve normalizes and bounds projected text before rendering it. If either
 callback throws or returns an empty string, eve keeps the existing activity
 label. `label.complete` does not run for failed or rejected tool calls. The
-full values remain available in `action.partial` and `action.result`; renderers
-receive only the projected text.
+full values remain available in `action.partial` and `action.result`; renderers receive only the projected label and optional rendering state.
 
 ### Background execution
 
