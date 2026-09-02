@@ -18,8 +18,8 @@ import {
   type AgentAddress,
   type AgentIdentity,
 } from "#harness/handles/store.js";
-import { defineTool, type TaskExec, type ToolContext } from "#public/definitions/tool.js";
-import { toInputSchema } from "#shared/tool-schema.js";
+import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
+import { toInputSchema } from "#tools/schema.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { createSubagentExecutorBinding } from "#tasks/types.js";
 

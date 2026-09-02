@@ -23,16 +23,30 @@
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)
  * - `$eve.title`        — truncated session title from the first user message
  * - `$eve.channel_request_id` — inbound channel request id
+ * - `$eve.schedule`     — authored schedule that created the session
  * - `$eve.invocation_token` — channel-local continuation token for an external invocation
  * - `$eve.invocation_owner` — SHA-256 fingerprint of the invocation's initiating principal
  * - `$eve.is_trace_content_visible` — whether observability may read content-bearing workflow data
+ * - `$eve.is_otel_trace_enabled` — whether hosted Agent Runs OTEL is enabled for the run
+ * - `$eve.trace_id` — trace id of the `agent.session` span, read from the pre-allocated
+ *   trace seed in the serialized context. Present only when the trace is sampled;
+ *   absence means no exported OTEL trace exists.
  */
 
-import { ChannelRequestIdKey } from "#context/keys.js";
-import { shouldCaptureInstrumentationContent } from "#harness/instrumentation/content-policy.js";
+import { CHANNEL_CONTEXT_KEY_NAME } from "#context/key-names.js";
+import {
+  ChannelRequestIdKey,
+  OtelTraceEnabledKey,
+  ScheduleIdKey,
+  SessionTraceSeedKey,
+  type SessionTraceSeed,
+} from "#context/keys.js";
 import type { EveAttributeValue } from "#runtime/attributes/normalize.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isNonEmptyString } from "#shared/guards.js";
+import { shouldCaptureInstrumentationContent } from "#shared/instrumentation-content.js";
+import { normalizeChannelAudience } from "#shared/channel-audience.js";
+import { isSampledTrace } from "#tracing/sampled-trace.js";
+import { resolveForwardedTraceSeed } from "#shared/forwarded-trace-policy.js";
 
 /**
  * Active compiled graph node id for the session's agent. Returned by
@@ -78,14 +92,38 @@ export interface SessionParentLineage {
  * tag emission silently drops undefined values.
  */
 export function readChannelKind(serializedContext: Record<string, unknown>): string | undefined {
-  const channel = serializedContext["eve.channel"] as SerializedChannelAdapter | undefined;
+  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
+    | SerializedChannelAdapter
+    | undefined;
   const kind = channel?.kind;
   return isNonEmptyString(kind) ? kind : undefined;
 }
 
 export function isWorkflowTraceContentVisible(serializedContext: Record<string, unknown>): boolean {
-  const channel = serializedContext["eve.channel"] as SerializedChannelAdapter | undefined;
+  const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
+  if (seed !== undefined) {
+    const traceState = resolveForwardedTraceSeed(seed)!;
+    if (traceState.forwardedTracePolicy !== undefined) {
+      const decision = traceState.decision;
+      return decision?.action === "record" && decision.recordInputs && decision.recordOutputs;
+    }
+  }
+  const channel = serializedContext[CHANNEL_CONTEXT_KEY_NAME] as
+    | SerializedChannelAdapter
+    | undefined;
   return shouldCaptureInstrumentationContent(normalizeChannelAudience(channel?.audience));
+}
+
+export function isWorkflowOtelTraceEnabled(serializedContext: Record<string, unknown>): boolean {
+  return serializedContext[OtelTraceEnabledKey.name] === true;
+}
+
+export function readSessionTraceId(serializedContext: Record<string, unknown>): string | undefined {
+  const seed = serializedContext[SessionTraceSeedKey.name] as SessionTraceSeed | undefined;
+  if (seed === undefined) return undefined;
+  const traceState = resolveForwardedTraceSeed(seed)!;
+  if (!isSampledTrace(traceState)) return undefined;
+  return isNonEmptyString(seed.traceId) ? seed.traceId : undefined;
 }
 
 /**
@@ -141,6 +179,12 @@ export function readChannelRequestId(
 ): string | undefined {
   const channelRequestId = serializedContext[ChannelRequestIdKey.name];
   return isNonEmptyString(channelRequestId) ? channelRequestId : undefined;
+}
+
+/** Reads the schedule name inherited from a schedule dispatch scope. */
+export function readScheduleId(serializedContext: Record<string, unknown>): string | undefined {
+  const scheduleId = serializedContext[ScheduleIdKey.name];
+  return isNonEmptyString(scheduleId) ? scheduleId : undefined;
 }
 
 /**
@@ -219,12 +263,16 @@ export function buildSessionAttributes(input: {
   readonly serializedContext: Record<string, unknown>;
 }): Record<string, EveAttributeValue> {
   const isTraceContentVisible = isWorkflowTraceContentVisible(input.serializedContext);
+  const isOtelTraceEnabled = isWorkflowOtelTraceEnabled(input.serializedContext);
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
+    "$eve.schedule": readScheduleId(input.serializedContext),
+    "$eve.is_otel_trace_enabled": isOtelTraceEnabled,
     "$eve.is_trace_content_visible": isTraceContentVisible,
+    "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "session",
     "$eve.trigger": readChannelKind(input.serializedContext),
-    "$eve.title": isTraceContentVisible ? deriveSessionTitle(input.inputMessage) : undefined,
+    "$eve.title": deriveSessionTitle(input.inputMessage),
   };
 }
 
@@ -247,7 +295,9 @@ export function buildSubagentRootAttributes(input: {
 }): Record<string, EveAttributeValue> {
   return {
     "$eve.channel_request_id": readChannelRequestId(input.serializedContext),
+    "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
     "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
+    "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "subagent",
     "$eve.parent": input.parentSessionId,
     "$eve.parent_call": input.parentCallId,
@@ -276,7 +326,9 @@ export function buildTurnAttributes(input: {
 }): Record<string, EveAttributeValue> {
   return {
     "$eve.channel_request_id": input.requestId,
+    "$eve.is_otel_trace_enabled": isWorkflowOtelTraceEnabled(input.serializedContext),
     "$eve.is_trace_content_visible": isWorkflowTraceContentVisible(input.serializedContext),
+    "$eve.trace_id": readSessionTraceId(input.serializedContext),
     "$eve.type": "turn",
     "$eve.parent": input.parentSessionId,
     "$eve.root": input.rootSessionId,

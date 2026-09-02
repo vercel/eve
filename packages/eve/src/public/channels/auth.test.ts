@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EVE_SESSION_ROUTE_PATH } from "#protocol/routes.js";
 import type { SessionAuthContext } from "#channel/types.js";
-import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
 import {
   type AuthFn,
   createIpAllowList,
@@ -873,6 +873,19 @@ describe("verifyVercelOidc", () => {
     }
   });
 
+  it("authenticates a current-project token from the global Vercel issuer", async () => {
+    const issuer = await installMockedVercelIssuer("global-issuer", "global");
+    try {
+      const token = await issuer.signToken({ project_id: "prj_current" });
+
+      await expect(
+        verifyVercelOidc(token, { currentVercelProject: { projectId: "prj_current" } }),
+      ).resolves.toMatchObject({ ok: true });
+    } finally {
+      issuer.restore();
+    }
+  });
+
   it("authenticates a development Vercel user token as a user principal", async () => {
     vi.stubEnv("VERCEL_PROJECT_ID", "prj_current");
     vi.stubEnv("VERCEL_TARGET_ENV", "development");
@@ -1300,7 +1313,10 @@ describe("verifyVercelOidc", () => {
  * jose's module-level JWKS cache (keyed on the JWKS URL) does not bleed
  * keys across tests when several cases run in the same file.
  */
-async function installMockedVercelIssuer(slug: string): Promise<{
+async function installMockedVercelIssuer(
+  slug: string,
+  issuerMode: "global" | "team" = "team",
+): Promise<{
   readonly issuer: string;
   readonly signToken: (
     claims: Record<string, unknown>,
@@ -1309,7 +1325,8 @@ async function installMockedVercelIssuer(slug: string): Promise<{
   readonly restore: () => void;
 }> {
   const teamSlug = `${slug}-${crypto.randomUUID()}`;
-  const issuer = `https://oidc.vercel.com/${teamSlug}`;
+  const issuer =
+    issuerMode === "global" ? "https://oidc.vercel.com" : `https://oidc.vercel.com/${teamSlug}`;
   const audience = `https://vercel.com/${teamSlug}`;
   const jwksUrl = `${issuer}/.well-known/jwks.json`;
   const discoveryUrl = `${issuer}/.well-known/openid-configuration`;

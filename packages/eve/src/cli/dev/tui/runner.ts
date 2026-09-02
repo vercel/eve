@@ -19,6 +19,7 @@ import {
   Client,
   ClientSession,
 } from "#client/index.js";
+import { renderApplicationInfo } from "#cli/commands/info.js";
 import { loadDevelopmentEnvironmentFiles } from "#cli/dev/environment.js";
 import { subscribeDevelopmentSandboxPrewarmLogs } from "#execution/sandbox/development-prewarm.js";
 import { createEventDeduper } from "#protocol/event-dedupe.js";
@@ -27,6 +28,7 @@ import {
   createDevelopmentRuntimeArtifactRefresher,
   type DevelopmentRuntimeArtifactRefresher,
 } from "#services/dev-client.js";
+import { inspectApplication } from "#services/inspect-application.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { SubagentPump, type SubagentPumpOptions, type SubagentView } from "./subagent-pump.js";
 export type {
@@ -76,6 +78,8 @@ import {
   type BootDetectionContext,
   type SetupIssue,
 } from "./setup-issues.js";
+import type { RegistryPlannerContext } from "#setup/flows/registry.js";
+import type { PlannerNavigation } from "#setup/prompter.js";
 import type { SetupFlowRenderer } from "./setup-flow.js";
 import type { TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import type { RemoteDevelopmentTarget } from "./target.js";
@@ -226,16 +230,15 @@ export type AgentTUIAgentHeader = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line shown under the brand line (local sessions only). */
+  /** Message-of-the-day line shown below the startup card (local sessions only). */
   tip?: string;
 };
 
 export type AgentTUIRenderer = {
   /**
-   * Commits a startup header describing the connected agent (brand mark,
-   * model, instructions, tools, skills, subagents) to the transcript before
-   * the first prompt, and refreshes it after local dev artifact changes.
-   * Optional — renderers without a header simply skip it.
+   * Commits the startup card to the transcript before the first prompt and
+   * refreshes it after local dev artifact changes. Optional — renderers
+   * without a header simply skip it.
    */
   renderAgentHeader?(header: AgentTUIAgentHeader): void;
   /**
@@ -372,6 +375,11 @@ export interface PromptCommandHandlerContext {
   readonly title: string;
   /** Provider entry authorized by confirmed boot-time model-access evidence. */
   readonly initialModelStep?: "provider";
+  readonly registryPlannerContext?: RegistryPlannerContext;
+  /** Overrides the standalone command title inside a composed setup journey. */
+  readonly setupFlowTitle?: string;
+  /** Progress owned by an enclosing journey while this command runs. */
+  readonly setupFlowNavigation?: PlannerNavigation;
   /** Live ChatGPT identity shown only inside model configuration UI. */
   readonly chatGptAccountLabel?: string;
   /**
@@ -392,6 +400,7 @@ export interface PromptCommandOutcome {
   tone?: "success" | "error";
   /** Post-command work after setup settles. */
   effect?: VercelStatusEffect | { kind: "model-access-changed" };
+  cancelled?: true;
 }
 
 export interface PromptCommandHandler {
@@ -400,6 +409,11 @@ export interface PromptCommandHandler {
     context: PromptCommandHandlerContext,
   ): Promise<PromptCommandOutcome | undefined>;
 }
+
+type TuiStartup = {
+  readonly headerTip: string;
+  finish(): string;
+};
 
 export type EveTUIRunnerOptions = TuiDisplayOptions & {
   session?: ClientSession;
@@ -433,11 +447,10 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   serverUrl?: string;
   /** Absolute local application root; omitted for remote `--url` sessions. */
   appRoot?: string;
-  /**
-   * Seeds the editable prompt buffer for the first prompt. A bare local
-   * `/model` starts initial model onboarding.
-   */
+  /** Seeds the editable prompt buffer for the first prompt. */
   initialInput?: string;
+  /** Explicit fresh-agent onboarding handoff from `eve init`. */
+  onboard?: boolean;
   /** Handles non-core slash commands without adding feature branches to the runner. */
   promptCommandHandler?: PromptCommandHandler;
   /** Commands shown in discovery for this local or remote session. */
@@ -455,6 +468,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   bootDetections?: readonly BootDetection[];
   /** Test seam for the status line's Vercel link probe; defaults to the real one. */
   detectProjectIdentity?: typeof detectProjectIdentity;
+  /** Test seam for `/info`; defaults to the filesystem application inspector. */
+  inspectApplication?: typeof inspectApplication;
   /** Test seam for the off-critical-path boot login probe; defaults to the real one. */
   getVercelAuthStatus?: typeof getVercelAuthStatus;
   /** Reports phases from this runner's initial local-dev connection. */
@@ -462,6 +477,8 @@ export type EveTUIRunnerOptions = TuiDisplayOptions & {
   /** Parent-owned diagnostics recorder; omitted for remote and test renderers. */
   diagnostics?: DevDiagnostics;
   lifecycle?: CommandLifecycle;
+  /** Editing-only startup state retained until the final agent header is ready to paint. */
+  startup?: TuiStartup;
 };
 
 /** The attention-line issue for a Vercel auth state, or undefined when nothing's wrong. */
@@ -486,17 +503,19 @@ export class EveTUIRunner {
   readonly #runtimeArtifacts?: DevelopmentRuntimeArtifactRefresher;
   readonly #serverUrl?: string;
   readonly #appRoot?: string;
-  /**
-   * Seeds the first prompt's editable buffer. A bare local `/model` starts
-   * fresh-agent onboarding.
-   */
+  /** Seeds the first prompt's editable buffer. */
   readonly #initialInput?: string;
+  readonly #startup?: TuiStartup;
+  /** Explicit fresh-agent onboarding handoff from `eve init`. */
+  readonly #onboard: boolean;
+  #initialOnboardingActive = false;
   readonly #promptCommandHandler?: PromptCommandHandler;
   readonly #availablePromptCommands: readonly PromptCommandSpec[];
   readonly #withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   readonly #remoteConnection?: RemoteConnectionController;
   readonly #bootDetections: readonly BootDetection[];
   readonly #getVercelAuthStatus: typeof getVercelAuthStatus;
+  readonly #inspectApplication: typeof inspectApplication;
   #onBootProgress?: DevBootProgressReporter;
   /** Set when the run loop unwinds, so a late boot login probe cannot paint into a torn-down terminal. */
   #disposed = false;
@@ -524,7 +543,7 @@ export class EveTUIRunner {
    * refreshes don't re-roll it mid-session. Local sessions only — every
    * tip references local-only slash commands.
    */
-  readonly #headerTip = pickAgentHeaderTip();
+  readonly #headerTip: string;
   #agentInfo?: AgentInfoResult;
   /**
    * approval-id → input-request map populated as `input.requested` events
@@ -534,6 +553,11 @@ export class EveTUIRunner {
   readonly #pendingInputRequests = new Map<string, InputRequest>();
   /** Idle wake result handed from the prompt follower into the normal HITL response loop. */
   #idleInputResult?: AgentTUIStreamResult;
+  /** Registry setups queued by tool results on root or child streams. */
+  readonly #pendingRegistrySetups: string[] = [];
+  #activeRegistrySetup?: string;
+  /** True only while the idle prompt owns terminal input. */
+  #readingPrompt = false;
   /**
    * callId → live state for one subagent dispatch. Persists across turn
    * boundaries because a subagent dispatched in one turn may not emit
@@ -579,8 +603,15 @@ export class EveTUIRunner {
     const pumpOptions: SubagentPumpOptions = { formatActionResultError };
     if (this.#client !== undefined) pumpOptions.client = this.#client;
     if (this.#renderer.subagents !== undefined) pumpOptions.view = this.#renderer.subagents;
+    if (options.appRoot !== undefined) {
+      pumpOptions.onToolCompleted = async (toolName, output) => {
+        const address = registryHandoffAddress(toolName, output);
+        if (address !== undefined) this.#queueRegistrySetup(address);
+      };
+    }
     this.#subagentPump = new SubagentPump(pumpOptions);
     this.#name = options.name ?? "eve";
+    this.#headerTip = options.startup?.headerTip ?? pickAgentHeaderTip();
     this.#withExclusiveTerminal = options.withExclusiveTerminal;
     this.#tools = options.tools ?? "full";
     this.#reasoning = options.reasoning ?? "full";
@@ -590,6 +621,8 @@ export class EveTUIRunner {
     this.#contextSize = options.contextSize;
     this.#formatTransportError = options.formatTransportError ?? toErrorMessage;
     if (options.initialInput !== undefined) this.#initialInput = options.initialInput;
+    if (options.startup !== undefined) this.#startup = options.startup;
+    this.#onboard = options.onboard === true;
     if (options.appRoot !== undefined) {
       this.#appRoot = options.appRoot;
       const trackerOptions: VercelStatusTrackerOptions = {
@@ -626,6 +659,7 @@ export class EveTUIRunner {
     }
     this.#bootDetections = options.bootDetections ?? BOOT_DETECTIONS;
     this.#getVercelAuthStatus = options.getVercelAuthStatus ?? getVercelAuthStatus;
+    this.#inspectApplication = options.inspectApplication ?? inspectApplication;
     if (options.onBootProgress !== undefined) this.#onBootProgress = options.onBootProgress;
     if (options.serverUrl !== undefined) this.#serverUrl = options.serverUrl;
     if (options.serverUrl !== undefined && options.remote === undefined) {
@@ -640,12 +674,12 @@ export class EveTUIRunner {
    * header. Never throws: a missing or unauthorized `/eve/v1/info` simply
    * yields a header without the agent's configuration detail.
    */
-  async #renderAgentHeader(): Promise<void> {
+  async #renderAgentHeader(): Promise<string | undefined> {
     const serverUrl = this.#serverUrl;
     if (serverUrl === undefined) {
       this.#reportBeforeFirstPaint();
-      await this.#renderSetupIssues(undefined);
-      return;
+      if (!this.#onboard) await this.#renderSetupIssues(undefined);
+      return this.#startup?.finish() ?? this.#initialInput;
     }
 
     let info: AgentInfoResult | undefined;
@@ -667,9 +701,11 @@ export class EveTUIRunner {
         }
       }
     }
+    const initialDraft = this.#startup?.finish() ?? this.#initialInput;
     this.#reportBeforeFirstPaint();
     const headerInfo = this.#replaceAgentInfo(info);
-    await this.#renderSetupIssues(headerInfo);
+    if (!this.#onboard) await this.#renderSetupIssues(headerInfo);
+    return initialDraft;
   }
 
   #replaceAgentInfo(info: AgentInfoResult | undefined): AgentInfoResult | undefined {
@@ -677,7 +713,7 @@ export class EveTUIRunner {
       this.#appRoot === undefined ? info : normalizeLocalModelEndpoint(info, process.env);
     this.#agentInfo = headerInfo;
     const serverUrl = this.#serverUrl;
-    if (serverUrl === undefined) return headerInfo;
+    if (serverUrl === undefined || this.#initialOnboardingActive) return headerInfo;
 
     const header: AgentTUIAgentHeader = {
       name: this.#name,
@@ -725,11 +761,7 @@ export class EveTUIRunner {
     let hasRunTurn = false;
     let followCurrentSession = false;
     let streamWithoutPrompt = false;
-    // `--input` seed: applied to the first prompt's editable buffer, then
-    // cleared so later prompts open empty.
-    let initialDraft = this.#initialInput;
-
-    await this.#renderAgentHeader();
+    let initialDraft = await this.#renderAgentHeader();
     if (this.#remoteConnection?.current().connection.state === "auth-required") {
       await this.#executeExtensionCommand(
         { type: "extension", name: "vc:login", argument: "" },
@@ -743,23 +775,42 @@ export class EveTUIRunner {
     this.#vercelStatus?.refreshIdentity();
     this.#mcpConnectionStatus?.refresh();
 
-    const initialCommand =
-      this.#initialInput === undefined ? undefined : parsePromptCommand(this.#initialInput);
-    const initialModelOnboarding =
-      initialCommand?.type === "extension" &&
-      initialCommand.name === "model" &&
-      initialCommand.argument === "" &&
+    const initialAgentOnboarding =
+      this.#onboard &&
       this.#appRoot !== undefined &&
       this.#promptCommandHandler !== undefined &&
       this.#renderer.setupFlow !== undefined;
-    if (initialModelOnboarding) {
+    if (initialAgentOnboarding) {
       initialDraft = undefined;
-      await this.#runInitialModelOnboarding(title);
+      this.#initialOnboardingActive = true;
+      try {
+        await this.#runInitialAgentOnboarding(title);
+      } finally {
+        this.#initialOnboardingActive = false;
+      }
     }
 
     while (true) {
       if (this.#lifecycle?.signal.aborted === true || this.#renderer.exitRequested?.() === true) {
         return;
+      }
+      const pendingRegistrySetup = this.#pendingRegistrySetups[0];
+      if (
+        pendingRegistrySetup !== undefined &&
+        pendingInputResponses === undefined &&
+        this.#idleInputResult === undefined
+      ) {
+        this.#pendingRegistrySetups.shift();
+        this.#activeRegistrySetup = pendingRegistrySetup;
+        try {
+          await this.#openRegistrySetup(pendingRegistrySetup);
+        } finally {
+          this.#activeRegistrySetup = undefined;
+        }
+        followCurrentSession = false;
+        streamWithoutPrompt = false;
+        prompt = undefined;
+        continue;
       }
       if (!streamWithoutPrompt) {
         if (prompt == null) {
@@ -780,17 +831,26 @@ export class EveTUIRunner {
           }
 
           try {
+            this.#readingPrompt = true;
             prompt = await this.#readPromptFollowingSession(promptOptions);
           } catch (error) {
             if (isInterruptedError(error)) {
-              if (this.#idleInputResult === undefined) return;
+              if (this.#idleInputResult === undefined && this.#pendingRegistrySetups.length === 0) {
+                return;
+              }
               streamWithoutPrompt = true;
               prompt = "";
             } else {
               throw error;
             }
+          } finally {
+            this.#readingPrompt = false;
           }
 
+          if (this.#pendingRegistrySetups.length > 0 && this.#idleInputResult === undefined) {
+            prompt = undefined;
+            continue;
+          }
           if (prompt == null && this.#idleInputResult === undefined) {
             return;
           }
@@ -931,6 +991,14 @@ export class EveTUIRunner {
         // without a prompt-command handler (e.g. remote --url sessions).
         if (command?.type === "help") {
           this.#renderCommandOutcome(formatPromptCommandHelp(this.#availablePromptCommands));
+          pendingInputResponses = undefined;
+          streamWithoutPrompt = false;
+          prompt = undefined;
+          continue;
+        }
+
+        if (command?.type === "info") {
+          await this.#showApplicationInfo();
           pendingInputResponses = undefined;
           streamWithoutPrompt = false;
           prompt = undefined;
@@ -1490,6 +1558,10 @@ export class EveTUIRunner {
         onTurnCancelled: (turnId) => this.#subagentPump.settleCancelledTurn(turnId),
         onConnectionAuthRequired: (event) => this.#handleConnectionAuthRequired(event),
         onConnectionAuthCompleted: (event) => this.#handleConnectionAuthCompleted(event),
+        onRegistryHandoff:
+          this.#appRoot === undefined
+            ? undefined
+            : async (address) => this.#queueRegistrySetup(address),
         onTerminalFailure: () => {
           this.#failedSession = sourceSession;
         },
@@ -1497,6 +1569,22 @@ export class EveTUIRunner {
       }),
       turnState,
     };
+  }
+
+  #queueRegistrySetup(address: string): void {
+    if (this.#activeRegistrySetup === address || this.#pendingRegistrySetups.includes(address)) {
+      return;
+    }
+    this.#pendingRegistrySetups.push(address);
+    if (this.#readingPrompt) this.#renderer.suspendPromptForInput?.();
+  }
+
+  async #openRegistrySetup(address: string): Promise<void> {
+    await this.#executeExtensionCommand(
+      { type: "extension", name: "add", argument: address },
+      "Add to your agent",
+      { trigger: "command" },
+    );
   }
 
   async #renderSetupIssues(info: AgentInfoResult | undefined): Promise<void> {
@@ -1590,7 +1678,15 @@ export class EveTUIRunner {
 
   async #handleExtensionCommand(
     command: Extract<PromptCommand, { type: "extension" }>,
-    input: Pick<PromptCommandHandlerContext, "initialModelStep" | "keepSetupFlowOpen" | "title">,
+    input: Pick<
+      PromptCommandHandlerContext,
+      | "initialModelStep"
+      | "registryPlannerContext"
+      | "setupFlowTitle"
+      | "setupFlowNavigation"
+      | "keepSetupFlowOpen"
+      | "title"
+    >,
   ): Promise<PromptCommandOutcome | undefined> {
     const handler = this.#promptCommandHandler;
     if (handler === undefined)
@@ -1598,9 +1694,8 @@ export class EveTUIRunner {
 
     const endpoint = this.#agentInfo?.agent.model.endpoint;
     const baseContext: PromptCommandHandlerContext = {
+      ...input,
       renderer: this.#renderer,
-      title: input.title,
-      initialModelStep: input.initialModelStep,
       chatGptAccountLabel:
         endpoint?.kind === "chatgpt" && endpoint.state === "ready"
           ? endpoint.accountLabel
@@ -1622,11 +1717,13 @@ export class EveTUIRunner {
   #renderStartupCommandInvocation(
     command: Extract<PromptCommand, { type: "extension" }>,
     trigger: "startup" | "command",
+    tone?: "success" | "error",
   ): void {
     if (trigger !== "startup") return;
 
     const state = this.#remoteConnection?.current().connection.state;
-    const status = state === "auth-failed" || state === "unavailable" ? "failed" : undefined;
+    const status =
+      tone === "error" || state === "auth-failed" || state === "unavailable" ? "failed" : undefined;
     const argument = command.argument.length === 0 ? "" : ` ${command.argument}`;
     this.#renderer.renderCommandInvocation?.(`/${command.name}${argument}`, status);
   }
@@ -1651,77 +1748,88 @@ export class EveTUIRunner {
     input: {
       readonly trigger: "startup" | "command";
       readonly initialModelStep?: "provider";
+      readonly registryPlannerContext?: RegistryPlannerContext;
+      readonly setupFlowTitle?: string;
+      readonly setupFlowNavigation?: PlannerNavigation;
       readonly keepSetupFlowOpen?: true;
+      readonly suppressSuccessfulTranscript?: true;
+      readonly suppressCancelledTranscript?: true;
     },
-  ): Promise<void> {
-    const outcome = await this.#handleExtensionCommand(command, {
-      initialModelStep: input.initialModelStep,
-      keepSetupFlowOpen: input.keepSetupFlowOpen,
-      title,
-    });
-    this.#renderStartupCommandInvocation(command, input.trigger);
-    this.#renderCommandOutcome(outcome?.message, outcome?.tone);
+  ): Promise<PromptCommandOutcome | undefined> {
+    const outcome = await this.#handleExtensionCommand(command, { ...input, title });
+    const suppressTranscript =
+      (input.suppressSuccessfulTranscript === true && outcome?.tone !== "error") ||
+      (input.suppressCancelledTranscript === true && outcome?.cancelled === true);
+    if (!suppressTranscript) {
+      this.#renderStartupCommandInvocation(command, input.trigger, outcome?.tone);
+    }
+    if (!suppressTranscript) this.#renderCommandOutcome(outcome?.message, outcome?.tone);
     await this.#applyCommandEffect(outcome?.effect);
     this.#refreshHeaderFromRemoteConnection();
+    return outcome;
   }
 
-  /**
-   * Fresh `eve init` launches the TUI with `/model` prefilled. Project-backed
-   * model access depends on the Vercel CLI and a Vercel session, so resolve
-   * only those missing prerequisites before entering the model picker. A probe
-   * failure still opens `/model`: its API-key and external-provider paths do
-   * not require Vercel. After model setup, open the categorized registry hub so
-   * a new user has concrete next steps before reaching the chat prompt.
-   */
-  async #runInitialModelOnboarding(title: string): Promise<void> {
-    const appRoot = this.#appRoot;
-    if (appRoot === undefined) return;
+  #onboardingNavigation(activeStep: number): PlannerNavigation {
+    return {
+      kind: "planner",
+      activeStep,
+      firstNavigableStep: 1,
+      steps: [
+        { label: "Model", complete: activeStep > 0 },
+        { label: "Channels" },
+        { label: "Integrations" },
+        { label: "Review" },
+      ],
+    };
+  }
 
-    const authStatus = async (): Promise<VercelAuthStatus | undefined> => {
-      try {
-        return await this.#getVercelAuthStatus(appRoot, { signal: this.#authProbeAbort.signal });
-      } catch {
-        return undefined;
-      }
+  /** Runs fresh-agent setup as two cohesive, one-way phases. */
+  async #runInitialAgentOnboarding(title: string): Promise<void> {
+    const journey = {
+      keepSetupFlowOpen: true as const,
+      setupFlowTitle: `Set up ${title}`,
+      trigger: "startup" as const,
     };
 
-    let status = await authStatus();
-    if (status === "cli-missing") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:install", argument: "" },
-        title,
-        { trigger: "startup", keepSetupFlowOpen: true },
-      );
-      status = await authStatus();
-      if (status === "cli-missing") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
+    const modelOutcome = await this.#executeExtensionCommand(
+      { type: "extension", name: "model", argument: "" },
+      title,
+      {
+        ...journey,
+        suppressSuccessfulTranscript: true,
+        initialModelStep: "provider",
+        setupFlowNavigation: this.#onboardingNavigation(0),
+      },
+    );
+    if (modelOutcome?.tone === "error" || modelOutcome?.cancelled === true) {
+      this.#renderer.setupFlow?.end({ preserveDiagnostics: modelOutcome.tone === "error" });
+      return;
     }
 
-    if (status === "logged-out") {
-      await this.#executeExtensionCommand(
-        { type: "extension", name: "vc:login", argument: "" },
+    let addOutcome: PromptCommandOutcome | undefined;
+    try {
+      addOutcome = await this.#executeExtensionCommand(
+        { type: "extension", name: "add", argument: "" },
         title,
-        { trigger: "startup", keepSetupFlowOpen: true },
+        {
+          ...journey,
+          registryPlannerContext: {
+            prefixSteps: [{ label: "Model", complete: true }],
+            reviewMessage: "Review your agent",
+            primaryActionLabel: "Install and finish setup",
+            emptyActionLabel: "Finish setup",
+          },
+        },
       );
-      status = await authStatus();
-      if (status === "cli-missing" || status === "logged-out") {
-        this.#renderer.setupFlow?.end();
-        return;
-      }
+    } finally {
+      // `/add` is the final onboarding phase. Release the shared panel so the
+      // ordinary chat prompt can own input, retaining deploy/setup evidence on failure.
+      this.#renderer.setupFlow?.end({ preserveDiagnostics: addOutcome?.tone === "error" });
     }
-
-    await this.#executeExtensionCommand({ type: "extension", name: "model", argument: "" }, title, {
-      trigger: "startup",
-      initialModelStep: "provider",
-    });
-    await this.#executeExtensionCommand({ type: "extension", name: "add", argument: "" }, title, {
-      trigger: "startup",
-    });
   }
 
   #refreshHeaderFromRemoteConnection(): void {
+    if (this.#initialOnboardingActive) return;
     const connection = this.#remoteConnection?.current().connection;
     if (connection?.state !== "ready" || connection.info === this.#agentInfo) return;
     this.#agentInfo = connection.info;
@@ -1752,6 +1860,22 @@ export class EveTUIRunner {
     } catch (error) {
       if (isInterruptedError(error)) return;
       throw error;
+    }
+  }
+
+  async #showApplicationInfo(): Promise<void> {
+    const appRoot = this.#appRoot;
+    if (appRoot === undefined) {
+      this.#renderCommandOutcome("/info is only available in local dev sessions.");
+      return;
+    }
+    try {
+      this.#renderCommandOutcome(renderApplicationInfo(await this.#inspectApplication(appRoot)));
+    } catch (error) {
+      this.#renderCommandOutcome(
+        `Couldn't inspect the application: ${toErrorMessage(error)}`,
+        "error",
+      );
     }
   }
 
@@ -1940,6 +2064,8 @@ type EveStreamTranslatorInput = {
   onTurnCancelled?: (turnId: string) => void;
   onConnectionAuthRequired?: (event: AuthorizationRequiredStreamEvent) => void;
   onConnectionAuthCompleted?: (event: AuthorizationCompletedStreamEvent) => void;
+  /** Opens a setup-bearing registry item in the existing `/add` flow. */
+  onRegistryHandoff?: (address: string) => Promise<void>;
   onTerminalFailure?: (event: SessionFailedStreamEvent) => void;
   /**
    * Replaces a failure's structured hint with a surface-local one (the
@@ -1948,6 +2074,22 @@ type EveStreamTranslatorInput = {
    */
   failureHintOverride?: (event: FailureStreamEvent) => string | undefined;
 };
+
+const SELFMOD_REGISTRY_ADD_TOOL = "selfmod__registry_add";
+
+/** Returns the registry address carried by a self-modification terminal handoff. */
+export function registryHandoffAddress(
+  toolName: string | undefined,
+  output: unknown,
+): string | undefined {
+  if (toolName !== SELFMOD_REGISTRY_ADD_TOOL || typeof output !== "object" || output === null) {
+    return undefined;
+  }
+  const result = output as { address?: unknown; status?: unknown };
+  return result.status === "needs-terminal" && typeof result.address === "string"
+    ? result.address
+    : undefined;
+}
 
 /**
  * Reduces one eve session-stream turn into renderer-native TUI events.
@@ -1967,11 +2109,13 @@ async function* eveEventsToTUIStream(
     onTurnCancelled,
     onConnectionAuthRequired,
     onConnectionAuthCompleted,
+    onRegistryHandoff,
     onTerminalFailure,
     failureHintOverride,
   } = input;
   const textParts = new Map<string, StreamPartState>();
   const reasoningParts = new Map<string, StreamPartState>();
+  const toolNames = new Map<string, string>();
   // Dropping re-delivered events here means every case below is a new emission.
   const seenEvents = createEventDeduper();
   // Counts `step.started` events. The harness reuses `stepIndex` across the
@@ -2159,6 +2303,7 @@ async function* eveEventsToTUIStream(
         if (actions.length === 0) break;
 
         for (const action of actions) {
+          toolNames.set(action.callId, action.toolName);
           if (knownToolCalls.has(action.callId)) continue;
           knownToolCalls.add(action.callId);
           yield {
@@ -2178,6 +2323,7 @@ async function* eveEventsToTUIStream(
 
         for (const request of requests) {
           const toolCallId = request.action.callId;
+          toolNames.set(toolCallId, request.action.toolName);
 
           // The session-limit continuation is harness-authored — no model
           // tool call exists behind it, so fabricating a transcript entry
@@ -2225,13 +2371,17 @@ async function* eveEventsToTUIStream(
           break;
         }
         switch (resultEvent.data.status) {
-          case "completed":
+          case "completed": {
+            const output = resultEvent.data.result.output;
             yield {
               type: "tool-result",
               toolCallId: callId,
-              output: resultEvent.data.result.output,
+              output,
             };
+            const address = registryHandoffAddress(toolNames.get(callId), output);
+            if (address !== undefined) await onRegistryHandoff?.(address);
             break;
+          }
           case "failed":
             yield {
               type: "tool-error",

@@ -68,6 +68,8 @@ Point the GitHub App webhook URL at `https://<deployment>/eve/v1/github`. For co
 
 Inbound hooks return `{ auth }` to dispatch, or `null` to ignore. Return `title` alongside `auth` to set the title when the dispatch starts a run. Use `defaultGitHubAuth(ctx)` to derive auth from the actor.
 
+The model-visible `<github_context>` includes `sender`, `bot_name` when resolved, and `is_mentioned` for comments. eve computes `is_mentioned` before removing the invocation token.
+
 ```ts
 import { defaultGitHubAuth, githubChannel } from "eve/channels/github";
 

@@ -4,15 +4,12 @@ import { stubSpawnProcess } from "./_helpers/sandbox-session-stub.js";
 
 import { ContextContainer, contextStorage } from "../src/context/container.js";
 import { SandboxKey } from "../src/context/keys.js";
-import { executeReadFileOnSandbox } from "../src/execution/sandbox/read-file-tool.js";
+import { executeReadFileOnSandbox } from "../src/execution/sandbox/read-file.js";
 import type { SandboxAccess } from "../src/sandbox/state.js";
 import type { SandboxSession } from "../src/shared/sandbox-session.js";
-import type { WriteFileResult } from "../src/execution/sandbox/write-file-tool.js";
-import { executeWriteFileOnSandbox } from "../src/execution/sandbox/write-file-tool.js";
-import {
-  createReadFileStamp,
-  ReadFileStateKey,
-} from "../src/runtime/framework-tools/file-state.js";
+import type { WriteFileResult } from "../src/execution/sandbox/write-file.js";
+import { executeWriteFileOnSandbox } from "../src/execution/sandbox/write-file.js";
+import { createReadFileStamp, ReadFileStateKey } from "../src/execution/tools/file-state.js";
 
 const HOME_PROBE_COMMAND = `printf '%s\\n' "$HOME"`;
 

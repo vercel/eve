@@ -23,10 +23,10 @@ const APP_ROOT = "/app/my-agent";
 
 const CATALOG: GatewayCatalogModel[] = [
   {
-    id: "zai/glm-5.2",
-    name: "GLM 5.2",
+    id: "openai/gpt-5.6-luna-fast",
+    name: "GPT-5.6 Luna Fast",
     type: "language",
-    owned_by: "zai",
+    owned_by: "openai",
     tags: ["reasoning"],
   },
   {
@@ -433,7 +433,7 @@ describe("runModelFlow", () => {
     expect(captured?.model).toEqual({
       kind: "pick",
       options: expect.arrayContaining([
-        expect.objectContaining({ value: "zai/glm-5.2", featured: true }),
+        expect.objectContaining({ value: "openai/gpt-5.6-luna-fast", featured: true }),
         expect.objectContaining({ value: "anthropic/claude-sonnet-5" }),
         expect.objectContaining({ value: "test/no-frills" }),
       ]),
@@ -487,11 +487,12 @@ describe("runModelFlow", () => {
     expect(menuPaints[0]?.notices).toEqual([]);
   });
 
-  it("leaves via the Done row exactly like Esc", async () => {
+  it("completes via Done without requiring a model change", async () => {
     const { prompter, menuPaints } = scriptedPrompter({ menu: ["done"] });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps: flowDeps() })).resolves.toEqual({
-      kind: "cancelled",
+      kind: "done",
+      accessChanged: false,
     });
     expect(menuPaints).toHaveLength(1);
   });
@@ -709,12 +710,13 @@ describe("runModelFlow", () => {
     expect(menuPaints[0]?.options[0]?.hint).toBe("anthropic/claude-sonnet-5@medium");
   });
 
-  it("folds an unchanged screen and a Done exit into a cancel", async () => {
+  it("completes after confirming unchanged model settings", async () => {
     const { prompter } = scriptedPrompter({ menu: ["model", "done"] });
     const deps = flowDeps({ pickModelSettings: vi.fn(async () => ({})) });
 
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "cancelled",
+      kind: "done",
+      accessChanged: false,
     });
     expect(deps.applySettings).not.toHaveBeenCalled();
   });
@@ -805,19 +807,19 @@ describe("runModelFlow", () => {
     expect(resolveAvailableProviders).toHaveBeenCalledTimes(1);
   });
 
-  it("treats the external-provider branch as informational — no notice, no outcome", async () => {
-    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "esc"] });
+  it("completes without persisted changes after direct-provider instructions", async () => {
+    const { prompter, menuPaints } = scriptedPrompter({ menu: ["provider", "done"] });
     const deps = flowDeps({
       runProviderFlow: vi.fn(async () => ({ kind: "external-provider" }) as const),
     });
 
-    // Nothing changed on disk (any existing gateway link is untouched), so
-    // the lap leaves no trace and the empty exit folds to cancelled.
     await expect(runModelFlow({ appRoot: APP_ROOT, prompter, deps })).resolves.toEqual({
-      kind: "cancelled",
+      kind: "done",
+      accessChanged: false,
     });
 
     expect(deps.resolveAvailableProviders).toHaveBeenCalledTimes(1);
+    expect(deps.writeProviderSelection).not.toHaveBeenCalled();
     expect(menuPaints[1]?.notices).toEqual([]);
   });
 

@@ -66,6 +66,7 @@ describe("runDevelopmentTui", () => {
       await runDevelopmentTui({
         headers: {
           authorization: "Basic dGVzdDpzZWNyZXQ=",
+          "User-Agent": "caller/1.0",
           "x-tenant": "acme",
         },
         target,
@@ -81,6 +82,7 @@ describe("runDevelopmentTui", () => {
 
       const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
       expect(headers.get("authorization")).toBe("Basic dGVzdDpzZWNyZXQ=");
+      expect(headers.get("user-agent")).toMatch(/^caller\/1\.0 eve-tui\/.+/);
       expect(headers.get("x-tenant")).toBe("acme");
     },
   );

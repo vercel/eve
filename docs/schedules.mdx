@@ -27,6 +27,8 @@ interface ScheduleHandlerArgs {
 
 `defineSchedule` is a type-level pass-through. The compiler is what enforces the one-of rule.
 
+A TypeScript schedule with `markdown` is compile-only because eve stores the prompt in the manifest. A schedule with `run` remains a runtime entry so the handler can execute. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle).
+
 `cron` is a standard 5-field string (`minute hour day-of-month month day-of-week`) with minute granularity. On Vercel, each schedule becomes a Vercel Cron Job, and Vercel evaluates the expression in UTC, so `"0 9 * * 1-5"` fires at 09:00 UTC on weekdays. `eve dev` never fires schedules on their cron cadence. A built app served with `eve start` does run production scheduled tasks. To trigger one while iterating in dev, use the dispatch route below.
 
 ## Markdown form (fire-and-forget)
@@ -81,6 +83,8 @@ The agent does not have to deliver a message on every run. When a prompt makes d
 - `to(channel, target).send(message, { auth })`: starts a session on another channel. It has the same contract as a route handler's `ctx.to(...)` handle.
 - `waitUntil(promise)`: extends the cron task's lifetime so the parked session and any in-flight fetches settle before the task ends. Wrap the `send` call in it.
 - `appAuth`: the app principal (`{ authenticator: "app", principalId: "eve:app", principalType: "runtime" }`). Pass it as `to(...).send(..., { auth: appAuth })` for work the agent does on its own behalf.
+
+The `auth` option controls which principal the session runs as. A handler may instead supply a user principal when scheduled work needs that user's grants; a session created by that dispatch still retains schedule provenance and conditional delivery behavior.
 
 A handler-form session runs on the same durable runtime engine as any other session, so it can park (durably suspend), for instance when the channel handoff is waiting for a Slack reply. Only markdown task mode is barred from waiting.
 

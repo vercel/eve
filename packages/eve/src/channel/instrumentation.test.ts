@@ -11,6 +11,7 @@ describe("channel instrumentation", () => {
     };
 
     expect(buildChannelInstrumentationProjection({ adapter, channelName: "support" })).toEqual({
+      channelType: "slack",
       kind: "channel:support",
       metadata: { audience: "unknown" },
     });
@@ -60,6 +61,7 @@ describe("channel instrumentation", () => {
     };
 
     expect(buildChannelInstrumentationProjection({ adapter, channelName: "support" })).toEqual({
+      channelType: "slack",
       kind: "channel:support",
       metadata: { audience: "unknown" },
     });

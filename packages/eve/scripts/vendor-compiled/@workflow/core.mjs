@@ -87,6 +87,10 @@ const copyDeclarations = createDeclarationCopier({
       kind: "vendored",
       compiledPath: "@workflow/world",
     },
+    "@workflow/world/attributes-validation": {
+      kind: "vendored",
+      compiledPath: "@workflow/world",
+    },
     devalue: {
       kind: "stub",
       stubBaseName: "_devalue",

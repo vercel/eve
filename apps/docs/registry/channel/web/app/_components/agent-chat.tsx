@@ -8,6 +8,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  ConversationTopFade,
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
@@ -16,6 +17,7 @@ import {
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
+  usePromptInputAttachments,
 } from "@/components/ai-elements/prompt-input";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,7 @@ export function AgentChat({
   readonly sessionless?: boolean;
 }) {
   const [cancellationError, setCancellationError] = useState<string>();
+  const [hasInputText, setHasInputText] = useState(false);
   const agent = useEveAgent({
     initialSession:
       sessionId === undefined
@@ -55,7 +58,7 @@ export function AgentChat({
   });
 
   const isBusy = agent.status === "submitted" || agent.status === "streaming";
-  const isRestoring = sessionId !== undefined && agent.events.length === 0 && isBusy;
+  const isResuming = agent.status === "resuming";
   const isEmpty = agent.data.messages.length === 0;
   const lastMessage = agent.data.messages.at(-1);
   const isPendingAssistantShell =
@@ -64,10 +67,10 @@ export function AgentChat({
   const showPendingThinking =
     isBusy &&
     (agent.status === "submitted" || lastMessage?.role !== "assistant" || isPendingAssistantShell);
-  const turnFailure = isBusy ? undefined : getLatestTurnFailure(agent.events);
+  const turnFailure = isBusy || isResuming ? undefined : getLatestTurnFailure(agent.events);
   const errorMessage = cancellationError ?? agent.error?.message ?? turnFailure;
   const hasConversationContent = sessionless || !isEmpty || errorMessage !== undefined;
-  const showConversationLayout = isRestoring || hasConversationContent;
+  const showConversationLayout = isResuming || hasConversationContent;
   const activeSessionId = sessionId ?? agent.session?.sessionId;
 
   const requestCancellation = () => {
@@ -79,8 +82,9 @@ export function AgentChat({
 
   const handleSubmit = async (message: PromptInputMessage) => {
     const text = message.text.trim();
-    if ((text.length === 0 && message.files.length === 0) || isRestoring) return;
+    if ((text.length === 0 && message.files.length === 0) || isResuming) return;
 
+    setHasInputText(false);
     setCancellationError(undefined);
     const options = isBusy ? { turnPolicy: "steer" as const } : undefined;
 
@@ -107,18 +111,17 @@ export function AgentChat({
 
   const composer = (
     <PromptInput onSubmit={handleSubmit}>
-      <PromptInputTextarea disabled={isRestoring} placeholder="Send a message…" />
-      {isBusy && !isRestoring ? (
-        <PromptInputButton
-          aria-label="Stop"
-          className="absolute right-12 bottom-2.5 rounded-full"
-          onClick={requestCancellation}
-          variant="default"
-        >
-          <SquareIcon className="size-3 fill-current" />
-        </PromptInputButton>
-      ) : null}
-      <PromptInputSubmit disabled={isRestoring} status={isBusy ? undefined : agent.status} />
+      <PromptInputTextarea
+        disabled={isResuming}
+        onChange={(event) => setHasInputText(event.currentTarget.value.trim().length > 0)}
+        placeholder="Send a message…"
+      />
+      <ComposerAction
+        hasInputText={hasInputText}
+        isBusy={isBusy}
+        isResuming={isResuming}
+        onCancel={requestCancellation}
+      />
     </PromptInput>
   );
 
@@ -139,13 +142,14 @@ export function AgentChat({
               : `eve:web-chat-scroll:${activeSessionId}`
           }
         >
+          <ConversationTopFade className="top-14" />
           <ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-20 pb-36 sm:px-6">
             {agent.data.messages.map((message, index) =>
               showPendingThinking &&
               isPendingAssistantShell &&
               message.id === lastMessage.id ? null : (
                 <AgentMessage
-                  canRespond={!isBusy}
+                  canRespond={!isBusy && !isResuming}
                   isStreaming={
                     agent.status === "streaming" && index === agent.data.messages.length - 1
                   }
@@ -184,6 +188,36 @@ export function AgentChat({
   );
 }
 
+function ComposerAction({
+  hasInputText,
+  isBusy,
+  isResuming,
+  onCancel,
+}: {
+  readonly hasInputText: boolean;
+  readonly isBusy: boolean;
+  readonly isResuming: boolean;
+  readonly onCancel: () => void;
+}) {
+  const attachments = usePromptInputAttachments();
+  const canSubmit = hasInputText || attachments.files.length > 0;
+
+  if (!isBusy || canSubmit) {
+    return <PromptInputSubmit disabled={isResuming} />;
+  }
+
+  return (
+    <PromptInputButton
+      aria-label="Stop"
+      className="absolute right-2.5 bottom-2.5"
+      onClick={onCancel}
+      variant="outline"
+    >
+      <SquareIcon className="size-3 fill-current" />
+    </PromptInputButton>
+  );
+}
+
 function ErrorMessage({ message }: { readonly message: string }) {
   return (
     <Message className="max-w-full" from="assistant">
@@ -211,14 +245,14 @@ function ChatHeader({ canStartNewChat }: { readonly canStartNewChat: boolean }) 
         {canStartNewChat ? (
           <Button
             aria-label="Start a new chat"
-            className="pointer-events-auto fixed top-2 right-6"
+            className="pointer-events-auto fixed top-3 right-6 pr-4"
             onClick={() => window.location.assign("/s")}
             size="sm"
             type="button"
             variant="ghost"
           >
             <PlusIcon className="size-4" />
-            <span className="hidden sm:inline">New chat</span>
+            <span className="hidden font-normal text-sm sm:inline">New chat</span>
           </Button>
         ) : null}
       </div>

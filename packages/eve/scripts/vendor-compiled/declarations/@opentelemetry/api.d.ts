@@ -87,12 +87,55 @@ export declare const propagation: {
 };
 
 export declare const trace: {
+  deleteSpan(context: Context): Context;
   getActiveSpan(): Span | undefined;
   getSpan(context: Context): Span | undefined;
   getTracer(name: string, version?: string): Tracer;
   getTracerProvider(): unknown;
   setSpan(context: Context, span: Span): Context;
   wrapSpanContext(spanContext: SpanContext): Span;
+};
+
+export interface MetricOptions {
+  readonly description?: string;
+  readonly unit?: string;
+}
+
+export interface ObservableResult {
+  observe(value: number, attributes?: Attributes): void;
+}
+
+export interface Counter {
+  add(value: number, attributes?: Attributes): void;
+}
+
+export interface Histogram {
+  record(value: number, attributes?: Attributes): void;
+}
+
+export interface ObservableGauge {
+  addCallback(callback: (result: ObservableResult) => void): void;
+}
+
+export interface ObservableUpDownCounter {
+  addCallback(callback: (result: ObservableResult) => void): void;
+}
+
+export interface Meter {
+  createCounter(name: string, options?: MetricOptions): Counter;
+  createHistogram(name: string, options?: MetricOptions): Histogram;
+  createObservableGauge(name: string, options?: MetricOptions): ObservableGauge;
+  createObservableUpDownCounter(name: string, options?: MetricOptions): ObservableUpDownCounter;
+}
+
+export declare const metrics: {
+  getMeter(name: string, version?: string): Meter;
+  /**
+   * The globally registered meter provider, shared across API copies. The
+   * instance comes from whichever metrics SDK registered it, so callers must
+   * feature-detect lifecycle methods before invoking them.
+   */
+  getMeterProvider(): unknown;
 };
 
 export declare enum SpanKind {

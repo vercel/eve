@@ -20,6 +20,7 @@ export const homeMetadata: Metadata = {
     ...titleMetadata.openGraph,
     description: tagline,
     images: [staticOgImage],
+    type: "website",
   },
   twitter: {
     ...titleMetadata.twitter,

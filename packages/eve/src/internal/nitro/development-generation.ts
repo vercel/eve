@@ -1,10 +1,8 @@
 import { rm } from "node:fs/promises";
 
 import type { CompileAgentResult } from "#compiler/compile-agent.js";
-import {
-  prepareMaterializedAuthoredModules,
-  writeMaterializedAuthoredModules,
-} from "#internal/materialized-authored-modules.js";
+import { prepareAuthoredRuntimeModules } from "#internal/authored-runtime-modules.js";
+import { writeMaterializedAuthoredModules } from "#internal/materialized-authored-modules.js";
 import {
   activateDevelopmentRuntimeArtifactsSnapshotTransaction,
   pruneDevelopmentRuntimeArtifactsSnapshots,
@@ -15,6 +13,8 @@ import {
 
 export interface DevelopmentGeneration extends DevelopmentRuntimeArtifactsSnapshot {
   readonly fingerprint: string;
+  /** Identity of the authored sources the workflow driver and step registrations are built from. */
+  readonly workflowSourceFingerprint?: string;
 }
 
 interface DevelopmentGenerationPruneState {
@@ -27,7 +27,7 @@ const developmentGenerationPruneStates = new Map<string, DevelopmentGenerationPr
 export async function stageDevelopmentGeneration(
   compileResult: CompileAgentResult,
 ): Promise<DevelopmentGeneration> {
-  const prepared = await prepareMaterializedAuthoredModules({
+  const prepared = await prepareAuthoredRuntimeModules({
     manifest: compileResult.manifest,
     moduleMapPath: compileResult.paths.moduleMapPath,
   });
@@ -39,10 +39,13 @@ export async function stageDevelopmentGeneration(
       runtimeAppRoot: snapshot.runtimeAppRoot,
     });
 
-    return {
-      ...snapshot,
-      fingerprint: materialized.fingerprint,
-    };
+    return prepared.workflowSourceFingerprint === undefined
+      ? { ...snapshot, fingerprint: materialized.fingerprint }
+      : {
+          ...snapshot,
+          fingerprint: materialized.fingerprint,
+          workflowSourceFingerprint: prepared.workflowSourceFingerprint,
+        };
   } catch (error) {
     try {
       await rm(snapshot.snapshotRoot, { force: true, recursive: true });

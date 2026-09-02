@@ -4,6 +4,7 @@ import type { CompiledModuleMap } from "#compiler/module-map.js";
 import {
   createRuntimeSession,
   getActiveRuntimeSession,
+  setRuntimeSessionCompiledArtifacts,
   withRuntimeSession,
 } from "#runtime/sessions/runtime-session.js";
 
@@ -32,11 +33,11 @@ export interface WithBundledCompiledArtifactsInput extends BundledCompiledArtifa
  * scoped session so tests cannot leak installations across each other.
  */
 export function installBundledCompiledArtifacts(input: BundledCompiledArtifacts): void {
-  getActiveRuntimeSession().compiledArtifacts = {
+  setRuntimeSessionCompiledArtifacts(getActiveRuntimeSession(), {
     manifest: input.manifest,
     metadata: input.metadata,
     moduleMap: input.moduleMap,
-  };
+  });
 }
 
 /**

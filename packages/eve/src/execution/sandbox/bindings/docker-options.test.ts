@@ -5,9 +5,11 @@ import {
   DEFAULT_DOCKER_SANDBOX_IMAGE,
   resolveDockerSandboxOptions,
 } from "#execution/sandbox/bindings/docker-options.js";
+import { DEFAULT_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 
 describe("resolveDockerSandboxOptions", () => {
   it("defaults to eve's published sandbox runtime image with permissive networking", () => {
+    expect(DEFAULT_DOCKER_SANDBOX_IMAGE).toBe(DEFAULT_EVE_SANDBOX_IMAGE);
     expect(resolveDockerSandboxOptions()).toEqual({
       env: {},
       image: DEFAULT_DOCKER_SANDBOX_IMAGE,

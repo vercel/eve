@@ -47,6 +47,35 @@ describe("ensureConnection", () => {
     );
   });
 
+  test("scaffolds Browser Use with its API key", async () => {
+    const projectRoot = await createTempDir();
+    await writeFile(
+      join(projectRoot, "package.json"),
+      `${JSON.stringify({ name: "demo", type: "module" }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const result = await ensureConnection({
+      projectRoot,
+      protocol: "mcp",
+      entry: entry("browser-use"),
+    });
+
+    expect(result.envKeysRequired).toEqual(["BROWSER_USE_API_KEY"]);
+    expect(result.envKeysAdded).toEqual(["BROWSER_USE_API_KEY"]);
+    expect(result.packageJsonUpdated).toEqual([]);
+
+    await expect(readFile(result.filePath, "utf8")).resolves.toContain(
+      '"x-browser-use-api-key": process.env.BROWSER_USE_API_KEY!',
+    );
+    await expect(readFile(join(projectRoot, ".env.local"), "utf8")).resolves.toContain(
+      "BROWSER_USE_API_KEY=",
+    );
+    await expect(readFile(join(projectRoot, "package.json"), "utf8")).resolves.not.toContain(
+      "@vercel/connect",
+    );
+  });
+
   test("seeds .env.local placeholders for a bearer-env connection", async () => {
     const projectRoot = await createTempDir();
 

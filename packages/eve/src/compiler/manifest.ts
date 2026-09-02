@@ -27,8 +27,19 @@ import type {
   AgentBuildDefinition,
   ModelRouting,
 } from "#shared/agent-definition.js";
-import type { InternalToolDefinition } from "#shared/tool-definition.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
+import type { InternalToolDefinition } from "#tools/definition.js";
+import type { CompiledToolBehavior } from "#tools/behavior.js";
+import type {
+  AgentModuleBacking,
+  AgentSourceComposition,
+  AgentSourceDescriptor,
+  AgentSourceOwner,
+  CompiledModuleBinding,
+} from "#compiler/source-graph.js";
+import {
+  validateCompiledAgentManifest,
+  validateCompiledAgentResources,
+} from "#compiler/validate-artifact.js";
 
 /**
  * Stable manifest kind emitted by the compiler for runtime loading.
@@ -43,12 +54,12 @@ export const ROOT_COMPILED_AGENT_NODE_ID = "__root__";
 /**
  * Current compiled manifest schema version.
  */
-export const COMPILED_AGENT_MANIFEST_VERSION = 41;
+export const COMPILED_AGENT_MANIFEST_VERSION = 47;
 
 /**
  * Compiled channel entry preserved in the compiled manifest.
  */
-export type CompiledChannelEntry = CompiledChannelDefinition | DisabledCompiledChannelEntry;
+export type CompiledChannelEntry = CompiledChannelDefinition;
 
 /**
  * Active compiled channel entry — backed by an authored `Channel` module.
@@ -83,10 +94,24 @@ export interface CompiledChannelDefinition {
  * Disabled compiled channel entry — marker that an authored file at this
  * slug exported `disableRoute()` to remove the matching framework default.
  */
-interface DisabledCompiledChannelEntry {
-  readonly kind: "disabled";
-  readonly name: string;
-  readonly logicalPath: string;
+export interface CompiledChannelPreflightDefinition {
+  readonly cors: NormalizedChannelCorsOptions;
+  readonly method: "OPTIONS";
+  readonly sourceIds: readonly string[];
+  readonly urlPath: string;
+}
+
+export interface CompiledShadowedChannelRoute {
+  readonly method: ChannelRouteMethod;
+  readonly source: AgentSourceDescriptor;
+  readonly urlPath: string;
+  readonly winnerSourceId: string;
+}
+
+export interface CompiledChannelRoutePlan {
+  readonly effective: readonly CompiledChannelDefinition[];
+  readonly preflight: readonly CompiledChannelPreflightDefinition[];
+  readonly shadowed: readonly CompiledShadowedChannelRoute[];
 }
 
 /**
@@ -127,6 +152,7 @@ type CompiledAgentCompactionDefinition = Omit<InternalAgentCompactionDefinition,
  */
 type CompiledAgentDefinitionBase = Omit<InternalAgentDefinition, "model" | "compaction"> & {
   compaction?: CompiledAgentCompactionDefinition;
+  source: ModuleSourceRef;
 };
 
 export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
@@ -146,13 +172,24 @@ export type CompiledAgentDefinition = CompiledAgentDefinitionBase &
  * manifest.
  */
 export type CompiledInstructionsDefinition = InternalInstructionsDefinition &
-  (Omit<MarkdownSourceRef<undefined>, "definition"> | Omit<ModuleSourceRef, "exportName">);
+  (
+    | (Omit<MarkdownSourceRef<undefined>, "definition"> & {
+        readonly owner: AgentSourceOwner;
+      })
+    | Omit<ModuleSourceRef, "exportName">
+  );
 
 /**
  * Normalized authored skill preserved in the compiled manifest.
  */
 export type CompiledSkillDefinition = NamedSkillDefinition &
-  (Omit<MarkdownSourceRef<undefined>, "definition"> | ModuleSourceRef | SkillPackageSourceRef);
+  (
+    | (Omit<MarkdownSourceRef<undefined>, "definition"> & {
+        readonly owner: AgentSourceOwner;
+      })
+    | ModuleSourceRef
+    | (SkillPackageSourceRef & { readonly owner: AgentSourceOwner })
+  );
 
 /**
  * Normalized authored schedule preserved in the compiled manifest.
@@ -183,15 +220,29 @@ export type CompiledWorkspaceResourceRoot = z.infer<typeof compiledWorkspaceReso
  */
 export type CompiledConnectionDefinition = z.infer<typeof compiledConnectionDefinitionSchema>;
 
+/** Dynamic connection resolver source preserved for runtime evaluation. */
+export interface CompiledDynamicConnectionDefinition extends ModuleSourceRef {
+  readonly eventNames: readonly string[];
+  /** Map results from extensions receive this mount namespace. */
+  readonly extensionNamespace?: string;
+  readonly slug: string;
+}
+
 /**
  * Normalized authored tool metadata preserved in the compiled manifest.
  */
-export type CompiledToolDefinition = InternalToolDefinition & ModuleSourceRef;
+export type CompiledToolDefinition = InternalToolDefinition &
+  ModuleSourceRef & {
+    readonly behavior?: CompiledToolBehavior;
+    readonly hasExecute: boolean;
+    readonly hasModelOutputProjection: boolean;
+    readonly requiresApproval: boolean;
+  };
 
 /**
  * Serializable configuration for the experimental framework `Workflow` tool.
  */
-export interface CompiledWorkflowToolDefinition {
+export interface CompiledWorkflowToolDefinition extends ModuleSourceRef {
   readonly maxSubagents?: number;
 }
 
@@ -203,6 +254,7 @@ export interface CompiledWorkflowToolDefinition {
 export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
   readonly slug: string;
   readonly eventNames: readonly string[];
+  readonly rebindMissingCallbacks?: boolean;
   /**
    * Mount namespace when this resolver comes from an extension. The runtime
    * prefixes the names of tools the resolver produces (`forecast` →
@@ -210,6 +262,12 @@ export interface CompiledDynamicToolDefinition extends ModuleSourceRef {
    * other extension contribution. Absent for consumer-authored resolvers.
    */
   readonly extensionNamespace?: string;
+}
+
+export interface CompiledMemoryDefinition extends ModuleSourceRef {
+  readonly description?: string;
+  readonly slot: string;
+  readonly visibility: "scope" | "session";
 }
 
 /**
@@ -244,6 +302,7 @@ export interface CompiledDynamicInstructionsDefinition extends ModuleSourceRef {
  * resolution happens at runtime via {@link resolveHookDefinition}.
  */
 export interface CompiledHookDefinition extends ModuleSourceRef {
+  readonly eventNames: readonly string[];
   /**
    * Path-relative slug used for diagnostics and ordering. Derived from
    * the authored file's logical path
@@ -263,8 +322,11 @@ export type CompiledAgentResources = z.infer<typeof compiledAgentResourcesSchema
 export type CompiledSubagentNode = Readonly<
   ModuleSourceRef &
     Node & {
+      backing: { readonly kind: "resource"; readonly sourcePath: string };
       entryPath: string;
       name: string;
+      owner: AgentSourceOwner;
+      parentNodeId: string;
       rootPath: string;
     } & (
       | {
@@ -283,17 +345,21 @@ export type CompiledSubagentNode = Readonly<
 export type { CompiledRemoteAgentNode } from "#compiler/remote-agent-node.js";
 
 /**
- * Parent-child edge connecting two compiled agent nodes.
- */
-export interface CompiledSubagentEdge {
-  readonly childNodeId: string;
-  readonly parentNodeId: string;
-}
-
-/**
  * Versioned compiled manifest emitted by the compiler and loaded by runtime.
  */
 export type CompiledAgentManifest = z.infer<typeof compiledAgentManifestSchema>;
+
+const agentSourceOwnerSchema: z.ZodType<AgentSourceOwner> = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("application") }).strict(),
+  z.object({ feature: z.string().min(1), kind: z.literal("framework") }).strict(),
+  z
+    .object({
+      kind: z.literal("extension"),
+      namespace: z.string().min(1),
+      packageName: z.string().min(1),
+    })
+    .strict(),
+]);
 
 const moduleSourceRefSchema: z.ZodType<ModuleSourceRef> = z
   .object({
@@ -301,6 +367,89 @@ const moduleSourceRefSchema: z.ZodType<ModuleSourceRef> = z
     sourceKind: z.literal("module"),
     logicalPath: z.string(),
     sourceId: z.string(),
+  })
+  .strict();
+
+const filesystemModuleBackingSchema = z
+  .object({
+    externalDependencies: z.array(z.string()).readonly(),
+    extensionScope: z.object({ namespace: z.string(), sourceRoot: z.string() }).strict().optional(),
+    kind: z.literal("filesystem"),
+    sourcePath: z.string(),
+  })
+  .strict();
+
+const programmaticModuleBackingSchema = z
+  .object({
+    dependencies: z.record(z.string(), z.string()).readonly().optional(),
+    kind: z.literal("programmatic"),
+    moduleId: z.string(),
+    parameters: jsonObjectSchema.optional(),
+    registryId: z.string(),
+    revision: z.string(),
+    semanticRevision: z.string().optional(),
+  })
+  .strict();
+
+const resourceSourceBackingSchema = z
+  .object({ kind: z.literal("resource"), sourcePath: z.string() })
+  .strict();
+
+const agentModuleBackingSchema: z.ZodType<AgentModuleBacking> = z.discriminatedUnion("kind", [
+  filesystemModuleBackingSchema,
+  programmaticModuleBackingSchema,
+]);
+
+const compiledModuleBindingSchema: z.ZodType<CompiledModuleBinding> = z
+  .object({
+    backing: agentModuleBackingSchema,
+    logicalPath: z.string(),
+    owner: agentSourceOwnerSchema,
+    usage: z
+      .object({
+        compile: z.boolean(),
+        runtimeEntry: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const agentSourceDescriptorSchema: z.ZodType<AgentSourceDescriptor> = z
+  .object({
+    backing: z.discriminatedUnion("kind", [
+      filesystemModuleBackingSchema,
+      programmaticModuleBackingSchema,
+      resourceSourceBackingSchema,
+    ]),
+    form: z.enum(["derived", "direct"]),
+    layer: z.enum(["framework-default", "extension-package", "extension-override", "application"]),
+    logicalPath: z.string(),
+    owner: agentSourceOwnerSchema,
+    sourceId: z.string(),
+  })
+  .strict();
+
+const agentSourceCompositionSchema: z.ZodType<AgentSourceComposition> = z
+  .object({
+    entries: z
+      .array(
+        z.discriminatedUnion("kind", [
+          z
+            .object({
+              kind: z.literal("shadowed"),
+              source: agentSourceDescriptorSchema,
+              winnerSourceId: z.string(),
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.literal("disabled"),
+              source: agentSourceDescriptorSchema,
+            })
+            .strict(),
+        ]),
+      )
+      .readonly(),
   })
   .strict();
 
@@ -357,18 +506,31 @@ const compiledChannelDefinitionSchema = z
   })
   .strict();
 
-const disabledCompiledChannelEntrySchema = z
+const compiledChannelPreflightDefinitionSchema: z.ZodType<CompiledChannelPreflightDefinition> = z
   .object({
-    kind: z.literal("disabled"),
-    name: z.string(),
-    logicalPath: z.string(),
+    cors: compiledChannelCorsSchema,
+    method: z.literal("OPTIONS"),
+    sourceIds: z.array(z.string()).readonly(),
+    urlPath: z.string(),
   })
   .strict();
 
-const compiledChannelEntrySchema = z.union([
-  compiledChannelDefinitionSchema,
-  disabledCompiledChannelEntrySchema,
-]) as unknown as z.ZodType<CompiledChannelEntry>;
+const compiledShadowedChannelRouteSchema: z.ZodType<CompiledShadowedChannelRoute> = z
+  .object({
+    method: channelMethodSchema,
+    source: agentSourceDescriptorSchema,
+    urlPath: z.string(),
+    winnerSourceId: z.string(),
+  })
+  .strict();
+
+const compiledChannelRoutePlanSchema: z.ZodType<CompiledChannelRoutePlan> = z
+  .object({
+    effective: z.array(compiledChannelDefinitionSchema).readonly(),
+    preflight: z.array(compiledChannelPreflightDefinitionSchema).readonly(),
+    shadowed: z.array(compiledShadowedChannelRouteSchema).readonly(),
+  })
+  .strict();
 
 const modelRoutingSchema = z.union([
   z
@@ -431,7 +593,11 @@ const compiledAgentLimitsDefinitionSchema = z
 
 const compiledWorkflowToolDefinitionSchema: z.ZodType<CompiledWorkflowToolDefinition> = z
   .object({
+    exportName: z.string().optional(),
+    logicalPath: z.string(),
     maxSubagents: z.number().int().positive().optional(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
   })
   .strict();
 
@@ -442,7 +608,6 @@ const compiledAgentConfigBaseFields = {
   experimental: z
     .object({
       instrumentationProviders: z.boolean().optional(),
-      subagentPersistentSessions: z.boolean().optional(),
       tasks: z.boolean().optional(),
       workflow: compiledAgentWorkflowDefinitionSchema.optional(),
     })
@@ -453,7 +618,7 @@ const compiledAgentConfigBaseFields = {
   reasoning: z
     .enum(["provider-default", "none", "minimal", "low", "medium", "high", "xhigh"])
     .optional(),
-  source: moduleSourceRefSchema.optional(),
+  source: moduleSourceRefSchema,
   limits: compiledAgentLimitsDefinitionSchema.optional(),
 };
 
@@ -472,16 +637,32 @@ const compiledAgentConfigSchema: z.ZodType<CompiledAgentDefinition> = z.union([
     .strict(),
 ]);
 
-const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z
-  .object({
-    content: z.string(),
-    name: z.string(),
-    logicalPath: z.string(),
-    role: z.enum(["system", "user"]),
-    sourceId: z.string(),
-    sourceKind: z.union([z.literal("markdown"), z.literal("module")]),
-  })
-  .strict();
+const compiledInstructionsBaseFields = {
+  content: z.string(),
+  name: z.string(),
+  logicalPath: z.string(),
+  role: z.enum(["system", "user"]),
+  sourceId: z.string(),
+};
+
+const compiledInstructionsSchema: z.ZodType<CompiledInstructionsDefinition> = z.discriminatedUnion(
+  "sourceKind",
+  [
+    z
+      .object({
+        ...compiledInstructionsBaseFields,
+        owner: agentSourceOwnerSchema,
+        sourceKind: z.literal("markdown"),
+      })
+      .strict(),
+    z
+      .object({
+        ...compiledInstructionsBaseFields,
+        sourceKind: z.literal("module"),
+      })
+      .strict(),
+  ],
+);
 
 const compiledSkillBaseFields = {
   name: z.string(),
@@ -499,6 +680,7 @@ const compiledSkillSourceSchema: z.ZodType<CompiledSkillDefinition> = z.discrimi
     z
       .object({
         ...compiledSkillBaseFields,
+        owner: agentSourceOwnerSchema,
         sourceKind: z.literal("markdown"),
       })
       .strict(),
@@ -512,6 +694,7 @@ const compiledSkillSourceSchema: z.ZodType<CompiledSkillDefinition> = z.discrimi
     z
       .object({
         ...compiledSkillBaseFields,
+        owner: agentSourceOwnerSchema,
         sourceKind: z.literal("skill-package"),
         skillId: z.string(),
         skillFilePath: z.string(),
@@ -524,17 +707,30 @@ const compiledSkillSourceSchema: z.ZodType<CompiledSkillDefinition> = z.discrimi
   ],
 );
 
-const compiledScheduleDefinitionSchema = z
-  .object({
-    cron: z.string(),
-    hasRun: z.boolean(),
-    name: z.string(),
-    logicalPath: z.string(),
-    markdown: z.string().optional(),
-    sourceId: z.string(),
-    sourceKind: z.union([z.literal("markdown"), z.literal("module")]),
-  })
-  .strict();
+const compiledScheduleBaseFields = {
+  cron: z.string(),
+  hasRun: z.boolean(),
+  name: z.string(),
+  logicalPath: z.string(),
+  markdown: z.string().optional(),
+  sourceId: z.string(),
+};
+
+const compiledScheduleDefinitionSchema = z.discriminatedUnion("sourceKind", [
+  z
+    .object({
+      ...compiledScheduleBaseFields,
+      owner: agentSourceOwnerSchema,
+      sourceKind: z.literal("markdown"),
+    })
+    .strict(),
+  z
+    .object({
+      ...compiledScheduleBaseFields,
+      sourceKind: z.literal("module"),
+    })
+    .strict(),
+]);
 
 const compiledSandboxDefinitionSchema = z
   .object({
@@ -611,15 +807,68 @@ const compiledConnectionDefinitionSchema = z
   })
   .strict();
 
+const compiledDynamicConnectionDefinitionSchema: z.ZodType<CompiledDynamicConnectionDefinition> = z
+  .object({
+    eventNames: z.array(z.string()).readonly(),
+    exportName: z.string().optional(),
+    extensionNamespace: z.string().optional(),
+    logicalPath: z.string(),
+    slug: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+  })
+  .strict();
+
+const compiledToolBehaviorSchema: z.ZodType<CompiledToolBehavior> = z
+  .object({
+    availability: z
+      .array(z.enum(["delegated-task-child", "requires-request-input", "root-session"]))
+      .readonly(),
+    handling: z
+      .discriminatedUnion("kind", [
+        z
+          .object({
+            action: z.enum(["self-agent", "task-cancel", "task-update"]),
+            kind: z.literal("dispatch"),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("provider-tool"),
+            provider: z.enum(["exa", "parallel"]),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("request-input"),
+            request: z.literal("question"),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("workflow-tool"),
+            workflowId: z.string(),
+          })
+          .strict(),
+      ])
+      .optional(),
+    presentation: z.literal("load-skill").optional(),
+  })
+  .strict();
+
 const compiledToolDefinitionSchema = z
   .object({
+    behavior: compiledToolBehaviorSchema.optional(),
     description: z.string(),
     execution: z.literal("background").optional(),
     exportName: z.string().optional(),
+    hasExecute: z.boolean(),
+    hasModelOutputProjection: z.boolean(),
     inputSchema: jsonObjectSchema.nullable(),
     logicalPath: z.string(),
     name: z.string(),
     outputSchema: jsonObjectSchema.optional(),
+    requiresApproval: z.boolean(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
   })
@@ -631,9 +880,22 @@ const compiledDynamicToolDefinitionSchema: z.ZodType<CompiledDynamicToolDefiniti
     exportName: z.string().optional(),
     extensionNamespace: z.string().optional(),
     logicalPath: z.string(),
+    rebindMissingCallbacks: z.boolean().optional(),
     slug: z.string(),
     sourceId: z.string(),
     sourceKind: z.literal("module"),
+  })
+  .strict();
+
+const compiledMemoryDefinitionSchema: z.ZodType<CompiledMemoryDefinition> = z
+  .object({
+    description: z.string().optional(),
+    exportName: z.string().optional(),
+    logicalPath: z.string(),
+    slot: z.string(),
+    sourceId: z.string(),
+    sourceKind: z.literal("module"),
+    visibility: z.enum(["scope", "session"]),
   })
   .strict();
 
@@ -663,6 +925,7 @@ const compiledDynamicInstructionsDefinitionSchema: z.ZodType<CompiledDynamicInst
 
 const compiledHookDefinitionSchema: z.ZodType<CompiledHookDefinition> = z
   .object({
+    eventNames: z.array(z.string()).readonly(),
     exportName: z.string().optional(),
     logicalPath: z.string(),
     slug: z.string(),
@@ -689,23 +952,26 @@ const compiledExtensionMountSchema: z.ZodType<CompiledExtensionMount> = z
 const compiledAgentResourceFields = {
   agentRoot: z.string(),
   appRoot: z.string(),
-  channels: z.array(compiledChannelEntrySchema),
+  bindings: z.record(z.string(), compiledModuleBindingSchema),
+  channelRoutes: compiledChannelRoutePlanSchema,
   connections: z.array(compiledConnectionDefinitionSchema),
+  dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
   diagnosticsSummary: discoverDiagnosticsSummarySchema,
-  disabledFrameworkTools: z.array(z.string()).readonly(),
+  sourceComposition: agentSourceCompositionSchema,
   workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
-  webSearchProvider: z.enum(["exa", "parallel"]).optional(),
   dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
   dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
   dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
   extensionMounts: z.array(compiledExtensionMountSchema).default([]),
   hooks: z.array(compiledHookDefinitionSchema),
-  sandbox: compiledSandboxDefinitionSchema.nullable(),
+  memories: z.array(compiledMemoryDefinitionSchema).default([]),
+  sandbox: compiledSandboxDefinitionSchema,
   sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
   schedules: z.array(compiledScheduleDefinitionSchema),
   remoteAgents: z.array(compiledRemoteAgentNodeSchema),
   skills: z.array(compiledSkillSourceSchema).readonly(),
   instructions: z.array(compiledInstructionsSchema).readonly().default([]),
+  instrumentation: moduleSourceRefSchema.optional(),
   tools: z.array(compiledToolDefinitionSchema),
   workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
 };
@@ -720,10 +986,13 @@ const compiledAgentNodeManifestSchema = z
   .strict();
 
 const compiledSubagentNodeBaseFields = {
+  backing: resourceSourceBackingSchema,
   entryPath: z.string(),
   logicalPath: z.string(),
   name: z.string(),
   nodeId: z.string(),
+  owner: agentSourceOwnerSchema,
+  parentNodeId: z.string(),
   rootPath: z.string(),
   sourceId: z.string(),
   sourceKind: z.literal("module"),
@@ -755,13 +1024,6 @@ const compiledSubagentNodeSchema: z.ZodType<CompiledSubagentNode> = z.union([
     })
     .strict(),
 ]);
-
-const compiledSubagentEdgeSchema: z.ZodType<CompiledSubagentEdge> = z
-  .object({
-    childNodeId: z.string(),
-    parentNodeId: z.string(),
-  })
-  .strict();
 
 /**
  * One mounted extension recorded on a compiled agent manifest. The runtime
@@ -797,27 +1059,29 @@ export const compiledAgentManifestSchema = z
   .object({
     agentRoot: z.string(),
     appRoot: z.string(),
+    bindings: z.record(z.string(), compiledModuleBindingSchema),
     extensionMounts: z.array(compiledExtensionMountSchema).default([]),
-    channels: z.array(compiledChannelEntrySchema),
+    channelRoutes: compiledChannelRoutePlanSchema,
     config: compiledAgentConfigSchema,
     connections: z.array(compiledConnectionDefinitionSchema),
+    dynamicConnections: z.array(compiledDynamicConnectionDefinitionSchema).default([]),
     diagnosticsSummary: discoverDiagnosticsSummarySchema,
-    disabledFrameworkTools: z.array(z.string()).readonly(),
+    sourceComposition: agentSourceCompositionSchema,
     workflowTool: compiledWorkflowToolDefinitionSchema.optional(),
-    webSearchProvider: z.enum(["exa", "parallel"]).optional(),
     dynamicInstructions: z.array(compiledDynamicInstructionsDefinitionSchema).default([]),
     dynamicSkills: z.array(compiledDynamicSkillDefinitionSchema).default([]),
     dynamicTools: z.array(compiledDynamicToolDefinitionSchema).default([]),
     hooks: z.array(compiledHookDefinitionSchema),
+    memories: z.array(compiledMemoryDefinitionSchema).default([]),
     kind: z.literal(COMPILED_AGENT_MANIFEST_KIND),
     remoteAgents: z.array(compiledRemoteAgentNodeSchema),
-    sandbox: compiledSandboxDefinitionSchema.nullable(),
+    sandbox: compiledSandboxDefinitionSchema,
     sandboxWorkspaces: z.array(compiledSandboxWorkspaceSchema),
     schedules: z.array(compiledScheduleDefinitionSchema),
     skills: z.array(compiledSkillSourceSchema).readonly(),
-    subagentEdges: z.array(compiledSubagentEdgeSchema),
     subagents: z.array(compiledSubagentNodeSchema),
     instructions: z.array(compiledInstructionsSchema).readonly().default([]),
+    instrumentation: moduleSourceRefSchema.optional(),
     tools: z.array(compiledToolDefinitionSchema),
     version: z.literal(COMPILED_AGENT_MANIFEST_VERSION),
     workspaceResourceRoot: compiledWorkspaceResourceRootSchema,
@@ -827,23 +1091,26 @@ export const compiledAgentManifestSchema = z
 export interface CreateCompiledAgentResourcesInput {
   readonly agentRoot: string;
   readonly appRoot: string;
-  readonly channels?: readonly CompiledChannelEntry[];
+  readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
+  readonly channelRoutes: CompiledChannelRoutePlan;
   readonly connections?: readonly CompiledConnectionDefinition[];
+  readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
-  readonly disabledFrameworkTools?: readonly string[];
+  readonly sourceComposition: AgentSourceComposition;
   readonly workflowTool?: CompiledWorkflowToolDefinition;
-  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly extensionMounts?: readonly CompiledExtensionMount[];
   readonly hooks?: readonly CompiledHookDefinition[];
+  readonly memories?: readonly CompiledMemoryDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
-  readonly sandbox?: CompiledSandboxDefinition | null;
+  readonly sandbox: CompiledSandboxDefinition;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
   readonly instructions?: readonly CompiledInstructionsDefinition[];
+  readonly instrumentation?: ModuleSourceRef;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }
@@ -855,26 +1122,32 @@ export function createCompiledAgentResources(
   const resources: CompiledAgentResources = {
     agentRoot: input.agentRoot,
     appRoot: input.appRoot,
-    channels: [...(input.channels ?? [])],
+    bindings: { ...input.bindings },
+    channelRoutes: {
+      effective: [...input.channelRoutes.effective],
+      preflight: [...input.channelRoutes.preflight],
+      shadowed: [...input.channelRoutes.shadowed],
+    },
     connections: [...(input.connections ?? [])],
+    dynamicConnections: [...(input.dynamicConnections ?? [])],
     diagnosticsSummary: input.diagnosticsSummary ?? {
       errors: 0,
       warnings: 0,
     },
-    disabledFrameworkTools: [...(input.disabledFrameworkTools ?? [])],
-    workflowTool:
-      input.workflowTool === undefined
-        ? undefined
-        : { maxSubagents: input.workflowTool.maxSubagents },
-    webSearchProvider: input.webSearchProvider,
+    sourceComposition: {
+      entries: [...input.sourceComposition.entries],
+    },
+    workflowTool: input.workflowTool === undefined ? undefined : { ...input.workflowTool },
     dynamicInstructions: [...(input.dynamicInstructions ?? [])],
     dynamicSkills: [...(input.dynamicSkills ?? [])],
     dynamicTools: [...(input.dynamicTools ?? [])],
     extensionMounts: [...(input.extensionMounts ?? [])],
     hooks: [...(input.hooks ?? [])],
+    memories: [...(input.memories ?? [])],
     instructions: [...(input.instructions ?? [])],
+    instrumentation: input.instrumentation === undefined ? undefined : { ...input.instrumentation },
     remoteAgents: [...(input.remoteAgents ?? [])],
-    sandbox: input.sandbox ?? null,
+    sandbox: input.sandbox,
     sandboxWorkspaces: [...(input.sandboxWorkspaces ?? [])],
     schedules: [...(input.schedules ?? [])],
     skills: [...(input.skills ?? [])],
@@ -895,10 +1168,12 @@ export function createCompiledAgentResources(
 export function createCompiledAgentNodeManifest(
   input: CreateCompiledAgentResourcesInput & { readonly config: CompiledAgentDefinition },
 ): CompiledAgentNodeManifest {
-  return {
+  const manifest = {
     ...createCompiledAgentResources(input),
     config: cloneCompiledAgentDefinition(input.config),
   };
+  validateCompiledAgentResources(manifest, { allowUnknownResourceWinners: true });
+  return manifest;
 }
 
 function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): CompiledAgentDefinition {
@@ -925,7 +1200,6 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
         ? undefined
         : {
             instrumentationProviders: config.experimental.instrumentationProviders,
-            subagentPersistentSessions: config.experimental.subagentPersistentSessions,
             tasks: config.experimental.tasks,
             workflow:
               config.experimental.workflow === undefined
@@ -945,12 +1219,7 @@ function cloneCompiledAgentDefinition(config: CompiledAgentDefinition): Compiled
             maxOutputTokensPerSession: config.limits.maxOutputTokensPerSession,
             sessionTimeoutMs: config.limits.sessionTimeoutMs,
           },
-    source:
-      config.source === undefined
-        ? undefined
-        : {
-            ...config.source,
-          },
+    source: { ...config.source },
   };
 
   if (config.dynamicModel !== undefined) {
@@ -1007,35 +1276,39 @@ export function createCompiledSubagentNodeId(parentNodeId: string, sourceId: str
 export function createCompiledAgentManifest(input: {
   readonly agentRoot: string;
   readonly appRoot: string;
-  readonly channels?: readonly CompiledChannelEntry[];
+  readonly bindings: Readonly<Record<string, CompiledModuleBinding>>;
+  readonly channelRoutes: CompiledChannelRoutePlan;
   readonly config: CompiledAgentDefinition;
   readonly connections?: readonly CompiledConnectionDefinition[];
+  readonly dynamicConnections?: readonly CompiledDynamicConnectionDefinition[];
   readonly diagnosticsSummary?: DiscoverDiagnosticsSummary;
-  readonly disabledFrameworkTools?: readonly string[];
+  readonly sourceComposition: AgentSourceComposition;
   readonly workflowTool?: CompiledWorkflowToolDefinition;
-  readonly webSearchProvider?: WebSearchProvider;
+  readonly dynamicInstructions?: readonly CompiledDynamicInstructionsDefinition[];
   readonly dynamicSkills?: readonly CompiledDynamicSkillDefinition[];
   readonly dynamicTools?: readonly CompiledDynamicToolDefinition[];
   readonly hooks?: readonly CompiledHookDefinition[];
   readonly remoteAgents?: readonly CompiledRemoteAgentNode[];
-  readonly sandbox?: CompiledSandboxDefinition | null;
+  readonly sandbox: CompiledSandboxDefinition;
   readonly sandboxWorkspaces?: readonly CompiledSandboxWorkspace[];
   readonly schedules?: readonly CompiledScheduleDefinition[];
   readonly skills?: readonly CompiledSkillDefinition[];
-  readonly subagentEdges?: readonly CompiledSubagentEdge[];
   readonly subagents?: readonly CompiledSubagentNode[];
   readonly instructions?: readonly CompiledInstructionsDefinition[];
+  readonly instrumentation?: ModuleSourceRef;
   readonly tools?: readonly CompiledToolDefinition[];
   readonly extensionMounts?: readonly CompiledExtensionMount[];
+  readonly workspaceResourceRoot?: CompiledWorkspaceResourceRoot;
 }): CompiledAgentManifest {
-  return {
+  const manifest: CompiledAgentManifest = {
     ...createCompiledAgentNodeManifest(input),
     kind: COMPILED_AGENT_MANIFEST_KIND,
     extensionMounts: [...(input.extensionMounts ?? [])],
-    subagentEdges: [...(input.subagentEdges ?? [])],
     subagents: [...(input.subagents ?? [])],
     version: COMPILED_AGENT_MANIFEST_VERSION,
   };
+  validateCompiledAgentManifest(manifest);
+  return manifest;
 }
 
 function cloneCompiledRuntimeModelReference(

@@ -1,8 +1,11 @@
-import type { HarnessRuntimeActionDefinition } from "#harness/execute-tool.js";
-import { getRuntimeActionRequestKey } from "#runtime/actions/keys.js";
-import type { RuntimeActionRequest } from "#runtime/actions/types.js";
+import { getPendingDispatchActionKey } from "#runtime/actions/keys.js";
+import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 import type { JsonObject } from "#shared/json.js";
-import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
+import {
+  getWorkflowSandboxPendingInterrupts,
+  type WorkflowSandboxInterrupt,
+} from "#shared/workflow-sandbox.js";
+import type { PreparedDispatchTarget } from "#tools/behavior.js";
 
 export const WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND = "eve.workflow-runtime-action";
 
@@ -16,74 +19,43 @@ export function isWorkflowRuntimeActionInterrupt(interrupt: unknown): boolean {
 
 export function buildRuntimeActionFromWorkflowInterrupt(
   interrupt: WorkflowSandboxInterrupt,
-): RuntimeActionRequest {
+): PendingDispatchAction {
   const raw = interrupt.payload as Record<string, unknown>;
-  const runtimeAction = raw.runtimeAction as HarnessRuntimeActionDefinition;
+  const dispatchTarget = raw.dispatchTarget as PreparedDispatchTarget;
   const toolInput = raw.toolInput as JsonObject;
   const toolName = raw.toolName as string;
   const interruptId = "interruptId" in interrupt ? String(interrupt.interruptId) : "";
   const callId = sanitizeCallId(`${toolName}_${interruptId}`);
 
-  if (runtimeAction.kind === "remote-agent-call") {
+  if (
+    dispatchTarget.kind === "self-agent-call" ||
+    dispatchTarget.kind === "subagent-call" ||
+    dispatchTarget.kind === "remote-agent-call"
+  ) {
     return {
       callId,
       description: "",
       input: toolInput,
-      kind: "remote-agent-call",
-      name: toolName,
-      nodeId: runtimeAction.nodeId,
-      remoteAgentName: runtimeAction.remoteAgentName ?? toolName,
-    };
-  }
-
-  if (runtimeAction.kind === "subagent-call") {
-    return {
-      callId,
-      description: "",
-      input: toolInput,
-      kind: "subagent-call",
-      name: toolName,
-      nodeId: runtimeAction.nodeId,
-      subagentName: runtimeAction.subagentName,
+      target: dispatchTarget,
+      toolName,
     };
   }
 
   // Dynamic workflows only interrupt on delegation tools; task controls
   // never enter a workflow sandbox.
-  throw new Error(`Workflow runtime actions cannot carry "${runtimeAction.kind}" tools.`);
+  throw new Error(`Workflow runtime actions cannot carry "${dispatchTarget.kind}" tools.`);
 }
 
-/** Returns every pending runtime-action interrupt in deterministic ledger order. */
+/** Returns every pending runtime-action interrupt in deterministic request order. */
 export function getWorkflowRuntimeActionInterrupts(
   interrupt: WorkflowSandboxInterrupt,
 ): WorkflowSandboxInterrupt[] {
-  return interrupt.continuation.ledger.flatMap((entry) => {
-    if (
-      entry.kind !== "tool" ||
-      entry.status !== "interrupted" ||
-      entry.interruptPayload.kind !== WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND
-    ) {
-      return [];
-    }
-
-    return [
-      {
-        continuation: interrupt.continuation,
-        input: entry.inputJson === "" ? undefined : JSON.parse(entry.inputJson),
-        interruptId: entry.interruptId,
-        outerToolCallId: interrupt.continuation.outerToolCallId,
-        payload: entry.interruptPayload,
-        toolCallId: entry.toolCallId,
-        toolName: entry.name,
-        type: "code-mode-interrupt" as const,
-      },
-    ];
-  });
+  return getWorkflowSandboxPendingInterrupts(interrupt).filter(isWorkflowRuntimeActionInterrupt);
 }
 
 export function buildRuntimeActionsFromWorkflowInterrupt(
   interrupt: WorkflowSandboxInterrupt,
-): RuntimeActionRequest[] {
+): PendingDispatchAction[] {
   return getWorkflowRuntimeActionInterrupts(interrupt).map((pending) =>
     buildRuntimeActionFromWorkflowInterrupt(pending),
   );
@@ -92,7 +64,7 @@ export function buildRuntimeActionsFromWorkflowInterrupt(
 export function getRuntimeActionKeysFromWorkflowInterrupt(
   interrupt: WorkflowSandboxInterrupt,
 ): string[] {
-  return buildRuntimeActionsFromWorkflowInterrupt(interrupt).map(getRuntimeActionRequestKey);
+  return buildRuntimeActionsFromWorkflowInterrupt(interrupt).map(getPendingDispatchActionKey);
 }
 
 function sanitizeCallId(id: string): string {

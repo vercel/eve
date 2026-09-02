@@ -20,7 +20,7 @@ const alternateRepresentationPattern = /\.(?:md|mdx|txt|xml)$/i;
 
 const isIndexableHtmlPath = (pathname: string): boolean =>
   pathname === "/" ||
-  pathname === "/evals" ||
+  pathname === "/benchmarks" ||
   pathname === "/integrations" ||
   pathname === "/templates" ||
   /^\/docs\/.+/.test(pathname) ||

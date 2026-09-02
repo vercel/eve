@@ -244,7 +244,7 @@ export function accumulateTurnUsage(input: {
  * Folds a delegated child session's reported totals into the parent's
  * session totals without touching the in-flight turn totals. Turn tags
  * attribute only the parent's own model calls (child spend is attributed by
- * the caller-side `invoke_agent` span); session totals feed the session
+ * the caller's durable `agent.action` span); session totals feed the session
  * token limits and the remaining-quota budget granted to later delegations.
  */
 export function accumulateSessionUsage(input: {

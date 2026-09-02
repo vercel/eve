@@ -6,6 +6,7 @@
     "---Build---",
     "agent-config",
     "instructions",
+    "memory",
     "tools",
     "connections",
     "channels",
@@ -34,6 +35,6 @@
     "patterns",
     "...reference",
     "responsible-use",
-    "[Benchmarks](/evals)"
+    "[Benchmarks](/benchmarks)"
   ]
 }

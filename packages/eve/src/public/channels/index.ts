@@ -1,6 +1,9 @@
 export {
   defineChannel,
+  disableRoute,
   GET,
+  HEAD,
+  OPTIONS,
   POST,
   PUT,
   PATCH,
@@ -23,6 +26,7 @@ export {
   type ChannelCors,
   type ChannelCorsOptions,
   type ChannelDefinition,
+  type DisabledRouteSentinel,
   type ChannelContinuationOps,
   type ChannelEvents,
   type InferChannelMetadata,
@@ -42,6 +46,7 @@ export {
   type WebSocketRouteHooks,
   type WebSocketUpgradeRequest,
   type WebSocketUpgradeResult,
+  isDisabledRouteSentinel,
 } from "#public/definitions/channel.js";
 export {
   createWebSocketUpgradeServer,

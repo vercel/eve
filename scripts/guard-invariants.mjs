@@ -92,27 +92,29 @@
  *             authoring roots, every historical epoch must be supported or
  *             dropped, every retained epoch needs a compiling fixture, and
  *             every public authoring value must belong to a capability.
- *   rule 37 — The instrumentation lifecycle contract stays provider-neutral.
- *             `harness/instrumentation/lifecycle.ts` must not import from
- *             `ai`: its event payloads are eve's published shape, so deriving
- *             them from the model SDK's callback types would make an SDK
- *             upgrade a breaking change for every provider. Map at the bridge.
+ *   rule 37 — Instrumentation ownership stays provider-neutral and outside the
+ *             harness. The lifecycle contract must not import from `ai`, harness
+ *             code may import only runtime facade types, and execution may use
+ *             only runtime entrypoints and cancellation-state preservation.
  *   rule 38 — Workspace build scripts must not launch a nested
  *             `pnpm --filter eve build`. Turbo owns workspace dependency
  *             ordering; nested builds race on eve's clean-and-publish dist
  *             directory and let consumers observe a partial package.
- *   rule 40 — Every shipped wire-version module
- *             (`src/execution/wire/*-wire.vN.ts`) must carry a colocated
- *             `*-wire.vN.test.ts`. The session-inbox registry must also be
- *             contiguous, name every module, and identify its highest version
- *             as current. Version modules are append-only protocol history;
- *             the paired test pins that version's schema/encoder or
- *             migration/fixtures so a version cannot exist as untested code.
+ *   rule 40 — Wire schemas and version-bound encoders are immutable protocol
+ *             data. Pure `*.vN.migration.ts` transforms are immutable data too;
+ *             version selection, chain assembly, and realm normalization remain
+ *             editable policy. Every data module must carry a colocated test.
+ *             The session-inbox registry must be contiguous, name every schema
+ *             module, and identify its highest version as current. Wire versions
+ *             are append-only protocol history: change the contract by adding a
+ *             version and migration, never by updating historical data and its
+ *             snapshot together.
  *
  * Baselines for rules with pre-existing violations live in
  * `guard-invariants-baseline.json`. Counts and allowlists in that file
  * may only shrink (as offenders are removed) — they may never grow.
  */
+import { execFileSync } from "node:child_process";
 import { glob, readFile, readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -302,6 +304,10 @@ const WORKFLOW_QUEUE_NAMESPACE_MODULE = "packages/eve/src/internal/workflow/queu
  * @param {Violation[]} violations
  */
 function checkRule33(posix, lines, violations) {
+  // The single-runtime-identity boundary is eve's own source. Application code
+  // (fixtures, templates) legitimately imports the public `workflow/api`
+  // surface, which eve's bundler resolves to its own runtime.
+  if (!posix.startsWith("packages/eve/src/")) return;
   lines.forEach((line, idx) => {
     const isTypeOnlyImport = /^\s*(?:import|export)\s+type\b/.test(line);
     const isRuntimeImport =
@@ -356,7 +362,23 @@ function checkRule35(posix, lines, violations) {
 
 // ---------- Rule 37: instrumentation lifecycle provider boundary ----------
 
-const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumentation/lifecycle.ts";
+const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/instrumentation/lifecycle.ts";
+const HARNESS_RUNTIME_IMPORTS = new Map([
+  ["InstrumentationAttempt", "type"],
+  ["InstrumentationStepScope", "type"],
+  ["SessionInstrumentation", "type"],
+]);
+const EXECUTION_INSTRUMENTATION_IMPORTS = new Map([
+  [
+    "#instrumentation/runtime.js",
+    new Map([
+      ["bindSessionInstrumentation", "value"],
+      ["ExecutionInstrumentation", "type"],
+      ["initializeSessionInstrumentation", "value"],
+    ]),
+  ],
+  ["#instrumentation/state.js", new Map([["preserveSerializedInstrumentationState", "value"]])],
+]);
 
 /**
  * @param {string} posix
@@ -364,7 +386,15 @@ const INSTRUMENTATION_LIFECYCLE_CONTRACT = "packages/eve/src/harness/instrumenta
  * @param {Violation[]} violations
  */
 function checkRule37(posix, source, violations) {
-  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT) return;
+  const productionHarness =
+    posix.startsWith("packages/eve/src/harness/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  const productionExecution =
+    posix.startsWith("packages/eve/src/execution/") &&
+    !/\.(?:test|integration\.test|scenario\.test)\.ts$/.test(posix);
+  if (posix !== INSTRUMENTATION_LIFECYCLE_CONTRACT && !productionHarness && !productionExecution) {
+    return;
+  }
 
   const sourceFile = ts.createSourceFile(
     posix,
@@ -375,7 +405,11 @@ function checkRule37(posix, source, violations) {
   );
   const visit = (node) => {
     const specifier = importSpecifier(node);
-    if (specifier !== undefined && (specifier.text === "ai" || specifier.text.startsWith("ai/"))) {
+    if (
+      posix === INSTRUMENTATION_LIFECYCLE_CONTRACT &&
+      specifier !== undefined &&
+      (specifier.text === "ai" || specifier.text.startsWith("ai/"))
+    ) {
       violations.push({
         rule: 37,
         file: posix,
@@ -383,9 +417,84 @@ function checkRule37(posix, source, violations) {
         message: `imports from "ai". Lifecycle event payloads are eve's own shape, so an AI SDK type reaching them makes an SDK upgrade a breaking change for every provider. Add an eve type here and map to it in ai-sdk-hook-bridge.ts.`,
       });
     }
+    if (
+      productionHarness &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      specifier.text !== "#instrumentation/runtime.js"
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Harness code may consume instrumentation only through the bound SessionInstrumentation facade from "#instrumentation/runtime.js".`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#tracing/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports "${specifier.text}" directly. Tracing implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionHarness &&
+      specifier?.text === "#instrumentation/runtime.js" &&
+      !hasOnlyAllowedNamedImports(node, HARNESS_RUNTIME_IMPORTS)
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation runtime bindings. Harness code may use only the SessionInstrumentation, InstrumentationStepScope, and InstrumentationAttempt types.`,
+      });
+    }
+    if (productionHarness && specifier?.text.startsWith("#compiled/@opentelemetry/") === true) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports OpenTelemetry directly. OTel implementation belongs behind the bound instrumentation facade.`,
+      });
+    }
+    if (
+      productionExecution &&
+      specifier?.text.startsWith("#instrumentation/") === true &&
+      !hasOnlyAllowedNamedImports(
+        node,
+        EXECUTION_INSTRUMENTATION_IMPORTS.get(specifier.text) ?? new Map(),
+      )
+    ) {
+      violations.push({
+        rule: 37,
+        file: posix,
+        line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+        message: `imports unsupported instrumentation bindings from "${specifier.text}". Execution may use only session binding/initialization, the ExecutionInstrumentation type, and cancellation-state preservation.`,
+      });
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+function hasOnlyAllowedNamedImports(node, allowed) {
+  if (!ts.isImportDeclaration(node)) return false;
+  const clause = node.importClause;
+  if (
+    clause === undefined ||
+    clause.name !== undefined ||
+    clause.namedBindings === undefined ||
+    !ts.isNamedImports(clause.namedBindings) ||
+    clause.namedBindings.elements.length === 0
+  ) {
+    return false;
+  }
+  return clause.namedBindings.elements.every((element) => {
+    const imported = element.propertyName?.text ?? element.name.text;
+    const expectedKind = allowed.get(imported);
+    const actualKind = clause.isTypeOnly || element.isTypeOnly ? "type" : "value";
+    return expectedKind === actualKind;
+  });
 }
 
 function importSpecifier(node) {
@@ -427,10 +536,126 @@ function importSpecifier(node) {
 
 const WIRE_FAMILY_DIR = "packages/eve/src/execution/wire";
 const SESSION_INBOX_WIRE_CONTRACT = `${WIRE_FAMILY_DIR}/session-inbox-contract.ts`;
+const VERSIONED_WIRE_HISTORY_RE = new RegExp(
+  `^${WIRE_FAMILY_DIR}/(?:__snapshots__/)?[a-z0-9-]+-wire\\.v\\d+(?:\\.migration)?(?:\\.test\\.ts(?:\\.snap)?|\\.ts)$`,
+);
+const RULE_40_ALLOWED_REWRITES = new Map([
+  [
+    `${WIRE_FAMILY_DIR}/session-inbox-wire.v1.ts`,
+    {
+      from: "5f110be5d7b488216c574a1aef9d2074d670efd2",
+      to: "7f5864f20e6bbb9f430c23918320ca6319c4cb14",
+    },
+  ],
+]);
+const PURE_MIGRATION_IMPORTS = new Map([
+  ["#execution/durable-session-migrations/chain.js", new Map([["VersionMigration", "type"]])],
+  ["#shared/guards.js", new Map([["isObject", "value"]])],
+]);
 
-async function checkRule40WireContracts() {
+function gitOutput(args) {
+  try {
+    return execFileSync("git", args, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function checkRule40ImmutableWireHistory() {
+  const hasBase = gitOutput(["rev-parse", "--verify", "origin/main"]) !== undefined;
+  const comparisons = [
+    { args: ["diff", "--name-status", "--", WIRE_FAMILY_DIR], state: "worktree" },
+    {
+      args: ["diff", "--cached", "--name-status", "--", WIRE_FAMILY_DIR],
+      state: "index",
+    },
+  ];
+  if (hasBase)
+    comparisons.push({
+      args: ["diff", "--name-status", "origin/main...HEAD", "--", WIRE_FAMILY_DIR],
+      state: "head",
+    });
+
+  const changes = new Set();
+  for (const { args, state } of comparisons) {
+    for (const line of (gitOutput(args) ?? "").trim().split("\n")) {
+      if (line !== "") changes.add(`${state}\t${line}`);
+    }
+  }
+
   /** @type {Violation[]} */
   const violations = [];
+  for (const change of changes) {
+    const [state, status, ...paths] = change.split("\t");
+    const protectedPaths = paths.filter((path) => VERSIONED_WIRE_HISTORY_RE.test(path));
+    if (protectedPaths.length === 0 || status === "A") continue;
+    if (protectedPaths.every((path) => isAllowedRule40Rewrite(path, state))) continue;
+    if (
+      hasBase &&
+      protectedPaths.every(
+        (path) => gitOutput(["cat-file", "-e", `origin/main:${path}`]) === undefined,
+      )
+    ) {
+      continue;
+    }
+    violations.push({
+      rule: 40,
+      file: protectedPaths.at(-1),
+      line: 1,
+      message: `shipped wire-version history is immutable (git status ${status}). Add the next wire version and migration instead of changing or deleting an existing version module, contract test, or snapshot.`,
+    });
+  }
+  return violations;
+}
+
+function isAllowedRule40Rewrite(path, state) {
+  const rewrite = RULE_40_ALLOWED_REWRITES.get(path);
+  if (rewrite === undefined) return false;
+  const baseHash = gitOutput(["rev-parse", `origin/main:${path}`])?.trim();
+  const currentHash =
+    state === "head"
+      ? gitOutput(["rev-parse", `HEAD:${path}`])?.trim()
+      : state === "index"
+        ? gitOutput(["rev-parse", `:${path}`])?.trim()
+        : gitOutput(["hash-object", path])?.trim();
+  return baseHash === rewrite.from && currentHash === rewrite.to;
+}
+
+function checkRule40MigrationPurity(path, source) {
+  const sourceFile = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  /** @type {Violation[]} */
+  const violations = [];
+  const visit = (node) => {
+    const specifier = importSpecifier(node);
+    if (specifier !== undefined) {
+      const allowed = PURE_MIGRATION_IMPORTS.get(specifier.text);
+      if (allowed === undefined || !hasOnlyAllowedNamedImports(node, allowed)) {
+        violations.push({
+          rule: 40,
+          file: path,
+          line: sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile)).line + 1,
+          message: `imports "${specifier.text}". Versioned wire migrations are immutable data transforms, so they may import only the VersionMigration type or dependency-free shared guards. Move normalization and version-selection policy to the wire facade.`,
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
+async function checkRule40WireContracts() {
+  const violations = checkRule40ImmutableWireHistory();
   let entries;
   try {
     entries = await readdir(join(REPO_ROOT, WIRE_FAMILY_DIR));
@@ -439,11 +664,11 @@ async function checkRule40WireContracts() {
   }
 
   for (const name of entries) {
-    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)\.ts$/);
+    const match = name.match(/^([a-z0-9-]+)-wire\.v(\d+)(\.migration)?\.ts$/);
     if (match === null) continue;
-    const [, family, version] = match;
+    const [, family, version, kind = ""] = match;
 
-    const testName = `${family}-wire.v${version}.test.ts`;
+    const testName = `${family}-wire.v${version}${kind}.test.ts`;
     if (!entries.includes(testName)) {
       violations.push({
         rule: 40,
@@ -451,6 +676,12 @@ async function checkRule40WireContracts() {
         line: 1,
         message: `wire family "${family}" version ${version} has no colocated contract test (${testName}). Pin this version's schema/encoder or migration/fixtures before shipping it.`,
       });
+    }
+    if (kind === ".migration") {
+      const path = `${WIRE_FAMILY_DIR}/${name}`;
+      violations.push(
+        ...checkRule40MigrationPurity(path, await readFile(join(REPO_ROOT, path), "utf8")),
+      );
     }
   }
 

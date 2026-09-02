@@ -1,14 +1,6 @@
 import { SubagentDepthKey } from "#context/keys.js";
 import type { HarnessSession } from "#harness/types.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeRemoteAgentCallActionRequest,
-  RuntimeSubagentCallActionRequest,
-} from "#runtime/actions/types.js";
-
-export type DelegatedRuntimeActionRequest =
-  | RuntimeRemoteAgentCallActionRequest
-  | RuntimeSubagentCallActionRequest;
+import type { PendingAgentDispatchAction, PendingDispatchAction } from "#shared/dispatch-action.js";
 
 export type ResolvedSubagentDepth = {
   readonly currentDepth: number;
@@ -33,19 +25,24 @@ export function readSerializedSubagentDepth(
 }
 
 export function isSubagentDelegationAction(
-  action: RuntimeActionRequest,
-): action is DelegatedRuntimeActionRequest {
-  return action.kind === "subagent-call" || action.kind === "remote-agent-call";
+  action: PendingDispatchAction,
+): action is PendingAgentDispatchAction {
+  return (
+    action.target.kind === "self-agent-call" ||
+    action.target.kind === "subagent-call" ||
+    action.target.kind === "remote-agent-call"
+  );
 }
 
-export function getSubagentDelegationName(action: DelegatedRuntimeActionRequest): string {
-  switch (action.kind) {
+export function getSubagentDelegationName(action: PendingAgentDispatchAction): string {
+  switch (action.target.kind) {
     case "remote-agent-call":
-      return action.remoteAgentName;
+      return action.target.remoteAgentName;
+    case "self-agent-call":
     case "subagent-call":
-      return action.subagentName;
+      return action.target.subagentName;
     default: {
-      const _exhaustive: never = action;
+      const _exhaustive: never = action.target;
       return _exhaustive;
     }
   }

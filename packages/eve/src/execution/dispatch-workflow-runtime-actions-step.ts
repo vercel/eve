@@ -7,7 +7,10 @@ import {
   readDurableSession,
 } from "#execution/durable-session-store.js";
 import { hydrateDurableSession } from "#execution/session.js";
-import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
+import {
+  getPendingWorkflowInterrupt,
+  setPendingWorkflowUsedCalls,
+} from "#harness/workflow-interrupt-state.js";
 import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { buildRuntimeActionsFromWorkflowInterrupt } from "#harness/workflow-runtime-action-state.js";
 import {
@@ -17,11 +20,8 @@ import {
 import { getSubagentDelegationName, isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { createLogger } from "#internal/logging.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeSubagentDispatchFailure,
-  RuntimeActionResult,
-} from "#runtime/actions/types.js";
+import type { RuntimeSubagentDispatchFailure, RuntimeActionResult } from "#shared/action-types.js";
+import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 
 const log = createLogger("execution.dispatch-workflow-runtime-actions");
@@ -61,8 +61,8 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 
   const plan = planWorkflowSubagentDispatch({
     actions,
-    interrupt: pending.interrupt,
     maxSubagents: durableSession.workflowMaxSubagents,
+    usedCalls: pending.usedCalls,
   });
 
   const blockedResults = plan.blocked.map((action) => {
@@ -71,7 +71,7 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
       maxSubagents: plan.maxSubagents,
       subagentName: isSubagentDelegationAction(action)
         ? getSubagentDelegationName(action)
-        : action.kind,
+        : action.target.kind,
       usedCalls: plan.usedCalls,
     });
     return createWorkflowSubagentLimitResult({ action, plan });
@@ -89,11 +89,15 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
     turnAgent: effectiveAgent.turnAgent,
   });
 
+  const sessionWithUsage = setPendingWorkflowUsedCalls({
+    session,
+    usedCalls: pending.usedCalls + plan.allowed.length,
+  });
   const sessionWithBatch = setPendingRuntimeActionBatch({
     actions: plan.allowed,
     event: { sequence: 0, stepIndex: 0, turnId: "workflow-dispatch" },
     responseMessages: [],
-    session,
+    session: sessionWithUsage,
   });
 
   // Interrupt-sourced batches obey the same mode split as model-authored
@@ -122,12 +126,12 @@ export async function dispatchWorkflowRuntimeActionsStep(input: {
 }
 
 function createWorkflowSubagentLimitResult(input: {
-  readonly action: RuntimeActionRequest;
+  readonly action: PendingDispatchAction;
   readonly plan: WorkflowSubagentDispatchPlan;
 }): RuntimeSubagentDispatchFailure {
   const subagentName = isSubagentDelegationAction(input.action)
     ? getSubagentDelegationName(input.action)
-    : input.action.kind;
+    : input.action.target.kind;
 
   return {
     callId: input.action.callId,

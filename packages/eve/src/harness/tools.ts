@@ -2,12 +2,9 @@ import { type ToolApprovalConfiguration, type ToolApprovalStatus, type ToolSet, 
 
 import type { SessionCapabilities } from "#channel/types.js";
 import type { RuntimeModelReference } from "#runtime/agent/bootstrap.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
-import { ASK_QUESTION_TOOL_NAME } from "#runtime/framework-tools/ask-question.js";
-import { WEB_SEARCH_TOOL_DEFINITION } from "#runtime/framework-tools/web-search.js";
 import { isObject } from "#shared/guards.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
-import { resolveApprovalPolicy, type ApprovalStatus } from "#public/definitions/approval.js";
+import { resolveApprovalPolicy, type ApprovalStatus } from "#approval/definition.js";
 import { resolveWebSearchBackend, resolveWebSearchProviderTool } from "#harness/provider-tools.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { buildCallbackContext } from "#context/build-callback-context.js";
@@ -20,7 +17,7 @@ import {
 } from "#harness/authorization.js";
 import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { normalizeToolJsonOutput, normalizeToolModelOutput } from "#harness/tool-model-output.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import {
   createBackgroundToolCallBatch,
@@ -65,7 +62,10 @@ export function buildToolSet(input: {
   const disabled = input.disabledProviderTools;
 
   for (const definition of input.tools.values()) {
-    if (definition.name === ASK_QUESTION_TOOL_NAME && !canRequestInput) {
+    if (
+      definition.behavior?.availability.includes("requires-request-input") === true &&
+      !canRequestInput
+    ) {
       continue;
     }
 
@@ -285,7 +285,6 @@ export async function buildToolSetWithProviderTools(input: {
   readonly disabledProviderTools?: ReadonlySet<string>;
   readonly modelReference: RuntimeModelReference;
   readonly tools: HarnessToolMap;
-  readonly webSearchProvider?: WebSearchProvider;
 }): Promise<ToolSet> {
   const disabled = input.disabledProviderTools;
   const tools: ToolSet = {
@@ -298,16 +297,18 @@ export async function buildToolSetWithProviderTools(input: {
     }),
   };
 
-  // Inject the real provider tool for web_search when the definition has
-  // no local execute (i.e. the framework definition uses the provider sentinel).
-  if (!disabled?.has(WEB_SEARCH_TOOL_DEFINITION.name)) {
-    const webSearchTool = input.tools.get(WEB_SEARCH_TOOL_DEFINITION.name);
-    if (webSearchTool !== undefined && webSearchTool.execute === undefined) {
-      const backend = resolveWebSearchBackend(input.modelReference, input.webSearchProvider);
+  for (const definition of input.tools.values()) {
+    const handling = definition.behavior?.handling;
+    if (
+      handling?.kind === "provider-tool" &&
+      definition.execute === undefined &&
+      !disabled?.has(definition.name)
+    ) {
+      const backend = resolveWebSearchBackend(input.modelReference, handling.provider);
       if (backend === null) {
-        delete tools[WEB_SEARCH_TOOL_DEFINITION.name];
+        delete tools[definition.name];
       } else {
-        tools[WEB_SEARCH_TOOL_DEFINITION.name] = await resolveWebSearchProviderTool(backend);
+        tools[definition.name] = await resolveWebSearchProviderTool(backend);
       }
     }
   }

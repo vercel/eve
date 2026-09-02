@@ -1,5 +1,5 @@
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
-import { ContextContainer } from "#context/container.js";
+import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
   AuthKey,
@@ -13,6 +13,8 @@ import {
   ModeKey,
   ParentSessionKey,
   ParentTraceContextKey,
+  ActivityObserverKey,
+  ScheduleIdKey,
   SessionCallbackKey,
   SubagentDepthKey,
 } from "#context/keys.js";
@@ -37,6 +39,7 @@ export function buildRunContext(input: {
   if (run.channelMetadata !== undefined) {
     const existing = ctx.get(ChannelInstrumentationKey);
     ctx.set(ChannelInstrumentationKey, {
+      channelType: existing?.channelType ?? run.channelMetadata.channelType,
       kind: existing?.kind ?? run.channelMetadata.kind,
       metadata: run.channelMetadata.metadata,
     });
@@ -61,12 +64,20 @@ export function buildRunContext(input: {
     ctx.set(ChannelRequestIdKey, run.requestId);
   }
 
+  const scheduleId = contextStorage.getStore()?.get(ScheduleIdKey);
+  if (scheduleId !== undefined) {
+    ctx.set(ScheduleIdKey, scheduleId);
+  }
+
   if (run.delivery !== undefined) {
     ctx.set(ChannelDeliveryKey, run.delivery);
   }
 
   if (run.callback !== undefined) {
     ctx.set(SessionCallbackKey, run.callback);
+  }
+  if (run.activityObserver !== undefined) {
+    ctx.set(ActivityObserverKey, run.activityObserver);
   }
 
   if (run.parent !== undefined) {

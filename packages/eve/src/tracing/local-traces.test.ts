@@ -107,9 +107,8 @@ describe("localTracePolicy", () => {
   ] as const)("accepts the %s audience: %s", (audience, accepted) => {
     expect(
       localTracePolicy({
+        agentName: "weather",
         audience,
-        rootSessionId: "session-1",
-        sessionId: "session-1",
       }),
     ).toBe(accepted);
   });

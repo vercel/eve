@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -8,12 +8,51 @@ import { compileAgentManifest } from "#compiler/normalize-manifest.js";
 import { discoverAgent } from "#discover/discover-agent.js";
 import {
   bundleAuthoredModuleForGeneration,
+  bundleAuthoredModuleMapForGeneration,
   loadAuthoredModuleNamespace,
 } from "#internal/authored-module-loader.js";
 import { useScenarioApp } from "#internal/testing/scenario-app.js";
 
 describe("loadAuthoredModuleNamespace", () => {
   const scenarioApp = useScenarioApp();
+
+  it("stamps dynamic callbacks while building the generation module map", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/agent.ts": 'export default { model: "openai/gpt-5.4" };\n',
+        "agent/tools/dynamic.ts": [
+          'import { defineDynamic, defineTool } from "eve/tools";',
+          "",
+          "const marker = defineTool({",
+          '  description: "Return a marker.",',
+          '  inputSchema: { type: "object" },',
+          '  execute: () => ({ marker: "generation" }),',
+          "});",
+          "",
+          "export default defineDynamic({",
+          "  events: {",
+          '    "session.started": () => marker,',
+          "  },",
+          "});",
+          "",
+        ].join("\n"),
+      },
+      installDependencies: true,
+      name: "generation-dynamic-callback",
+    });
+    const discovered = await discoverAgent({
+      agentRoot: join(app.appRoot, "agent"),
+      appRoot: app.appRoot,
+    });
+    const manifest = await compileAgentManifest(discovered.manifest);
+
+    const { code } = await bundleAuthoredModuleMapForGeneration({
+      manifest,
+      moduleMapPath: join(app.appRoot, ".eve", "compile", "module-map.mjs"),
+    });
+
+    expect(code).toContain("eve:durable-dynamic-callback");
+  });
 
   it("preserves cached channel identity for relative channel imports", async () => {
     const app = await scenarioApp({
@@ -1057,7 +1096,11 @@ describe("loadAuthoredModuleNamespace", () => {
       const manifest = await compileAgentManifest(discovered.manifest);
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(manifest.tools).toHaveLength(1);
+      expect(
+        manifest.tools.filter(
+          (tool) => manifest.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1163,7 +1206,11 @@ describe("loadAuthoredModuleNamespace", () => {
 
       expect(manifest.config.build?.externalDependencies).toEqual(["external-only"]);
       expect(subagent?.agent.config.build?.externalDependencies).toEqual(["external-only"]);
-      expect(subagent?.agent.tools).toHaveLength(1);
+      expect(
+        subagent?.agent.tools.filter(
+          (tool) => subagent.agent.bindings[tool.sourceId]?.owner.kind === "application",
+        ),
+      ).toHaveLength(1);
     } finally {
       await rm(workspaceRoot, { force: true, recursive: true });
     }
@@ -1212,6 +1259,34 @@ describe("loadAuthoredModuleNamespace", () => {
       logoUrl: "data:application/octet-stream;base64,bG9nby1ieXRlcw==",
       rawText: "asset text",
     });
+  });
+
+  it("rejects asset imports outside the authored package", async () => {
+    const app = await scenarioApp({
+      files: {
+        "agent/tools/outside_asset.ts": "export default {};\n",
+      },
+      name: "outside-asset-import",
+    });
+    const outsideFileName = `${basename(app.appRoot)}.txt`;
+    const outsidePath = join(app.appRoot, "..", outsideFileName);
+    const modulePath = join(app.appRoot, "agent", "tools", "outside_asset.ts");
+
+    try {
+      await Promise.all([
+        writeFile(outsidePath, "outside\n"),
+        writeFile(
+          modulePath,
+          `import value from "../../../${outsideFileName}?raw";\nexport default value;\n`,
+        ),
+      ]);
+
+      await expect(loadAuthoredModuleNamespace(modulePath)).rejects.toThrow(
+        /resolves outside package root/,
+      );
+    } finally {
+      await rm(outsidePath, { force: true });
+    }
   });
 
   it("recovers in the same process once a missing package is installed", async () => {

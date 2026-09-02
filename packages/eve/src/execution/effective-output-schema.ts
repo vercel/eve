@@ -10,7 +10,8 @@ import type { RunMode } from "#shared/run-mode.js";
  * A run-scoped (client-supplied) schema on the turn's {@link StepInput} always
  * wins. With no run-scoped schema, a task run adopts the agent's declared
  * return schema — its function-output contract, which only applies when the
- * agent is invoked as a function (subagent / schedule / job), i.e. task mode.
+ * agent is invoked directly as a task-mode schedule or job. Subagent
+ * dispatch carries its declared schema as a run-scoped schema instead.
  * A conversation run with no run-scoped schema enforces nothing. Continuation
  * steps (no new `StepInput`) preserve whatever is already in effect.
  */

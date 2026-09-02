@@ -7,6 +7,8 @@ import type { ErrorLink, ErrorSignals } from "./signals.js";
  *   invalid credentials, unknown model id). The model-call classifier
  *   treats a matched `config` rule as terminal.
  * - `transient` — the failure is expected to clear on retry.
+ * - `recoverable` — the current request cannot proceed, but the same session
+ *   remains useful after an external fix.
  */
 export type SemanticErrorTag =
   | "gateway"
@@ -15,7 +17,8 @@ export type SemanticErrorTag =
   | "sandbox"
   | "system"
   | "config"
-  | "transient";
+  | "transient"
+  | "recoverable";
 
 /** A predicate over one extracted cause-chain link. */
 export type LinkPredicate = (link: ErrorLink) => boolean;
@@ -56,7 +59,8 @@ export interface SemanticErrorSummary {
   /**
    * The matched rule's tags, carried so consumers with a recovery policy
    * (the model-call classifier) can read the catalog's judgment —
-   * `config` is terminal, `transient` retries — without a second registry
+   * `config` is terminal, `transient` retries, and `recoverable` parks the
+   * session — without a second registry
    * of the same knowledge.
    */
   readonly tags: readonly SemanticErrorTag[];

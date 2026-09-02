@@ -4,6 +4,8 @@ import type { Prompter } from "#setup/prompter.js";
 import { readProjectLink, type VercelProjectReference } from "#setup/project-resolution.js";
 import { captureVercel, runVercel, runVercelCaptureStdout } from "#setup/primitives/run-vercel.js";
 
+export type ConnectPrincipalType = "app" | "user";
+
 /** Controls connector selection while adding a Connect-backed connection. */
 export interface SetupConnectionConnectorOptions {
   log: ChannelSetupLog;
@@ -11,6 +13,9 @@ export interface SetupConnectionConnectorOptions {
   projectRoot: string;
   slug: string;
   service: string;
+  creationType?: string;
+  connectionMethod?: "mcp" | "oauth";
+  principalType?: ConnectPrincipalType;
   canonicalConnectorName: string;
   project: VercelProjectReference;
   signal?: AbortSignal;
@@ -65,13 +70,16 @@ function parseConnectorRef(value: unknown): ConnectConnectorRef | undefined {
   return connector;
 }
 
-/** Parses a created connector that can issue user credentials. */
-export function parseCreatedConnector(stdout: string): ConnectConnectorRef | undefined {
+/** Parses a created connector that can issue credentials for the requested principal type. */
+export function parseCreatedConnector(
+  stdout: string,
+  principalType: ConnectPrincipalType = "user",
+): ConnectConnectorRef | undefined {
   const value = parseJson(stdout);
   const connector = parseConnectorRef(value);
   if (!isRecord(value) || connector === undefined) return undefined;
   const subjects = value["supportedSubjectTypes"];
-  return Array.isArray(subjects) && subjects.includes("user") ? connector : undefined;
+  return Array.isArray(subjects) && subjects.includes(principalType) ? connector : undefined;
 }
 
 function parseConnectorList(
@@ -142,7 +150,7 @@ async function listConnectors(
   return connectors;
 }
 
-async function supportsUserAuthorization(
+async function supportsPrincipalType(
   options: SetupConnectionConnectorOptions,
   project: VercelProjectReference,
   connector: ConnectConnectorRef,
@@ -165,7 +173,7 @@ async function supportsUserAuthorization(
     throw new Error(`Vercel returned invalid details for connector ${connector.uid}.`);
   }
   const subjects = value["supportedSubjectTypes"];
-  return Array.isArray(subjects) && subjects.includes("user");
+  return Array.isArray(subjects) && subjects.includes(options.principalType ?? "user");
 }
 
 function connectorNames(connectors: readonly ConnectConnectorRef[]): Set<string> {
@@ -234,6 +242,7 @@ async function resolveFallbackConnector(
   connectors: readonly ConnectConnectorRef[],
   initialNotice: string,
 ): Promise<ConnectorResolution> {
+  const principalType = options.principalType ?? "user";
   let notice = initialNotice;
   while (true) {
     const choice = await options.prompter.select<"find" | "create">({
@@ -248,12 +257,12 @@ async function resolveFallbackConnector(
     if (choice === "find") {
       const supported: ConnectConnectorRef[] = [];
       for (const connector of connectors) {
-        if (await supportsUserAuthorization(options, project, connector, onOutput)) {
+        if (await supportsPrincipalType(options, project, connector, onOutput)) {
           supported.push(connector);
         }
       }
       if (supported.length === 0) {
-        notice = `No existing ${options.service} connectors support user authorization.`;
+        notice = `No existing ${options.service} connectors support ${principalType} credentials.`;
         continue;
       }
       const byUid = new Map(supported.map((connector) => [connector.uid, connector]));
@@ -298,9 +307,12 @@ async function resolveFallbackConnector(
           [
             "connect",
             "create",
-            options.service,
+            options.creationType ?? options.service,
             "--name",
             name,
+            ...(options.connectionMethod === undefined
+              ? []
+              : ["--connection-method", options.connectionMethod]),
             "-F",
             "json",
             "--scope",
@@ -312,10 +324,10 @@ async function resolveFallbackConnector(
     );
     const raw = parseConnectorRef(parseJson(created.stdout));
     const ownedId = raw?.id ?? CREATED_CONNECTOR.exec(transcript.join("\n"))?.[1];
-    const connector = created.ok ? parseCreatedConnector(created.stdout) : undefined;
+    const connector = created.ok ? parseCreatedConnector(created.stdout, principalType) : undefined;
     if (connector !== undefined) return { kind: "created", connector };
     const message = created.ok
-      ? `The ${options.service} connector does not support user authorization.`
+      ? `The ${options.service} connector does not support ${principalType} credentials.`
       : connectorCreationFailure(options.service, created.stderr);
     if (ownedId !== undefined) {
       try {
@@ -339,6 +351,7 @@ async function resolveFallbackConnector(
 export async function setupConnectionConnector(
   options: SetupConnectionConnectorOptions,
 ): Promise<SetupConnectionConnectorResult> {
+  const principalType = options.principalType ?? "user";
   const onOutput = createPromptCommandOutput(options.log);
   const project = options.project;
   const connectors = await listConnectors(options, project, onOutput);
@@ -348,7 +361,7 @@ export async function setupConnectionConnector(
   let notice = `Could not find a connector named ${options.canonicalConnectorName}.`;
 
   if (canonical !== undefined) {
-    if (await supportsUserAuthorization(options, project, canonical, onOutput)) {
+    if (await supportsPrincipalType(options, project, canonical, onOutput)) {
       if (await attach(options, project, canonical.uid, onOutput)) {
         options.log.success(`Attached ${canonical.uid} connector`);
         return { kind: "existing", connectorUid: canonical.uid };
@@ -356,7 +369,7 @@ export async function setupConnectionConnector(
       options.signal?.throwIfAborted();
       notice = `Could not attach ${canonical.uid}.`;
     } else {
-      notice = `${canonical.uid} does not support user authorization.`;
+      notice = `${canonical.uid} does not support ${principalType} credentials.`;
     }
   }
 

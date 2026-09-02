@@ -1,7 +1,7 @@
 import { createPromptCommandOutput, whimsyFor } from "#setup/cli/index.js";
 import { HumanActionRequiredError } from "#setup/human-action.js";
 import { captureVercel, runVercel, type VercelCaptureFailure } from "#setup/primitives/index.js";
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 import { z } from "zod";
 
 import {
@@ -187,18 +187,20 @@ async function probeWhoami(projectRoot: string, options: VercelProjectOperationO
 }
 
 /**
- * Whether a failed `whoami` is the explicit not-authenticated diagnostic ("No
- * existing credentials found" / "not authenticated") rather than a transient
- * fault (DNS, network, API error, timeout). Only the former is a genuine
- * logged-out state; classifying any non-zero exit as logged-out would route a
- * network blip to `/vc:login`.
+ * Whether a failed `whoami` explicitly calls for authentication recovery
+ * rather than reporting a transient fault (DNS, network, API error, timeout).
+ * Vercel reports an invalid stored token directly, but a linked team can mask
+ * that diagnostic with `scope-not-accessible`; both require a fresh login.
  */
 function isLoggedOutFailure(failure: VercelCaptureFailure): boolean {
   const text = `${failure.stdout} ${failure.stderr}`.toLowerCase();
   return (
     text.includes("credentials") ||
     text.includes("not authenticated") ||
-    text.includes("not logged in")
+    text.includes("not logged in") ||
+    text.includes("specified token is not valid") ||
+    text.includes("scope-not-accessible") ||
+    text.includes("do not have access to the specified account")
   );
 }
 

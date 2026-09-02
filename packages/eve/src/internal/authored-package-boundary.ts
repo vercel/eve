@@ -3,6 +3,7 @@ import { isBuiltin } from "node:module";
 import { dirname, join, resolve, sep } from "node:path";
 
 import { normalizeEsmImportSpecifier } from "#internal/application/import-specifier.js";
+import { resolveWorkflowModulePath } from "#internal/application/package.js";
 
 export const CACHED_CHANNEL_PREFIX = "eve-cached-channel:";
 
@@ -52,10 +53,7 @@ export function createGenerationPackageBoundaryPlugin(input: {
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
-        return {
-          external: true,
-          id: source,
-        };
+        return { external: true, id: resolveFrameworkRuntimeImport(source) };
       }
 
       const externalModule = await resolveConfiguredExternalModule.call(this, {
@@ -93,7 +91,7 @@ export function createRuntimeLoaderPackageBoundaryPlugin(input: {
       }
 
       if (isFrameworkRuntimeImport(source, importer)) {
-        return { external: true, id: source };
+        return { external: true, id: resolveFrameworkRuntimeImport(source) };
       }
 
       const externalModule = await resolveConfiguredExternalModule.call(this, {
@@ -364,6 +362,19 @@ function isFrameworkRuntimeImport(source: string, importer: string | undefined):
   }
 
   return false;
+}
+
+/**
+ * `eve` and `eve/*` stay bare: the application installs eve, so Node resolves
+ * them to the one installed copy. The public `workflow` surface is not a
+ * dependency of the application; eve vendors it, so those specifiers bind to
+ * eve's own modules by path and share the process-wide Workflow runtime.
+ */
+function resolveFrameworkRuntimeImport(source: string): string {
+  if (source === "eve" || source.startsWith("eve/")) {
+    return source;
+  }
+  return normalizeEsmImportSpecifier(resolveWorkflowModulePath(source));
 }
 
 export function isNodeModulesPath(path: string): boolean {

@@ -71,10 +71,11 @@ The root agent uses its `package.json` `name`, or its app directory name if none
 
 ### Recommended layout
 
-A minimal agent needs `instructions.md`; `agent.ts` is optional when the defaults are sufficient. Add other slots as the agent needs them:
+A minimal agent needs `instructions.md`; `agent.ts` is optional when the default config is sufficient. Framework defaults occupy ordinary agent slots, so authoring the same path replaces the default before eve compiles the agent. Add other slots as the agent needs them:
 
 ```text
 my-agent/
+├── README.md
 ├── package.json
 ├── tsconfig.json
 ├── agent/
@@ -105,7 +106,7 @@ Each path under `agent/` has a specific purpose. Root agents can use every path 
 | `instructions.md` / `instructions.ts` / `instructions/` | Base system prompt                        | Optional               | A flat file or directory of `.md` and `.ts` files. Static sources compose at build time. Dynamic sources resolve at runtime. Required on the root, optional on subagents.         |
 | `instrumentation.ts`                                    | Telemetry config                          | No                     | OTel exporter and AI SDK span settings, auto-discovered and run before agent code. Root-only.                                                                                     |
 | `channels/`                                             | HTTP and messaging entry points           | No                     | Root-only.                                                                                                                                                                        |
-| `connections/`                                          | External MCP and OpenAPI services         | Yes                    | One connection per file; its name comes from the filename.                                                                                                                        |
+| `connections/`                                          | External MCP and OpenAPI services         | Yes                    | Static files define one path-named connection. Dynamic files can resolve a caller-specific connection set at runtime.                                                             |
 | `hooks/`                                                | Lifecycle and stream-event subscribers    | Yes                    | Module-backed only. Recursive directories are supported.                                                                                                                          |
 | `skills/`                                               | On-demand procedures and capability packs | Yes                    | Flat markdown, module-backed skills, or packaged skills. Runtime files are seeded under `$HOME/.agents/skills/`, with `/workspace/skills/` as a fallback.                         |
 | `lib/`                                                  | Shared authored helper code               | Yes                    | Import-only; not mounted into the workspace.                                                                                                                                      |
@@ -173,13 +174,13 @@ The [Tutorial](/docs/tutorial/first-agent) builds a data analytics agent step by
 
 After the tutorial, continue with the task you need:
 
-| Goal                                                    | Read                                                                                                          |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| Give the model an action it can call                    | [Tools](/docs/tools)                                                                                          |
-| Connect an MCP server or OpenAPI service                | [Connections](/docs/connections)                                                                              |
-| Reach users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                           |
-| Build a browser interface                               | [Frontend Frameworks](/docs/guides/frontend/overview)                                                         |
-| Test agent behavior                                     | [Evals](/docs/evals/overview)                                                                                 |
-| Secure and deploy the agent                             | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
+| Goal                                                               | Read                                                                                                          |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Give the model some code it can run                                | [Tools](/docs/tools)                                                                                          |
+| Connect the agent to an external MCP or OpenAPI service            | [Connections](/docs/connections)                                                                              |
+| Communicate with users through Slack, Discord, or another platform | [Channels](/docs/channels/overview)                                                                           |
+| Build a browser interface                                          | [Frontend Frameworks](/docs/guides/frontend/overview)                                                         |
+| Test agent behavior                                                | [Evals](/docs/evals/overview)                                                                                 |
+| Secure and deploy the agent                                        | [Authentication](/docs/guides/auth-and-route-protection), then [Deployment](/docs/guides/deployment/overview) |
 
 Read [Execution Model and Durability](/docs/concepts/execution-model-and-durability) for the mental model behind sessions, turns, durable steps, and parked work.

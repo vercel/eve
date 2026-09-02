@@ -17,13 +17,13 @@ import {
 import { createEveCallbackRoutePath } from "#protocol/routes.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 import { parseJsonValue } from "#shared/json.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
 import {
   createTaskDelegated,
   isTaskDelegated,
   type TaskExec,
   type TaskSendCommand,
-} from "#shared/tool-task.js";
+} from "#tools/task.js";
 import { recordTaskAgentAddress } from "#harness/handles/transitions.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { recordSessionTask } from "#tasks/session-index.js";
@@ -35,6 +35,8 @@ import {
   type BackgroundTask,
 } from "#execution/tasks/parent/delegate.js";
 import { propagateSubagentExecutorCancel } from "#execution/tasks/parent/dispatch.js";
+import { readWorkflowToolExecutor } from "#execution/tool-run/background.js";
+import { cancelToolRun } from "#execution/tool-run/cancel.js";
 import { sendTaskCommand, sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 
 interface BackgroundToolExecutionRecord {
@@ -338,7 +340,7 @@ async function compensateBackgroundToolExecution(
       failures.push(error);
     }
     // Reject first so the task is terminal and a late child result cannot
-    // revive it, then best-effort abort the already-dispatched child using
+    // revive it, then best-effort abort the already-dispatched executor using
     // the address carried on its durable executor binding.
     const subagent = readSubagentExecutor(record.task.executor);
     if (subagent !== undefined) {
@@ -347,6 +349,10 @@ async function compensateBackgroundToolExecution(
         executor: subagent,
         taskId: record.task.taskId,
       });
+    }
+    const toolRun = readWorkflowToolExecutor(record.task.executor);
+    if (toolRun !== undefined) {
+      await cancelToolRun(toolRun, "The step that started the tool failed.");
     }
   }
   if (failures.length > 0) {

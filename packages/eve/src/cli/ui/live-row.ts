@@ -1,4 +1,4 @@
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { sliceVisible, visibleLength } from "#cli/ui/terminal-text.js";
 import { LiveRegion } from "#cli/ui/live-region.js";

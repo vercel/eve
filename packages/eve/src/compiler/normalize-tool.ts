@@ -6,6 +6,9 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
+import type { AgentModuleBinding } from "#compiler/source-graph.js";
+import { resolveAuthoredPackageRoot } from "#internal/authored-module-loader.js";
+import { readAuthoredExecuteWorkflowId } from "#internal/workflow-bundle/authored-workflow-modules.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -18,7 +21,10 @@ export type CompiledToolEntry =
   | { readonly kind: "tool"; readonly definition: CompiledToolDefinition }
   | { readonly kind: "disabled"; readonly name: string }
   | { readonly kind: "workflow-tool"; readonly maxSubagents?: number }
-  | { readonly kind: "web-search-tool"; readonly provider: "exa" | "parallel" }
+  | {
+      readonly definition: CompiledToolDefinition;
+      readonly kind: "web-search-tool";
+    }
   | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
 
 /**
@@ -34,15 +40,15 @@ export type CompiledToolEntry =
  * are rejected by the normalizer.
  */
 export async function compileToolEntry(
-  agentRoot: string,
+  _agentRoot: string,
   source: ToolSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
+  options: ModuleBackedDefinitionLoadOptions,
 ): Promise<CompiledToolEntry> {
   const entry = normalizeToolDefinition(
     await loadModuleBackedDefinition({
-      agentRoot,
-      externalDependencies: options.externalDependencies,
+      binding: options.binding,
       kind: "tool",
+      loadNamespace: options.loadNamespace,
       source,
     }),
     `Expected the tool export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
@@ -65,7 +71,26 @@ export async function compileToolEntry(
         `The webSearch() definition must be exported from "tools/web_search.ts", not "${source.logicalPath}".`,
       );
     }
-    return { kind: "web-search-tool", provider: entry.provider };
+    return {
+      definition: {
+        behavior: {
+          availability: [],
+          handling: { kind: "provider-tool", provider: entry.provider },
+        },
+        description:
+          "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
+        exportName: source.exportName,
+        hasExecute: false,
+        hasModelOutputProjection: false,
+        inputSchema: null,
+        logicalPath: source.logicalPath,
+        name: toolName,
+        sourceId: source.sourceId,
+        sourceKind: "module",
+        requiresApproval: false,
+      },
+      kind: "web-search-tool",
+    };
   }
 
   if (entry.kind === "dynamic-tool") {
@@ -75,6 +100,7 @@ export async function compileToolEntry(
         eventNames: [...entry.eventNames],
         exportName: source.exportName,
         logicalPath: source.logicalPath,
+        rebindMissingCallbacks: entry.rebindMissingCallbacks || undefined,
         slug: toolName,
         sourceId: source.sourceId,
         sourceKind: "module",
@@ -82,18 +108,35 @@ export async function compileToolEntry(
     };
   }
 
+  const workflowId = await readToolWorkflowId(options.binding);
   return {
     kind: "tool",
     definition: {
+      behavior:
+        workflowId === undefined
+          ? entry.definition.behavior
+          : { availability: [], handling: { kind: "workflow-tool", workflowId } },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,
+      hasExecute: entry.definition.hasExecute,
+      hasModelOutputProjection: entry.definition.hasModelOutputProjection,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,
       name: toolName,
       outputSchema: entry.definition.outputSchema,
+      requiresApproval: entry.definition.hasApproval,
       sourceId: source.sourceId,
       sourceKind: "module",
     },
   };
+}
+
+async function readToolWorkflowId(binding: AgentModuleBinding): Promise<string | undefined> {
+  if (binding.backing.kind !== "filesystem") return undefined;
+  const filePath = binding.backing.sourcePath;
+  return await readAuthoredExecuteWorkflowId({
+    appRoot: resolveAuthoredPackageRoot(filePath),
+    filePath,
+  });
 }

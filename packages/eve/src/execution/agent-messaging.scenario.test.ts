@@ -79,9 +79,6 @@ const model = mockModel((request) => {
 });
 
 export default defineAgent({
-  experimental: {
-    subagentPersistentSessions: true,
-  },
   model,
   modelContextWindowTokens: 32_000,
 });
@@ -197,6 +194,7 @@ describe("agent messaging", () => {
         await expectRetainedChildConversation({
           childSessionId,
           client: new Client({ host: server.url }),
+          expectedCompletionCount: 0,
         });
         expect(await readWorkflowRunStatus(app.appRoot, childSessionId)).toBe("cancelled");
       } catch (error) {
@@ -233,6 +231,7 @@ describe("agent messaging", () => {
               auth: { bearer: REMOTE_MEMORY_TOKEN },
               host: remoteServer.url,
             }),
+            expectedCompletionCount: 1,
           });
         } catch (error) {
           throw new Error(
@@ -313,6 +312,7 @@ async function runScriptedParentSession(input: {
 async function expectRetainedChildConversation(input: {
   readonly childSessionId: string;
   readonly client: Client;
+  readonly expectedCompletionCount: number;
 }): Promise<void> {
   const childEvents = await collectStreamToEnd({
     label: "persisted child events",
@@ -324,7 +324,9 @@ async function expectRetainedChildConversation(input: {
   expect(childTurnStarts).toHaveLength(2);
   expect(childWaits).toHaveLength(2);
   expect(childWaits[0]).toBeLessThan(childTurnStarts[1] ?? -1);
-  expect(filterEventsByType(childEvents, "session.completed")).toHaveLength(0);
+  expect(filterEventsByType(childEvents, "session.completed")).toHaveLength(
+    input.expectedCompletionCount,
+  );
   expect(filterEventsByType(childEvents, "session.failed")).toHaveLength(0);
   expect(
     filterEventsByType(childEvents, "message.completed").some(

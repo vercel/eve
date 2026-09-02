@@ -106,6 +106,31 @@ describe("reduceTraceViewerKey", () => {
     expect(state.selectedRow).toBe(count - 2);
   });
 
+  it("moves and scrolls with j/k", () => {
+    let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    state = reduceTraceViewerKey(state, key("text", "j"), ENV).state;
+    expect(state.selectedRow).toBe(1);
+    state = reduceTraceViewerKey(state, key("text", "k"), ENV).state;
+    expect(state.selectedRow).toBe(0);
+
+    state = reduceTraceViewerKey(state, key("enter"), ENV).state;
+    state = reduceTraceViewerKey(state, key("tab"), ENV).state;
+    state = reduceTraceViewerKey(state, key("text", "j"), ENV).state;
+    expect(state.panelScroll).toBe(1);
+    state = reduceTraceViewerKey(state, key("text", "k"), ENV).state;
+    expect(state.panelScroll).toBe(0);
+  });
+
+  it("ignores pasted j/k navigation", () => {
+    const state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
+    const result = reduceTraceViewerKey(
+      state,
+      { type: "text", value: "j", framing: "bracketed-paste" },
+      ENV,
+    );
+    expect(result.state.selectedRow).toBe(0);
+  });
+
   it("jumps home and end", () => {
     let state = applyLoadedTrace(createTraceViewerState(), conversationTrace());
     state = reduceTraceViewerKey(state, key("end"), ENV).state;

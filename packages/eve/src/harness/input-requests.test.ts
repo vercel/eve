@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionKey } from "#context/keys.js";
-import { once } from "#public/tools/approval/approval-helpers.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import { once } from "#tools/approval/policies.js";
+import type { InputRequest } from "#shared/input.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
   clearPendingSessionLimitPrompt,

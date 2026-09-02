@@ -42,7 +42,9 @@ export default defineInstructions({
 
 `role` is either `"system"` or `"user"` and defaults to `"system"`. The legacy `{ markdown: string }` form still creates system-role instructions, but is deprecated; do not combine `markdown` with `content` or `role`. Blank content contributes no context.
 
-A module-backed definition runs once at build time. eve stores its resolved content and role in the compiled manifest, so the runtime never reruns the module.
+A module-backed definition runs once at build time. eve stores its resolved content and role in the compiled manifest, so the definition is not a runtime entry.
+
+This includes its normal ESM and [asset imports](./reference/typescript-api#asset-imports), such as a top-level prompt imported with `?raw`. See [Authored module lifecycle](./reference/typescript-api#authored-module-lifecycle) for the full compile/runtime contract.
 
 ## System and user roles
 
@@ -97,4 +99,4 @@ Where an eve agent communicates with people, you may be required to disclose tha
 - [Tools](./tools): typed actions, the next capability to add
 - [Context control](./concepts/context-control): all the levers for what the model sees
 - [Skills](./skills): on-demand procedures, the counterpart to always-on instructions
-- [Multi-tenant memory](./patterns/multi-tenant-memory): dynamic instructions that load per-tenant memories each turn
+- [Memory](./memory): provider-backed context that outlives a session, recalled before each turn

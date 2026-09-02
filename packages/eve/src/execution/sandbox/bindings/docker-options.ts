@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { DEFAULT_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import type {
   DockerSandboxCreateOptions,
   DockerSandboxNetworkPolicy,
@@ -10,7 +11,7 @@ import type {
  * Default base image for the Docker backend: eve's published sandbox
  * runtime image.
  */
-export const DEFAULT_DOCKER_SANDBOX_IMAGE = "ghcr.io/vercel/eve:latest";
+export const DEFAULT_DOCKER_SANDBOX_IMAGE = DEFAULT_EVE_SANDBOX_IMAGE;
 
 /**
  * Fully-defaulted Docker backend options consumed by the backend

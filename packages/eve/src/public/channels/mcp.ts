@@ -27,7 +27,7 @@ import {
   createMcpProtectedResourceMetadata,
   createMcpResourceChallenge,
 } from "#internal/mcp/protected-resource.js";
-import { inputRequestSchema, inputResponseSchema } from "#runtime/input/types.js";
+import { inputRequestSchema, inputResponseSchema } from "#shared/input.js";
 import {
   escapeAuthChallengeParameter,
   readOAuthResourceOptions,

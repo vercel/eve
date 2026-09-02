@@ -73,6 +73,32 @@ describe("integration discovery", () => {
     expect(integrationSearchText(browserbase!)).toContain("Stagehand");
   });
 
+  it("renders the BlitzReels extension setup", () => {
+    const blitzreels = getIntegration("blitzreels");
+    expect(blitzreels).toBeDefined();
+
+    const markdown = integrationMarkdown(blitzreels!);
+    expect(markdown).toContain("eve add extension/blitzreels");
+    expect(markdown).toContain('import blitzreels from "@blitzreels/eve"');
+    expect(markdown).toContain("BLITZREELS_API_KEY");
+    expect(markdown).toContain("blitzreels__create_clip_batch");
+    expect(markdown).toContain("require eve approval");
+    expect(integrationSearchText(blitzreels!)).toContain("video editing");
+  });
+
+  it("renders the Mux Video extension setup", () => {
+    const muxVideo = getIntegration("mux-video");
+    expect(muxVideo).toBeDefined();
+
+    const markdown = integrationMarkdown(muxVideo!);
+    expect(markdown).toContain("github.com/muxinc/mux-video-agent.git");
+    expect(markdown).toContain('import muxVideo from "@mux/eve-video"');
+    expect(markdown).toContain("MUX_TOKEN_ID");
+    expect(markdown).toContain("mux_video__run_workflow");
+    expect(markdown).toContain("require explicit human approval");
+    expect(integrationSearchText(muxVideo!)).toContain("Mux Robots");
+  });
+
   it("renders the Jetty extension and eval reporter setup", () => {
     const jetty = getIntegration("jetty");
     expect(jetty).toBeDefined();
@@ -110,6 +136,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(arcana!)).toContain("long-term memory");
   });
 
+  it("renders the Supermemory provider setup", () => {
+    const supermemory = getIntegration("supermemory");
+    expect(supermemory).toBeDefined();
+
+    const markdown = integrationMarkdown(supermemory!);
+    expect(markdown).toContain("eve add memory/supermemory");
+    expect(markdown).toContain('import supermemory from "@supermemory/eve"');
+    expect(markdown).toContain("SUPERMEMORY_API_KEY");
+    expect(markdown).toContain("supermemory__search");
+    expect(integrationSearchText(supermemory!)).toContain("Memory provider");
+  });
+
   it("renders the Hindsight memory extension setup", () => {
     const hindsight = getIntegration("hindsight");
     expect(hindsight).toBeDefined();
@@ -135,6 +173,18 @@ describe("integration discovery", () => {
     expect(integrationSearchText(githubTools!)).toContain("code review");
   });
 
+  it("renders the Blooio channel setup", () => {
+    const blooio = getIntegration("blooio");
+    expect(blooio).toBeDefined();
+
+    const markdown = integrationMarkdown(blooio!);
+    expect(markdown).toContain("eve add channel/blooio");
+    expect(markdown).toContain('import { blooioChannel } from "eve-channel-blooio"');
+    expect(markdown).toContain("BLOOIO_API_KEY");
+    expect(markdown).toContain("BLOOIO_WEBHOOK_SECRET");
+    expect(integrationSearchText(blooio!)).toContain("iMessage");
+  });
+
   it("renders every connection setup variant", () => {
     const notion = getIntegration("notion");
     expect(notion).toBeDefined();
@@ -143,6 +193,16 @@ describe("integration discovery", () => {
     expect(markdown).toContain("### MCP · User");
     expect(markdown).toContain("### OpenAPI · User");
     expect(markdown).toContain("agent/connections/notion.ts");
+  });
+
+  it("renders hand-authored connection setup without generated variant headings", () => {
+    const shopify = getIntegration("shopify");
+    expect(shopify).toBeDefined();
+
+    const markdown = integrationMarkdown(shopify!);
+    expect(markdown).toContain('process.env.EVE_DEV === "1"');
+    expect(markdown).toContain("SHOPIFY_STORE_DOMAIN");
+    expect(markdown).not.toContain("### MCP ·");
   });
 
   it("renders instrumentation providers with registry installation", () => {

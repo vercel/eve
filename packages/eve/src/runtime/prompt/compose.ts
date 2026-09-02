@@ -24,12 +24,6 @@ const TASK_AGENT_MESSAGING_INSTRUCTION =
 interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
-  /**
-   * Whether the agent opted into `experimental.subagentPersistentSessions`.
-   * Gates the agent-messaging prompt block that documents `agentId`
-   * continuation and the `<agents>` listing.
-   */
-  persistentSubagentSessions?: boolean;
   tasksEnabled?: boolean;
   skills?: readonly ResolvedSkillDefinition[];
   subagentsAvailable?: boolean;
@@ -46,7 +40,7 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    ...(input.subagentsAvailable && input.persistentSubagentSessions
+    ...(input.subagentsAvailable
       ? [input.tasksEnabled ? TASK_AGENT_MESSAGING_INSTRUCTION : AGENT_MESSAGING_INSTRUCTION]
       : []),
     ...createConnectionsPromptBlocks(input.connections),
@@ -65,12 +59,7 @@ function createInstructionsPromptBlocks(
   }
 
   const only = systemInstructions.length === 1 ? systemInstructions[0] : undefined;
-  const name =
-    only !== undefined &&
-    !only.sourceId.startsWith("ext:") &&
-    !only.sourceId.startsWith("ext-override:")
-      ? only.name
-      : "instructions";
+  const name = only !== undefined && only.owner.kind !== "extension" ? only.name : "instructions";
   const content = systemInstructions
     .map((entry) => entry.content)
     .join("\n\n")

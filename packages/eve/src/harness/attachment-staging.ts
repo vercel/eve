@@ -20,7 +20,6 @@ import {
   type SandboxRef,
 } from "#internal/attachments/sandbox-refs.js";
 import type { SandboxSession } from "#public/definitions/sandbox.js";
-import { toErrorMessage } from "#shared/errors.js";
 
 /**
  * Sandbox directory where inbound file attachments are staged before the
@@ -290,14 +289,30 @@ async function stageFilePart(
   part: FilePart,
   sandbox: SandboxSession,
   adapterCtx: ChannelAdapterContext,
-): Promise<FilePart> {
+): Promise<FilePart | TextPart> {
   if (isSandboxRefUrl(part.data)) {
     return part;
   }
 
   // URL objects (including reconstituted ones) → try fetchFile
   if (part.data instanceof URL && part.data.protocol !== "data:") {
-    const resolved = await tryFetchFile(part.data.href, adapterCtx);
+    let resolved: FetchFileResult | null;
+    try {
+      resolved = await tryFetchFile(part.data.href, adapterCtx);
+    } catch (error) {
+      if (!(error instanceof EveAttachmentError)) throw error;
+      const filename = part.filename?.trim() || "file";
+      log.warn("attachment resolver failed — degrading to text part", {
+        adapterKind: error.adapterKind,
+        error: error.cause,
+        filename,
+        kind: error.kind,
+      });
+      return {
+        text: `Attachment ${filename} could not be retrieved: ${error.message}`,
+        type: "text",
+      };
+    }
     if (resolved === null) {
       return part;
     }
@@ -345,7 +360,7 @@ async function tryFetchFile(
   const adapterKind = getAdapterKind(adapter);
 
   try {
-    const result = await adapter.fetchFile(url);
+    const result = await adapter.fetchFile(url, adapterCtx);
     if (result === null) {
       return null;
     }
@@ -358,7 +373,7 @@ async function tryFetchFile(
       adapterKind,
       cause,
       kind: "resolver-threw",
-      message: `fetchFile for adapter kind="${adapterKind}" threw: ${toErrorMessage(cause)}`,
+      message: `Attachment retrieval failed in the "${adapterKind}" channel.`,
     });
   }
 }

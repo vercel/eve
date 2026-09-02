@@ -1,7 +1,8 @@
 import { RuntimeRegistry } from "#internal/runtime-registry.js";
 import type { PreparedRuntimeAuthoredTool } from "#runtime/sessions/turn.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
-import { serializeInputSchema, serializeOutputSchema } from "#shared/tool-schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
+import type { CompiledToolBehavior, PreparedToolBehavior } from "#tools/behavior.js";
 
 /**
  * One executable authored tool tracked by the runtime-owned registry.
@@ -28,6 +29,7 @@ export async function createRuntimeToolRegistry(
     readonly tools: readonly ResolvedToolDefinition[];
   },
   input: {
+    readonly nodeId?: string;
     readonly reservedToolNames?: readonly string[];
   } = {},
 ): Promise<RuntimeToolRegistry> {
@@ -38,7 +40,7 @@ export async function createRuntimeToolRegistry(
   );
 
   for (const toolDefinition of definitions.tools) {
-    const prepared = await createPreparedRuntimeTool(toolDefinition);
+    const prepared = await createPreparedRuntimeTool(toolDefinition, input.nodeId);
     registry.register(
       toolDefinition.name,
       { definition: toolDefinition, prepared },
@@ -72,14 +74,71 @@ export function findRegisteredRuntimeTool(
 
 async function createPreparedRuntimeTool(
   definition: ResolvedToolDefinition,
+  nodeId: string | undefined,
 ): Promise<PreparedRuntimeAuthoredTool> {
   return {
+    behavior: prepareToolBehavior(definition.behavior, nodeId),
     description: definition.description,
     inputSchema: serializeInputSchema(definition.inputSchema),
     kind: "authored-tool",
     logicalPath: definition.logicalPath,
     name: definition.name,
+    owner: definition.owner,
     outputSchema: serializeOutputSchema(definition.outputSchema),
     sourceId: definition.sourceId,
+  };
+}
+
+function prepareToolBehavior(
+  behavior: CompiledToolBehavior | undefined,
+  nodeId: string | undefined,
+): PreparedToolBehavior | undefined {
+  if (behavior === undefined) {
+    return undefined;
+  }
+  if (behavior.handling === undefined) {
+    return {
+      availability: behavior.availability,
+      presentation: behavior.presentation,
+    };
+  }
+  if (behavior.handling.kind === "workflow-tool") {
+    return {
+      ...behavior,
+      handling: {
+        kind: "dispatch",
+        target: { kind: "workflow-tool-call", workflowId: behavior.handling.workflowId },
+      },
+    };
+  }
+  if (behavior.handling.kind !== "dispatch") {
+    return { ...behavior, handling: behavior.handling };
+  }
+
+  let target: Extract<PreparedToolBehavior["handling"], { readonly kind: "dispatch" }>["target"];
+  switch (behavior.handling.action) {
+    case "self-agent":
+      if (nodeId === undefined) {
+        throw new Error("The self-agent tool requires a concrete runtime node id.");
+      }
+      target = { kind: "self-agent-call", nodeId, subagentName: "agent" };
+      break;
+    case "task-cancel":
+      target = { kind: "task-cancel" };
+      break;
+    case "task-update":
+      target = { kind: "task-update" };
+      break;
+    default: {
+      const _exhaustive: never = behavior.handling.action;
+      return _exhaustive;
+    }
+  }
+  return {
+    ...behavior,
+    handling: {
+      kind: "dispatch",
+      target,
+    },
   };
 }

@@ -10,25 +10,26 @@ import { decodeJwt } from "#compiled/jose/index.js";
 import type { SessionAuthContext } from "#channel/types.js";
 import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger } from "#internal/logging.js";
-import { authenticateHttpBasicStrategy } from "#runtime/governance/auth/http-basic.js";
-import { authenticateJwtEcdsaStrategy } from "#runtime/governance/auth/jwt-ecdsa.js";
-import { authenticateJwtHmacStrategy } from "#runtime/governance/auth/jwt-hmac.js";
-import { authenticateOidcStrategy } from "#runtime/governance/auth/oidc.js";
-import { resolveVercelOidcCurrentProject } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { authenticateHttpBasicStrategy } from "#channel/auth/http-basic.js";
+import { authenticateJwtEcdsaStrategy } from "#channel/auth/jwt-ecdsa.js";
+import { authenticateJwtHmacStrategy } from "#channel/auth/jwt-hmac.js";
+import { authenticateOidcStrategy } from "#channel/auth/oidc.js";
+import { resolveVercelOidcCurrentProject } from "#channel/auth/vercel-oidc-project.js";
 import {
   createRuntimeSessionAuthContext,
   type ResolvedJwtEcdsaAuthStrategy,
   type ResolvedJwtHmacAuthStrategy,
   type ResolvedOidcAuthStrategy,
   type RouteStrategyAuthenticationResult,
-} from "#runtime/governance/auth/types.js";
+} from "#channel/auth/types.js";
+import { isVercelOidcIssuer } from "#shared/vercel-project.js";
 
 const vercelOidcLog = createLogger("auth.vercel-oidc");
 import {
   createRuntimeIpAllowList,
   isRuntimeIpAllowed,
   type RuntimeIpAllowList,
-} from "#runtime/governance/network/ip-allow-list.js";
+} from "#channel/ip-allow-list.js";
 import { isLoopbackHostname } from "#shared/network-address.js";
 
 // ---------------------------------------------------------------------------
@@ -847,8 +848,6 @@ const LOCAL_DEV_SESSION_AUTH_CONTEXT: SessionAuthContext = {
   principalType: "local-dev",
 };
 
-const VERCEL_OIDC_ISSUER_PREFIX = "https://oidc.vercel.com/";
-
 /**
  * Expected prefix for the `aud` claim of a Vercel-minted OIDC token
  * (`https://vercel.com/<owner-slug>`). Requiring it gives a real audience
@@ -923,7 +922,7 @@ export async function verifyVercelOidc(
     return { ok: false };
   }
 
-  if (!claims.issuer.startsWith(VERCEL_OIDC_ISSUER_PREFIX)) {
+  if (!isVercelOidcIssuer(claims.issuer)) {
     vercelOidcLog.debug("Rejected token whose issuer is not a Vercel OIDC issuer.", {
       issuer: claims.issuer,
     });

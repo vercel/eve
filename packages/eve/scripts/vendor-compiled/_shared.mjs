@@ -427,7 +427,10 @@ export async function runVendor({
 
   const desiredStamp = await computeStamp({ scriptFiles, modules, packageRoot, toolVersions });
 
-  if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+  if (
+    stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+    (await compiledModuleEntrypointsExist({ compiledRoot, modules }))
+  ) {
     console.log("Compiled vendor modules are already up to date.");
     return;
   }
@@ -435,10 +438,18 @@ export async function runVendor({
   await acquireLock(lockPath);
   try {
     // A peer process may have completed while we waited for the lock.
-    if (stampMatches(desiredStamp, await readExistingStamp(stampPath))) {
+    if (
+      stampMatches(desiredStamp, await readExistingStamp(stampPath)) &&
+      (await compiledModuleEntrypointsExist({ compiledRoot, modules }))
+    ) {
       console.log("Compiled vendor modules are already up to date.");
       return;
     }
+
+    // A matching stamp must not survive a repair attempt. Otherwise another
+    // process could accept directories created by an incomplete build as a
+    // valid cache hit while this process is writing, or after it fails.
+    await rm(stampPath, { force: true });
 
     const bundledModules = modules.filter((module) => module.typeOnly !== true);
     const typeOnlyModules = modules.filter((module) => module.typeOnly === true);
@@ -459,6 +470,21 @@ export async function runVendor({
   } finally {
     await releaseLock(lockPath);
   }
+}
+
+async function compiledModuleEntrypointsExist({ compiledRoot, modules }) {
+  const paths = modules.flatMap((module) =>
+    (module.entries ?? [{ outputPath: "index" }]).map((entry) =>
+      join(compiledRoot, module.compiledPath, `${entry.outputPath}.js`),
+    ),
+  );
+  const entries = await Promise.all(
+    paths.map(async (path) => {
+      const stats = await stat(path).catch(() => null);
+      return stats?.isFile() ?? false;
+    }),
+  );
+  return entries.every(Boolean);
 }
 
 /**

@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createCompiledAgentManifest, type CompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import { computeDevelopmentHostFingerprint } from "#internal/nitro/host/dev-host-fingerprint.js";
 import type { PreparedDevelopmentApplicationHost } from "#internal/nitro/host/types.js";
+import { defineChannel, GET } from "#public/definitions/channel.js";
+import { defineSchedule } from "#public/definitions/schedule.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -19,10 +21,11 @@ afterEach(async () => {
 });
 
 interface HostVariant {
-  readonly channels?: CompiledAgentManifest["channels"];
+  readonly channel?: { readonly path: string };
   readonly instrumentationSlot?: string;
   readonly instrumentationSource?: string;
-  readonly schedules?: CompiledAgentManifest["schedules"];
+  readonly schedule?: { readonly cron: string; readonly markdown: string };
+  readonly workflowSourceFingerprint?: string;
   readonly workflowWorld?: "local" | "vercel";
 }
 
@@ -38,18 +41,42 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
     await writeFile(instrumentationSourcePath, variant.instrumentationSource);
   }
 
-  const manifest = createCompiledAgentManifest({
+  const modules = [
+    ...(variant.channel === undefined
+      ? []
+      : [
+          {
+            logicalPath: "channels/smoke.ts",
+            loadNamespace: async () => ({
+              default: defineChannel({
+                routes: [GET(variant.channel!.path, async () => new Response("ok"))],
+              }),
+            }),
+          },
+        ]),
+    ...(variant.schedule === undefined
+      ? []
+      : [
+          {
+            logicalPath: "schedules/heartbeat.ts",
+            loadNamespace: async () => ({
+              default: defineSchedule(variant.schedule!),
+            }),
+          },
+        ]),
+  ];
+  const { manifest } = await compileFromMemory({
     agentRoot,
     appRoot,
-    channels: variant.channels ?? [],
-    config: {
-      model: { id: "openai/gpt-5-mini", routing: { kind: "gateway", target: "openai" } },
-      name: "fingerprint-host",
+    agent: {
+      model: "openai/gpt-5.4",
       ...(variant.workflowWorld === undefined
         ? {}
         : { experimental: { workflow: { world: variant.workflowWorld } } }),
     },
-    schedules: variant.schedules ?? [],
+    model: "openai/gpt-5.4",
+    modules,
+    name: "fingerprint-host",
   });
 
   return {
@@ -68,6 +95,12 @@ async function createHost(variant: HostVariant = {}): Promise<PreparedDevelopmen
       workflowWorldPluginPath: join(appRoot, "workflow-world.mjs"),
     },
     compileResult: { manifest } as PreparedDevelopmentApplicationHost["compileResult"],
+    generation: {
+      fingerprint: "generation",
+      ...(variant.workflowSourceFingerprint === undefined
+        ? {}
+        : { workflowSourceFingerprint: variant.workflowSourceFingerprint }),
+    } as PreparedDevelopmentApplicationHost["generation"],
   } as PreparedDevelopmentApplicationHost;
 }
 
@@ -106,17 +139,7 @@ describe("computeDevelopmentHostFingerprint", () => {
     const base = await computeDevelopmentHostFingerprint(await createHost());
     const withRoute = await computeDevelopmentHostFingerprint(
       await createHost({
-        channels: [
-          {
-            kind: "channel",
-            logicalPath: "channels/smoke.ts",
-            method: "GET",
-            name: "smoke",
-            sourceId: "channels/smoke.ts",
-            sourceKind: "module",
-            urlPath: "/smoke",
-          },
-        ] as CompiledAgentManifest["channels"],
+        channel: { path: "/smoke" },
       }),
     );
 
@@ -146,21 +169,24 @@ describe("computeDevelopmentHostFingerprint", () => {
     expect(vercel).not.toBe(local);
   });
 
+  it("treats authored workflow sources as structural", async () => {
+    const base = await computeDevelopmentHostFingerprint(await createHost());
+    const withWorkflows = await computeDevelopmentHostFingerprint(
+      await createHost({ workflowSourceFingerprint: "a" }),
+    );
+    const edited = await computeDevelopmentHostFingerprint(
+      await createHost({ workflowSourceFingerprint: "b" }),
+    );
+
+    expect(withWorkflows).not.toBe(base);
+    expect(edited).not.toBe(withWorkflows);
+  });
+
   it("leaves schedule definitions runtime-only", async () => {
     const base = await computeDevelopmentHostFingerprint(await createHost());
     const withSchedule = await computeDevelopmentHostFingerprint(
       await createHost({
-        schedules: [
-          {
-            cron: "0 0 * * 0",
-            hasRun: false,
-            logicalPath: "schedules/heartbeat.md",
-            markdown: "Report the weather.",
-            name: "heartbeat",
-            sourceId: "schedules/heartbeat.md",
-            sourceKind: "markdown",
-          },
-        ],
+        schedule: { cron: "0 0 * * 0", markdown: "Report the weather." },
       }),
     );
 

@@ -22,10 +22,12 @@ import {
   prepareRuntimeActionDispatch,
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
-  startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
+import { startSubagent } from "#execution/dispatch-runtime-actions-start.js";
+import { startWorkflowTool } from "#execution/tool-run/dispatch.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
-import type { RuntimeActionResult } from "#runtime/actions/types.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
 
 export async function dispatchRuntimeActionsStep(
   input: RuntimeActionDispatchInput,
@@ -42,8 +44,6 @@ export async function dispatchRuntimeActionsStep(
   }
 
   const { batch, bundle, session } = prepared;
-  const persistentSessions =
-    bundle.resolvedAgent.config?.experimental?.subagentPersistentSessions === true;
   // Acquired only once preflight can no longer throw, so a planning failure
   // never leaks the writer lock.
   const writer = input.parentWritable.getWriter();
@@ -57,6 +57,18 @@ export async function dispatchRuntimeActionsStep(
         results.push(entry.result);
         continue;
       }
+      if (entry.kind === "workflow-tool") {
+        const started = await startWorkflowTool({
+          action: entry.action,
+          batchEvent: batch.event,
+          ownerInboxToken: input.parentContinuationToken,
+          prepared,
+          session: nextSession,
+        });
+        nextSession = started.session;
+        if (started.result !== undefined) results.push(started.result);
+        continue;
+      }
       if (entry.kind === "task-control") {
         // Unreachable: the plan was built with `taskControls: false`.
         throw new Error("Task-control actions require the task dispatch step.");
@@ -67,6 +79,20 @@ export async function dispatchRuntimeActionsStep(
         case "resume":
           outcome = await dispatchToAgentHandle({
             action: entry.action,
+            activityObserver:
+              prepared.activityObserver === undefined
+                ? undefined
+                : deriveChildActivityObserverConfig({
+                    activityObserver: prepared.activityObserver,
+                    callId: entry.action.callId,
+                    kind: entry.action.kind === "remote-agent-call" ? "remote-agent" : "subagent",
+                    name:
+                      entry.action.kind === "remote-agent-call"
+                        ? entry.action.remoteAgentName
+                        : entry.action.subagentName,
+                    parentSessionId: session.sessionId,
+                    parentTurnId: batch.event.turnId,
+                  }),
             agentId: entry.agentId,
             auth: prepared.auth,
             bundle: createAgentContinuationBundle({
@@ -90,9 +116,10 @@ export async function dispatchRuntimeActionsStep(
             currentSession: nextSession,
             fanoutSize: prepared.fanoutSize,
             initiatorAuth: prepared.initiatorAuth,
+            localDevRequest: prepared.localDevRequest,
             parentContinuationToken: input.parentContinuationToken,
             parentTraceContext: prepared.parentTraceContext,
-            persistentSessions,
+            activityObserver: prepared.activityObserver,
             sandboxSessionId: prepared.sandboxSessionId,
             serializedContext: prepared.serializedContext,
             session,
@@ -126,7 +153,7 @@ export async function dispatchRuntimeActionsStep(
     results,
     sessionState:
       nextSession === session
-        ? input.sessionState
+        ? prepared.getBaselineSessionState()
         : createDurableSessionState({ session: nextSession }),
     pendingTasks: [],
   };

@@ -9,14 +9,11 @@ import {
   prepareFixtures,
   resetExperiments,
   writeExperiment,
-  writeSubjectArchives,
 } from "./experiment-files.mjs";
 
 const subject = {
-  archive: Buffer.from("source"),
-  dependencyArchive: Buffer.from("dependencies"),
-  digest: "source-digest",
-  dependencyDigest: "dependency-digest",
+  revision: "1234567890abcdef1234567890abcdef12345678",
+  packageSpec: "https://pkg.eve.dev/1234567890abcdef1234567890abcdef12345678/eve.tgz",
 };
 const benchmark = {
   id: "test",
@@ -26,7 +23,7 @@ const benchmark = {
   support: "supported",
 };
 
-test("materializes fixtures and complete experiment inputs", () => {
+test("materializes fixtures and complete experiment inputs", async () => {
   const root = mkdtempSync(join(tmpdir(), "eve-benchmark-experiments-"));
   const evals = join(root, "evals");
   const experiments = join(root, "experiments");
@@ -36,8 +33,12 @@ test("materializes fixtures and complete experiment inputs", () => {
     writeFileSync(join(evals, "not-a-case"), "ignored");
     assert.deepEqual(fixtureNames(evals), ["author-001-first", "author-002-second"]);
 
-    prepareFixtures(evals);
-    assert.equal(readFileSync(join(evals, "author-001-first", "PROMPT.md"), "utf8"), "");
+    await prepareFixtures(evals, subject);
+    assert.equal(readFileSync(join(evals, "author-001-first", "PROMPT.md"), "utf8"), "Build it.\n");
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(evals, "author-001-first", ".eve-authoring-bootstrap.json"))),
+      { startingPoint: "scaffolded", revision: subject.revision, setupIds: [] },
+    );
     assert.deepEqual(JSON.parse(readFileSync(join(evals, "author-001-first", "package.json"))), {
       name: "eve-authoring-author-001-first",
       private: true,
@@ -45,25 +46,18 @@ test("materializes fixtures and complete experiment inputs", () => {
     });
 
     resetExperiments(experiments);
-    const archives = writeSubjectArchives(experiments, subject, "published-deadbeef");
     writeExperiment(experiments, "test-opencode--guided", {
-      ...archives,
-      digest: subject.digest,
-      dependencyDigest: subject.dependencyDigest,
+      revision: subject.revision,
+      packageSpec: subject.packageSpec,
       runs: 3,
       evals: ["author-001-first"],
       benchmark,
       treatment: "guided",
     });
 
-    assert.equal(readFileSync(join(experiments, archives.archiveName), "utf8"), "source");
-    assert.equal(
-      readFileSync(join(experiments, archives.dependencyArchiveName), "utf8"),
-      "dependencies",
-    );
     const experiment = readFileSync(join(experiments, "test-opencode--guided.ts"), "utf8");
-    assert.match(experiment, /dependencyArchive: readFileSync/u);
-    assert.match(experiment, /published-deadbeef\.dependencies\.tar\.gz/u);
+    assert.match(experiment, /revision: "1234567890abcdef1234567890abcdef12345678"/u);
+    assert.match(experiment, /pkg\.eve\.dev\/1234567890abcdef1234567890abcdef12345678\/eve\.tgz/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -72,6 +66,9 @@ test("materializes fixtures and complete experiment inputs", () => {
 function writeCase(evals, name) {
   const root = join(evals, name);
   mkdirSync(root, { recursive: true });
-  writeFileSync(join(root, "CASE.ts"), "export default {};\n");
+  writeFileSync(
+    join(root, "CASE.ts"),
+    'export default { startingPoint: { workspace: "scaffolded" }, async interact({ send }) { await send("Build it."); } };\n',
+  );
   assert.ok(existsSync(root));
 }

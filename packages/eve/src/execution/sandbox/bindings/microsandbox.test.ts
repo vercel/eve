@@ -10,6 +10,7 @@ import {
   MICROSANDBOX_DEFAULT_IMAGE,
   resolveMicrosandboxOptions,
 } from "#execution/sandbox/bindings/microsandbox-options.js";
+import { DEFAULT_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 
 const lifecycleMocks = vi.hoisted(() => ({
   createMicrosandboxHandle: vi.fn(),
@@ -32,7 +33,7 @@ describe.skipIf(onWindows)("createMicrosandboxSandboxBackend", () => {
   });
 
   it("defaults to eve's published sandbox runtime image", () => {
-    expect(MICROSANDBOX_DEFAULT_IMAGE).toBe("ghcr.io/vercel/eve:latest");
+    expect(MICROSANDBOX_DEFAULT_IMAGE).toBe(DEFAULT_EVE_SANDBOX_IMAGE);
     expect(resolveMicrosandboxOptions(undefined).image).toBe(MICROSANDBOX_DEFAULT_IMAGE);
   });
 

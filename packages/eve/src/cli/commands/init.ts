@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import pc from "picocolors";
+import pc from "#compiled/picocolors/index.js";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
 import { EVE_WORDMARK } from "#cli/banner.js";
@@ -658,11 +658,8 @@ export async function runInitCommand(
   // existing app may start unrelated processes. Exec-style runs do not echo
   // the command the way run-scripts do, so the handoff line is printed here.
   const freshScaffold = result.kind === "created";
-  const devArguments = freshScaffold
-    ? [...baseDevArguments, "--input", "/model"]
-    : baseDevArguments;
-  logger.log(pc.dim(freshScaffold ? "$ eve dev --input /model" : "$ eve dev"));
-
+  const devArguments = freshScaffold ? [...baseDevArguments, "--onboard"] : baseDevArguments;
+  logger.log(pc.dim("$ eve dev"));
   if (
     !resultSucceeded(
       await dependencies.spawnPackageManager(

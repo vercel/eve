@@ -352,7 +352,9 @@ describe("useEveAgent (Vue composable wiring)", () => {
       }),
       createSessionWaitingEvent(),
     ];
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createBoundedStreamResponse(events));
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(createBoundedStreamResponse(events))
+      .mockResolvedValueOnce(createEagerStreamResponse([]));
     const scope = effectScope();
     const agent = scope.run(() =>
       useEveAgent({
@@ -362,7 +364,7 @@ describe("useEveAgent (Vue composable wiring)", () => {
     );
     if (agent === undefined) throw new Error("effect scope did not run");
 
-    expect(agent.status.value).toBe("submitted");
+    expect(agent.status.value).toBe("resuming");
     await vi.waitFor(() => expect(agent.events.value).toHaveLength(events.length));
     expect(agent.status.value).toBe("ready");
     expect(agent.data.value).toEqual(

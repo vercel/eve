@@ -21,6 +21,15 @@ import type {
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
+  defineHook: () => ({
+    create: (options?: { readonly token?: string }) => ({
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+      dispose: async () => {},
+      getConflict: async () => null,
+      token: options?.token ?? "hook",
+    }),
+    resume: async () => null,
+  }),
 }));
 
 vi.mock("#execution/hook-ownership.js", async (importOriginal) => ({
@@ -175,6 +184,26 @@ describe("taskRunWorkflow", () => {
       "completed",
     ]);
     expect(disposeHook).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens and disposes the run channels only for a background tool's task", async () => {
+    mockCommandHook([
+      { command: { kind: "ready" }, kind: "task-command" },
+      { command: { data: "done", kind: "complete" }, kind: "task-command" },
+    ]);
+
+    await taskRunWorkflow({
+      taskInboxToken: "task-token",
+      initialView: {
+        metadata: { kind: "tool", name: "deploy" },
+        status: "working",
+        taskId: "task_abc123",
+      },
+      parentContinuationToken: "parent-session-token",
+    });
+
+    expect(appendedStatuses()).toEqual(["working", "working", "completed"]);
+    expect(disposeHook).toHaveBeenCalledTimes(4);
   });
 
   it("skips views for rejected and noop commands", async () => {

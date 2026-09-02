@@ -3,22 +3,26 @@
  * `dispatchRuntimeActionsStep` (plain mode) and `dispatchTaskStep`
  * (task mode). Both run the same preflight → plan → dispatch → emit
  * skeleton over one pending batch and differ only in the per-entry
- * delegation lifecycle, so planning, subagent starts, and the
- * replay-safe `subagent.called` emission tail live here.
+ * delegation lifecycle, so planning and the replay-safe
+ * `subagent.called` emission tail live here.
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
+import type { ActivityObserverConfig, SessionParent } from "#channel/types.js";
 import {
   callAdapterEventHandler,
   type ChannelAdapter,
   type ChannelAdapterContext,
 } from "#channel/adapter.js";
 import {
+  ActivityObserverKey,
   AuthKey,
   CapabilitiesKey,
   ChannelInstrumentationKey,
   InitiatorAuthKey,
+  ParentSessionKey,
   SandboxKey,
+  type LocalDevRequestProvenance,
 } from "#context/keys.js";
 import { type AlsContext, ContextContainer } from "#context/container.js";
 import { withContextScope } from "#context/run-step.js";
@@ -30,37 +34,45 @@ import {
 import { deserializeContext } from "#context/serialize.js";
 import {
   type DispatchOutcome,
-  isAgentHandleAction,
   type RuntimeAgentHandleAction,
   type RuntimeSession,
 } from "#execution/agent-handle-dispatch.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
-import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
+import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
 import {
   assertUniqueRuntimeActionCallIds,
   getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
   stampMessageStreamEvent,
 } from "#protocol/message.js";
+import type { ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type {
-  RuntimeActionRequest,
   RuntimeActionResult,
   RuntimeRemoteAgentCallActionRequest,
   RuntimeSubagentCallActionRequest,
   RuntimeSubagentDispatchFailure,
-  RuntimeToolCallActionRequest,
-} from "#runtime/actions/types.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+} from "#shared/action-types.js";
+import type {
+  PendingAgentDispatchAction,
+  PendingDispatchAction,
+  PendingTaskControlAction,
+  PendingWorkflowToolAction,
+} from "#shared/dispatch-action.js";
+import {
+  createDurableSessionState,
+  type DurableSessionState,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,
   createUnavailableDynamicSubagentResult,
   getSubagentName,
 } from "#execution/dispatch-action-failures.js";
-import { startLocalSubagent } from "#execution/subagent-start-local.js";
-import { startRemoteSubagent } from "#execution/subagent-start-remote.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
@@ -70,6 +82,9 @@ import { resolveSubagentDepth } from "#harness/subagent-depth.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
+import { isWorkflowToolAction } from "#execution/tool-run/dispatch.js";
+import { isSubagentDelegationAction } from "#harness/subagent-depth.js";
+import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -96,13 +111,15 @@ export type DispatchPlanEntry =
     }
   | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
   | { readonly kind: "start"; readonly target: DispatchStartTarget }
-  | { readonly kind: "task-control"; readonly action: RuntimeToolCallActionRequest };
+  | { readonly kind: "task-control"; readonly action: PendingTaskControlAction }
+  | { readonly kind: "workflow-tool"; readonly action: PendingWorkflowToolAction };
 
 export type DispatchStartTarget =
   | {
       readonly kind: "local";
       readonly action: RuntimeSubagentCallActionRequest;
       readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
+      readonly selfAgent: boolean;
       readonly source: SubagentInputSource;
     }
   | {
@@ -154,11 +171,22 @@ export interface PreparedRuntimeActionDispatch {
    */
   readonly fanoutSize: number;
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
+  readonly localDevRequest?: LocalDevRequestProvenance;
+  /** Lineage of the session running this dispatch, when it is itself a delegated child. */
+  readonly parentSession: SessionParent | undefined;
   readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
+  readonly activityObserver?: ActivityObserverConfig & {
+    readonly workIdentity: ActivityWorkIdentityV1;
+  };
   readonly sandboxSessionId: string;
   readonly serializedContext: Record<string, unknown>;
   readonly plan: readonly DispatchPlanEntry[];
   readonly session: RuntimeSession;
+}
+
+interface PreparedPendingRuntimeActionDispatch extends PreparedRuntimeActionDispatch {
+  /** Returns the durable baseline corresponding to `session`. */
+  readonly getBaselineSessionState: () => DurableSessionState;
 }
 
 /**
@@ -177,23 +205,42 @@ export async function prepareRuntimeActionDispatch(input: {
    * those calls fail as unsupported batch actions.
    */
   readonly taskControls: boolean;
-}): Promise<PreparedRuntimeActionDispatch | undefined> {
+}): Promise<PreparedPendingRuntimeActionDispatch | undefined> {
   const durableSession = await readDurableSession(input.sessionState);
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
+  const parentTurnId = batch.event.turnId || activeTurnId(input.sessionState.emissionState);
+  const sessionStateRepaired = batch.event.turnId !== parentTurnId;
+  const repairedBatch = sessionStateRepaired
+    ? { ...batch, event: { ...batch.event, turnId: parentTurnId } }
+    : batch;
   const ctx = await deserializeContext(input.serializedContext);
-  return await prepareActionDispatch({
-    batch,
+  const prepared = await prepareActionDispatch({
+    batch: repairedBatch,
     ctx,
     durableSession,
     serializedContext: input.serializedContext,
     taskControls: input.taskControls,
   });
+  if (!sessionStateRepaired) {
+    return { ...prepared, getBaselineSessionState: () => input.sessionState };
+  }
+
+  const session = setPendingRuntimeActionBatch({
+    ...repairedBatch,
+    session: prepared.session,
+  });
+
+  return {
+    ...prepared,
+    getBaselineSessionState: () => createDurableSessionState({ session }),
+    session,
+  };
 }
 
 export async function prepareAgentActionDispatch(input: {
-  readonly action: RuntimeActionRequest;
+  readonly action: PendingAgentDispatchAction;
   readonly ctx: AlsContext;
   readonly event: {
     readonly sequence: number;
@@ -280,11 +327,37 @@ async function prepareActionDispatch(input: {
       input.fanoutSize ??
       plan.filter((entry) => entry.kind === "start" && entry.target.kind === "local").length,
     initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
+    localDevRequest: ctx.localDevRequest,
+    parentSession: ctx.get(ParentSessionKey),
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),
     plan,
+    activityObserver: resolvePreparedActivity(
+      ctx.get(ActivityObserverKey),
+      session,
+      batch.event.turnId,
+    ),
     sandboxSessionId,
     serializedContext: input.serializedContext,
     session,
+  };
+}
+
+function resolvePreparedActivity(
+  activityObserver: ActivityObserverConfig | undefined,
+  session: RuntimeSession,
+  turnId: string,
+): (ActivityObserverConfig & { readonly workIdentity: ActivityWorkIdentityV1 }) | undefined {
+  if (activityObserver === undefined) return undefined;
+  return {
+    sink: activityObserver.sink,
+    workIdentity: activityObserver.workIdentity ?? {
+      id: deriveRootTurnActivityWorkId({ sessionId: session.sessionId, turnId }),
+      kind: "root-turn",
+      rootSessionId: session.rootSessionId ?? session.sessionId,
+      rootTurnId: turnId,
+      sessionId: session.sessionId,
+      turnId,
+    },
   };
 }
 
@@ -295,14 +368,10 @@ function planSharesSandbox(input: {
   const graph = (input.bundle as Partial<CompiledBundle>).graph;
   return input.plan.some((entry) => {
     if (entry.kind !== "start" || entry.target.kind !== "local") return false;
-    const action = entry.target.action;
-    const isSelfDelegation =
-      action.subagentName === "agent" &&
-      !input.bundle.subagentRegistry.subagentsByNodeId.has(action.nodeId);
     return (
-      isSelfDelegation ||
-      graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox.definition.inheritsParent ===
-        true
+      entry.target.selfAgent ||
+      graph?.nodesByNodeId.get(entry.target.action.nodeId)?.sandboxRegistry.sandbox.definition
+        .inheritsParent === true
     );
   });
 }
@@ -392,7 +461,7 @@ export async function emitSubagentCalled(input: {
  * resolves to a stored handle becomes a resume.
  */
 function planDispatch(input: {
-  readonly actions: readonly RuntimeActionRequest[];
+  readonly actions: readonly PendingDispatchAction[];
   readonly bundle: CompiledBundle;
   readonly ctx: Parameters<typeof getDynamicSubagentSelection>[0];
   readonly session: RuntimeSession;
@@ -404,25 +473,36 @@ function planDispatch(input: {
     if (input.taskControls && isTaskControlAction(action)) {
       return { action, kind: "task-control" };
     }
+    if (isWorkflowToolAction(action)) {
+      return { action, kind: "workflow-tool" };
+    }
+
+    if (!isSubagentDelegationAction(action)) {
+      throw new Error(
+        `Unsupported prepared dispatch target "${action.target.kind}" in workflow runtime.`,
+      );
+    }
+    const resolved = resolvePreparedAgentAction(action);
 
     const rawAgentId = action.input.agentId;
     const agentId =
       typeof rawAgentId === "string" && rawAgentId.trim() !== "" ? rawAgentId : undefined;
-    if (agentId !== undefined && isAgentHandleAction(action)) {
+    if (agentId !== undefined) {
       // Resume classification runs before the recursion guard: an agentId
       // continuation resumes an already-adopted child rather than starting
       // a new one. Unknown ids go through classifyFreshStart below, which
       // re-applies the guard the resume path bypasses.
       if (handles.some((handle) => handle.identity.id === agentId)) {
         const dynamicSubagentSelection =
-          input.bundle.subagentRegistry.dynamicNodeIds?.has(action.nodeId) === true
-            ? getDynamicSubagentSelection(input.ctx, action.nodeId)
+          input.bundle.subagentRegistry.dynamicNodeIds?.has(resolved.action.nodeId) === true
+            ? getDynamicSubagentSelection(input.ctx, resolved.action.nodeId)
             : undefined;
         return {
-          action,
+          action: resolved.action,
           agentId,
           dynamicRemoteAgent:
-            action.kind === "remote-agent-call" && dynamicSubagentSelection?.kind === "remote"
+            resolved.action.kind === "remote-agent-call" &&
+            dynamicSubagentSelection?.kind === "remote"
               ? dynamicSubagentSelection.remoteAgent
               : undefined,
           kind: "resume",
@@ -435,9 +515,10 @@ function planDispatch(input: {
     }
 
     return classifyFreshStart({
-      action,
+      action: resolved.action,
       bundle: input.bundle,
       ctx: input.ctx,
+      selfAgent: resolved.selfAgent,
       session: input.session,
     });
   });
@@ -449,15 +530,17 @@ function planDispatch(input: {
  * unknown-agentId fallback, so both paths enforce the same guard.
  */
 function classifyFreshStart(input: {
-  readonly action: RuntimeActionRequest;
+  readonly action: RuntimeAgentHandleAction;
   readonly bundle: CompiledBundle;
   readonly ctx: Parameters<typeof getDynamicSubagentSelection>[0];
+  readonly selfAgent: boolean;
   readonly session: RuntimeSession;
 }): Extract<DispatchPlanEntry, { kind: "reject" | "start" }> {
   const { action } = input;
   const registry = input.bundle.subagentRegistry.subagentsByNodeId;
   const subagentDepth = resolveSubagentDepth(input.session);
-  const rootOnly = input.session.rootSessionId !== undefined || subagentDepth.currentDepth > 0;
+  const outsideRootSession =
+    input.session.rootSessionId !== undefined || subagentDepth.currentDepth > 0;
 
   const isDynamicSubagent =
     (action.kind === "subagent-call" || action.kind === "remote-agent-call") &&
@@ -480,7 +563,10 @@ function classifyFreshStart(input: {
     return { kind: "reject", result: createUnavailableDynamicSubagentResult(action) };
   }
 
-  if (isRecursiveAgentAction(action, registry) && rootOnly) {
+  if (input.selfAgent && action.kind !== "subagent-call") {
+    throw new Error("A self-agent dispatch target must resolve to a local subagent action.");
+  }
+  if (input.selfAgent && outsideRootSession && action.kind === "subagent-call") {
     log.warn("recursive agent call blocked outside the root session", {
       callId: action.callId,
       currentDepth: subagentDepth.currentDepth,
@@ -503,13 +589,22 @@ function classifyFreshStart(input: {
           ? registered.definition.description
           : undefined);
       const source: SubagentInputSource =
-        description !== undefined ? { description, type: "local" } : { type: "runtime" };
+        description !== undefined
+          ? {
+              description,
+              outputSchema:
+                dynamicAgentConfig?.outputSchema ??
+                input.bundle.graph?.nodesByNodeId.get(action.nodeId)?.turnAgent?.outputSchema,
+              type: "local",
+            }
+          : { outputSchema: input.bundle.turnAgent.outputSchema, type: "runtime" };
       return {
         kind: "start",
         target: {
           action,
           dynamicSubagentAgentConfig: dynamicAgentConfig,
           kind: "local",
+          selfAgent: input.selfAgent,
           source,
         },
       };
@@ -526,90 +621,9 @@ function classifyFreshStart(input: {
           kind: "remote",
         },
       };
-    default:
-      throw new Error(`Unsupported runtime action kind "${action.kind}" in workflow runtime.`);
-  }
-}
-
-/** Starts one planned fresh child against its local or remote target. */
-export async function startSubagent(input: {
-  readonly auth: Parameters<typeof buildSubagentRunInput>[0]["auth"];
-  readonly batchEvent: { readonly sequence: number; readonly turnId: string };
-  readonly bundle: CompiledBundle;
-  readonly callbackBaseUrl: string | undefined;
-  readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
-  readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
-  readonly currentSession: RuntimeSession;
-  readonly fanoutSize: number;
-  readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
-  readonly parentContinuationToken: string | undefined;
-  readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly persistentSessions: boolean;
-  readonly sandboxSessionId: string;
-  readonly serializedContext: Record<string, unknown>;
-  readonly session: RuntimeSession;
-  readonly taskOwned: boolean;
-  readonly target: DispatchStartTarget;
-}): Promise<DispatchOutcome> {
-  const parentTraceContext =
-    readActionTraceContext(
-      input.serializedContext,
-      input.session.sessionId,
-      input.batchEvent.turnId,
-      input.target.action.callId,
-    ) ?? input.parentTraceContext;
-
-  switch (input.target.kind) {
-    case "local":
-      return startLocalSubagent({
-        action: input.target.action,
-        auth: input.auth,
-        batchEvent: input.batchEvent,
-        bundle: input.bundle,
-        capabilities: input.capabilities,
-        channelMetadata: input.channelMetadata,
-        currentSession: input.currentSession,
-        dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
-        fanoutSize: input.fanoutSize,
-        initiatorAuth: input.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
-        persistentSessions: input.persistentSessions,
-        sandboxSessionId: input.sandboxSessionId,
-        session: input.session,
-        source: input.target.source,
-        taskOwned: input.taskOwned,
-      });
-    case "remote":
-      return startRemoteSubagent({
-        action: input.target.action,
-        auth: input.auth,
-        batchEvent: input.batchEvent,
-        bundle: input.bundle,
-        callbackBaseUrl: input.callbackBaseUrl,
-        currentSession: input.currentSession,
-        dynamicRemoteAgent: input.target.dynamicRemoteAgent,
-        initiatorAuth: input.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
-        persistentSessions: input.persistentSessions,
-        session: input.session,
-        taskOwned: input.taskOwned,
-      });
     default: {
-      const _exhaustive: never = input.target;
+      const _exhaustive: never = action;
       return _exhaustive;
     }
   }
-}
-
-function isRecursiveAgentAction(
-  action: RuntimeActionRequest,
-  subagentsByNodeId: ReadonlyMap<string, unknown>,
-): action is RuntimeSubagentCallActionRequest {
-  return (
-    action.kind === "subagent-call" &&
-    action.subagentName === "agent" &&
-    !subagentsByNodeId.has(action.nodeId)
-  );
 }

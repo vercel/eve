@@ -1,19 +1,20 @@
 import type { HarnessSession } from "#harness/types.js";
 import {
   createHistoryViewPreparer,
-  identityHistoryViewProjector,
+  type HistoryViewProjector,
   type PreparedHistoryView,
 } from "#shared/history-view.js";
+import { projectMemoryHistoryFromSessionState } from "#shared/memory-state.js";
 
 export interface ExecutionHistoryView {
   readonly initial: PreparedHistoryView;
   readonly messages: (session: HarnessSession) => PreparedHistoryView["messages"];
   readonly prepare: (session: HarnessSession) => PreparedHistoryView;
-  readonly projector: typeof identityHistoryViewProjector;
+  readonly projector: HistoryViewProjector;
 }
 
 export function createExecutionHistoryView(session: HarnessSession): ExecutionHistoryView {
-  const projector = identityHistoryViewProjector;
+  const projector: HistoryViewProjector = projectMemoryHistoryFromSessionState;
   const prepareHistory = createHistoryViewPreparer({ projector });
   const prepare = (next: HarnessSession) => prepareHistory(next.history, next.state);
 

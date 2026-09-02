@@ -1,12 +1,14 @@
 packages:
   - apps/*
-  - apps/*/*
+  - apps/fixtures/*
+  - apps/frameworks/*
   - e2e/fixtures/*
   - packages/*
 
 allowBuilds:
   "@google/genai": false # No-op preinstall.
   "@parcel/watcher": false # Builds from source only when explicitly requested.
+  "@swc/core": false # Only its pure transform-utils module is vendored (via @workflow/builders); eve never runs SWC.
   braintrust: false # Installs an optional CLI binary; the SDK does not need it.
   bufferutil: false # The package already includes the supported prebuilt bindings.
   cpu-features: false # Optional ssh2 acceleration; JavaScript fallback is sufficient.
@@ -38,12 +40,13 @@ catalog:
   "@types/node": "25.9.1"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
-  "@vercel/connect": "0.4.3"
+  "@vercel/connect": "1.0.0"
   "@vercel/otel": "2.1.3"
   "@vercel/sandbox": "2.8.0"
+  "@vercel/sandbox-delete": "npm:@vercel/sandbox@3.2.0"
   "@vercel/sandbox-drives": "npm:@vercel/sandbox@2.10.0-beta.0"
-  "@workflow/world-postgres": "5.0.0-beta.35"
-  ai: "^7.0.58"
+  "@workflow/world-postgres": "5.0.0-beta.39"
+  ai: "^7.0.82"
   better-auth: "1.6.26"
   marked: "17.0.6"
   next: "16.3.0-preview.6"
@@ -54,7 +57,7 @@ catalog:
   streamdown: "2.5.0"
   typescript: "7.0.2"
   vitest: "4.1.10"
-  zod: "4.4.3"
+  zod: "4.5.4"
 
 catalogs:
   docs:
@@ -64,7 +67,10 @@ minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
   - "@linqapp/chat-sdk-adapter"
+  - "@linqapp/sdk"
+  - "@supermemory/eve"
   - "@vercel/*"
   - "@workflow/*"
   - nitro
+  - run
   - workflow

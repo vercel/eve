@@ -57,15 +57,18 @@ import {
 import type {
   SetupEditableSelectResult,
   SetupFlowIndicator,
+  SetupFlowInterrupt,
   SetupFlowRenderer,
   SetupFlowStatus,
   SetupSelectRequest,
+  SetupSelectResult,
 } from "./setup-flow.js";
-import type { SelectNotice } from "#setup/prompter.js";
+import type { PlannerNavigation, SelectNotice } from "#setup/prompter.js";
 import type { ModelSettingsRequest, ModelSettingsResult } from "#setup/flows/model.js";
 import type { ProviderPickerChoice, ProviderPickerRequest } from "#setup/flows/provider.js";
 import {
   initialSelectState,
+  orderedSelection,
   reduceSelect,
   searchActionQuery,
   selectValueAtCursor,
@@ -116,7 +119,7 @@ import { AltScreen } from "#cli/ui/alt-screen.js";
 import { copyTextToClipboard } from "./clipboard.js";
 import type { TraceViewerOpenOptions, TraceViewerRenderer } from "./traces/trace-viewer-session.js";
 import { TraceViewerSession } from "./traces/trace-viewer-session.js";
-import { buildStatusLine } from "./status-line.js";
+import { buildStatusLine, type DevBuildStatus } from "./status-line.js";
 import { nextLogDisplayMode } from "./log-display-mode.js";
 import { createTheme, detectUnicode, type Theme } from "./theme.js";
 import {
@@ -240,6 +243,7 @@ type TurnIndicatorState = { kind: "idle" } | { kind: "waiting"; startedAtMs: num
 
 type SetupFlowState = {
   title: string;
+  navigation?: PlannerNavigation;
   indicator: SetupFlowIndicatorState;
   lines: FlowPanelLine[];
   summary?: { headline: string; facts: readonly { label: string; value: string }[] };
@@ -295,7 +299,7 @@ export type AgentHeaderOptions = {
   name: string;
   serverUrl: string;
   info?: AgentInfoResult;
-  /** Message-of-the-day line under the brand line (local sessions only). */
+  /** Message-of-the-day line below the startup card (local sessions only). */
   tip?: string;
 };
 
@@ -336,6 +340,10 @@ const incompletePasteFlushMs = 1_000;
 // How long the transient Ctrl+L log-mode hint stays in the status line after
 // the last cycle before it clears itself.
 const logLevelHintMs = 5_000;
+// Fast authored-source rebuilds skip their intermediate state to avoid a
+// distracting status-bar flash; genuinely slow builds still show progress.
+const devBuildProgressDelayMs = 250;
+const devBuildLoadedStatusMs = 4_000;
 
 const STATUS = {
   processing: "Working…",
@@ -398,6 +406,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   readonly #fileContents = new FileContentCache();
   readonly #subagentHeaders = new Set<string>();
   #agentHeader?: AgentHeaderOptions;
+  #startupHeader?: { readonly name: string; readonly tip: string };
   #agentHeaderRendered = false;
   /** The last committed header body, to skip re-committing an unchanged banner. */
   #agentHeaderBody?: string;
@@ -519,6 +528,10 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * an ordinary log block, and the next rebuild line opens a fresh cycle.
    */
   #devRebuild?: { id: string; summary: string };
+  /** Log-filter-independent authored-source state shown in the bottom status bar. */
+  #devBuildStatus?: DevBuildStatus;
+  #devBuildStatusVisible = false;
+  #devBuildStatusTimer?: ReturnType<typeof setTimeout>;
   /** Monotonic id source — committed cycle ids must never be reused. */
   #devRebuildSequence = 0;
   #pendingEchoedPrompt?: string;
@@ -565,7 +578,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /** The prompt submitted for the streaming turn, for external-cancel recovery. */
   #currentSubmittedPrompt?: string;
   /** Armed by {@link SetupFlowRenderer.waitForInterrupt}; fired by the idle key trap. */
-  #flowInterrupt?: () => void;
+  #flowInterrupt?: (interrupt: SetupFlowInterrupt) => void;
   /** The installed working-state key consumer, so re-arming and disposal can recognize it. */
   #flowIdleConsumer?: (key: TerminalKey) => void;
   /** The open `/traces` viewer session, if the alt-screen viewer is active. */
@@ -578,6 +591,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   #terminalBackground?: RgbColor;
   readonly setupFlow: SetupFlowRenderer = {
     begin: (title, indicator) => this.#beginSetupFlow(title, indicator),
+    setNavigation: (navigation) => this.#setSetupFlowNavigation(navigation),
     end: (options) => this.#endSetupFlow(options?.preserveDiagnostics ?? true),
     readSelect: (options) => this.#readSetupSelect(options),
     readEditableSelect: (options) => this.#readSetupEditableSelect(options),
@@ -629,8 +643,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
   /**
    * Commits the startup agent header (brand mark + resolved configuration) to
    * scrollback before the first prompt. Later calls (dev HMR refreshing fields
-   * such as the agent name) commit a fresh header beneath the existing
-   * transcript only when the rendered header actually changed — every source
+   * such as the model) commit a fresh header beneath the existing transcript
+   * only when the rendered header actually changed — every source
    * reload re-sends it, and an identical banner repeated per reload is noise.
    * Committed scrollback is never cleared or replayed.
    */
@@ -654,6 +668,43 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // paints the input line beneath it. Startup intentionally preserves the
     // user's existing scrollback instead of clearing the terminal.
     this.#live.flush(this.#renderAgentHeaderRows(), []);
+  }
+
+  beginStartupDraft(options: { initialDraft?: string; tip: string; title: string }): void {
+    this.#start({ title: options.title });
+    this.#inputActive = true;
+    this.#promptPlaceholderActive = true;
+    this.#startupHeader = { name: options.title, tip: options.tip };
+    let editor = lineOf(stripPromptControlCharacters(options.initialDraft ?? ""));
+    this.#syncInput(editor);
+    this.#startCaretBlink();
+    this.#paint();
+
+    const apply = (next: LineState) => {
+      editor = next;
+      this.#showCaret();
+      this.#syncInput(editor);
+      this.#paint();
+    };
+    this.#consumeKey = (key) => {
+      const edited = applyLineEditorKey(editor, key, { multiline: true });
+      if (edited !== undefined) {
+        apply(edited);
+        return;
+      }
+      if (key.type === "ctrl-c") this.#onExitRequest?.();
+    };
+    this.#attachInput();
+  }
+
+  finishStartupDraft(): string {
+    const draft = this.#inputText;
+    this.#detachInput();
+    this.#stopCaretBlink();
+    this.#inputActive = false;
+    this.#startupHeader = undefined;
+    this.#promptPlaceholderActive = false;
+    return draft;
   }
 
   async readPrompt(options?: AgentTUISessionOptions): Promise<string> {
@@ -1245,6 +1296,14 @@ export class TerminalRenderer implements AgentTUIRenderer {
         }
 
         if (mode === "overlay") {
+          const textNavigation = setupSelectionIntent(key, {
+            textNavigation: !isOnFreeformRow(),
+          });
+          if (textNavigation?.kind === "move") {
+            moveCursor(textNavigation.direction === "up" ? -1 : 1);
+            return;
+          }
+
           switch (key.type) {
             case "up":
             case "ctrl-p":
@@ -1737,13 +1796,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     const content = stripAnsi(text);
     if (content.trim().length === 0) return;
     this.#start();
-    this.#pushBlock(
-      tone === "success"
-        ? { kind: "result", body: content, live: false, status: "done" }
-        : tone === "error"
-          ? { kind: "flow", title: tone, body: content, live: false }
-          : { kind: "result", body: content, live: false },
-    );
+    this.#pushBlock({
+      kind: "result",
+      body: content,
+      live: false,
+      status: tone === "success" ? "done" : undefined,
+    });
     this.#paint();
   }
 
@@ -1768,6 +1826,12 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // The ticker runs for the whole flow: the idle pulse, the status indicator,
     // and the output preview all animate through it.
     this.#startTicker();
+    this.#paint();
+  }
+
+  #setSetupFlowNavigation(navigation: PlannerNavigation | undefined): void {
+    if (this.#setupFlow === undefined) return;
+    this.#setupFlow.navigation = navigation;
     this.#paint();
   }
 
@@ -1819,16 +1883,17 @@ export class TerminalRenderer implements AgentTUIRenderer {
    * clears an active search first. One question at a time; it vanishes on
    * resolve.
    */
-  async #readSetupSelect(opts: SetupSelectRequest): Promise<readonly string[] | undefined> {
+  async #readSetupSelect(opts: SetupSelectRequest): Promise<SetupSelectResult> {
     const flow = this.#beginSetupQuestion();
     const multiple = isMultiSelectRequest(opts);
     const searchAction = opts.kind === "search" ? opts.searchAction : undefined;
     let selectOptions: readonly SetupPanelOption[] = opts.options;
 
+    const plannerNavigation = opts.navigation?.kind === "planner";
     const initial: Parameters<typeof initialSelectState>[0] = {
       options: selectOptions,
       searchAction,
-      submitRow: multiple,
+      submitRow: multiple && !plannerNavigation,
     };
     if ("initialValue" in opts && opts.initialValue !== undefined) {
       initial.defaultValue = opts.initialValue;
@@ -1851,7 +1916,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         {
           options: selectOptions,
           searchAction,
-          submitRow: multiple,
+          submitRow: multiple && !plannerNavigation,
         },
       );
       this.#paint();
@@ -1872,7 +1937,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const filter = select.filter;
         selectOptions = options;
         select = {
-          ...initialSelectState({ options, searchAction, submitRow: multiple }),
+          ...initialSelectState({
+            options,
+            searchAction,
+            submitRow: multiple && !plannerNavigation,
+          }),
           filter,
         };
       } catch (reason) {
@@ -1909,8 +1978,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.question = (width) => renderSelectQuestion(panelState(), this.#theme, width);
     this.#paint();
 
-    const question = this.#captureSetupQuestion<readonly string[] | undefined>((key, settle) => {
-      const close = (value: readonly string[] | undefined): void => {
+    const question = this.#captureSetupQuestion<SetupSelectResult>((key, settle) => {
+      const close = (value: SetupSelectResult): void => {
         searchVersion += 1;
         settle(value);
       };
@@ -1921,9 +1990,34 @@ export class TerminalRenderer implements AgentTUIRenderer {
         return;
       }
 
+      const plannerStep = opts.navigation?.kind === "planner" ? opts.navigation : undefined;
+      const plannerDirection =
+        key.type === "left" &&
+        (plannerStep?.activeStep ?? 0) > (plannerStep?.firstNavigableStep ?? 0)
+          ? "back"
+          : key.type === "right" &&
+              plannerStep !== undefined &&
+              plannerStep.activeStep >= (plannerStep.firstNavigableStep ?? 0) &&
+              plannerStep.activeStep < plannerStep.steps.length - 1
+            ? "forward"
+            : undefined;
+      if (plannerDirection !== undefined) {
+        close({
+          kind: "navigate",
+          direction: plannerDirection,
+          values: multiple ? orderedSelection(selectOptions, select.selected) : [],
+        });
+        return;
+      }
+
       const base = { key, options: selectOptions, searchAction, select };
       const result = multiple
-        ? reduceSetupSelectInput({ ...base, kind: opts.kind, required: opts.required })
+        ? reduceSetupSelectInput({
+            ...base,
+            kind: opts.kind,
+            required: opts.required,
+            plannerNavigation: plannerNavigation || undefined,
+          })
         : reduceSetupSelectInput({ ...base, kind: opts.kind });
       switch (result.kind) {
         case "cancel":
@@ -1993,7 +2087,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const question = this.#captureSetupQuestion<string | undefined>(
       (key, settle) => {
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: true });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2111,7 +2205,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
           );
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, { textNavigation: !onEditableRow() });
         switch (intent?.kind) {
           case "cancel":
             settle(undefined);
@@ -2239,7 +2333,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
           }
         };
 
-        const intent = setupSelectionIntent(key);
+        const intent = setupSelectionIntent(key, {
+          textNavigation: interaction.phase.kind === "inactive",
+        });
         switch (intent?.kind) {
           case "cancel":
             dispatch({ type: "cancel" });
@@ -2460,7 +2556,15 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#inputActive = false;
     this.#turnIndicator = { kind: "idle" };
     this.#status = "";
-    return this.#requireSetupFlow();
+    const flow = this.#requireSetupFlow();
+    // A standard question means the preceding background operation settled.
+    // Clear its transient item summary and timer before painting the prompt.
+    if (flow.status !== undefined) {
+      flow.status = undefined;
+      flow.summary = undefined;
+      flow.preview = undefined;
+    }
+    return flow;
   }
 
   /** A flow is implicitly opened for a bare question (tests, future hosts). */
@@ -2543,11 +2647,11 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   /** See {@link SetupFlowRenderer.waitForInterrupt}. */
   #waitForFlowInterrupt(options?: { interruptible?: boolean }): {
-    promise: Promise<void>;
+    promise: Promise<SetupFlowInterrupt>;
     dispose(): void;
   } {
-    let fire!: () => void;
-    const promise = new Promise<void>((resolve) => {
+    let fire!: (interrupt: SetupFlowInterrupt) => void;
+    const promise = new Promise<SetupFlowInterrupt>((resolve) => {
       fire = resolve;
     });
     this.#flowInterrupt = fire;
@@ -2580,7 +2684,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
         const fire = this.#flowInterrupt;
         this.#flowInterrupt = undefined;
         this.#disarmFlowIdleTrap();
-        fire?.();
+        fire?.(key.type === "ctrl-c" ? "ctrl-c" : "escape");
         return;
       }
       if (key.type === "ctrl-r") this.#paint();
@@ -2680,6 +2784,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     flow.lines = [];
     flow.outputBuffer = [];
     flow.preview = undefined;
+    flow.status = undefined;
     flow.summary =
       content === undefined
         ? undefined
@@ -2916,6 +3021,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       this.#logLevelHintTimer = undefined;
     }
     this.#logLevelHintActive = false;
+    this.#clearDevBuildStatus();
 
     if (!this.#isInteractive) return;
 
@@ -3800,7 +3906,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     const width = this.#width();
     const footer = this.#footerRows(width);
-    const maxBlockRows = Math.max(1, this.#height() - footer.length);
+    const startupHeader = this.#startupHeader === undefined ? [] : this.#renderAgentHeaderRows();
+    const maxBlockRows = Math.max(1, this.#height() - startupHeader.length - footer.length);
     const committed: string[] = [];
     let previous = this.#lastCommitted;
 
@@ -3853,6 +3960,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
 
     const liveRows = [
+      ...startupHeader,
       ...clipLiveRows(
         flat.map((entry) => entry.row),
         maxBlockRows,
@@ -3962,14 +4070,16 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
   #renderAgentHeaderRows(): string[] {
     const header = this.#agentHeader;
-    if (header === undefined) return [];
+    const startup = this.#startupHeader;
+    if (header === undefined && startup === undefined) return [];
     const input: Parameters<typeof buildAgentHeader>[0] = {
-      name: header.name,
+      name: header?.name ?? startup?.name,
       theme: this.#theme,
       width: this.#width(),
     };
-    if (header.info !== undefined) input.info = header.info;
-    if (header.tip !== undefined) input.tip = header.tip;
+    if (header?.info !== undefined) input.info = header.info;
+    const tip = header?.tip ?? startup?.tip;
+    if (tip !== undefined) input.tip = tip;
     return buildAgentHeader(input);
   }
 
@@ -4061,6 +4171,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
       }
       const state: Parameters<typeof renderFlowPanel>[0] = {
         title: flow.title,
+        navigation: flow.navigation,
         lines:
           flow.summary === undefined
             ? flow.hideLinesWhileQuestion === true
@@ -4137,6 +4248,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       const isCommand = isPromptControlCommand(this.#inputText);
       const ghost = inlineHint ? c.dim(` ${inlineHint}`) : "";
       const statusRows: string[] = [];
+      if (this.#startupHeader !== undefined) {
+        statusRows.push(clip(c.dim(`${this.#theme.glyph.dot} Building your agent…`), width));
+      }
       this.#pushStatusLine(statusRows, width);
       // Keep one transcript row above the footer and one separator below the
       // prompt. Everything already in `rows` has higher-level footer ownership
@@ -4290,6 +4404,9 @@ export class TerminalRenderer implements AgentTUIRenderer {
       theme: this.#theme,
       width: contentWidth,
     };
+    if (this.#devBuildStatusVisible && this.#devBuildStatus !== undefined) {
+      input.devBuild = this.#devBuildStatus;
+    }
     if (this.#logLevelHintActive) input.logLevel = this.#logs;
     const serverUrl = this.#agentHeader?.serverUrl;
     if (serverUrl !== undefined && this.#remoteConnection === undefined) {
@@ -4546,6 +4663,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
   }
 
   #handleDevRebuildFailure(body: string): void {
+    this.#clearDevBuildStatus();
     if (this.#logs === "all") {
       if (body.trim().length === 0) return;
       this.#pushBlock({ kind: "log", title: "stderr", body, live: true });
@@ -4572,6 +4690,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
     if (update.kind === "rebuilding") {
       const summary = summarizeChangedFiles(update.events, update.more);
+      this.#setDevBuildStatus({ phase: "building", summary });
       if (cycle !== undefined) {
         cycle.state.summary = summary;
         cycle.block.body = formatDevRebuildStatus(summary, "rebuilding");
@@ -4590,6 +4709,8 @@ export class TerminalRenderer implements AgentTUIRenderer {
       return;
     }
 
+    const summary = cycle?.state.summary ?? this.#devBuildStatus?.summary;
+    if (summary !== undefined) this.#setDevBuildStatus({ phase: "complete", summary });
     if (cycle !== undefined) {
       cycle.block.body = formatDevRebuildStatus(cycle.state.summary, update.kind);
       if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
@@ -4597,6 +4718,31 @@ export class TerminalRenderer implements AgentTUIRenderer {
     }
     if (update.kind === "rebuilt") this.#delayedDevBuildError = undefined;
     this.#pushBlock({ kind: "log", title: "stdout", body: line, live: true });
+  }
+
+  #setDevBuildStatus(status: DevBuildStatus): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = status;
+    this.#devBuildStatusVisible = status.phase === "complete";
+    this.#devBuildStatusTimer = setTimeout(
+      () => {
+        if (status.phase === "building") {
+          this.#devBuildStatusVisible = true;
+          this.#devBuildStatusTimer = undefined;
+        } else {
+          this.#clearDevBuildStatus();
+        }
+        this.#paint();
+      },
+      status.phase === "building" ? devBuildProgressDelayMs : devBuildLoadedStatusMs,
+    );
+  }
+
+  #clearDevBuildStatus(): void {
+    if (this.#devBuildStatusTimer !== undefined) clearTimeout(this.#devBuildStatusTimer);
+    this.#devBuildStatus = undefined;
+    this.#devBuildStatusVisible = false;
+    this.#devBuildStatusTimer = undefined;
   }
 
   /** The rebuild status block still cycling in place, if any. */

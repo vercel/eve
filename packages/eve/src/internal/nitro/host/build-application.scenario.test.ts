@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Nitro } from "nitro/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createCompiledAgentManifest } from "#compiler/manifest.js";
+import { compileFromMemory } from "#compiler/compile-from-memory.js";
 import {
   APPLICATION_BUILD_PROFILE_SCHEMA_VERSION,
   type ApplicationBuildProfile,
@@ -120,15 +120,13 @@ vi.mock("./vercel-build-prewarm.js", () => ({
 const createScratchDirectory = useTemporaryDirectories();
 const DEPLOYABLE_BUILD_OPTIONS = { skipVercelSandboxPrewarm: false } as const;
 
-function createPreparedHost(appRoot: string): PreparedApplicationHost {
+async function createPreparedHost(appRoot: string): Promise<PreparedApplicationHost> {
   const agentRoot = join(appRoot, "agent");
-  const manifest = createCompiledAgentManifest({
+  const { manifest } = await compileFromMemory({
     agentRoot,
     appRoot,
-    config: {
-      model: { id: "openai/gpt-5.4", routing: { kind: "gateway", target: "openai" } },
-      name: "scenario-test-agent",
-    },
+    model: "openai/gpt-5.4",
+    name: "scenario-test-agent",
   });
   return {
     appRoot,
@@ -181,7 +179,7 @@ async function prepareHostBuildWorkspace(
   workspace: ApplicationBuildWorkspace,
 ): Promise<PreparedApplicationHost> {
   await mkdir(join(workspace.compiler.artifactsDir, "compile"), { recursive: true });
-  return createPreparedHost(workspace.appRoot);
+  return await createPreparedHost(workspace.appRoot);
 }
 
 describe("buildApplication", () => {

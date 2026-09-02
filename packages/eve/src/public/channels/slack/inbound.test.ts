@@ -6,6 +6,8 @@ import {
   parseDirectMessageEvent,
   parseMessageEvent,
   parseSlackEventEnvelope,
+  slackEventReceivingBotUserId,
+  slackEventInstallationTeamId,
   slackMessageFromWebhookPayload,
 } from "#public/channels/slack/inbound.js";
 
@@ -52,6 +54,52 @@ describe("parseSlackEventEnvelope", () => {
 
   it("throws for invalid JSON", () => {
     expect(() => parseSlackEventEnvelope("not-json")).toThrow();
+  });
+});
+
+describe("slackEventInstallationTeamId", () => {
+  const envelope = (
+    authorizations: readonly { is_bot?: boolean; team_id?: string; user_id?: string }[],
+  ) => ({ type: "event_callback" as const, authorizations });
+
+  it("prefers the bot installation over other authorizations", () => {
+    expect(
+      slackEventInstallationTeamId(
+        envelope([
+          { is_bot: false, team_id: "T_USER", user_id: "U1" },
+          { is_bot: true, team_id: "T_BOT", user_id: "U_BOT" },
+        ]),
+      ),
+    ).toBe("T_BOT");
+  });
+
+  it("falls back to an authorization that omits is_bot", () => {
+    expect(slackEventInstallationTeamId(envelope([{ team_id: "T_UNKNOWN" }]))).toBe("T_UNKNOWN");
+  });
+
+  it("accepts an is_bot false authorization for a bot app_mention", () => {
+    expect(
+      slackEventInstallationTeamId(envelope([{ is_bot: false, team_id: "T_INSTALLATION" }])),
+    ).toBe("T_INSTALLATION");
+  });
+});
+
+describe("slackEventReceivingBotUserId", () => {
+  it("accepts an unflagged authorization only when the app mention names the same user", () => {
+    expect(
+      slackEventReceivingBotUserId({
+        authorizations: [{ user_id: "U_BOT" }],
+        event: { text: "<@U_BOT> investigate", type: "app_mention" },
+        type: "event_callback",
+      }),
+    ).toBe("U_BOT");
+    expect(
+      slackEventReceivingBotUserId({
+        authorizations: [{ is_bot: false, user_id: "U_INSTALLER" }],
+        event: { text: "<@U_INSTALLER> and <@U_BOT>", type: "app_mention" },
+        type: "event_callback",
+      }),
+    ).toBeUndefined();
   });
 });
 
@@ -385,5 +433,278 @@ describe("parseDirectMessageEvent", () => {
         size: 2048,
       },
     ]);
+  });
+
+  it.each(["is_share", "is_msg_unfurl", "is_reply_unfurl"])(
+    "includes an app mention's %s attachment",
+    (sharedMessageFlag) => {
+      const payload = parseSlackWebhookBody(
+        JSON.stringify({
+          type: "event_callback",
+          team_id: "T01",
+          event: {
+            type: "app_mention",
+            user: "U01",
+            text: "<@U123> :eyes:",
+            channel: "C01",
+            ts: "1700000000.000200",
+            attachments: [
+              {
+                [sharedMessageFlag]: true,
+                text: "Ship it",
+                from_url: "https://example.slack.com/archives/C02/p1700000000000100",
+              },
+            ],
+          },
+        }),
+      );
+      expect(payload.kind).toBe("app_mention");
+      if (payload.kind !== "app_mention") throw new Error("expected app_mention");
+
+      const message = slackMessageFromWebhookPayload(payload);
+
+      expect(message?.text).toBe("<@U123> :eyes:\nShip it");
+      expect(message?.markdown).toContain("Ship it");
+    },
+  );
+});
+
+describe("Block Kit inbound markdown", () => {
+  it("extracts section and field text when top-level text is empty", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      team_id: "T01",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "",
+        channel: "C01",
+        ts: "1234567890.123456",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Alert:* Service latency is high",
+            },
+          },
+          {
+            type: "section",
+            fields: [
+              { type: "mrkdwn", text: "Status: Firing" },
+              { type: "mrkdwn", text: "Region: us-east-1" },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(message).not.toBeNull();
+    expect(message?.text).not.toBe("");
+    expect(message?.markdown).toContain("Alert");
+    expect(message?.markdown).toContain("Service latency is high");
+    expect(message?.markdown).toContain("Status: Firing");
+    expect(message?.markdown).toContain("Region: us-east-1");
+  });
+
+  it("extracts legacy attachment title, text, and fields when top-level text is empty", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "",
+        channel: "C01",
+        ts: "1234567890.123457",
+        attachments: [
+          {
+            title: "Deploy failed",
+            text: "The production deploy did not finish.",
+            fields: [
+              { title: "Service", value: "api", short: true },
+              { title: "Commit", value: "abc123", short: true },
+            ],
+            footer: "CI Bot",
+          },
+        ],
+      },
+    });
+
+    expect(message).not.toBeNull();
+    expect(message?.markdown).toContain("Deploy failed");
+    expect(message?.markdown).toContain("The production deploy did not finish.");
+    expect(message?.markdown).toContain("Service");
+    expect(message?.markdown).toContain("api");
+    expect(message?.markdown).toContain("CI Bot");
+  });
+
+  it("keeps plain top-level text when there are no blocks or attachments", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "hello bot",
+        channel: "C01",
+        ts: "1234567890.123458",
+      },
+    });
+
+    expect(message?.text).toBe("hello bot");
+    expect(message?.markdown).toBe("hello bot");
+  });
+
+  it("does not duplicate markdown when rich_text mirrors top-level text", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "Status update",
+        channel: "C01",
+        ts: "1234567890.123459",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [{ type: "text", text: "Status update" }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(message?.markdown).toBe("Status update");
+  });
+
+  it("converts rich_text mentions to GFM in the extracted markdown", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        bot_id: "B01",
+        text: "",
+        channel: "C01",
+        ts: "1234567890.123462",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "text", text: "cc " },
+                  { type: "user", user_id: "U123" },
+                  { type: "text", text: " " },
+                  { type: "broadcast", range: "here" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(message?.markdown).toBe("cc @U123 @here");
+  });
+
+  it("converts rich_text links to GFM in the extracted markdown", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        bot_id: "B01",
+        text: "",
+        channel: "C01",
+        ts: "1234567890.123463",
+        blocks: [
+          {
+            type: "rich_text",
+            elements: [
+              {
+                type: "rich_text_section",
+                elements: [
+                  { type: "link", text: "incident dashboard", url: "https://example.com/incident" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(message?.markdown).toBe("[incident dashboard](https://example.com/incident)");
+  });
+
+  it("prefers block content over a short fallback text field", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "Alert",
+        channel: "C01",
+        ts: "1234567890.123460",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "*Alert:* Service latency is high in us-east-1",
+            },
+          },
+          {
+            type: "section",
+            fields: [{ type: "mrkdwn", text: "Status: Firing" }],
+          },
+        ],
+      },
+    });
+
+    expect(message?.markdown).toContain("Service latency is high in us-east-1");
+    expect(message?.markdown).toContain("Status: Firing");
+  });
+
+  it("includes action block button labels as bracketed controls", () => {
+    const message = parseMessageEvent({
+      type: "event_callback",
+      event: {
+        type: "message",
+        user: "U01",
+        text: "",
+        channel: "C01",
+        ts: "1234567890.123461",
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: "Approve this deploy?",
+            },
+          },
+          {
+            type: "actions",
+            elements: [
+              {
+                type: "button",
+                text: { type: "plain_text", text: "Approve" },
+                action_id: "approve",
+              },
+              {
+                type: "button",
+                text: { type: "plain_text", text: "Reject" },
+                action_id: "reject",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(message?.markdown).toContain("Approve this deploy?");
+    expect(message?.markdown).toContain("[Approve] [Reject]");
   });
 });

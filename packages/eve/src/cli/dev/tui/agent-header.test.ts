@@ -1,168 +1,70 @@
 import { describe, expect, it } from "vitest";
 
-import type { AgentInfoResult, AgentInfoToolEntry } from "#client/index.js";
+import type { AgentInfoResult } from "#client/index.js";
 import { stripAnsi } from "#cli/ui/terminal-text.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { AGENT_HEADER_TIPS, buildAgentHeader, pickAgentHeaderTip } from "./agent-header.js";
 import { createTheme } from "./theme.js";
 
-const FRAMEWORK_TOOL: AgentInfoToolEntry = {
-  description: "Run a shell command.",
-  hasAuth: false,
-  hasExecute: true,
-  hasModelOutputProjection: false,
-  hasOutputSchema: true,
-  inputSchema: { type: "object" },
-  logicalPath: "eve:framework/bash",
-  name: "bash",
-  origin: "framework",
-  outputSchema: { type: "object" },
-  replacesFrameworkTool: false,
-  requiresApproval: false,
-  sourceId: "eve:bash-tool",
-  sourceKind: "module",
-};
-
-const AUTHORED_TOOL: AgentInfoToolEntry = {
-  description: "Get the weather.",
-  hasAuth: false,
-  hasExecute: true,
-  hasModelOutputProjection: false,
-  hasOutputSchema: false,
-  inputSchema: { type: "object" },
-  logicalPath: "agent/tools/get_weather.ts",
-  name: "get_weather",
-  origin: "authored",
-  outputSchema: null,
-  replacesFrameworkTool: false,
-  requiresApproval: false,
-  sourceKind: "module",
-};
-
-const INFO: AgentInfoResult = {
-  agent: {
-    agentRoot: "/tmp/weather-agent/agent",
-    appRoot: "/tmp/weather-agent",
-    model: {
-      id: "anthropic/claude-opus-4.7",
-      routing: { kind: "gateway", target: "anthropic" },
-    },
-    name: "Weather Agent",
-  },
-  capabilities: {
-    devRoutes: true,
-  },
-  channels: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    framework: [],
-  },
-  connections: [],
-  diagnostics: {
-    discoveryErrors: 0,
-    discoveryWarnings: 0,
-  },
-  hooks: [],
-  instructions: {
-    dynamic: [],
-    static: [
-      {
-        content: "You are a weather assistant.",
-        logicalPath: "instructions.md",
-        name: "instructions",
-        role: "system",
-        sourceKind: "markdown",
-      },
-    ],
-  },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: {
-    dynamic: [],
-    static: [],
-  },
-  subagents: {
-    local: [],
-    total: 0,
-  },
-  tools: {
-    authored: [AUTHORED_TOOL],
-    available: [FRAMEWORK_TOOL, AUTHORED_TOOL],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [
-      {
-        ...FRAMEWORK_TOOL,
-        disabledByAuthor: false,
-        replacedByAuthoredTool: false,
-        status: "active",
-      },
-    ],
-    reserved: [],
-  },
-  version: 2,
-  workflow: {
-    enabled: false,
-    toolName: "Workflow",
-  },
-  workspace: {
-    resourceRoot: null,
-    rootEntries: [],
-  },
-};
+const INFO = createTestAgentInfoResult({
+  agentRoot: "/tmp/weather-agent/agent",
+  appRoot: "/tmp/weather-agent",
+  modelId: "zai/glm-5.2",
+  name: "Weather Agent",
+});
 
 describe("buildAgentHeader", () => {
-  const theme = createTheme({ color: false, unicode: false });
+  it("renders a compact agent card", () => {
+    const theme = createTheme({ color: true, unicode: true });
+    const lines = buildAgentHeader({ info: INFO, theme, width: 120 });
+    const plain = lines.map(stripAnsi);
+    const card = plain.join("\n");
+    const titleIndex = plain.findIndex((line) => line.includes("Weather Agent"));
 
-  it("renders the brand line with the agent name", () => {
-    const lines = buildAgentHeader({ name: "agent-subagents", info: INFO, theme, width: 120 });
-
-    expect(lines).toEqual([" eve agent-subagents"]);
+    expect(plain[0]).toBe(`╭${"─".repeat(66)}╮`);
+    expect(plain[titleIndex]).toMatch(/^│ ☰eve \(v\d+\.\d+\.\d+\) +Weather Agent │$/u);
+    expect(card).not.toContain("model");
+    expect(card).not.toContain("instructions");
+    expect(card).not.toContain("⣿");
+    expect(lines[0]).toBe(theme.colors.dim(plain[0]!));
   });
 
-  it("renders just the brand line when info is unavailable", () => {
-    expect(buildAgentHeader({ name: "weather-agent", theme, width: 120 })).toEqual([
-      " eve weather-agent",
-    ]);
-  });
+  it("renders only known fields before agent inspection", () => {
+    const theme = createTheme({ color: false, unicode: true });
+    const card = buildAgentHeader({
+      name: "weather-agent",
+      theme,
+      tip: "Use the /help command to see every command.",
+      width: 120,
+    }).join("\n");
 
-  it("renders the tip line for local sessions only", () => {
-    const tip = AGENT_HEADER_TIPS[0]!;
-    const local = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120, tip });
-    expect(local).toEqual([" eve weather-agent", ` ${tip}`]);
-
-    const remote = buildAgentHeader({ name: "weather-agent", info: INFO, theme, width: 120 });
-    expect(remote.join("\n")).not.toContain("/channels");
+    expect(card).toContain("weather-agent");
+    expect(card).toContain("Tip: Use the /help command to see every command.");
   });
 
   it("renders the /add tip with a blue command", () => {
-    const colorTheme = createTheme({ color: true, unicode: false });
+    const theme = createTheme({ color: true, unicode: false });
     const tip = AGENT_HEADER_TIPS.find((candidate) => candidate.includes("/add"));
 
-    expect(tip).toBe("Use /add to install integrations from the registry.");
+    expect(tip).toBe("Use the /add command to install an integration.");
     if (tip === undefined) return;
 
-    const line = buildAgentHeader({
-      name: "weather-agent",
-      info: INFO,
-      theme: colorTheme,
-      width: 120,
-      tip,
-    }).at(-1);
+    const line = buildAgentHeader({ info: INFO, theme, width: 120, tip }).find((candidate) =>
+      candidate.includes("Tip:"),
+    );
 
-    expect(stripAnsi(line ?? "")).toBe(` ${tip}`);
-    expect(line).toContain(colorTheme.colors.blue("/add"));
+    expect(stripAnsi(line ?? "")).toContain(`| Tip: ${tip}`);
+    expect(line).toContain(theme.colors.blue("/add"));
   });
 
   it("keeps the discovery-diagnostics line when the compiler reported problems", () => {
+    const theme = createTheme({ color: false, unicode: false });
     const info: AgentInfoResult = {
       ...INFO,
       diagnostics: { discoveryErrors: 1, discoveryWarnings: 2 },
     };
-    const lines = buildAgentHeader({ name: "weather-agent", info, theme, width: 120 });
+    const lines = buildAgentHeader({ info, theme, width: 120 });
 
     expect(lines.some((line) => line.includes("1 error"))).toBe(true);
     expect(lines.some((line) => line.includes("2 warnings"))).toBe(true);

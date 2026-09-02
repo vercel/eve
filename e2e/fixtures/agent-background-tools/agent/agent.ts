@@ -4,9 +4,15 @@ import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/ev
 
 const PROGRESS = "EXPORT-PROGRESS";
 const RESULT = "EXPORT-COMPLETE";
+const SCHEDULED = "BACKGROUND-EXPORT-SCHEDULED";
+const EMPTY_DELIVERY_SENTINEL = "<eve-empty-delivery/>";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = [...request.userMessages].reverse().find((entry) => entry.trim() !== "") ?? "";
+
+  if (request.userMessages.some((entry) => entry.includes(SCHEDULED))) {
+    return respondScheduled(request, message);
+  }
 
   if (message.includes("BACKGROUND-EXPORT-START")) {
     const roles = request.messages.map((entry) => entry.role);
@@ -39,6 +45,31 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   }
 
   return "BACKGROUND-EXPORT-IDLE";
+}
+
+function respondScheduled(request: MockModelRequest, message: string): MockModelResponse | string {
+  const taskNotification = [...request.userMessages]
+    .reverse()
+    .find((entry) => /^Background task task_[a-z0-9]+/iu.test(entry));
+  if (taskNotification?.includes("is completed") && taskNotification.includes(RESULT)) {
+    return "SCHEDULED-EXPORT-DONE";
+  }
+  const roles = request.messages.map((entry) => entry.role);
+  const launched = roles.lastIndexOf("tool") > roles.lastIndexOf("user");
+  if (!launched && taskNotification === undefined) {
+    return {
+      toolCalls: [
+        {
+          name: "export",
+          input: { query: "nightly" },
+        },
+      ],
+    };
+  }
+  const instructedToAcknowledge = request.messages.some(
+    (entry) => entry.role === "system" && entry.text.includes("launch acknowledgement"),
+  );
+  return instructedToAcknowledge ? "SCHEDULED-EXPORT-LAUNCH-ACK" : EMPTY_DELIVERY_SENTINEL;
 }
 
 const base = e2eAgentConfig({ mock: respond });

@@ -1,4 +1,5 @@
 import type {
+  MetricReader,
   PropagatorOrName,
   SamplerOrName,
   SpanExporter,
@@ -13,7 +14,12 @@ import { batchSpanProcessor } from "#tracing/batch-span-processor.js";
 import type { ResolvedContentOptions } from "#tracing/content-attributes.js";
 import { contentFilteringProcessor } from "#tracing/content-span-processor.js";
 import { vercelRuntimeSpanProcessor } from "#tracing/vercel-runtime-span-exporter.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import type { TraceCapturePolicy } from "#shared/trace-policy.js";
+export type {
+  TraceCaptureContext,
+  TraceCapturePolicy,
+  TracePolicyDecision,
+} from "#shared/trace-policy.js";
 import {
   composeSpanExportPolicies,
   redactSpanInputs,
@@ -60,8 +66,18 @@ export interface OtelOptions {
    */
   readonly traceChannelRequests?: boolean;
   /**
-   * Process-wide head gate for an agent session trace. Defaults to retaining
-   * only public conversations. A thrown error rejects the trace.
+   * Process-wide trace and content decision. Boolean returns preserve the
+   * existing audience-aware behavior; explicit decisions can disable emission
+   * or select input and output capture independently. Defaults to emitting
+   * every audience, with content only for public conversations. The result is
+   * an OpenTelemetry capture ceiling: local delivery audience and destination
+   * settings can only narrow it. For a trusted remote trace, eve evaluates this
+   * policy against the immutable origin audience and intersects it with the
+   * parent's effective ceiling, so every hop can only narrow capture. It never
+   * changes what authored instrumentation providers receive. A thrown error rejects trace production without
+   * silencing lifecycle providers. The policy may be invoked more than once
+   * while a new session is being prepared, so it must be deterministic for
+   * consistent results.
    */
   readonly tracePolicy?: TraceCapturePolicy;
   /**
@@ -104,21 +120,19 @@ export interface ContentOptions {
   readonly recordOutputs?: boolean;
 }
 
-export interface TraceCaptureContext {
-  readonly agentName?: string;
-  readonly audience: ChannelAudience;
-  readonly rootSessionId: string;
-  readonly sessionId: string;
-}
-
-export type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;
-
-/** Where one `otelIntegration()` sends spans. */
+/** Where one `otelIntegration()` sends spans and metrics. */
 export interface OtelIntegrationOptions extends ContentOptions {
   /** Merged into the pipeline in declaration order. */
   readonly spanProcessors?: readonly SpanProcessor[];
   /** Wrapped in eve's batching processor and appended after `spanProcessors`. */
   readonly traceExporter?: SpanExporter;
+  /**
+   * Metric readers collected into the process's one meter provider in
+   * declaration order. Without any, the meter provider is not created and
+   * `metrics.getMeter()` returns a no-op meter. Readers come from the app's
+   * own `@opentelemetry/sdk-metrics` install.
+   */
+  readonly metricReaders?: readonly MetricReader[];
   /**
    * Contributes runtime context that the AI SDK merges into telemetry spans
    * for each model call. Child spans inherit the values, so a destination can
@@ -149,6 +163,7 @@ export interface OtelIntegration extends InstrumentationProvider {
   readonly [OTEL_INTEGRATION]: true;
   /** @deprecated Content is captured upstream and redacted by destination policies. */
   readonly content: ResolvedContentOptions;
+  readonly metricReaders: readonly MetricReader[];
   readonly runtimeContext?: (input: InstrumentationRuntimeContextInput) => JsonObject | undefined;
   readonly spanProcessors: readonly SpanProcessorOrName[];
 }
@@ -199,6 +214,7 @@ function createOtelIntegration(
     [OTEL_INTEGRATION]: true,
     [PROVIDER]: true,
     content: resolveContentOptions(options),
+    metricReaders: options.metricReaders ?? [],
     runtimeContext: options.runtimeContext,
     spanProcessors: spanProcessors.map((processor) =>
       withExportPolicies(processor, legacyContentRedactionPolicy(options), exportPolicy),
@@ -212,6 +228,7 @@ export function agentRunsIntegration(options: ManagedTraceOptions = {}): OtelInt
     [OTEL_INTEGRATION]: true,
     [PROVIDER]: true,
     content: resolveContentOptions(options),
+    metricReaders: [],
     spanProcessors: [
       withExportPolicies(
         vercelRuntimeSpanProcessor(),
@@ -266,6 +283,7 @@ export function isOtelIntegration(value: unknown): value is OtelIntegration {
 /** The one pipeline a process can register. @internal */
 export interface OtelPipeline {
   readonly instrumentations?: readonly unknown[];
+  readonly metricReaders?: readonly MetricReader[];
   readonly propagators?: readonly PropagatorOrName[];
   readonly resource?: Readonly<Record<string, unknown>>;
   readonly sampler?: SamplerOrName;
@@ -311,6 +329,7 @@ export interface CollectedOtel {
  */
 export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
   const spanProcessors: SpanProcessorOrName[] = [];
+  const metricReaders: MetricReader[] = [];
   const runtimeContextResolvers: RuntimeContextResolver[] = [];
   let declaration: OtelDeclaration | undefined;
   let declared = false;
@@ -321,6 +340,7 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
       declared = true;
       capturesContent = true;
       spanProcessors.push(...value.spanProcessors);
+      metricReaders.push(...value.metricReaders);
       if (value.runtimeContext !== undefined) {
         runtimeContextResolvers.push(value.runtimeContext);
       }
@@ -350,6 +370,7 @@ export function collectOtelPipeline(values: readonly unknown[]): CollectedOtel {
     declared,
     pipeline: {
       instrumentations: options.instrumentations,
+      metricReaders: metricReaders.length > 0 ? metricReaders : undefined,
       propagators: options.propagators,
       resource: options.resource,
       sampler: options.sampler,

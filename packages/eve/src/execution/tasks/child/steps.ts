@@ -1,13 +1,18 @@
 import { getWritable } from "#compiled/@workflow/core/index.js";
 import type {
+  ActivityObserverConfig,
   SessionAuthContext,
   SessionCommand,
   SubagentAuthorizationEventHookPayload,
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
+import { submitActivity } from "#execution/submit-activity.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeToolRunAnswers } from "#execution/tool-run/answer.js";
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createLogger } from "#internal/logging.js";
+import type { ActivityEventV1 } from "#protocol/activity.js";
 import type { JsonValue } from "#shared/json.js";
 import {
   isTerminalTaskStatus,
@@ -27,7 +32,10 @@ const log = createLogger("execution.tasks.run");
  * stream. Only the task run workflow calls this, which is what makes
  * the run the single writer readers can trust without re-validating.
  */
-export async function appendTaskViewStep(input: { readonly view: TaskView }): Promise<void> {
+export async function appendTaskViewStep(input: {
+  readonly activityObserver?: ActivityObserverConfig;
+  readonly view: TaskView;
+}): Promise<void> {
   "use step";
 
   const writable = getWritable<TaskView>({ namespace: TASK_VIEW_STREAM_NAMESPACE });
@@ -37,6 +45,36 @@ export async function appendTaskViewStep(input: { readonly view: TaskView }): Pr
   } finally {
     writer.releaseLock();
   }
+
+  const events = projectTaskActivitySettlement({
+    activityObserver: input.activityObserver,
+    settledAt: new Date().toISOString(),
+    view: input.view,
+  });
+  void submitActivity({ events, sink: input.activityObserver?.sink });
+}
+
+export function projectTaskActivitySettlement(input: {
+  readonly activityObserver: ActivityObserverConfig | undefined;
+  readonly settledAt: string;
+  readonly view: TaskView;
+}): readonly ActivityEventV1[] {
+  const work = input.activityObserver?.workIdentity;
+  const status = input.view.status;
+  if (
+    work === undefined ||
+    (status !== "completed" && status !== "failed" && status !== "cancelled")
+  )
+    return [];
+  return [
+    {
+      eventId: `${work.id}:settled:${status}`,
+      kind: "work.settled",
+      outcome: status,
+      settledAt: input.settledAt,
+      workId: work.id,
+    },
+  ];
 }
 
 /** Re-emits a task-owned child authorization event through the parent channel. */
@@ -181,6 +219,7 @@ export async function wakeTaskInputRequestParentStep(input: {
  */
 export async function deliverTaskInputResponsesStep(input: {
   readonly answer: TaskInboundAnswerInput;
+  readonly answerHook?: AnswerHookRoute;
   readonly requestIds: readonly string[];
 }): Promise<"delivered" | "unreachable"> {
   "use step";
@@ -207,6 +246,11 @@ export async function deliverTaskInputResponsesStep(input: {
       if (response.status === 404) return "unreachable";
       if (!response.ok)
         throw new Error(`Remote task input delivery failed with HTTP ${response.status}.`);
+    } else if (input.answerHook !== undefined) {
+      await resumeToolRunAnswers(
+        input.answer.childContinuationToken,
+        command.payload.inputResponses,
+      );
     } else {
       await resumeSessionInbox(input.answer.childContinuationToken, command);
     }

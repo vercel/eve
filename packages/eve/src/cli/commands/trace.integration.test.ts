@@ -76,14 +76,13 @@ describe("eve traces", () => {
     expect(() => resolveLocalTraces(traces, "missing")).toThrow(/No local trace matches/u);
   });
 
-  it("resolves a windowed session to every window, oldest first", async () => {
+  it("resolves a session with multiple traces oldest first", async () => {
     const root = await createRoot();
     await writeSegment(
       root,
       TRACE_TWO,
       span("b", "agent.session", 100, 100, undefined, {
         "agent.session.id": "session-one",
-        "agent.session.window": 1,
       }),
     );
     await writeSegment(
@@ -91,12 +90,10 @@ describe("eve traces", () => {
       TRACE_ONE,
       span("a", "agent.session", 10, 10, undefined, {
         "agent.session.id": "session-one",
-        "agent.session.window": 0,
       }),
     );
     const traces = await listLocalTraces(root);
 
-    expect(traces.map((trace) => trace.window)).toEqual([1, 0]);
     expect(ids(resolveLocalTraces(traces, "session-one"))).toEqual([TRACE_ONE, TRACE_TWO]);
 
     const output = collectingLogger();
@@ -105,27 +102,23 @@ describe("eve traces", () => {
     expect(output.out[0]).toContain(TRACE_ONE);
     expect(output.out[0]).toContain(TRACE_TWO);
     expect(output.out[0]!.indexOf(TRACE_ONE)).toBeLessThan(output.out[0]!.indexOf(TRACE_TWO));
-    expect(output.out[0]).toContain("Window");
   });
 
-  it("resolves a subagent child to the parent window it recorded into", async () => {
+  it("resolves a subagent child to the parent trace it recorded into", async () => {
     const root = await createRoot();
-    const window = "a".repeat(16);
+    const session = "a".repeat(16);
     const child = "b".repeat(16);
     await writeSegment(
       root,
       TRACE_ONE,
-      span(window, "agent.session", 10, 10, undefined, {
-        "agent.root.session.id": "session-one",
+      span(session, "agent.session", 10, 10, undefined, {
         "agent.session.id": "session-one",
-        "agent.session.window": 0,
       }),
     );
     await writeSegment(
       root,
       TRACE_ONE,
-      span(child, "agent.turn", 20, 30, window, {
-        "agent.root.session.id": "session-one",
+      span(child, "agent.turn", 20, 30, session, {
         "agent.session.id": "child-one",
       }),
     );
@@ -145,10 +138,11 @@ describe("eve traces", () => {
     await writeSegment(
       root,
       TRACE_ONE,
-      span(turn, "agent.turn", 10, 100, undefined, {
+      span(turn, "invoke_agent weather", 10, 100, undefined, {
         "agent.name": "weather",
         "agent.session.id": "session-one",
         "agent.turn.id": "turn-1",
+        "gen_ai.operation.name": "invoke_agent",
       }),
     );
     await writeSegment(
@@ -177,7 +171,7 @@ describe("eve traces", () => {
 
     await runTraceShowCommand(output.logger, root, "session-one");
 
-    expect(output.out[0]).toContain("agent.turn [turn-1]");
+    expect(output.out[0]).toContain("invoke_agent weather [turn-1]");
     expect(output.out[0]).toContain("└─ agent.step [step 0, attempt 0]");
     expect(output.out[0]).toContain("└─ agent.action [tool-call: weather]");
     expect(output.out[0]).toContain("failed  10ms ERROR");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { SUBAGENT_ADAPTER_KIND } from "#execution/subagent-adapter-state.js";
 import type { HarnessSession } from "#harness/types.js";
-import type { RuntimeSubagentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeSubagentCallActionRequest } from "#shared/action-types.js";
 import { buildSubagentRunInput } from "#execution/subagent-tool.js";
 
 type BuildSubagentRunInput = Parameters<typeof buildSubagentRunInput>[0];
@@ -34,9 +34,13 @@ function makeAction(): RuntimeSubagentCallActionRequest {
 }
 
 function buildRuntimeSubagentRunInput(
-  input: Omit<BuildSubagentRunInput, "source">,
+  input: Omit<BuildSubagentRunInput, "selfAgent" | "source"> & { readonly selfAgent?: boolean },
 ): ReturnType<typeof buildSubagentRunInput> {
-  return buildSubagentRunInput({ ...input, source: { type: "runtime" } });
+  return buildSubagentRunInput({
+    ...input,
+    selfAgent: input.selfAgent ?? false,
+    source: { type: "runtime" },
+  });
 }
 
 function makeInheritingGraph(nodeId: string) {
@@ -97,7 +101,7 @@ describe("buildSubagentRunInput", () => {
     });
     expect(runInput.continuationToken).toBe(childContinuationToken);
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
-    expect(runInput.mode).toBe("task");
+    expect(runInput.mode).toBe("conversation");
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {
@@ -142,6 +146,29 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.channelMetadata).toBeUndefined();
+  });
+
+  it("preserves accepted forwarded trace policy through local subagents", () => {
+    const parentTraceContext = {
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "private",
+      },
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    } as const;
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      parentTraceContext,
+      session: makeSession(),
+    });
+
+    expect(runInput.parentTraceContext).toEqual(parentTraceContext);
   });
 
   it("propagates an existing rootSessionId through a nested subagent chain", () => {
@@ -215,6 +242,39 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.input.outputSchema).toEqual(schema);
+    expect(runInput.mode).toBe("conversation");
+  });
+
+  it("uses a declared local outputSchema on the persistent child's first turn", () => {
+    const schema = { properties: { result: { type: "string" } }, type: "object" };
+    const { runInput } = buildSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      selfAgent: false,
+      session: makeSession(),
+      source: { description: "Research the request.", outputSchema: schema, type: "local" },
+    });
+
+    expect(runInput.input.outputSchema).toEqual(schema);
+    expect(runInput.mode).toBe("conversation");
+  });
+
+  it("lets a per-call outputSchema override the local child's declared schema", () => {
+    const declared = { properties: { declared: { type: "string" } }, type: "object" };
+    const requested = { properties: { requested: { type: "number" } }, type: "object" };
+    const { runInput } = buildSubagentRunInput({
+      action: { ...makeAction(), input: { message: "do something", outputSchema: requested } },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      selfAgent: false,
+      session: makeSession(),
+      source: { description: "Research the request.", outputSchema: declared, type: "local" },
+    });
+
+    expect(runInput.input.outputSchema).toEqual(requested);
   });
 
   it("hands the parent's trace window down to the child, and omits it when absent", () => {
@@ -248,6 +308,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfAgent: false,
       session: makeSession(),
       source: { description: "Local delegate subagent description.", type: "local" },
     });
@@ -257,7 +318,7 @@ describe("buildSubagentRunInput", () => {
         'You are the subagent "linear".',
         "Description: Local delegate subagent description.",
         "",
-        "The caller delegated the following task to you. Complete it and return the final result directly.",
+        "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
         "",
         "Caller message:",
         "Make an issue titled 'Resolve flaky test'.",
@@ -286,13 +347,29 @@ describe("buildSubagentRunInput", () => {
       [
         `You are the subagent "${action.subagentName}".`,
         "",
-        "The caller delegated the following task to you. Complete it and return the final result directly.",
+        "The caller delegated the following task to you. Complete it and return the result directly. The caller may send follow-up messages after you answer.",
         "",
         "Caller message:",
         "Make an issue titled 'Resolve flaky test'.",
       ].join("\n"),
     );
     expect(runInput.input.message).not.toContain(action.description);
+  });
+
+  it("uses the root agent's declared outputSchema for a fresh built-in copy", () => {
+    const schema = { properties: { result: { type: "string" } }, type: "object" };
+    const { runInput } = buildSubagentRunInput({
+      action: { ...makeAction(), name: "agent", nodeId: "root", subagentName: "agent" },
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      selfAgent: true,
+      session: makeSession(),
+      source: { outputSchema: schema, type: "runtime" },
+    });
+
+    expect(runInput.input.outputSchema).toEqual(schema);
+    expect(runInput.mode).toBe("conversation");
   });
 
   it("leaves outputSchema undefined when not provided", () => {
@@ -335,6 +412,7 @@ describe("buildSubagentRunInput", () => {
       auth: null,
       batchEvent: { sequence: 0, turnId: "turn-0" },
       initiatorAuth: null,
+      selfAgent: true,
       session,
     });
 

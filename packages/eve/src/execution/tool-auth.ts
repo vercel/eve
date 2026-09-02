@@ -3,8 +3,7 @@
  * providers inline with {@link ToolContext.getToken} and
  * {@link ToolContext.requireAuth}.
  *
- * Mirrors the connection authorization flow (see
- * `runtime/framework-tools/connection-search-dynamic.ts`) but scopes the
+ * Mirrors the connection authorization flow used by connection search but scopes the
  * per-step token cache and framework-owned callback URL by the tool's
  * path-derived name and provider key instead of a connection name. All the shared
  * machinery — principal resolution, cache reads/writes, the park/resume
@@ -19,16 +18,16 @@ import {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
   isConnectionAuthorizationRequiredError,
-} from "#public/connections/errors.js";
-import type { ApprovalResponseAuth } from "#public/definitions/approval.js";
-import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "#public/definitions/tool.js";
+} from "#connections/errors.js";
+import type { ApprovalResponseAuth } from "#approval/definition.js";
+import type { ToolAuthOptions, ToolAuthProvider, ToolContext } from "#tools/definition.js";
 import { type AuthorizationChallenge, requestAuthorization } from "#harness/authorization.js";
 import {
   type AuthorizationDefinition,
   supportsInteractiveAuthorization,
   type TokenResult,
-} from "#runtime/connections/types.js";
-import { normalizeAuthorizationSpec } from "#runtime/connections/validate-authorization.js";
+} from "#shared/connection-types.js";
+import { normalizeAuthorizationSpec } from "#shared/validate-authorization.js";
 import {
   completeScopedAuthorization,
   evictScopedToken,
@@ -36,8 +35,8 @@ import {
   startScopedAuthorization,
   type ScopedAuthorization,
 } from "#runtime/connections/scoped-authorization.js";
-import type { ToolExecuteOptions } from "#shared/tool-definition.js";
-import type { TaskExec } from "#shared/tool-task.js";
+import type { ToolExecuteOptions } from "#tools/definition.js";
+import type { TaskExec } from "#tools/task.js";
 import { isAsyncIterable } from "#shared/async-iterable.js";
 
 /**

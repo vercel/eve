@@ -100,7 +100,7 @@ model: mockModel({
 
 `t` is both the driver and the assertion surface. There are no separate `input`, `run`, `checks`, or `scores` fields. You write ordinary control flow, sending turns and asserting inline.
 
-- **Drive** the agent: `t.send(...)`, `t.start(...)`, `t.cancel()`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.requireInputRequest(...)`, `t.newSession()`. Live turns returned by `start()` can wait for typed mid-turn events before cancellation or settlement. Read what came back with `t.reply` (the last assistant message), `t.sessionId`, and `t.events`. See [Cases](./cases).
+- **Drive** the agent: `t.send(...)`, `t.start(...)`, `t.cancel()`, `t.respond(...)`, `t.respondAll(...)`, `t.sendFile(...)`, `t.requireInputRequest(...)`, `t.newSession()`. Live turns returned by `start()` can wait for typed mid-turn events before cancellation or settlement. Read what came back with `t.reply` (the last assistant message), `t.transcript` (the primary session's user and assistant messages), `t.sessionId`, and `t.events`. See [Cases](./cases).
 - **Assert** with three surfaces, covered next.
 
 ## Three assertion surfaces
@@ -109,7 +109,7 @@ Each surface matches a genuinely different kind of judgment:
 
 - **Scoped methods** read the final whole run on `t`, snapshot one independent session when invoked there, or inspect one immutable `EveEvalTurn`. See [Assertions](./assertions).
 - **`t.check(value, assertion)`** grades an explicit value with a deterministic builder from `eve/evals/expect`, such as `t.check(t.reply, includes("sunny"))`. Grade `t.reply`, an intermediate draft, parsed JSON, or anything else. See [Assertions](./assertions).
-- **`t.judge.autoevals.*`** is the LLM-as-judge surface, like `t.judge.autoevals.closedQA("cites a source")`. It grades `t.reply` by default and uses the configured judge model, never the agent under test. See [Judge](./judge).
+- **`t.judge.autoevals.*`** is the LLM-as-judge surface, like `t.judge.autoevals.closedQA("cites a source")`. It grades `t.reply` by default; pass `{ on: t.transcript }` to grade a multi-turn conversation. The judge uses the configured judge model, never the agent under test. See [Judge](./judge).
 
 ## Gate vs soft
 

@@ -6,7 +6,7 @@ import {
   type InputRequest,
   parseInputResponse,
   type ValidatedInputResponse,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 import type {
   TeamsActivity,
   TeamsInvokeActivity,

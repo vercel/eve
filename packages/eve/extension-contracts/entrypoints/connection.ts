@@ -1,6 +1,7 @@
 export {
   ConnectionAuthorizationFailedError,
   ConnectionAuthorizationRequiredError,
+  defineDynamic,
   defineInteractiveAuthorization,
   defineMcpClientConnection,
   defineOpenAPIConnection,

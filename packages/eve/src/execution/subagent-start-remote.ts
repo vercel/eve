@@ -1,4 +1,5 @@
 import type { DispatchOutcome, RuntimeSession } from "#execution/agent-handle-dispatch.js";
+import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import { createRemoteAgentStartFailureResult } from "#execution/dispatch-action-failures.js";
 import { mintStartOperation } from "#execution/dispatch-start-operation.js";
 import {
@@ -12,8 +13,9 @@ import {
   rejectAgentEffect,
 } from "#harness/handles/transitions.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type { RuntimeRemoteAgentCallActionRequest } from "#runtime/actions/types.js";
+import type { RuntimeRemoteAgentCallActionRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
+import type { ChannelAudience } from "#shared/channel-audience.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
@@ -24,6 +26,7 @@ export async function startRemoteSubagent(input: {
   readonly batchEvent: { readonly sequence: number; readonly turnId: string };
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
+  readonly originAudience: ChannelAudience;
   readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: NonNullable<
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
@@ -31,11 +34,19 @@ export async function startRemoteSubagent(input: {
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
-  readonly persistentSessions: boolean;
+  readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
   readonly taskOwned: boolean;
 }): Promise<DispatchOutcome> {
   const { action } = input;
+  const activityObserver = deriveChildActivityObserverConfig({
+    activityObserver: input.activityObserver,
+    callId: action.callId,
+    kind: "remote-agent",
+    name: action.remoteAgentName,
+    parentSessionId: input.session.sessionId,
+    parentTurnId: input.batchEvent.turnId,
+  });
 
   // Preflight resolution failures happen before ownership exists, so they
   // reject without touching the handle store.
@@ -72,10 +83,16 @@ export async function startRemoteSubagent(input: {
     parentSessionId: input.session.sessionId,
     parentTurnId: input.batchEvent.turnId,
   });
+  const credentialResolver = {
+    resolverId:
+      input.dynamicRemoteAgent === undefined
+        ? action.nodeId
+        : input.dynamicRemoteAgent.credentialsStepId,
+  };
   const preparedSession = prepareAgentStart(input.currentSession, {
     identity,
     operation,
-    target: { callbackBaseUrl, kind: "agent/remote", url: resolvedRemote.url },
+    target: { callbackBaseUrl, credentialResolver, kind: "agent/remote", url: resolvedRemote.url },
   });
 
   try {
@@ -84,15 +101,17 @@ export async function startRemoteSubagent(input: {
       auth: input.auth,
       callbackBaseUrl,
       callbackToken: input.parentContinuationToken,
+      originAudience: input.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parentTraceContext: input.parentTraceContext,
-      persistentSessions: input.persistentSessions,
+      activityObserver,
       remote: resolvedRemote,
       session: input.session,
     });
     const address = {
       callbackBaseUrl,
+      credentialResolver,
       kind: "agent/remote",
       sessionId: child.sessionId,
       url: resolvedRemote.url,

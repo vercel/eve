@@ -8,6 +8,7 @@ import {
   extensionEntries,
   getIntegrationEntry,
   instrumentationEntries,
+  memoryEntries,
 } from "./index.js";
 
 describe("integration catalog", () => {
@@ -21,7 +22,8 @@ describe("integration catalog", () => {
       channelEntries().length +
         connectionEntries().length +
         extensionEntries().length +
-        instrumentationEntries().length,
+        instrumentationEntries().length +
+        memoryEntries().length,
     ).toBe(INTEGRATIONS.length);
   });
 
@@ -39,6 +41,18 @@ describe("integration catalog", () => {
     }
   });
 
+  it("catalogs Neon with its official MCP endpoint", () => {
+    expect(getIntegrationEntry("neon")).toMatchObject({
+      name: "Neon",
+      kind: "connection",
+      surfaces: { scaffoldable: false, registry: true, gallery: true },
+      connection: {
+        description: "Neon: manage projects, run queries, and make schema changes.",
+        mcp: { url: "https://mcp.neon.tech/mcp" },
+      },
+    });
+  });
+
   it("keeps channels free of connection identity", () => {
     for (const entry of channelEntries()) {
       expect(entry.connection).toBeUndefined();
@@ -54,6 +68,13 @@ describe("integration catalog", () => {
   it("keeps instrumentation providers free of connection identity", () => {
     expect(instrumentationEntries().length).toBeGreaterThan(0);
     for (const entry of instrumentationEntries()) {
+      expect(entry.connection).toBeUndefined();
+    }
+  });
+
+  it("keeps memory providers free of connection identity", () => {
+    expect(memoryEntries().length).toBeGreaterThan(0);
+    for (const entry of memoryEntries()) {
       expect(entry.connection).toBeUndefined();
     }
   });
@@ -116,9 +137,21 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("hindsight")?.connection).toBeUndefined();
   });
 
+  it("exposes Supermemory as a memory provider", () => {
+    expect(getIntegrationEntry("supermemory")?.kind).toBe("memory");
+    expect(getIntegrationEntry("supermemory")?.connection).toBeUndefined();
+  });
+
   it("exposes Buzz as a gallery-only channel", () => {
     expect(getIntegrationEntry("buzz")).toMatchObject({
       kind: "channel",
+      surfaces: { scaffoldable: false, registry: false, gallery: true },
+    });
+  });
+
+  it("exposes Mux Video as a gallery-only extension", () => {
+    expect(getIntegrationEntry("mux-video")).toMatchObject({
+      kind: "extension",
       surfaces: { scaffoldable: false, registry: false, gallery: true },
     });
   });

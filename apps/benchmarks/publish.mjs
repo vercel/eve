@@ -12,13 +12,8 @@ import {
   publishedBenchmarkModels,
   publishedExperimentId,
 } from "./lib/benchmark-config.ts";
-import {
-  prepareFixtures,
-  resetExperiments,
-  writeExperiment,
-  writeSubjectArchives,
-} from "./lib/experiment-files.mjs";
-import { revisionSubject } from "./lib/source.mjs";
+import { prepareFixtures, resetExperiments, writeExperiment } from "./lib/experiment-files.mjs";
+import { canarySubject } from "./lib/source.mjs";
 
 const appRoot = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(appRoot, "../..");
@@ -51,14 +46,15 @@ if (values["allow-dirty"]) {
   );
 }
 
-const revision = git(["rev-parse", "--verify", `${values.revision}^{commit}`]).trim();
-const subject = revisionSubject(repositoryRoot, revision, "published");
+const requestedRevision = git(["rev-parse", "--verify", `${values.revision}^{commit}`]).trim();
+const subject = canarySubject(requestedRevision, "published");
+const revision = subject.revision;
 const benchmarks = selectedBenchmarks(values.models);
 const experimentNames = benchmarks.flatMap((benchmark) =>
   authoringTreatments.map((treatment) => publishedExperimentId(benchmark, treatment)),
 );
 
-prepareFixtures(evalsRoot);
+await prepareFixtures(evalsRoot, subject, publishedBenchmark.caseIds);
 writeExperiments(subject, revision, benchmarks);
 
 console.log(`> eve revision: ${revision}`);
@@ -158,19 +154,11 @@ To inspect pending benchmark cells without publishing:
 
 function writeExperiments(subject, revision, benchmarks) {
   resetExperiments(experimentsRoot);
-  const { archiveName, dependencyArchiveName } = writeSubjectArchives(
-    experimentsRoot,
-    subject,
-    `published-${revision.slice(0, 12)}`,
-  );
-
   for (const benchmark of benchmarks) {
     for (const treatment of authoringTreatments) {
       writeExperiment(experimentsRoot, publishedExperimentId(benchmark, treatment), {
-        archiveName,
-        dependencyArchiveName,
-        digest: subject.digest,
-        dependencyDigest: subject.dependencyDigest,
+        revision: subject.revision,
+        packageSpec: subject.packageSpec,
         runs: publishedBenchmark.runs,
         evals: publishedBenchmark.caseIds,
         benchmark,

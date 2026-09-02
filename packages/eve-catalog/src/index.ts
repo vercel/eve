@@ -19,7 +19,7 @@
  */
 
 /** Surface an integration targets. Extend as new kinds are catalogued. */
-export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation";
+export type IntegrationKind = "channel" | "connection" | "extension" | "instrumentation" | "memory";
 
 /** Wire protocol a connection speaks at runtime. */
 export type ConnectionProtocol = "mcp" | "openapi";
@@ -118,6 +118,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Twilio",
     kind: "channel",
     tagline: "Put your agent on a phone number: SMS and speech-transcribed calls.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "blooio",
+    name: "Blooio",
+    kind: "channel",
+    tagline: "Send and receive iMessage, RCS, and SMS through Blooio.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
@@ -277,6 +284,20 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "blitzreels",
+    name: "BlitzReels",
+    kind: "extension",
+    tagline: "Turn long videos into short clips, generate media, repair edits, and export.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "mux-video",
+    name: "Mux Video",
+    kind: "extension",
+    tagline: "Create and inspect video assets, make clips, and run Mux Robots workflows.",
+    surfaces: { scaffoldable: false, registry: false, gallery: true },
+  },
+  {
     slug: "browserbase",
     name: "Browserbase",
     kind: "extension",
@@ -313,6 +334,14 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "supermemory",
+    name: "Supermemory",
+    kind: "memory",
+    tagline:
+      "Give your agents long-term memory, user profiles, and SuperRAG across conversations and context.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
     slug: "arcana",
     name: "Kybernesis Arcana",
     kind: "extension",
@@ -332,7 +361,7 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Browser Use",
     kind: "connection",
     tagline: "Run managed browser automation tasks through Browser Use's MCP server.",
-    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    surfaces: { scaffoldable: true, registry: true, gallery: true },
     connection: {
       description:
         "Browser Use: run browser automation tasks, inspect sessions, and manage browser profiles.",
@@ -613,6 +642,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     },
   },
   {
+    slug: "neon",
+    name: "Neon",
+    kind: "connection",
+    tagline: "Manage Neon projects, run queries, and make schema changes.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Neon: manage projects, run queries, and make schema changes.",
+      mcp: { url: "https://mcp.neon.tech/mcp" },
+    },
+  },
+  {
     slug: "netlify",
     name: "Netlify",
     kind: "connection",
@@ -698,6 +738,17 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     connection: {
       description: "Similarweb: web traffic, app, and market intelligence data.",
       mcp: { url: "https://mcp.similarweb.com" },
+    },
+  },
+  {
+    slug: "shopify",
+    name: "Shopify",
+    kind: "connection",
+    tagline: "Search products and manage carts and checkouts on a Shopify storefront.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+    connection: {
+      description: "Search products and build carts and checkouts on a Shopify storefront.",
+      mcp: { url: "https://{shop}.myshopify.com/api/ucp/mcp" },
     },
   },
   {
@@ -909,4 +960,9 @@ export function extensionEntries(): IntegrationEntry[] {
 /** All instrumentation entries, in catalog order. */
 export function instrumentationEntries(): IntegrationEntry[] {
   return integrationsByKind("instrumentation");
+}
+
+/** All memory provider entries, in catalog order. */
+export function memoryEntries(): IntegrationEntry[] {
+  return integrationsByKind("memory");
 }

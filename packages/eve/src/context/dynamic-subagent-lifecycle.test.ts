@@ -22,7 +22,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
 
@@ -42,19 +41,23 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
 
     expect(buildDynamicSubagentTools(ctx)).toMatchObject([
       {
+        behavior: {
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "subagent-call",
+              nodeId: "subagents/researcher",
+              subagentName: "researcher",
+            },
+          },
+        },
         description: "Research the request.",
         name: "researcher",
-        runtimeAction: {
-          kind: "subagent-call",
-          nodeId: "subagents/researcher",
-          subagentName: "researcher",
-        },
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toBeDefined();
@@ -77,7 +80,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)).toHaveLength(1);
@@ -86,7 +88,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
     expect(buildDynamicSubagentTools(ctx)).toEqual([]);
@@ -120,7 +121,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
     const sessionSelection = getDynamicSubagentSelection(ctx, resolver.nodeId);
@@ -133,7 +133,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createTurnStartedEvent({ sequence: 0, turnId: "turn-1" }),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
     const turnSelection = getDynamicSubagentSelection(ctx, resolver.nodeId);
@@ -175,19 +174,23 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: true,
       resolvers: [resolver],
     });
 
     expect(buildDynamicSubagentTools(ctx)).toMatchObject([
       {
+        behavior: {
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "remote-agent-call",
+              nodeId: "subagents/researcher",
+              remoteAgentName: "researcher",
+            },
+          },
+        },
         description: "Research on the remote deployment.",
         name: "researcher",
-        runtimeAction: {
-          kind: "remote-agent-call",
-          nodeId: "subagents/researcher",
-          remoteAgentName: "researcher",
-        },
       },
     ]);
     expect(getDynamicSubagentSelection(ctx, resolver.nodeId)).toMatchObject({
@@ -221,7 +224,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
     });
 
@@ -241,7 +243,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
       runtimeRevision: "deployment:one",
     });
@@ -249,7 +250,6 @@ describe("dynamic subagent lifecycle", () => {
       ctx,
       event: createSessionStartedEvent(),
       messages: [],
-      persistentSessions: false,
       resolvers: [resolver],
       runtimeRevision: "deployment:one",
     });

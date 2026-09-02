@@ -44,14 +44,14 @@ test("exports missing cells without publishing private artifacts", () => {
     assert.deepEqual(
       [...new Set(output.experiments.map((experiment) => experiment.modelDisplayName))],
       [
-        "Claude Sonnet 4.6",
         "Kimi K3",
-        "Claude Fable 5",
+        "Claude Fable 5.1",
         "Grok 4.6",
         "GPT-5.6 Sol",
         "GPT-5.6 Terra",
         "Claude Sonnet 5",
-        "GLM 5.2",
+        "GLM 5.3",
+        "Claude Opus 5",
         "Gemini 3.1 Pro Preview",
       ],
     );
@@ -60,6 +60,76 @@ test("exports missing cells without publishing private artifacts", () => {
     for (const privateField of ["transcript", "commands", "worldEvents", "files"]) {
       assert.equal(raw.includes(`"${privateField}"`), false);
     }
+  } finally {
+    rmSync(resultsPath, { recursive: true, force: true });
+    if (existsSync(savedResultsPath)) renameSync(savedResultsPath, resultsPath);
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("retains superseded experiments separately from the current matrix", () => {
+  const directory = mkdtempSync(join(tmpdir(), "eve-benchmark-export-previous-"));
+  const outputPath = join(directory, "results.json");
+  const resultsPath = new URL("../results", import.meta.url).pathname;
+  const savedResultsPath = join(directory, "saved-results");
+  try {
+    writeFileSync(
+      outputPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: "2026-08-01T00:00:00.000Z",
+        suite: {
+          eveRevision: "b".repeat(40),
+          caseFingerprint: "c".repeat(64),
+          caseCount: 1,
+          runsPerCell: 1,
+        },
+        experiments: [
+          {
+            id: "claude-sonnet-4-6-opencode--baseline",
+            groupId: "claude-sonnet-4-6-opencode",
+            model: "claude-sonnet-4-6",
+            modelDisplayName: "Claude Sonnet 4.6",
+            harness: "OpenCode",
+            treatment: "baseline",
+          },
+        ],
+        results: [
+          {
+            experimentId: "claude-sonnet-4-6-opencode--baseline",
+            caseId: "author-001-weather-tool",
+            status: "current",
+            passedRuns: 1,
+            validRuns: 1,
+            meanDurationMs: 1000,
+            measuredAt: "2026-08-01T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    if (existsSync(resultsPath)) renameSync(resultsPath, savedResultsPath);
+    mkdirSync(resultsPath, { recursive: true });
+    execFileSync(
+      process.execPath,
+      [
+        new URL("./export-results.mjs", import.meta.url).pathname,
+        "--revision",
+        "a".repeat(40),
+        "--output",
+        outputPath,
+      ],
+      { cwd: appRoot, stdio: "pipe" },
+    );
+    const output = JSON.parse(readFileSync(outputPath, "utf8"));
+    assert.equal(output.previouslyMeasured.length, 1);
+    assert.equal(
+      output.previouslyMeasured[0].experiments[0].id,
+      "claude-sonnet-4-6-opencode--baseline",
+    );
+    assert.equal(
+      output.previouslyMeasured[0].results[0].experimentId,
+      "claude-sonnet-4-6-opencode--baseline",
+    );
   } finally {
     rmSync(resultsPath, { recursive: true, force: true });
     if (existsSync(savedResultsPath)) renameSync(savedResultsPath, resultsPath);
@@ -76,7 +146,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
     if (existsSync(resultsPath)) renameSync(resultsPath, savedResultsPath);
     const runPath = join(
       resultsPath,
-      "claude-sonnet-4-6-opencode--baseline",
+      "kimi-k3-opencode--baseline",
       "run",
       "author-001-weather-tool",
       "run-1",
@@ -113,7 +183,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
         "--revision",
         "a".repeat(40),
         "--models",
-        "claude-sonnet-4-6",
+        "kimi-k3",
         "--output",
         outputPath,
       ],
@@ -122,7 +192,7 @@ test("exports mean cost, token consumption, and tool invocations", () => {
     const output = JSON.parse(readFileSync(outputPath, "utf8"));
     const result = output.results.find(
       (entry) =>
-        entry.experimentId === "claude-sonnet-4-6-opencode--baseline" &&
+        entry.experimentId === "kimi-k3-opencode--baseline" &&
         entry.caseId === "author-001-weather-tool",
     );
     assert.equal(result.meanEstimatedListCostUsd, 4.5);

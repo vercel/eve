@@ -33,9 +33,9 @@ const FILTER_DESCRIPTIONS: Record<Exclude<GalleryFilter, "all">, string> = {
   connection:
     "Connections are the tools your agent calls during a run: services reached over MCP or OpenAPI.",
   extension: "Extensions are packages that add reusable tools, skills, connections, and hooks.",
+  memory: "Memory providers store and recall context across sessions through eve-managed scopes.",
   instrumentation:
     "Observability providers are OpenTelemetry backends that receive your agent's traces: every model call, tool execution, and turn.",
-  memory: "Memory integrations let your agent store and recall information across sessions.",
 };
 
 interface GalleryProps {

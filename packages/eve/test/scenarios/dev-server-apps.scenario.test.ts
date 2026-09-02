@@ -45,6 +45,45 @@ const NPM_LAYOUT_DESCRIPTOR: ScenarioAppDescriptor = {
   name: "weather-agent-npm",
   packageManager: "npm",
 };
+const WORKFLOW_TOOL_DESCRIPTOR: ScenarioAppDescriptor = {
+  ...WEATHER_AGENT_DESCRIPTOR,
+  files: {
+    ...WEATHER_AGENT_DESCRIPTOR.files,
+    "agent/lib/deploy/plan.ts": [
+      'import { createHash } from "node:crypto";',
+      "",
+      "export function describePlan(service: string): string {",
+      "  return `deploy ${service}`;",
+      "}",
+      "",
+      "export async function hashPlan(plan: string): Promise<string> {",
+      '  "use step";',
+      '  return createHash("sha256").update(plan).digest("hex").slice(0, 8);',
+      "}",
+      "",
+    ].join("\n"),
+    "agent/tools/deploy_service.ts": [
+      'import { defineTool } from "eve/tools";',
+      'import { sleep } from "workflow";',
+      'import { z } from "zod";',
+      'import { describePlan, hashPlan } from "../lib/deploy/plan.ts";',
+      "",
+      "export default defineTool({",
+      '  description: "Deploy a service after planning it durably.",',
+      "  inputSchema: z.object({ service: z.string() }),",
+      "  async execute({ service }, ctx) {",
+      '    "use workflow";',
+      "    const plan = describePlan(service);",
+      "    const digest = await hashPlan(plan);",
+      '    await sleep("10ms");',
+      "    return { digest, plan, session: ctx.session.id, tool: ctx.toolName };",
+      "  },",
+      "});",
+      "",
+    ].join("\n"),
+  },
+  name: "weather-agent-workflow-tool",
+};
 const WORKSPACE_EXTENSION_HMR_DESCRIPTOR: ScenarioAppDescriptor = {
   dependencies: {
     "@acme/workspace-extension": "workspace:*",
@@ -108,7 +147,7 @@ function createWorkspaceExtensionToolSource(description: string): string {
 }
 
 async function workspaceExtensionToolDescription(serverUrl: string): Promise<string | undefined> {
-  return (await fetchAgentInfo(serverUrl)).tools.authored.find(
+  return (await fetchAgentInfo(serverUrl)).tools.static.find(
     (tool) => tool.name === "workspace__marker",
   )?.description;
 }
@@ -217,6 +256,40 @@ describe("eve dev server app layouts", () => {
           method: "POST",
         });
         expect(unknown.status).toBe(404);
+        expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
+  it(
+    "runs an authored workflow tool through the development server",
+    async () => {
+      const app = await scenarioApp(WORKFLOW_TOOL_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const messageResult = await sendDevelopmentMessage({
+          message: 'Run deploy_service with service "api"',
+          session: createDevelopmentSessionState(),
+          serverUrl: server.url,
+        });
+        const results = messageResult.events.filter((event) => event.type === "action.result");
+        const outputs = results.map((event) => JSON.stringify(event.data));
+        expect(
+          outputs.some((output) => output.includes('"plan":"deploy api"')),
+          [
+            "Expected the workflow tool's return value to settle the tool call.",
+            `events:\n${messageResult.events.map((event) => event.type).join(",")}`,
+            `results:\n${outputs.join("\n")}`,
+            `stdout:\n${server.stdout()}`,
+            `stderr:\n${server.stderr()}`,
+          ].join("\n\n"),
+        ).toBe(true);
+        expect(outputs.some((output) => output.includes('"tool":"deploy_service"'))).toBe(true);
+        expect(messageResult.events.some((event) => event.type === "message.completed")).toBe(true);
         expect(hasKnownDevServerFailure(`${server.stdout()}\n${server.stderr()}`)).toBe(false);
       } finally {
         await server.stop();

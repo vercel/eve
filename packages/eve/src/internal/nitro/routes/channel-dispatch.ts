@@ -12,6 +12,7 @@ import { readTrustedDevelopmentClientAddress } from "#internal/nitro/dev-client-
 import { DEVELOPMENT_WORKFLOW_SECRET_ENV } from "#internal/workflow/development-world-protocol.js";
 import {
   attachAgentInfoRouteResponse,
+  attachHomeRouteMetadata,
   attachRouteChannelName,
   attachRemoteAgentStreamHeadersResolver,
   attachRouteSessionCreator,
@@ -20,7 +21,8 @@ import type { NitroArtifactsConfig } from "#internal/nitro/routes/runtime-artifa
 import { traceChannelRequest } from "#internal/nitro/routes/channel-request-instrumentation.js";
 import { resolveNitroChannelRuntimeBundle } from "#internal/nitro/routes/runtime-stack.js";
 import { readVercelProjectLink } from "#internal/vercel/project-link.js";
-import { withVercelOidcProjectResolver } from "#runtime/governance/auth/vercel-oidc-project.js";
+import { withVercelOidcProjectResolver } from "#channel/auth/vercel-oidc-project.js";
+import { withLocalDevRequestScope } from "#runtime/local-dev-capability.js";
 
 const log = createLogger("channel.dispatch");
 
@@ -186,17 +188,21 @@ async function withDevelopmentVercelOidcContext<T>(
     return await callback();
   }
 
-  return await withVercelOidcProjectResolver(
-    {
-      request,
-      resolveCurrentProject: async () => {
-        const link = await readVercelProjectLink(config.appRoot);
-        return link === undefined
-          ? undefined
-          : { environment: "development", projectId: link.projectId };
-      },
-    },
-    callback,
+  return await withLocalDevRequestScope(
+    request,
+    async () =>
+      await withVercelOidcProjectResolver(
+        {
+          request,
+          resolveCurrentProject: async () => {
+            const link = await readVercelProjectLink(config.appRoot);
+            return link === undefined
+              ? undefined
+              : { environment: "development", projectId: link.projectId };
+          },
+        },
+        callback,
+      ),
   );
 }
 
@@ -223,7 +229,9 @@ function buildRouteArgs(
   const channel = bundle.channels.find((candidate) => candidate.name === channelName);
   const adapter = channel?.adapter ?? { kind: "channel" };
   const requestSpanContext = requestSpan?.spanContext();
+  const acceptedDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined;
   const deliverySource = {
+    acceptedDeploymentId,
     channelKind,
     channelName,
     requestId,
@@ -250,22 +258,25 @@ function buildRouteArgs(
   const to = createCrossChannelToFn(bundle.runtime, toCrossChannelTargets(bundle.channels));
 
   const args = attachRouteSessionCreator(
-    attachRouteChannelName(
-      attachAgentInfoRouteResponse(
-        {
-          attachSession,
-          ...channelOperations,
-          params,
-          requestIp,
-          to,
-          waitUntil,
-        },
-        async () => {
-          const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
-          return await handleAgentInfoRequest(config);
-        },
+    attachHomeRouteMetadata(
+      attachRouteChannelName(
+        attachAgentInfoRouteResponse(
+          {
+            attachSession,
+            ...channelOperations,
+            params,
+            requestIp,
+            to,
+            waitUntil,
+          },
+          async () => {
+            const { handleAgentInfoRequest } = await import("#internal/nitro/routes/info.js");
+            return await handleAgentInfoRequest(config);
+          },
+        ),
+        channelName,
       ),
-      channelName,
+      { agentName: bundle.agentName },
     ),
     async (input) =>
       await bundle.runtime.createSession({

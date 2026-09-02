@@ -3,6 +3,7 @@ import type {
   CompiledAgentResources,
   CompiledInstructionsDefinition,
 } from "#compiler/manifest.js";
+import type { AgentSourceOwner } from "#compiler/source-graph.js";
 import type { CompiledModuleMap } from "#compiler/module-map.js";
 import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 
@@ -12,6 +13,7 @@ import { resolveChannelDefinition } from "#runtime/resolve-channel.js";
 export { ResolveAgentError } from "#runtime/resolve-helpers.js";
 
 import { resolveConnectionDefinition } from "#runtime/resolve-connection.js";
+import { resolveDynamicConnectionDefinition } from "#runtime/resolve-dynamic-connection.js";
 import { resolveHookDefinition } from "#runtime/resolve-hook.js";
 import { createResolvedModuleSourceRef } from "#runtime/resolve-helpers.js";
 import { resolveSandboxDefinition } from "#runtime/resolve-sandbox.js";
@@ -19,6 +21,7 @@ import { resolveDynamicInstructionsDefinition } from "#runtime/resolve-dynamic-i
 import { resolveDynamicSkillDefinition } from "#runtime/resolve-dynamic-skill.js";
 import { resolveDynamicToolDefinition } from "#runtime/resolve-dynamic-tool.js";
 import { resolveToolDefinition } from "#runtime/resolve-tool.js";
+import { resolveMemoryDefinition } from "#runtime/resolve-memory.js";
 import type {
   ResolvedAgent,
   ResolvedChannelDefinition,
@@ -41,6 +44,7 @@ export interface ResolveAgentInput {
 export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAgent> {
   const resolvedSkills = input.manifest.skills.map((skill) => ({
     ...skill,
+    owner: requireCompiledSourceOwner(input.manifest, skill),
     metadata:
       skill.metadata === undefined
         ? undefined
@@ -48,24 +52,24 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
             ...skill.metadata,
           },
   })) satisfies ResolvedSkillDefinition[];
-  // Disabled channel entries (kind === "disabled") are filtered out here
-  // and surfaced separately on `ResolvedAgent.disabledFrameworkChannels`
-  // so the graph resolver can remove the corresponding framework defaults.
-  const resolvedChannels: ResolvedChannelDefinition[] = [];
-  const disabledFrameworkChannels: string[] = [];
-
-  for (const channelEntry of input.manifest.channels) {
-    if (channelEntry.kind === "disabled") {
-      disabledFrameworkChannels.push(channelEntry.name);
-      continue;
-    }
-    resolvedChannels.push(
-      await resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
-    );
-  }
+  const resolvedChannels: ResolvedChannelDefinition[] = await Promise.all(
+    input.manifest.channelRoutes.effective.map((channelEntry) =>
+      resolveChannelDefinition(channelEntry, input.moduleMap, input.nodeId),
+    ),
+  );
   const resolvedTools = await Promise.all(
     input.manifest.tools.map((toolDefinition) =>
-      resolveToolDefinition(toolDefinition, input.moduleMap, input.nodeId),
+      resolveToolDefinition(
+        toolDefinition,
+        input.moduleMap,
+        input.nodeId,
+        requireBindingOwner(input.manifest, toolDefinition.sourceId),
+      ),
+    ),
+  );
+  const resolvedDynamicConnectionResolvers = await Promise.all(
+    input.manifest.dynamicConnections.map((definition) =>
+      resolveDynamicConnectionDefinition(definition, input.moduleMap, input.nodeId),
     ),
   );
   const resolvedDynamicInstructionsResolvers = await Promise.all(
@@ -96,22 +100,28 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       resolveConnectionDefinition(connectionDefinition, input.moduleMap, input.nodeId),
     ),
   );
-  const authoredSandbox =
-    input.manifest.sandbox === null
-      ? null
-      : await resolveSandboxDefinition(input.manifest.sandbox, input.moduleMap, input.nodeId);
-  const instructions = input.manifest.instructions.map(createResolvedInstructionsDefinition);
+  const resolvedMemories = await Promise.all(
+    input.manifest.memories.map((definition) =>
+      resolveMemoryDefinition(definition, input.moduleMap, input.nodeId),
+    ),
+  );
+  const authoredSandbox = await resolveSandboxDefinition(
+    input.manifest.sandbox,
+    input.moduleMap,
+    input.nodeId,
+  );
+  const instructions = input.manifest.instructions.map((definition) =>
+    createResolvedInstructionsDefinition(input.manifest, definition),
+  );
   const workspaceResourceRoot = input.manifest.workspaceResourceRoot;
   const resolvedAgent: ResolvedAgent = {
     channels: resolvedChannels,
     connections: resolvedConnections,
-    disabledFrameworkChannels,
-    disabledFrameworkTools: [...input.manifest.disabledFrameworkTools],
+    dynamicConnectionResolvers: resolvedDynamicConnectionResolvers,
     workflowTool:
       input.manifest.workflowTool === undefined
         ? undefined
         : { maxSubagents: input.manifest.workflowTool.maxSubagents },
-    webSearchProvider: input.manifest.webSearchProvider,
     dynamicInstructionsResolvers: resolvedDynamicInstructionsResolvers,
     dynamicSkillResolvers: resolvedDynamicSkillResolvers,
     dynamicToolResolvers: resolvedDynamicToolResolvers,
@@ -122,6 +132,7 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
       appRoot: input.manifest.appRoot,
       diagnosticsSummary: input.manifest.diagnosticsSummary,
     },
+    memories: resolvedMemories,
     sandbox: authoredSandbox,
     workspaceResourceRoot,
     skills: resolvedSkills,
@@ -134,17 +145,42 @@ export async function resolveAgent(input: ResolveAgentInput): Promise<ResolvedAg
     : resolvedAgent;
 }
 
+function requireBindingOwner(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+  sourceId: string,
+) {
+  const binding = manifest.bindings[sourceId];
+  if (binding === undefined) throw new Error(`Compiled source "${sourceId}" has no binding.`);
+  return binding.owner;
+}
+
 function createResolvedInstructionsDefinition(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
   instructions: CompiledInstructionsDefinition,
 ): ResolvedInstructionsDefinition {
   return {
     content: instructions.content,
     name: instructions.name,
+    owner: requireCompiledSourceOwner(manifest, instructions),
     logicalPath: instructions.logicalPath,
     role: instructions.role,
     sourceId: instructions.sourceId,
     sourceKind: instructions.sourceKind,
   };
+}
+
+function requireCompiledSourceOwner(
+  manifest: CompiledAgentNodeManifest | CompiledAgentResources,
+  source: {
+    readonly owner?: AgentSourceOwner;
+    readonly sourceId: string;
+  },
+): AgentSourceOwner {
+  const owner = manifest.bindings[source.sourceId]?.owner ?? source.owner;
+  if (owner === undefined) {
+    throw new Error(`Compiled source "${source.sourceId}" has no owner.`);
+  }
+  return owner;
 }
 
 function createResolvedAgentConfig(
@@ -201,7 +237,6 @@ function createResolvedAgentConfig(
   if (manifest.config.experimental !== undefined) {
     config.experimental = {
       instrumentationProviders: manifest.config.experimental.instrumentationProviders,
-      subagentPersistentSessions: manifest.config.experimental.subagentPersistentSessions,
       tasks: manifest.config.experimental.tasks,
       workflow:
         manifest.config.experimental.workflow === undefined

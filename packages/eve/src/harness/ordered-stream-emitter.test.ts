@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import {
+  createActionInputAppendedEvent,
   createActionPartialEvent,
   createActionResultEvent,
   createMessageAppendedEvent,
@@ -47,6 +48,18 @@ function partial(callId: string, output: string) {
   });
 }
 
+function input(callId: string, delta: string, offset: number) {
+  return createActionInputAppendedEvent({
+    callId,
+    inputTextDelta: delta,
+    inputTextOffset: offset,
+    sequence: 1,
+    stepIndex: 0,
+    toolName: "render",
+    turnId: "turn_1",
+  });
+}
+
 describe("createOrderedStreamEmitter", () => {
   it("keeps consuming while a write is active and preserves the latest event payload", async () => {
     const firstWrite = deferred();
@@ -66,6 +79,31 @@ describe("createOrderedStreamEmitter", () => {
     await emitter.closeAndDrain();
 
     expect(events).toEqual([message("A", "A"), message("BC", "ABC")]);
+  });
+
+  it("coalesces adjacent input deltas for the same tool call", async () => {
+    const firstWrite = deferred();
+    const events: UnstampedMessageStreamEvent[] = [];
+    const emitFn = vi.fn(async (event: UnstampedMessageStreamEvent) => {
+      events.push(event);
+      if (events.length === 1) await firstWrite.promise;
+    });
+    const emitter = createOrderedStreamEmitter(emitFn);
+
+    await emitter.emit(message("A", "A"));
+    await emitter.emit(input("call_1", "{", 0));
+    await emitter.emit(input("call_1", '"title":', 1));
+    await emitter.emit(input("call_1", '"Hello"}', 9));
+    await emitter.emit(input("call_2", "{}", 0));
+
+    firstWrite.resolve();
+    await emitter.closeAndDrain();
+
+    expect(events).toEqual([
+      message("A", "A"),
+      input("call_1", '{"title":"Hello"}', 0),
+      input("call_2", "{}", 0),
+    ]);
   });
 
   it("treats other event types and stream coordinates as ordering barriers", async () => {

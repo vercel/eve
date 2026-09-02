@@ -18,17 +18,20 @@ import {
   defineDynamic as defineDynamicInstructions,
   defineInstructions,
 } from "#public/definitions/instructions.js";
-import { defineInstrumentation } from "#public/definitions/instrumentation.js";
+import {
+  defineInstrumentation,
+  type ProviderDefinition,
+} from "#public/definitions/instrumentation.js";
 import { defineSandbox } from "#public/definitions/sandbox.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import {
   defineTool,
-  experimental_workflow,
   type TaskReceipt,
   type TaskExec,
   type ToolDefinition,
-} from "#public/definitions/tool.js";
+} from "#public/tools/index.js";
+import { experimental_workflow } from "#public/tools/workflow.js";
 
 describe("definition helper exact inputs", () => {
   it("preserves literal inference for valid definitions", () => {
@@ -305,6 +308,9 @@ function typeOnlyFixtures(): void {
     },
   });
 
+  const providerWithCapture: ProviderDefinition = { capture: "content" };
+  void providerWithCapture;
+
   defineInstrumentation({
     // @ts-expect-error Instrumentation event hooks are authored through `events`.
     runtimeContext: {
@@ -452,7 +458,13 @@ function typeOnlyFixtures(): void {
   defineSandbox({
     async onSession({ ctx, use }) {
       const sessionId: string = ctx.session.id;
+      // @ts-expect-error Sandbox lifecycle access is unavailable during session initialization.
+      void ctx.getSandbox;
+      // @ts-expect-error Skill access is unavailable during session initialization.
+      void ctx.getSkill;
       const sandbox = await use();
+      // @ts-expect-error Runtime lifecycle access is unavailable during session initialization.
+      void sandbox.delete;
       void sandbox;
       void sessionId;
     },

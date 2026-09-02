@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import type { RuntimeToolCallActionRequest } from "#runtime/actions/types.js";
-import type { InputRequest, InputResponse } from "#runtime/input/types.js";
+import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import type { InputRequest, InputResponse } from "#shared/input.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
 import {
   getApprovedTools,
@@ -25,6 +25,7 @@ import {
   resolveSessionLimitInput,
 } from "#harness/hitl/session-limit-input-requests.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
+import { readClientContext } from "#internal/client-context.js";
 
 export { getApprovedTools, clearPendingSessionLimitPrompt };
 export type { RejectedActionBatch };
@@ -97,7 +98,9 @@ export function resolvePendingInput(input: {
   if (responses.length === 0 && resolvedStepInput?.message === undefined) {
     const deferredInput = compactStepInput(resolvedStepInput);
     const session =
-      deferredInput.context !== undefined || deferredInput.outputSchema !== undefined
+      deferredInput.context !== undefined ||
+      readClientContext(deferredInput) !== undefined ||
+      deferredInput.outputSchema !== undefined
         ? queueDeferredStepInput(input.session, deferredInput)
         : input.session;
     return { outcome: "unresolved", messages: baseHistory, session };

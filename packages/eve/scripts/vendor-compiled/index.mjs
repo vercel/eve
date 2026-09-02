@@ -5,6 +5,7 @@
  */
 import acpSdk from "./@agentclientprotocol/sdk.mjs";
 import anthropic from "./@ai-sdk/anthropic.mjs";
+import codeMode from "./@ai-sdk/code-mode.mjs";
 import google from "./@ai-sdk/google.mjs";
 import mcp from "./@ai-sdk/mcp.mjs";
 import openai from "./@ai-sdk/openai.mjs";
@@ -22,11 +23,14 @@ import modelContextProtocolServer from "./@modelcontextprotocol/server.mjs";
 import opentelemetryApi from "./@opentelemetry/api.mjs";
 import opentelemetryOtlpTransformer from "./@opentelemetry/otlp-transformer.mjs";
 import standardSchemaSpec from "./@standard-schema/spec.mjs";
+import vercelBlob from "./@vercel/blob.mjs";
 import vercelDetectAgent from "./@vercel/detect-agent.mjs";
 import vercelOidc from "./@vercel/oidc.mjs";
 import vercelOtel from "./@vercel/otel.mjs";
 import vercelSandbox from "./@vercel/sandbox.mjs";
+import vercelSandboxDelete from "./@vercel/sandbox-delete.mjs";
 import vercelSandboxStable from "./@vercel/sandbox-stable.mjs";
+import workflowBuilders from "./@workflow/builders.mjs";
 import workflowCore from "./@workflow/core.mjs";
 import workflowErrors from "./@workflow/errors.mjs";
 import workflowSerde from "./@workflow/serde.mjs";
@@ -37,7 +41,6 @@ import workflowWorldVercel from "./@workflow/world-vercel.mjs";
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
-import experimentalAiSdkCodeMode from "./experimental-ai-sdk-code-mode.mjs";
 import eventsourceParserStream from "./eventsource-parser-stream.mjs";
 import envRunner from "./env-runner.mjs";
 import grayMatter from "./gray-matter.mjs";
@@ -55,13 +58,13 @@ import zodValidationError from "./zod-validation-error.mjs";
 export const MODULES = [
   acpSdk,
   anthropic,
+  codeMode,
   chat,
   chatAdapterSlack,
   chatAdapterStateMemory,
   chatAdapterTwilio,
   chokidar,
   commander,
-  experimentalAiSdkCodeMode,
   eventsourceParserStream,
   envRunner,
   google,
@@ -85,11 +88,14 @@ export const MODULES = [
   shadcnRegistry,
   standardSchemaSpec,
   turndown,
+  vercelBlob,
   vercelDetectAgent,
   vercelOidc,
   vercelOtel,
   vercelSandbox,
+  vercelSandboxDelete,
   vercelSandboxStable,
+  workflowBuilders,
   workflowCore,
   workflowErrors,
   workflowSerde,

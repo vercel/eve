@@ -1,8 +1,6 @@
-import {
-  isDisabledToolSentinel,
-  isExperimentalWorkflowToolDefinition,
-} from "#public/definitions/tool.js";
-import { isWebSearchToolDefinition } from "#public/tools/web-search.js";
+import { isDisabledToolSentinel } from "#tools/definition.js";
+import { isExperimentalWorkflowToolDefinition } from "#tools/workflow.js";
+import { isWebSearchToolDefinition } from "#tools/provided/web-search.js";
 import {
   expectFunction,
   expectObjectRecord,
@@ -10,18 +8,20 @@ import {
   expectPositiveInteger,
   expectString,
 } from "#internal/authored-module.js";
-import type { InternalToolDefinitionWithExecuteFn } from "#shared/tool-definition.js";
+import type { InternalToolDefinition, ToolExecuteFn } from "#tools/definition.js";
+import { readToolBehavior, type CompiledToolBehavior } from "#tools/behavior.js";
 import {
   serializeInputSchema,
   serializeOutputSchema,
   type ToolSchemaSource,
-} from "#shared/tool-schema.js";
+} from "#tools/schema.js";
 import { normalizeApproval } from "#internal/authored-definition/approval.js";
+import { shouldRebindDynamicCallbacks } from "#internal/dynamic-tool-rebind.js";
 import {
   assertResolverOnlyDynamicSentinel,
   isDynamicSentinel,
   type DynamicToolEventName,
-} from "#shared/dynamic-tool-definition.js";
+} from "#dynamic/definition.js";
 
 /**
  * Canonical normalized shape of one authored tool default export.
@@ -29,7 +29,15 @@ import {
  * Identity is path-derived — the compiler stamps the filename slug onto
  * the compiled entry. This shape never carries an authored `name`.
  */
-type NormalizedAuthoredTool = Readonly<Omit<InternalToolDefinitionWithExecuteFn, "name">>;
+type NormalizedAuthoredTool = Readonly<
+  Omit<InternalToolDefinition, "name"> & {
+    readonly behavior?: CompiledToolBehavior;
+    readonly execute?: ToolExecuteFn;
+    readonly hasApproval: boolean;
+    readonly hasExecute: boolean;
+    readonly hasModelOutputProjection: boolean;
+  }
+>;
 type MutableNormalizedAuthoredTool = {
   -readonly [K in keyof NormalizedAuthoredTool]: NormalizedAuthoredTool[K];
 };
@@ -49,6 +57,7 @@ type NormalizedToolEntry =
   | {
       readonly kind: "dynamic-tool";
       readonly eventNames: readonly DynamicToolEventName[];
+      readonly rebindMissingCallbacks: boolean;
     };
 
 /**
@@ -64,6 +73,7 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
     return {
       kind: "dynamic-tool",
       eventNames: Object.keys(value.events) as DynamicToolEventName[],
+      rebindMissingCallbacks: shouldRebindDynamicCallbacks(value),
     };
   }
   if (isDisabledToolSentinel(value)) {
@@ -110,12 +120,32 @@ export function normalizeToolDefinition(value: unknown, message: string): Normal
       ? null
       : serializeInputSchema(record.inputSchema as ToolSchemaSource);
   const outputSchema = serializeOutputSchema(record.outputSchema as ToolSchemaSource | undefined);
+  const behavior = readToolBehavior(value);
+  const hasExecute = record.execute !== undefined;
+  if (
+    !hasExecute &&
+    behavior?.handling?.kind !== "dispatch" &&
+    behavior?.handling?.kind !== "request-input"
+  ) {
+    expectFunction(record.execute, message);
+  }
   const definition: MutableNormalizedAuthoredTool = {
     description: expectString(record.description, message),
-    execute: expectFunction(record.execute, message),
+    hasApproval: record.approval !== undefined,
+    hasExecute,
+    hasModelOutputProjection: record.toModelOutput !== undefined,
     inputSchema,
   };
+  if (behavior !== undefined) {
+    definition.behavior = behavior;
+  }
+  if (hasExecute) {
+    definition.execute = expectFunction(record.execute, message) as ToolExecuteFn;
+  }
   if (record.execution !== undefined) {
+    if (!hasExecute) {
+      throw new Error(`${message} Execute-less native tools cannot use background execution.`);
+    }
     const execution = expectString(record.execution, message);
     if (execution !== "background") {
       throw new Error(`${message} Expected "execution" to be "background".`);

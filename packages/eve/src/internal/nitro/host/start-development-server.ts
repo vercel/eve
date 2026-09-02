@@ -19,8 +19,8 @@ import {
 import { resolveDiscoveryProject } from "#discover/project.js";
 import { DevelopmentServerState } from "#internal/nitro/host/dev-server-state.js";
 import { toErrorMessage } from "#shared/errors.js";
-import { isEveServerHealthy } from "#shared/eve-server-health.js";
 import { isLoopbackServerUrl } from "#shared/network-address.js";
+import { readDevelopmentRuntimeArtifactsRevision } from "#services/dev-client/runtime-artifacts.js";
 import { handleDevRuntimeArtifactsRequest } from "#internal/nitro/routes/dev-runtime-artifacts.js";
 import { resolveNitroCompiledArtifactsSource } from "#internal/nitro/routes/runtime-artifacts.js";
 import {
@@ -44,6 +44,7 @@ import {
   DEFAULT_DEVELOPMENT_SERVER_PORT,
   MAX_DEVELOPMENT_SERVER_PORT_ATTEMPTS,
 } from "#internal/nitro/host/ports.js";
+import { installLocalDevCapabilityEnvironment } from "#runtime/local-dev-capability.js";
 import { detectPackageManager, type PackageManagerKind } from "#setup/package-manager.js";
 import { eveDevArguments } from "#setup/primitives/index.js";
 import { devBootPhase } from "#internal/dev-boot-progress.js";
@@ -64,6 +65,7 @@ import {
 } from "#internal/nitro/host/dev-server-url.js";
 
 const MAX_ALLOWED_DEVELOPMENT_SERVER_PORT = 65_535;
+const DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS = 1_000;
 const PORT_ENV = "PORT";
 
 export { normalizeDevelopmentServerClientUrl };
@@ -82,7 +84,7 @@ export async function isActiveDevelopmentServerForApp(input: {
     if (
       recordedServerUrl === undefined ||
       !isLoopbackServerUrl(recordedServerUrl) ||
-      !(await isEveServerHealthy(recordedServerUrl))
+      !(await isDevelopmentServerReady(recordedServerUrl))
     ) {
       return false;
     }
@@ -94,6 +96,15 @@ export async function isActiveDevelopmentServerForApp(input: {
   } catch {
     return false;
   }
+}
+
+async function isDevelopmentServerReady(serverUrl: string): Promise<boolean> {
+  return (
+    (await readDevelopmentRuntimeArtifactsRevision({
+      serverUrl,
+      timeoutMs: DEVELOPMENT_SERVER_READINESS_TIMEOUT_MS,
+    })) !== undefined
+  );
 }
 
 function isAddressInUseError(error: unknown): error is NodeJS.ErrnoException {
@@ -222,12 +233,16 @@ function addDevelopmentControlHandler(input: {
     if (watcher === undefined) {
       return Response.json({ error: "The development server is still starting." }, { status: 503 });
     }
+    const leaseId = url.searchParams.get("lease");
+    if ((isSuspendRequest || isResumeRequest) && (leaseId === null || leaseId.length === 0)) {
+      return Response.json({ error: "A suspension lease is required." }, { status: 400 });
+    }
     if (isSuspendRequest) {
-      await watcher.suspend();
+      await watcher.suspend(leaseId!);
       return Response.json({ suspended: true });
     }
     if (isResumeRequest) {
-      await watcher.resume({ silent: url.searchParams.get("silent") === "1" });
+      await watcher.resume(leaseId!, { silent: url.searchParams.get("silent") === "1" });
       return handleDevRuntimeArtifactsRequest({ appRoot: input.appRoot });
     }
     if (url.searchParams.get("force") === "1") {
@@ -382,7 +397,7 @@ async function startNitroDevelopmentServer(
   if (
     existingServerUrl !== undefined &&
     isLoopbackServerUrl(existingServerUrl) &&
-    (await isEveServerHealthy(existingServerUrl))
+    (await isDevelopmentServerReady(existingServerUrl))
   ) {
     if (options.existing === "attach-if-unconfigured" && !hasExplicitEndpoint) {
       return {
@@ -398,6 +413,7 @@ async function startNitroDevelopmentServer(
   process.env[EVE_DEVELOPMENT_SANDBOX_RUN_ID_ENV] = developmentSandboxRunId;
   let nitro: Nitro | undefined;
   let devServer: NitroDevelopmentServer | undefined;
+  let restoreLocalDevCapabilityEnvironment: (() => void) | undefined;
   let restoreWorkflowLocalQueueEnvironment: (() => void) | undefined;
   let restoreWorkflowTransportEnvironment: (() => void) | undefined;
   let workflowWorld: ParentDevelopmentWorkflowWorld | undefined;
@@ -469,6 +485,12 @@ async function startNitroDevelopmentServer(
 
     const serverUrl = normalizeDevelopmentServerClientUrl(server.url);
     restoreWorkflowLocalQueueEnvironment = installWorkflowLocalQueueEnvironment(serverUrl);
+    // Published before the first worker is created, so every runtime generation
+    // inherits it: workers copy `process.env` at construction.
+    restoreLocalDevCapabilityEnvironment = installLocalDevCapabilityEnvironment({
+      appRoot: project.appRoot,
+      serverUrl,
+    });
     await devBootPhase(
       "building dev bundle",
       async () => {
@@ -525,6 +547,7 @@ async function startNitroDevelopmentServer(
     const devServerOnClose = devServer;
     const workflowWorldOnClose = workflowWorld;
     const restoreWorkflowTransportEnvironmentOnClose = restoreWorkflowTransportEnvironment;
+    const restoreLocalDevCapabilityEnvironmentOnClose = restoreLocalDevCapabilityEnvironment;
     let closePromise: Promise<void> | undefined;
     const close = (): Promise<void> => {
       closePromise ??= (async () => {
@@ -548,6 +571,7 @@ async function startNitroDevelopmentServer(
         } finally {
           restoreWorkflowLocalQueueEnvironmentOnClose();
           restoreWorkflowTransportEnvironmentOnClose?.();
+          restoreLocalDevCapabilityEnvironmentOnClose?.();
           restoreDevelopmentSandboxRunId(previousDevelopmentSandboxRunId);
         }
       })();
@@ -583,6 +607,7 @@ async function startNitroDevelopmentServer(
     }
     restoreWorkflowLocalQueueEnvironment?.();
     restoreWorkflowTransportEnvironment?.();
+    restoreLocalDevCapabilityEnvironment?.();
     if (cleanup.listenerClosed) {
       await state.remove().catch(() => {});
     }

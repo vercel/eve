@@ -8,6 +8,7 @@ const typeLabel: Record<Integration["type"], string> = {
   connection: "Connection",
   extension: "Extension",
   instrumentation: "Instrumentation",
+  memory: "Memory provider",
 };
 
 interface IntegrationCardProps {

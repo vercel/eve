@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/2331
 status: proposed
-last_updated: "2026-08-20"
+last_updated: "2026-09-01"
 ---
 
 # Audience-aware trace content policy
@@ -20,9 +20,9 @@ Channels may project one of three values from their existing synchronous `metada
 type ChannelAudience = "public" | "private" | "unknown";
 ```
 
-The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests.
+The field is optional for authored channels. Eve normalizes absent, malformed, and unsupported values to `unknown`. Built-in channel metadata interfaces require the field and classify only from platform evidence already captured during dispatch; ambiguous and proactive destinations remain `unknown` rather than performing observability-only network requests. Proactive Slack `receive` / `ctx.send` targets may optionally supply `audience` when the caller already knows channel visibility, for example a webhook that classified the Slack destination before handoff.
 
-The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. Remote agents classify their receiving channel independently rather than trusting opaque metadata across deployment boundaries.
+The normalized audience is persisted with session trace state and exported as `agent.channel.audience` only on each `agent.session` window. Durable Eve state and an internal OpenTelemetry context key make the same value available to descendant export policies without duplicating a public attribute onto every span. Local subagents inherit the parent audience. A remote agent with principal forwarding propagates the immutable origin audience and the current hop's effective directional ceiling through one `eve.audience` W3C Baggage member. The receiver accepts it only with the same `trustedForwarders` decision that admitted the principal, then intersects it with its own process policy. Every later hop forwards that intersection; malformed and mixed-version assertions become metadata-only.
 
 ## Public tracing API
 
@@ -32,21 +32,42 @@ The process-wide declaration owns trace creation:
 
 ```ts
 interface TraceCaptureContext {
-  readonly agentName?: string;
+  readonly agentName: string;
   readonly audience: ChannelAudience;
-  readonly rootSessionId: string;
-  readonly sessionId: string;
+  readonly channelType?: string;
 }
 
-type TraceCapturePolicy = (trace: TraceCaptureContext) => boolean;
+type TracePolicyDecision =
+  | { readonly emit: false }
+  | {
+      readonly emit: true;
+      readonly recordInputs: boolean;
+      readonly recordOutputs: boolean;
+    };
+
+type TraceCapturePolicy = (trace: TraceCaptureContext) => TracePolicyDecision | boolean;
 
 interface OtelOptions {
   // Other process-wide OTel settings are unchanged.
   readonly tracePolicy?: TraceCapturePolicy;
 }
 
+interface ProviderDefinition {
+  readonly tracePolicy?: TraceCapturePolicy;
+}
+
 declare function otel(options?: OtelOptions): OtelDeclaration;
 ```
+
+The `otel()` trace decision is a process-wide OTel ceiling. Each local delivery is
+intersected with its own audience classification. An accepted remote ceiling is
+instead intersected with the receiver policy evaluated against the immutable origin
+audience, permitting private content only when both sides explicitly approve it.
+Destination settings may narrow the result further. A provider's `defineInstrumentation({ tracePolicy })` decision
+is independent: `false` skips that provider, `true` uses audience-aware content,
+and an explicit emitted decision authorizes its input and output directions even
+for private channels. An omitted provider policy uses the default audience-aware
+behavior.
 
 Agent Runs and local traces expose the managed export policy:
 
@@ -101,25 +122,25 @@ declare function localTraces(options?: ManagedTraceOptions): OtelIntegration;
 
 `composeSpanExportPolicies()` applies policies in declaration order. A later span or attribute policy sees the facade produced by earlier redactors. A span predicate returning `false` removes that span from one destination without suppressing the rest of its trace. Attribute policies run once for each attribute still visible at their stage.
 
-For example, this admits public and private conversations at the head gate while redacting private content before applying destination-specific filtering:
+For example, this retains every conversation while capturing content only for public audiences:
 
 ```ts
 // agent/instrumentation/otel.ts
 export default otel({
-  tracePolicy: ({ audience }) => audience === "public" || audience === "private",
+  tracePolicy: ({ audience }) => ({
+    emit: true,
+    recordInputs: audience === "public",
+    recordOutputs: audience === "public",
+  }),
 });
 
 // agent/instrumentation/agent-runs.ts
 export default agentRuns({
-  exportPolicy: composeSpanExportPolicies(
-    redactSpanInputs(({ audience }) => audience !== "public"),
-    redactSpanOutputs(({ audience }) => audience !== "public"),
-    {
-      span: ({ name }) => name !== "internal.cache.refresh",
-      attribute: ({ key }) =>
-        key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
-    },
-  ),
+  exportPolicy: composeSpanExportPolicies({
+    span: ({ name }) => name !== "internal.cache.refresh",
+    attribute: ({ key }) =>
+      key === "user.email" ? { action: "replace", value: "[redacted]" } : { action: "keep" },
+  }),
 });
 ```
 
@@ -128,14 +149,21 @@ export default agentRuns({
 The default authored and production head policy is equivalent to:
 
 ```ts
-({ audience }) => audience === "public";
+({ audience }) => ({
+  emit: true,
+  recordInputs: audience === "public",
+  recordOutputs: audience === "public",
+});
 ```
 
-| Audience  | Trace created by default | Content when admitted by a custom trace policy |
-| --------- | ------------------------ | ---------------------------------------------- |
-| `public`  | Yes                      | Unchanged unless an export policy redacts it   |
-| `private` | No                       | Unchanged unless an export policy redacts it   |
-| `unknown` | No                       | Unchanged unless an export policy redacts it   |
+| Audience  | Trace created by default | Content by default |
+| --------- | ------------------------ | ------------------ |
+| `public`  | Yes                      | Yes                |
+| `private` | Yes                      | No                 |
+| `unknown` | Yes                      | No                 |
+
+An explicit provider policy can authorize content for any audience. The OTel
+policy remains subject to its process-wide audience ceiling.
 
 The default policy for local tracing for `eve dev` is equivalent to:
 
@@ -153,12 +181,23 @@ The runtime order is:
 4. Run each managed destination's composed export policies in declaration order. Custom integrations run their declared span processors.
 5. Hand the resulting facade to that destination's processors or exporter.
 
+The lifecycle bus separately evaluates each instrumentation provider's policy
+against the same agent and channel context, skips rejected providers, and applies
+directional content projection before invoking accepted handlers.
+
 There is no implicit content redaction after a custom trace policy admits an audience. Redaction occurs only when the export pipeline includes `redactSpanInputs()` or `redactSpanOutputs()` (or when a retained compatibility option explicitly requests the equivalent redaction).
 
 Policies fail closed at their boundary: a throwing trace policy rejects the trace, a throwing span policy drops the span, a throwing attribute policy drops the attribute, and a throwing content-redaction predicate redacts that content direction. Missing, malformed, or conflicting audience evidence normalizes to `unknown`.
 
 ## Compatibility
 
-The existing `recordInputs` and `recordOutputs` destination options remain accepted as deprecated source-compatible aliases. An explicit `false` prepends the corresponding redaction policy; these options no longer prevent accepted spans from capturing content upstream. `EVE_TRACES_CONTENT=off` similarly prepends both redactors for local traces.
+Instrumentation providers deprecate the experimental `capture` field in favor
+of `tracePolicy`; `"content"` and `"metadata"` are mapped to equivalent fixed
+policies while integrations migrate. The existing OTel destination
+`recordInputs` and `recordOutputs` options remain accepted as deprecated
+source-compatible aliases. An explicit `false` prepends the corresponding
+redaction policy; these options no longer prevent accepted spans from capturing
+content upstream. `EVE_TRACES_CONTENT=off` similarly prepends both redactors for
+local traces.
 
 Filtering remains a span-processor responsibility because local trace persistence and authored processors are processors rather than uniform exporters. Keeping the filtering boundary immediately above each destination prevents one destination's policy from mutating what another destination receives.

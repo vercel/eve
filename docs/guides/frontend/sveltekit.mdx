@@ -51,10 +51,11 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
   const agent = useEveAgent();
   let message = $state("");
   let isBusy = $derived(agent.status === "submitted" || agent.status === "streaming");
+  let isInputDisabled = $derived(isBusy || agent.status === "resuming");
 
   async function handleSubmit() {
     const text = message.trim();
-    if (!text || isBusy) return;
+    if (!text || isInputDisabled) return;
     message = "";
     await agent.send(text);
   }
@@ -64,8 +65,8 @@ With the plugin in `vite.config.ts`, components call [`useEveAgent`](./use-eve-a
   event.preventDefault();
   void handleSubmit();
 }}>
-  <input bind:value={message} disabled={isBusy} />
-  <button type="submit" disabled={isBusy}>Send</button>
+  <input bind:value={message} disabled={isInputDisabled} />
+  <button type="submit" disabled={isInputDisabled}>Send</button>
 </form>
 ```
 

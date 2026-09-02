@@ -19,7 +19,15 @@ export type SetupSelectionIntent =
   | { kind: "submit" };
 
 /** Maps terminal keys to the intents every setup selection surface shares. */
-export function setupSelectionIntent(key: TerminalKey): SetupSelectionIntent | undefined {
+export function setupSelectionIntent(
+  key: TerminalKey,
+  options: { textNavigation?: boolean } = {},
+): SetupSelectionIntent | undefined {
+  if (options.textNavigation && key.type === "text" && key.framing === "unframed") {
+    if (key.value === "k") return { kind: "move", direction: "up" };
+    if (key.value === "j") return { kind: "move", direction: "down" };
+  }
+
   switch (key.type) {
     case "ctrl-c":
     case "escape":
@@ -61,6 +69,7 @@ type SetupSingleSelectInput = SetupSelectInput & {
 type SetupMultiSelectInput = SetupSelectInput & {
   kind: "multi" | "searchable-multi";
   required: boolean;
+  plannerNavigation?: true;
 };
 
 type SetupSelectInputState = SetupSingleSelectInput | SetupMultiSelectInput;
@@ -82,7 +91,7 @@ function updatedSelect(
     select: reduceSelect(input.select, event, {
       options: input.options,
       searchAction: input.searchAction,
-      submitRow: isMultiSelect(input),
+      submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
     }),
   };
 }
@@ -92,6 +101,7 @@ function submitSetupSelect(input: SetupSelectInputState): SetupSelectInputResult
     ? filterOptions(input.options, input.select.filter, input.searchAction)
     : [...input.options];
   if (isMultiSelect(input)) {
+    if (input.plannerNavigation === true) return updatedSelect(input, { type: "toggle" });
     if (input.select.cursor !== submitRowIndex(visible)) {
       return updatedSelect(input, { type: "toggle" });
     }
@@ -126,7 +136,7 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
       const context = {
         options: input.options,
         searchAction: input.searchAction,
-        submitRow: isMultiSelect(input),
+        submitRow: isMultiSelect(input) && input.plannerNavigation !== true,
       };
       for (const char of input.key.value.replaceAll("\n", " ")) {
         if (char >= " " && char !== "\u007f") {
@@ -142,7 +152,7 @@ function editSetupSelect(input: SetupSelectInputState): SetupSelectInputResult {
 
 /** Pure key transition for a setup select; rendering and lifecycle stay outside. */
 export function reduceSetupSelectInput(input: SetupSelectInputState): SetupSelectInputResult {
-  const intent = setupSelectionIntent(input.key);
+  const intent = setupSelectionIntent(input.key, { textNavigation: !isSearchableSelect(input) });
   switch (intent?.kind) {
     case "cancel":
       if (

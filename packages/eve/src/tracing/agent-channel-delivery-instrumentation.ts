@@ -14,11 +14,12 @@ import type {
   InstrumentationHandlerContext,
   InstrumentationProviderDefinition,
   InstrumentationSessionStartedEvent,
-} from "#harness/instrumentation/lifecycle.js";
-import { sessionIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { sessionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import type { JsonValue } from "#shared/json.js";
 import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
+import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
@@ -30,7 +31,6 @@ interface ChannelDeliverySpanState {
   readonly requestTraceContext?: SpanContext;
   readonly spanId: string;
   readonly startTimeMs: number;
-  readonly window: number;
 }
 
 /** Builds durable channel delivery spans around the turn that consumes each request. */
@@ -62,6 +62,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       parentTraceContext: event.parentTraceContext,
       rootSessionId: event.rootSessionId,
       sessionId: event.sessionId,
+      traceSeed: event.traceSeed,
       type: "session.started",
     });
     if (!isSampledTrace(session.context)) return;
@@ -76,7 +77,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       },
       spanId: input.idGenerator.deriveSpanId(`channel-delivery:${event.idempotencyKey}`),
       startTimeMs: Date.now(),
-      window: session.window,
     };
     if (inputAttribute !== undefined) state.inputAttribute = inputAttribute;
     if (event.delivery.requestTraceContext !== undefined) {
@@ -99,16 +99,6 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       event.turnId === undefined
         ? undefined
         : await input.stateStore.getTurn(event.sessionId, event.turnId);
-    const session = await input.stateStore.getSession(event.sessionId);
-    const parent =
-      turn === undefined
-        ? state.parent
-        : {
-            isRemote: turn.parentIsRemote ?? false,
-            spanId: turn.parentSpanId,
-            traceFlags: turn.context.traceFlags,
-            traceId: turn.context.traceId,
-          };
     const startTimeMs =
       turn === undefined ? state.startTimeMs : Math.max(state.startTimeMs, turn.startTimeMs);
     const requestLink = state.requestTraceContext;
@@ -125,9 +115,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
             "agent.name": event.agentName,
-            "agent.root.session.id": event.rootSessionId,
             "agent.session.id": event.sessionId,
-            "agent.session.window": session?.window ?? state.window,
             "agent.turn.id": event.turnId,
             "agent.turn.sequence": event.sequence,
           },
@@ -143,7 +131,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
                 ],
           startTime: startTimeMs,
         },
-        contextFromSpanContext(parent),
+        withChannelAudience(contextFromSpanContext(state.parent), state.channelAudience),
       ),
     );
     span.addEvent("channel.delivery.started", undefined, startTimeMs);
@@ -161,6 +149,19 @@ export function createAgentChannelDeliveryInstrumentation(input: {
       recordError(span, event.error);
     }
     span.end();
+    if (
+      turn !== undefined &&
+      event.turnId !== undefined &&
+      turn.parentSpanId === state.parent.spanId &&
+      turn.context.traceId === state.parent.traceId
+    ) {
+      await input.stateStore.updateTurn(event.sessionId, event.turnId, (current) =>
+        current.parentSpanId === state.parent.spanId &&
+        current.context.traceId === state.parent.traceId
+          ? { ...current, parentIsRemote: false, parentSpanId: state.spanId }
+          : current,
+      );
+    }
   };
 
   return {
@@ -173,11 +174,7 @@ export function createAgentChannelDeliveryInstrumentation(input: {
 
 function readState(value: unknown): ChannelDeliverySpanState | undefined {
   if (!isRecord(value) || !isSpanContext(value.parent)) return undefined;
-  if (
-    typeof value.spanId !== "string" ||
-    typeof value.startTimeMs !== "number" ||
-    typeof value.window !== "number"
-  ) {
+  if (typeof value.spanId !== "string" || typeof value.startTimeMs !== "number") {
     return undefined;
   }
   const requestTraceContext = isSpanContext(value.requestTraceContext)
@@ -190,7 +187,6 @@ function readState(value: unknown): ChannelDeliverySpanState | undefined {
     requestTraceContext,
     spanId: value.spanId,
     startTimeMs: value.startTimeMs,
-    window: value.window,
   };
 }
 

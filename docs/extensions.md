@@ -7,7 +7,7 @@ Extensions package eve tools, channels, connections, skills, schedules, subagent
 
 Ready-made extensions can also be distributed through an eve integration registry. See [Add Integrations](./install-integrations) to discover and add one with `eve add`; this page explains how extension packages are authored, mounted, configured, and overridden.
 
-This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A memory extension could use hooks to capture context and tools to recall it. A self-improving extension could pair hooks with dynamic instructions.
+This enables sharing many different capability sets. A browser extension might include several tools for navigating a site. A self-improving extension could pair hooks with dynamic instructions.
 
 ## Author: create an extension
 
@@ -39,11 +39,15 @@ An extension uses the same file conventions as an agent for its contributions:
     lib/http.ts
 ```
 
-Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/tools/` can contain `defineDynamic(...)`.
+Each listed slot accepts the same authored forms as its agent counterpart. Static and dynamic tools, connections, skills, and instructions all work in an extension: `extension/instructions.ts` is as valid as `extension/instructions.md`, and `extension/connections/` can contain `defineDynamic(...)`.
 
 Names come from paths, so call the tool `search`, not `crm_search`; the consumer's mount adds the `crm__` prefix. The same prefix applies to channel, schedule, and parent-visible subagent IDs, while channel route paths and schedule cron expressions stay unchanged. Keep shared code in `extension/lib/`.
 
-The extension root cannot declare agent configuration, a sandbox, or nested extensions. A subagent contributed under `extension/subagents/` owns its own agent configuration and sandbox like any other [declared subagent](./subagents).
+The extension root cannot declare agent configuration, instrumentation,
+[memory](./memory), a sandbox, or nested extensions. Those agent-level concerns
+belong to the consuming application. A subagent contributed under
+`extension/subagents/` owns its own agent configuration, memory, and sandbox
+like any other [declared subagent](./subagents).
 
 ### Add configuration and contributions
 
@@ -273,7 +277,7 @@ Production `eve build` expects the extension distribution to exist already. Keep
 
 ### Override a contribution
 
-Use a directory mount to replace or remove an extension contribution. Put the mount declaration in `extension.ts` and add overrides beside it:
+Use a directory mount to keep overrides beside the mount declaration. Put the declaration in `extension.ts` and add overrides beside it:
 
 ```
 agent/extensions/crm/
@@ -307,7 +311,7 @@ export default disableTool();
 
 Hooks and instruction fragments are additive, so they cannot be replaced. To replace a dynamic tool, use a dynamic definition in the same slot; dynamic tools win over same-named static tools at runtime. `disableTool()` removes either kind.
 
-The `crm__` prefix is reserved for this directory mount. A consumer cannot override the extension from `agent/tools/`, `agent/connections/`, `agent/subagents/`, or another agent-root slot.
+You can also place an override in the corresponding agent-root slot by using the final qualified name. For example, `agent/tools/crm__search.ts` replaces `tools/search.ts` from the extension package or its directory override. Application sources have the highest precedence, so an agent-root override wins when both forms exist.
 
 ### Use an extension tool result in a hook
 
@@ -338,7 +342,7 @@ At build time, eve checks the extension's generated capability metadata. If the 
 
 - [Integrations](/integrations): browse ready-to-install extensions using the Extensions filter
 - [Tools](/docs/tools): static tools, approval, and tool output
-- [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic tools, skills, and instructions
+- [Dynamic capabilities](/docs/guides/dynamic-capabilities): dynamic connections, tools, skills, and instructions
 - [Instructions](/docs/instructions): static and TypeScript instructions
 - [Skills](/docs/skills): package procedures and supporting files
 - [Connections](/docs/connections): integrate external services

@@ -58,7 +58,7 @@ You are responsible for ensuring any observability or eval provider is approved 
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
 
-Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown.
+Built-in messaging channels classify their instrumentation metadata with an `audience`: `public`, `private`, or `unknown`. Slack public channels and Chat SDK workspace-visible threads are public; direct and private conversations are private; platform surfaces without enough visibility evidence remain unknown. Proactive Slack `receive` / `ctx.send` handoffs stay `unknown` unless the caller passes `audience` on the target, for example when a webhook or schedule already knows the destination channel is public.
 
 ## Channel delivery traces
 
@@ -163,7 +163,9 @@ Structural tags describe each run's place in the tree:
 - `$eve.root`: session id of the root session in the chain (group a whole tree with `$eve.root=<id>`)
 - `$eve.subagent`: compiled graph node id (subagent runs only)
 - `$eve.trigger`: the channel kind that started the run
+- `$eve.schedule`: the authored schedule that created the session, including sessions started through a target channel
 - `$eve.title`: truncated title derived from the first user message
+- `$eve.trace_id`: trace id of the sampled agent trace containing the run, written on session, subagent, and turn rows so a dashboard run can be joined to its OpenTelemetry trace. Present only when the trace is sampled; absence means no exported OTEL trace exists.
 
 Per-turn usage tags are written on each step of a turn, accumulating cumulative totals (last write wins):
 

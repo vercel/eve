@@ -1,6 +1,6 @@
 import { getVercelOidcToken } from "#compiled/@vercel/oidc/index.js";
 import { hasEnvValue } from "#internal/resolve-model-endpoint-status.js";
-import { buildAgentInfoResponseFromManifest } from "#internal/nitro/routes/agent-info/build-agent-info-response-from-manifest.js";
+import { buildAgentInfoResponse } from "#internal/nitro/routes/agent-info/build-agent-info-response.js";
 import {
   loadAgentInfoManifestData,
   resolveAgentInfoCompiledArtifactsSource,
@@ -20,7 +20,7 @@ async function createAgentInfoPayload(input: NitroArtifactsConfig) {
     data.manifest.config.dynamicModel === undefined
       ? data.manifest.config.model.routing
       : undefined;
-  return buildAgentInfoResponseFromManifest(data, {
+  return buildAgentInfoResponse(data, {
     mode: input.kind,
     gatewayCredentials:
       routing === undefined

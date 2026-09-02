@@ -12,7 +12,7 @@ import {
   TEAMS_HITL_REQUEST_KIND_KEY,
 } from "#public/channels/teams/hitl.js";
 import { parseTeamsActivity } from "#public/channels/teams/inbound.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 
 describe("Teams HITL helpers", () => {
   it("renders approval tool input in the card and fallback text", () => {

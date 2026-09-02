@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client, type AgentInfoResult } from "#client/index.js";
+import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 import { EveTUIRunner, type AgentTUIRenderer } from "./runner.js";
 import { detectSetupIssues } from "./setup-issues.js";
@@ -14,40 +15,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const BASE_GATEWAY_INFO = createTestAgentInfoResult({
+  agentRoot: "/app/agent",
+  appRoot: "/app",
+  modelId: "openai/gpt-5.5",
+  name: "Agent",
+});
 const DISCONNECTED_GATEWAY_INFO: AgentInfoResult = {
+  ...BASE_GATEWAY_INFO,
   agent: {
-    agentRoot: "/app/agent",
-    appRoot: "/app",
+    ...BASE_GATEWAY_INFO.agent,
     model: {
       endpoint: { kind: "gateway", connected: false },
       id: "openai/gpt-5.5",
       routing: { kind: "gateway", target: "openai" },
     },
-    name: "Agent",
   },
-  capabilities: { devRoutes: true },
-  channels: { authored: [], available: [], disabledFramework: [], framework: [] },
-  connections: [],
-  diagnostics: { discoveryErrors: 0, discoveryWarnings: 0 },
-  hooks: [],
-  instructions: { dynamic: [], static: [] },
-  kind: "eve-agent-info",
-  mode: "development",
-  sandbox: null,
-  schedules: [],
-  skills: { dynamic: [], static: [] },
-  subagents: { local: [], total: 0 },
-  tools: {
-    authored: [],
-    available: [],
-    disabledFramework: [],
-    dynamic: [],
-    framework: [],
-    reserved: [],
-  },
-  version: 2,
-  workflow: { enabled: false, toolName: "Workflow" },
-  workspace: { resourceRoot: null, rootEntries: [] },
 };
 
 async function linkedAppRoot(): Promise<string> {
@@ -124,7 +107,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       renderer,
       serverUrl: "http://localhost:3000",
       session: client.sessions.attach("session_test"),
-      initialInput: "/model",
+      onboard: true,
     });
 
     await runner.run();
@@ -132,12 +115,40 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     expect(handle).toHaveBeenNthCalledWith(
       1,
       { type: "extension", name: "model", argument: "" },
-      { renderer, title: "eve", initialModelStep: "provider" },
+      expect.objectContaining({
+        renderer,
+        title: "eve",
+        initialModelStep: "provider",
+        keepSetupFlowOpen: true,
+        setupFlowTitle: "Set up eve",
+        setupFlowNavigation: {
+          kind: "planner",
+          activeStep: 0,
+          firstNavigableStep: 1,
+          steps: [
+            { label: "Model", complete: false },
+            { label: "Channels" },
+            { label: "Integrations" },
+            { label: "Review" },
+          ],
+        },
+      }),
     );
     expect(handle).toHaveBeenNthCalledWith(
       2,
       { type: "extension", name: "add", argument: "" },
-      { renderer, title: "eve" },
+      expect.objectContaining({
+        renderer,
+        title: "eve",
+        keepSetupFlowOpen: true,
+        setupFlowTitle: "Set up eve",
+        registryPlannerContext: {
+          prefixSteps: [{ label: "Model", complete: true }],
+          reviewMessage: "Review your agent",
+          primaryActionLabel: "Install and finish setup",
+          emptyActionLabel: "Finish setup",
+        },
+      }),
     );
     expect(readPrompt).toHaveBeenCalledOnce();
     expect(order).toEqual(["model", "add", "prompt"]);

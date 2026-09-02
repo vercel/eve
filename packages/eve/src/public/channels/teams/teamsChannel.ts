@@ -302,7 +302,10 @@ export function teamsChannel(config: TeamsChannelConfig = {}): TeamsChannel {
     kindHint: "teams",
     turnPolicy: config.turnPolicy,
     state: initialTeamsState(),
-    fetchFile: createTeamsFetchFile(filesPolicy),
+    fetchFile: createTeamsFetchFile(filesPolicy, {
+      ...config.api,
+      credentials: config.credentials,
+    }),
     metadata: (state) => ({
       audience: teamsAudience(state.conversationType),
       channelId: state.channelId,
@@ -638,9 +641,11 @@ async function dispatchMessage(input: {
   const turnMessage = buildTeamsTurnMessage(input.activity.text, fileParts);
   const inboundContext: TeamsInboundContext = {
     activityId: input.activity.id,
+    botId: input.activity.recipient.id,
     channelId: input.activity.teamsChannelId,
     conversationId: input.activity.conversation.id,
     conversationType: input.activity.conversationType,
+    isMentioned: input.activity.isBotMentioned,
     scope: input.activity.scope,
     teamId: input.activity.teamId,
     tenantId: input.activity.tenantId,

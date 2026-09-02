@@ -12,8 +12,17 @@ import { describe, expect, it, vi } from "vitest";
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
 import { contextStorage } from "#context/container.js";
-import { AuthKey, InitiatorAuthKey } from "#context/keys.js";
+import { serializeContext } from "#context/serialize.js";
+import {
+  AuthKey,
+  ChannelInstrumentationKey,
+  InitiatorAuthKey,
+  ParentTraceContextKey,
+  SessionTraceSeedKey,
+} from "#context/keys.js";
 import { buildRunContext } from "#execution/runtime-context.js";
+import { setChannelContext } from "#execution/channel-context.js";
+import { buildSessionAttributes } from "#execution/eve-workflow-attributes.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { isConnectionAuthorizationFailedError } from "#public/connections/errors.js";
 import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/principal.js";
@@ -47,6 +56,23 @@ const FORWARDED_INITIATOR: SessionAuthContext = {
   principalType: "user",
   subject: "U999",
 };
+
+function createEmptySkillBundle(): CompiledBundle {
+  return {
+    adapterRegistry: undefined as never,
+    compiledArtifactsSource: { kind: "bundled" },
+    graph: undefined as never,
+    hookRegistry: undefined as never,
+    moduleMap: undefined as never,
+    nodeId: undefined,
+    resolvedAgent: { skills: [] } as never,
+    subagentRegistry: undefined as never,
+    toolRegistry: undefined as never,
+    turnAgent: undefined as never,
+  };
+}
+
+const EMPTY_SKILL_BUNDLE = createEmptySkillBundle();
 
 function createEveCreateHandler(input: EveChannelInput) {
   const channel = eveChannel(input);
@@ -82,20 +108,36 @@ function createEveCreateHandler(input: EveChannelInput) {
 }
 
 describe("eveChannel forwarded principal → runtime principal", () => {
-  it("seeds the forwarded principal into the run context and resolves a user Connect principal", async () => {
+  it("preserves origin audience and ceiling across adapter-state persistence", async () => {
+    const trustedForwarders = vi.fn(
+      (caller: SessionAuthContext) => caller.principalId === ROUTER_CALLER.principalId,
+    );
     const handler = createEveCreateHandler({
-      trustedForwarders: (caller) => caller.principalId === ROUTER_CALLER.principalId,
+      trustedForwarders,
       auth: () => ROUTER_CALLER,
     });
 
     const response = await handler.fetch(
       new Request("https://receiver.example.com/eve/v1/session", {
         body: JSON.stringify({
-          forwardedPrincipal: { current: FORWARDED_CURRENT, initiator: FORWARDED_INITIATOR },
+          forwardedPrincipal: {
+            current: FORWARDED_CURRENT,
+            initiator: FORWARDED_INITIATOR,
+          },
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
           message: "check my dashboards",
           mode: "task",
         }),
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          baggage: "vendor=value,eve.audience=private;ceiling=i1o0",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
         method: "POST",
       }),
     );
@@ -112,10 +154,49 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       channelName: "eve",
       ...options,
     };
-    const ctx = buildRunContext({ bundle: {} as CompiledBundle, run });
+    const ctx = buildRunContext({ bundle: EMPTY_SKILL_BUNDLE, run });
 
     const current = ctx.get(AuthKey);
     const initiator = ctx.get(InitiatorAuthKey);
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
+      ceiling: { recordInputs: true, recordOutputs: false },
+      originAudience: "private",
+    });
+
+    setChannelContext(ctx, { ...run.adapter, state: { persisted: true } });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    });
+    const serializedContext = serializeContext(ctx);
+    expect(serializedContext[SessionTraceSeedKey.name]).toMatchObject({
+      decision: { action: "record", recordInputs: true, recordOutputs: false },
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
+    });
+    expect(buildSessionAttributes({ inputMessage: "research", serializedContext })).toMatchObject({
+      "$eve.is_trace_content_visible": false,
+    });
+    expect(ctx.get(ParentTraceContextKey)).toEqual({
+      isRemote: true,
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: false },
+        originAudience: "private",
+      },
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    });
     expect(current).toMatchObject({
       attributes: { "eve:forwarded-by": ROUTER_CALLER.principalId, user_id: "U123" },
       principalId: "slack:U123",
@@ -142,6 +223,132 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     });
     // The audit attribute never enters Connect token-cache keying.
     expect(principalKey(principal)).toBe("user:slack:slack:U123");
+    expect(trustedForwarders).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["eve.audience=public;ceiling=i1", "eve.audience=public"])(
+    "keeps malformed or mixed-version baggage metadata-only: %s",
+    async (baggage) => {
+      const handler = createEveCreateHandler({
+        trustedForwarders: () => true,
+        auth: () => ROUTER_CALLER,
+      });
+
+      await handler.fetch(
+        new Request("https://receiver.example.com/eve/v1/session", {
+          body: JSON.stringify({
+            forwardedPrincipal: { current: FORWARDED_CURRENT },
+            callback: {
+              callId: "call-1",
+              subagentName: "site-ops",
+              token: "parent-token",
+              url: "https://caller.example.com/eve/v1/callback/parent-token",
+            },
+            message: "check my dashboards",
+            mode: "task",
+          }),
+          headers: {
+            "content-type": "application/json",
+            baggage,
+            traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+          },
+          method: "POST",
+        }),
+      );
+
+      const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+        RunInput,
+        "adapter" | "channelName" | "requestId"
+      >;
+      const ctx = buildRunContext({
+        bundle: EMPTY_SKILL_BUNDLE,
+        run: {
+          adapter: { kind: "eve" },
+          channelName: "eve",
+          ...options,
+        },
+      });
+      expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
+      expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
+        ceiling: { recordInputs: false, recordOutputs: false },
+        originAudience: "unknown",
+      });
+    },
+  );
+
+  it("ignores a ceiling that disagrees with unsampled trace flags", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          forwardedPrincipal: { current: FORWARDED_CURRENT },
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
+          message: "check my dashboards",
+          mode: "task",
+        }),
+        headers: {
+          "content-type": "application/json",
+          baggage: "eve.audience=private;ceiling=i1o1",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-00`,
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(handler.createSession.mock.calls[0]?.[0]?.parentTraceContext).not.toHaveProperty(
+      "forwardedTracePolicy",
+    );
+  });
+
+  it("ignores public audience baggage without an accepted forwarded principal", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
+          message: "check my dashboards",
+          mode: "task",
+        }),
+        headers: {
+          "content-type": "application/json",
+          baggage: "eve.audience=public;ceiling=i1o1",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+    );
+
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
+    const ctx = buildRunContext({
+      bundle: EMPTY_SKILL_BUNDLE,
+      run: {
+        adapter: { kind: "eve" },
+        channelName: "eve",
+        ...options,
+      },
+    });
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("unknown");
   });
 
   it("resolves the transport service principal (and fails Connect) without forwarding", async () => {
@@ -163,7 +370,7 @@ describe("eveChannel forwarded principal → runtime principal", () => {
       "adapter" | "channelName" | "requestId"
     >;
     const ctx = buildRunContext({
-      bundle: {} as CompiledBundle,
+      bundle: EMPTY_SKILL_BUNDLE,
       run: {
         adapter: { kind: "eve" },
         channelName: "eve",
@@ -188,5 +395,37 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     })();
     expect(isConnectionAuthorizationFailedError(failure)).toBe(true);
     expect(failure).toMatchObject({ reason: "principal_required" });
+  });
+
+  it("ignores forwarded instrumentation without a delegated trace parent", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          forwardedPrincipal: {
+            current: FORWARDED_CURRENT,
+          },
+          message: "check my dashboards",
+          mode: "task",
+        }),
+        headers: {
+          "content-type": "application/json",
+          baggage: "eve.audience=public;ceiling=i1o1",
+          traceparent: `00-${"1".repeat(32)}-${"2".repeat(16)}-01`,
+        },
+        method: "POST",
+      }),
+    );
+
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      RunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
+    expect(options.channelMetadata).toBeUndefined();
+    expect(options.parentTraceContext).toBeUndefined();
   });
 });

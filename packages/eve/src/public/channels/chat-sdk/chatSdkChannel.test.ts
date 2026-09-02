@@ -388,6 +388,101 @@ describe("chatSdkChannel", () => {
     ]);
   });
 
+  it("renders an authorization challenge in a direct-message thread and updates it on completion", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const state: ChatSdkChannelState = { thread: serializedThread({ isDM: true }) };
+    const channelAdapter = withState(getAdapter(bridge.channel), state);
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.required", {
+        authorization: {
+          displayName: "Notion Workspace",
+          instructions: "Choose a workspace.",
+          url: "https://connect.example.com/a/sca_1",
+          userCode: "ABC-123",
+        },
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([
+      {
+        message: {
+          markdown:
+            "Authorization required for Notion Workspace.\n\nChoose a workspace.\n\nCode: ABC-123\n\nhttps://connect.example.com/a/sca_1",
+        },
+        threadId: THREAD_ID,
+      },
+    ]);
+    expect(state.pendingAuthMessageIds).toEqual({ notion: "posted-1" });
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.completed", {
+        authorization: { displayName: "Notion Workspace" },
+        name: "notion",
+        outcome: "authorized",
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.edited).toEqual([
+      {
+        message: { markdown: "Notion Workspace connected." },
+        messageId: "posted-1",
+        threadId: THREAD_ID,
+      },
+    ]);
+    expect(state.pendingAuthMessageIds).toEqual({});
+  });
+
+  it("keeps authorization challenges link-free outside direct messages", async () => {
+    const adapter = testAdapter();
+    const bridge = chatSdkChannel({
+      adapters: { test: adapter },
+      state: memoryState(),
+      userName: "bot",
+    });
+    const channelAdapter = withState(getAdapter(bridge.channel), { thread: serializedThread() });
+    const ctx = buildAdapterContext(channelAdapter, stubAccessor());
+
+    await callEvent(
+      channelAdapter,
+      makeEvent("authorization.required", {
+        authorization: { url: "https://connect.example.com/a/sca_1", userCode: "ABC-123" },
+        name: "notion",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "turn-1",
+      }),
+      ctx,
+    );
+
+    expect(adapter.posted).toEqual([
+      {
+        message: {
+          markdown:
+            "Authorization required for Notion. Continue in a direct message with this agent.",
+        },
+        threadId: THREAD_ID,
+      },
+    ]);
+  });
+
   it("does not throw when the adapter's startTyping is not implemented", async () => {
     const adapter = testAdapter();
     adapter.startTypingError = new NotImplementedError("startTyping");
@@ -872,14 +967,14 @@ function message(text: string): Message {
   });
 }
 
-function serializedThread() {
+function serializedThread(overrides: { readonly isDM?: boolean } = {}) {
   return {
     _type: "chat:Thread",
     adapterName: "test",
     channelId: CHANNEL_ID,
     channelVisibility: "workspace",
     id: THREAD_ID,
-    isDM: false,
+    isDM: overrides.isDM ?? false,
   } as const;
 }
 

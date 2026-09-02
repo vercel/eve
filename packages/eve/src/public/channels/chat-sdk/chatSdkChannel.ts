@@ -13,7 +13,7 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { ContextKey } from "#context/key.js";
 import { createLogger, extractErrorId, formatErrorHint } from "#internal/logging.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { InputRequest } from "#runtime/input/types.js";
+import type { InputRequest } from "#shared/input.js";
 import type {
   ActionEvent,
   Adapter,
@@ -32,6 +32,7 @@ import {
   Message,
   ThreadImpl,
 } from "#compiled/chat/index.js";
+import { defaultAuthorizationEvents } from "#public/channels/chat-sdk/authorization.js";
 import { isNotImplemented } from "#public/channels/chat-sdk/notImplemented.js";
 import {
   defineChannel,
@@ -83,6 +84,8 @@ export interface ChatSdkChannelState extends Record<string, unknown> {
   lastEditAtMs?: number | null;
   /** Buffered first line of a tool-call message, surfaced as typing status. */
   pendingToolCallMessage?: string | null;
+  /** Authorization status messages, keyed by connection name. */
+  pendingAuthMessageIds?: Record<string, string>;
   /** Step index the current stream anchor belongs to (resets per step). */
   streamStepIndex?: number | null;
 }
@@ -349,6 +352,7 @@ function defaultEvents<TAdapters extends ChatSdkAdapters>(
   inputActionPrefix: string,
 ): ChatSdkChannelEvents<TAdapters> {
   return {
+    ...defaultAuthorizationEvents(),
     async "turn.started"(_event, channel, _ctx) {
       channel.state.pendingToolCallMessage = null;
       clearStream(channel.state);
@@ -577,7 +581,7 @@ async function bridgeSend<TAdapters extends ChatSdkAdapters>(
 }
 
 function initialState(): ChatSdkChannelState {
-  return { thread: null };
+  return { pendingAuthMessageIds: {}, thread: null };
 }
 
 function threadFromState<TAdapters extends ChatSdkAdapters>(

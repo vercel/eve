@@ -69,6 +69,7 @@ function collectGatewayModelIds(rootPaths: readonly string[]): ReadonlySet<strin
     "anthropic/claude-opus-4.7",
     "anthropic/claude-sonnet-5",
     "zai/glm-5.2",
+    "openai/gpt-5.6-luna-fast",
     "openai/gpt-5.4",
     "openai/gpt-5.4-mini",
   ]);

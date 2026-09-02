@@ -1,10 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import {
-  ALLOWED_DYNAMIC_SKILL_EVENTS,
-  isBrandedSkillEntry,
-} from "#shared/dynamic-tool-definition.js";
-import type { SkillPackageDefinition } from "#shared/skill-definition.js";
+import { ALLOWED_DYNAMIC_SKILL_EVENTS } from "#dynamic/definition.js";
+import { isBrandedSkillEntry, type SkillPackageDefinition } from "#shared/skill-definition.js";
 import {
   type MaterializableSkillPackage,
   normalizeSkillPackage,

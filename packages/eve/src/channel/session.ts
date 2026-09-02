@@ -6,6 +6,7 @@ import {
 import type { MessageStreamEvent } from "#protocol/message.js";
 import type { UserContent } from "ai";
 import type {
+  ActivityObserverConfig,
   CancelTurnResult,
   ClearSessionResult,
   CompactSessionResult,
@@ -25,9 +26,10 @@ import {
   type InputResponse,
   parseInputResponses,
   type StrictInputResponses,
-} from "#runtime/input/types.js";
+} from "#shared/input.js";
 import type { JsonObject } from "#shared/json.js";
 import { toChannelLocalContinuationToken } from "#shared/continuation-token.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 /** Immutable-ID handle for one exact durable session. */
 export interface Session {
@@ -55,6 +57,7 @@ export interface Session {
 }
 
 interface SessionDeliveryOptions {
+  readonly activityObserver?: ActivityObserverConfig;
   readonly auth: SessionAuthContext | null;
   /** Public callback destination for a delegated continuation turn. */
   readonly callback?: SessionCallback;
@@ -93,12 +96,12 @@ export function createSession(
     id,
     async send(message, options) {
       const delivery = createDelivery(metadata);
-      const caller = sessionCallbackToTurnCaller(options.callback);
-      const payload: {
+      const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
+      const payload = attachClientContext<{
         context?: readonly string[];
         message: string | UserContent | undefined;
         outputSchema?: JsonObject;
-      } = { message: serializeUrlFilePartsInMessage(message) };
+      }>({ message: serializeUrlFilePartsInMessage(message) }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
@@ -119,13 +122,13 @@ export function createSession(
         throw new Error("respond() requires at least one input response.");
       }
       const validatedInputResponses = parseInputResponses(inputResponses);
-      const caller = sessionCallbackToTurnCaller(options.callback);
+      const caller = sessionCallbackToTurnCaller(options.callback, options.activityObserver);
       const delivery = createDelivery(metadata);
-      const payload: {
+      const payload = attachClientContext<{
         context?: readonly string[];
         inputResponses: readonly InputResponse[];
         outputSchema?: JsonObject;
-      } = { inputResponses: validatedInputResponses };
+      }>({ inputResponses: validatedInputResponses }, readClientContext(options));
       if (options.context !== undefined) payload.context = options.context;
       if (options.outputSchema !== undefined) payload.outputSchema = options.outputSchema;
       const commandWithoutCaller = {
@@ -233,10 +236,12 @@ function namespaceContinuationToken(currentToken: string, rawToken: string): str
 /** @internal Converts validated public callback metadata into runtime turn routing. */
 export function sessionCallbackToTurnCaller(
   callback: SessionCallback | undefined,
+  activityObserver?: ActivityObserverConfig,
 ): TurnCaller | undefined {
   return callback === undefined
     ? undefined
     : {
+        activityObserver,
         callId: callback.callId,
         replyTo: { kind: "callback", token: callback.token, url: callback.url },
         subagentName: callback.subagentName,

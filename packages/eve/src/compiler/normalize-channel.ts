@@ -2,7 +2,7 @@ import { stripLogicalPathExtension } from "#discover/filesystem.js";
 import type { ChannelSourceRef } from "#discover/manifest.js";
 import { normalizeChannelDefinition } from "#internal/authored-definition/channel.js";
 import { type ChannelRouteMethod, isDisabledRouteSentinel } from "#public/definitions/channel.js";
-import type { CompiledChannelEntry } from "#compiler/manifest.js";
+import type { CompiledChannelDefinition } from "#compiler/manifest.js";
 import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
@@ -22,25 +22,24 @@ import {
  * the filesystem path; the URL path comes from the route's `path` field.
  */
 export async function compileChannelDefinition(
-  agentRoot: string,
+  _agentRoot: string,
   source: ChannelSourceRef,
-  options: ModuleBackedDefinitionLoadOptions = {},
-): Promise<CompiledChannelEntry | readonly CompiledChannelEntry[]> {
+  options: ModuleBackedDefinitionLoadOptions,
+): Promise<
+  | { readonly kind: "disabled"; readonly name: string }
+  | { readonly definitions: readonly CompiledChannelDefinition[]; readonly kind: "channel" }
+> {
   const rawValue = await loadModuleBackedDefinition({
-    agentRoot,
-    externalDependencies: options.externalDependencies,
+    binding: options.binding,
     kind: "channel",
+    loadNamespace: options.loadNamespace,
     source,
   });
 
   const channelName = stripLogicalPathExtension(source.logicalPath).replace(/^channels\//, "");
 
   if (isDisabledRouteSentinel(rawValue)) {
-    return {
-      kind: "disabled",
-      name: channelName,
-      logicalPath: source.logicalPath,
-    };
+    return { kind: "disabled", name: channelName };
   }
 
   const definition = normalizeChannelDefinition(
@@ -48,18 +47,21 @@ export async function compileChannelDefinition(
     `Expected the channel export "${source.exportName ?? "default"}" from "${source.logicalPath}" to match the public eve shape.`,
   );
 
-  return definition.routes.map((route) => ({
-    kind: "channel" as const,
-    name: channelName,
-    logicalPath: source.logicalPath,
-    method: route.method.toUpperCase() as ChannelRouteMethod,
-    urlPath: route.path,
-    sourceId: source.sourceId,
-    sourceKind: "module" as const,
-    exportName: source.exportName,
-    adapterKind: extractAdapterKind(definition.adapter),
-    cors: definition.cors,
-  }));
+  return {
+    definitions: definition.routes.map((route) => ({
+      kind: "channel" as const,
+      name: channelName,
+      logicalPath: source.logicalPath,
+      method: route.method.toUpperCase() as ChannelRouteMethod,
+      urlPath: route.path,
+      sourceId: source.sourceId,
+      sourceKind: "module" as const,
+      exportName: source.exportName,
+      adapterKind: extractAdapterKind(definition.adapter),
+      cors: definition.cors,
+    })),
+    kind: "channel",
+  };
 }
 
 function extractAdapterKind(adapter: unknown): string | undefined {

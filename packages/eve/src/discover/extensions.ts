@@ -39,14 +39,6 @@ export const DISCOVER_EXTENSION_NESTED_MOUNT_UNSUPPORTED =
   "discover/extension-nested-mount-unsupported";
 
 /**
- * Emitted when a consumer's agent-root contribution (e.g. `agent/tools/crm__x.ts`)
- * uses a mounted extension's `<ns>__` prefix. That prefix is reserved for the
- * extension and its co-located overrides, not the agent root.
- */
-export const DISCOVER_EXTENSION_OVERRIDE_OUTSIDE_MOUNT =
-  "discover/extension-override-outside-mount";
-
-/**
  * Emitted when a resolved package is not a valid eve extension.
  */
 export const DISCOVER_EXTENSION_PACKAGE_INVALID = "discover/extension-package-invalid";
@@ -76,6 +68,14 @@ export const DISCOVER_EXTENSION_AGENT_CONFIG_UNSUPPORTED =
  * consuming agent's to own.
  */
 export const DISCOVER_EXTENSION_SANDBOX_UNSUPPORTED = "discover/extension-sandbox-unsupported";
+export const DISCOVER_EXTENSION_MEMORY_UNSUPPORTED = "discover/extension-memory-unsupported";
+
+/**
+ * Emitted when an extension declares agent-level instrumentation. Instrumentation
+ * is a singleton owned by the consuming agent and cannot be namespace-scoped.
+ */
+export const DISCOVER_EXTENSION_INSTRUMENTATION_UNSUPPORTED =
+  "discover/extension-instrumentation-unsupported";
 
 /**
  * Resolved on-disk location of one mounted extension package.

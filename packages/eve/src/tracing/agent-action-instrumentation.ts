@@ -13,8 +13,8 @@ import type {
   InstrumentationActionTerminalEvent,
   InstrumentationAttemptScope,
   InstrumentationProviderDefinition,
-} from "#harness/instrumentation/lifecycle.js";
-import { actionIdempotencyKey, attemptIdempotencyKey } from "#harness/instrumentation/lifecycle.js";
+} from "#instrumentation/lifecycle.js";
+import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -102,7 +102,9 @@ export function createAgentActionInstrumentation(input: {
       } else if (event.output.type === "error") {
         recordError(span, event.output.error);
       } else {
-        if (event.usage !== undefined) setAgentUsage(span, event.usage);
+        if (event.usage !== undefined) {
+          setAgentUsage(span, event.usage, { includeGenAiDetails: false });
+        }
         if (input.recordOutputs) {
           const result = contentAttribute(event.output.output, false);
           if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
@@ -126,7 +128,6 @@ export function createAgentActionInstrumentation(input: {
             "agent.action.name": state.name,
             "agent.framework.name": "eve",
             "agent.framework.version": input.frameworkVersion,
-            "agent.root.session.id": state.rootSessionId,
             "agent.session.id": state.sessionId,
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,

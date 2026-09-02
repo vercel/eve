@@ -6,8 +6,9 @@ import type {
   SessionAuthContext,
   TurnCaller,
 } from "#channel/types.js";
-import type { InputResponse } from "#runtime/input/types.js";
+import type { InputResponse } from "#shared/input.js";
 import type { StepInput } from "#harness/types.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 /**
  * Merges two {@link StepInput} values into one.
@@ -28,6 +29,10 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
   const context = coalesceContext({
     a: a.context,
     b: b.context,
+  });
+  const ephemeralContext = coalesceContext({
+    a: readClientContext(a),
+    b: readClientContext(b),
   });
   const outputSchema = b.outputSchema ?? a.outputSchema;
 
@@ -54,7 +59,7 @@ export function coalesceTurnInputs(a: StepInput, b: StepInput): StepInput {
     result.outputSchema = outputSchema;
   }
 
-  return result;
+  return attachClientContext(result, ephemeralContext);
 }
 
 /**

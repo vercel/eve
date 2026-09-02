@@ -171,7 +171,10 @@ MCP clients receive four tools:
 | `agent_update` | `{ invocationId, responses }` | Answer the complete pending human-input batch.              |
 | `agent_cancel` | `{ invocationId }`            | Request cooperative cancellation of non-terminal work.      |
 
-`agent_start` creates one task-mode eve session and returns after durable acceptance. Keep its `invocationId`, then call `agent_get` until the invocation reaches a terminal state. While the status is `working`, wait at least `pollAfterMs` before polling again.
+`agent_start` creates one task-mode eve session and returns after durable acceptance without
+waiting for the session continuation hook to become readable. Keep its `invocationId`, then call
+`agent_get` until the invocation reaches a terminal state. While the status is `working`, wait at
+least `pollAfterMs` before polling again.
 
 The invocation response is discriminated by `status`:
 

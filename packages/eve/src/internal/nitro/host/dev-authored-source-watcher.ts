@@ -46,8 +46,8 @@ export interface AuthoredSourceWatcherHandle {
   close(): Promise<void>;
   flush(): Promise<void>;
   rebuild(): Promise<void>;
-  suspend(): Promise<void>;
-  resume(options?: { silent?: boolean }): Promise<void>;
+  suspend(leaseId: string): Promise<void>;
+  resume(leaseId: string, options?: { silent?: boolean }): Promise<void>;
 }
 
 /**
@@ -65,7 +65,7 @@ export async function startAuthoredSourceWatcher(input: {
   let queue: Promise<void> = Promise.resolve();
   let debounceTimer: NodeJS.Timeout | undefined;
   let isWatcherReady = false;
-  let suspensionCount = 0;
+  const suspensionLeases = new Set<string>();
   const pendingEvents = new Map<string, WatcherChangeEvent>();
   const pendingChangedPaths = new Set<string>();
   const initialWatchPaths = await resolveAuthoredWatchPaths(currentHost);
@@ -83,7 +83,7 @@ export async function startAuthoredSourceWatcher(input: {
   const watcherReady = waitForWatcherReady(watcher);
 
   const rebuild = async (force: boolean, silent = false) => {
-    if (closed || suspensionCount > 0) {
+    if (closed || suspensionLeases.size > 0) {
       return;
     }
 
@@ -180,18 +180,18 @@ export async function startAuthoredSourceWatcher(input: {
     },
     flush,
     rebuild: forceRebuild,
-    async suspend() {
-      suspensionCount += 1;
+    async suspend(leaseId) {
+      if (suspensionLeases.has(leaseId)) return;
+      suspensionLeases.add(leaseId);
       if (debounceTimer !== undefined) {
         clearTimeout(debounceTimer);
         debounceTimer = undefined;
       }
       await queue;
     },
-    async resume(options) {
-      if (suspensionCount === 0) return;
-      suspensionCount -= 1;
-      if (suspensionCount === 0) await forceRebuild(options?.silent);
+    async resume(leaseId, options) {
+      if (!suspensionLeases.delete(leaseId)) return;
+      if (suspensionLeases.size === 0) await forceRebuild(options?.silent);
     },
   };
 }

@@ -178,6 +178,8 @@ matrices from the registry:
 - `model_matrix` — fixture × model legs for `e2e-local.yml`. The first
   registry model is the default that every fixture runs on; the rest run only
   on fixtures with `"e2e": { "modelMatrix": "full" }` in package.json.
+  A fixture can add a narrowly scoped leg with `e2e.additionalModels` entries
+  shaped as `{ "name": "short-check-name", "id": "provider/model" }`.
 - `world_matrix_<world>` — one leg per fixture for that world's suite
   workflow. A registered world's `package` reaches the job as
   `EVE_E2E_WORKFLOW_WORLD` (worlds without one, like `vercel`, use the

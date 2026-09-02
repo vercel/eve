@@ -4,7 +4,7 @@ description: "Define typed actions the agent can call, and gate sensitive ones o
 url: /tools
 ---
 
-A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. The action stays in code you control. Tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
+A tool is a typed action the agent can call, such as hitting an API, running a query, or writing a file. Define a tool when you implement the action in code you control. To give the model tools published by an external MCP or OpenAPI service, use a [connection](/docs/connections) instead. Authored tools run in your app runtime with full access to `process.env`, not in the [sandbox](/docs/sandbox).
 
 ## Define a tool
 
@@ -72,9 +72,18 @@ framework-owned and is not yet a stable authored-tool API.
 
 After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
 cohort and instructs the model to acknowledge that the work started without waiting for results.
+[Schedule](/docs/schedules)-initiated turns are the exception: no user prompted them, so their
+launches keep conditional delivery and send no acknowledgement.
 Later task-triggered parent turns receive fresh state for the same cohort. The model is instructed
 to keep related intermediate results silent while any task remains pending. Once every related
 task is terminal, the state includes their outputs so the model can combine the useful results.
+
+### Durable tools
+
+A tool whose `execute` starts with `"use workflow"` runs as a durable Workflow run instead of
+inside the model step. It can wait for a person, a webhook, or a timer for as long as it takes, with
+nothing running in between, and its return value still settles the tool call. See
+[Durable tools](/docs/tools/workflows).
 
 ### The `ctx` parameter
 

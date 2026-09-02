@@ -113,6 +113,7 @@ const DISCORD_RESPONSE_INSTRUCTIONS =
  * commandName) are omitted from the block when not provided.
  */
 export interface DiscordInboundContext {
+  readonly applicationId?: string;
   readonly channelId: string;
   readonly commandName?: string;
   readonly guildId?: string;
@@ -152,6 +153,7 @@ export function formatDiscordContextBlock(context: DiscordInboundContext): strin
     "<discord_context>",
     "response_medium: discord",
     `response_instructions: ${DISCORD_RESPONSE_INSTRUCTIONS}`,
+    ...(context.applicationId ? [`application_id: ${context.applicationId}`] : []),
     `user_id: ${context.userId}`,
     ...(context.username ? [`username: ${context.username}`] : []),
     `channel_id: ${context.channelId}`,
