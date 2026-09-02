@@ -216,58 +216,61 @@ describe("EveAgentStore stream overlap", () => {
     ).toEqual([null, "3"]);
   });
 
-  it("reconstructs a split message across a v24-to-v25 reconnect", async () => {
-    const current = streamingTurnEvents();
-    const received = current[0]!;
-    const started = current[1]!;
-    if (received.type !== "message.received" || started.type !== "turn.started") {
-      throw new Error("Expected the streaming fixture to begin a turn.");
-    }
-    const legacyPrefix = [
-      received,
-      started,
-      {
-        data: {
-          messageDelta: "Hel",
-          messageSoFar: "Hel",
-          sequence: 2,
-          stepIndex: 0,
-          turnId: "turn_1",
+  it.each(["21", "24"] as const)(
+    "reconstructs a split message across a v%s-to-v25 reconnect",
+    async (legacyVersion) => {
+      const current = streamingTurnEvents();
+      const received = current[0]!;
+      const started = current[1]!;
+      if (received.type !== "message.received" || started.type !== "turn.started") {
+        throw new Error("Expected the streaming fixture to begin a turn.");
+      }
+      const legacyPrefix = [
+        received,
+        started,
+        {
+          data: {
+            messageDelta: "Hel",
+            messageSoFar: "Hel",
+            sequence: 2,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+          meta: current[2]!.meta,
+          type: "message.appended",
         },
-        meta: current[2]!.meta,
-        type: "message.appended",
-      },
-    ] satisfies readonly MessageStreamEventForVersion<"24">[];
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(startedResponse())
-      .mockResolvedValueOnce(versionedDisconnectingStreamResponse("24", legacyPrefix))
-      .mockResolvedValueOnce(versionedStreamResponse("25", current.slice(3)));
-    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
-    const streamingText: string[] = [];
-    store.subscribe(() => {
-      const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
-      if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
-    });
+      ] satisfies readonly MessageStreamEventForVersion<typeof legacyVersion>[];
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(startedResponse())
+        .mockResolvedValueOnce(versionedDisconnectingStreamResponse(legacyVersion, legacyPrefix))
+        .mockResolvedValueOnce(versionedStreamResponse("25", current.slice(3)));
+      const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+      const streamingText: string[] = [];
+      store.subscribe(() => {
+        const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+        if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+      });
 
-    await store.send({ message: "Hello" });
+      await store.send({ message: "Hello" });
 
-    expect(streamingText).toContain("Hel");
-    expect(streamingText).toContain("Hello");
-    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
-      state: "done",
-      stepIndex: 0,
-      text: "Hello",
-      type: "text",
-    });
-    expect(
-      fetchMock.mock.calls
-        .slice(1)
-        .map(([request]) =>
-          new URL(request.toString(), "http://localhost").searchParams.get("startIndex"),
-        ),
-    ).toEqual([null, "3"]);
-  });
+      expect(streamingText).toContain("Hel");
+      expect(streamingText).toContain("Hello");
+      expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+        state: "done",
+        stepIndex: 0,
+        text: "Hello",
+        type: "text",
+      });
+      expect(
+        fetchMock.mock.calls
+          .slice(1)
+          .map(([request]) =>
+            new URL(request.toString(), "http://localhost").searchParams.get("startIndex"),
+          ),
+      ).toEqual([null, "3"]);
+    },
+  );
 
   it("rejects a prepared turn containing both a message and input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");

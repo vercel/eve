@@ -67,7 +67,7 @@ A durable step retry reuses its turn and step coordinates. Its first offset-`0` 
 
 A consumer that reconnects with both its prior accumulator and stream cursor continues normally. A consumer that retained only the cursor cannot reconstruct a block from a later nonzero delta; it must replay from the start of that block or wait for its completed event. This is the capability removed with cumulative append snapshots.
 
-The client reads the stream version header on every connection. It normalizes v24 cumulative appends into the v25 offset contract before reducers see them, including when a reconnect crosses deployments. A current server performs the same normalization when replaying v24 events persisted by an earlier deployment. Missing, unsupported, or shape-inconsistent versions fail instead of being cast to the current event union.
+The client reads the stream version header on every connection. It normalizes v21–v24 cumulative appends into the v25 offset contract before reducers see them, including when a reconnect crosses deployments. A current server performs the same normalization when replaying cumulative events persisted by an earlier deployment. Missing, unsupported, or shape-inconsistent versions fail instead of being cast to the current event union.
 
 Built-in channel accumulators live in weak maps keyed by in-memory channel-state identity, not as properties of persisted channel state. The runtime serializes `channel.state` at the durable turn-step boundary, so putting cumulative text there would reintroduce an unnecessary snapshot write even though it would not repeat once per append event.
 

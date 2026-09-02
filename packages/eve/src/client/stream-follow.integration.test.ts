@@ -4,8 +4,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { Client } from "./client.js";
 import { followStreamIterable } from "./open-stream.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 
 const servers: Server[] = [];
+const streamHeaders = {
+  "content-type": "application/x-ndjson",
+  [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
+} as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -55,7 +60,7 @@ describe("stream following over real sockets", () => {
       createServer((req, res) => {
         connections += 1;
         const index = startIndexOf(req.url);
-        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.writeHead(200, streamHeaders);
         res.write(`${JSON.stringify(log[index])}\n`);
 
         if (index % 2 === 0) {
@@ -92,7 +97,7 @@ describe("stream following over real sockets", () => {
   it("reconnects an open stream that goes idle and continues from its cursor", async () => {
     const events = [
       { type: "step.started", data: {} },
-      { type: "message.appended", data: { messageDelta: "hello" } },
+      { type: "message.appended", data: { messageDelta: "hello", messageOffset: 0 } },
       { type: "session.completed", data: {} },
     ];
     let connections = 0;
@@ -100,7 +105,7 @@ describe("stream following over real sockets", () => {
       createServer((req, res) => {
         connections += 1;
         const index = startIndexOf(req.url);
-        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.writeHead(200, streamHeaders);
         if (connections === 1) {
           res.write(`${JSON.stringify(events[0])}\n`);
           return;
@@ -132,7 +137,7 @@ describe("stream following over real sockets", () => {
     const host = await listen(
       createServer((_req, res) => {
         connections += 1;
-        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.writeHead(200, streamHeaders);
         setTimeout(() => res.end(), 10);
       }),
     );
@@ -166,7 +171,7 @@ describe("stream following over real sockets", () => {
         );
         tailRequests.push(tailRequested);
         res.writeHead(200, {
-          "content-type": "application/x-ndjson",
+          ...streamHeaders,
           ...(tailRequested === "1" ? { "x-eve-stream-tail-index": String(log.length - 1) } : {}),
         });
 
@@ -202,7 +207,7 @@ describe("stream following over real sockets", () => {
       createServer((_req, res) => {
         connections += 1;
         res.writeHead(200, {
-          "content-type": "application/x-ndjson",
+          ...streamHeaders,
           "x-eve-stream-tail-index": "-1",
         });
         // Send headers without any body: a live follow would idle here
@@ -223,7 +228,7 @@ describe("stream following over real sockets", () => {
   it("fails a follow: false read when the server does not report a tail index", async () => {
     const host = await listen(
       createServer((_req, res) => {
-        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.writeHead(200, streamHeaders);
         res.end();
       }),
     );
@@ -239,7 +244,7 @@ describe("stream following over real sockets", () => {
       createServer((req, res) => {
         connections += 1;
         const index = startIndexOf(req.url);
-        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        res.writeHead(200, streamHeaders);
         const served = idlesServed.get(index) ?? 0;
         if (index < events.length && served >= 2) {
           res.end(`${JSON.stringify({ type: events[index], data: {} })}\n`);

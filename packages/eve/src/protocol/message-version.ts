@@ -30,11 +30,15 @@ interface ReasoningAppendedStreamEventV24 {
 }
 
 interface MessageStreamAppendEventsByVersion {
+  "21": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
+  "22": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
+  "23": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
   "24": MessageAppendedStreamEventV24 | ReasoningAppendedStreamEventV24;
   "25": MessageAppendedStreamEvent | ReasoningAppendedStreamEvent;
 }
 
 export type MessageStreamVersion = keyof MessageStreamAppendEventsByVersion;
+type LegacyMessageStreamVersion = Exclude<MessageStreamVersion, "25">;
 
 type VersionIndependentMessageStreamEvent = Exclude<
   UnstampedMessageStreamEvent,
@@ -64,8 +68,14 @@ export function normalizeMessageStreamEvent(
   event: SupportedMessageStreamEvent,
 ): MessageStreamEvent {
   switch (version) {
+    case "21":
+    case "22":
+    case "23":
     case "24":
-      return normalizeLegacyMessageStreamEvent(event as MessageStreamEventForVersion<"24">);
+      return normalizeLegacyMessageStreamEvent(
+        version,
+        event as MessageStreamEventForVersion<LegacyMessageStreamVersion>,
+      );
     case "25":
       return validateCurrentMessageStreamEvent(event as MessageStreamEventForVersion<"25">);
     default:
@@ -81,7 +91,10 @@ export function normalizePersistedMessageStreamEvent(
     (event.type === "message.appended" && "messageSoFar" in event.data) ||
     (event.type === "reasoning.appended" && "reasoningSoFar" in event.data)
   ) {
-    return normalizeMessageStreamEvent("24", event as MessageStreamEventForVersion<"24">);
+    return normalizeLegacyMessageStreamEvent(
+      undefined,
+      event as MessageStreamEventForVersion<LegacyMessageStreamVersion>,
+    );
   }
   return normalizeMessageStreamEvent(
     currentMessageStreamVersion,
@@ -90,7 +103,8 @@ export function normalizePersistedMessageStreamEvent(
 }
 
 function normalizeLegacyMessageStreamEvent(
-  event: MessageStreamEventForVersion<"24">,
+  version: LegacyMessageStreamVersion | undefined,
+  event: MessageStreamEventForVersion<LegacyMessageStreamVersion>,
 ): MessageStreamEvent {
   if (event.type === "message.appended") {
     return {
@@ -100,6 +114,7 @@ function normalizeLegacyMessageStreamEvent(
           event.data.messageSoFar,
           event.data.messageDelta,
           "message",
+          version,
         ),
         sequence: event.data.sequence,
         stepIndex: event.data.stepIndex,
@@ -118,6 +133,7 @@ function normalizeLegacyMessageStreamEvent(
           event.data.reasoningSoFar,
           event.data.reasoningDelta,
           "reasoning",
+          version,
         ),
         sequence: event.data.sequence,
         stepIndex: event.data.stepIndex,
@@ -156,10 +172,12 @@ function legacyAppendOffset(
   snapshot: string,
   delta: string,
   stream: "message" | "reasoning",
+  version: LegacyMessageStreamVersion | undefined,
 ): number {
   const offset = snapshot.length - delta.length;
   if (offset < 0 || snapshot.slice(offset) !== delta) {
-    throw new TypeError(`Invalid cumulative ${stream} append for stream version 24.`);
+    const source = version === undefined ? "persisted stream" : `stream version ${version}`;
+    throw new TypeError(`Invalid cumulative ${stream} append for ${source}.`);
   }
   return offset;
 }

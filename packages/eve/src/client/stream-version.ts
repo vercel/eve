@@ -2,6 +2,9 @@ import { EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 import type { MessageStreamVersion } from "#protocol/message-version.js";
 
 const supportedMessageStreamVersions = {
+  "21": true,
+  "22": true,
+  "23": true,
   "24": true,
   "25": true,
 } as const satisfies Record<MessageStreamVersion, true>;

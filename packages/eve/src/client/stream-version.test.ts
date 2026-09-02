@@ -4,7 +4,7 @@ import { readMessageStreamVersion } from "#client/stream-version.js";
 import { EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 
 describe("readMessageStreamVersion", () => {
-  it.each(["24", "25"] as const)("accepts stream version %s", (version) => {
+  it.each(["21", "22", "23", "24", "25"] as const)("accepts stream version %s", (version) => {
     expect(readMessageStreamVersion(new Headers({ [EVE_STREAM_VERSION_HEADER]: version }))).toBe(
       version,
     );
