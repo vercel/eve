@@ -6,6 +6,7 @@ import { queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 import type { ResolvedInputActionBatch, ToolResponsePart } from "#harness/hitl/request-verdict.js";
 import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
+import type { ReadyRequestGroupDeliveryTarget } from "#harness/hitl/request-ledger.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
 
 export type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean };
@@ -20,9 +21,13 @@ export type InputDomainResolverInput = {
 };
 
 export type ResolvePendingInputResult = {
+  readonly kind?: never;
   readonly consumedMessage?: boolean;
-  /** Ready Group delivery being applied by the harness owner. */
-  readonly groupCompletionDeliveryKey?: string;
+  /** Ready Group delivery being applied by its named owners. */
+  readonly groupCompletionDelivery?: {
+    readonly deliveryKey: string;
+    readonly targets: readonly ReadyRequestGroupDeliveryTarget[];
+  };
   readonly deferredContext?: boolean;
   readonly deferredMessage?: boolean;
   /** Present when a session-limit continuation prompt was resolved. */

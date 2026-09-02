@@ -55,11 +55,15 @@ export interface RequestGroup {
   readonly responseMessages: readonly ModelMessage[];
 }
 
-export interface ReadyRequestGroupDelivery {
-  readonly deliveryKey: string;
+export interface ReadyRequestGroupDeliveryTarget {
   readonly groupId: string;
   readonly owner: RequestGroupOwner;
+}
+
+export interface ReadyRequestGroupDelivery {
+  readonly deliveryKey: string;
   readonly ownerCompletion: unknown;
+  readonly targets: readonly ReadyRequestGroupDeliveryTarget[];
 }
 
 export interface RequestLedgerAuthorizationRecord {
@@ -325,17 +329,24 @@ export function prepareReadyRequestGroupDeliveries(input: {
 export function listReadyRequestGroupDeliveries(
   state: SessionStateMap | undefined,
 ): readonly ReadyRequestGroupDelivery[] {
-  return readRequestLedger(state).groups.flatMap((group) => {
-    if (typeof group.completion !== "object" || group.completion.status !== "ready") return [];
-    return [
-      {
+  const deliveries = new Map<string, ReadyRequestGroupDelivery>();
+  for (const group of readRequestLedger(state).groups) {
+    if (typeof group.completion !== "object" || group.completion.status !== "ready") continue;
+    const existing = deliveries.get(group.completion.deliveryKey);
+    if (existing === undefined) {
+      deliveries.set(group.completion.deliveryKey, {
         deliveryKey: group.completion.deliveryKey,
-        groupId: group.id,
-        owner: group.owner,
         ownerCompletion: group.completion.ownerCompletion,
-      },
-    ];
-  });
+        targets: [{ groupId: group.id, owner: group.owner }],
+      });
+      continue;
+    }
+    deliveries.set(group.completion.deliveryKey, {
+      ...existing,
+      targets: [...existing.targets, { groupId: group.id, owner: group.owner }],
+    });
+  }
+  return [...deliveries.values()];
 }
 
 export function acknowledgeReadyRequestGroupDelivery(input: {

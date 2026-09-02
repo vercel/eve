@@ -303,7 +303,7 @@ export function settleAllowedCandidate(input: {
   });
 }
 
-export function settleDirectApprovalResponse(input: {
+export function settleApprovalRequestResponse(input: {
   readonly actor: SessionAuthContext;
   readonly outcome: "allowed" | "cancelled";
   readonly requestId: string;

@@ -137,7 +137,7 @@ import {
   markApprovalSettlementEventEmitted,
 } from "#harness/hitl/approval-response-attempts.js";
 import {
-  interpretApprovalResponses,
+  interpretPendingInputDelivery,
   shouldPrepareApprovalResponsePolicies,
 } from "#harness/hitl/request-interpreter.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";
@@ -151,7 +151,6 @@ import {
   hasDeferredStepInput,
   hasPendingApprovalBatch,
   hasStepInput,
-  resolvePendingInput,
   appendPendingInputBatch,
 } from "#harness/input-requests.js";
 import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
@@ -295,6 +294,22 @@ const MODEL_CALL_MAX_ATTEMPTS = 3;
  * a provider incident clears.
  */
 const MODEL_CALL_RETRY_BASE_DELAY_MS = 500;
+
+function deliverRequestGroupCompletion(
+  targets: readonly import("#harness/hitl/request-ledger.js").ReadyRequestGroupDeliveryTarget[],
+): void {
+  for (const target of targets) {
+    switch (target.owner) {
+      case "framework-approval-gate":
+      case "session-turn":
+        break;
+      default: {
+        const unhandled: never = target.owner;
+        throw new TypeError(`Unhandled HITL request Group owner: ${String(unhandled)}`);
+      }
+    }
+  }
+}
 
 function mergeSystemInstructions(
   instructions: readonly SystemModelMessage[],
@@ -670,7 +685,11 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         messages: projectHistory(resolvedRuntimeActions.messages, session.state),
       });
     }
-    const coordinated = await interpretApprovalResponses({
+    const pending = await interpretPendingInputDelivery({
+      durableGroupCompletionDelivery: config.durableGroupCompletionDelivery,
+      deferMessagesWhileApprovalsPending: config.mode !== "conversation",
+      history: resolvedRuntimeActions.messages,
+      resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
       session,
       stepInput: effectiveStepInput,
       tools: buildResponseAuthorizationTools({
@@ -678,9 +697,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         context: approvalContext,
       }),
     });
-    session = coordinated.session;
+    session = pending.session;
     if (emit) {
-      for (const message of coordinated.feedback) {
+      for (const message of pending.feedback) {
         await emit(
           createMessageCompletedEvent({
             message,
@@ -759,55 +778,53 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         };
       }
     }
-    if (coordinated.kind === "park") return { next: null, session };
-    if (coordinated.kind === "continue-coordination") {
-      const continuedSession =
-        coordinated.stepInput === undefined
-          ? session
-          : queueDeferredStepInput(session, coordinated.stepInput);
-      return { next: runStep, session: continuedSession };
-    }
-    if (coordinated.challenges.length > 0) {
-      if (emit) {
-        for (const challenge of coordinated.challenges) {
-          await emit(
-            createAuthorizationRequiredEvent({
-              authorization: challenge.challenge,
-              candidateId: challenge.candidateId,
-              description:
-                challenge.challenge.instructions ?? `Authorization required for ${challenge.name}`,
-              name: challenge.name,
-              sequence: emissionState.sequence,
-              stepIndex: emissionState.stepIndex,
-              turnId: emissionState.turnId,
-              webhookUrl: challenge.hookUrl,
-            }),
-          );
+    if ("kind" in pending) {
+      switch (pending.kind) {
+        case "park":
+          return { next: null, session };
+        case "continue-coordination": {
+          const continuedSession =
+            pending.stepInput === undefined
+              ? session
+              : queueDeferredStepInput(session, pending.stepInput);
+          return { next: runStep, session: continuedSession };
+        }
+        case "authorization-required": {
+          if (emit) {
+            for (const challenge of pending.challenges) {
+              await emit(
+                createAuthorizationRequiredEvent({
+                  authorization: challenge.challenge,
+                  candidateId: challenge.candidateId,
+                  description:
+                    challenge.challenge.instructions ??
+                    `Authorization required for ${challenge.name}`,
+                  name: challenge.name,
+                  sequence: emissionState.sequence,
+                  stepIndex: emissionState.stepIndex,
+                  turnId: emissionState.turnId,
+                  webhookUrl: challenge.hookUrl,
+                }),
+              );
+            }
+          }
+          const parkedSession =
+            pending.stepInput === undefined
+              ? session
+              : queueDeferredStepInput(session, pending.stepInput);
+          return {
+            next: null,
+            session: {
+              ...parkedSession,
+              state: setPendingAuthorization(parkedSession.state, {
+                challenges: pending.challenges,
+              }),
+            },
+          };
         }
       }
-      const parkedSession =
-        coordinated.stepInput === undefined
-          ? session
-          : queueDeferredStepInput(session, coordinated.stepInput);
-      return {
-        next: null,
-        session: {
-          ...parkedSession,
-          state: setPendingAuthorization(parkedSession.state, {
-            challenges: coordinated.challenges,
-          }),
-        },
-      };
     }
 
-    const pending = resolvePendingInput({
-      durableGroupCompletionDelivery: config.durableGroupCompletionDelivery,
-      deferMessagesWhileApprovalsPending: config.mode !== "conversation",
-      history: resolvedRuntimeActions.messages,
-      resolveApprovalKey: resolveApprovalKeyFromTools(config.tools),
-      session,
-      stepInput: coordinated.stepInput,
-    });
     if (pending.outcome === "ready") {
       return { next: runStep, session: pending.session };
     }
@@ -932,9 +949,10 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       }
     }
 
-    if (pending.groupCompletionDeliveryKey !== undefined) {
+    if (pending.groupCompletionDelivery !== undefined) {
+      deliverRequestGroupCompletion(pending.groupCompletionDelivery.targets);
       session = acknowledgeReadyRequestGroupDelivery({
-        deliveryKey: pending.groupCompletionDeliveryKey,
+        deliveryKey: pending.groupCompletionDelivery.deliveryKey,
         session,
       });
     }

@@ -17,7 +17,7 @@ import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
   settleAllowedCandidate,
-  settleDirectApprovalResponse,
+  settleApprovalRequestResponse,
   type ActiveApprovalResponseAttempt,
   type ApprovalSettlementAuditRecord,
 } from "#harness/hitl/approval-response-attempts.js";
@@ -96,7 +96,10 @@ export function interpretRequestDelivery(input: {
   if (readyDelivery !== undefined) {
     return {
       ...(readyDelivery.ownerCompletion as StoredRequestGroupCompletion),
-      groupCompletionDeliveryKey: readyDelivery.deliveryKey,
+      groupCompletionDelivery: {
+        deliveryKey: readyDelivery.deliveryKey,
+        targets: readyDelivery.targets,
+      },
       session: input.session,
     };
   }
@@ -755,13 +758,42 @@ const UNAUTHENTICATED_APPROVAL_FEEDBACK = "Authentication is required to respond
 const APPROVAL_AUTHORIZER_TIMEOUT_MS = 10_000;
 const APPROVAL_CANDIDATE_TTL_MS = 10 * 60_000;
 
-export interface ApprovalDeliveryResult {
-  readonly challenges: readonly AuthorizationChallenge[];
-  readonly feedback: readonly string[];
-  readonly kind: "continue" | "continue-coordination" | "authorization-required" | "park";
-  readonly session: HarnessSession;
-  readonly stepInput?: StepInput;
-}
+type ApprovalCoordinationResult = (
+  | {
+      readonly challenges: readonly AuthorizationChallenge[];
+      readonly feedback: readonly string[];
+      readonly kind: "authorization-required";
+      readonly session: HarnessSession;
+      readonly stepInput?: StepInput;
+    }
+  | {
+      readonly challenges: readonly AuthorizationChallenge[];
+      readonly feedback: readonly string[];
+      readonly kind: "continue";
+      readonly session: HarnessSession;
+      readonly stepInput?: StepInput;
+    }
+  | {
+      readonly challenges: readonly AuthorizationChallenge[];
+      readonly feedback: readonly string[];
+      readonly kind: "continue-coordination";
+      readonly session: HarnessSession;
+      readonly stepInput?: StepInput;
+    }
+  | {
+      readonly challenges: readonly AuthorizationChallenge[];
+      readonly feedback: readonly string[];
+      readonly kind: "park";
+      readonly session: HarnessSession;
+      readonly stepInput?: StepInput;
+    }
+) & { readonly outcome?: never };
+
+type ApprovalDeliveryResult = Exclude<ApprovalCoordinationResult, { readonly kind: "continue" }>;
+
+export type InterpretPendingInputDeliveryResult =
+  | ApprovalDeliveryResult
+  | (ResolvePendingInputResult & { readonly feedback: readonly string[] });
 
 export function shouldPrepareApprovalResponsePolicies(input: {
   readonly now?: number;
@@ -799,12 +831,16 @@ export function shouldPrepareApprovalResponsePolicies(input: {
   );
 }
 
-export async function interpretApprovalResponses(input: {
+export async function interpretPendingInputDelivery(input: {
+  readonly deferMessagesWhileApprovalsPending?: boolean;
+  readonly durableGroupCompletionDelivery?: boolean;
+  readonly history?: readonly ModelMessage[];
   readonly now?: number;
+  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly session: HarnessSession;
   readonly stepInput?: StepInput;
   readonly tools: HarnessToolMap;
-}): Promise<ApprovalDeliveryResult> {
+}): Promise<InterpretPendingInputDeliveryResult> {
   const now = input.now ?? Date.now();
   const expiredChallengeNames = getApprovalAuditState(input.session.state)
     .activeCandidates.filter((attempt) => attempt.expiresAt <= now)
@@ -837,9 +873,11 @@ export async function interpretApprovalResponses(input: {
     pendingSettlements.length === 0 &&
     !hasMeaningfulInput(deduplicatedInput)
   ) {
-    return deliveryResult(session, deduplicatedInput, "park");
+    return deliveryResult(session, deduplicatedInput, "park") as ApprovalDeliveryResult;
   }
-  if (batches.length === 0) return deliveryResult(session, deduplicatedInput);
+  if (batches.length === 0) {
+    return finishPendingInputInterpretation(input, session, deduplicatedInput);
+  }
 
   const stepInput = deduplicatedInput;
   const authorizationRequiredRequestIds = new Set(
@@ -876,7 +914,7 @@ export async function interpretApprovalResponses(input: {
         responder !== null &&
         (response.optionId === "approve" || response.optionId === "cancel")
       ) {
-        const settled = settleDirectApprovalResponse({
+        const settled = settleApprovalRequestResponse({
           actor: responder,
           outcome: response.optionId === "approve" ? "allowed" : "cancelled",
           requestId: response.requestId,
@@ -899,7 +937,7 @@ export async function interpretApprovalResponses(input: {
         feedback.push(UNAUTHENTICATED_APPROVAL_FEEDBACK);
         continue;
       }
-      const settled = settleDirectApprovalResponse({
+      const settled = settleApprovalRequestResponse({
         actor: responder,
         outcome: "cancelled",
         requestId: response.requestId,
@@ -935,17 +973,17 @@ export async function interpretApprovalResponses(input: {
   }
 
   const remainingStepInput = removeConsumedResponses(stepInput, consumed);
-  if (consumed.size > 0) {
+  if (consumed.size > 0 && didCommit) {
     return deliveryResult(
       session,
       remainingStepInput,
-      didCommit ? "continue-coordination" : "continue",
+      "continue-coordination",
       [],
       feedback,
-    );
+    ) as ApprovalDeliveryResult;
   }
-  if (didCommit) {
-    return deliveryResult(session, remainingStepInput, "continue", [], feedback);
+  if (consumed.size > 0 || didCommit) {
+    return finishPendingInputInterpretation(input, session, remainingStepInput, feedback);
   }
 
   const parkedChallengeNames = new Set(
@@ -993,17 +1031,49 @@ export async function interpretApprovalResponses(input: {
   }
 
   const resumedStepInput = appendSettledResponses(remainingStepInput, pendingSettlements);
-  if (pendingSettlements.length > 0) {
-    return deliveryResult(session, resumedStepInput, "continue");
-  }
-  return didCommit
-    ? deliveryResult(session, resumedStepInput, "continue-coordination")
-    : deliveryResult(
-        session,
-        resumedStepInput,
-        challenges.length > 0 ? "authorization-required" : "continue",
-        challenges,
-      );
+  const coordinated =
+    pendingSettlements.length > 0
+      ? deliveryResult(session, resumedStepInput, "continue")
+      : didCommit
+        ? deliveryResult(session, resumedStepInput, "continue-coordination")
+        : deliveryResult(
+            session,
+            resumedStepInput,
+            challenges.length > 0 ? "authorization-required" : "continue",
+            challenges,
+          );
+
+  if (coordinated.kind !== "continue") return coordinated;
+  return finishPendingInputInterpretation(
+    input,
+    coordinated.session,
+    coordinated.stepInput,
+    coordinated.feedback,
+  );
+}
+
+function finishPendingInputInterpretation(
+  input: {
+    readonly deferMessagesWhileApprovalsPending?: boolean;
+    readonly durableGroupCompletionDelivery?: boolean;
+    readonly history?: readonly ModelMessage[];
+    readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  },
+  session: HarnessSession,
+  stepInput?: StepInput,
+  feedback: readonly string[] = [],
+): ResolvePendingInputResult & { readonly feedback: readonly string[] } {
+  return {
+    ...interpretRequestDelivery({
+      deferMessagesWhileApprovalsPending: input.deferMessagesWhileApprovalsPending,
+      durableGroupCompletionDelivery: input.durableGroupCompletionDelivery,
+      history: input.history,
+      resolveApprovalKey: input.resolveApprovalKey,
+      session,
+      stepInput,
+    }),
+    feedback,
+  };
 }
 
 async function authorizeCandidate(input: {
@@ -1212,10 +1282,10 @@ function hasMeaningfulInput(stepInput: StepInput | undefined): boolean {
 function deliveryResult(
   session: HarnessSession,
   stepInput?: StepInput,
-  kind: ApprovalDeliveryResult["kind"] = "continue",
+  kind: ApprovalCoordinationResult["kind"] = "continue",
   challenges: readonly AuthorizationChallenge[] = [],
   feedback: readonly string[] = [],
-): ApprovalDeliveryResult {
+): ApprovalCoordinationResult {
   return { challenges, feedback, kind, session, stepInput };
 }
 

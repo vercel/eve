@@ -188,7 +188,11 @@ describe("current HITL lifecycle conformance", () => {
     });
 
     expect(delivered.outcome).toBe("resolved");
-    expect(delivered.groupCompletionDeliveryKey).toBeDefined();
+    expect(delivered.groupCompletionDelivery).toEqual(
+      expect.objectContaining({
+        targets: [{ groupId: "session-turn:0", owner: "session-turn" }],
+      }),
+    );
     expect(retried.messages).toEqual(delivered.messages);
     expect(readRequestLedger(delivered.session.state).groups[0]?.completion).toEqual(
       expect.objectContaining({ status: "ready" }),

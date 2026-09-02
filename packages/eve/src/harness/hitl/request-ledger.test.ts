@@ -121,7 +121,7 @@ describe("request ledger", () => {
 
 describe("request ledger extension migration", () => {
   it("reads legacy approval-attempt state and removes its key on write", async () => {
-    const { getApprovalAuditState, settleDirectApprovalResponse } =
+    const { getApprovalAuditState, settleApprovalRequestResponse } =
       await import("#harness/hitl/approval-response-attempts.js");
     const actor = {
       attributes: {},
@@ -139,7 +139,7 @@ describe("request ledger extension migration", () => {
     };
     expect(getApprovalAuditState(legacy).settlements).toEqual([]);
 
-    const settled = settleDirectApprovalResponse({
+    const settled = settleApprovalRequestResponse({
       actor,
       outcome: "allowed",
       requestId: "request-1",
@@ -256,21 +256,57 @@ describe("request group completion delivery", () => {
     expect(listReadyRequestGroupDeliveries(prepared.state)).toEqual([
       {
         deliveryKey: "delivery-1",
-        groupId: "session-turn:0",
-        owner: "framework-approval-gate",
         ownerCompletion: { ok: 1 },
+        targets: [{ groupId: "session-turn:0", owner: "framework-approval-gate" }],
       },
       {
         deliveryKey: "delivery-2",
-        groupId: "session-turn:1",
-        owner: "session-turn",
         ownerCompletion: ["opaque"],
+        targets: [{ groupId: "session-turn:1", owner: "session-turn" }],
       },
     ]);
     expect(openRequestGroups(prepared.state)).toEqual([]);
     expect(readRequestLedger(prepared.state).requests).toEqual([
       expect.objectContaining({ id: "request-2", state: "terminal" }),
       expect.objectContaining({ id: "request-1", state: "terminal" }),
+    ]);
+  });
+
+  it("groups mixed owners into one ordered delivery transaction", () => {
+    const second: InputRequest = {
+      action: { callId: "call-2", input: {}, kind: "tool-call", toolName: "ask_question" },
+      kind: "question",
+      prompt: "Second?",
+      requestId: "request-2",
+    };
+    const created = createRequestGroup({
+      owner: "session-turn",
+      requests: [second],
+      responseMessages: [],
+      session: createRequestGroup({
+        owner: "framework-approval-gate",
+        requests: [request],
+        responseMessages: [],
+        session: session(),
+      }),
+    });
+    const prepared = prepareReadyRequestGroupDeliveries({
+      ownerCompletions: new Map([
+        ["session-turn:0", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
+        ["session-turn:1", { deliveryKey: "delivery-1", ownerCompletion: { ok: true } }],
+      ]),
+      session: created,
+    });
+
+    expect(listReadyRequestGroupDeliveries(prepared.state)).toEqual([
+      {
+        deliveryKey: "delivery-1",
+        ownerCompletion: { ok: true },
+        targets: [
+          { groupId: "session-turn:0", owner: "framework-approval-gate" },
+          { groupId: "session-turn:1", owner: "session-turn" },
+        ],
+      },
     ]);
   });
 

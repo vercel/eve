@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { getPendingAuthorization } from "#harness/authorization.js";
-import { settleDirectApprovalResponse } from "#harness/hitl/approval-response-attempts.js";
-import { interpretApprovalResponses } from "#harness/hitl/request-interpreter.js";
+import { settleApprovalRequestResponse } from "#harness/hitl/approval-response-attempts.js";
+import { interpretPendingInputDelivery } from "#harness/hitl/request-interpreter.js";
 import { appendPendingInputBatch, getPendingInputBatches } from "#harness/pending-input-batches.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { InputRequest } from "#shared/input.js";
@@ -43,50 +43,72 @@ function parkedSession(): HarnessSession {
   });
 }
 
-describe("interpretApprovalResponses", () => {
+describe("interpretPendingInputDelivery", () => {
   it("recovers an allowed settlement before its synthetic response is consumed", async () => {
     const parked = parkedSession();
-    const settled = settleDirectApprovalResponse({
+    const settled = settleApprovalRequestResponse({
       actor: responder,
       outcome: "allowed",
       requestId: request.requestId,
       settledAt: 100,
       state: parked.state,
     });
-    const result = await interpretApprovalResponses({
+    const result = await interpretPendingInputDelivery({
       now: 101,
       session: { ...parked, state: settled.state },
       tools: new Map(),
     });
-    expect(result.kind).toBe("continue");
-    expect(result.stepInput?.inputResponses).toEqual([
-      { optionId: "approve", requestId: request.requestId },
-    ]);
+    if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
+    expect(result.outcome).toBe("resolved");
+    expect(getPendingInputBatches(result.session.state)).toEqual([]);
+    expect(result.messages.at(-1)).toEqual({
+      content: [
+        expect.objectContaining({
+          approvalId: request.requestId,
+          approved: true,
+          type: "tool-approval-response",
+        }),
+      ],
+      role: "tool",
+    });
   });
 
   it("recovers a cancelled settlement before its synthetic response is consumed", async () => {
     const parked = parkedSession();
-    const settled = settleDirectApprovalResponse({
+    const settled = settleApprovalRequestResponse({
       actor: responder,
       outcome: "cancelled",
       requestId: request.requestId,
       settledAt: 100,
       state: parked.state,
     });
-    const result = await interpretApprovalResponses({
+    const result = await interpretPendingInputDelivery({
       now: 101,
       session: { ...parked, state: settled.state },
       tools: new Map(),
     });
-    expect(result.kind).toBe("continue");
-    expect(result.stepInput?.inputResponses).toEqual([
-      { optionId: "cancel", requestId: request.requestId },
-    ]);
+    if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
+    expect(result.outcome).toBe("resolved");
+    expect(getPendingInputBatches(result.session.state)).toEqual([]);
+    expect(result.messages.at(-1)).toEqual({
+      content: expect.arrayContaining([
+        expect.objectContaining({
+          approvalId: request.requestId,
+          approved: false,
+          type: "tool-approval-response",
+        }),
+        expect.objectContaining({
+          output: expect.objectContaining({ type: "execution-denied" }),
+          type: "tool-result",
+        }),
+      ]),
+      role: "tool",
+    });
   });
 
   it("forwards an unrelated message while a response-authorized approval remains pending", async () => {
     const messageAuth: SessionAuthContext = { ...responder, principalId: "user-2" };
-    const result = await interpretApprovalResponses({
+    const result = await interpretPendingInputDelivery({
       now: 100,
       session: parkedSession(),
       stepInput: {
@@ -96,10 +118,9 @@ describe("interpretApprovalResponses", () => {
       tools: new Map(),
     });
 
-    expect(result.kind).toBe("continue");
+    if ("kind" in result) throw new Error(`Unexpected coordination result: ${result.kind}`);
+    expect(result.outcome).toBe("continue");
     expect(result.feedback).toEqual([]);
-    expect(result.stepInput?.message).toBe("What else can you help with?");
-    expect(result.stepInput?.messageAuth).toEqual(messageAuth);
     expect(
       getPendingInputBatches(result.session.state).flatMap((batch) =>
         batch.requests.map((pending) => pending.requestId),
@@ -109,7 +130,7 @@ describe("interpretApprovalResponses", () => {
 
   it("deduplicates replay of the same attributed delivery", async () => {
     const parked = parkedSession();
-    const first = await interpretApprovalResponses({
+    const first = await interpretPendingInputDelivery({
       now: 100,
       session: parked,
       stepInput: {
@@ -123,7 +144,7 @@ describe("interpretApprovalResponses", () => {
       },
       tools: new Map(),
     });
-    const replay = await interpretApprovalResponses({
+    const replay = await interpretPendingInputDelivery({
       now: 101,
       session: first.session,
       stepInput: {
@@ -139,12 +160,13 @@ describe("interpretApprovalResponses", () => {
     });
 
     expect(first.session.state).toBeDefined();
-    expect(replay.kind).toBe("continue");
+    if ("kind" in replay) throw new Error(`Unexpected coordination result: ${replay.kind}`);
+    expect(replay.outcome).toBe("unresolved");
   });
 
   it("creates distinct competing attempts for distinct deliveryIds from the same responder", async () => {
     const parked = parkedSession();
-    const first = await interpretApprovalResponses({
+    const first = await interpretPendingInputDelivery({
       now: 100,
       session: parked,
       stepInput: {
@@ -158,7 +180,7 @@ describe("interpretApprovalResponses", () => {
       },
       tools: new Map(),
     });
-    const second = await interpretApprovalResponses({
+    const second = await interpretPendingInputDelivery({
       now: 101,
       session: first.session,
       stepInput: {

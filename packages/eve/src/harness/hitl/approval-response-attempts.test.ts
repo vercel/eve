@@ -9,7 +9,7 @@ import {
   getApprovalAuditState,
   markApprovalCandidateAuthorizationRequired,
   settleAllowedCandidate,
-  settleDirectApprovalResponse,
+  settleApprovalRequestResponse,
 } from "#harness/hitl/approval-response-attempts.js";
 import { getPendingAuthorization } from "#harness/authorization.js";
 import type { SessionStateMap } from "#harness/types.js";
@@ -297,7 +297,7 @@ describe("approval candidate state", () => {
 
   it("lets Cancel win atomically and stales every Allow candidate", () => {
     const first = create({ candidateId: "candidate-1", deliveryId: "d1", principalId: "U1" });
-    const cancelled = settleDirectApprovalResponse({
+    const cancelled = settleApprovalRequestResponse({
       actor: responder("U2"),
       outcome: "cancelled",
       requestId: "request-1",
