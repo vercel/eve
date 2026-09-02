@@ -58,7 +58,7 @@ Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_fil
 
 ### Project structured activity state
 
-Return `renderingState` from `label.complete` when a successful tool result should replace structured state that a channel renderer can present. The state key identifies the renderer contract; eve stores the projected JSON value without interpreting its schema:
+Return `renderingState` from `label.complete` when a successful tool result should replace structured state that a channel renderer can present. eve keys the state by the path-derived tool name and stores the projected JSON value without interpreting its schema:
 
 ```ts title="agent/tools/project_plan.ts"
 import { defineTool } from "eve/tools";
@@ -76,7 +76,7 @@ export default defineTool({
   label: {
     start: () => "Update project plan",
     complete: (_input, output) => ({
-      renderingState: { key: "project-plan", value: output.tasks },
+      renderingState: output.tasks,
     }),
   },
   execute({ tasks }) {

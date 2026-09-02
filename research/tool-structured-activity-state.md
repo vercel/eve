@@ -20,7 +20,7 @@ export default defineTool({
   label: {
     start: () => "Update project plan",
     complete: (_input, output) => ({
-      renderingState: { key: "project-plan", value: output.tasks },
+      renderingState: output.tasks,
     }),
   },
 });
@@ -42,11 +42,11 @@ model tool call
 
 ## Semantics
 
-- The state key identifies a contract between the tool and renderer. eve does not assign meaning to keys or inspect projected schemas.
+- The path-derived tool name identifies the contract between the tool and renderer. eve does not inspect projected schemas.
 - A successful final result replaces the previous value for `(owning work, key)`. Failed and rejected calls do not change state.
 - The snapshot records the projected value with its source tool, action, event, owning work, root turn, and replacement time.
 - A renderer receives every work-scoped publication and ignores keys it does not understand. It may show only root state, nest state under its owning work, or flatten publications that share a key. Multiple renderers may interpret the same state differently.
-- Custom tools can use their own keys and schemas. Tools may share a key only when they intentionally implement the same renderer contract.
+- Custom tools use their own path-derived names and schemas.
 - Structured state is separate from observed `work`, `actions`, and `blockers`. A renderer may combine them visually, but eve infers no ownership relation beyond the recorded source action and work.
 
 ## Boundaries

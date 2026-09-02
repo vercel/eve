@@ -68,7 +68,7 @@ describe("definition helper exact inputs", () => {
           expectTypeOf(output.phase).toEqualTypeOf<string>();
           return {
             label: `Report ${output.phase}`,
-            renderingState: { key: "report", value: { phase: output.phase } },
+            renderingState: { phase: output.phase },
           };
         },
         delta(_input, partial) {
