@@ -7,29 +7,30 @@ Relevant `eve` commands can run from the application root or any directory benea
 
 ## Commands
 
-| Command                       | Description                                                                                                                        |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `eve`                         | Initialize the current directory, or start development when it is already an eve project                                           |
-| `eve init [target]`           | Create a new agent, or add an agent to an existing project                                                                         |
-| `eve info`                    | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
-| `eve build`                   | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
-| `eve start`                   | Serve the built `.output/` app; prints the listening URL                                                                           |
-| `eve dev`                     | Start the local dev server and open the terminal UI                                                                                |
-| `eve dev <url>`               | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                              |
-| `eve acp [url]`               | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                      |
-| `eve logs [logid]`            | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                        |
-| `eve logs ls`                 | List `eve dev` diagnostic logs, most recent first                                                                                  |
-| `eve traces ls`               | List locally captured agent traces, most recent first                                                                              |
-| `eve traces [trace]`          | Show a local span tree (the most recent when omitted)                                                                              |
-| `eve link`                    | Link the directory to a Vercel project and pull AI Gateway credentials                                                             |
-| `eve deploy`                  | Deploy the agent to Vercel production (links first if needed)                                                                      |
-| `eve eval`                    | Run evals against the local app or a remote target                                                                                 |
-| `eve channels list`           | List user-authored channels                                                                                                        |
-| `eve extension init [target]` | Create a new extension package                                                                                                     |
-| `eve extension build`         | Build the current package as an extension                                                                                          |
-| `eve set`                     | Change the root agent's model and reasoning effort                                                                                 |
-| `eve add <item>`              | Install an item from the official or a configured shadcn registry                                                                  |
-| `eve registry <command>`      | Add sources and list, search, or view registry catalog items                                                                       |
+| Command                        | Description                                                                                                                        |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `eve`                          | Initialize the current directory, or start development when it is already an eve project                                           |
+| `eve init [target]`            | Create a new agent, or add an agent to an existing project                                                                         |
+| `eve info`                     | Print the resolved application, including static instructions and discovered capabilities, routes, artifact paths, and diagnostics |
+| `eve build`                    | Compile `.eve/` artifacts and build the host output; prints the output directory                                                   |
+| `eve start`                    | Serve the built `.output/` app; prints the listening URL                                                                           |
+| `eve dev`                      | Start the local dev server and open the terminal UI                                                                                |
+| `eve dev <url>`                | Connect the UI to an existing server URL (e.g. a remote deployment) instead of booting a local server                              |
+| `eve acp [url]`                | Serve the local application or an existing eve server URL as a stable ACP v1 agent over stdio                                      |
+| `eve logs [logid]`             | Print an `eve dev` diagnostic log (the most recent when `logid` is omitted)                                                        |
+| `eve logs ls`                  | List `eve dev` diagnostic logs, most recent first                                                                                  |
+| `eve traces ls`                | List locally captured agent traces, most recent first                                                                              |
+| `eve traces [trace]`           | Show a local span tree (the most recent when omitted)                                                                              |
+| `eve link`                     | Link the directory to a Vercel project and pull AI Gateway credentials                                                             |
+| `eve deploy`                   | Deploy the agent to Vercel production (links first if needed)                                                                      |
+| `eve eval`                     | Run evals against the local app or a remote target                                                                                 |
+| `eve channels list`            | List user-authored channels                                                                                                        |
+| `eve extension init [target]`  | Create a new extension package                                                                                                     |
+| `eve extension build`          | Build the current package as an extension                                                                                          |
+| `eve set`                      | Change the root agent's model and reasoning effort                                                                                 |
+| `eve add <item>`               | Install an item from the official or a configured shadcn registry                                                                  |
+| `eve integration setup <kind>` | Run a built-in setup flow directly after its registry files are installed                                                          |
+| `eve registry <command>`       | Add sources and list, search, or view registry catalog items                                                                       |
 
 When `eve build` fails on discovery errors, it prints the full diagnostics report (severity, message, source path) and the diagnostics artifact path.
 
@@ -118,6 +119,8 @@ Commands for installing and discovering [shadcn registry](https://ui.shadcn.com/
 eve add extension/agent-browser
 eve add linear
 eve add channel/slack --skip-install
+eve add memory/file
+eve integration setup file-memory
 eve add https://example.com/r/my-extension.json --overwrite
 eve registry add @acme=https://example.com/r/{name}.json
 eve registry search browser
@@ -132,6 +135,8 @@ eve add @acme/my-extension
 Coding agents should use `eve add <item> --non-interactive`, adding `--yes` to accept recommended setup values and reduce setup round trips. Explicit `--answer` values take precedence. This mode never opens an eve prompt. When a component or setup decision is missing, the NDJSON terminal event includes a stable question key and a safe continuation command; add the requested answer to that command. Supply answers with repeatable `--answer 'key=<JSON value>'` options. Follow a reported `eve link` prerequisite before retrying Vercel Connect setup. Do not put secrets in command-line answers; use the integration's documented environment variable or secret store.
 
 When setup is skipped, cancelled, or needs more input after installation, eve prints or returns the matching `eve add <item> --skip-install` continuation. It reruns the selected components' declared flows without reinstalling registry files.
+
+`eve integration setup file-memory` runs the storage setup directly without reinstalling `agent/memory/file.ts`. It authenticates through the Vercel CLI, resolves the linked project, reconciles the private Blob store, and pulls the environment. Use it to repair or verify a previous provisioning attempt; `eve add memory/file` also offers the normal deployment handoff after setup.
 
 `eve registry add` records configured sources in `package.json#registries`. `eve registry list` aggregates the official catalog and all configured sources by default. `eve registry search` also includes [skills.sh](https://skills.sh), available without configuration at `@skills`, and groups results by source with each source's available result count. Search returns up to 10 matches per source by default; pass `--limit <count>` to request between 1 and 100. Either command can browse one supplied URL or namespace. Official and other universal items with explicit file targets do not require shadcn project configuration.
 

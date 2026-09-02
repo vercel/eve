@@ -291,6 +291,13 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {
+    slug: "mux-video",
+    name: "Mux Video",
+    kind: "extension",
+    tagline: "Create and inspect video assets, make clips, and run Mux Robots workflows.",
+    surfaces: { scaffoldable: false, registry: false, gallery: true },
+  },
+  {
     slug: "browserbase",
     name: "Browserbase",
     kind: "extension",
@@ -324,6 +331,14 @@ export const INTEGRATIONS: readonly IntegrationEntry[] = [
     name: "Upstash AgentKit",
     kind: "extension",
     tagline: "Add long-term memory, Redis Search, and durable chat history with Upstash Redis.",
+    surfaces: { scaffoldable: false, registry: true, gallery: true },
+  },
+  {
+    slug: "file",
+    name: "File memory",
+    kind: "memory",
+    tagline:
+      "Store durable per-principal memory in a private Vercel Blob store provisioned for the agent.",
     surfaces: { scaffoldable: false, registry: true, gallery: true },
   },
   {

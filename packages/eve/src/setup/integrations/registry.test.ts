@@ -31,6 +31,10 @@ describe("setup integrations", () => {
   });
   it("registers GitHub", () => {
     expect(setupIntegration("github")).toMatchObject({ kind: "github", label: "GitHub" });
+    expect(setupIntegration("file-memory")).toMatchObject({
+      kind: "file-memory",
+      label: "File memory",
+    });
   });
   it("registers Shopify", () => {
     expect(setupIntegration("shopify")).toMatchObject({ kind: "shopify", label: "Shopify" });

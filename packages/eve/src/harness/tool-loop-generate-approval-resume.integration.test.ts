@@ -8,8 +8,15 @@ import {
   preparePersistedStepDynamicToolMetadata,
 } from "#context/dynamic-tool-lifecycle.js";
 import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
-import { AuthKey, SessionKey, StepDynamicToolMetadataKey } from "#context/keys.js";
+import { PendingSkillAnnouncementKey } from "#context/dynamic-skill-lifecycle.js";
+import {
+  AuthKey,
+  SessionKey,
+  StepDynamicToolMetadataKey,
+  TurnTaskStateKey,
+} from "#context/keys.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
+import type { InputRequest } from "#shared/input.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
@@ -78,11 +85,8 @@ const secondApprovalRequest = {
   type: "tool-approval-request" as const,
 };
 
-function createPendingApprovalSession(
-  history?: readonly ModelMessage[],
-  responseAuthorization = false,
-): HarnessSession {
-  const session: HarnessSession = {
+function createBaseSession(history?: readonly ModelMessage[]): HarnessSession {
+  return {
     agent: {
       modelReference: { id: "generate-approval-resume-model" },
       system: "You are a test assistant.",
@@ -99,27 +103,32 @@ function createPendingApprovalSession(
     history: [...(history ?? [{ content: "Run pwd.", role: "user" }])],
     sessionId: "generate-approval-resume-session",
   };
+}
 
+const pendingApprovalInputRequest: InputRequest = {
+  action: {
+    callId: toolCall.toolCallId,
+    input: toolCall.input,
+    kind: "tool-call",
+    toolName: toolCall.toolName,
+  },
+  allowFreeform: false,
+  display: "confirmation",
+  kind: "tool-approval",
+  options: [
+    { id: "approve", label: "Yes" },
+    { id: "cancel", label: "No" },
+  ],
+  prompt: "Approve tool call: bash",
+  requestId: approvalRequest.approvalId,
+};
+
+function createPendingApprovalSession(
+  history?: readonly ModelMessage[],
+  responseAuthorization = false,
+): HarnessSession {
   return appendPendingInputBatch({
-    requests: [
-      {
-        action: {
-          callId: toolCall.toolCallId,
-          input: toolCall.input,
-          kind: "tool-call",
-          toolName: toolCall.toolName,
-        },
-        allowFreeform: false,
-        display: "confirmation",
-        kind: "tool-approval",
-        options: [
-          { id: "approve", label: "Yes" },
-          { id: "cancel", label: "No" },
-        ],
-        prompt: "Approve tool call: bash",
-        requestId: approvalRequest.approvalId,
-      },
-    ],
+    requests: [pendingApprovalInputRequest],
     responseAuthRequiredRequestIds: responseAuthorization
       ? [approvalRequest.approvalId]
       : undefined,
@@ -129,7 +138,7 @@ function createPendingApprovalSession(
         role: "assistant",
       },
     ],
-    session,
+    session: createBaseSession(history),
   });
 }
 
@@ -597,6 +606,76 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
       toolCallId: toolCall.toolCallId,
       toolName: toolCall.toolName,
     });
+    expect(result.session.history.at(-1)).toMatchObject({
+      content: [{ text: "The command returned /workspace.", type: "text" }],
+      role: "assistant",
+    });
+  });
+
+  // Regression: turn-local context (task state, dynamic skill announcement) was
+  // appended as a user message after the approval response. The AI SDK reads
+  // approvals only from the tail tool message, so the approved tool never ran
+  // and the provider rejected the prompt with a tool call that had no output.
+  it.each([
+    { key: PendingSkillAnnouncementKey, label: "dynamic skill announcement" },
+    { key: TurnTaskStateKey, label: "task state" },
+  ])("executes the approved tool when $label is injected on the resume step", async ({ key }) => {
+    const siblingCall = {
+      input: { command: "whoami" },
+      toolCallId: "call-sibling",
+      toolName: "bash",
+      type: "tool-call" as const,
+    };
+    const siblingResult = {
+      output: { type: "text" as const, value: "eve" },
+      toolCallId: siblingCall.toolCallId,
+      toolName: "bash",
+      type: "tool-result" as const,
+    };
+    const session = appendPendingInputBatch({
+      requests: [pendingApprovalInputRequest],
+      // The parked shape when a gated call shares a step with an ungated one.
+      responseMessages: [
+        { content: [toolCall, approvalRequest, siblingCall], role: "assistant" },
+        { content: [siblingResult], role: "tool" },
+      ],
+      session: createBaseSession(),
+    });
+    const ctx = new ContextContainer();
+    ctx.set(key, "[Runtime context]\nInjected on the resume step.");
+    const execute = vi.fn(async () => "/workspace");
+    const model = createModel();
+
+    const result = await contextStorage.run(ctx, () =>
+      createToolLoopHarness(createConfig(model, execute))(
+        setHarnessEmissionState(session, {
+          sequence: 1,
+          sessionStarted: true,
+          stepIndex: 1,
+          turnId: "turn-1",
+        }),
+        { inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }] },
+      ),
+    );
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      toolCall.input,
+      expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+    );
+
+    const providerPrompt = model.doGenerateCalls[0]?.prompt ?? [];
+    const answered = new Set<string>();
+    const called: string[] = [];
+    for (const message of providerPrompt) {
+      if (!Array.isArray(message.content)) continue;
+      for (const part of message.content) {
+        if (part.type === "tool-call") called.push(part.toolCallId);
+        if (part.type === "tool-result") answered.add(part.toolCallId);
+      }
+    }
+    expect(called).toEqual([toolCall.toolCallId, siblingCall.toolCallId]);
+    expect(called.filter((id) => !answered.has(id))).toEqual([]);
+    expect(providerPrompt.at(-1)?.role).toBe("tool");
     expect(result.session.history.at(-1)).toMatchObject({
       content: [{ text: "The command returned /workspace.", type: "text" }],
       role: "assistant",

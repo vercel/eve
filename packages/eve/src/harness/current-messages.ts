@@ -34,10 +34,15 @@ export function createCurrentMessages(
     }
   }
   let userInsertionIndex = currentTurnInsertionIndex ?? nonSystemMessages.length;
+  // The AI SDK collects approval responses only from the tail tool message.
+  // Appending user-role context there would skip the approved tool's
+  // execution and send the provider a tool call with no result.
+  const canAppendUserMessages =
+    currentTurnInsertionIndex !== undefined || !hasTailApprovalResponse(nonSystemMessages);
 
   return {
     add(turnSequence, message, { cacheFriendly = true } = {}) {
-      if (turnSequence > 0 && cacheFriendly === true) {
+      if (turnSequence > 0 && cacheFriendly === true && canAppendUserMessages) {
         nonSystemMessages.splice(userInsertionIndex, 0, { role: "user", content: message });
         userInsertionIndex += 1;
       } else {
@@ -54,4 +59,12 @@ export function createCurrentMessages(
       return [...systemMessages];
     },
   };
+}
+
+/** True when the history ends with a tool message carrying a tool-approval-response. */
+export function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
+  const tail = messages.at(-1);
+  return (
+    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
+  );
 }

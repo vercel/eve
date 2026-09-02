@@ -14,7 +14,7 @@ export function parseConnectPrincipalType(value: string): ConnectPrincipalType {
   throw new InvalidArgumentError('Expected principal type "app" or "user".');
 }
 
-/** Registers hidden built-in integration setup commands used by trusted registry items. */
+/** Registers built-in integration setup commands used by trusted registry items. */
 export function registerIntegrationCommands(input: {
   program: Command;
   logger: IntegrationCommandLogger;
@@ -22,10 +22,12 @@ export function registerIntegrationCommands(input: {
 }): void {
   const { applicationContext, logger, program } = input;
 
-  const integration = program.command("integration", { hidden: true });
+  const integration = program.command("integration").description("Set up an eve integration");
 
   applicationCommand(integration.command("setup <kind>"), applicationContext)
+    .description("Run a built-in integration setup flow")
     .option("-y, --yes")
+    .option("--force", "Overwrite files created by setup.")
     .option(
       "--non-interactive",
       "Run without interactive prompts, instead emit structured NDJSON when further input is required",
@@ -41,6 +43,7 @@ export function registerIntegrationCommands(input: {
         kind: string,
         options: {
           yes?: boolean;
+          force?: boolean;
           nonInteractive?: boolean;
           answer?: Record<string, unknown>;
         },
@@ -48,6 +51,7 @@ export function registerIntegrationCommands(input: {
         const { runIntegrationSetupCommand } = await import("./integration-setup.js");
         await runIntegrationSetupCommand(logger, applicationContext.root, kind, {
           yes: options.yes,
+          force: options.force,
           nonInteractive: options.nonInteractive,
           answers: options.answer,
         });
@@ -55,7 +59,7 @@ export function registerIntegrationCommands(input: {
     );
 
   applicationCommand(
-    integration.command("connect <slug> <service> [canonical-name]"),
+    integration.command("connect <slug> <service> [canonical-name]", { hidden: true }),
     applicationContext,
   )
     .option("-y, --yes")

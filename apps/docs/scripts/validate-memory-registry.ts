@@ -13,6 +13,11 @@ interface RegistryItem {
   dependencies?: string[];
   envVars?: Record<string, string>;
   files?: RegistryFile[];
+  meta?: {
+    eve?: {
+      setup?: { package?: string; bin?: string; args?: string[] };
+    };
+  };
 }
 
 interface Registry {
@@ -46,7 +51,18 @@ for (const item of items) {
   }
   await access(join(docsRoot, expectedPath));
 
-  if (slug === "supermemory") {
+  if (slug === "file") {
+    const setup = item.meta?.eve?.setup;
+    if (
+      setup?.package !== "eve" ||
+      setup.bin !== "eve" ||
+      JSON.stringify(setup.args) !== JSON.stringify(["integration", "setup", "file-memory"])
+    ) {
+      throw new Error(
+        'Registry item "memory/file" must declare the trusted file-memory setup flow.',
+      );
+    }
+  } else if (slug === "supermemory") {
     if (!item.dependencies?.includes("@supermemory/eve")) {
       throw new Error('Registry item "memory/supermemory" must depend on @supermemory/eve.');
     }
