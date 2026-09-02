@@ -206,25 +206,79 @@ describe("Slack activity plan", () => {
     expect(requests[5]!.body.get("blocks")).toContain('"status":"complete"');
   });
 
-  it("waits for a valid todo projection before starting a stream", async () => {
-    const fetch = vi.fn(async () => Response.json({ ok: true, ts: "1700.1" }));
-    vi.stubGlobal("fetch", fetch);
+  it("falls back to the activity hierarchy when no todo state is available", async () => {
+    const requests: Array<{ operation: string; body: URLSearchParams }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        requests.push({
+          body: new URLSearchParams(String(init?.body ?? "")),
+          operation: String(url).split("/").at(-1)!,
+        });
+        return Response.json({ ok: true, ts: "1700.1" });
+      }),
+    );
     const renderer = buildSlackActivityRenderers({
       botToken: "xoxb-test",
       renderers: [experimental_slackActivityPlan()],
     })[0]!;
-    const snapshot = reduceActivityBatch(createActivitySnapshot(), {
-      events: [{ eventId: "root", kind: "work.started", startedAt: "1", work: root }],
+    const started = reduceActivityBatch(createActivitySnapshot(), {
+      events: [
+        { eventId: "root", kind: "work.started", startedAt: "1", work: root },
+        { eventId: "worker", kind: "work.started", startedAt: "2", work: worker },
+        { action: searchAction, eventId: "search-started", kind: "action.started", startedAt: "3" },
+      ],
       version: 1,
     });
-
     const state = await renderer.render({
       destination: { channelId: "C1", teamId: "TEAM", threadTs: "T1", triggeringUserId: "USER" },
-      snapshot,
+      snapshot: started,
       state: undefined,
     });
+    const settled = reduceActivityBatch(started, {
+      events: [
+        {
+          actionId: searchAction.id,
+          eventId: "search-done",
+          kind: "action.settled",
+          outcome: "completed",
+          settledAt: "4",
+        },
+        {
+          eventId: "worker-done",
+          kind: "work.settled",
+          outcome: "completed",
+          settledAt: "5",
+          workId: worker.id,
+        },
+        {
+          eventId: "root-done",
+          kind: "work.settled",
+          outcome: "completed",
+          settledAt: "6",
+          workId: root.id,
+        },
+      ],
+      version: 1,
+    });
+    await renderer.render({
+      destination: { channelId: "C1", teamId: "TEAM", threadTs: "T1", triggeringUserId: "USER" },
+      snapshot: settled,
+      state,
+    });
 
-    expect(fetch).not.toHaveBeenCalled();
-    expect(state).toEqual({ streams: {} });
+    expect(requests.map((request) => request.operation)).toEqual([
+      "chat.startStream",
+      "chat.appendStream",
+      "chat.appendStream",
+      "chat.stopStream",
+      "chat.update",
+    ]);
+    expect(requests[0]!.body.get("chunks")).toContain("Agent activity");
+    expect(requests[0]!.body.get("chunks")).toContain("researcher");
+    expect(requests[1]!.body.get("chunks")).toContain("• web_search\\n");
+    expect(requests[2]!.body.get("chunks")).toContain("✓ web_search\\n");
+    expect(requests[4]!.body.get("blocks")).toContain('"title":"Agent activity"');
+    expect(requests[4]!.body.get("blocks")).toContain('"title":"researcher"');
   });
 });
