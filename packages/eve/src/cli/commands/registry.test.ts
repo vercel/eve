@@ -325,7 +325,7 @@ describe("registry commands", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it.each(["web", "slack"] as const)(
+  it.each(["web", "slack", "photon"] as const)(
     "installs the official %s item before running its declared setup",
     async (kind) => {
       const logger = createLogger();
@@ -369,7 +369,7 @@ describe("registry commands", () => {
         {
           package: "eve",
           bin: "eve",
-          args: ["integration", "setup", kind, "--yes"],
+          args: ["integration", "setup", kind, "--yes", "--force"],
         },
         `channel/${kind}`,
         expect.objectContaining({ prompter: expect.any(Object) }),

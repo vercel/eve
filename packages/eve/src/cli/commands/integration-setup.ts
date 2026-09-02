@@ -22,6 +22,7 @@ import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 
 export interface IntegrationSetupOptions {
   yes?: boolean;
+  force?: boolean;
   nonInteractive?: boolean;
   answers?: Record<string, unknown>;
   signal?: AbortSignal;
@@ -62,6 +63,7 @@ export async function runIntegrationSetupCommand(
         appRoot,
         prompter,
         asker,
+        force: options.force,
         resolveVercelProject: nonInteractive
           ? undefined
           : () =>
