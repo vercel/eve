@@ -23,9 +23,11 @@ import type { EveEvalContext } from "eve/evals";
 //   t2  session A still reads the file: the parked session keeps working when
 //       its messages route through the new deployment, and its sandbox
 //       (keyed per durable session, not per deployment) is untouched
-//   t1' push another deployment update that adds a skill
-//   t3  session A still reads the file: exact deployment routing does not
-//       discard the durable workspace owned by the existing session
+//   t1' push a deployment update that adds a skill — skills materialize into
+//       the sandbox workspace resources, so the sandbox version hash rotates
+//       for anything executing the new code
+//   t3  session A no longer sees the file: its next request runs on the new
+//       deployment, whose changed sandbox resources rotate the sandbox key
 //   t4  a NEW session B adopts the new deployment: the added skill loads and
 //       shapes the reply
 //
@@ -34,6 +36,7 @@ import type { EveEvalContext } from "eve/evals";
 // everywhere else.
 
 const ALIAS_ENV = "EVE_E2E_REDEPLOY_ALIAS";
+const ALIAS_SETTLE_MATCHES = 5;
 
 const FILE_PATH = "/workspace/redeploy-note.txt";
 const FILE_TOKEN = "sandbox-redeploy-ok-K4W";
@@ -63,7 +66,7 @@ const EXEC_OPTIONS = { maxBuffer: 64 * 1024 * 1024 } as const;
 
 export default defineEval({
   description:
-    "Sandbox: a parked session follows request-serving deployments without losing its durable workspace, and new sessions adopt new resources.",
+    "Sandbox: a parked session adopts request-serving deployments, preserving or rotating its workspace according to the sandbox version.",
   tags: ["redeploy"],
   timeoutMs: 20 * 60_000,
   async test(t) {
@@ -104,21 +107,21 @@ export default defineEval({
       persist.calledTool("bash", { output: new RegExp(FILE_TOKEN) });
       persist.messageIncludes(FILE_TOKEN);
 
-      // t1': deployment update that adds a skill.
+      // t1': deployment update that adds a skill, rotating the sandbox key.
       await mkdir(SKILLS_DIR, { recursive: true });
       await writeFile(SKILL_PATH, SKILL_MARKDOWN);
       await deployToAlias(t, alias, "skill");
       await waitForAliasToServe(t, `"${SKILL_NAME}"`);
 
-      // t3: the next request is accepted by the new deployment, while the
-      // existing session retains ownership of its durable workspace.
+      // t3: the next request is accepted by the new deployment. Its changed
+      // sandbox resources rotate the versioned key, so the old file is absent.
       const probe = await t.send(
         `Run the bash command \`test -f ${FILE_PATH} && echo present || echo absent\` ` +
           "and reply with the command output verbatim.",
       );
       probe.expectOk();
-      probe.calledTool("bash", { output: /present/ });
-      probe.messageIncludes("present");
+      probe.calledTool("bash", { output: /absent/ });
+      probe.messageIncludes("absent");
 
       // t4: a fresh session adopts the new deployment — the added skill is
       // advertised and usable.
@@ -179,15 +182,22 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 }
 
 /**
- * Polls `/eve/v1/info` until the alias serves a deployment whose manifest
- * contains `marker`, so post-redeploy turns cannot hit a stale deployment.
+ * Polls `/eve/v1/info` until the alias repeatedly serves a deployment whose
+ * manifest contains `marker`. One matching response is insufficient while an
+ * alias update is propagating and could race the next request.
  */
 async function waitForAliasToServe(t: EveEvalContext, marker: string): Promise<void> {
   const deadline = Date.now() + 120_000;
+  let consecutiveMatches = 0;
   while (Date.now() < deadline) {
-    const response = await t.target.fetch("/eve/v1/info");
+    const response = await t.target.fetch("/eve/v1/info", { cache: "no-store" });
     if (response.ok && JSON.stringify(await response.json()).includes(marker)) {
-      return;
+      consecutiveMatches += 1;
+      if (consecutiveMatches >= ALIAS_SETTLE_MATCHES) {
+        return;
+      }
+    } else {
+      consecutiveMatches = 0;
     }
     await t.sleep(1_000);
   }
