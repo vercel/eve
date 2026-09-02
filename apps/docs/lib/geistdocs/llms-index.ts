@@ -28,6 +28,9 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 - [Agents](${EVE_ORIGIN}/docs/agent-config.md): Configure the model, reasoning effort, compaction, and runtime behavior.
 - [Instructions](${EVE_ORIGIN}/docs/instructions.md): Write the agent's always-on system prompt.
 - [Tools](${EVE_ORIGIN}/docs/tools.md): Define typed actions and gate sensitive calls on human approval.
+- [Memory](${EVE_ORIGIN}/docs/memory.md): Give an agent cross-session context through eve-managed slots backed by Supermemory, the built-in file provider, or your own provider.
+- [File Memory](${EVE_ORIGIN}/docs/memory/file.md): Configure the built-in bounded document provider and its storage backends.
+- [Build a Memory Provider](${EVE_ORIGIN}/docs/memory/custom-provider.md): Implement the recall, capture, and tools contract for any store or memory service.
 - [Connections](${EVE_ORIGIN}/docs/connections.md): Connect external MCP and OpenAPI servers without exposing credentials to the model.
 - [Channels](${EVE_ORIGIN}/docs/channels/overview.md): Expose the agent through HTTP, Slack, Discord, and other messaging surfaces.
 - [Base eve Channel](${EVE_ORIGIN}/docs/channels/eve.md): Understand the HTTP API exposed by each running eve app.
@@ -69,7 +72,7 @@ Documentation links below point directly to Markdown. Remove the \`.md\` suffix 
 
 ## Patterns
 
-- [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Compose tenant-scoped long-term memory from dynamic instructions and tools.
+- [Multi-Tenant Memory](${EVE_ORIGIN}/docs/patterns/multi-tenant-memory.md): Scope any memory provider to an authenticated tenant and caller.
 - [Dynamic Scheduling](${EVE_ORIGIN}/docs/patterns/dynamic-scheduling.md): Build application-managed schedules from an eve schedule and authored tools.
 - [Multi-Tenant Outbound Auth](${EVE_ORIGIN}/docs/patterns/multi-tenant-auth.md): Select tenant-scoped credentials for tools and connections.
 - [Multi-Tenant Approvals](${EVE_ORIGIN}/docs/patterns/multi-tenant-approvals.md): Apply tenant policy to authored and connection tools.
