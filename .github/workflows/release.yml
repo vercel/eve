@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  VCR_IMAGE: vcr.vercel.com/vercel/eve/base
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -41,6 +44,47 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Prepare VCR tag
+        if: github.ref == 'refs/heads/main'
+        id: vcr-tag
+        run: |
+          set -euo pipefail
+
+          version="$(jq -er '.version | select(type == "string" and length > 0)' packages/eve/package.json)"
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+          echo "tag=${VCR_IMAGE}:${version}" >>"$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: github.ref == 'refs/heads/main'
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to Vercel Container Registry
+        if: github.ref == 'refs/heads/main'
+        uses: vercel/vcr-login-action@9340c52f6b68b4758d9d2eebbd4c52b36e66f7f3 # main
+        with:
+          team: ${{ secrets.VCR_TEAM_ID }}
+
+      - name: Publish eve image to Vercel Container Registry
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: ./packages/eve
+          file: ./packages/eve/Dockerfile
+          platforms: linux/amd64
+          provenance: false
+          tags: |
+            ${{ steps.vcr-tag.outputs.tag }}
+            ${{ env.VCR_IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.title=eve Sandbox
+            org.opencontainers.image.description=Sandbox base image for eve agents.
+            org.opencontainers.image.source=https://github.com/vercel/eve
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.vcr-tag.outputs.version }}
+          outputs: type=image,push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # `commitMode: github-api` commits through @changesets/ghcommit, which
       # reads the repo with isomorphic-git. Unlike git itself, isomorphic-git

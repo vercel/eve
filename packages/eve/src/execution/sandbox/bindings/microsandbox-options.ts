@@ -1,7 +1,8 @@
+import { DEFAULT_EVE_SANDBOX_IMAGE } from "#execution/sandbox/bindings/eve-image.js";
 import type { MicrosandboxSandboxCreateOptions } from "#public/sandbox/microsandbox-sandbox.js";
 import type { SandboxNetworkPolicy } from "#shared/sandbox-network-policy.js";
 
-export const MICROSANDBOX_DEFAULT_IMAGE = "ghcr.io/vercel/eve:latest";
+export const MICROSANDBOX_DEFAULT_IMAGE = DEFAULT_EVE_SANDBOX_IMAGE;
 export const MICROSANDBOX_DEFAULT_CPUS = 1;
 export const MICROSANDBOX_DEFAULT_MEMORY_MIB = 1024;
 export const MICROSANDBOX_DEFAULT_PULL_POLICY = "if-missing";
