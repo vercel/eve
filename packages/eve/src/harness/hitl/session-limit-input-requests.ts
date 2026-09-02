@@ -1,24 +1,9 @@
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
-import { buildResolvedInputBatch } from "#harness/input-request-resolution.js";
 import {
   getPendingInputBatches,
-  queueDeferredStepInput,
   removePendingInputBatches,
 } from "#harness/pending-input-batches.js";
-import {
-  appendResolvedBatchTranscript,
-  compactStepInput,
-  finishResolvedInput,
-  responsesForBatches,
-} from "#harness/hitl/pending-input-resolution.js";
-import type {
-  InputDomainResolverInput,
-  ResolvePendingInputResult,
-} from "#harness/hitl/pending-input-resolution.js";
-import {
-  isSessionLimitContinuationRequest,
-  resolveSessionLimitContinuation,
-} from "#harness/session-limit-continuation.js";
+import { isSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import type { HarnessSession } from "#harness/types.js";
 
 const SESSION_LIMIT_BATCH_INVARIANT_MESSAGE =
@@ -31,48 +16,6 @@ export function isSessionLimitInputBatch(batch: PendingInputBatch): boolean {
     throw new TypeError(SESSION_LIMIT_BATCH_INVARIANT_MESSAGE);
   }
   return hasSessionLimit;
-}
-
-export function resolveSessionLimitInput(
-  input: InputDomainResolverInput & { readonly pendingBatch: PendingInputBatch },
-): ResolvePendingInputResult {
-  const responseIds = new Set(input.responses.map((response) => response.requestId));
-  const answered =
-    input.pendingBatch.requests.some((request) => responseIds.has(request.requestId)) &&
-    input.pendingBatch.requests.every((request) => responseIds.has(request.requestId));
-  if (!answered) {
-    return {
-      deferredMessage: true,
-      outcome: "unresolved",
-      messages: [...input.baseHistory],
-      session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
-    };
-  }
-
-  const openBatches = input.batches.filter((batch) => batch !== input.pendingBatch);
-  const leftoverResponses = responsesForBatches(input.responses, openBatches);
-  const limitBlocked = openBatches.some((batch) =>
-    batch.requests.some((request) => isSessionLimitContinuationRequest(request)),
-  );
-  const messages = [...input.baseHistory];
-  appendResolvedBatchTranscript(messages, input.pendingBatch, []);
-  const session = removePendingInputBatches(input.session, [input.pendingBatch]);
-  const limitContinuation = resolveSessionLimitContinuation({
-    requests: input.pendingBatch.requests,
-    responses: input.responses,
-  });
-
-  return finishResolvedInput({
-    deferTurnInput: input.deferTurnInput || limitBlocked,
-    leftoverResponses,
-    limitContinuation,
-    messages,
-    resolvedInputs: [buildResolvedInputBatch(input.pendingBatch, input.responses)].filter(
-      (batch): batch is NonNullable<typeof batch> => batch !== undefined,
-    ),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
-  });
 }
 
 /** Drops only harness-authored session-limit prompts from a parked session. */

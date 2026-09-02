@@ -3,27 +3,23 @@ import type { ModelMessage } from "ai";
 import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
-import {
-  getApprovedTools,
-  hasAnsweredApprovalBatch,
-  resolveApprovalInputBatches,
-} from "#harness/hitl/approval-input-requests.js";
+import { getApprovedTools } from "#harness/hitl/approval-input-requests.js";
 import type { RejectedActionBatch } from "#harness/hitl/approval-input-requests.js";
 import { isApprovalRequest } from "#harness/input-request-class.js";
 import type { PendingInputBatch } from "#harness/pending-input-batches.js";
+import {
+  hasSettledApprovalBatch,
+  interpretPendingInput,
+  translatePendingInputEffects,
+} from "#harness/hitl/pending-input-interpreter.js";
 import { getPendingInputBatches, queueDeferredStepInput } from "#harness/pending-input-batches.js";
 import { compactStepInput } from "#harness/hitl/pending-input-resolution.js";
 import type {
   ResolvePendingInputResult,
   ResolvedStepInput,
 } from "#harness/hitl/pending-input-resolution.js";
-import { resolveQuestionOnlyInputBatches } from "#harness/hitl/question-input-requests.js";
 import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
-import {
-  clearPendingSessionLimitPrompt,
-  isSessionLimitInputBatch,
-  resolveSessionLimitInput,
-} from "#harness/hitl/session-limit-input-requests.js";
+import { clearPendingSessionLimitPrompt } from "#harness/hitl/session-limit-input-requests.js";
 import type { HarnessSession, StepInput } from "#harness/types.js";
 
 export { getApprovedTools, clearPendingSessionLimitPrompt };
@@ -70,21 +66,32 @@ export function resolvePendingInput(input: {
     return { outcome: "continue", messages: baseHistory, session: input.session };
   }
 
-  const route = routePendingInput(batches);
+  const initialResponses = canonicalizeInputResponses(input.stepInput?.inputResponses ?? []);
+  const initial = interpretPendingInput({
+    batches,
+    message: input.stepInput?.message !== undefined,
+    responses: initialResponses,
+  });
   const deferTurnInput = hasTailApprovalResponse(baseHistory);
   const textResolutionBatch =
-    route.kind === "session-limit" ? route.batch : batches.length === 1 ? batches[0] : undefined;
+    initial.groups.find((group) => group.kind === "limit")?.batch ??
+    (batches.length === 1 ? batches[0] : undefined);
   const resolvedStepInput =
     textResolutionBatch === undefined
       ? input.stepInput
       : resolveTextMessageInput(textResolutionBatch, input.stepInput);
   const responses = canonicalizeInputResponses(resolvedStepInput?.inputResponses ?? []);
+  const interpretation = interpretPendingInput({
+    batches,
+    message: resolvedStepInput?.message !== undefined,
+    responses,
+  });
 
   if (
-    route.kind === "approval" &&
+    interpretation.groups.some((group) => group.kind === "approval") &&
     input.deferMessagesWhileApprovalsPending === true &&
     resolvedStepInput?.message !== undefined &&
-    !hasAnsweredApprovalBatch(route.approvalBatches, responses)
+    !hasSettledApprovalBatch(interpretation)
   ) {
     return {
       deferredMessage: true,
@@ -103,76 +110,16 @@ export function resolvePendingInput(input: {
     return { outcome: "unresolved", messages: baseHistory, session };
   }
 
-  const resolverInput = {
+  return translatePendingInputEffects({
     baseHistory,
     batches,
     deferTurnInput,
+    interpretation,
+    resolveApprovalKey: input.resolveApprovalKey,
     resolvedStepInput,
     responses,
     session: input.session,
-  };
-  switch (route.kind) {
-    case "session-limit":
-      return resolveSessionLimitInput({ ...resolverInput, pendingBatch: route.batch });
-    case "approval":
-      return resolveApprovalInputBatches({
-        ...resolverInput,
-        approvalBatches: route.approvalBatches,
-        questionBatches: route.questionBatches,
-        resolveApprovalKey: input.resolveApprovalKey,
-      });
-    case "question":
-      return resolveQuestionOnlyInputBatches(resolverInput);
-  }
-}
-
-type PendingInputRoute =
-  | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
-  | {
-      readonly approvalBatches: readonly PendingInputBatch[];
-      readonly kind: "approval";
-      readonly questionBatches: readonly PendingInputBatch[];
-    }
-  | { readonly kind: "question" };
-
-type PendingInputBatchDomain = "approval" | "question" | "session-limit";
-
-function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputRoute {
-  const classified = batches.map((batch) => ({ batch, domain: classifyPendingInputBatch(batch) }));
-  const limitBatch = classified.find(({ domain }) => domain === "session-limit")?.batch;
-  if (limitBatch !== undefined) return { batch: limitBatch, kind: "session-limit" };
-
-  const approvalBatches = classified
-    .filter(({ domain }) => domain === "approval")
-    .map(({ batch }) => batch);
-  if (approvalBatches.length > 0) {
-    const approvalSet = new Set(approvalBatches);
-    return {
-      approvalBatches,
-      kind: "approval",
-      questionBatches: batches.filter((batch) => !approvalSet.has(batch)),
-    };
-  }
-
-  return { kind: "question" };
-}
-
-function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchDomain {
-  for (const request of batch.requests) {
-    switch (request.kind) {
-      case "question":
-      case "session-limit":
-      case "tool-approval":
-        break;
-      default: {
-        const unhandled: never = request.kind;
-        throw new TypeError(`Unhandled pending input request kind: ${String(unhandled)}`);
-      }
-    }
-  }
-
-  if (isSessionLimitInputBatch(batch)) return "session-limit";
-  return batch.requests.some((request) => isApprovalRequest(request)) ? "approval" : "question";
+  });
 }
 
 function canonicalizeInputResponses(responses: readonly InputResponse[]): readonly InputResponse[] {
