@@ -20,13 +20,18 @@ const worker = {
   rootSessionId: "session",
   rootTurnId: "turn",
 };
-const todoAction = {
-  id: "todo-action",
+const previousTodoAction = {
+  id: "previous-todo-action",
   kind: "tool" as const,
   name: "todo",
   parentWorkId: root.id,
   rootTurnId: "turn",
   stepIndex: 0,
+};
+const todoAction = {
+  ...previousTodoAction,
+  id: "todo-action",
+  stepIndex: 1,
 };
 const searchAction = {
   id: "search-action",
@@ -82,6 +87,25 @@ describe("Slack activity plan", () => {
       events: [
         { eventId: "root", kind: "work.started", startedAt: "1", work: root },
         { eventId: "worker", kind: "work.started", startedAt: "2", work: worker },
+        {
+          action: previousTodoAction,
+          eventId: "previous-todo-started",
+          kind: "action.started",
+          startedAt: "2",
+        },
+        {
+          actionId: previousTodoAction.id,
+          eventId: "previous-todo-label",
+          kind: "action.label.updated",
+          label: "Update todo list",
+        },
+        {
+          actionId: previousTodoAction.id,
+          eventId: "previous-todo-settled",
+          kind: "action.settled",
+          outcome: "completed",
+          settledAt: "3",
+        },
         { action: todoAction, eventId: "todo-started", kind: "action.started", startedAt: "3" },
         {
           actionId: todoAction.id,
@@ -200,6 +224,7 @@ describe("Slack activity plan", () => {
     expect(requests[0]!.body.get("chunks")).not.toContain("with extra detail");
     expect(requests[1]!.body.get("chunks")).toContain("• researcher\\n");
     expect(requests[1]!.body.get("chunks")).toContain("• Review Slack plan API\\n");
+    expect(requests[1]!.body.get("chunks")).not.toContain("Update todo list");
     expect(requests[2]!.body.get("chunks")).toContain("Run checks");
     expect(requests[2]!.body.get("chunks")).toContain("✓ Review Slack plan API\\n");
     expect(requests[5]!.body.get("blocks")).toContain('"title":"Agent plan"');
