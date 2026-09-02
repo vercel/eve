@@ -16,7 +16,7 @@ describe("normalizeToolDefinition", () => {
     const tool = defineTool({
       label: {
         start: () => "Echo input",
-        complete: (_input, output) => ({ renderingState: { key: "echo", value: output } }),
+        complete: (_input, output) => ({ renderingState: output }),
       },
       description: "Echoes the input back to the caller.",
       inputSchema: z.object({}),

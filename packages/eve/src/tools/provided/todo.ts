@@ -31,7 +31,7 @@ export const todo = defineTool({
   label: {
     start: (input) => (input.todos === undefined ? "Read todo list" : "Update todo list"),
     complete: (_input, output) => ({
-      renderingState: { key: "todo", value: output.todos },
+      renderingState: output.todos,
     }),
   },
   execute: async (input) => executeTodoTool((input ?? {}) as TodoToolInput),
