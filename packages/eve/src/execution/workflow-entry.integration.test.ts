@@ -695,7 +695,7 @@ describe("workflowEntry integration", () => {
     });
   });
 
-  it.skip("parks in conversation mode and resumes via runtime delivery", async () => {
+  it("parks in conversation mode and resumes via runtime delivery", async () => {
     vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_inline");
     const runtime = await createTestRuntime({ agent: { name: "workflow-entry-conversation" } });
     const continuationToken = "http:workflow-entry-conversation";
