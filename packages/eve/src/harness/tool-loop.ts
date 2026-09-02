@@ -128,11 +128,13 @@ import {
 import { createToolResultMessagePartFromToolError } from "#harness/action-result-helpers.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
-  convertStaleResponsesToUserMessage,
-  dropStaleSessionLimitContinuationResponses,
   hasPendingApprovalPolicyWork,
   interpretRequests,
 } from "#harness/hitl/request-interpreter.js";
+import {
+  convertStaleResponsesToUserMessage,
+  dropStaleSessionLimitContinuationResponses,
+} from "#harness/stale-input-responses.js";
 import { performRequestEffects } from "#harness/hitl/request-effects.js";
 import { recordApprovedToolKeys } from "#harness/hitl/approval-input-requests.js";
 import type { InstrumentationAttempt, InstrumentationStepScope } from "#instrumentation/runtime.js";

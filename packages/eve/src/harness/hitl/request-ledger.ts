@@ -9,6 +9,10 @@ import type {
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import { isInputRequest, type InputRequest, type InputResponse } from "#shared/input.js";
+import {
+  importLegacyBatches,
+  normalizePersistedLedger,
+} from "#harness/hitl/request-ledger-legacy.js";
 
 const KEY = "eve.runtime.hitl.requestLedger";
 const LEGACY_BATCHES_KEY = "eve.runtime.pendingInputBatches";
@@ -72,7 +76,6 @@ export interface ClosedAttempt {
 export type RequestOutcome =
   | {
       readonly kind: "approved";
-      /** Absent when the response carried no responder identity. */
       readonly actor?: ResponderIdentity;
       readonly attemptId?: string;
       readonly at: number;
@@ -183,11 +186,15 @@ export function classifyRequestResponse(
 export function readRequestLedger(state: SessionStateMap | undefined): RequestLedger {
   const persisted = state?.[KEY];
   if (typeof persisted === "object" && persisted !== null) {
-    const ledger = normalizePersistedLedger(persisted as Record<string, unknown>, state);
+    const ledger = normalizePersistedLedger({
+      authorizationRequestId,
+      persisted: persisted as Record<string, unknown>,
+      state,
+    });
     assertUniqueRequestIds(ledger.requests);
     return ledger;
   }
-  return importLegacyBatches(state);
+  return importLegacyBatches({ state, authorizationRequestId, assertUniqueRequestIds });
 }
 
 function writeRequestLedger(input: {
@@ -264,9 +271,7 @@ export function hasPendingAuthorization(state: SessionStateMap | undefined): boo
   return getPendingAuthorization(state) !== undefined;
 }
 
-export function openAuthorizationRequests(
-  ledger: RequestLedger,
-): readonly (RequestRecord & {
+export function openAuthorizationRequests(ledger: RequestLedger): readonly (RequestRecord & {
   readonly request: InternalAuthorizationRequest;
   readonly outcome?: undefined;
 })[] {
@@ -436,345 +441,6 @@ export function acknowledgeReadyRequestGroupDelivery(input: {
   });
 }
 
-type LegacyApprovalCandidateStatus =
-  | "pending"
-  | "authorization-required"
-  | "allowed"
-  | "rejected"
-  | "failed"
-  | "timed-out"
-  | "stale";
-
-interface LegacyApprovalResponderIdentity {
-  readonly authenticator: string;
-  readonly issuer?: string;
-  readonly principalId: string;
-  readonly principalType: string;
-}
-
-interface LegacyApprovalCandidateAuditRecord {
-  readonly candidateId: string;
-  readonly requestId: string;
-  readonly responder: LegacyApprovalResponderIdentity;
-  readonly status: LegacyApprovalCandidateStatus;
-  readonly createdAt: number;
-  readonly completedAt?: number;
-  readonly deliveryId?: string;
-  readonly eventEmitted?: boolean;
-  readonly expiresAt?: number;
-  readonly reason?: string;
-}
-
-interface LegacyApprovalSettlementAuditRecord {
-  readonly actor: LegacyApprovalResponderIdentity;
-  readonly outcome: "allowed" | "cancelled";
-  readonly requestId: string;
-  readonly settledAt: number;
-  readonly candidateId?: string;
-  readonly eventEmitted?: boolean;
-}
-
-interface LegacyActiveApprovalResponseAttempt {
-  readonly attemptId: string;
-  readonly candidateId: string;
-  readonly createdAt: number;
-  readonly deliveryId?: string;
-  readonly expiresAt: number;
-  readonly pendingEventEmitted?: boolean;
-  readonly requestId: string;
-  readonly responder: SessionAuthContext;
-  readonly status: "pending" | "authorization-required";
-}
-
-interface LegacyDurableResponseAttemptState {
-  readonly activeResponseAttempts?: Readonly<Record<string, LegacyActiveApprovalResponseAttempt>>;
-  readonly responseAttemptHistory?: readonly LegacyApprovalCandidateAuditRecord[];
-  readonly settlements?: Readonly<Record<string, LegacyApprovalSettlementAuditRecord>>;
-}
-
-function importLegacyBatches(state: SessionStateMap | undefined): RequestLedger {
-  type LegacyOpenRequestGroup = {
-    readonly event?: RequestGroupEvent;
-    readonly requests: readonly InputRequest[];
-    readonly responseAuthRequiredRequestIds?: readonly string[];
-    readonly responseMessages: readonly ModelMessage[];
-  };
-
-  const collection = state?.[LEGACY_BATCHES_KEY];
-  const candidates = Array.isArray(collection) ? collection : [state?.[LEGACY_BATCH_KEY]];
-  const groups = candidates.filter((value): value is LegacyOpenRequestGroup => {
-    if (typeof value !== "object" || value === null) return false;
-    const group = value as LegacyOpenRequestGroup;
-    return Array.isArray(group.requests) && Array.isArray(group.responseMessages);
-  });
-  const requests: RequestRecord[] = [];
-  const importedGroups = groups.map((group, index): RequestGroup => {
-    const id =
-      group.event === undefined
-        ? `session-turn:${String(index)}`
-        : `session-turn:${group.event.turnId}:${String(group.event.stepIndex)}`;
-    requests.push(
-      ...group.requests.map((request) => ({
-        groupId: id,
-        id: request.requestId,
-        request,
-      })),
-    );
-    return {
-      completion: "waiting",
-      event: group.event,
-      id,
-      owner: "session-turn",
-      requestIds: group.requests.map((request) => request.requestId),
-      responseAuthRequiredRequestIds: group.responseAuthRequiredRequestIds,
-      responseMessages: group.responseMessages,
-    };
-  });
-
-  const requestsWithAttempts = mergeLegacyApprovalState(
-    requests,
-    readLegacyApprovalState(state),
-    readLegacyAuthorizationChallenges(state),
-  );
-  const withPendingAuthorizations = upsertLegacyPendingAuthorizationRequests(
-    requestsWithAttempts,
-    readLegacyAuthorizations(state),
-  );
-
-  assertUniqueRequestIds(withPendingAuthorizations);
-  return { groups: importedGroups, requests: withPendingAuthorizations, version: 0 };
-}
-
-function normalizePersistedLedger(
-  persisted: Record<string, unknown>,
-  state: SessionStateMap | undefined,
-): RequestLedger {
-  const groups = Array.isArray(persisted.groups)
-    ? (persisted.groups as readonly RequestGroup[])
-    : [];
-  const requests = Array.isArray(persisted.requests)
-    ? (persisted.requests as readonly Record<string, unknown>[])
-    : [];
-  const normalized = requests.map((request) => normalizePersistedRequest(request));
-  const mergedApproval = mergeLegacyApprovalState(
-    normalized,
-    persisted.responseAttempts as LegacyDurableResponseAttemptState | undefined,
-    readLegacyAuthorizationChallenges(state),
-  );
-  const withPendingAuthorizations = upsertLegacyPendingAuthorizationRequests(
-    mergedApproval,
-    readLegacyAuthorizations(state),
-  );
-  return {
-    groups,
-    requests: withPendingAuthorizations,
-    version: typeof persisted.version === "number" ? persisted.version : 0,
-  };
-}
-
-function normalizePersistedRequest(request: Record<string, unknown>): RequestRecord {
-  const legacyState = request.state;
-  const normalized: RequestRecord = {
-    groupId: typeof request.groupId === "string" ? request.groupId : undefined,
-    id: String(request.id),
-    request: request.request as DurableRequest,
-    attempts: Array.isArray(request.attempts)
-      ? (request.attempts as readonly ResponseAttempt[])
-      : undefined,
-    attemptHistory: Array.isArray(request.attemptHistory)
-      ? (request.attemptHistory as readonly ClosedAttempt[])
-      : undefined,
-    outcome:
-      typeof request.outcome === "object" && request.outcome !== null
-        ? (request.outcome as RequestOutcome)
-        : legacyState === "terminal"
-          ? ({ kind: "ignored", at: 0 } satisfies RequestOutcome)
-          : undefined,
-    outcomeEventEmitted:
-      typeof request.outcomeEventEmitted === "boolean" ? request.outcomeEventEmitted : undefined,
-  };
-  return normalized;
-}
-
-function mergeLegacyApprovalState(
-  requests: readonly RequestRecord[],
-  approvalState: LegacyDurableResponseAttemptState | undefined,
-  authorizationChallenges: ReadonlyMap<string, readonly AuthorizationChallenge[]>,
-): RequestRecord[] {
-  if (approvalState === undefined) return [...requests];
-
-  const attemptsByRequestId = new Map<string, ResponseAttempt[]>();
-  for (const attempt of Object.values(approvalState.activeResponseAttempts ?? {})) {
-    const list = attemptsByRequestId.get(attempt.requestId) ?? [];
-    list.push(toResponseAttempt(attempt, authorizationChallenges.get(attempt.attemptId) ?? []));
-    attemptsByRequestId.set(attempt.requestId, list);
-  }
-
-  const historyByRequestId = new Map<string, ClosedAttempt[]>();
-  for (const attempt of approvalState.responseAttemptHistory ?? []) {
-    const list = historyByRequestId.get(attempt.requestId) ?? [];
-    list.push(toClosedAttempt(attempt));
-    historyByRequestId.set(attempt.requestId, list);
-  }
-
-  const settlements = approvalState.settlements ?? {};
-  return requests.map((request) => {
-    if (!isApprovalRequestRecord(request)) return request;
-    const attempts = attemptsByRequestId.get(request.id);
-    const attemptHistory = historyByRequestId.get(request.id);
-    const settlement = settlements[request.id];
-    return {
-      ...request,
-      attempts: attempts && attempts.length > 0 ? attempts : request.attempts,
-      attemptHistory:
-        attemptHistory && attemptHistory.length > 0 ? attemptHistory : request.attemptHistory,
-      outcome: request.outcome ?? toRequestOutcome(settlement),
-      outcomeEventEmitted:
-        request.outcomeEventEmitted ??
-        (settlement !== undefined ? settlement.eventEmitted : undefined),
-    };
-  });
-}
-
-function upsertLegacyPendingAuthorizationRequests(
-  requests: readonly RequestRecord[],
-  authorizations: readonly {
-    readonly challenge: AuthorizationChallenge;
-    readonly responseAttemptId?: string;
-  }[],
-): RequestRecord[] {
-  if (authorizations.length === 0) return [...requests];
-  const desired = new Map(
-    authorizations.map((entry) => {
-      const id = authorizationRequestId(entry);
-      return [
-        id,
-        {
-          id,
-          request: {
-            authorization: entry.challenge,
-            kind: "authorization" as const,
-            requestId: id,
-            responseAttemptId: entry.responseAttemptId,
-          },
-        } satisfies RequestRecord,
-      ] as const;
-    }),
-  );
-
-  const result = requests.map((record) => {
-    if (record.request.kind !== "authorization") return record;
-    const replacement = desired.get(record.id);
-    if (replacement === undefined) return record;
-    desired.delete(record.id);
-    return isOpenRequest(record) ? replacement : record;
-  });
-  return [...result, ...desired.values()];
-}
-
-function readLegacyApprovalState(
-  state: SessionStateMap | undefined,
-): LegacyDurableResponseAttemptState | undefined {
-  const legacy = state?.[LEGACY_APPROVAL_STATE_KEY];
-  return typeof legacy === "object" && legacy !== null
-    ? (legacy as LegacyDurableResponseAttemptState)
-    : undefined;
-}
-
-function readLegacyAuthorizationChallenges(
-  state: SessionStateMap | undefined,
-): ReadonlyMap<string, readonly AuthorizationChallenge[]> {
-  const pending = readLegacyAuthorizations(state);
-  const byAttemptId = new Map<string, AuthorizationChallenge[]>();
-  for (const entry of pending) {
-    const attemptId = entry.responseAttemptId;
-    if (attemptId === undefined) continue;
-    const list = byAttemptId.get(attemptId) ?? [];
-    list.push(entry.challenge);
-    byAttemptId.set(attemptId, list);
-  }
-  return byAttemptId;
-}
-
-function readLegacyAuthorizations(
-  state: SessionStateMap | undefined,
-): readonly { readonly challenge: AuthorizationChallenge; readonly responseAttemptId?: string }[] {
-  const legacy = state?.[LEGACY_PENDING_AUTHORIZATION_KEY] as
-    | { readonly challenges?: readonly AuthorizationChallenge[] }
-    | undefined;
-  return (
-    legacy?.challenges?.map((challenge) => ({
-      challenge,
-      responseAttemptId: challenge.candidateId,
-    })) ?? []
-  );
-}
-
-function toResponseAttempt(
-  attempt: LegacyActiveApprovalResponseAttempt,
-  challenges: readonly AuthorizationChallenge[],
-): ResponseAttempt {
-  return {
-    id: attempt.attemptId,
-    createdAt: attempt.createdAt,
-    deliveryId: attempt.deliveryId,
-    expiresAt: attempt.expiresAt,
-    responder: attempt.responder,
-    status: attempt.status === "authorization-required" ? "awaiting-authorization" : "pending",
-    authorizationRequestIds: challenges.map((challenge) =>
-      authorizationRequestId({ challenge, responseAttemptId: attempt.attemptId }),
-    ),
-  };
-}
-
-function toClosedAttempt(attempt: LegacyApprovalCandidateAuditRecord): ClosedAttempt {
-  return {
-    id: attempt.candidateId,
-    createdAt: attempt.createdAt,
-    deliveryId: attempt.deliveryId,
-    expiresAt: attempt.expiresAt ?? attempt.completedAt ?? attempt.createdAt,
-    responder: attempt.responder as SessionAuthContext,
-    status: mapLegacyClosedAttemptStatus(attempt.status),
-    authorizationRequestIds: [],
-    completedAt: attempt.completedAt ?? attempt.createdAt,
-    reason: attempt.reason,
-    eventEmitted: attempt.eventEmitted,
-  };
-}
-
-function mapLegacyClosedAttemptStatus(status: LegacyApprovalCandidateStatus): ClosedAttemptStatus {
-  switch (status) {
-    case "allowed":
-      return "allowed";
-    case "rejected":
-      return "rejected";
-    case "failed":
-      return "failed";
-    case "timed-out":
-      return "timed-out";
-    case "stale":
-      return "stale";
-    case "pending":
-    case "authorization-required":
-      return "stale";
-  }
-}
-
-function toRequestOutcome(
-  settlement: LegacyApprovalSettlementAuditRecord | undefined,
-): RequestOutcome | undefined {
-  if (settlement === undefined) return undefined;
-  if (settlement.outcome === "allowed") {
-    return {
-      kind: "approved",
-      actor: settlement.actor,
-      attemptId: settlement.candidateId,
-      at: settlement.settledAt,
-    };
-  }
-  return { kind: "cancelled", at: settlement.settledAt };
-}
-
 function closeOpenRequest(request: RequestRecord, now: number): RequestRecord {
   if (request.request.kind === "authorization") {
     return { ...request, outcome: { kind: "cancelled", at: now } };
@@ -797,10 +463,6 @@ function closeOpenRequest(request: RequestRecord, now: number): RequestRecord {
           ],
     outcome: { kind: "cancelled", at: now },
   };
-}
-
-function isApprovalRequestRecord(request: RequestRecord): boolean {
-  return request.request.kind === "tool-approval";
 }
 
 function isReadyCompletion(
