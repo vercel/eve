@@ -155,9 +155,17 @@ Message hooks return `{ auth }` to dispatch, `null` to drop, or `{ auth, context
 
 Only the first available handler runs. A message hook returning `null` drops the message; it does not continue down the table.
 
+### Interactive callbacks
+
+#### Message interactions
+
 `onInteraction(action, ctx)` separately handles user-owned `block_actions` callbacks. eve-owned HITL buttons and modal submissions go through `onInputResponse(ctx, submission)` instead. eve attaches the triggering Slack user id to the same model message as its text, preserving speaker attribution without profile lookups.
 
+#### Shortcuts
+
 Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
+
+#### Raw interaction fallback
 
 Use `onRawInteraction(interaction, ctx)` as the fallback for signed interactive callbacks that eve's HITL handling, `onInteraction`, or `onShortcut` does not claim. This includes App Home and modal `block_actions`, custom `view_submission` callbacks, dynamic select `block_suggestion` requests, `view_closed`, and interaction types added by Slack later. The fallback receives the complete decoded Slack payload under `interaction.payload`, plus its `type` and normalized `user`, `teamId`, `installationTeamId`, and `enterpriseId` fields when Slack supplies them. The workspace-scoped `ctx.slack` handle resolves credentials from `installationTeamId`, which can differ from the actor's `teamId` in Slack Connect callbacks.
 
@@ -197,6 +205,8 @@ export default slackChannel({
 
 Handler precedence matches the Events API fallback: a configured `onInteraction` claims message-backed `block_actions`, and a configured `onShortcut` claims shortcuts. Returning from either handler does not continue to `onRawInteraction`. eve-owned HITL actions and submissions remain reserved and do not reach the raw fallback.
 
+#### Slash commands
+
 Use `onSlashCommand(command, ctx)` for commands configured under **Slash Commands** in your Slack app. The handler receives the command name, argument text, invoking user, channel, workspace, trigger ID, and response URL. It also receives workspace-scoped Slack API access. eve acknowledges slash commands immediately with an empty `200 OK` response and keeps the handler alive in the background:
 
 ```ts title="agent/channels/slack.ts"
@@ -213,6 +223,8 @@ export default slackChannel({
   },
 });
 ```
+
+### Message handling details
 
 The model-visible `<slack_message>` includes `sender_id`, `bot_user_id` when available, and the `is_mentioned` value from `ctx.isBotMentioned()`. Its `<content>` keeps `<@USER_ID>` intact while converting other mrkdwn to Markdown; routing is unchanged.
 
