@@ -19,7 +19,7 @@ import { reconcileSessionContinuationToken } from "#execution/reconcile-session-
 import { hydrateDurableSession } from "#execution/session.js";
 import { emitProxiedInputRequest } from "#execution/subagent-hitl-proxy.js";
 import { upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import type { ProxyInputRequest } from "#harness/proxy-input-requests.js";
+import type { AnswerHookRoute, ProxyInputRequest } from "#harness/proxy-input-requests.js";
 import type { HarnessSession } from "#harness/types.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 import { encodeMessageStreamEvent, stampMessageStreamEvent } from "#protocol/message.js";
@@ -39,6 +39,7 @@ interface ProxySubagentEventResult {
 
 /** Proxies one child event through its parent channel across a durable step boundary. */
 export async function runProxySubagentEventStep(input: {
+  readonly answerHook?: AnswerHookRoute;
   readonly hookPayload: SubagentEventHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -50,6 +51,7 @@ export async function runProxySubagentEventStep(input: {
   const ctx = await deserializeContext(input.serializedContext);
 
   return emitProxiedSubagentEvent({
+    answerHook: input.answerHook,
     ctx,
     durableSession,
     hookPayload: input.hookPayload,
@@ -99,6 +101,7 @@ export async function emitRecordedTaskAuthorizationEventStep(input: {
 
 /** Applies one proxied child event to an already-hydrated parent context. */
 export async function emitProxiedSubagentEvent(input: {
+  readonly answerHook?: AnswerHookRoute;
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
@@ -156,8 +159,12 @@ export async function emitProxiedSubagentEvent(input: {
     proxyEntries !== undefined &&
     input.hookPayload.kind === "subagent-input-request"
   ) {
+    const answerHook = input.answerHook;
     scopedSession = upsertProxyInputRequests({
-      entries: proxyEntries,
+      entries:
+        answerHook === undefined
+          ? proxyEntries
+          : proxyEntries.map(([requestId, route]) => [requestId, { ...route, answerHook }]),
       forChildContinuationToken: input.hookPayload.childContinuationToken,
       session: scopedSession,
     });

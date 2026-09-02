@@ -1,8 +1,25 @@
+import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js";
 import { WizardCancelledError } from "#setup/step.js";
+
+import { reportHeadlessSetupCompletion } from "./setup-headless.js";
 
 export interface RegistryCommandLogger {
   error(message: string): void;
   log(message: string): void;
+}
+
+export function reportRegistryCompletion(
+  logger: RegistryCommandLogger,
+  item: string,
+  completion: RegistrySetupCompletion | false,
+  options: { nonInteractive?: boolean },
+): RegistrySetupCompletion | undefined {
+  return reportHeadlessSetupCompletion({
+    logger,
+    item,
+    completion,
+    nonInteractive: options.nonInteractive,
+  });
 }
 
 export function errorMessage(error: unknown): string {

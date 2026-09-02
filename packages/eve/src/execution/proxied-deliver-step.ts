@@ -8,6 +8,8 @@ import {
 import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { resumeToolRunAnswers } from "#execution/tool-run/answer.js";
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import {
@@ -42,6 +44,7 @@ type LegacyRoutedDeliverResult =
     };
 
 interface ChildBucket {
+  readonly answerHook?: AnswerHookRoute;
   readonly childContinuationToken: string;
   readonly childResponseUrl?: string;
   readonly metadata: NonNullable<DeliverHookPayload["deliveryMetadata"]>[number][];
@@ -114,6 +117,7 @@ export async function routeProxiedDeliverStep(
               forChild.taskId,
             ].join("\0");
       const child = children.get(key) ?? {
+        answerHook: forChild.answerHook,
         childContinuationToken: forChild.childContinuationToken,
         childResponseUrl: forChild.childResponseUrl,
         metadata: [],
@@ -168,6 +172,16 @@ export async function routeProxiedDeliverStep(
       // Hand-off to the task run succeeded. Retire the parent-visible
       // routes so a later click cannot re-enter the same batch after the
       // run has already accepted (or no-op'd) this answer.
+      durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
+      retired = true;
+      continue;
+    }
+
+    if (child.answerHook !== undefined) {
+      await resumeToolRunAnswers(
+        child.childContinuationToken,
+        coalesceDeliverPayloads(child.payloads).inputResponses,
+      );
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
       retired = true;
       continue;

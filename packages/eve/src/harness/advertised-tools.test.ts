@@ -186,22 +186,29 @@ function createTool(name: string): HarnessToolDefinition {
 function createSubagentTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
-    runtimeAction: {
-      kind: "subagent-call",
-      nodeId: "workers",
-      subagentName: name,
+    behavior: {
+      availability: [],
+      handling: {
+        kind: "dispatch",
+        target: { kind: "subagent-call", nodeId: "workers", subagentName: name },
+      },
     },
-    workflowCallable: true,
   };
 }
 
 function createBuiltInAgentTool(): HarnessToolDefinition {
   return {
     ...createSubagentTool("agent"),
-    runtimeAction: {
-      kind: "subagent-call",
-      nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-      subagentName: "agent",
+    behavior: {
+      availability: ["root-session"],
+      handling: {
+        kind: "dispatch",
+        target: {
+          kind: "self-agent-call",
+          nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
+          subagentName: "agent",
+        },
+      },
     },
   };
 }
@@ -209,7 +216,13 @@ function createBuiltInAgentTool(): HarnessToolDefinition {
 function createTaskControlTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
-    runtimeAction: { kind: "task-control" },
+    behavior: {
+      availability: [name === "task_update" ? "delegated-task-child" : "root-session"],
+      handling: {
+        kind: "dispatch",
+        target: { kind: name === "task_update" ? "task-update" : "task-cancel" },
+      },
+    },
   };
 }
 

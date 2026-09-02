@@ -36,6 +36,12 @@ console.log(result.status, result.message);
 
 When the stream includes `session.failed`, the turn returns `status: "failed"` rather than throwing. Transport and route errors throw `ClientError`.
 
+`session.send()` retries `409 session_not_active` three times when a durable run has been accepted
+but its command inbox is still starting. The retries wait 250 ms, 500 ms, and 1 second. Other
+errors, `session.respond()`, control methods, and raw HTTP requests do not use this retry. An unknown
+session still throws `ClientError` immediately, while a terminal session throws after the final
+attempt. The client never creates a replacement session.
+
 ## Send a full turn payload
 
 Pass the full payload to `create()` for the first turn or `send()` for a follow-up:

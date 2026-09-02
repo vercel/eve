@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { rm, writeFile } from "node:fs/promises";
+import { realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -10,7 +10,10 @@ import {
   resolveDevelopmentRuntimeArtifactsPointerPath,
 } from "../../src/internal/nitro/dev-runtime-artifacts.js";
 import { STRUCTURAL_RELOAD_LOG_LINE } from "../../src/internal/nitro/host/dev-watcher-log.js";
-import { useScenarioApp } from "../../src/internal/testing/scenario-app.js";
+import {
+  type ScenarioAppDescriptor,
+  useScenarioApp,
+} from "../../src/internal/testing/scenario-app.js";
 import { sendDevelopmentMessage } from "../dev-client-harness/send-message.js";
 import { createDevelopmentSessionState } from "../dev-client-harness/session.js";
 import {
@@ -33,6 +36,37 @@ import {
 
 const scenarioApp = useScenarioApp();
 
+const LOCAL_DEV_CAPABILITY_DESCRIPTOR: ScenarioAppDescriptor = {
+  ...DEV_SERVER_AGENT_DESCRIPTOR,
+  files: {
+    ...DEV_SERVER_AGENT_DESCRIPTOR.files,
+    "agent/channels/local-dev-capability.ts": [
+      'import { writeFile } from "node:fs/promises";',
+      'import { join } from "node:path";',
+      'import { defineChannel, GET } from "eve/channels";',
+      'import { getLocalDevCapability } from "eve/local-dev";',
+      "",
+      "export default defineChannel({",
+      "  routes: [",
+      '    GET("/local-dev-capability", async () => {',
+      "      const capability = getLocalDevCapability();",
+      "      if (capability === undefined) return Response.json({ available: false });",
+      "      return await capability.withSuspendedSource(async () => {",
+      '        await writeFile(join(capability.appRoot, "local-dev-capability.marker"), "updated\\n");',
+      "        return Response.json({",
+      "          appRoot: capability.appRoot,",
+      "          available: true,",
+      "          interactiveClient: capability.interactiveClient,",
+      "        });",
+      "      });",
+      "    }),",
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+  },
+};
+
 function createCandidateChannelSource(): string {
   return createTransactionalChannelSource([
     '    GET("/candidate-only", () => new Response("candidate")),',
@@ -40,6 +74,37 @@ function createCandidateChannelSource(): string {
 }
 
 describe("eve dev server rebuild transactions", () => {
+  it(
+    "scopes a local-dev capability through the host and releases its watcher lease",
+    async () => {
+      const app = await scenarioApp(LOCAL_DEV_CAPABILITY_DESCRIPTOR);
+      const server = await startEveDev(app.appRoot);
+
+      try {
+        const initialRevision = await readDevelopmentRevision(server.url);
+        const response = await fetch(new URL("/local-dev-capability", server.url), {
+          headers: { "x-eve-dev-interactive-client": "1" },
+        });
+
+        await expect(response.json()).resolves.toEqual({
+          appRoot: await realpath(app.appRoot),
+          available: true,
+          interactiveClient: true,
+        });
+        expect(existsSync(join(app.appRoot, "local-dev-capability.marker"))).toBe(true);
+
+        await writeFile(join(app.appRoot, "agent", "instructions.md"), "Still watching.\n");
+        await waitForCondition(
+          async () => (await readDevelopmentRevision(server.url)) !== initialRevision,
+          `Timed out waiting for the released watcher.\n\nstdout:\n${server.stdout()}\n\nstderr:\n${server.stderr()}`,
+        );
+      } finally {
+        await server.stop();
+      }
+    },
+    DEV_SERVER_SCENARIO_TIMEOUT_MS,
+  );
+
   it(
     "publishes authored tool removals without replacing the active host",
     async () => {

@@ -19,10 +19,23 @@ import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
 
 const resumeHookMock = vi.fn();
 const createHookMock = vi.fn();
+const createOwnerHookMock = vi.fn();
 const sleepMock = vi.fn(async (_duration: unknown) => {});
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+  defineHook: () => ({
+    create: (options?: { readonly token?: string }) => {
+      createOwnerHookMock(options?.token);
+      return {
+        [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => {}) }),
+        dispose: async () => {},
+        getConflict: async () => null,
+        token: options?.token ?? "hook",
+      };
+    },
+    resume: async () => null,
+  }),
   getWorkflowMetadata: vi.fn(() => ({ url: "https://eve.example.com" })),
   sleep: (duration: unknown) => sleepMock(duration),
 }));
@@ -68,6 +81,7 @@ describe("turnWorkflow", () => {
     vi.clearAllMocks();
     resumeHookMock.mockReset();
     createHookMock.mockReset();
+    createOwnerHookMock.mockReset();
     sleepMock.mockClear();
   });
 
@@ -98,6 +112,87 @@ describe("turnWorkflow", () => {
       },
       kind: "turn-result",
     });
+    // A turn that starts no workflow tool run never opens run channels.
+    expect(createOwnerHookMock).not.toHaveBeenCalled();
+  });
+
+  it("continues from an inline step result without executing it twice", async () => {
+    const initialState = createSessionState();
+    const finalState = createSessionState({ continuationToken: "http:continued" });
+    installInbox([]);
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState: initialState,
+    });
+
+    await turnWorkflow({
+      ...input,
+      initialStep: {
+        beforeStep: {
+          serializedContext: input.stepInput.serializedContext,
+          sessionState: initialState,
+        },
+        result: {
+          action: "done",
+          output: "already complete",
+          serializedContext: { state: "done" },
+          sessionState: finalState,
+        },
+      },
+    });
+
+    expect(turnStep).not.toHaveBeenCalled();
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({ kind: "done", output: "already complete" }),
+        kind: "turn-result",
+      }),
+    );
+  });
+
+  it("keeps earlier inline state when cancellation wins over a completed step", async () => {
+    const initialState = createSessionState({ continuationToken: "http:initial" });
+    const beforeStepState = createSessionState({ continuationToken: "http:inline-checkpoint" });
+    const completedState = createSessionState({ continuationToken: "http:completed" });
+    installInbox([]);
+    const { input } = createInput({
+      driverCapabilities: { cancelledTurnSettle: true, turnInbox: true },
+      sessionState: initialState,
+    });
+
+    await turnWorkflow({
+      ...input,
+      initialCancellation: {},
+      initialStep: {
+        beforeStep: {
+          serializedContext: { state: "inline-checkpoint" },
+          sessionState: beforeStepState,
+        },
+        result: {
+          action: "done",
+          output: "must not complete",
+          serializedContext: { state: "done" },
+          sessionState: completedState,
+        },
+      },
+    });
+
+    expect(cancelDescendantTurnsStep).toHaveBeenCalledWith({
+      serializedContext: { state: "inline-checkpoint" },
+      sessionState: beforeStepState,
+    });
+    expect(resumeHookMock).toHaveBeenCalledWith(
+      "turn-token",
+      expect.objectContaining({
+        action: expect.objectContaining({
+          cancelled: true,
+          kind: "park",
+          sessionState: beforeStepState,
+        }),
+        kind: "turn-result",
+      }),
+    );
   });
 
   it("migrates a pre-version (unversioned) input and runs the first turn step", async () => {

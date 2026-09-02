@@ -15,22 +15,16 @@ import {
   readTaskView,
 } from "#execution/tasks/parent/control-shared.js";
 import { executeTaskUpdate } from "#execution/tasks/child/update.js";
+import { readWorkflowToolExecutor } from "#execution/tool-run/background.js";
+import { cancelToolRun } from "#execution/tool-run/cancel.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { DelegatedTask } from "#execution/tasks/parent/delegate.js";
 import { sendTaskCommand } from "#execution/tasks/parent/run-parent.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
 import { createLogger, logError } from "#internal/logging.js";
-import type {
-  RuntimeActionRequest,
-  RuntimeActionResult,
-  RuntimeToolCallActionRequest,
-} from "#shared/action-types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { PendingDispatchAction, PendingTaskControlAction } from "#shared/dispatch-action.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import {
-  TASK_CANCEL_TOOL_NAME,
-  TASK_TOOL_NAMES,
-  TASK_UPDATE_TOOL_NAME,
-} from "#tools/framework/task-contract.js";
 import type { SessionTaskIndexEntry } from "#tasks/session-index.js";
 import {
   isTerminalTaskStatus,
@@ -47,9 +41,9 @@ const CANCEL_COMMIT_POLL_DELAY_MS = 250;
 
 /** True for task-control calls dispatched outside the model loop. */
 export function isTaskControlAction(
-  action: RuntimeActionRequest,
-): action is RuntimeToolCallActionRequest {
-  return action.kind === "tool-call" && TASK_TOOL_NAMES.has(action.toolName);
+  action: PendingDispatchAction,
+): action is PendingTaskControlAction {
+  return action.target.kind === "task-cancel" || action.target.kind === "task-update";
 }
 
 /**
@@ -60,7 +54,7 @@ export function isTaskControlAction(
  * Returns the current session alongside the action result.
  */
 export async function executeTaskControlAction(input: {
-  readonly action: RuntimeToolCallActionRequest;
+  readonly action: PendingTaskControlAction;
   readonly adapter?: ChannelAdapter;
   readonly bundle: CompiledBundle;
   readonly parentStepIndex?: number;
@@ -74,7 +68,7 @@ export async function executeTaskControlAction(input: {
 }> {
   const { action, session } = input;
 
-  if (action.toolName === TASK_UPDATE_TOOL_NAME) {
+  if (action.target.kind === "task-update") {
     return {
       result: await executeTaskUpdate({
         action,
@@ -100,13 +94,6 @@ export async function executeTaskControlAction(input: {
     return { result: createUnknownTasksError(action, lookup.unknown), session };
   }
   const entries = lookup.entries;
-
-  if (action.toolName !== TASK_CANCEL_TOOL_NAME) {
-    return {
-      result: createTaskControlError(action, `Unsupported task control "${action.toolName}".`),
-      session,
-    };
-  }
 
   const views: TaskView[] = [];
   for (const entry of entries) {
@@ -155,6 +142,7 @@ export async function cancelOwnedTask(input: {
     await propagateTaskCancel({
       bundle: input.bundle,
       serializedContext: input.serializedContext,
+      entry,
       session: input.session,
       view: settledView,
     });
@@ -172,9 +160,22 @@ export async function cancelOwnedTask(input: {
 async function propagateTaskCancel(input: {
   readonly bundle: CompiledBundle;
   readonly serializedContext?: Record<string, unknown>;
+  readonly entry: SessionTaskIndexEntry;
   readonly session: RuntimeSession;
   readonly view: TaskView;
 }): Promise<void> {
+  const toolRun = readWorkflowToolExecutor(input.view.executor?.binding);
+  if (toolRun !== undefined) {
+    // The run reports its own end only after its cancel grace period; settle
+    // the executor now so the task run finishes and releases its hook.
+    await cancelToolRun(toolRun, `Task ${input.entry.taskId} was cancelled.`);
+    await sendTaskCommand({
+      command: { kind: "settle-executor" },
+      taskInboxToken: input.entry.taskInboxToken,
+    });
+    return;
+  }
+
   const metadata = readSubagentTaskMetadata(input.view);
   if (metadata === undefined) return;
   const executor =

@@ -2,7 +2,8 @@ import type { RuntimeSession } from "#execution/agent-handle-dispatch.js";
 import { readLatestTaskView } from "#execution/tasks/parent/run-parent.js";
 import { isTaskWorkflowTargetGone } from "#execution/tasks/workflow-target.js";
 import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
-import type { RuntimeActionResult, RuntimeToolCallActionRequest } from "#shared/action-types.js";
+import type { RuntimeActionResult } from "#shared/action-types.js";
+import type { TaskControlInvocation } from "#shared/dispatch-action.js";
 import { taskViewsToJson } from "#tasks/json.js";
 import {
   findSessionTaskEntry,
@@ -109,7 +110,7 @@ export async function findActiveTaskForAgent(
 
 /** One successful task-control result carrying full task views. */
 export function createTaskViewsResult(
-  action: RuntimeToolCallActionRequest,
+  action: TaskControlInvocation,
   views: readonly TaskView[],
 ): RuntimeActionResult {
   return {
@@ -122,7 +123,7 @@ export function createTaskViewsResult(
 
 /** One task-control error the model can act on. */
 export function createTaskControlError(
-  action: RuntimeToolCallActionRequest,
+  action: TaskControlInvocation,
   message: string,
 ): RuntimeActionResult {
   return {
@@ -136,7 +137,7 @@ export function createTaskControlError(
 
 /** The ownership error for ids outside this session's task index. */
 export function createUnknownTasksError(
-  action: RuntimeToolCallActionRequest,
+  action: TaskControlInvocation,
   unknown: readonly string[],
 ): RuntimeActionResult {
   return createTaskControlError(

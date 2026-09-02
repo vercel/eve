@@ -161,7 +161,100 @@ describe("registerOtelPipeline", () => {
       registerOtelPipeline({ pipeline: { spanProcessors: [] }, serviceName: "weather" }),
     ).toThrow(/another runtime already owns/u);
   });
+
+  it("drains held children on flush when their parent never ends", async () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    const child = physicalSpan("3", "2");
+    processor.onStart(parent, {});
+    processor.onStart(child, {});
+    processor.onEnd(child);
+    expect(downstream.onEnd).not.toHaveBeenCalled();
+
+    await processor.forceFlush();
+
+    expect(downstream.onEnd).toHaveBeenCalledExactlyOnceWith(child);
+    expect(downstream.forceFlush).toHaveBeenCalledOnce();
+    expect(downstream.onEnd.mock.invocationCallOrder[0]).toBeLessThan(
+      downstream.forceFlush.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("drains held children at shutdown", async () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    const child = physicalSpan("3", "2");
+    processor.onStart(parent, {});
+    processor.onStart(child, {});
+    processor.onEnd(child);
+
+    await processor.shutdown();
+
+    expect(downstream.onEnd).toHaveBeenCalledExactlyOnceWith(child);
+    expect(downstream.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("does not re-forward drained children when the parent ends later", async () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    const child = physicalSpan("3", "2");
+    processor.onStart(parent, {});
+    processor.onStart(child, {});
+    processor.onEnd(child);
+    await processor.forceFlush();
+
+    processor.onEnd(parent);
+
+    expect(downstream.onEnd.mock.calls).toEqual([[child], [parent]]);
+  });
+
+  it("releases held children once one stuck parent exceeds the pending cap", () => {
+    const { downstream, processor } = filteringProcessor();
+    const parent = physicalSpan("2");
+    processor.onStart(parent, {});
+    const overflow = 10_001;
+    for (let index = 0; index < overflow; index += 1) {
+      const child = {
+        parentSpanContext: { spanId: "2".repeat(16), traceId: "1".repeat(32) },
+        spanContext: () => ({
+          spanId: index.toString(16).padStart(16, "0"),
+          traceId: "1".repeat(32),
+        }),
+      };
+      processor.onStart(child, {});
+      processor.onEnd(child);
+    }
+
+    expect(downstream.onEnd).toHaveBeenCalledTimes(overflow);
+  });
 });
+
+function filteringProcessor() {
+  const downstream = {
+    forceFlush: vi.fn(async () => {}),
+    onEnd: vi.fn(),
+    onStart: vi.fn(),
+    shutdown: vi.fn(async () => {}),
+  };
+  registerOTel.mockImplementation(() => undefined);
+  expect(() =>
+    registerOtelPipeline({
+      pipeline: { spanProcessors: [downstream] },
+      serviceName: "weather",
+    }),
+  ).toThrow();
+  const processor = (
+    registerOTel.mock.calls.at(-1)![0] as {
+      spanProcessors: {
+        forceFlush(): Promise<void>;
+        onEnd(span: unknown): void;
+        onStart(span: unknown, parentContext: unknown): void;
+        shutdown(): Promise<void>;
+      }[];
+    }
+  ).spanProcessors[0]!;
+  return { downstream, processor };
+}
 
 function replaySpan(marker: string) {
   return {

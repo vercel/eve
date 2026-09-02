@@ -1,3 +1,4 @@
+import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import { createHook } from "#compiled/@workflow/core/index.js";
 
 import type {
@@ -15,6 +16,13 @@ import {
 } from "#execution/tasks/child/steps.js";
 import { applyTaskTransition } from "#tasks/transitions.js";
 import { translateTaskInboundPayload } from "#tasks/wire.js";
+import { createChannelReader, raceChannelReads } from "#execution/tool-run/owner-channels.js";
+import { openRunOwnerChannels } from "#execution/tool-run/owner.js";
+import {
+  runOutcomeToTaskCommand,
+  runReportToTaskUpdate,
+  runRequestToInputRequestPayload,
+} from "#execution/tool-run/owner-inbox.js";
 import {
   isReadyTaskStatus,
   isTerminalTaskStatus,
@@ -78,7 +86,18 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   // The iterator shares the hook's durable cursor; create it before
   // claiming so conflict replay is consumed by getConflict(), not a
   // later iterator read.
-  const iterator = commands[Symbol.asyncIterator]();
+  const commandReader = createChannelReader("commands", commands);
+  // Only a background tool's task can own a workflow tool run. Opened before
+  // the claim: the parent hands the token to the run as soon as the claim
+  // lands, and the run may report at once.
+  const runChannels =
+    input.initialView.metadata.kind === "tool"
+      ? openRunOwnerChannels(input.taskInboxToken)
+      : undefined;
+  const readers =
+    runChannels === undefined
+      ? ([commandReader] as const)
+      : ([...runChannels.readers, commandReader] as const);
   let ownsHook = false;
 
   try {
@@ -98,15 +117,27 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     let pendingAuthorizationEvents: TaskInboundAuthorizationEvent[] = [];
     let pendingUpdates: TaskInboundUpdate[] = [];
     let dispatchAcknowledged = false;
+    let runUpdateIndex = 0;
+    // The parent answers with the request's token; only this run knows it was a hook.
+    const answerHooks = new Map<string, AnswerHookRoute>();
     await appendTaskViewStep({ activityObserver: input.activityObserver, view });
 
     while (!isTaskRunFinished(view, dispatchAcknowledged)) {
-      const next = await iterator.next();
-      if (next.done === true) return;
+      const read = await raceChannelReads(readers);
+      if (read.next.done === true) return;
+      if (read.channel === "request") {
+        answerHooks.set(read.next.value.answerToken, { runId: read.next.value.from.runId });
+      }
+      const raw: TaskRunHookPayload =
+        read.channel === "report"
+          ? runReportToTaskUpdate(read.next.value, view.taskId, runUpdateIndex++)
+          : read.channel === "request"
+            ? runRequestToInputRequestPayload(read.next.value)
+            : read.channel === "outcome"
+              ? { command: runOutcomeToTaskCommand(read.next.value), kind: "task-command" }
+              : read.next.value;
       const payload: TaskRunInboundPayload =
-        next.value.kind === "subagent-authorization-event"
-          ? { ...next.value, kind: "authorization-event" }
-          : next.value;
+        raw.kind === "subagent-authorization-event" ? { ...raw, kind: "authorization-event" } : raw;
       // Approval lifecycle events (`approval.candidate`/`approval.settled`)
       // are intra-child responder bookkeeping, not task blockers: only
       // `authorization.required`/`authorization.completed` may block or
@@ -153,7 +184,11 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
         };
       } else if (isTaskInputAnswer) {
         if (view.status !== "input_required") continue;
-        command = await resolveAnsweredCommand(view, payload);
+        command = await resolveAnsweredCommand(
+          view,
+          payload,
+          answerHooks.get(payload.childContinuationToken),
+        );
       } else {
         command = translateTaskInboundPayload(payload);
       }
@@ -224,7 +259,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     // Dispose-only teardown: `iterator.return()` would await a pending
     // durable read that never settles, leaving this run `running`
     // forever and its hook unswept.
-    if (ownsHook) await disposeHook(commands);
+    if (ownsHook) {
+      await runChannels?.dispose();
+      await disposeHook(commands);
+    }
   }
 }
 
@@ -241,6 +279,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 async function resolveAnsweredCommand(
   view: Extract<TaskView, { status: "input_required" }>,
   answer: TaskInboundAnswerInput,
+  answerHook: AnswerHookRoute | undefined,
 ): Promise<TaskCommand | undefined> {
   if (answer.taskId !== view.taskId) return undefined;
 
@@ -255,6 +294,6 @@ async function resolveAnsweredCommand(
     .filter((requestId) => outstanding.has(requestId));
   if (requestIds.length === 0) return undefined;
 
-  const delivery = await deliverTaskInputResponsesStep({ answer, requestIds });
+  const delivery = await deliverTaskInputResponsesStep({ answer, answerHook, requestIds });
   return delivery === "delivered" ? { kind: "answered", requestIds } : undefined;
 }

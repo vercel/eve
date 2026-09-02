@@ -407,6 +407,15 @@ export const naturalLogo = (props: LogoProps) => (
   </svg>
 );
 
+export const neonLogo = (props: LogoProps) => (
+  <svg fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <path
+      d="M24 0V24l-9.365-8.045V24H0V0ZM2.942 21.087h8.751V9.563l9.365 8.204V2.919L2.942 2.914Z"
+      fill="#34D59A"
+    />
+  </svg>
+);
+
 export const mem0Logo = (props: LogoProps) => (
   <svg fill="none" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" {...props}>
     <rect fill="#CBB2FF" height="100" rx="12" width="100" />
@@ -777,6 +786,7 @@ export const logos = {
   miro: miroLogo,
   mixpanel: mixpanelLogo,
   natural: naturalLogo,
+  neon: neonLogo,
   netlify: netlifyLogo,
   oreilly: oreillyLogo,
   planetscale: planetscaleLogo,

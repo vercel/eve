@@ -452,6 +452,14 @@ function renderCommand(block: Block, theme: Theme): string[] {
  * Connect URL, a written env file). The tone travels in `title`; info dims,
  * the other tones keep the body at full intensity behind their glyph.
  */
+function paintOutcomeMarker(line: string, theme: Theme, source = line): string {
+  const marker = source.trimStart().slice(0, 1);
+  if (marker === "✓") return line.replace(marker, theme.colors.green(theme.glyph.success));
+  if (marker === "⨯") return line.replace(marker, theme.colors.red(theme.glyph.error));
+  if (marker === "–") return line.replace(marker, theme.colors.yellow(theme.glyph.dash));
+  return line;
+}
+
 function renderFlow(block: Block, width: number, theme: Theme): string[] {
   const c = theme.colors;
   const tone = block.title ?? "info";
@@ -464,7 +472,8 @@ function renderFlow(block: Block, width: number, theme: Theme): string[] {
           ? c.red(theme.glyph.error)
           : c.dim(theme.glyph.dot);
   const lines = wrap(block.body ?? "", width - 2);
-  const paint = (line: string): string => (tone === "info" ? c.dim(line) : line);
+  const paint = (line: string): string =>
+    tone === "info" ? c.dim(line) : paintOutcomeMarker(line, theme);
   return lines.map((line, index) => `${index === 0 ? glyph : " "} ${paint(line)}`);
 }
 
@@ -493,8 +502,10 @@ function renderResult(block: Block, width: number, theme: Theme): string[] {
   // SGR 22 closes bold and dim together, so a result that bolds a span (the
   // /model reply's model name) would drop the rest of the line out of dim;
   // re-open dim after each close so the whole line stays quiet.
-  const dim = (line: string): string =>
-    theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
+  const dim = (line: string): string => {
+    const body = theme.colors.dim(line.replaceAll("\x1b[22m", "\x1b[22m\x1b[2m"));
+    return paintOutcomeMarker(body, theme, line);
+  };
   return lines.map((line, index) =>
     index === 0 ? `   ${marker}  ${dim(line)}` : `      ${dim(line)}`,
   );

@@ -1,8 +1,9 @@
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
-import { defineSubagent, registerLocalSubagentExecutor } from "#execution/tools/subagent/local.js";
+import { defineSubagent } from "#execution/tools/subagent/local.js";
 import { defineRemoteSubagent } from "#execution/tools/subagent/remote.js";
 import type { PreparedRuntimeDelegationTool } from "#runtime/sessions/turn.js";
+import type { PreparedDispatchTarget } from "#tools/behavior.js";
 import {
   UNSPECIFIED_INPUT_SCHEMA,
   toInputSchema,
@@ -12,70 +13,86 @@ import {
 
 type HarnessDelegationTool = Pick<
   PreparedRuntimeDelegationTool,
-  "description" | "kind" | "name" | "nodeId"
+  "behavior" | "description" | "name"
 > & {
   readonly inputSchema?: ToolSchemaSource | null;
   readonly outputSchema?: ToolSchemaSource | null;
-  readonly rootOnly?: boolean;
 };
+
+type AgentDispatchTarget = Extract<
+  PreparedDispatchTarget,
+  {
+    readonly kind: "remote-agent-call" | "self-agent-call" | "subagent-call";
+  }
+>;
 
 export function createHarnessDelegationToolDefinition(
   tool: HarnessDelegationTool,
 ): HarnessToolDefinition {
-  const runtimeAction: HarnessToolDefinition["runtimeAction"] =
-    tool.kind === "remote"
-      ? {
-          kind: "remote-agent-call",
-          nodeId: tool.nodeId,
-          remoteAgentName: tool.name,
-          subagentName: tool.name,
-        }
-      : {
-          kind: "subagent-call",
-          nodeId: tool.nodeId,
-          subagentName: tool.name,
-        };
-
   return {
+    behavior: tool.behavior,
     description: tool.description ?? "",
     inputSchema: toInputSchema(tool.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
     outputSchema: toOutputSchema(tool.outputSchema) ?? undefined,
-    rootOnly: tool.rootOnly,
-    runtimeAction,
-    workflowCallable: true,
   };
 }
 
 export function createBackgroundSubagentHarnessDefinition(
   tool: HarnessDelegationTool,
 ): HarnessToolDefinition {
-  const definition =
-    tool.kind === "remote"
-      ? defineRemoteSubagent({
-          description: tool.description ?? "",
-          name: tool.name,
-          nodeId: tool.nodeId,
-        })
-      : defineSubagent({
-          description: tool.description ?? "",
-          name: tool.name,
-          nodeId: tool.nodeId,
-        });
+  const target = tool.behavior?.handling;
+  if (target?.kind !== "dispatch") {
+    throw new Error(`Background subagent tool "${tool.name}" has no prepared dispatch target.`);
+  }
+  if (
+    target.target.kind === "task-cancel" ||
+    target.target.kind === "task-update" ||
+    target.target.kind === "workflow-tool-call"
+  ) {
+    throw new Error(
+      `Background subagent tool "${tool.name}" cannot dispatch ${target.target.kind}.`,
+    );
+  }
+  const definition = createBackgroundSubagentDefinition({
+    description: tool.description ?? "",
+    name: tool.name,
+    target: target.target,
+  });
   const execute = createToolExecuteWithAuth({
     execute: definition.execute,
     execution: definition.execution,
     scope: tool.name,
   });
-  if (tool.kind !== "remote") registerLocalSubagentExecutor(execute);
   return {
+    behavior: tool.behavior,
     description: definition.description,
     execute,
     execution: definition.execution,
     inputSchema: toInputSchema(definition.inputSchema) ?? UNSPECIFIED_INPUT_SCHEMA,
     name: tool.name,
     outputSchema: toOutputSchema(definition.outputSchema) ?? undefined,
-    rootOnly: tool.rootOnly,
-    workflowCallable: true,
   };
+}
+
+function createBackgroundSubagentDefinition(input: {
+  readonly description: string;
+  readonly name: string;
+  readonly target: AgentDispatchTarget;
+}) {
+  switch (input.target.kind) {
+    case "remote-agent-call":
+      return defineRemoteSubagent({
+        description: input.description,
+        name: input.name,
+        target: input.target,
+      });
+    case "self-agent-call":
+    case "subagent-call":
+      return defineSubagent({
+        description: input.description,
+        name: input.name,
+        target: input.target,
+      });
+  }
 }

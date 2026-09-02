@@ -55,6 +55,10 @@ const DEVELOPMENT_ARTIFACTS_CONFIG = {
   moduleMapLoaderPath: "/eve/src/internal/authored-module-map-loader.ts",
 } as const;
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 function createRuntime(overrides: Partial<Runtime> = {}): Runtime {
   return {
     createSession: vi.fn(),
@@ -336,6 +340,43 @@ describe("dispatchChannelRequest", () => {
     expect(response.status).toBe(200);
     expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
       { requestId: "iad1::abc123-1710000000000-deadbeef" },
+    );
+  });
+
+  it("tags route sends with the Vercel deployment that accepted them", async () => {
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_current");
+    const runtimeForTest = createRuntime({
+      dispatchContinuation: vi.fn().mockResolvedValue({
+        sessionId: "sess_route",
+        status: "accepted",
+      }),
+    });
+
+    mockedResolveNitroChannelRuntimeBundle.mockResolvedValue({
+      agentName: "test-agent",
+      channels: [
+        {
+          handler: async (_req, args) => {
+            await args.from("route-token").send("hello", { auth: null });
+            return new Response("ok");
+          },
+          fetch: async () => new Response("ok"),
+          adapter: { kind: "channel:webhook" },
+          logicalPath: "agent/channels/webhook.ts",
+          method: "POST",
+          name: "webhook",
+          sourceId: "channel-webhook",
+          sourceKind: "module",
+          urlPath: "/webhook",
+        } satisfies ResolvedChannelDefinition,
+      ],
+      runtime: runtimeForTest,
+    });
+
+    await dispatchChannelRequest(createEvent({ waitUntil: vi.fn() }), "POST /webhook", {} as never);
+
+    expect(vi.mocked(runtimeForTest.dispatchContinuation).mock.calls[0]?.[0].command).toMatchObject(
+      { delivery: { acceptedDeploymentId: "dpl_current" } },
     );
   });
 

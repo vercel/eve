@@ -34,7 +34,7 @@ import type { NamedSkillDefinition } from "#shared/skill-definition.js";
 import type { InternalAgentDefinition } from "#shared/agent-definition.js";
 import type { RuntimeDynamicModelReference } from "#runtime/agent/bootstrap.js";
 import type { InternalToolDefinitionWithExecuteFn } from "#tools/definition.js";
-import type { WebSearchProvider } from "#shared/web-search.js";
+import type { CompiledToolBehavior } from "#tools/behavior.js";
 import type { SandboxBackend } from "#shared/sandbox-backend.js";
 import type { SandboxBootstrapContext, SandboxSessionContext } from "#shared/sandbox-definition.js";
 import type { ToolSchema } from "#tools/schema.js";
@@ -165,6 +165,7 @@ export type ResolvedToolDefinition = Readonly<
   >
 > &
   ResolvedModuleSourceRef & {
+    readonly behavior?: CompiledToolBehavior;
     readonly owner: AgentSourceOwner;
     /**
      * Validated runtime input schema. Compiled and durable JSON Schemas are
@@ -441,7 +442,6 @@ export interface ResolvedAgent {
     readonly maxSubagents?: number;
   };
   /** AI Gateway provider selected for the framework `web_search` tool. */
-  readonly webSearchProvider?: WebSearchProvider;
   readonly dynamicInstructionsResolvers: readonly ResolvedDynamicInstructionsResolver[];
   readonly dynamicSkillResolvers: readonly ResolvedDynamicSkillResolver[];
   readonly dynamicToolResolvers: readonly ResolvedDynamicToolResolver[];

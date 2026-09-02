@@ -4,17 +4,19 @@ import {
   DEFAULT_WORKFLOW_MAX_SUBAGENTS,
   planWorkflowSubagentDispatch,
 } from "#harness/workflow-subagent-limit.js";
-import type { RuntimeActionRequest } from "#shared/action-types.js";
+import type { PendingDispatchAction } from "#shared/dispatch-action.js";
 
-function createAction(index: number): RuntimeActionRequest {
+function createAction(index: number): PendingDispatchAction {
   return {
     callId: `call-${index}`,
     description: "",
     input: {},
-    kind: "subagent-call",
-    name: "echo-marker",
-    nodeId: "subagents/echo-marker",
-    subagentName: "echo-marker",
+    target: {
+      kind: "subagent-call",
+      nodeId: "subagents/echo-marker",
+      subagentName: "echo-marker",
+    },
+    toolName: "echo-marker",
   };
 }
 

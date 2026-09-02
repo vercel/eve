@@ -483,6 +483,34 @@ export async function reduceApprovalRecord(input: {
   return ledger;
 }
 
+/**
+ * Whether this step may replay a previously approved tool call: either policy
+ * work is pending, or the delivery approves an open Approval outright.
+ * Persisted dynamic tool metadata must be current before either path runs.
+ */
+export function hasApprovalReplayWork(input: {
+  readonly authorizationResults: readonly AuthorizationResult[];
+  readonly ledger: RequestLedger;
+  readonly now: number;
+  readonly responses: readonly InputResponse[];
+}): boolean {
+  if (hasPendingApprovalPolicyWork(input.ledger, input.now, input.authorizationResults)) {
+    return true;
+  }
+  const approved = new Set(
+    input.responses
+      .filter((response) => response.optionId === "approve")
+      .map((response) => response.requestId),
+  );
+  return input.ledger.requests.some(
+    (record) =>
+      isOpenRequest(record) &&
+      isInputRequest(record.request) &&
+      isApprovalRequest(record.request) &&
+      approved.has(record.id),
+  );
+}
+
 export function hasPendingApprovalPolicyWork(
   ledger: RequestLedger,
   now: number,

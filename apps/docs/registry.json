@@ -34,6 +34,22 @@
       "title": "Self-modification (Experimental)",
       "description": "Add an experimental, development-only source editing subagent to an eve project.",
       "dependencies": ["@eve/self-modification"],
+      "meta": {
+        "eve": {
+          "install": {
+            "pnpm": {
+              "buildScripts": [
+                {
+                  "packages": ["node-liblzma", "@mongodb-js/zstd"],
+                  "optional": true,
+                  "recommendedAction": "ignore-optional",
+                  "reason": "These optional just-bash compression accelerators are not required by the self-modification agent."
+                }
+              ]
+            }
+          }
+        }
+      },
       "files": [
         {
           "path": "registry/experimental/self-modification/agent.ts",
@@ -261,7 +277,15 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "vercel", "vercel", "vercel"]
+            "args": [
+              "integration",
+              "connect",
+              "vercel",
+              "vercel",
+              "vercel",
+              "--connection-method",
+              "mcp"
+            ]
           },
           "requires": ">=0.29.0"
         }
@@ -862,6 +886,31 @@
       ]
     },
     {
+      "name": "connection/neon",
+      "type": "registry:item",
+      "title": "Neon",
+      "description": "Manage Neon projects, run queries, and make schema changes.",
+      "meta": {
+        "eve": {
+          "setup": {
+            "command": "eve",
+            "package": "eve",
+            "bin": "eve",
+            "args": ["integration", "connect", "neon", "neon", "neon", "--principal-type", "app"]
+          },
+          "requires": ">=0.48.0"
+        }
+      },
+      "dependencies": ["@vercel/connect"],
+      "files": [
+        {
+          "path": "registry/connections/neon.ts",
+          "type": "registry:file",
+          "target": "agent/connections/neon.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/netlify",
       "type": "registry:item",
       "title": "Netlify",
@@ -1196,9 +1245,17 @@
             "command": "eve",
             "package": "eve",
             "bin": "eve",
-            "args": ["integration", "connect", "tinybird", "tinybird", "tinybird"]
+            "args": [
+              "integration",
+              "connect",
+              "tinybird",
+              "tinybird",
+              "tinybird",
+              "--principal-type",
+              "app"
+            ]
           },
-          "requires": ">=0.29.0"
+          "requires": ">=0.48.0"
         }
       },
       "dependencies": ["@vercel/connect"],

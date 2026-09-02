@@ -138,6 +138,7 @@ async function resolveRuntimeAgentNode(
   const toolRegistry = await createRuntimeToolRegistry(
     { tools: agent.tools },
     {
+      nodeId,
       reservedToolNames: [WORKFLOW_TOOL_NAME],
     },
   );

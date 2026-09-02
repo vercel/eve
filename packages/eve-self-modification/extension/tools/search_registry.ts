@@ -101,6 +101,10 @@ export interface CatalogEntry {
   readonly requires?: string;
   /** Authored path this item installs, used to detect an existing install. */
   readonly authoredTarget?: string;
+  /** Whether `meta.eve.setup` declares one or more setup commands. */
+  readonly declaresSetup?: boolean;
+  /** Names of environment variables the item declares. */
+  readonly envVars?: readonly string[];
 }
 
 /** One row returned to the model. */
@@ -202,6 +206,12 @@ function authoredTargetOf(entry: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/** Names of environment variables the item declares, used to report unset ones after install. */
+function declaredEnvVars(entry: Record<string, unknown>): readonly string[] {
+  const envVars = entry.envVars;
+  return isRecord(envVars) ? Object.keys(envVars) : [];
+}
+
 /**
  * Narrows the published registry index into catalog entries.
  *
@@ -224,7 +234,9 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
       category?: Category;
       componentSearchTerms?: readonly string[];
       components?: readonly string[];
+      declaresSetup?: boolean;
       description?: string;
+      envVars?: readonly string[];
       requires?: string;
       title: string;
     } = { address, title: optionalString(item.title) ?? titleFromAddress(address) };
@@ -242,6 +254,9 @@ export function parseRegistryIndex(value: unknown): readonly CatalogEntry[] {
     if (requires !== undefined) entry.requires = requires;
     const authoredTarget = authoredTargetOf(item);
     if (authoredTarget !== undefined) entry.authoredTarget = authoredTarget;
+    if (eve.setup !== undefined && eve.setup !== null) entry.declaresSetup = true;
+    const envVars = declaredEnvVars(item);
+    if (envVars.length > 0) entry.envVars = envVars;
 
     entries.push(entry);
   }
@@ -407,7 +422,7 @@ export function clearRegistryIndexCache(): void {
   cache = undefined;
 }
 
-async function loadRegistryIndex(input: {
+export async function loadRegistryIndex(input: {
   readonly nowMs: number;
   readonly signal?: AbortSignal;
   readonly url: string;
@@ -481,7 +496,7 @@ async function annotateInstalled(input: {
 
 export default defineTool({
   description:
-    "Search the eve registry for integrations this project can add: channels, MCP connections, extensions, and observability. Read-only — it installs nothing. Call it before writing an integration by hand, and report the item address (for example `channel/slack`) so the developer can install it with `/add`.",
+    "Search the eve registry for integrations this project can add: channels, MCP connections, extensions, and observability. Read-only — it installs nothing. Call it before writing an integration by hand, then pass an exact item address (for example `channel/slack`) to selfmod__registry_add.",
   inputSchema,
   outputSchema,
   async execute(input, ctx) {

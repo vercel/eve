@@ -1,6 +1,6 @@
 {
   "name": "eve",
-  "version": "0.47.6",
+  "version": "0.49.0",
   "private": false,
   "description": "Filesystem-first framework for durable backend AI agents that run anywhere.",
   "keywords": [
@@ -181,6 +181,16 @@
       "import": "./dist/src/public/tools/workflow.js",
       "default": "./dist/src/public/tools/workflow.js"
     },
+    "./workflow": {
+      "eve-source": "./src/public/workflow/index.ts",
+      "types": "./dist/src/public/workflow/index.d.ts",
+      "import": "./dist/src/public/workflow/index.js",
+      "default": "./dist/src/public/workflow/index.js"
+    },
+    "./workflow-modules": {
+      "eve-source": "./src/public/workflow-modules.d.ts",
+      "types": "./dist/src/public/workflow-modules.d.ts"
+    },
     "./models/openai": {
       "types": "./dist/src/public/models/openai/index.d.ts",
       "import": "./dist/src/public/models/openai/index.js",
@@ -265,6 +275,11 @@
       "types": "./dist/src/internal/programmatic-source-loader.d.ts",
       "import": "./dist/src/internal/programmatic-source-loader.js",
       "default": "./dist/src/internal/programmatic-source-loader.js"
+    },
+    "./local-dev": {
+      "types": "./dist/src/public/local-dev.d.ts",
+      "import": "./dist/src/public/local-dev.js",
+      "default": "./dist/src/public/local-dev.js"
     },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
@@ -433,13 +448,14 @@
     "@vercel/sandbox-delete": "catalog:",
     "@vercel/sandbox-drives": "catalog:",
     "@vercel/sdk": "1.28.8",
-    "@workflow/core": "5.0.0-beta.43",
-    "@workflow/errors": "5.0.0-beta.17",
+    "@workflow/builders": "5.0.0-beta.47",
+    "@workflow/core": "5.0.0-beta.47",
+    "@workflow/errors": "5.0.0-beta.19",
     "@workflow/serde": "5.0.0-beta.2",
-    "@workflow/utils": "5.0.0-beta.8",
-    "@workflow/world": "5.0.0-beta.28",
-    "@workflow/world-local": "5.0.0-beta.37",
-    "@workflow/world-vercel": "5.0.0-beta.39",
+    "@workflow/utils": "5.0.0-beta.10",
+    "@workflow/world": "5.0.0-beta.32",
+    "@workflow/world-local": "5.0.0-beta.41",
+    "@workflow/world-vercel": "5.0.0-beta.43",
     "ai": "catalog:",
     "autoevals": "0.0.132",
     "chat": "4.34.0",

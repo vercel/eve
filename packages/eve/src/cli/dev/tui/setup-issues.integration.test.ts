@@ -107,7 +107,7 @@ describe("BOOT_DETECTIONS against a real directory", () => {
       renderer,
       serverUrl: "http://localhost:3000",
       session: client.sessions.attach("session_test"),
-      initialInput: "/model",
+      onboard: true,
     });
 
     await runner.run();
@@ -115,12 +115,40 @@ describe("BOOT_DETECTIONS against a real directory", () => {
     expect(handle).toHaveBeenNthCalledWith(
       1,
       { type: "extension", name: "model", argument: "" },
-      { renderer, title: "eve", initialModelStep: "provider" },
+      expect.objectContaining({
+        renderer,
+        title: "eve",
+        initialModelStep: "provider",
+        keepSetupFlowOpen: true,
+        setupFlowTitle: "Set up eve",
+        setupFlowNavigation: {
+          kind: "planner",
+          activeStep: 0,
+          firstNavigableStep: 1,
+          steps: [
+            { label: "Model", complete: false },
+            { label: "Channels" },
+            { label: "Integrations" },
+            { label: "Review" },
+          ],
+        },
+      }),
     );
     expect(handle).toHaveBeenNthCalledWith(
       2,
       { type: "extension", name: "add", argument: "" },
-      { renderer, title: "eve" },
+      expect.objectContaining({
+        renderer,
+        title: "eve",
+        keepSetupFlowOpen: true,
+        setupFlowTitle: "Set up eve",
+        registryPlannerContext: {
+          prefixSteps: [{ label: "Model", complete: true }],
+          reviewMessage: "Review your agent",
+          primaryActionLabel: "Install and finish setup",
+          emptyActionLabel: "Finish setup",
+        },
+      }),
     );
     expect(readPrompt).toHaveBeenCalledOnce();
     expect(order).toEqual(["model", "add", "prompt"]);

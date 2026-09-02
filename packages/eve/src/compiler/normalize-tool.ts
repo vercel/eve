@@ -6,6 +6,9 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
+import type { AgentModuleBinding } from "#compiler/source-graph.js";
+import { resolveAuthoredPackageRoot } from "#internal/authored-module-loader.js";
+import { readAuthoredExecuteWorkflowId } from "#internal/workflow-bundle/authored-workflow-modules.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -21,7 +24,6 @@ export type CompiledToolEntry =
   | {
       readonly definition: CompiledToolDefinition;
       readonly kind: "web-search-tool";
-      readonly provider: "exa" | "parallel";
     }
   | { readonly kind: "dynamic-tool"; readonly definition: CompiledDynamicToolDefinition };
 
@@ -71,6 +73,10 @@ export async function compileToolEntry(
     }
     return {
       definition: {
+        behavior: {
+          availability: [],
+          handling: { kind: "provider-tool", provider: entry.provider },
+        },
         description:
           "Search the web for real-time information. Use this to find up-to-date information about current events, recent developments, or topics that may have changed since the knowledge cutoff.",
         exportName: source.exportName,
@@ -84,7 +90,6 @@ export async function compileToolEntry(
         requiresApproval: false,
       },
       kind: "web-search-tool",
-      provider: entry.provider,
     };
   }
 
@@ -103,13 +108,18 @@ export async function compileToolEntry(
     };
   }
 
+  const workflowId = await readToolWorkflowId(options.binding);
   return {
     kind: "tool",
     definition: {
+      behavior:
+        workflowId === undefined
+          ? entry.definition.behavior
+          : { availability: [], handling: { kind: "workflow-tool", workflowId } },
       description: entry.definition.description,
       execution: entry.definition.execution,
       exportName: source.exportName,
-      hasExecute: true,
+      hasExecute: entry.definition.hasExecute,
       hasModelOutputProjection: entry.definition.hasModelOutputProjection,
       inputSchema: entry.definition.inputSchema ?? null,
       logicalPath: source.logicalPath,
@@ -120,4 +130,13 @@ export async function compileToolEntry(
       sourceKind: "module",
     },
   };
+}
+
+async function readToolWorkflowId(binding: AgentModuleBinding): Promise<string | undefined> {
+  if (binding.backing.kind !== "filesystem") return undefined;
+  const filePath = binding.backing.sourcePath;
+  return await readAuthoredExecuteWorkflowId({
+    appRoot: resolveAuthoredPackageRoot(filePath),
+    filePath,
+  });
 }

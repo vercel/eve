@@ -1,5 +1,7 @@
 import { defineTool } from "eve/tools";
 
+import { withAuthoredSourceLock } from "../source-lock.js";
+
 const replacementSchema = {
   type: "object",
   additionalProperties: false,
@@ -120,20 +122,25 @@ export default defineTool({
     }
 
     const sandbox = await ctx.getSandbox();
-    const content = await sandbox.readTextFile({ path });
 
-    if (content === null) {
-      throw new Error(`File not found: ${path}.`);
-    }
-    if (content.includes("\0")) {
-      throw new Error(`File "${path}" contains NUL bytes and appears to be binary.`);
-    }
+    // Serialized against a concurrent registry install, which rewrites
+    // package.json and the authored tree out of process.
+    return await withAuthoredSourceLock(async () => {
+      const content = await sandbox.readTextFile({ path });
 
-    await sandbox.writeTextFile({
-      content: applyExactEdits(content, edits),
-      path,
+      if (content === null) {
+        throw new Error(`File not found: ${path}.`);
+      }
+      if (content.includes("\0")) {
+        throw new Error(`File "${path}" contains NUL bytes and appears to be binary.`);
+      }
+
+      await sandbox.writeTextFile({
+        content: applyExactEdits(content, edits),
+        path,
+      });
+
+      return { path: sandbox.resolvePath(path), replacements: edits.length };
     });
-
-    return { path: sandbox.resolvePath(path), replacements: edits.length };
   },
 });

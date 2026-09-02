@@ -1,9 +1,9 @@
 import {
-  buildConnectionConfigure,
   buildConnectionInstall,
   buildConnectionSetup,
+  renderConnectionVariants,
 } from "./connection-setup";
-import { type Integration, authModeLabel, integrations, protocolLabel } from "./data";
+import { type Integration, integrations } from "./data";
 
 const typeLabel: Record<Integration["type"], string> = {
   channel: "Channel",
@@ -14,19 +14,6 @@ const typeLabel: Record<Integration["type"], string> = {
 };
 
 const section = (title: string, content: string): string => `## ${title}\n\n${content}`;
-
-const connectionQuickStart = (integration: Integration): string => {
-  const setup = buildConnectionSetup(integration);
-
-  return setup.protocols
-    .flatMap((protocol) =>
-      setup.authModes.map((authMode) => {
-        const content = setup.variants[`${protocol}:${authMode}`] ?? "";
-        return `### ${protocolLabel[protocol]} · ${authModeLabel[authMode]}\n\n${content}`;
-      }),
-    )
-    .join("\n\n");
-};
 
 /** Plain text used by the advanced search index for one integration. */
 export const integrationSearchText = (integration: Integration): string =>
@@ -40,11 +27,13 @@ export const integrationSearchText = (integration: Integration): string =>
 /** Markdown representation shared by integration discovery and agent-readable routes. */
 export const integrationMarkdown = (integration: Integration): string => {
   const isConnection = integration.connection !== undefined;
+  const setup = isConnection ? buildConnectionSetup(integration) : undefined;
   const install = isConnection ? buildConnectionInstall(integration) : (integration.install ?? "");
   const quickStart =
-    integration.quickStart ?? (isConnection ? connectionQuickStart(integration) : "");
+    integration.quickStart ?? (setup ? renderConnectionVariants(setup, setup.variants) : "");
   const configure =
-    integration.configure ?? (isConnection ? buildConnectionConfigure(integration) : "");
+    integration.configure ??
+    (setup ? renderConnectionVariants(setup, setup.configureVariants) : "");
 
   return [
     `${typeLabel[integration.type]} integration for eve. ${integration.tagline}`,

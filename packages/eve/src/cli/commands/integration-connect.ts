@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   cleanupCreatedConnectionConnector,
   setupConnectionConnector,
+  type ConnectPrincipalType,
   type SetupConnectionConnectorOptions,
 } from "#setup/connection-connector.js";
 import {
@@ -24,6 +25,7 @@ import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 export interface IntegrationConnectOptions {
   creationType?: string;
   connectionMethod?: "mcp" | "oauth";
+  principalType?: ConnectPrincipalType;
   nonInteractive?: boolean;
   signal?: AbortSignal;
 }
@@ -97,6 +99,7 @@ export async function runIntegrationConnect(input: {
     service: input.service,
     creationType: input.options?.creationType,
     connectionMethod: input.options?.connectionMethod,
+    principalType: input.options?.principalType,
     canonicalConnectorName: input.canonicalConnectorName ?? input.slug,
     project,
     signal,

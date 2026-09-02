@@ -70,9 +70,14 @@ Inbound files are off by default. Opt in to allow personal-scope downloads and p
 
 ```ts
 export default teamsChannel({
-  files: { enabled: true, allowedHosts: ["contoso.sharepoint.com"] },
+  files: {
+    enabled: true,
+    allowedHosts: ["smba.trafficmanager.net", "contoso.sharepoint.com"],
+  },
 });
 ```
+
+eve authenticates downloads from Microsoft Bot Connector hosts with your bot credentials. Downloads from other allowlisted hosts remain unauthenticated.
 
 ## What to read next
 

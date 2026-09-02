@@ -44,7 +44,7 @@ function setupFlowRenderer() {
     renderOutput: vi.fn(),
     withInheritedStdio: (task) => task(),
     waitForInterrupt: () => ({
-      promise: new Promise<void>(() => {}),
+      promise: new Promise<"escape" | "ctrl-c">(() => {}),
       dispose: vi.fn(),
     }),
   } satisfies SetupFlowRenderer;
@@ -276,7 +276,7 @@ describe("createPromptCommandHandler", () => {
   it("reports mutations that completed before remote /vc:login was interrupted", async () => {
     const setupFlow = {
       ...setupFlowRenderer(),
-      waitForInterrupt: () => ({ promise: Promise.resolve(), dispose: vi.fn() }),
+      waitForInterrupt: () => ({ promise: Promise.resolve("ctrl-c" as const), dispose: vi.fn() }),
     } satisfies SetupFlowRenderer;
     const runLoginFlow = vi.fn(async () => ({ kind: "cancelled" as const }));
     const remoteConnection: RemoteConnectionController = {

@@ -58,6 +58,31 @@ describe("runLoginFlow", () => {
     expect(runVercelLogin).toHaveBeenCalledWith(expect.objectContaining({ cwd: APP_ROOT }));
   });
 
+  it("keeps the Vercel device-login URL visible", async () => {
+    const { prompter } = createFakePrompter({});
+    const runVercelLogin = vi.fn<LoginFlowDeps["runVercelLogin"]>(async ({ onOutput }) => {
+      onOutput({
+        stream: "stdout",
+        text: "Visit https://vercel.com/oauth/device?user_code=MDXV-HSVH",
+      });
+      onOutput({ stream: "stdout", text: "Waiting for authentication..." });
+      return false;
+    });
+
+    await expect(
+      runLoginFlow({
+        appRoot: APP_ROOT,
+        prompter,
+        deps: { getVercelAuthStatus: authProbe("logged-out"), runVercelLogin },
+      }),
+    ).resolves.toEqual({ kind: "failed" });
+
+    expect(prompter.log.info).toHaveBeenCalledExactlyOnceWith(
+      "Open https://vercel.com/oauth/device?user_code=MDXV-HSVH",
+    );
+    expect(prompter.log.commandOutput).toHaveBeenCalledTimes(2);
+  });
+
   it("reports failed when vercel login exits non-zero", async () => {
     const runVercelLogin = vi.fn<LoginFlowDeps["runVercelLogin"]>(async () => false);
     await expect(

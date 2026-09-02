@@ -3,12 +3,16 @@ import type { UserContent } from "ai";
 import type { MessageStreamEvent, UnstampedMessageStreamEvent } from "#protocol/message.js";
 import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/cancel-turn.js";
 import type { RunMode } from "#shared/run-mode.js";
-import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import type {
+  RuntimeSubagentChildResult,
+  RuntimeToolResultActionResult,
+} from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
+import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 import type { TaskView } from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
@@ -85,6 +89,7 @@ export interface SessionParent {
  */
 export interface SessionTraceContext {
   readonly decision?: InstrumentationDecision;
+  readonly forwardedTracePolicy?: ForwardedTraceAssertion;
   readonly spanId: string;
   readonly traceFlags: number;
   readonly traceId: string;
@@ -92,6 +97,7 @@ export interface SessionTraceContext {
 
 /** Framework-owned identity for one inbound channel operation. */
 export interface ChannelDeliveryMetadata {
+  readonly acceptedDeploymentId?: string;
   readonly channelKind: string;
   readonly channelName: string;
   readonly deliveryId: string;
@@ -287,14 +293,13 @@ export interface ClearSessionHookPayload {
 }
 
 /**
- * Child-produced subagent results resumed back into a parked parent workflow.
- *
- * The `runtime-action-result` discriminator predates this subagent-only inbox
- * lane. Parent-produced dispatch results never travel through this hook.
+ * Results resumed back into a parked parent workflow by the work it
+ * dispatched: child-produced subagent results and authored workflow tool
+ * results. Parent-produced dispatch results never travel through this hook.
  */
 export interface RuntimeActionResultHookPayload {
   readonly kind: "runtime-action-result";
-  readonly results: readonly RuntimeSubagentChildResult[];
+  readonly results: readonly (RuntimeSubagentChildResult | RuntimeToolResultActionResult)[];
 }
 
 /**
@@ -479,6 +484,14 @@ export interface RunInput {
    */
   readonly continuationToken?: string;
   /**
+   * Framework-owned delivery to forward when another run wins the initial
+   * continuation-token claim. Channel addresses set this so concurrent cold
+   * starts preserve every distinct inbound message inside durable execution.
+   * Create-once and replay-idempotent starts omit it so losing inputs are
+   * discarded.
+   */
+  readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
+  /**
    * The original (top-level) caller's auth, forwarded down the delegation
    * chain so the child's `session.auth.initiator` always resolves back to
    * whoever started the root session. Defaults to {@link auth} when omitted
@@ -544,8 +557,8 @@ export type RunResult =
   | { readonly status: "waiting" };
 
 /**
- * Handle returned by `runtime.createSession()` once the command inbox is ready,
- * before the step loop completes.
+ * Handle returned by `runtime.createSession()` once the durable run is accepted,
+ * before its command inbox or step loop necessarily starts.
  *
  * Carries the identifiers needed for stream endpoints.
  */

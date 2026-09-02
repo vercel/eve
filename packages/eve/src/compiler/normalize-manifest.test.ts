@@ -23,6 +23,8 @@ import { defineInstructions } from "#public/definitions/instructions.js";
 import { defineSchedule } from "#public/definitions/schedule.js";
 import { defineSkill } from "#public/definitions/skill.js";
 import { resolveAgent } from "#runtime/resolve-agent.js";
+import { resolveRuntimeAgentGraph } from "#runtime/resolve-agent-graph.js";
+import { compiledAgentManifestSchema } from "#compiler/manifest.js";
 import { defineTool, disableTool } from "#tools/definition.js";
 import { defineMemory } from "#public/memory/index.js";
 import { defineDynamic } from "#dynamic/definition.js";
@@ -110,6 +112,87 @@ describe("compileAgentManifest source graph", () => {
       sourceRegistry,
     ]);
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
+  });
+
+  it("preserves selected native behavior through serialization and runtime preparation", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/web_search.ts",
+        loadNamespace: async () => ({ default: webSearch({ provider: "parallel" }) }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const serialized = compiledAgentManifestSchema.parse(JSON.parse(JSON.stringify(compiled)));
+    const moduleMap = await createProgrammaticCompiledModuleMap(serialized, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const graph = await resolveRuntimeAgentGraph({ manifest: serialized, moduleMap });
+
+    expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
+      behavior: {
+        availability: ["root-session"],
+        handling: { action: "self-agent", kind: "dispatch" },
+      },
+      hasExecute: false,
+    });
+    expect(serialized.tools.find((tool) => tool.name === "ask_question")).toMatchObject({
+      behavior: {
+        availability: ["requires-request-input"],
+        handling: { kind: "request-input", request: "question" },
+      },
+      hasExecute: false,
+    });
+    expect(serialized.tools.find((tool) => tool.name === "web_search")).toMatchObject({
+      behavior: {
+        availability: [],
+        handling: { kind: "provider-tool", provider: "parallel" },
+      },
+      hasExecute: false,
+    });
+    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
+      behavior: {
+        handling: {
+          kind: "dispatch",
+          target: { kind: "self-agent-call", nodeId: "__root__", subagentName: "agent" },
+        },
+      },
+    });
+    expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
+      behavior: {
+        handling: { kind: "provider-tool", provider: "parallel" },
+      },
+    });
+  });
+
+  it("keeps an authored framework-slot replacement as an ordinary executable tool", async () => {
+    const execute = vi.fn(() => ({ ordinary: true }));
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/agent.ts",
+        loadNamespace: async () => ({
+          default: defineTool({ description: "Application agent tool.", execute, inputSchema: {} }),
+        }),
+      },
+    ]);
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+    const selected = compiled.tools.find((tool) => tool.name === "agent");
+    expect(selected).toMatchObject({ hasExecute: true, logicalPath: "tools/agent.ts" });
+    expect(selected?.behavior).toBeUndefined();
+
+    const moduleMap = await createProgrammaticCompiledModuleMap(compiled, [
+      frameworkAgentSourceRegistry,
+      sourceRegistry,
+    ]);
+    const graph = await resolveRuntimeAgentGraph({ manifest: compiled, moduleMap });
+    const resolved = graph.root.toolRegistry.toolsByName.get("agent")?.definition;
+    expect(resolved?.behavior).toBeUndefined();
+    expect(await resolved?.execute?.({}, {} as never)).toEqual({ ordinary: true });
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("loads the selected config before any non-config definition", async () => {

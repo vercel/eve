@@ -2,7 +2,12 @@ import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import type { DynamicToolEntry } from "#tools/dynamic.js";
-import type { DurableDynamicToolMetadata } from "#context/keys.js";
+import {
+  isCurrentDynamicToolMetadata,
+  type CurrentDynamicToolMetadata,
+  type OldSourceOffsetDynamicToolMetadata,
+  type OldStepFunctionDynamicToolMetadata,
+} from "#context/dynamic-tool-metadata.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
 import { defineTool, type ToolContext } from "#tools/definition.js";
 import type { JsonObject } from "#shared/json.js";
@@ -19,6 +24,7 @@ const {
   replayDynamicSessionTools,
   dispatchDynamicToolEvent,
   refreshDynamicSessionToolsForRuntimeRevision,
+  rebindMissingCompiledDynamicToolCallbacks,
   validateDurableDynamicToolCallbacks,
 } = await import("#context/dynamic-tool-lifecycle.js");
 const { buildDynamicTools, buildResponseAuthorizationTools } =
@@ -39,7 +45,11 @@ import {
   stampDurableDynamicToolCallbacks,
 } from "#tools/durable-callbacks.js";
 import type { ResolvedDynamicToolResolver } from "#runtime/types.js";
-import { createSessionStartedEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
+import {
+  createSessionStartedEvent,
+  createStepStartedEvent,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 
 // Re-implement the naming logic here to test it independently
 // (the production function is unexported — testing via the public behavior)
@@ -186,8 +196,21 @@ function registerTestCallback(
   });
 }
 
+function requireCurrentMetadata(
+  metadata:
+    | CurrentDynamicToolMetadata
+    | OldSourceOffsetDynamicToolMetadata
+    | OldStepFunctionDynamicToolMetadata
+    | undefined,
+): CurrentDynamicToolMetadata {
+  if (metadata === undefined || !isCurrentDynamicToolMetadata(metadata)) {
+    throw new Error("Expected current dynamic tool metadata.");
+  }
+  return metadata;
+}
+
 describe("replayDynamicSessionTools", () => {
-  function metadata(name: string, closure: JsonObject = {}): DurableDynamicToolMetadata {
+  function metadata(name: string, closure: JsonObject = {}): CurrentDynamicToolMetadata {
     return {
       callbacks: { execute: { closure } },
       description: `${name} description`,
@@ -346,6 +369,14 @@ function createApprovalContext(input: {
 }
 
 function makeEvent(type: string): UnstampedMessageStreamEvent {
+  if (type === "step.started") {
+    return createStepStartedEvent({
+      modelId: "test-model",
+      sequence: 0,
+      stepIndex: 0,
+      turnId: "test-turn",
+    });
+  }
   return { type, data: {} } as UnstampedMessageStreamEvent;
 }
 
@@ -549,6 +580,154 @@ describe("dispatchDynamicToolEvent", () => {
     await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ ok: true });
   });
 
+  it("migrates serialized legacy session metadata when the runtime revision is unchanged", async () => {
+    let ctx = createCtx();
+    ctx.set(SessionDynamicToolRuntimeRevisionKey, "deployment:dpl_current");
+    const serialized = serializeContext(ctx);
+    serialized[SessionDynamicToolMetadataKey.name] = [
+      {
+        closureVars: { version: "legacy" },
+        description: "legacy description",
+        entryKey: "tool",
+        executeStepFnName: "fn_0",
+        inputSchema: { type: "object" },
+        name: "tool",
+        resolverSlug: "legacy",
+      } satisfies OldStepFunctionDynamicToolMetadata,
+    ];
+    ctx = await deserializeContext(serialized);
+    const handler = vi.fn(() => ({ tool: createReplayableTool("current description") }));
+    const resolver = createResolver("legacy", ["session.started"], handler);
+
+    await refreshDynamicSessionToolsForRuntimeRevision({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: createSessionStartedEvent(),
+      runtimeRevision: "deployment:dpl_current",
+    });
+
+    expect(handler).toHaveBeenCalledOnce();
+    expect(
+      requireCurrentMetadata(ctx.get(SessionDynamicToolMetadataKey)?.[0]).callbacks.execute.closure,
+    ).toEqual({});
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ ok: true });
+  });
+
+  it("converts source-offset turn metadata while preserving its closure", async () => {
+    let ctx = createCtx();
+    const serialized = serializeContext(ctx);
+    serialized[TurnDynamicToolMetadataKey.name] = [
+      {
+        callbacks: {
+          execute: {
+            closure: { version: "offset" },
+            stepId: "eve:dynamic-tool//old/execute/0-100",
+          },
+        },
+        description: "legacy description",
+        entryKey: "legacy_turn_tool",
+        inputSchema: { type: "object" },
+        name: "legacy_turn_tool",
+        resolverSlug: "legacy",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ];
+    ctx = await deserializeContext(serialized);
+    const entry = defineTool({
+      description: "current description",
+      inputSchema: { type: "object" },
+      execute: async () => null,
+    });
+    stampDurableDynamicToolCallbacks(entry, {
+      execute: {
+        callback: (closure) => closure,
+        closure: { version: "current" },
+      },
+    });
+    const resolver = createResolver("legacy", ["turn.started"], () => ({
+      legacy_turn_tool: entry,
+    }));
+
+    await rebindMissingCompiledDynamicToolCallbacks({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(
+      requireCurrentMetadata(ctx.get(TurnDynamicToolMetadataKey)?.[0]).callbacks.execute.closure,
+    ).toEqual({
+      version: "offset",
+    });
+    const [tool] = buildDynamicTools(ctx);
+    await expect(tool!.execute!({}, executeOptions)).resolves.toEqual({ version: "offset" });
+  });
+
+  it("does not use a same-named callback registered by a different owner", async () => {
+    let ctx = createCtx();
+    const serialized = serializeContext(ctx);
+    serialized[TurnDynamicToolMetadataKey.name] = [
+      {
+        callbacks: {
+          execute: { closure: {}, stepId: "old-offset" },
+        },
+        description: "old description",
+        entryKey: "tool",
+        inputSchema: { type: "object" },
+        name: "colliding_tool",
+        resolverSlug: "missing-owner",
+      } satisfies OldSourceOffsetDynamicToolMetadata,
+    ];
+    ctx = await deserializeContext(serialized);
+    registerTestCallback("colliding_tool", "execute", () => ({ wrongOwner: true }));
+
+    try {
+      await expect(
+        rebindMissingCompiledDynamicToolCallbacks({
+          ctx,
+          event: makeEvent("turn.started"),
+          messages: [],
+          resolvers: [],
+        }),
+      ).rejects.toThrow('Dynamic tool "colliding_tool" uses old persisted metadata');
+    } finally {
+      getDynamicCallbackRegistry().delete("colliding_tool");
+    }
+  });
+
+  it("replaces old step-function turn metadata without requiring cold-rebind opt-in", async () => {
+    let ctx = createCtx();
+    const serialized = serializeContext(ctx);
+    serialized[TurnDynamicToolMetadataKey.name] = [
+      {
+        closureVars: { version: "old" },
+        description: "old description",
+        entryKey: "tool",
+        executeStepFnName: "old-step-function",
+        inputSchema: { type: "object" },
+        name: "tool",
+        resolverSlug: "old",
+      } satisfies OldStepFunctionDynamicToolMetadata,
+    ];
+    ctx = await deserializeContext(serialized);
+    const resolver = createResolver("old", ["turn.started"], () => ({
+      tool: createReplayableTool("current description"),
+    }));
+
+    await rebindMissingCompiledDynamicToolCallbacks({
+      ctx,
+      event: makeEvent("turn.started"),
+      messages: [],
+      resolvers: [resolver],
+    });
+
+    expect(requireCurrentMetadata(ctx.get(TurnDynamicToolMetadataKey)?.[0]).description).toBe(
+      "current description",
+    );
+  });
+
   it("rejects metadata persisted by the pre-release offset-based format", () => {
     const entry = defineTool({
       description: "legacy tool",
@@ -739,10 +918,12 @@ describe("dispatchDynamicToolEvent", () => {
     const resolver = createResolver("api", ["step.started"], () => ({
       query: createReplayableTool("cached"),
     }));
-    const event = {
-      type: "step.started",
-      data: { stepIndex: 1, turnId: "turn-1" },
-    } as UnstampedMessageStreamEvent;
+    const event = createStepStartedEvent({
+      modelId: "test-model",
+      sequence: 0,
+      stepIndex: 1,
+      turnId: "turn-1",
+    });
 
     await dispatchDynamicToolEvent({ ctx, event, messages: [], resolvers: [resolver] });
     ctx.clearVirtualContext();
@@ -766,7 +947,12 @@ describe("dispatchDynamicToolEvent", () => {
       ctx,
       resolvers: [resolver],
       messages: [],
-      event: makeEvent("step.started"),
+      event: createStepStartedEvent({
+        modelId: "test-model",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "test-turn",
+      }),
     });
     expect(buildDynamicTools(ctx)[0]!.description).toBe("call 1");
 
@@ -774,7 +960,12 @@ describe("dispatchDynamicToolEvent", () => {
       ctx,
       resolvers: [resolver],
       messages: [],
-      event: makeEvent("step.started"),
+      event: createStepStartedEvent({
+        modelId: "test-model",
+        sequence: 1,
+        stepIndex: 1,
+        turnId: "test-turn",
+      }),
     });
     expect(buildDynamicTools(ctx)).toHaveLength(1);
     expect(buildDynamicTools(ctx)[0]!.description).toBe("call 2");
@@ -899,7 +1090,9 @@ describe("dispatchDynamicToolEvent", () => {
     });
     expect(buildDynamicTools(ctx)).toHaveLength(1);
     expect(ctx.get(SessionDynamicToolMetadataKey)).toHaveLength(1);
-    expect(ctx.get(SessionDynamicToolMetadataKey)![0]!.callbacks.execute.closure).toEqual({
+    expect(
+      requireCurrentMetadata(ctx.get(SessionDynamicToolMetadataKey)?.[0]).callbacks.execute.closure,
+    ).toEqual({
       apiUrl: "https://api.example.com",
     });
 
@@ -1053,7 +1246,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
 
     const metadata = ctx.get(SessionDynamicToolMetadataKey);
     expect(metadata).toHaveLength(1);
-    expect(metadata![0]!.callbacks.execute.closure).toEqual({});
+    expect(requireCurrentMetadata(metadata?.[0]).callbacks.execute.closure).toEqual({});
 
     const tools = buildDynamicTools(ctx);
     expect(tools).toHaveLength(1);

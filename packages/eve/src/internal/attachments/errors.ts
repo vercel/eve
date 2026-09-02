@@ -28,6 +28,9 @@ interface EveAttachmentErrorInput {
  * Channels can inspect the `.kind` discriminator to decide whether to
  * drop the attachment and continue the turn (the default posture for
  * every kind today) or fail the whole delivery (future strict mode).
+ * `.message` crosses into model-visible input when the attachment is
+ * dropped, so it must not contain URLs, credentials, or verbatim upstream
+ * error text. Preserve private diagnostics on `.cause` instead.
  * The original failure, when there is one, is preserved on `.cause` so
  * observability can surface the upstream error without losing context.
  */

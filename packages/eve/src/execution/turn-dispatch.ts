@@ -2,7 +2,13 @@ import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#chan
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
 import { TurnControlReceiver } from "#execution/turn-control-receiver.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
+import type {
+  InitialTurnStep,
+  TurnWorkflowDispatchInput,
+} from "#execution/durable-session-migrations/turn-workflow.js";
+import { runInlineTurn } from "#execution/inline-turn.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
@@ -22,7 +28,7 @@ export interface DispatchedTurn {
 }
 
 /** Dispatches one turn and services its private-inbox control protocol until it terminates. */
-export async function dispatchAndAwaitTurn(input: {
+interface TurnDispatchInput {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
   readonly capabilities?: SessionCapabilities;
@@ -35,7 +41,26 @@ export async function dispatchAndAwaitTurn(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly seenTaskDeliveries?: Set<string>;
   readonly sessionState: DurableSessionState;
-}): Promise<DispatchedTurn> {
+}
+
+export async function dispatchAndAwaitTurn(input: TurnDispatchInput): Promise<DispatchedTurn> {
+  const inline = await runInlineTurn(input);
+  if (inline.kind === "result") {
+    return { action: inline.action, async dispose() {} };
+  }
+  return await dispatchAndAwaitChildTurn({
+    ...input,
+    initialCancellation: inline.initialCancellation,
+    initialStep: inline.initialStep,
+  });
+}
+
+async function dispatchAndAwaitChildTurn(
+  input: TurnDispatchInput & {
+    readonly initialCancellation?: TurnCancelPayload;
+    readonly initialStep?: InitialTurnStep;
+  },
+): Promise<DispatchedTurn> {
   const control = new TurnControlReceiver({
     bufferedDeliveries: input.bufferedDeliveries,
     bufferedSessionControls: input.bufferedSessionControls,
@@ -51,11 +76,13 @@ export async function dispatchAndAwaitTurn(input: {
       capabilities: input.capabilities,
       completionToken: control.token,
       delivery: input.delivery,
+      initialCancellation: input.initialCancellation,
+      initialStep: input.initialStep,
       mode: input.mode,
       parentWritable: input.parentWritable,
       serializedContext: input.serializedContext,
       sessionState: input.sessionState,
-    });
+    } satisfies TurnWorkflowDispatchInput);
     const action = await control.waitForAction();
     return { action, dispose: () => control.dispose() };
   } catch (error) {

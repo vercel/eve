@@ -96,6 +96,7 @@ export function buildSubagentRunInput(input: {
   readonly graph?: SubagentSandboxGraph;
   /** Durable session identity of the sandbox currently used by the parent. */
   readonly sandboxSessionId?: string;
+  readonly selfAgent: boolean;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
@@ -139,7 +140,7 @@ export function buildSubagentRunInput(input: {
   };
   const sharesSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
-      .inheritsParent === true || action.subagentName === "agent";
+      .inheritsParent === true || input.selfAgent;
   if (sharesSandbox) {
     if (session.sandboxState !== undefined) {
       adapterState.parentSandboxState = session.sandboxState;

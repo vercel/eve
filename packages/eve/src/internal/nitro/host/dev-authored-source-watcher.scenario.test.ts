@@ -107,16 +107,39 @@ describe("startAuthoredSourceWatcher", () => {
     const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
 
     try {
-      await watcher.suspend();
+      await watcher.suspend("setup");
       mockedWatcher.emit("change", join(host.appRoot, "package.json"));
       await vi.advanceTimersByTimeAsync(200);
       expect(coordinator.rebuild).not.toHaveBeenCalled();
 
-      await watcher.resume();
+      await watcher.resume("setup");
       expect(coordinator.rebuild).toHaveBeenCalledOnce();
       expect(coordinator.rebuild).toHaveBeenCalledWith({
         changedPaths: [join(host.appRoot, "package.json")],
       });
+    } finally {
+      await watcher.close();
+    }
+  });
+
+  it("keeps nested holders suspended and releases each lease idempotently", async () => {
+    const host = await createPreparedHost();
+    const coordinator = createCoordinator(host);
+    const watcher = await startAuthoredSourceWatcher({ coordinator, preparedHost: host });
+
+    try {
+      await watcher.suspend("first");
+      await watcher.suspend("second");
+      await watcher.suspend("second");
+
+      await watcher.resume("first");
+      expect(coordinator.rebuild).not.toHaveBeenCalled();
+
+      await watcher.resume("second");
+      expect(coordinator.rebuild).toHaveBeenCalledOnce();
+
+      await watcher.resume("second");
+      expect(coordinator.rebuild).toHaveBeenCalledOnce();
     } finally {
       await watcher.close();
     }

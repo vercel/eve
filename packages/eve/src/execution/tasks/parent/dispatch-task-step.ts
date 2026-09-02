@@ -26,8 +26,9 @@ import {
   prepareRuntimeActionDispatch,
   type RuntimeActionDispatchInput,
   type RuntimeActionDispatchResult,
-  startSubagent,
 } from "#execution/dispatch-runtime-actions-shared.js";
+import { startSubagent } from "#execution/dispatch-runtime-actions-start.js";
+import { startWorkflowTool } from "#execution/tool-run/dispatch.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
 import {
@@ -72,6 +73,18 @@ export async function dispatchTaskStep(
     for (const entry of prepared.plan) {
       if (entry.kind === "reject") {
         results.push(entry.result);
+        continue;
+      }
+      if (entry.kind === "workflow-tool") {
+        const started = await startWorkflowTool({
+          action: entry.action,
+          batchEvent: batch.event,
+          ownerInboxToken: input.parentContinuationToken,
+          prepared,
+          session: nextSession,
+        });
+        nextSession = started.session;
+        if (started.result !== undefined) results.push(started.result);
         continue;
       }
 
@@ -179,6 +192,7 @@ export async function dispatchTaskStep(
             currentSession: nextSession,
             fanoutSize: prepared.fanoutSize,
             initiatorAuth: prepared.initiatorAuth,
+            localDevRequest: prepared.localDevRequest,
             parentContinuationToken: delegated.taskInboxToken,
             parentTraceContext: prepared.parentTraceContext,
             activityObserver: prepared.activityObserver,
@@ -236,7 +250,7 @@ export async function dispatchTaskStep(
     results,
     sessionState:
       nextSession === session
-        ? input.sessionState
+        ? prepared.getBaselineSessionState()
         : createDurableSessionState({ session: nextSession }),
     pendingTasks,
   };

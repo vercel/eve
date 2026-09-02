@@ -269,7 +269,7 @@ eve deploy
     "target": "ES2022",
     "module": "esnext",
     "moduleResolution": "bundler",
-    "types": ["node"],
+    "types": ["node", "eve/workflow-modules"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

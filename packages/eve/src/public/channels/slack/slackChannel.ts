@@ -72,7 +72,7 @@ import {
 } from "#public/channels/upload-policy.js";
 import { verifySlackRequest, type SlackWebhookVerifier } from "#public/channels/slack/verify.js";
 import { defineChannel, POST, type Channel } from "#public/definitions/channel.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
+import { normalizeChannelAudience, type ChannelAudience } from "#shared/channel-audience.js";
 import { markEventHandled } from "./utils.js";
 
 export type {
@@ -278,6 +278,12 @@ export interface SlackChannelCredentials {
 export interface SlackReceiveTarget {
   readonly channelId: string;
   readonly threadTs?: string;
+  /**
+   * Optional audience for proactive receives. Omit to leave `unknown`.
+   * Pass when the caller already knows channel visibility, for example a
+   * webhook or schedule that classified the Slack destination before handoff.
+   */
+  readonly audience?: ChannelAudience;
   /** Slack workspace whose app installation supplies credentials for this send. */
   readonly installationTeamId?: string;
   /**
@@ -988,16 +994,31 @@ async function receiveOnSlack(
   // Threadless proactive runs need distinct identities until their first
   // Slack post supplies the real thread timestamp and re-keys the session.
   const continuationThreadTs = threadTs || crypto.randomUUID();
+  const audience =
+    receiveTarget.audience === undefined
+      ? undefined
+      : normalizeChannelAudience(receiveTarget.audience);
+  const state: {
+    channelId: string;
+    installationTeamId: string | null;
+    threadTs: string | null;
+    teamId: string | null;
+    triggeringUserId: string | null;
+    audience?: ChannelAudience;
+  } = {
+    channelId,
+    installationTeamId: installationTeamId ?? null,
+    threadTs: threadTs || null,
+    teamId: deps.teamId ?? null,
+    triggeringUserId: deps.triggeringUserId ?? null,
+  };
+  if (audience !== undefined) {
+    state.audience = audience;
+  }
 
   return deps.from(slackContinuationToken(channelId, continuationThreadTs)).send(input.message, {
     auth: input.auth,
-    state: {
-      channelId,
-      installationTeamId: installationTeamId ?? null,
-      threadTs: threadTs || null,
-      teamId: deps.teamId ?? null,
-      triggeringUserId: deps.triggeringUserId ?? null,
-    },
+    state,
     title: input.title,
   });
 }
