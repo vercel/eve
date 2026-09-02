@@ -1155,6 +1155,81 @@ describe("pending input batch collection", () => {
     expect(hasPendingInputBatch(second.session.state)).toBe(false);
   });
 
+  it("does not apply an approval grant to already-pending calls with the same key", () => {
+    let session = createHarnessSession();
+    for (const index of [1, 2, 3]) {
+      session = appendPendingInputBatch({
+        requests: [approvalRequest(`approval-${index}`, `call-${index}`)],
+        responseMessages: [batchOutput(`call-${index}`, "bash")],
+        session,
+      });
+    }
+
+    const first = resolvePendingInput({
+      session,
+      stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
+    });
+
+    expect(first.outcome).toBe("resolved");
+    expect(getApprovedTools(first.session)).toEqual(new Set());
+    expect(getPendingInputRequestIds(first.session.state)).toEqual(
+      new Set(["approval-2", "approval-3"]),
+    );
+
+    const second = resolvePendingInput({
+      session: first.session,
+      stepInput: { inputResponses: [{ requestId: "approval-2", optionId: "cancel" }] },
+    });
+    expect(getApprovedTools(second.session)).toEqual(new Set());
+    expect(getPendingInputRequestIds(second.session.state)).toEqual(new Set(["approval-3"]));
+
+    const third = resolvePendingInput({
+      session: second.session,
+      stepInput: { inputResponses: [{ requestId: "approval-3", optionId: "cancel" }] },
+    });
+    expect(getApprovedTools(third.session)).toEqual(new Set(["bash"]));
+    expect(hasPendingInputBatch(third.session.state)).toBe(false);
+  });
+
+  it("keeps approval grants independent across compound keys", () => {
+    const scopedApproval = (
+      requestId: string,
+      callId: string,
+      workspace: string,
+    ): InputRequest => ({
+      ...approvalRequest(requestId, callId),
+      action: {
+        callId,
+        input: { workspace },
+        kind: "tool-call",
+        toolName: "notion__notion-update-page",
+      },
+    });
+    const resolveApprovalKey = (request: InputRequest) =>
+      `${request.action.toolName}:${String(request.action.input.workspace)}`;
+    let session = appendPendingInputBatch({
+      requests: [scopedApproval("approval-1", "call-1", "workspace-a")],
+      responseMessages: [batchOutput("call-1", "notion__notion-update-page")],
+      session: createHarnessSession(),
+    });
+    session = appendPendingInputBatch({
+      requests: [scopedApproval("approval-2", "call-2", "workspace-b")],
+      responseMessages: [batchOutput("call-2", "notion__notion-update-page")],
+      session,
+    });
+
+    const result = resolvePendingInput({
+      resolveApprovalKey,
+      session,
+      stepInput: { inputResponses: [{ requestId: "approval-1", optionId: "approve" }] },
+    });
+
+    expect(getApprovedTools(result.session, resolveApprovalKey)).toEqual(
+      new Set(["notion__notion-update-page:workspace-a"]),
+    );
+    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-2"]));
+  });
+
   it("leaves every batch open when a message arrives with several batches pending", () => {
     let session = appendPendingInputBatch({
       requests: [approvalRequest("approval-1", "call-1")],

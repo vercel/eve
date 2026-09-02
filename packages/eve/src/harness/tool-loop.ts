@@ -1145,7 +1145,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         projectedMessages,
       );
     }
-    const approvedTools = getApprovedTools(session);
+    const approvedTools = getApprovedTools(session, resolveApprovalKeyFromTools(config.tools));
 
     const isFirstTurn = emissionState.sequence === 0;
     const hasScheduleProvenance = isFirstTurn && ctx?.get(ScheduleIdKey) !== undefined;
