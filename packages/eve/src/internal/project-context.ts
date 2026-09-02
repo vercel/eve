@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import {
@@ -39,6 +39,12 @@ export async function resolveNamedAgentProjectContext(
   let workspaceRoot = resolvedAppRoot;
 
   while (true) {
+    if (
+      workspaceRoot !== resolvedAppRoot &&
+      (await source.stat(join(workspaceRoot, "agent"))) === "directory"
+    ) {
+      return undefined;
+    }
     const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
     const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
     if (workspace !== undefined && member !== undefined) {
