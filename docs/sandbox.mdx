@@ -156,7 +156,7 @@ With `backend` omitted, eve uses `defaultBackend()`, which resolves on first use
 3. **microsandbox** when the host supports it: macOS on Apple Silicon, or glibc Linux with KVM enabled.
 4. **just-bash** as the dependency-free fallback.
 
-The Docker, microsandbox, and Vercel backends use the published `vcr.vercel.com/vercel/eve/base` image tag matching the installed eve version by default. The backend environment must have VCR pull access to the `vercel/eve` project; eve does not log local Docker or microsandbox hosts in to VCR automatically.
+The Docker, microsandbox, and Vercel backends use the public `vcr.vercel.com/vercel/eve/base` image tag matching the installed eve version by default. Docker and microsandbox can pull it without registry credentials.
 
 `defaultBackend()` also accepts a keyed bag so each inner backend gets its own typed create options:
 
