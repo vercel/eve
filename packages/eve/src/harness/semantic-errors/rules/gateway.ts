@@ -49,10 +49,16 @@ export const GATEWAY_RULES: readonly SemanticErrorRule[] = [
   {
     id: "gateway-free-tier-rate-limited",
     name: "AI Gateway free tier rate limit exceeded",
-    tags: ["gateway", "recoverable"],
+    tags: ["gateway", "transient", "recoverable"],
     when: messageMatches(/Free tier requests on this model are rate-limited/),
     message: (link) => link.message,
-    hint: "Wait for the free-tier limit to reset or upgrade your Vercel plan, then retry.",
+    hint: "Reduce request volume or add AI Gateway credits for higher limits.",
+    recovery: {
+      kind: "durable-retry",
+      defaultDelayMs: 60_000,
+      maxAttempts: 1,
+      maxDelayMs: 300_000,
+    },
   },
   {
     id: "gateway-auth-invalid-api-key",

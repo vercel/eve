@@ -1,6 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { extractErrorId, formatErrorHint } from "#internal/logging.js";
+import {
+  extractScheduledRecoveryNotice,
+  formatScheduledRecoveryNotice,
+} from "#public/channels/scheduled-recovery.js";
 import type {
   TwilioTextMessage,
   TwilioVoiceCall,
@@ -72,6 +76,12 @@ export const defaultEvents: TwilioChannelEvents = {
   async "message.completed"(event, channel, _ctx) {
     if (event.finishReason === "tool-calls" || !event.message) return;
     await channel.twilio.sendMessage(event.message);
+  },
+
+  async "step.failed"(event, channel, _ctx) {
+    const notice = extractScheduledRecoveryNotice(event);
+    if (notice === null) return;
+    await channel.twilio.sendMessage(formatScheduledRecoveryNotice(notice));
   },
 
   async "turn.failed"(event, channel, _ctx) {

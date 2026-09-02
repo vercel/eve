@@ -1,6 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
 
 import { createLogger, extractErrorId, formatErrorHint, logError } from "#internal/logging.js";
+import {
+  extractScheduledRecoveryNotice,
+  formatScheduledRecoveryNotice,
+} from "#public/channels/scheduled-recovery.js";
 import type { GitHubApiOptions } from "#public/channels/github/api.js";
 import type {
   GitHubBotNameResolver,
@@ -100,6 +104,12 @@ export function createDefaultEvents(options: GitHubDefaultEventOptions = {}): Gi
     async "message.completed"(event, channel, _ctx) {
       if (event.finishReason === "tool-calls" || !event.message) return;
       await postCommentChunks(channel, event.message);
+    },
+
+    async "step.failed"(event, channel, _ctx) {
+      const notice = extractScheduledRecoveryNotice(event);
+      if (notice === null) return;
+      await postCommentChunks(channel, formatScheduledRecoveryNotice(notice));
     },
 
     async "input.requested"(event, channel, _ctx) {

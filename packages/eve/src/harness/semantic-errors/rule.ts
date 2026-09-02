@@ -23,6 +23,13 @@ export type SemanticErrorTag =
 /** A predicate over one extracted cause-chain link. */
 export type LinkPredicate = (link: ErrorLink) => boolean;
 
+export interface SemanticErrorDurableRetryPolicy {
+  readonly kind: "durable-retry";
+  readonly defaultDelayMs: number;
+  readonly maxAttempts: number;
+  readonly maxDelayMs?: number;
+}
+
 /**
  * One catalog rule, in the linter shape: a stable id, a headline, a
  * declarative predicate over extracted {@link ErrorLink} facts, and the
@@ -50,6 +57,8 @@ export interface SemanticErrorRule {
    * `/model` hints; a channel adapter may drop CLI advice entirely).
    */
   readonly hint?: string | ((link: ErrorLink) => string | undefined);
+  /** Internal policy for a failure that may safely be replayed after a durable wait. */
+  readonly recovery?: SemanticErrorDurableRetryPolicy;
 }
 
 /** A matched rule projected into a displayable summary. */
@@ -68,6 +77,7 @@ export interface SemanticErrorSummary {
   readonly message: string;
   /** What to do about it, when the rule carries remediation. */
   readonly hint?: string;
+  readonly recovery?: SemanticErrorDurableRetryPolicy;
 }
 
 /** Evaluates an ordered rule list against extracted signals; first match wins. */
@@ -88,9 +98,28 @@ export function evaluateSemanticErrorRules(
     };
     const hint = typeof rule.hint === "function" ? rule.hint(link) : rule.hint;
     if (hint !== undefined && hint.length > 0) summary.hint = hint;
+    if (rule.recovery !== undefined) {
+      validateDurableRetryPolicy(rule.recovery, rule.id);
+      summary.recovery = rule.recovery;
+    }
     return summary;
   }
   return null;
+}
+
+function validateDurableRetryPolicy(policy: SemanticErrorDurableRetryPolicy, ruleId: string): void {
+  if (
+    !isPositiveSafeInteger(policy.defaultDelayMs) ||
+    !isPositiveSafeInteger(policy.maxAttempts) ||
+    (policy.maxDelayMs !== undefined &&
+      (!isPositiveSafeInteger(policy.maxDelayMs) || policy.maxDelayMs < policy.defaultDelayMs))
+  ) {
+    throw new Error(`Semantic error rule "${ruleId}" has an invalid durable retry policy.`);
+  }
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
 // ---------------------------------------------------------------------------

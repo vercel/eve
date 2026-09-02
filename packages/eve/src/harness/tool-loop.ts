@@ -112,6 +112,7 @@ import {
   advanceStep,
   emitFailedStep,
   emitRecoverableFailedTurn,
+  emitStepFailure,
   emitStepStarted,
   emitStreamContent,
   emitTurnEpilogue,
@@ -181,11 +182,19 @@ import {
   extractModelCallErrorDetails,
   extractUnsupportedProviderToolTypes,
   isNoOutputGeneratedError,
+  resolveDurableRetryDelay,
   type UpstreamRejectionSummary,
   extractUpstreamRejectionMessage,
 } from "#harness/model-call-error.js";
 import { summarizeKnownError, type SemanticErrorSummary } from "#harness/semantic-errors/index.js";
 import { throwIfTurnAborted } from "#harness/turn-cancellation.js";
+import { requestTurnSleep } from "#harness/turn-sleep.js";
+import {
+  clearPendingSemanticRecovery,
+  getPendingSemanticRecovery,
+  nextSemanticRecoveryAttempt,
+  setPendingSemanticRecovery,
+} from "#harness/semantic-recovery-state.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { PreparedDispatchTarget } from "#tools/behavior.js";
 import { EMPTY_DELIVERY_SENTINEL, hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
@@ -1250,6 +1259,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       trailingUserNote?: string;
     };
     let modelCallRuntimeActionTools = config.tools;
+    let failedModelCallEmittedOutput = false;
 
     const runSingleModelCall = async (
       opts: ModelCallOptions & { readonly attemptIndex: number },
@@ -1260,6 +1270,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       // visible as a second LLM span under one step.
       if (opts.retryReason) {
         telemetryRuntimeContext["eve.retry.reason"] = opts.retryReason;
+      }
+      const pendingSemanticRecovery = getPendingSemanticRecovery(session.state);
+      if (pendingSemanticRecovery?.turnId === emissionState.turnId) {
+        telemetryRuntimeContext["eve.retry.reason"] = "semantic-error";
+        telemetryRuntimeContext["eve.retry.semantic_error_id"] =
+          pendingSemanticRecovery.semanticErrorId;
+        telemetryRuntimeContext["eve.retry.attempt"] = pendingSemanticRecovery.attempt;
       }
       // Trailing rather than an extraSystemNote prepend: keeps the provider's
       // cached prompt prefix valid, and handleStepResult rebuilds history
@@ -1432,10 +1449,28 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             invalidInputToolCallIds,
             inlineAuthorizationResults,
             trailingInlineToolResultParts,
-          } = await emitStreamContent(emit, emissionState, streamResult.fullStream, {
-            excludedActionToolNames,
-            tools: effectiveHarnessTools,
-          });
+          } = await emitStreamContent(
+            async (event, eventMessages) => {
+              if (
+                event.type === "message.appended" ||
+                event.type === "message.completed" ||
+                event.type === "reasoning.appended" ||
+                event.type === "reasoning.completed" ||
+                event.type === "actions.requested" ||
+                event.type === "action.partial" ||
+                event.type === "action.result"
+              ) {
+                failedModelCallEmittedOutput = true;
+              }
+              await emit(event, eventMessages);
+            },
+            emissionState,
+            streamResult.fullStream,
+            {
+              excludedActionToolNames,
+              tools: effectiveHarnessTools,
+            },
+          );
           throwIfTurnAborted(config.abortSignal);
           const [stepResult, accumulatedResponseMessages] = await Promise.all([
             hooks.stepResult,
@@ -1650,6 +1685,71 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           modelCallDetails,
           upstreamRejection,
         });
+
+        const durableRetry = resolveDurableRetryDelay(finalError);
+        const recoveryAttempt =
+          durableRetry === null || catalogSummary?.recovery === undefined
+            ? undefined
+            : nextSemanticRecoveryAttempt({
+                maxAttempts: catalogSummary.recovery.maxAttempts,
+                semanticErrorId: catalogSummary.id,
+                state: session.state,
+                turnId: emissionState.turnId,
+              });
+        if (
+          config.mode === "conversation" &&
+          emit !== undefined &&
+          durableRetry !== null &&
+          catalogSummary?.recovery !== undefined &&
+          recoveryAttempt !== undefined &&
+          !failedModelCallEmittedOutput
+        ) {
+          const recoveryDetails: JsonObject = {
+            ...details,
+            recovery: {
+              attempt: recoveryAttempt,
+              delayMs: durableRetry.delayMs,
+              kind: "durable-retry",
+              maxAttempts: catalogSummary.recovery.maxAttempts,
+              status: "scheduled",
+            },
+          };
+          log.warn("model call failed; scheduling durable semantic recovery", {
+            delayMs: durableRetry.delayMs,
+            delaySource: durableRetry.source,
+            errorId,
+            maxAttempts: catalogSummary.recovery.maxAttempts,
+            recoveryAttempt,
+            semanticErrorId: catalogSummary.id,
+            sessionId: session.sessionId,
+            turnId: emissionState.turnId,
+          });
+          await emitStepFailure(emit, emissionState, {
+            code: "MODEL_CALL_FAILED",
+            details: recoveryDetails,
+            message: errorMessage,
+          });
+          requestTurnSleep(durableRetry.delayMs);
+          session = setPendingSemanticRecovery(
+            {
+              ...session,
+              history: [...messages],
+            },
+            {
+              attempt: recoveryAttempt,
+              maxAttempts: catalogSummary.recovery.maxAttempts,
+              semanticErrorId: catalogSummary.id,
+              turnId: emissionState.turnId,
+            },
+          );
+          return {
+            next: runStep,
+            session: setHarnessEmissionState(session, advanceStep(emissionState)),
+          };
+        }
+
+        session = clearPendingSemanticRecovery(session);
+
         const modelCallLogFields = buildModelCallFailureLogFields({
           error: finalError,
           errorId,
@@ -1750,6 +1850,8 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         };
       }
     }
+
+    session = clearPendingSemanticRecovery(session);
 
     // --- Step-side observability tags ---------------------------------------
     //

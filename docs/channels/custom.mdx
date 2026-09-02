@@ -72,7 +72,7 @@ Event handlers receive `(eventData, channel, ctx)`. `ctx.session.id` identifies
 the exact session, while `channel.continuation` exposes the current address and
 `rekey()` when this channel needs to move it. `session.failed` receives only
 `(eventData, channel)` because it runs outside session context; its event data
-contains `sessionId` directly.
+contains `sessionId` directly. A `step.failed` handler can receive a nonterminal scheduled recovery in `eventData.details.recovery`; built-in channels use it to post an automatic-retry notice. Declaring `events["step.failed"]` replaces that built-in notice for the event.
 
 `channel.continuation.token` is always the channel-local address accepted by
 `from()`, `resolveSession()`, and `rekey()`. Framework namespace prefixes are not

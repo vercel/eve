@@ -185,6 +185,7 @@ export interface TeamsChannelEvents {
   readonly "action.result"?: TeamsEventHandler<"action.result">;
   readonly "message.completed"?: TeamsEventHandler<"message.completed">;
   readonly "message.appended"?: TeamsEventHandler<"message.appended">;
+  readonly "step.failed"?: TeamsEventHandler<"step.failed">;
   readonly "input.requested"?: TeamsEventHandler<"input.requested">;
   readonly "turn.failed"?: TeamsEventHandler<"turn.failed">;
   readonly "turn.completed"?: TeamsEventHandler<"turn.completed">;

@@ -8,6 +8,7 @@ const RESPONSE_BODY_SNIPPET_LIMIT = 1_000;
 const API_ERROR_SUMMARY_LIMIT = 800;
 const GATEWAY_MODEL_REQUEST_REJECTED_MESSAGE =
   "AI Gateway rejected the model request before the agent produced a response.";
+const MIN_DURABLE_RETRY_DELAY_MS = 1_000;
 
 /**
  * Anchored regex for the upstream "unsupported tool" rejection message
@@ -30,6 +31,73 @@ const UNSUPPORTED_TOOL_TYPE_REGEX = /tool type ['"]([\w.-]+)['"] is not supporte
 export interface UpstreamRejectionSummary {
   readonly name: string;
   readonly message: string;
+}
+
+export interface ResolvedDurableRetryDelay {
+  readonly delayMs: number;
+  readonly source: "policy-default" | "retry-after-date" | "retry-after-seconds";
+}
+
+/** Resolves a catalog-authorized durable retry delay without exposing response headers. */
+export function resolveDurableRetryDelay(
+  error: unknown,
+  now = Date.now(),
+): ResolvedDurableRetryDelay | null {
+  const recovery = summarizeKnownError(error)?.recovery;
+  if (recovery?.kind !== "durable-retry") return null;
+
+  const retryAfter = findRetryAfter(error, now);
+  const source = retryAfter?.source ?? "policy-default";
+  const requestedDelayMs = retryAfter?.delayMs ?? jitterFallbackDelay(recovery.defaultDelayMs);
+  const maxDelayMs = recovery.maxDelayMs ?? recovery.defaultDelayMs;
+  return {
+    delayMs: Math.ceil(
+      Math.min(maxDelayMs, Math.max(MIN_DURABLE_RETRY_DELAY_MS, requestedDelayMs)),
+    ),
+    source,
+  };
+}
+
+function findRetryAfter(
+  error: unknown,
+  now: number,
+): {
+  readonly delayMs: number;
+  readonly source: "retry-after-date" | "retry-after-seconds";
+} | null {
+  for (const candidate of walkCauseChain(error)) {
+    if (!isObject(candidate)) continue;
+    const headers = candidate.responseHeaders;
+    const value =
+      headers instanceof Headers
+        ? headers.get("retry-after")
+        : isObject(headers)
+          ? Object.entries(headers).find(([key]) => key.toLowerCase() === "retry-after")?.[1]
+          : undefined;
+    if (typeof value !== "string") continue;
+    if (/^\d+$/.test(value.trim())) {
+      const seconds = Number(value.trim());
+      if (Number.isSafeInteger(seconds)) {
+        const delayMs = seconds * 1_000;
+        if (Number.isSafeInteger(delayMs)) return { delayMs, source: "retry-after-seconds" };
+      }
+      continue;
+    }
+    // Retry-After dates use HTTP-date (IMF-fixdate) syntax. Do not accept
+    // Date.parse's permissive nonstandard inputs such as "-1".
+    if (!/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/u.test(value)) {
+      continue;
+    }
+    const date = Date.parse(value);
+    if (Number.isFinite(date) && date > now) {
+      return { delayMs: date - now, source: "retry-after-date" };
+    }
+  }
+  return null;
+}
+
+function jitterFallbackDelay(delayMs: number): number {
+  return delayMs + Math.floor(Math.random() * Math.min(1_000, Math.max(1, delayMs / 10)));
 }
 
 interface ModelCallErrorSignals {
@@ -268,6 +336,12 @@ export function classifyModelCallError(error: unknown): "retry" | "recoverable" 
   // stale empty result. The harness reissues with fresh hooks instead
   // (attemptEmptyResponseRecovery in tool-loop.ts).
   if (error instanceof EmptyModelResponseError) {
+    return "recoverable";
+  }
+
+  // A semantic durable-retry policy deliberately bypasses this short
+  // in-process loop so a meaningful upstream wait becomes a durable sleep.
+  if (summarizeKnownError(error)?.recovery?.kind === "durable-retry") {
     return "recoverable";
   }
 
