@@ -1416,6 +1416,22 @@
       ]
     },
     {
+      "name": "connection/stacktree",
+      "type": "registry:item",
+      "title": "Stacktree",
+      "description": "Publish and update private HTML pages through Stacktree's MCP server.",
+      "envVars": {
+        "STACKTREE_API_KEY": ""
+      },
+      "files": [
+        {
+          "path": "registry/connections/stacktree.ts",
+          "type": "registry:file",
+          "target": "agent/connections/stacktree.ts"
+        }
+      ]
+    },
+    {
       "name": "connection/stripe",
       "type": "registry:item",
       "title": "Stripe",
