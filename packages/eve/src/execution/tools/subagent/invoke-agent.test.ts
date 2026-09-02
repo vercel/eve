@@ -253,6 +253,60 @@ describe("background agent invocation routing", () => {
     });
   });
 
+  it("rejects dispatch failures without reporting a child settlement", async () => {
+    const failure = {
+      callId: "call-1:research",
+      isError: true as const,
+      kind: "subagent-result" as const,
+      origin: "dispatch" as const,
+      output: {
+        code: "REMOTE_AGENT_START_FAILED",
+        message: "The remote agent could not be started.",
+      },
+      subagentName: "research",
+    };
+    mocks.createHook.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({
+        next: vi
+          .fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: { kind: "runtime-action-result", results: [failure] },
+          })
+          .mockResolvedValue({ done: true }),
+      }),
+      token: "agent-reply",
+    });
+    const ctx = { callId: "call-1" } as ToolContext;
+    attachWorkflowToolRunContext(ctx, {
+      from: {
+        callId: "call-1",
+        execution: "blocking",
+        input: { message: "Find it" },
+        runId: "run-1",
+        sequence: 0,
+        stepIndex: 0,
+        toolName: "research",
+        turnId: "turn-1",
+      },
+      owner: {
+        admission: "owner-admission",
+        outcome: "owner-outcome",
+        report: "owner-report",
+        request: "owner-request",
+      },
+    });
+
+    await expect(
+      agent(ctx, { key: "research", message: "Find it", target: "research" }),
+    ).rejects.toEqual(failure.output);
+    expect(mocks.resumeHook).toHaveBeenCalledTimes(1);
+    expect(mocks.resumeHook).not.toHaveBeenCalledWith(
+      "owner-request",
+      expect.objectContaining({ request: expect.objectContaining({ kind: "agent-settled" }) }),
+    );
+  });
+
   it("preserves each child HITL event's coordinates when relaying repeated requests", async () => {
     const childRequest = (input: {
       readonly requestId: string;
