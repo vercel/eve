@@ -4,14 +4,19 @@ import { join } from "node:path";
 import type { AgentWorkspace } from "#internal/agent-workspace.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
-import { resolveAgentWorkspaceDeploymentMode } from "#internal/vercel/agent-workspace-deployment.js";
+import { readVercelJsonFile } from "#internal/vercel/vercel-services-config.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 
 const VERCEL_BUILD_OUTPUT_VERSION = 3;
 
 /** Emit the inferred Vercel Services project for a strict hostless workspace. */
 export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<string> {
-  if ((await resolveAgentWorkspaceDeploymentMode(workspace)) === "authored") {
+  const config = await readVercelJsonFile(join(workspace.root, "vercel.json"));
+  if (
+    config.services !== undefined ||
+    config.experimentalServices !== undefined ||
+    config.experimentalServicesV2 !== undefined
+  ) {
     throw new Error(
       "This project defines its Vercel service graph in vercel.json. Run `vercel build` to build the complete project, or run `eve build` from an individual agent directory.",
     );

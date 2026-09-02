@@ -1,9 +1,8 @@
-import { resolveEveProjectContext } from "#internal/project-context.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 import { runDeployFlow, type DeployFlowDeps } from "#setup/flows/deploy.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
-import { hasInteractiveTerminal, NOT_AN_AGENT_MESSAGE } from "./preconditions.js";
+import { hasInteractiveTerminal, validateWorkspaceProjectCommand } from "./preconditions.js";
 import {
   isNonInteractiveProjectCommand,
   runNonInteractiveLink,
@@ -41,20 +40,15 @@ export async function runDeployCommand(
   dependencies: DeployCommandDependencies = defaultDependencies,
   options: VercelProjectCliOptions & { yes?: boolean } = {},
 ): Promise<void> {
-  const projectContext = await resolveEveProjectContext(appRoot);
-  if (projectContext.kind === "workspace-member") {
-    logger.error(
-      `This agent belongs to the workspace at ${projectContext.workspace.root}. Run \`eve deploy\` from the workspace root to deploy every peer agent together.`,
-    );
-    process.exitCode = 1;
-    return;
-  }
   if (
-    !(await (dependencies.isEveProject ?? isEveProject)(appRoot)) &&
-    projectContext.kind === "standalone"
+    !(await validateWorkspaceProjectCommand({
+      appRoot,
+      isEveProject: dependencies.isEveProject,
+      logger,
+      workspaceMemberMessage: (workspace) =>
+        `This agent belongs to the workspace at ${workspace.root}. Run \`eve deploy\` from the workspace root to deploy every peer agent together.`,
+    }))
   ) {
-    logger.error(NOT_AN_AGENT_MESSAGE);
-    process.exitCode = 1;
     return;
   }
   if (isNonInteractiveProjectCommand(options)) {
