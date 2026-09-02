@@ -1420,20 +1420,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
             hooks.stepResult,
             streamResult.responseMessages,
           ]);
-          if (
-            isEmptyModelResponse(stepResult) &&
-            extractToolResultCallIds(accumulatedResponseMessages).size === 0 &&
-            inlineAuthorizationResults.length === 0 &&
-            trailingInlineToolResultParts.length === 0
-          ) {
-            throw new EmptyModelResponseError();
-          }
-          await emitStepActions(emit, emissionState, stepResult, {
-            emittedActionCallIds,
-            excludedActionCallIds: invalidInputToolCallIds,
-            excludedActionToolNames,
-            handledInlineToolResultCallIds,
-            tools: advertisedHarnessTools,
+          const contentFilterToolResults = createContentFilterToolResults({
+            responseMessages: accumulatedResponseMessages,
+            step: stepResult,
+          });
+          const responseMessages = appendMissingToolResultMessages({
+            append: [...trailingInlineToolResultParts, ...contentFilterToolResults],
+            responseMessages: accumulatedResponseMessages,
           });
           const existingToolResults = stepResult.toolResults as TypedToolResult<ToolSet>[];
           const toolResultsByCallId = new Map(
@@ -1442,15 +1435,28 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           for (const toolResult of inlineAuthorizationResults) {
             toolResultsByCallId.set(toolResult.toolCallId, toolResult);
           }
-          return withAccumulatedResponseMessages({
+          const resolvedStep = withAccumulatedResponseMessages({
             invalidInputToolCallIds,
-            responseMessages: appendMissingToolResultMessages({
-              append: trailingInlineToolResultParts,
-              responseMessages: accumulatedResponseMessages,
-            }),
+            responseMessages,
             stepResult,
             toolResults: [...toolResultsByCallId.values()],
           });
+          if (
+            isEmptyModelResponse(resolvedStep) &&
+            extractToolResultCallIds(responseMessages).size === 0 &&
+            inlineAuthorizationResults.length === 0 &&
+            contentFilterToolResults.length === 0
+          ) {
+            throw new EmptyModelResponseError();
+          }
+          await emitStepActions(emit, emissionState, resolvedStep, {
+            emittedActionCallIds,
+            excludedActionCallIds: invalidInputToolCallIds,
+            excludedActionToolNames,
+            handledInlineToolResultCallIds,
+            tools: advertisedHarnessTools,
+          });
+          return resolvedStep;
         }
         const generateResult = await agent.generate({
           abortSignal: config.abortSignal,
@@ -1465,7 +1471,13 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
           throw new EmptyModelResponseError();
         }
         return withAccumulatedResponseMessages({
-          responseMessages: generateResult.responseMessages,
+          responseMessages: appendMissingToolResultMessages({
+            append: createContentFilterToolResults({
+              responseMessages: generateResult.responseMessages,
+              step: stepResult,
+            }),
+            responseMessages: generateResult.responseMessages,
+          }),
           stepResult,
         });
       };
@@ -2086,7 +2098,7 @@ function getInvalidToolCallInputErrors(input: {
  * history normalization, which runs after the backfill paths), so a
  * tool-message-only scan would let a synthesized result duplicate them.
  */
-function extractToolResultCallIds(messages: readonly StepResponseMessage[]): ReadonlySet<string> {
+function extractToolResultCallIds(messages: readonly ModelMessage[]): ReadonlySet<string> {
   const callIds = new Set<string>();
 
   for (const message of messages) {
@@ -2102,6 +2114,45 @@ function extractToolResultCallIds(messages: readonly StepResponseMessage[]): Rea
   }
 
   return callIds;
+}
+
+function createContentFilterToolResults(input: {
+  readonly responseMessages: readonly StepResponseMessage[];
+  readonly step: HarnessStepResult;
+}): ToolResultPart[] {
+  if (input.step.finishReason !== "content-filter") return [];
+
+  const answeredCallIds = new Set(extractToolResultCallIds(input.responseMessages));
+  for (const result of input.step.toolResults) answeredCallIds.add(result.toolCallId);
+  for (const part of input.step.content ?? []) {
+    if (part.type === "tool-error" || part.type === "tool-result") {
+      answeredCallIds.add(part.toolCallId);
+    }
+  }
+  const approvalCallIds = new Set(
+    extractToolApprovalInputRequests({ content: input.step.content ?? [] }).map(
+      (request) => request.action.callId,
+    ),
+  );
+
+  return (input.step.toolCalls as TypedToolCall<ToolSet>[])
+    .filter(
+      (call) =>
+        call.providerExecuted !== true &&
+        !isInvalidToolCall(call) &&
+        !answeredCallIds.has(call.toolCallId) &&
+        !approvalCallIds.has(call.toolCallId),
+    )
+    .map((call) => ({
+      output: {
+        type: "error-text" as const,
+        value:
+          "Tool execution was skipped because the model response was blocked by a content filter.",
+      },
+      toolCallId: call.toolCallId,
+      toolName: call.toolName,
+      type: "tool-result" as const,
+    }));
 }
 
 /** True when provider history still owes a result for any assistant tool call. */
@@ -2358,6 +2409,7 @@ async function handleStepResult(input: {
     providerExecutedOutcomeIds,
   });
   const responseMessages = normalizedProviderHistory.messages;
+  const answeredToolCallIds = extractToolResultCallIds(responseMessages);
 
   const baseSession: HarnessSession = {
     ...session,
@@ -2400,7 +2452,11 @@ async function handleStepResult(input: {
   const approvalRequestCallIds = new Set(approvalRequests.map((request) => request.action.callId));
   const questionRequests = extractQuestionInputRequests({
     toolCalls: result.toolCalls,
-    excludedCallIds: new Set([...invalidInputToolCallIds, ...approvalRequestCallIds]),
+    excludedCallIds: new Set([
+      ...invalidInputToolCallIds,
+      ...approvalRequestCallIds,
+      ...answeredToolCallIds,
+    ]),
     tools: input.coordinationTools,
   });
   const inputRequests: InputRequest[] = [...approvalRequests, ...questionRequests];
@@ -2426,6 +2482,7 @@ async function handleStepResult(input: {
   });
   const pendingCoordination = ((result.toolCalls ?? []) as TypedToolCall<ToolSet>[])
     .filter((toolCall) => !invalidInputToolCallIds.has(toolCall.toolCallId))
+    .filter((toolCall) => !answeredToolCallIds.has(toolCall.toolCallId))
     .filter((toolCall) => isDeferredHarnessTool(input.coordinationTools.get(toolCall.toolName)))
     .filter((toolCall) => {
       if (isDeferredHarnessTool(advertisedCoordinationTools.get(toolCall.toolName))) {

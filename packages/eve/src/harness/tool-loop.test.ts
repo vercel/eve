@@ -3782,6 +3782,86 @@ describe("createToolLoopHarness", () => {
     expect(isHarnessBetweenTurns(result.session)).toBe(false);
   });
 
+  it("settles an unexecuted content-filter tool call before the next model step", async () => {
+    const toolCall = {
+      input: { page: 3 },
+      toolCallId: "call-filtered",
+      toolName: "fetch-page",
+      type: "tool-call" as const,
+    };
+    setupMockAgent({
+      content: [toolCall],
+      finishReason: "content-filter",
+      response: { messages: [{ content: [toolCall], role: "assistant" }] },
+      text: "",
+      toolCalls: [toolCall],
+      toolResults: [],
+    });
+
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(
+      createTestConfig("conversation", emit, {
+        tools: new Map([
+          [
+            "fetch-page",
+            {
+              description: "Fetch one page.",
+              execute: vi.fn(),
+              inputSchema: jsonSchema({ type: "object" }),
+              name: "fetch-page",
+            },
+          ],
+        ]),
+      }),
+    );
+    const filtered = await runStep(createTestSession(), { message: "Fetch page 3." });
+
+    expect(typeof filtered.next).toBe("function");
+    expect(filtered.session.history).toEqual([
+      { content: "Fetch page 3.", role: "user" },
+      { content: [toolCall], role: "assistant" },
+      {
+        content: [
+          {
+            output: {
+              type: "error-text",
+              value:
+                "Tool execution was skipped because the model response was blocked by a content filter.",
+            },
+            toolCallId: "call-filtered",
+            toolName: "fetch-page",
+            type: "tool-result",
+          },
+        ],
+        role: "tool",
+      },
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          result: expect.objectContaining({ callId: "call-filtered", isError: true }),
+        }),
+        type: "action.result",
+      }),
+    );
+
+    setupMockAgent({
+      content: [{ text: "Recovered.", type: "text" }],
+      finishReason: "stop",
+      response: { messages: [{ content: "Recovered.", role: "assistant" }] },
+      text: "Recovered.",
+      toolCalls: [],
+      toolResults: [],
+    });
+    if (typeof filtered.next !== "function") throw new Error("Expected another model step.");
+    const recovered = await filtered.next(filtered.session);
+    expect(recovered.settledTurn).toEqual({ output: "Recovered." });
+    const secondAgent = vi.mocked(ToolLoopAgent).mock.results[1]?.value as MockAgentInstance;
+    expect(vi.mocked(secondAgent.stream).mock.calls[0]?.[0]).toMatchObject({
+      messages: filtered.session.history,
+    });
+  });
+
   it("emits failed action.result from tool response messages when the stream and toolResults omit it", async () => {
     setupMockAgent({
       finishReason: "tool-calls",
