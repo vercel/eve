@@ -17,12 +17,11 @@ Add an explicit tool projection that maps successful output to bounded JSON unde
 ```ts
 export default defineTool({
   // description, schemas, and execute omitted
-  activity: {
-    label: () => "Update project plan",
-    state: {
-      key: "project-plan",
-      project: (output) => output.tasks,
-    },
+  label: {
+    start: () => "Update project plan",
+    complete: (_input, output) => ({
+      renderingState: { key: "project-plan", value: output.tasks },
+    }),
   },
 });
 ```
@@ -33,7 +32,7 @@ The data path remains a projection of the durable session event log:
 model tool call
   -> validated tool execution
   -> durable action.result
-  -> authored state projection
+  -> authored completion projection
   -> internal state.replaced activity event
   -> activity snapshot.states[key]
   -> channel renderer
