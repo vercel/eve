@@ -1,4 +1,5 @@
 import { HumanActionRequiredError } from "#setup/human-action.js";
+import type { RegistryCatalogItem } from "#cli/commands/registry.js";
 import { runDeployFlow } from "#setup/flows/deploy.js";
 import {
   runInstallVercelCliFlow,
@@ -7,7 +8,11 @@ import {
 import { runLoginFlow, type LoginFlowResult } from "#setup/flows/login.js";
 import { runModelFlow } from "#setup/flows/model.js";
 import type { ProviderSelection } from "#setup/provider-settings.js";
-import { runProviderFlow, type ProviderPicker } from "#setup/flows/provider.js";
+import {
+  runProviderFlow,
+  type ProviderPicker,
+  type ProviderPickerChoice,
+} from "#setup/flows/provider.js";
 import {
   RegistryFlowFailedError,
   runRegistryFlow,
@@ -59,8 +64,12 @@ export interface TuiSetupCommandInput {
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
   initialModelStep?: "provider";
+  /** A provider choice collected by fresh-init onboarding before dependencies settled. */
+  initialProviderChoice?: ProviderPickerChoice;
   /** Registry address supplied by `/add <item>`, confirmed and installed directly. */
   initialRegistryAddress?: string;
+  /** Registry choices collected by fresh-init onboarding before dependencies settled. */
+  initialRegistryItems?: readonly RegistryCatalogItem[];
   /** Presentation and navigation supplied by an enclosing setup journey. */
   registryPlannerContext?: RegistryPlannerContext;
   /** Live ChatGPT identity shown only inside model configuration UI. */
@@ -272,6 +281,9 @@ async function executeSetupCommand(
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
         }
+        if (input.initialProviderChoice !== undefined) {
+          modelInput.initialProviderChoice = input.initialProviderChoice;
+        }
         modelInput.withExclusiveTerminal = (task) =>
           renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());
         const result = await flows.runModelFlow(modelInput);
@@ -310,6 +322,7 @@ async function executeSetupCommand(
           prompter,
           signal,
           initialAddress: input.initialRegistryAddress,
+          initialItems: input.initialRegistryItems,
           plannerContext: input.registryPlannerContext,
           onItemStart: registryItemProgress(renderer),
           runItem: runRegistryItem,

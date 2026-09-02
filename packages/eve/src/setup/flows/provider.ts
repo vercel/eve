@@ -39,6 +39,10 @@ export interface ProviderFlowDeps {
   validateGatewayApiKey: typeof validateGatewayApiKey;
 }
 
+export interface ProviderPlanDeps {
+  validateGatewayApiKey: typeof validateGatewayApiKey;
+}
+
 export type ProviderFlowResult = {
   kind: ProviderSelection | "cancelled" | "external-provider";
 };
@@ -158,6 +162,42 @@ async function selectProvider(input: {
   return choice;
 }
 
+/** Collects a provider choice without authenticating, linking, or writing project files. */
+export async function planProviderChoice(input: {
+  picker?: ProviderPicker;
+  selectedProvider: ProviderSelection;
+  selectionExplicit?: boolean;
+  signal?: AbortSignal;
+  deps?: Partial<ProviderPlanDeps>;
+}): Promise<ProviderPickerChoice | undefined> {
+  const deps: ProviderPlanDeps = {
+    validateGatewayApiKey,
+    ...input.deps,
+  };
+  try {
+    return await selectProvider({
+      picker: input.picker,
+      options: providerOptions(
+        undefined,
+        input.selectedProvider,
+        input.selectionExplicit !== false,
+        true,
+      ),
+      initialValue: input.selectedProvider,
+      validateInlineKey: (key, validationSignal) =>
+        deps.validateGatewayApiKey(
+          key,
+          input.signal === undefined
+            ? validationSignal
+            : AbortSignal.any([input.signal, validationSignal]),
+        ),
+    });
+  } catch (error) {
+    if (error instanceof WizardCancelledError) return undefined;
+    throw error;
+  }
+}
+
 /**
  * THE PROVIDER FLOW behind the dev TUI `/model` menu's provider row
  * (`eve link` keeps {@link runLinkFlow}'s shape). One question chooses a
@@ -180,6 +220,8 @@ export async function runProviderFlow(input: {
   selectionExplicit?: boolean;
   /** Interactive caller recovery that resumes project linking after Vercel repair. */
   recoverHumanAction?: (error: HumanActionRequiredError) => Promise<"retry" | "cancel">;
+  /** A previously reviewed choice whose effects should now be applied without asking again. */
+  initialChoice?: ProviderPickerChoice;
   deps?: Partial<ProviderFlowDeps>;
 }): Promise<ProviderFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -197,24 +239,28 @@ export async function runProviderFlow(input: {
   // re-homes it onto the key row below.
   let initialValue: ProviderConnection = selectedProvider;
   let keyChoice: Extract<ProviderPickerChoice, { kind: "ai-gateway-key" }>;
+  let plannedChoice = input.initialChoice;
 
   try {
     while (true) {
-      const choice = await selectProvider({
-        picker: input.picker,
-        options: providerOptions(
-          authStatus,
-          selectedProvider,
-          input.selectionExplicit !== false,
-          input.recoverHumanAction !== undefined,
-        ),
-        initialValue,
-        validateInlineKey: (key, validationSignal) =>
-          deps.validateGatewayApiKey(
-            key,
-            signal === undefined ? validationSignal : AbortSignal.any([signal, validationSignal]),
+      const choice =
+        plannedChoice ??
+        (await selectProvider({
+          picker: input.picker,
+          options: providerOptions(
+            authStatus,
+            selectedProvider,
+            input.selectionExplicit !== false,
+            input.recoverHumanAction !== undefined,
           ),
-      });
+          initialValue,
+          validateInlineKey: (key, validationSignal) =>
+            deps.validateGatewayApiKey(
+              key,
+              signal === undefined ? validationSignal : AbortSignal.any([signal, validationSignal]),
+            ),
+        }));
+      plannedChoice = undefined;
 
       if (choice.kind === "external") {
         if (prompter.acknowledge) {

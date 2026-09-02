@@ -5,6 +5,7 @@ import { performance } from "node:perf_hooks";
 import pc from "#compiled/picocolors/index.js";
 
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
+import { hasInteractiveTerminal } from "#cli/commands/preconditions.js";
 import { EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
@@ -43,11 +44,8 @@ import {
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
 import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
-import {
-  cleanupFreshInitTarget,
-  workspaceFailureNote,
-  type InitFailurePolicy,
-} from "./init-recovery.js";
+import type { InitResult, PreparedInitProject } from "./init-result.js";
+import { cleanupFreshInitTarget, workspaceFailureNote } from "./init-recovery.js";
 import { tryInitializeGit, type GitInitResult } from "./init-git.js";
 import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 import { resolveInitTarget } from "./init-target.js";
@@ -72,10 +70,12 @@ export interface InitCommandDependencies {
   detectInvokingPackageManager: typeof detectInvokingPackageManager;
   detectPackageManager: typeof detectPackageManager;
   ensureChannel: typeof ensureChannel;
+  hasInteractiveTerminal: typeof hasInteractiveTerminal;
   isCodingAgentLaunch: typeof isCodingAgentLaunch;
   now: () => number;
   runPackageManagerInstall: typeof runPackageManagerInstall;
   scaffoldBaseProject: typeof scaffoldBaseProject;
+  runInitOnboarding: (typeof import("./init-onboarding.js"))["runInitOnboarding"];
   selectInitHandoff: typeof selectInitHandoff;
   spawnCodingAgentRepl: typeof spawnCodingAgentRepl;
   spawnPackageManager: typeof spawnPackageManager;
@@ -89,10 +89,13 @@ const defaultDependencies: InitCommandDependencies = {
   detectInvokingPackageManager,
   detectPackageManager,
   ensureChannel,
+  hasInteractiveTerminal,
   isCodingAgentLaunch,
   now: () => performance.now(),
   runPackageManagerInstall,
   scaffoldBaseProject,
+  runInitOnboarding: async (input) =>
+    (await import("./init-onboarding.js")).runInitOnboarding(input),
   selectInitHandoff,
   spawnCodingAgentRepl,
   spawnPackageManager,
@@ -274,49 +277,6 @@ async function scaffoldProject(
   }
 }
 
-type PreparedInitProject =
-  | {
-      configurationFilesChanged: string[];
-      dependenciesAdded: string[];
-      failurePolicy: "preserve";
-      filesWritten: string[];
-      kind: "added";
-      nodeEngineOverride?: NodeEngineOverride;
-      packageManager: PackageManagerKind;
-      projectPath: string;
-    }
-  | {
-      failurePolicy: InitFailurePolicy;
-      kind: "created";
-      packageManager: PackageManagerKind;
-      preservedTargetEntries: readonly string[];
-      projectPath: string;
-      retryCommand: string;
-      workspaceMember: boolean;
-      workspaceRootMutations: WorkspaceRootMutation[];
-    };
-
-type InitResult = {
-  agentElapsedMs: number;
-  agentLaunched: boolean;
-  installElapsedMs: number;
-  packageManager: PackageManagerKind;
-  projectPath: string;
-} & (
-  | {
-      configurationFilesChanged: string[];
-      dependenciesAdded: string[];
-      filesWritten: string[];
-      kind: "added";
-      nodeEngineOverride?: NodeEngineOverride;
-    }
-  | {
-      gitResult: GitInitResult;
-      kind: "created";
-      workspaceRootMutations: WorkspaceRootMutation[];
-    }
-);
-
 function installProgressDetail(
   packageManager: PackageManagerKind,
   line: ProcessOutputLine,
@@ -466,16 +426,25 @@ async function runInitSteps(input: {
       progress = startCliLiveRow(logger);
     }
 
-    progress.update("Installing dependencies", `${project.packageManager} install`);
+    const runOnboarding =
+      project.kind === "created" &&
+      !agentLaunched &&
+      options.model === undefined &&
+      options.reasoning === undefined &&
+      options.channelWebNextjs !== true &&
+      dependencies.hasInteractiveTerminal();
+    if (runOnboarding) progress.stop();
+    else progress.update("Installing dependencies", `${project.packageManager} install`);
     initLog.debug(`installing dependencies with ${project.packageManager}`);
     const installStartedAt = dependencies.now();
     const installFailureOutput: string[] = [];
     const recentInstallOutput: string[] = [];
-    const installResult = await dependencies.runPackageManagerInstall(
+    const installPromise = dependencies.runPackageManagerInstall(
       project.packageManager,
       project.projectPath,
       {
         progressDetails: process.stdout.isTTY === true && !debug,
+        nonInteractive: runOnboarding,
         onOutput: (line) => {
           if (line.text.trim() !== "") {
             recentInstallOutput.push(line.text);
@@ -492,7 +461,25 @@ async function runInitSteps(input: {
         },
       },
     );
-    const installElapsedMs = dependencies.now() - installStartedAt;
+    let installSettledAt: number | undefined;
+    const timedInstallPromise = installPromise.then((result) => {
+      installSettledAt = dependencies.now();
+      return result;
+    });
+    let onboardingGitResult: GitInitResult | undefined;
+    const onboardingResult = runOnboarding
+      ? await dependencies.runInitOnboarding({
+          appRoot: project.projectPath,
+          install: timedInstallPromise,
+          afterInstall: async () => {
+            progress.update("Initializing Git repository");
+            initLog.debug("initializing git repository");
+            onboardingGitResult = await dependencies.tryInitializeGit(project.projectPath);
+          },
+        })
+      : undefined;
+    const installResult = onboardingResult?.install ?? (await timedInstallPromise);
+    const installElapsedMs = (installSettledAt ?? dependencies.now()) - installStartedAt;
     if (!packageManagerInstallSucceeded(installResult)) {
       initLog.debug("dependency installation failed", { ms: installElapsedMs });
       progress.stop();
@@ -536,18 +523,28 @@ async function runInitSteps(input: {
     initLog.debug("dependencies installed", { ms: installElapsedMs });
 
     if (project.kind === "created") {
-      progress.update("Initializing Git repository");
-      initLog.debug("initializing git repository");
+      if (onboardingGitResult === undefined) {
+        progress.update("Initializing Git repository");
+        initLog.debug("initializing git repository");
+        onboardingGitResult = await dependencies.tryInitializeGit(project.projectPath);
+      }
       return {
         ...project,
         agentElapsedMs,
         agentLaunched,
-        gitResult: await dependencies.tryInitializeGit(project.projectPath),
+        gitResult: onboardingGitResult,
         installElapsedMs,
+        onboardingCompleted: onboardingResult?.onboarded === true,
       };
     }
 
-    return { ...project, agentElapsedMs, agentLaunched, installElapsedMs };
+    return {
+      ...project,
+      agentElapsedMs,
+      agentLaunched,
+      installElapsedMs,
+      onboardingCompleted: false,
+    };
   } finally {
     progress.stop();
   }
@@ -658,7 +655,10 @@ export async function runInitCommand(
   // existing app may start unrelated processes. Exec-style runs do not echo
   // the command the way run-scripts do, so the handoff line is printed here.
   const freshScaffold = result.kind === "created";
-  const devArguments = freshScaffold ? [...baseDevArguments, "--onboard"] : baseDevArguments;
+  const devArguments =
+    freshScaffold && !result.onboardingCompleted
+      ? [...baseDevArguments, "--onboard"]
+      : baseDevArguments;
   logger.log(pc.dim("$ eve dev"));
   if (
     !resultSucceeded(

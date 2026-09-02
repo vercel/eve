@@ -2860,7 +2860,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     this.#sessionId = sessionId;
   }
 
-  shutdown(): void {
+  shutdown(options: { partingLine?: boolean } = {}): void {
     this.#stop();
     // The parting line: the boot banner's dim counterpart, written after the
     // terminal is restored so it lands as the session's last scrollback row.
@@ -2868,7 +2868,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
     // inside the reader long before the runner's teardown reaches here) and
     // printed at most once. Carries the session id so the conversation the
     // user just left can be found again.
-    if (this.#everInteractive && !this.#partingLinePrinted) {
+    if (options.partingLine !== false && this.#everInteractive && !this.#partingLinePrinted) {
       this.#partingLinePrinted = true;
       const session =
         this.#sessionId === undefined ? "" : ` ${this.#theme.glyph.dot} session ${this.#sessionId}`;

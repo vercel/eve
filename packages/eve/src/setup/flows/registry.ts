@@ -194,9 +194,11 @@ async function editPlan(input: {
   selected: Set<string>;
   notices?: readonly SelectNotice[];
   plannerContext?: RegistryPlannerContext;
+  beforeReview?: () => Promise<void>;
 }): Promise<"install" | "cancelled"> {
   let screen: PlannerScreen = "channels";
   let notices = input.notices;
+  let reviewPrepared = false;
   while (true) {
     if (screen !== "review") {
       try {
@@ -216,6 +218,11 @@ async function editPlan(input: {
         return "cancelled";
       }
       continue;
+    }
+
+    if (!reviewPrepared) {
+      await input.beforeReview?.();
+      reviewPrepared = true;
     }
 
     try {
@@ -276,6 +283,52 @@ function hasSettledOutcomes(
   );
 }
 
+export type RegistryPlanResult =
+  | { kind: "done"; items: readonly RegistryCatalogItem[] }
+  | { kind: "cancelled" };
+
+/** Collects registry selections without installing packages or running setup effects. */
+export async function planRegistryFlow(input: {
+  appRoot: string;
+  prompter: Prompter;
+  plannerContext?: RegistryPlannerContext;
+  /** Work that must settle before the final mutation-authorizing review is shown. */
+  beforeReview?: () => Promise<void>;
+  deps?: Pick<Partial<RegistryFlowDeps>, "browseRegistryCatalog">;
+}): Promise<RegistryPlanResult> {
+  const browseRegistryCatalog =
+    input.deps?.browseRegistryCatalog ??
+    (await import("#cli/commands/registry.js")).browseRegistryCatalog;
+  const catalogResult = await withSpinner(input.prompter, "Loading registry…", () =>
+    browseRegistryCatalog(input.appRoot),
+  );
+  const catalog = [...catalogResult.items];
+  const selected = new Set<string>();
+  const notices = catalogResult.errors.map((error) => ({
+    tone: "warning" as const,
+    text: `${error.registry}: ${error.message}`,
+  }));
+  const itemsByAddress = new Map(catalog.map((item) => [item.address, item]));
+  const plan = await editPlan({
+    prompter: input.prompter,
+    catalog,
+    itemsByAddress,
+    selected,
+    notices,
+    plannerContext: input.plannerContext,
+    beforeReview: input.beforeReview,
+  });
+  if (plan !== "install") return { kind: "cancelled" };
+  return {
+    kind: "done",
+    items: [...selected].map((address) => {
+      const item = itemsByAddress.get(address);
+      if (item === undefined) throw new Error(`Registry item "${address}" is no longer available.`);
+      return item;
+    }),
+  };
+}
+
 /** Collects a channel and integration plan, then installs every chosen item in order. */
 export async function runRegistryFlow(input: {
   appRoot: string;
@@ -283,6 +336,8 @@ export async function runRegistryFlow(input: {
   signal?: AbortSignal;
   /** Registry item supplied by `/add <item>`, confirmed and installed directly. */
   initialAddress?: string;
+  /** Previously reviewed items to install without reopening the planner. */
+  initialItems?: readonly RegistryCatalogItem[];
   plannerContext?: RegistryPlannerContext;
   onItemStart?: (item: Item, index: number, total: number) => void;
   /** Gives each installation its own cancellation boundary without ending the batch. */
@@ -293,7 +348,9 @@ export async function runRegistryFlow(input: {
   try {
     const initialAddress = input.initialAddress?.trim();
     let items: Item[];
-    if (initialAddress !== undefined && initialAddress !== "") {
+    if (input.initialItems !== undefined) {
+      items = [...input.initialItems];
+    } else if (initialAddress !== undefined && initialAddress !== "") {
       const confirmed = await input.prompter.select({
         message: `Add ${initialAddress}?`,
         options: [
@@ -304,34 +361,9 @@ export async function runRegistryFlow(input: {
       if (confirmed === "cancel") return { kind: "cancelled" };
       items = [{ address: initialAddress, name: initialAddress, source: "Registry" }];
     } else {
-      const browseRegistryCatalog =
-        input.deps?.browseRegistryCatalog ??
-        (await import("#cli/commands/registry.js")).browseRegistryCatalog;
-      const catalogResult = await withSpinner(input.prompter, "Loading registry…", () =>
-        browseRegistryCatalog(input.appRoot),
-      );
-      const catalog = [...catalogResult.items];
-      const selected = new Set<string>();
-      const notices = catalogResult.errors.map((error) => ({
-        tone: "warning" as const,
-        text: `${error.registry}: ${error.message}`,
-      }));
-      const itemsByAddress = new Map(catalog.map((item) => [item.address, item]));
-      const plan = await editPlan({
-        prompter: input.prompter,
-        catalog,
-        itemsByAddress,
-        selected,
-        notices,
-        plannerContext: input.plannerContext,
-      });
-      if (plan !== "install") return { kind: "cancelled" };
-      items = [...selected].map((address) => {
-        const item = itemsByAddress.get(address);
-        if (item === undefined)
-          throw new Error(`Registry item "${address}" is no longer available.`);
-        return item;
-      });
+      const plan = await planRegistryFlow(input);
+      if (plan.kind === "cancelled") return plan;
+      items = [...plan.items];
     }
 
     const installRegistryItem =

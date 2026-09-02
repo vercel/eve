@@ -45,7 +45,7 @@ import {
   type ApplyModelSettingsOutcome,
 } from "./model-source-change.js";
 import { ensureChatGptAuth } from "./chatgpt-auth.js";
-import { runProviderFlow } from "./provider.js";
+import { runProviderFlow, type ProviderPickerChoice } from "./provider.js";
 
 /** The current model id, its routing, and whether `/model` can rewrite it. */
 export interface CurrentAgentModel {
@@ -291,6 +291,8 @@ export async function runModelFlow(input: {
   withExclusiveTerminal?: <T>(task: () => Promise<T>) => Promise<T>;
   /** Live ChatGPT identity shown in this configuration flow only. */
   chatGptAccountLabel?: string;
+  /** A provider choice collected before project mutations were safe. */
+  initialProviderChoice?: ProviderPickerChoice;
   deps?: Partial<ModelFlowDeps>;
 }): Promise<ModelFlowResult> {
   const { appRoot, prompter, signal } = input;
@@ -346,6 +348,7 @@ export async function runModelFlow(input: {
 
   let lastApply: ApplyModelSettingsOutcome | undefined;
   let committedProviderSelection: ProviderSelection | undefined;
+  let initialProviderChoice = input.initialProviderChoice;
   let shouldAuthenticateChatGpt = false;
   let completed = false;
   let commitDraft = false;
@@ -462,7 +465,9 @@ export async function runModelFlow(input: {
       signal,
       availableProviders,
       selectedProvider,
+      initialChoice: initialProviderChoice,
     });
+    initialProviderChoice = undefined;
     // Backing out of the provider sub-flow changed nothing; the cursor stays on
     // the provider row so a retry is one keypress away.
     if (result.kind === "cancelled") {
