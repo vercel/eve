@@ -28,7 +28,7 @@ type ReasoningAppendedData = {
 };
 ```
 
-`startsBlock` is `true` on the first delta of a block and `false` on its continuations. A retry starts a replacement block even when it reuses the same turn and step coordinates. Adjacent continuation events may be coalesced while a durable write is in flight; a block start is an ordering barrier. Completed events remain the canonical finalized text.
+`startsBlock: true` means reset the accumulator before applying that delta; `false` means append to the existing block. A retry starts a replacement block even when it reuses the same turn and step coordinates. The reset is idempotent because normalized v24 tool-input streams can contain both an empty start and a first content delta at offset zero. Adjacent continuation events may be coalesced while a durable write is in flight; a block start is an ordering barrier. Completed events remain the canonical finalized text.
 
 This is a stream-version 25 breaking change: `messageDelta` replaces the `messageDelta` plus `messageSoFar` pair, and `reasoningDelta` replaces the `reasoningDelta` plus `reasoningSoFar` pair. `startsBlock` replaces the retry-boundary role previously inferred from a zero offset. Streamed tool input adopts the same marker instead of `inputTextOffset`.
 
@@ -62,6 +62,8 @@ The rule replaces accumulated text at a block start, appends continuations, and 
 A durable step retry reuses its turn and step coordinates. Its first `startsBlock: true` event replaces partial output in projections such as the default reducer and channel posts. The TUI cannot retract text already emitted to its renderer, so a replacement block stops further deltas for that visible part. A completed event may still extend the visible prefix; otherwise the next step boundary closes the old part without splicing attempts.
 
 A consumer that reconnects with both its prior accumulator and stream cursor continues normally. A consumer that retained only the cursor cannot reconstruct a block from a continuation; it must replay from the start of that block or wait for its completed event. This is the capability removed with cumulative append snapshots. Numeric character positions do not solve that missing-content problem, so the protocol does not carry them.
+
+The block marker does not validate character continuity inside a block. Supported clients rely on the durable event cursor for ordered, gap-free delivery. A raw consumer that omits an event after a valid block start can therefore produce an incomplete accumulator; numeric positions could detect some such gaps but could not recover the missing text.
 
 The client reads the stream version header on every connection. It normalizes v21–v24 cumulative message and reasoning appends, plus v24 offset-based tool-input appends, into the v25 block-marker contract before reducers see them, including when a reconnect crosses deployments. A current server performs the same normalization when replaying events persisted by an earlier deployment. Missing, unsupported, or shape-inconsistent versions fail instead of being cast to the current event union.
 

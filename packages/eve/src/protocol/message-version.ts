@@ -163,6 +163,9 @@ function normalizeLegacyMessageStreamEvent(
   }
 
   if (event.type === "action.input.appended") {
+    if (version !== undefined && version !== "24") {
+      throw new TypeError(`Invalid action input append for stream version ${version}.`);
+    }
     assertLegacyActionInputOffset(event.data.inputTextOffset, version);
     return {
       data: {
@@ -186,13 +189,28 @@ function validateCurrentMessageStreamEvent(
   event: MessageStreamEventForVersion<"25">,
 ): MessageStreamEvent {
   if (event.type === "message.appended") {
+    assertNoLegacyAppendField(event.data, "messageOffset", "message");
+    assertNoLegacyAppendField(event.data, "messageSoFar", "message");
     assertCurrentStartsBlock(event.data.startsBlock, "message");
   } else if (event.type === "reasoning.appended") {
+    assertNoLegacyAppendField(event.data, "reasoningOffset", "reasoning");
+    assertNoLegacyAppendField(event.data, "reasoningSoFar", "reasoning");
     assertCurrentStartsBlock(event.data.startsBlock, "reasoning");
   } else if (event.type === "action.input.appended") {
+    assertNoLegacyAppendField(event.data, "inputTextOffset", "action input");
     assertCurrentStartsBlock(event.data.startsBlock, "action input");
   }
   return event;
+}
+
+function assertNoLegacyAppendField(
+  data: object,
+  field: string,
+  stream: "action input" | "message" | "reasoning",
+): void {
+  if (field in data) {
+    throw new TypeError(`Invalid ${stream} append shape for stream version 25.`);
+  }
 }
 
 function assertNever(value: never): never {

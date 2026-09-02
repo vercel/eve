@@ -116,6 +116,70 @@ describe("message stream protocol", () => {
     });
   });
 
+  it("preserves repeated v24 tool-input resets as idempotent block starts", () => {
+    const normalize = (inputTextDelta: string) => {
+      const event = normalizeMessageStreamEvent("24", {
+        data: {
+          callId: "call_1",
+          inputTextDelta,
+          inputTextOffset: 0,
+          sequence: 4,
+          stepIndex: 0,
+          toolName: "render",
+          turnId: "turn_1",
+        },
+        meta: { at: "2026-09-02T00:00:00.001Z", id: `evt_${inputTextDelta.length}` },
+        type: "action.input.appended",
+      });
+      if (event.type !== "action.input.appended") {
+        throw new TypeError(`Expected an action input append, received ${event.type}.`);
+      }
+      return event;
+    };
+
+    expect(normalize("").data).toMatchObject({ inputTextDelta: "", startsBlock: true });
+    expect(normalize("{").data).toMatchObject({ inputTextDelta: "{", startsBlock: true });
+  });
+
+  it("rejects append variants that contradict their declared stream version", () => {
+    const v24ToolInput = {
+      data: {
+        callId: "call_1",
+        inputTextDelta: "{",
+        inputTextOffset: 0,
+        sequence: 4,
+        stepIndex: 0,
+        toolName: "render",
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.001Z", id: "evt_v24_input" },
+      type: "action.input.appended",
+    } satisfies MessageStreamEventForVersion<"24">;
+    const hybridV25 = {
+      data: {
+        messageDelta: "Hel",
+        messageOffset: 0,
+        sequence: 1,
+        startsBlock: true,
+        stepIndex: 0,
+        turnId: "turn_1",
+      },
+      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt_hybrid" },
+      type: "message.appended",
+    };
+    const parseWireEvent = <Version extends "23" | "25">(
+      event: object,
+    ): MessageStreamEventForVersion<Version> =>
+      JSON.parse(JSON.stringify(event)) as MessageStreamEventForVersion<Version>;
+
+    expect(() => normalizeMessageStreamEvent("23", parseWireEvent<"23">(v24ToolInput))).toThrow(
+      "Invalid action input append for stream version 23.",
+    );
+    expect(() => normalizeMessageStreamEvent("25", parseWireEvent<"25">(hybridV25))).toThrow(
+      "Invalid message append shape for stream version 25.",
+    );
+  });
+
   it("rejects an append that does not match its declared stream version", () => {
     const malformed = {
       data: {
