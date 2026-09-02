@@ -482,7 +482,7 @@ function renderWorkTree(
         );
       else if ("action" in descendant)
         append(
-          `${childPrefix}${branch}${phaseIcon(descendant.action.phase)} ${escapeSlackText(descendant.action.name)}`,
+          `${childPrefix}${branch}${phaseIcon(descendant.action.phase)} ${escapeSlackText(descendant.action.label ?? descendant.action.name)}`,
         );
       else visit(descendant.child, childPrefix, branch);
     });
@@ -527,7 +527,7 @@ export function selectSlackActivityStatus(snapshot: ActivitySnapshotV1): string 
   const action = newestAction(
     Object.values(snapshot.actions).filter((candidate) => candidate.phase === "running"),
   );
-  if (action !== undefined) return truncateTypingStatus(action.name);
+  if (action !== undefined) return truncateTypingStatus(action.label ?? action.name);
   const delegated = newestWork(active.filter((work) => work.kind !== "root-turn"));
   if (delegated !== undefined) return truncateTypingStatus(delegated.name ?? "Working with agent");
   return "Working…";
