@@ -140,6 +140,54 @@ afterEach(() => {
 });
 
 describe("runInitCommand", () => {
+  it("creates an agent workspace from comma-separated names", async () => {
+    const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-agents-"));
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(
+      output,
+      parentDirectory,
+      "operations",
+      {
+        agents: ["foreman", "researcher"],
+      },
+      deps,
+    );
+
+    const projectRoot = join(parentDirectory, "operations");
+    await expect(
+      pathExists(join(projectRoot, "agents", "foreman", "agent", "agent.ts")),
+    ).resolves.toBe(true);
+    await expect(
+      pathExists(join(projectRoot, "agents", "researcher", "agent", "agent.ts")),
+    ).resolves.toBe(true);
+    await expect(pathExists(join(projectRoot, "agent"))).resolves.toBe(false);
+    await expect(readFile(join(projectRoot, "tsconfig.json"), "utf8")).resolves.toContain(
+      '"agents/**/*.ts"',
+    );
+  });
+
+  it("adds only agent files to an existing workspace", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-workspace-agent-"));
+    await mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true });
+    await writeFile(join(workspaceRoot, "package.json"), '{"name":"workspace"}\n');
+    const beforePackageJson = await readFile(join(workspaceRoot, "package.json"), "utf8");
+    const output = logger();
+    const deps = dependencies();
+
+    await runInitCommand(output, workspaceRoot, "billing", {}, deps);
+
+    await expect(
+      pathExists(join(workspaceRoot, "agents", "billing", "agent", "agent.ts")),
+    ).resolves.toBe(true);
+    await expect(readFile(join(workspaceRoot, "package.json"), "utf8")).resolves.toBe(
+      beforePackageJson,
+    );
+    expect(deps.runPackageManagerInstall).not.toHaveBeenCalled();
+    expect(deps.tryInitializeGit).not.toHaveBeenCalled();
+  });
+
   it("creates the base agent with the runtime default model and invoking eve dependency", async () => {
     const parentDirectory = await mkdtemp(join(tmpdir(), "eve-init-base-"));
     const output = logger();

@@ -4,7 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
 
 function context(): CliApplicationContext & { resolve: ReturnType<typeof vi.fn> } {
-  return { root: "/workspace", resolve: vi.fn(async () => {}) };
+  return {
+    root: "/workspace",
+    resolve: vi.fn(async () => {}),
+    resolveAgent: vi.fn(async () => ({
+      appRoot: "/workspace",
+      environmentRoot: "/workspace",
+      kind: "standalone" as const,
+    })),
+  };
 }
 
 describe("applicationCommand", () => {

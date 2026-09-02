@@ -3,7 +3,7 @@ title: "CLI"
 description: "Reference for every eve CLI command: init, set, info, build, start, dev, logs, trace, link, deploy, eval, channels, and extension."
 ---
 
-Relevant `eve` commands can run from the application root or any directory beneath it. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
+Relevant `eve` commands can run from the application root or any directory beneath it. In an `agents/` workspace, agent-specific commands accept `--agent <name>` and otherwise open a picker when more than one agent exists. Non-interactive runs must pass `--agent`. Running `eve` with no command runs `eve init` when the current directory is not an eve project, or `eve dev` when it is.
 
 ## Commands
 
@@ -37,7 +37,7 @@ When `eve build` fails on discovery errors, it prints the full diagnostics repor
 ## `eve init`
 
 ```bash
-eve init [target] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs]
+eve init [target] [--agents <name,...>] [--model <provider/model-id>] [--reasoning <effort>] [--channel-web-nextjs]
 ```
 
 Creates a new agent app or adds an agent to an existing app. Always installs dependencies. New directories also initialize Git.
@@ -48,6 +48,8 @@ Creates a new agent app or adds an agent to an existing app. Always installs dep
 | `eve init` or `eve init .` in an empty directory                           | Creates an agent project in the current directory                                                                                                                        |
 | `eve init` or `eve init .` in a non-empty directory without `package.json` | Asks whether to scaffold in the current directory or a named subdirectory. Using the current directory preserves unrelated files but overwrites files at generated paths |
 | `eve init .` in an existing project                                        | Adds `agent/` plus missing `eve`, `ai`, and `zod` dependencies. Requires `package.json` and no existing `agent/` files                                                   |
+| `eve init my-project --agents foreman,researcher`                          | Creates a workspace with `agents/foreman/agent/` and `agents/researcher/agent/`                                                                                          |
+| `eve init billing` from an `agents/` workspace                             | Adds only `agents/billing/agent/`; the workspace keeps its existing package, dependencies, and TypeScript configuration                                                  |
 
 Coding-agent launches and non-interactive terminals cannot answer the location prompt and fail before writing. Pass a new directory name, such as `eve init my-agent`, in those environments.
 
@@ -55,6 +57,7 @@ After scaffolding, a human terminal usually continues into `eve dev`. If a codin
 
 | Flag                   | Type   | Default                    | Description                                                                                                              |
 | ---------------------- | ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `--agents <names>`     | list   | unset                      | Create an `agents/` workspace with one or more comma-separated agent names.                                              |
 | `--model <model>`      | string | `openai/gpt-5.6-luna-fast` | Set the root agent's AI Gateway model ID.                                                                                |
 | `--reasoning <effort>` | enum   | provider default           | Set reasoning to `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. `provider-default` leaves the field unauthored. |
 | `--channel-web-nextjs` | flag   | off                        | Add the Web Chat app (Next.js). Not for existing projects — run `eve add channel/web` there instead.                     |

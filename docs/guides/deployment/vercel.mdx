@@ -63,7 +63,9 @@ my-project/
         └── agent/
 ```
 
-An `agents/` directory marks the project as a workspace. eve validates and discovers only direct `agents/<name>/agent/` children. Their directory names become their public identities, exposed at `/<name>/eve/v1/*`. Run `eve dev`, `eve info`, and `eve eval` from an individual child directory; run project-level build, link, and deploy commands from the workspace root. The workspace root is the project package; child agent directories do not define packages or build scripts.
+An `agents/` directory marks the project as a workspace. eve validates and discovers only direct `agents/<name>/agent/` children. Their directory names become their public identities, exposed at `/<name>/eve/v1/*`. Run an agent-specific command from a child directory or pass `--agent <name>` at the workspace root; interactive commands open a picker when the name is omitted. Run project-level build, link, and deploy commands from the workspace root. The workspace root owns the project package, dependencies, and build scripts.
+
+Create this layout with `eve init my-project --agents support,research`, or add one agent to an existing workspace with `eve init billing`.
 
 With no authored `vercel.json#services`, `eve build` derives the complete Vercel Services graph on every build. If `vercel.json` declares `services`, that authored graph is authoritative instead; use `vercel build` to build and validate the complete project. This supports heterogeneous projects with frontends, private APIs, bindings, and other non-eve services without generated configuration files.
 
