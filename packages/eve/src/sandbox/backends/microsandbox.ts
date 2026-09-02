@@ -13,8 +13,10 @@ import type {
  * snapshot-backed templates and a firewall capable of domain-level
  * network policies and credential brokering.
  *
- * Supported hosts: macOS on Apple Silicon, or Linux (glibc) with KVM
- * enabled. The `microsandbox` package is not bundled with eve. When it
+ * Supported hosts: macOS on Apple Silicon, or Linux (glibc) where the
+ * current user can read and write `/dev/kvm`. Setting `MSB_PATH`
+ * explicitly selects a custom runtime executable instead of this local
+ * KVM probe. The `microsandbox` package is not bundled with eve. When it
  * (or its VM runtime) is missing, `eve dev` installs both
  * automatically (disable with `setup: { autoInstall: false }`);
  * production processes fail with actionable errors instead.

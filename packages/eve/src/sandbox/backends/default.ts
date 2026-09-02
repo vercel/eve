@@ -53,8 +53,9 @@ const PRODUCTION_PROBES: DefaultSandboxProbes = {
  *    is set) — local container/VM runtimes cannot run there.
  * 2. **Docker** when a Linux-container Docker daemon is reachable.
  * 3. **microsandbox** when the host supports it (macOS on Apple
- *    Silicon, or glibc Linux with KVM); `eve dev` auto-installs the
- *    package into the project.
+ *    Silicon, or glibc Linux where the current user can read and write
+ *    `/dev/kvm`; `MSB_PATH` explicitly selects a custom runtime);
+ *    `eve dev` auto-installs the package into the project.
  * 4. **just-bash** as the dependency-free fallback; `eve dev`
  *    auto-installs the package into the project.
  *
