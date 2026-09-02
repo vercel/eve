@@ -13,14 +13,16 @@ export default defineEval({
       ].join(" "),
     );
     started.expectOk();
-    const firstTurn = t.target.watchTurn(started.sessionId, {
-      startIndex: requireStreamIndex(t),
-    });
-    const completed = await firstTurn.result();
+    const firstTurn = started.message?.includes("SUBAGENT_TOKEN=echo-marker-9F2X")
+      ? undefined
+      : t.target.watchTurn(started.sessionId, {
+          startIndex: requireStreamIndex(t),
+        });
+    const completed = firstTurn === undefined ? started : await firstTurn.result();
     completed.expectOk();
     completed.messageIncludes("SUBAGENT_TOKEN=echo-marker-9F2X");
 
-    const second = await firstTurn.session.send(
+    const second = await (firstTurn?.session ?? t).send(
       [
         "Use the Workflow tool exactly once. In its JavaScript, call the same echo-marker child twice sequentially",
         "using the agentId shown in the latest <agents> block, with messages 'blocking second' and 'blocking third'.",
