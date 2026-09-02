@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rename, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rename, rm } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 
@@ -9,10 +9,7 @@ import { EVE_WORDMARK } from "#cli/banner.js";
 import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
-import { assertValidPublicAgentName } from "#internal/agent-name.js";
-import { resolveAgentWorkspace } from "#internal/agent-workspace.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -31,7 +28,6 @@ import {
 import type { ProcessOutputLine } from "#setup/primitives/process-output.js";
 import { addAgentToProject } from "#setup/scaffold/create/add-to-project.js";
 import { ensureChannel, scaffoldBaseProject } from "#setup/scaffold/index.js";
-import { createPrompter } from "#setup/prompter.js";
 import { WizardCancelledError } from "#setup/step.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
 import {
@@ -39,13 +35,17 @@ import {
   type WorkspaceRootMutation,
 } from "#setup/scaffold/workspace-root.js";
 import {
-  agentTemplateFiles,
   DEFAULT_EVE_PACKAGE_CONTRACT,
   type EvePackageContract,
 } from "#setup/scaffold/create/project.js";
-import { writeTextFile } from "#setup/scaffold/files.js";
 
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
+import {
+  addAgentsToWorkspace,
+  convertScaffoldToAgentWorkspace,
+  type InitCliLogger,
+  type InitCommandOptions,
+} from "./init-agent-workspace.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
 import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
 import {
@@ -57,21 +57,7 @@ import { tryInitializeGit, type GitInitResult } from "./init-git.js";
 import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 import { resolveInitTarget } from "./init-target.js";
 
-export interface InitCliLogger {
-  error(message: string): void;
-  log(message: string): void;
-}
-
-export interface InitCommandOptions {
-  /** Names used to create or extend an `agents/` workspace. Set by `--agents`. */
-  agents?: readonly string[];
-  /** Add the Web Chat channel (a Next.js app). Set by `--channel-web-nextjs`. */
-  channelWebNextjs?: boolean;
-  /** Model id written to the root agent config. Set by `--model`. */
-  model?: string;
-  /** Reasoning effort written to the root agent config. Set by `--reasoning`. */
-  reasoning?: AgentReasoningDefinition;
-}
+export type { InitCliLogger, InitCommandOptions } from "./init-agent-workspace.js";
 
 export interface InitCommandDependencies {
   addAgentToProject: typeof addAgentToProject;
@@ -111,94 +97,6 @@ const CURRENT_DIRECTORY_PROJECT_NAME = ".";
 export const EVE_INIT_PACKAGE_SPEC_ENV = "EVE_INIT_PACKAGE_SPEC";
 
 const initLog = createLogger("init");
-
-function validateAgentNames(names: readonly string[]): void {
-  if (names.length === 0) throw new Error("--agents requires at least one agent name.");
-  const unique = new Set<string>();
-  for (const name of names) {
-    assertValidPublicAgentName(name, "Agent");
-    if (unique.has(name)) throw new Error(`Agent name ${JSON.stringify(name)} is repeated.`);
-    unique.add(name);
-  }
-}
-
-async function writeWorkspaceAgent(
-  workspaceRoot: string,
-  name: string,
-  options: InitCommandOptions,
-): Promise<void> {
-  const appRoot = join(workspaceRoot, "agents", name);
-  if (await pathExists(appRoot)) {
-    throw new Error(
-      `Cannot create agent ${JSON.stringify(name)} because ${appRoot} already exists.`,
-    );
-  }
-  const files = agentTemplateFiles(options.model ?? DEFAULT_AGENT_MODEL_ID, options.reasoning);
-  await Promise.all(
-    Object.entries(files).map(([path, content]) => writeTextFile(join(appRoot, path), content)),
-  );
-}
-
-async function convertScaffoldToAgentWorkspace(
-  projectRoot: string,
-  names: readonly string[],
-  options: InitCommandOptions,
-): Promise<void> {
-  validateAgentNames(names);
-  if (options.channelWebNextjs === true) {
-    throw new Error("--channel-web-nextjs cannot be combined with --agents.");
-  }
-  const [first, ...remaining] = names;
-  await mkdir(join(projectRoot, "agents", first!), { recursive: true });
-  await rename(join(projectRoot, "agent"), join(projectRoot, "agents", first!, "agent"));
-  const tsconfigPath = join(projectRoot, "tsconfig.json");
-  const tsconfig = await import("node:fs/promises").then(({ readFile }) =>
-    readFile(tsconfigPath, "utf8"),
-  );
-  await writeTextFile(tsconfigPath, tsconfig.replace('"agent/**/*.ts"', '"agents/**/*.ts"'), {
-    force: true,
-  });
-  for (const name of remaining) {
-    await writeWorkspaceAgent(projectRoot, name, options);
-  }
-}
-
-async function addAgentsToWorkspace(
-  logger: InitCliLogger,
-  workspaceRoot: string,
-  target: string | undefined,
-  options: InitCommandOptions,
-): Promise<boolean> {
-  const workspace = await resolveAgentWorkspace(workspaceRoot);
-  if (workspace === undefined) return false;
-  if (options.channelWebNextjs === true) {
-    throw new Error("--channel-web-nextjs is not supported when adding a workspace agent.");
-  }
-  let names = options.agents;
-  if (target !== undefined && names !== undefined) {
-    throw new Error("Pass either an agent name or --agents, not both.");
-  }
-  if (names === undefined && target !== undefined) names = [target];
-  if (names === undefined) {
-    if (!(process.stdin.isTTY && process.stdout.isTTY)) {
-      throw new Error(
-        "This directory is an eve agent workspace. Pass an agent name, for example: eve init billing.",
-      );
-    }
-    names = [await createPrompter().text({ message: "Name the new agent" })];
-  }
-  validateAgentNames(names);
-  if (options.model !== undefined) {
-    const rejection = await validateModelSlug(workspaceRoot, options.model);
-    if (rejection !== null) throw new Error(rejection);
-  }
-  for (const name of names) await writeWorkspaceAgent(workspaceRoot, name, options);
-  logger.log(
-    `${pc.green("✓")} Added ${names.length === 1 ? "agent" : "agents"} ${names.map((name) => pc.bold(name)).join(", ")}`,
-  );
-  logger.log(pc.dim("$ eve dev --agent <name>"));
-  return true;
-}
 
 async function moveDirectoryContents(sourceRoot: string, targetRoot: string): Promise<void> {
   for (const entry of await readdir(sourceRoot)) {
@@ -670,7 +568,16 @@ export async function runInitCommand(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies = defaultDependencies,
 ): Promise<void> {
-  if (await addAgentsToWorkspace(logger, parentDirectory, target, options)) return;
+  if (
+    await addAgentsToWorkspace(
+      logger,
+      parentDirectory,
+      target,
+      options,
+      dependencies.validateModelSlug,
+    )
+  )
+    return;
 
   let result: InitResult;
   try {

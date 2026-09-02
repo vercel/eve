@@ -38,6 +38,7 @@ import {
   type InvokeCliRuntimeDependencies,
 } from "#cli/invoke/command.js";
 import {
+  parseAgentNamesOption,
   parseContextSizeOption,
   parseDisplayMode,
   parseLogsMode,
@@ -152,16 +153,6 @@ function hasInteractiveTerminal(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-function parseAgentNames(value: string): string[] {
-  const names = value.split(",").map((name) => name.trim());
-  if (names.length === 0 || names.some((name) => name === "")) {
-    throw new InvalidArgumentError(
-      "--agents requires a comma-separated list of at least one agent name.",
-    );
-  }
-  return names;
-}
-
 function createCliProgram(
   logger: CliLogger,
   runtime: CliRuntimeOverrides,
@@ -247,7 +238,7 @@ function createCliProgram(
     .option(
       "--agents <names>",
       "Create an agents/ workspace with comma-separated agent names",
-      parseAgentNames,
+      parseAgentNamesOption,
     )
     .option("--model <model>", "Set the agent model (provider/model-id)")
     .option(

@@ -75,6 +75,16 @@ const REASONING_VALUES: readonly AgentReasoningDefinition[] = [
 ];
 
 /** Parses an authored model reasoning effort. */
+export function parseAgentNamesOption(value: string): string[] {
+  const names = value.split(",").map((name) => name.trim());
+  if (names.length === 0 || names.some((name) => name === "")) {
+    throw new InvalidArgumentError(
+      "--agents requires a comma-separated list of at least one agent name.",
+    );
+  }
+  return names;
+}
+
 export function parseReasoningOption(value: string): AgentReasoningDefinition {
   if (!REASONING_VALUES.some((candidate) => candidate === value)) {
     throw new InvalidArgumentError(
