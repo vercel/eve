@@ -66,6 +66,7 @@ catalogs:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
+  - "@kybernesis/arcana"
   - "@linqapp/chat-sdk-adapter"
   - "@linqapp/sdk"
   - "@supermemory/eve"
