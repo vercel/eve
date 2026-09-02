@@ -4,7 +4,6 @@ import { satisfies } from "eve/evals/expect";
 const RECOVERY_TOKEN = "CANCELLED-SUBAGENT-RECOVERED";
 
 export default defineEval({
-  tags: ["real-model"],
   description:
     "Cancel a parent turn, cascade cancellation to its local sleeper subagent, then resume that child.",
   timeoutMs: 240_000,
