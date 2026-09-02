@@ -18,7 +18,7 @@ const PARENT_RESULT = `PARENT_RECALLED=${CODEWORD}`;
 const REMOTE_MEMORY_TOKEN = "remote-memory-scenario-token";
 
 function createScriptedParentAgentSource(subagentName: string): string {
-  const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}">`;
+  const agentIdPattern = `<agent id="([^"]+)" name="${subagentName}"(?: [^>]*)?>`;
 
   return `import { defineAgent } from "eve";
 import { mockModel } from "eve/evals";
