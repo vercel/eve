@@ -156,6 +156,8 @@ With `backend` omitted, eve uses `defaultBackend()`, which resolves on first use
 3. **microsandbox** when the host supports it: macOS on Apple Silicon, or glibc Linux with KVM enabled.
 4. **just-bash** as the dependency-free fallback.
 
+The Docker, microsandbox, and Vercel backends use the public `vcr.vercel.com/vercel/eve/base` image tag matching the installed eve version by default. Docker and microsandbox can pull it without registry credentials.
+
 `defaultBackend()` also accepts a keyed bag so each inner backend gets its own typed create options:
 
 ```ts
@@ -164,7 +166,7 @@ import { defaultBackend, defineSandbox } from "eve/sandbox";
 export default defineSandbox({
   backend: defaultBackend({
     vercel: { networkPolicy: "deny-all", resources: { vcpus: 4 } },
-    docker: { image: "ghcr.io/vercel/eve:latest" },
+    docker: { networkPolicy: "deny-all" },
     microsandbox: { memoryMiB: 2048 },
   }),
 });
@@ -172,11 +174,11 @@ export default defineSandbox({
 
 ### Docker
 
-`docker()` drives the Docker CLI directly. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
+`docker()` drives the Docker CLI directly. By default, it uses eve's published sandbox runtime image at `vcr.vercel.com/vercel/eve/base:<eve-version>`, with the tag resolved from the installed eve version. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
 
 ### microsandbox
 
-`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. The default base image is `ghcr.io/vercel/eve:latest`, eve's published sandbox runtime image. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
+`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. By default, it uses eve's published sandbox runtime image at `vcr.vercel.com/vercel/eve/base:<eve-version>`, with the tag resolved from the installed eve version. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
 
 ### just-bash
 
