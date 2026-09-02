@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1224
-status: proposed
-last_updated: "2026-08-19"
+status: in-progress
+last_updated: "2026-09-02"
 ---
 
 # HITL requests must not wedge sessions
@@ -1312,111 +1312,119 @@ obligation.
 The mitigations shipped the always-receptive scheduler ([#1830]
 authorization, via a window-gated extra inbox source; [#1868] approvals) and
 the ordered pending-batch collection with a legacy-key read shim ([#1868]).
-Their deliberate deviations from this contract, each named by its anchor:
-partial responses are deferred rather than settled per member
-(`owner.batch.response.settle-partial`); text matching is retained
-(`owner.approval.message.run-open`); question supersession is not
-actor-scoped (`owner.question.message.run-open-other-actor`); multi-batch
-question dismissal is suppressed rather than per-group; the window-gated
-authorization hook remains (deleted in stage 4).
 
-### Target: one engine
+The engine ships as two stacked PRs. Each is a reviewable boundary on its
+own: the first changes where state lives, the second changes who may change
+it.
 
-One harness-owned package implements the machine; everything else is an
-adapter that feeds it inputs or executes its plans. The driver schedules,
-the interpreter decides, the store persists, the executor performs — no
-other module may settle, dismiss, supersede, reject, buffer, or resume an
-obligation.
+1. **[#2822] One ledger.** Requests, Groups, and their completion state move
+   into `harness/hitl/request-ledger.ts` under one session key
+   (`eve.runtime.hitl.requestLedger`). Every read of pending HITL state goes
+   through the ledger; legacy keys import on first read. Behavior is
+   unchanged: the batch router, the approval response-attempt coordinator,
+   and the pending-authorization store still run as separate writers. The
+   request lifecycle conformance suite
+   (`request-lifecycle.conformance.test.ts`) is added here and is the oracle
+   for the next PR.
+2. **[#2863] One transition.** `interpretRequests(ledger, delivery)` becomes
+   the only place a Request, ResponseAttempt, Authorization, or Group changes
+   state. The tool loop reads the ledger, awaits the transition, commits
+   once, performs the returned effects, and dispatches Group completion by
+   owner. ResponseAttempts live on the Approval record; Authorization is an
+   internal Request linked by attempt id; `RequestRecord.outcome` is the
+   single terminal fact. Group completion is durable (`ready` with an
+   idempotency key, then `delivered` after owner effects succeed) and turn
+   cancellation force-closes every open Request, Group, and attempt in the
+   same transition. Deleted: `pending-input-batches.ts`,
+   `approval-response-attempts.ts`, `approval-response-interpreter.ts`,
+   `pending-input-resolution.ts`, `setPendingAuthorization` /
+   `clearPendingAuthorization`, and the synthetic settlement refeed.
+
+Deviations that survive both PRs, each named by its anchor: text matching is
+retained (`owner.approval.message.run-open`); question supersession is not
+actor-scoped (`owner.question.message.run-open-other-actor`); the
+window-gated authorization inbox source remains in `workflow-entry`
+(callbacks reach the interpreter through `stepInput.authorizationResults`,
+not the command stream); stale-response conversion still runs as a
+projection ahead of the interpreter in `stale-input-responses.ts`.
+
+### Shape as shipped
 
 ```text
 packages/eve/src/harness/hitl/
-  types.ts         state, inputs, transitions, and ordered effects
-  obligations.ts   one durable ledger: obligations, groups, candidates,
-                   routes, and generations; migration + the only state writer
-  interpret.ts     pure (HitlState, HitlInput) ->
-                   HitlDecision { nextState, effects }
-  projector.ts     routes: project / forward / re-emit / drop
-  events.ts        domain transition -> protocol event
-  execute.ts       persist nextState, then perform effects in order
+  request-ledger.ts         one durable ledger: requests, groups, attempts,
+                            outcomes; legacy import; the only state writer
+  request-interpreter.ts    interpretRequests(ledger, delivery) ->
+                            { ledger', effects, kind }
+  approval-attempts.ts      attempt, policy, and Authorization passes
+                            called by the interpreter
+  request-effects.ts        performs ordered effects after the commit
+  request-ledger-legacy.ts  one-shot import of pendingInputBatches,
+                            hitl.approvalState, pendingAuthorization
 ```
 
 ```ts
-type HitlInput =
-  | { type: "delivery"; delivery: AdmittedDelivery } // server-assigned deliveryId; verified actor or null
-  | { type: "timer"; timer: AuthorizationDeadline | SessionDeadline }
-  | { type: "turn-outcome"; outcome: TurnOutcome }
-  | { type: "child-event"; event: ChildHitlEvent }
-  | { type: "control"; control: CancelTurn | EndSession };
-
-interface HitlState {
-  obligations: Record<ObligationId, Obligation>;
-  groups: Record<GroupId, ObligationGroup>; // members + fire-once continuation
-  groupOrder: readonly GroupId[];
-  candidates: Record<CandidateId, ResponseCandidate>;
-  routes: Record<RequestId, ProjectionRoute>;
-  nextLimitGeneration: number;
+interface RequestDelivery {
+  now: number;
+  stepInput?: StepInput;                         // responses, message, context
+  authorizationResults: readonly AuthorizationResult[];
+  responder: SessionAuthContext | null;          // verified actor or null
 }
 
-type HitlEffect =
-  | { type: "emit"; event: InputLifecycleEvent }
-  | { type: "restore-group"; groupId: GroupId }
-  | { type: "execute-tool"; callId: string }
-  | { type: "run-model"; input: ModelTurnInput }
-  | { type: "forward-response"; routeId: string; response: InputResponse }
-  | { type: "terminate-turn" };
+type RequestEffect =
+  | { kind: "feedback"; message: string }
+  | { kind: "authorization-required"; challenges: readonly AuthorizationChallenge[] }
+  | { kind: "authorization-completed"; requestId; outcome: "completed" | "failed" }
+  | { kind: "approval-attempt"; attemptId; requestId; status }
+  | { kind: "approval-settled"; requestId; outcome: "allowed" | "cancelled" }
+  | { kind: "input-resolved"; ... }
+  | { kind: "action-rejected"; ... }
+  | { kind: "wait"; heldInput?: StepInput };
 ```
 
-`interpretHitl` is pure — no persistence, network, model, clock, or hook
-access; timers and verified identity arrive as input values. The executor
-persists `nextState` before performing the ordered effects; an effect that
-produces a turn outcome feeds it back through the same interpreter. Terminal
-obligations stay in the ledger as tombstones until the session ends — that
-record is what classifies duplicates and late callbacks as stale; there is
-no second stale-response mechanism.
+`interpretRequests` is pure over its inputs except for the approval policy
+lookup, which is passed in and evaluated late so a callback or persisted
+policy runs against current code. The tool loop persists `ledger'` before
+performing effects; a crash between them replays idempotently from the
+committed ledger. Terminal Requests stay in the ledger until the session
+ends; that record is what classifies duplicates and late callbacks as stale.
 
-Machine-checked at the store/interpreter boundary: only the store writes
-obligation state; every obligation belongs to exactly one group; terminal
-obligations never transition again; a continuation leaves `pending` exactly
-once; every candidate names one obligation and one admitted delivery; every
-route names one child-owned obligation or tombstone; every admitted input
-produces an observable effect or a documented no-op; interpreter output is
-deterministic for equal state and input; no two open approvals share one
-authored intent key.
+Held at the ledger boundary: only `request-ledger.ts` writes ledger state;
+every Request belongs to exactly one Group; a terminal Request never
+transitions again; a Group leaves `waiting` exactly once; every
+ResponseAttempt names one Request and one responder; interpreter output is
+deterministic for equal ledger and delivery.
 
-### Adapters and deletions
+### Remaining work
 
-- **tool-loop** keeps AI SDK transcript conversion, tool execution, and
-  model calls. Parked output becomes an ApprovalBatch continuation; new
-  requests and challenges return as turn outcomes; `resolvePendingInput`,
-  the stale-conversion pass, the limit special cases, and
-  `deferredStepInput` decisions all disappear into interpreter rows and
-  ordered effects.
-- **workflow-entry** becomes a pure scheduler: callbacks arrive through the
-  one command stream, classified by payload; the authorization window
-  machinery (`claimAuthorization`, `setAuthorizationWindow`,
-  `nextWithSource`, `awaitAuthorizationResume`) is deleted.
-- **workflow-steps** normalizes inputs and executes effects; callback
-  pairing and pending-state derivation move into the machine.
-- **session-limit-enforcement**: the budget gate opens `Limit(gen)` in the
-  store; resolution is an interpreter row like any other.
-- **proxy modules** fold into `projector.ts`; **resolve-text** leaves the
-  runtime path but stays exported for channel adapters.
-- Deleted outright: `stale-input-responses.ts` (becomes the `reject-stale`
-  rows), `input-request-class.ts` (classification is the obligation kind),
-  the inbox window machinery, and `deferredStepInput` as a decision
-  mechanism.
+Each item is a diff to the interpreter and its unit matrix, or a deletion of
+an adapter it has made redundant. None reopens the ledger boundary.
+
+- **Command stream.** Route authorization callbacks and timers through the
+  interpreter as `RequestDelivery` values; delete the window-gated inbox
+  source (`claimAuthorization`, `setAuthorizationWindow`, `nextWithSource`,
+  `awaitAuthorizationResume`).
+- **Projection.** Fold the proxy modules into a projector with per-request
+  route accumulation (fixes #1608); actor-partitioned coalescing.
+- **Target semantics.** Per-member settlement, actor-scoped question
+  supersession, text-match removal with its docs update, limit generations,
+  fail-closed request creation (fixes #1201).
+- **Stale conversion as interpreter rows.** Move `stale-input-responses.ts`
+  into `reject-stale` transitions so there is one stale mechanism.
+- **Lifecycle events.** Emit the event family from `request-effects.ts`; the
+  gated evals activate via `EVE_HITL_LIFECYCLE_CONTRACT=1`, keyed by anchor,
+  with expected sequences written literally.
 
 ### Migration and compatibility
 
-`loadHitlState` reads the new key first, then migrates the legacy sources in
-memory — pending batches (and the older singleton), `pendingAuthorization`,
-limit continuations, projected routes, `deferredStepInput`; the first write
-stores only the new shape. Messages wedged behind an approval before the
-mitigation release as an ordinary message turn on the first delivery after
-upgrade. One scoped transport break: challenge URLs minted before the
-cutover embed the old `${sessionId}:auth` hook token — ship a one-release
-token alias or accept the break for in-flight challenges under the pre-1.0
-policy.
+`readRequestLedger` reads the new key first, then imports the legacy sources
+in memory — pending batches (and the older singleton), `hitl.approvalState`,
+`pendingAuthorization`; the first write stores only the new shape. Messages
+wedged behind an approval before the mitigation release as an ordinary
+message turn on the first delivery after upgrade. One scoped transport
+break: challenge URLs minted before the cutover embed the old
+`${sessionId}:auth` hook token — ship a one-release token alias or accept
+the break for in-flight challenges under the pre-1.0 policy.
 
 ### Decisions and alternatives
 
@@ -1429,38 +1437,18 @@ policy.
   synthetic result naming the open request. Rejected alternatives: binding
   the call site to the open obligation breaks one-group-per-obligation;
   failing the park punishes ordinary invariant-1 traffic.
+- **Two PRs, not three.** An intermediate that moved attempts and
+  Authorization into the ledger without changing authority was cut: reviewed
+  alone it shows one ledger with three writers, which is not a boundary
+  anyone can hold. Storage moves and authority moves land together in
+  [#2863].
+- **Policies are late-bound and never persisted.** The interpreter receives
+  the live policy lookup per pass; a persisted attempt that needs a policy is
+  re-evaluated against current code after `prepareStepDynamicTools` has
+  refreshed dynamic tool metadata.
 - **No pending marker in the projection, yet.** Telling the model about open
   approvals would make re-raises unlikely, not impossible; it is a
   compatible future addition, and invariant 4 stays the hard guarantee.
-
-### Stages
-
-Each stage lands alone; its executable gate is recorded in
-[coverage.md](../e2e/fixtures/agent-tools-hitl/evals/lifecycle/coverage.md#implementation-stage-gates)
-and must pass before the next stage begins. After stage 4, every remaining
-behavior change is a diff to `interpret.ts` and its unit matrix.
-
-1. **Store foundation.** `obligations.ts` unifies pending batches,
-   `pendingAuthorization`, and the limit prompt into one shape, with
-   candidate records and generations; read shims for the legacy keys;
-   existing behavior unchanged.
-2. **Interpreter extraction.** `interpret.ts` absorbs `resolvePendingInput`,
-   stale conversion, and limit resolution, behavior-preserving; text
-   matching enters as an explicit, removable rule.
-3. **Auth through the machine.** Challenge parks become AuthGroups;
-   callbacks and deadlines pass through the interpreter (the deadline gains
-   its missing producer); multi-challenge resume falls out of group closure.
-4. **Single stream and projection.** Callbacks through the command stream
-   (window machinery deleted); projector extraction with per-request route
-   accumulation (fixes #1608); actor-partitioned coalescing.
-5. **Target semantics.** Per-member settlement, actor-scoped question
-   supersession, candidate races, text-match removal with its docs update,
-   limit generations, forced closure, fail-closed request creation (fixes
-   #1201).
-6. **Lifecycle events.** `events.ts` emits the event family; the gated evals
-   activate via `EVE_HITL_LIFECYCLE_CONTRACT=1`, keyed by anchor, with
-   expected sequences written literally and never computed from runtime
-   code.
 
 The acceptance gate for the late splice —
 [`tool-loop-generate-approval-resume.integration.test.ts`](../packages/eve/src/harness/tool-loop-generate-approval-resume.integration.test.ts)
@@ -1501,3 +1489,5 @@ response resumes a disposed child hook and fails the parent.
 
 [#1830]: https://github.com/vercel/eve/pull/1830
 [#1868]: https://github.com/vercel/eve/pull/1868
+[#2822]: https://github.com/vercel/eve/pull/2822
+[#2863]: https://github.com/vercel/eve/pull/2863
