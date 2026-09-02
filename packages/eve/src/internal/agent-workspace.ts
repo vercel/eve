@@ -39,13 +39,13 @@ export async function resolveAgentWorkspace(
     const name = basename(appRoot);
     assertValidPublicAgentName(name, "Agent workspace member");
     if ((await source.stat(join(appRoot, "agent"))) !== "directory") {
-      const relativeAppRoot = relative(workspaceRoot, appRoot);
+      const relativeAppRoot = relative(workspaceRoot, appRoot).replaceAll("\\", "/");
       const flatHint =
         (await source.stat(join(appRoot, "agent.ts"))) === "file"
           ? " Move flat authored files under an agent/ directory."
           : "";
       throw new Error(
-        `${relativeAppRoot} is not a workspace agent: expected ${join(relativeAppRoot, "agent")}/.${flatHint}`,
+        `${relativeAppRoot} is not a workspace agent: expected ${relativeAppRoot}/agent/.${flatHint}`,
       );
     }
     members.push({ appRoot, name });
