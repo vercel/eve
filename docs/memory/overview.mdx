@@ -79,15 +79,15 @@ automatically or only through explicit tool calls.
 ### Supermemory
 
 [Supermemory](https://github.com/supermemoryai/eve-supermemory#readme) is a
-hosted memory service with an eve provider. It recalls relevant context before
-each turn, captures completed turns automatically, and gives the model tools to
-search, remember, forget, and extract sources.
+long-term memory platform that adds persistent, self-growing memory to eve
+agents. It automatically captures completed turns and retrieves relevant context
+through semantic search. Add it from the eve registry:
 
 ```bash
 eve add memory/supermemory
 ```
 
-The command installs `@supermemory/eve` and writes a `supermemory` slot:
+This scaffolds a memory slot that you can customize:
 
 ```ts title="agent/memory/supermemory.ts"
 import supermemory from "@supermemory/eve";
@@ -103,10 +103,8 @@ export default defineMemory({
 });
 ```
 
-Set `SUPERMEMORY_API_KEY` in the agent's environment. The provider sends
-conversation content and extracted sources to Supermemory, so review its
-retention and data handling before enabling it for sensitive data. See the
-[Supermemory integration page](/integrations/supermemory) for provider options.
+See the [Supermemory provider documentation](/integrations/supermemory) for
+full setup and configuration.
 
 ### File memory
 
