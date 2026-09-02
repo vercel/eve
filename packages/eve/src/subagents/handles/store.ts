@@ -121,32 +121,33 @@ export type TurnOwnedAgentHandle =
     };
 
 /**
- * Background-task lifecycle: `reserved → claimed → available ↔ claimed`.
+ * Workflow-owner lifecycle: `reserved → claimed → available ↔ claimed`.
  *
  * `reserved` leases a fresh identity before start, `claimed` leases an
- * addressed child turn to one task, and `available` retains the idle address
- * between tasks. A terminal child leaves this union entirely.
+ * addressed child turn to one task or workflow-tool run, and `available`
+ * retains the idle address between invocations. A terminal child leaves this
+ * union entirely.
  */
 export type TaskOwnedAgentHandle =
   | {
-      /** Fresh identity leased to one task before the child's address is confirmed. */
+      /** Fresh identity leased to one owner before the child's address is confirmed. */
       readonly phase: "reserved";
       readonly identity: AgentIdentity;
       readonly operationId: string;
       readonly callId?: string;
-      readonly taskId: string;
+      readonly ownerId: string;
     }
   | {
-      /** Addressed child turn leased to one task until that task releases it. */
+      /** Addressed child turn leased until its owner releases it. */
       readonly phase: "claimed";
       readonly identity: AgentIdentity;
       readonly operationId: string;
       readonly callId?: string;
       readonly address: AgentAddress;
-      readonly taskId: string;
+      readonly ownerId: string;
     }
   | {
-      /** Idle addressed child with no task lease, ready for a later task to claim. */
+      /** Idle addressed child with no owner lease, ready for a later invocation to claim. */
       readonly phase: "available";
       readonly identity: AgentIdentity;
       readonly address: AgentAddress;
@@ -171,7 +172,7 @@ export interface AgentHandleStore {
 
 export const EMPTY_AGENT_HANDLE_STORE: AgentHandleStore = { handles: [] };
 
-/** One serialized task-lease mutation against the shared agent handle store. */
+/** One serialized owner-lease mutation against the shared agent handle store. */
 export type AgentHandleStoreCommand =
   | { readonly kind: "read" }
   | {
@@ -179,13 +180,13 @@ export type AgentHandleStoreCommand =
       readonly kind: "reserve";
       readonly operationId: string;
       readonly callId?: string;
-      readonly taskId: string;
+      readonly ownerId: string;
     }
   | {
       readonly address: AgentAddress;
       readonly kind: "confirm";
       readonly operationId: string;
-      readonly taskId: string;
+      readonly ownerId: string;
     }
   | {
       readonly agentId: string;
@@ -194,10 +195,10 @@ export type AgentHandleStoreCommand =
       readonly invokedName: string;
       readonly kind: "claim";
       readonly operationId: string;
-      readonly taskId: string;
+      readonly ownerId: string;
     }
-  | { readonly agentId: string; readonly kind: "remove"; readonly taskId: string }
-  | { readonly kind: "release-task"; readonly taskId: string };
+  | { readonly agentId: string; readonly kind: "remove"; readonly ownerId: string }
+  | { readonly kind: "release-owner"; readonly ownerId: string };
 
 export type AgentHandleStoreCommandResult =
   | { readonly kind: "ready"; readonly handle?: TaskOwnedAgentHandle }
@@ -268,13 +269,13 @@ const agentHandleStoreCommandSchema: z.ZodType<AgentHandleStoreCommand> = z.disc
       callId: nonEmptyString.optional(),
       kind: z.literal("reserve"),
       operationId: nonEmptyString,
-      taskId: nonEmptyString,
+      ownerId: nonEmptyString,
     }),
     z.strictObject({
       address: addressSchema,
       kind: z.literal("confirm"),
       operationId: nonEmptyString,
-      taskId: nonEmptyString,
+      ownerId: nonEmptyString,
     }),
     z.strictObject({
       agentId: nonEmptyString,
@@ -283,14 +284,14 @@ const agentHandleStoreCommandSchema: z.ZodType<AgentHandleStoreCommand> = z.disc
       invokedName: nonEmptyString,
       kind: z.literal("claim"),
       operationId: nonEmptyString,
-      taskId: nonEmptyString,
+      ownerId: nonEmptyString,
     }),
     z.strictObject({
       agentId: nonEmptyString,
       kind: z.literal("remove"),
-      taskId: nonEmptyString,
+      ownerId: nonEmptyString,
     }),
-    z.strictObject({ kind: z.literal("release-task"), taskId: nonEmptyString }),
+    z.strictObject({ kind: z.literal("release-owner"), ownerId: nonEmptyString }),
   ],
 );
 
@@ -321,7 +322,7 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
     identity: identitySchema,
     operationId: nonEmptyString,
     phase: z.literal("reserved"),
-    taskId: nonEmptyString,
+    ownerId: nonEmptyString,
   }),
   z.strictObject({
     address: addressSchema,
@@ -329,7 +330,7 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
     identity: identitySchema,
     operationId: nonEmptyString,
     phase: z.literal("claimed"),
-    taskId: nonEmptyString,
+    ownerId: nonEmptyString,
   }),
   z.strictObject({
     address: addressSchema,

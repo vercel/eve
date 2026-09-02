@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   dispatchAgentInvocation,
+  releaseAgentInvocationOwnerStep,
   settleTaskAgentInvocationStep,
 } from "#execution/tools/subagent/invoke-step.js";
-import { dispatchToTaskAgentAddress } from "#subagents/handle-dispatch.js";
+import { dispatchToClaimedAgentAddress } from "#subagents/handle-dispatch.js";
 import { startSubagent } from "#execution/tools/subagent/start.js";
 import { prepareOwnerAgentInvocation } from "#execution/tools/subagent/invoke-preparation.js";
 import { readDurableSession } from "#execution/durable-session-store.js";
@@ -12,7 +13,7 @@ import { getAgentHandleStore, setAgentHandleStore } from "#subagents/handles/sto
 
 vi.mock("#subagents/handle-dispatch.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  dispatchToTaskAgentAddress: vi.fn(),
+  dispatchToClaimedAgentAddress: vi.fn(),
 }));
 vi.mock("#subagents/continuation-bundle.js", () => ({
   createAgentContinuationBundle: vi.fn(() => ({ nodeId: "child" })),
@@ -83,16 +84,16 @@ describe("owner agent invocation dispatch", () => {
       ...prepared,
       plan: [{ action, agentId: "agent-1", kind: "resume" }],
     } as never);
-    vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue(called);
+    vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue(called);
 
     const dispatched = await dispatch();
 
-    expect(dispatchToTaskAgentAddress).toHaveBeenCalledWith(
+    expect(dispatchToClaimedAgentAddress).toHaveBeenCalledWith(
       expect.objectContaining({
         handle: expect.objectContaining({
           identity: availableRecord.identity,
           phase: "claimed",
-          taskId: "task-1",
+          ownerId: "task-1",
         }),
         parentToken: "agent-reply",
         taskId: "task-1",
@@ -103,7 +104,7 @@ describe("owner agent invocation dispatch", () => {
       expect.objectContaining({
         identity: availableRecord.identity,
         phase: "claimed",
-        taskId: "task-1",
+        ownerId: "task-1",
       }),
     ]);
   });
@@ -114,7 +115,7 @@ describe("owner agent invocation dispatch", () => {
       callId: "call-1",
       operationId: "admission-operation",
       phase: "claimed" as const,
-      taskId: "task-1",
+      ownerId: "task-1",
     };
     const claimedSession = {
       ...session,
@@ -126,13 +127,67 @@ describe("owner agent invocation dispatch", () => {
       session: claimedSession,
       plan: [{ action, agentId: "agent-1", kind: "resume" }],
     } as never);
-    vi.mocked(dispatchToTaskAgentAddress).mockResolvedValue(called);
+    vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue(called);
 
     await dispatch();
 
-    expect(dispatchToTaskAgentAddress).toHaveBeenCalledWith(
+    expect(dispatchToClaimedAgentAddress).toHaveBeenCalledWith(
       expect.objectContaining({ handle: claimed }),
     );
+  });
+
+  it("reuses one handle across blocking invocations with the same agentId", async () => {
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      plan: [{ action, agentId: "agent-1", kind: "resume" }],
+    } as never);
+    vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue(called);
+
+    const first = await dispatchAgentInvocation({
+      replyTo: "first-reply",
+      request: {
+        input: { agentId: "agent-1", message: "First", target: "research" },
+        invocationId: "call-1:first",
+        kind: "agent-invoke",
+      },
+      ownerId: "workflow-run-1",
+      serializedContext: {},
+      sessionState: {} as never,
+    });
+    expect(first.kind).toBe("dispatched");
+    const firstHandle =
+      first.kind === "dispatched"
+        ? getAgentHandleStore(first.sessionState.snapshot?.session.state)?.handles[0]
+        : undefined;
+    expect(firstHandle).toMatchObject({
+      identity: { id: "agent-1" },
+      ownerId: "workflow-run-1",
+      phase: "claimed",
+    });
+
+    vi.mocked(readDurableSession).mockResolvedValue({
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [availableRecord] }),
+    } as never);
+    const second = await dispatchAgentInvocation({
+      replyTo: "second-reply",
+      request: {
+        input: { agentId: "agent-1", message: "Second", target: "research" },
+        invocationId: "call-1:second",
+        kind: "agent-invoke",
+      },
+      ownerId: "workflow-run-1",
+      serializedContext: {},
+      sessionState: {} as never,
+    });
+
+    expect(second).toMatchObject({ agentId: "agent-1", kind: "dispatched" });
+    expect(dispatchToClaimedAgentAddress).toHaveBeenCalledTimes(2);
+    expect(
+      vi
+        .mocked(dispatchToClaimedAgentAddress)
+        .mock.calls.map(([input]) => input.handle.identity.id),
+    ).toEqual(["agent-1", "agent-1"]);
   });
 
   it("starts a fresh agent with task-owned handle semantics", async () => {
@@ -141,7 +196,7 @@ describe("owner agent invocation dispatch", () => {
       identity: { id: "agent-receipt", name: "research", nodeId: "subagents/research" },
       operationId: "receipt-operation",
       phase: "reserved" as const,
-      taskId: "task-1",
+      ownerId: "task-1",
     };
     vi.mocked(readDurableSession).mockResolvedValue({
       ...session,
@@ -176,7 +231,7 @@ describe("owner agent invocation dispatch", () => {
       }),
     );
     expect(getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles).toEqual(
-      expect.arrayContaining([expect.objectContaining({ phase: "claimed", taskId: "task-1" })]),
+      expect.arrayContaining([expect.objectContaining({ ownerId: "task-1", phase: "claimed" })]),
     );
   });
 });
@@ -187,7 +242,7 @@ describe("task-owned agent settlement", () => {
       ...availableRecord,
       operationId: "operation-1",
       phase: "claimed" as const,
-      taskId: "task-1",
+      ownerId: "task-1",
     };
     vi.mocked(readDurableSession).mockResolvedValue({
       ...session,
@@ -212,6 +267,7 @@ describe("task-owned agent settlement", () => {
         output: "done",
         subagentName: "research",
       },
+      ownerId: "task-1",
       sessionState: {} as never,
       taskId: "task-1",
     });
@@ -221,6 +277,28 @@ describe("task-owned agent settlement", () => {
     expect(handles).toEqual(
       kind === "parked" ? [expect.objectContaining({ phase: "available" })] : [],
     );
+  });
+
+  it("releases every remaining claim for a completed workflow run", async () => {
+    const claimed = {
+      ...availableRecord,
+      operationId: "operation-1",
+      ownerId: "workflow-run-1",
+      phase: "claimed" as const,
+    };
+    vi.mocked(readDurableSession).mockResolvedValue({
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+    } as never);
+
+    const released = await releaseAgentInvocationOwnerStep({
+      ownerId: "workflow-run-1",
+      sessionState: {} as never,
+    });
+
+    expect(getAgentHandleStore(released.sessionState.snapshot?.session.state)?.handles).toEqual([
+      availableRecord,
+    ]);
   });
 });
 
@@ -233,6 +311,7 @@ async function dispatch() {
       invocationId: "call-1",
       kind: "agent-invoke",
     },
+    ownerId: "task-1",
     serializedContext: {},
     sessionState: {} as never,
     taskId: "task-1",

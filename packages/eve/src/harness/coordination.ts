@@ -4,7 +4,6 @@ import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#prot
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type {
   RuntimeActionRequest,
-  RuntimeAgentDispatchRequest,
   RuntimeActionResult,
   RuntimeToolCallActionRequest,
   RuntimeWorkflowTaskRequest,
@@ -17,7 +16,11 @@ import {
   clearProxyInputRequestsForChild,
   clearProxyInputRequestsWhere,
 } from "#harness/proxy-input-requests.js";
-import { findWorkflowToolRun, removeWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import {
+  findWorkflowToolRun,
+  isInboxSubagentResultFromRecordedWorkflowToolRun,
+  removeWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { normalizeToolModelOutput } from "#harness/tool-model-output.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import {
@@ -71,7 +74,7 @@ export interface PendingCoordinationBatch {
   /** Framework task controls deferred to the turn owner. */
   readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
   /** Authored-tool and subagent workflow tasks pending coordination. */
-  readonly tasks: readonly (RuntimeAgentDispatchRequest | RuntimeWorkflowTaskRequest)[];
+  readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
   readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
@@ -132,7 +135,7 @@ export function clearPendingCoordinationBatch(session: HarnessSession): HarnessS
  */
 export function setPendingCoordinationBatch(input: {
   readonly runtimeActions: readonly RuntimeToolCallActionRequest[];
-  readonly tasks: readonly (RuntimeAgentDispatchRequest | RuntimeWorkflowTaskRequest)[];
+  readonly tasks: readonly RuntimeWorkflowTaskRequest[];
   readonly event: PendingCoordinationEventMetadata;
   readonly localFanoutSize?: number;
   readonly responseMessages: readonly ModelMessage[];
@@ -195,7 +198,12 @@ function resolveResultsForCoordinationBatch(input: {
     pendingCallIds: [...input.batch.runtimeActions, ...input.batch.tasks].map(
       (request) => request.callId,
     ),
-    results: input.results.filter((result) => isResultBoundToRunningHandle(input.state, result)),
+    results: input.results.filter(
+      (result) =>
+        isResultBoundToRunningHandle(input.state, result) ||
+        (result.kind === "subagent-result" &&
+          isInboxSubagentResultFromRecordedWorkflowToolRun(input.state, result)),
+    ),
   });
 }
 

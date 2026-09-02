@@ -43,7 +43,7 @@ const parkedRemoteHandle: AgentHandle = {
 };
 
 describe("projectParkedAgentHandles / renderAgentsSnippet", () => {
-  it("projects and renders only parked handles", () => {
+  it("projects and renders only idle handles", () => {
     const runningStore = { handles: [runningHandle] };
     expect(projectParkedAgentHandles(runningStore)).toEqual([]);
     expect(renderAgentsSnippet(runningStore)).toBe("[Agents]\n<agents>\n</agents>");
@@ -54,6 +54,15 @@ describe("projectParkedAgentHandles / renderAgentsSnippet", () => {
     expect(snippet.startsWith("[Agents]\n<agents>")).toBe(true);
     expect(snippet).toContain(
       `<agent id="${identity.id}" name="research">initial findings</agent>`,
+    );
+
+    const availableHandle = {
+      address: runningHandle.address,
+      identity,
+      phase: "available" as const,
+    };
+    expect(renderAgentsSnippet({ handles: [availableHandle] })).toContain(
+      `<agent id="${identity.id}" name="research">(available)</agent>`,
     );
   });
 

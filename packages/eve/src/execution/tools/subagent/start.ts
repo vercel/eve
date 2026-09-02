@@ -19,7 +19,7 @@ import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 
-export type DispatchStartTarget =
+export type SubagentStartTarget =
   | {
       readonly kind: "local";
       readonly action: RuntimeSubagentDispatchRequest;
@@ -53,7 +53,7 @@ export async function startSubagent(input: {
   readonly serializedContext: Record<string, unknown>;
   readonly session: RuntimeSession;
   readonly taskId?: string;
-  readonly target: DispatchStartTarget;
+  readonly target: SubagentStartTarget;
 }): Promise<DispatchOutcome> {
   const storedParentTraceContext =
     readActionTraceContext(

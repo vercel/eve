@@ -131,7 +131,7 @@ export async function notifyTurnCallerStep(input: {
   await resumeSettledTurnHook(input.caller.replyTo.token, result);
 }
 
-/** Settles a task-owned caller after the child turn is cooperatively cancelled. */
+/** Settles a workflow-owned caller after the child turn is cooperatively cancelled. */
 export async function notifyCancelledTaskCallerStep(input: {
   readonly caller: TurnCaller | undefined;
   readonly sessionId: string;
@@ -139,10 +139,15 @@ export async function notifyCancelledTaskCallerStep(input: {
 }): Promise<void> {
   "use step";
 
-  if (input.caller?.taskId === undefined) return;
+  if (input.caller === undefined) return;
   const usageDelta = input.usage ?? ZERO_TOKEN_USAGE;
+  const error = {
+    code: SUBAGENT_EXECUTION_FAILED,
+    message: "The agent invocation was cancelled.",
+  };
   const base: RuntimeSubagentChildResult = {
     callId: input.caller.callId,
+    isError: true,
     kind: "subagent-result",
     origin: "child",
     outcome: {
@@ -150,7 +155,7 @@ export async function notifyCancelledTaskCallerStep(input: {
       result: { kind: "cancelled" },
       usageDelta,
     },
-    output: "",
+    output: error,
     subagentName: input.caller.subagentName,
   };
   const result = input.usage === undefined ? base : { ...base, usage: input.usage };

@@ -70,7 +70,7 @@ describe("acceptTaskAuthorizationEventStep", () => {
         identity: { id: "agent-1", name: "research", nodeId: "node-1" },
         operationId: "operation-1",
         phase: "claimed",
-        taskId: "task-1",
+        ownerId: "task-1",
       },
     ]);
     vi.mocked(readLatestTaskView).mockResolvedValue({
@@ -96,7 +96,7 @@ describe("acceptTaskAuthorizationEventStep", () => {
         identity: { id: "agent-1", name: "research", nodeId: "node-1" },
         operationId: "operation-1",
         phase: "reserved",
-        taskId: "task-1",
+        ownerId: "task-1",
       },
     ]);
 

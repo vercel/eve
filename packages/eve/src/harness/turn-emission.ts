@@ -1,10 +1,7 @@
 import type { ModelMessage } from "ai";
 
-import type {
-  AssistantStepFinishReason,
-  RuntimeIdentity,
-  RuntimeTraceContext,
-} from "#protocol/message.js";
+import type { HarnessEmissionState } from "#harness/emission-state.js";
+import type { HarnessEmitFn, StepInput } from "#harness/types.js";
 import {
   createMessageReceivedEvent,
   createSessionCompletedEvent,
@@ -16,16 +13,14 @@ import {
   createTurnCompletedEvent,
   createTurnFailedEvent,
   createTurnStartedEvent,
+  type AssistantStepFinishReason,
+  type RuntimeIdentity,
+  type RuntimeTraceContext,
 } from "#protocol/message.js";
-import type { RunMode } from "#shared/run-mode.js";
 import type { JsonObject } from "#shared/json.js";
-import type { HarnessEmissionState } from "#harness/emission-state.js";
-import type { HarnessEmitFn, StepInput } from "#harness/types.js";
+import type { RunMode } from "#shared/run-mode.js";
 
-/**
- * Emits `session.started` (once), `turn.started`, and `message.received` at the
- * beginning of a new turn. Returns updated emission state.
- */
+/** Emits the session/turn/message preamble and advances to the active turn state. */
 export async function emitTurnPreamble(
   emitFn: HarnessEmitFn,
   input: StepInput,
@@ -38,30 +33,16 @@ export async function emitTurnPreamble(
   if (!state.sessionStarted) {
     await emitFn(createSessionStartedEvent({ runtime: runtimeIdentity, trace: traceContext }));
   }
-
   await emitFn(createTurnStartedEvent({ sequence: state.sequence, trace: traceContext, turnId }));
-
   if (input.message !== undefined) {
     await emitFn(
-      createMessageReceivedEvent({
-        message: input.message,
-        sequence: state.sequence,
-        turnId,
-      }),
+      createMessageReceivedEvent({ message: input.message, sequence: state.sequence, turnId }),
     );
   }
-
-  return {
-    sessionStarted: true,
-    sequence: state.sequence,
-    stepIndex: 0,
-    turnId,
-  };
+  return { sessionStarted: true, sequence: state.sequence, stepIndex: 0, turnId };
 }
 
-/**
- * Emits `step.started` for one model call.
- */
+/** Emits `step.started` for one model call. */
 export async function emitStepStarted(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
@@ -85,11 +66,6 @@ interface FailedStepPayload {
   readonly message: string;
 }
 
-/**
- * Emits the shared head of both failure cascades: `step.failed` →
- * `turn.failed`. Both terminal and recoverable paths diverge only on
- * the third event (`session.failed` vs. `session.waiting`).
- */
 async function emitStepAndTurnFailed(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
@@ -103,24 +79,10 @@ async function emitStepAndTurnFailed(
       turnId: state.turnId,
     }),
   );
-  await emitFn(
-    createTurnFailedEvent({
-      ...input,
-      sequence: state.sequence,
-      turnId: state.turnId,
-    }),
-  );
+  await emitFn(createTurnFailedEvent({ ...input, sequence: state.sequence, turnId: state.turnId }));
 }
 
-/**
- * Emits the full terminal failure cascade: `step.failed` →
- * `turn.failed` → `session.failed`.
- *
- * Use this when the session cannot be salvaged (structural config
- * error, auth misconfig, non-recoverable provider response). The
- * `session.failed` tail tells adapters the session is dead and no
- * further follow-up is possible on the same continuation token.
- */
+/** Emits the full terminal step, turn, and session failure cascade. */
 export async function emitFailedStep(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
@@ -130,10 +92,7 @@ export async function emitFailedStep(
   await emitFn(createSessionFailedEvent(input));
 }
 
-/**
- * Emits the recoverable failure cascade: `step.failed` →
- * `turn.failed` → `session.waiting`.
- */
+/** Emits a recoverable step and turn failure, then parks the session. */
 export async function emitRecoverableFailedTurn(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
@@ -141,7 +100,6 @@ export async function emitRecoverableFailedTurn(
 ): Promise<HarnessEmissionState> {
   await emitStepAndTurnFailed(emitFn, state, input);
   await emitFn(createSessionWaitingEvent());
-
   return {
     sessionStarted: state.sessionStarted,
     sequence: state.sequence + 1,
@@ -150,38 +108,21 @@ export async function emitRecoverableFailedTurn(
   };
 }
 
-/**
- * Returns updated emission state for the next step in the current turn.
- */
+/** Advances to the next model step in the current turn. */
 export function advanceStep(state: HarnessEmissionState): HarnessEmissionState {
-  return {
-    ...state,
-    stepIndex: state.stepIndex + 1,
-  };
+  return { ...state, stepIndex: state.stepIndex + 1 };
 }
 
-/**
- * Emits `turn.completed` and either `session.waiting` or `session.completed`.
- * Returns updated emission state with an incremented sequence.
- */
+/** Emits turn completion and either parks or completes the session. */
 export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
 ): Promise<HarnessEmissionState> {
+  await emitFn(createTurnCompletedEvent({ sequence: state.sequence, turnId: state.turnId }));
   await emitFn(
-    createTurnCompletedEvent({
-      sequence: state.sequence,
-      turnId: state.turnId,
-    }),
+    mode === "conversation" ? createSessionWaitingEvent() : createSessionCompletedEvent(),
   );
-
-  if (mode === "conversation") {
-    await emitFn(createSessionWaitingEvent());
-  } else {
-    await emitFn(createSessionCompletedEvent());
-  }
-
   return {
     sessionStarted: state.sessionStarted,
     sequence: state.sequence + 1,
@@ -190,10 +131,7 @@ export async function emitTurnEpilogue(
   };
 }
 
-/**
- * Maps an AI SDK finish reason string to the eve-owned
- * {@link AssistantStepFinishReason} union. Unknown values become `"other"`.
- */
+/** Maps an AI SDK finish reason onto eve's stable finish-reason union. */
 export function normalizeAssistantStepFinishReason(
   value: string | undefined,
 ): AssistantStepFinishReason {

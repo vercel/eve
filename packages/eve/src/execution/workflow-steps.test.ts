@@ -900,7 +900,7 @@ describe("dispatchCoordinationStep", () => {
     expect(getPendingCoordinationBatch(persisted?.state)?.event.turnId).toBe("turn_3");
   });
 
-  it("dispatches blocking Workflow agent actions through the turn owner", async () => {
+  it("rejects direct agent actions outside a workflow-tool execute", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
         adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
@@ -957,8 +957,8 @@ describe("dispatchCoordinationStep", () => {
         serializedContext: createSerializedContext(),
         sessionState,
       }),
-    ).resolves.toMatchObject({ results: [], pendingTasks: [] });
-    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeDefined();
+    ).rejects.toThrow('Unsupported coordination request "subagent-call".');
+    expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
 
   it("blocks a stale recursive agent call from a delegated session", async () => {
@@ -1021,32 +1021,9 @@ describe("dispatchCoordinationStep", () => {
         serializedContext: createSerializedContext(),
         sessionState,
       }),
-    ).resolves.toEqual({
-      results: [
-        {
-          callId: "call-1",
-          isError: true,
-          kind: "subagent-result",
-          origin: "dispatch",
-          output: {
-            code: "RECURSIVE_AGENT_ROOT_ONLY",
-            message: 'The built-in "agent" tool is only available to the root session.',
-          },
-          subagentName: "agent",
-        },
-      ],
-      sessionState,
-      pendingTasks: [],
-    });
+    ).rejects.toThrow('Unsupported coordination request "subagent-call".');
     expect(startMock).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(
-      "[eve:execution.dispatch-coordination] recursive agent call blocked outside the root session",
-      expect.objectContaining({
-        callId: "call-1",
-        rootSessionId: "root-session",
-        subagentName: "agent",
-      }),
-    );
+    expect(warn).not.toHaveBeenCalled();
     expect(workflowWritesByNamespace.get(DEFAULT_WORKFLOW_STREAM_NAMESPACE)).toBeUndefined();
   });
 
@@ -1121,23 +1098,7 @@ describe("dispatchCoordinationStep", () => {
         serializedContext: createSerializedContext(),
         sessionState,
       }),
-    ).resolves.toEqual({
-      results: [
-        {
-          callId: "call-dynamic",
-          isError: true,
-          kind: "subagent-result",
-          origin: "dispatch",
-          output: {
-            code: "SUBAGENT_UNAVAILABLE",
-            message: 'Subagent "researcher" is not available in the current session context.',
-          },
-          subagentName: "researcher",
-        },
-      ],
-      sessionState,
-      pendingTasks: [],
-    });
+    ).rejects.toThrow('Unsupported coordination request "subagent-call".');
     expect(startMock).not.toHaveBeenCalled();
   });
 });

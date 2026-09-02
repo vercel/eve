@@ -7,6 +7,14 @@ import {
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
+export interface AgentRequestDelivery {
+  readonly accumulateUsage?: boolean;
+  readonly ownerId: string;
+  readonly replyTo: TaskAgentRequestDelivery["replyTo"];
+  readonly request: TaskAgentRequestDelivery["request"];
+  readonly taskId?: string;
+}
+
 export interface TaskAgentRequestContext {
   readonly callbackBaseUrl?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
@@ -20,33 +28,40 @@ export interface AppliedTaskAgentRequest {
 }
 
 /**
- * Applies one task-owned agent request to the parent session: `agent-invoke`
+ * Applies one workflow-owned agent request to the parent session: `agent-invoke`
  * spawns the child with parent-owned material and `agent-settled` releases the
  * handle. Child authorization and HITL ride their own task envelope arms.
  */
 export async function applyTaskAgentRequest(
-  delivery: TaskAgentRequestDelivery,
+  delivery: AgentRequestDelivery,
   ctx: TaskAgentRequestContext,
 ): Promise<AppliedTaskAgentRequest> {
   const { request } = delivery;
   switch (request.kind) {
     case "agent-settled": {
-      const settled = await settleTaskAgentInvocationStep({
+      const settlement = {
+        accumulateUsage: delivery.accumulateUsage,
+        ownerId: delivery.ownerId,
         result: request.result,
         sessionState: ctx.sessionState,
-        taskId: delivery.taskId,
-      });
+      };
+      const settled = await settleTaskAgentInvocationStep(
+        delivery.taskId === undefined ? settlement : { ...settlement, taskId: delivery.taskId },
+      );
       return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
     }
     case "agent-invoke": {
-      const dispatched = await dispatchTaskAgentInvocationStep({
+      const invocation = {
         callbackBaseUrl: ctx.callbackBaseUrl,
+        ownerId: delivery.ownerId,
         replyTo: delivery.replyTo,
         request,
         serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
-        taskId: delivery.taskId,
-      });
+      };
+      const dispatched = await dispatchTaskAgentInvocationStep(
+        delivery.taskId === undefined ? invocation : { ...invocation, taskId: delivery.taskId },
+      );
       switch (dispatched.kind) {
         case "dispatched": {
           const emitted = await emitTaskSubagentCalledStep({

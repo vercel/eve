@@ -516,7 +516,11 @@ async function runDriverLoop(input: {
     const action =
       stateCursor.sessionState === dispatchedSessionState
         ? turn.action
-        : rebaseTaskAgentHandleMutations(turn.action, stateCursor.sessionState);
+        : rebaseTaskAgentHandleMutations(
+            turn.action,
+            stateCursor.sessionState,
+            dispatchedSessionState,
+          );
     stateCursor.adoptState(action);
     input.crashCleanupState.lastSessionState = stateCursor.sessionState;
     input.crashCleanupState.serializedContext = stateCursor.serializedContext;

@@ -9,7 +9,6 @@ import {
   type AgentHandleStoreCommand,
   type AgentHandleStoreCommandResult,
   type AgentIdentity,
-  type ContinueOperation,
   type StartOperation,
   type TaskOwnedAgentHandle,
   type TurnOwnedAgentHandle,
@@ -54,72 +53,6 @@ export function prepareAgentStart(
 }
 
 type AgentStartTargetInput = Extract<TurnOwnedAgentHandle, { phase: "starting" }>["target"];
-
-/** Result of preparing a continuation against an existing handle. */
-export type PrepareAgentContinuationResult =
-  | {
-      readonly kind: "ready";
-      readonly session: HarnessSession;
-      readonly handle: Extract<TurnOwnedAgentHandle, { phase: "running" }>;
-    }
-  | { readonly kind: "unknown" }
-  | { readonly kind: "mismatch" }
-  | { readonly kind: "busy" };
-
-/**
- * Records intent to deliver a follow-up turn to a parked child. Must be
- * applied to the step's working snapshot before the delivery side effect
- * runs.
- *
- * Delivery is at-least-once, not exactly-once: the `running` handle durably
- * commits only when the enclosing dispatch step's result commits. If the
- * step dies after a successful delivery, replay starts from `parked` and
- * delivers the same operation again — which is why replaying the operation
- * already recorded on a running handle returns `ready` with the unchanged
- * session instead of a busy conflict.
- *
- * `unknown`, `mismatch`, and `busy` do not change the session; the caller
- * maps them onto `AGENT_UNREACHABLE`, `AGENT_MISMATCH`, and `AGENT_BUSY`
- * results.
- */
-export function prepareAgentContinuation(
-  session: HarnessSession,
-  input: {
-    readonly agentId: string;
-    readonly invokedName: string;
-    readonly operation: ContinueOperation;
-  },
-): PrepareAgentContinuationResult {
-  const handles = getAgentHandleStore(session.state)?.handles ?? [];
-  const existing = handles.find((handle) => handle.identity.id === input.agentId);
-  if (existing === undefined) {
-    return { kind: "unknown" };
-  }
-  if (existing.identity.name !== input.invokedName) {
-    return { kind: "mismatch" };
-  }
-  if (existing.phase === "running" && existing.operation.id === input.operation.id) {
-    return { handle: existing, kind: "ready", session };
-  }
-  if (existing.phase !== "parked") {
-    return { kind: "busy" };
-  }
-
-  const running: Extract<TurnOwnedAgentHandle, { phase: "running" }> = {
-    address: existing.address,
-    identity: existing.identity,
-    operation: { ...input.operation, previousStatus: existing.lastStatus },
-    phase: "running",
-  };
-  return {
-    handle: running,
-    kind: "ready",
-    session: writeHandles(
-      session,
-      handles.map((handle) => (handle.identity.id === input.agentId ? running : handle)),
-    ),
-  };
-}
 
 type ActiveAgentHandle = Extract<TurnOwnedAgentHandle, { phase: "starting" | "running" }>;
 
@@ -319,7 +252,7 @@ export function settleAgentTurn(
   };
 }
 
-/** Applies one atomic task lease command to the shared agent handle store. */
+/** Applies one atomic owner lease command to the shared agent handle store. */
 export function applyAgentHandleStoreCommand(
   store: AgentHandleStore,
   command: AgentHandleStoreCommand,
@@ -335,7 +268,7 @@ export function applyAgentHandleStoreCommand(
       if (existing !== undefined) {
         return (existing.phase === "reserved" || existing.phase === "claimed") &&
           existing.operationId === command.operationId &&
-          existing.taskId === command.taskId
+          existing.ownerId === command.ownerId
           ? { result: { handle: existing, kind: "ready" }, store }
           : { result: { handle: existing, kind: "busy" }, store };
       }
@@ -344,7 +277,7 @@ export function applyAgentHandleStoreCommand(
         identity: command.identity,
         operationId: command.operationId,
         phase: "reserved",
-        taskId: command.taskId,
+        ownerId: command.ownerId,
       };
       return {
         result: { handle, kind: "ready" },
@@ -358,7 +291,7 @@ export function applyAgentHandleStoreCommand(
         ): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "claimed" | "reserved" }> =>
           (handle.phase === "claimed" || handle.phase === "reserved") &&
           handle.operationId === command.operationId &&
-          handle.taskId === command.taskId,
+          handle.ownerId === command.ownerId,
       );
       if (existing === undefined) return { result: { kind: "unknown" }, store };
       if (existing.phase === "claimed") {
@@ -370,7 +303,7 @@ export function applyAgentHandleStoreCommand(
         identity: existing.identity,
         operationId: existing.operationId,
         phase: "claimed",
-        taskId: existing.taskId,
+        ownerId: existing.ownerId,
       };
       return replaceHandle(store, existing, handle);
     }
@@ -388,7 +321,7 @@ export function applyAgentHandleStoreCommand(
         return { result: { handle: existing, kind: "mismatch" }, store };
       }
       if (existing.phase === "claimed") {
-        return existing.operationId === command.operationId && existing.taskId === command.taskId
+        return existing.operationId === command.operationId && existing.ownerId === command.ownerId
           ? { result: { handle: existing, kind: "ready" }, store }
           : { result: { handle: existing, kind: "busy" }, store };
       }
@@ -401,14 +334,14 @@ export function applyAgentHandleStoreCommand(
         identity: existing.identity,
         operationId: command.operationId,
         phase: "claimed",
-        taskId: command.taskId,
+        ownerId: command.ownerId,
       };
       return replaceHandle(store, existing, handle);
     }
     case "remove": {
       const existing = store.handles.find((handle) => handle.identity.id === command.agentId);
       if (existing === undefined) return { result: { kind: "ready" }, store };
-      if (existing.phase === "claimed" && existing.taskId !== command.taskId) {
+      if (existing.phase === "claimed" && existing.ownerId !== command.ownerId) {
         return { result: { handle: existing, kind: "busy" }, store };
       }
       return {
@@ -416,10 +349,10 @@ export function applyAgentHandleStoreCommand(
         store: { handles: store.handles.filter((handle) => handle !== existing) },
       };
     }
-    case "release-task": {
+    case "release-owner": {
       const handles = store.handles.flatMap((handle): readonly AgentHandle[] => {
-        if (handle.phase === "reserved" && handle.taskId === command.taskId) return [];
-        if (handle.phase !== "claimed" || handle.taskId !== command.taskId) return [handle];
+        if (handle.phase === "reserved" && handle.ownerId === command.ownerId) return [];
+        if (handle.phase !== "claimed" || handle.ownerId !== command.ownerId) return [handle];
         return [{ address: handle.address, identity: handle.identity, phase: "available" }];
       });
       return {
@@ -430,7 +363,7 @@ export function applyAgentHandleStoreCommand(
   }
 }
 
-/** Applies one task-owned handle transition to a harness session. */
+/** Applies one owner-scoped handle transition to a harness session. */
 export function applyTaskAgentHandleCommand<Session extends { readonly state?: SessionStateMap }>(
   session: Session,
   command: AgentHandleStoreCommand,

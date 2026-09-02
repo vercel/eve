@@ -114,15 +114,6 @@ function createWorkflowTaskHostTool(harnessTool: HarnessToolDefinition): ToolSet
       return requestWorkflowSandboxInterrupt({
         kind: WORKFLOW_TASK_INTERRUPT_KIND,
         task: {
-          action:
-            harnessTool.behavior?.handling?.kind !== "dispatch"
-              ? undefined
-              : harnessTool.behavior.handling.target.kind === "self-agent-call"
-                ? "subagent-call"
-                : harnessTool.behavior.handling.target.kind === "subagent-call" ||
-                    harnessTool.behavior.handling.target.kind === "remote-agent-call"
-                  ? harnessTool.behavior.handling.target.kind
-                  : undefined,
           executeInput: harnessTool.executeInput?.(toolInput),
           nodeId: harnessTool.nodeId,
           resultKind: harnessTool.resultKind,

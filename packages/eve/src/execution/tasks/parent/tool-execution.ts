@@ -205,7 +205,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
           availability: "busy" as const,
           id: handle.identity.id,
           name: handle.identity.name,
-          taskId: handle.taskId,
+          taskId: handle.ownerId,
           taskStatus: "working" as const,
         },
       ];
@@ -435,7 +435,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         callId: taskInput.callId,
         kind: "reserve",
         operationId: identity.operation.id,
-        taskId: task.taskId,
+        ownerId: task.taskId,
       });
       if (reservation.kind !== "ready") {
         throw new Error(`Agent handle store rejected start operation "${identity.operation.id}".`);
@@ -462,7 +462,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         invokedName: subagentProjection.metadata.name,
         kind: "claim",
         operationId,
-        taskId: task.taskId,
+        ownerId: task.taskId,
       });
       if (!readClaimedHandle(claim)) {
         throwAgentClaimError(subagentProjection.metadata.agentId, claim);
@@ -537,13 +537,13 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         }
       }
       if (record.claim !== undefined) {
-        this.applyAgentHandleCommand({ kind: "release-task", taskId: record.claim.taskId });
+        this.applyAgentHandleCommand({ kind: "release-owner", ownerId: record.claim.taskId });
       }
       if (record.reservation !== undefined && record.task !== undefined) {
         this.applyAgentHandleCommand({
           agentId: record.reservation.agentId,
           kind: "remove",
-          taskId: record.task.taskId,
+          ownerId: record.task.taskId,
         });
       }
     }
@@ -676,14 +676,13 @@ function throwAgentClaimError(agentId: string, result: AgentHandleStoreCommandRe
     );
   }
   if (result.kind === "busy") {
-    const taskId = "taskId" in result.handle ? result.handle.taskId : undefined;
+    const owned = "ownerId" in result.handle;
     throw new Error(
       JSON.stringify({
         code: AGENT_BUSY,
-        message:
-          taskId === undefined
-            ? `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another task.`
-            : `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on task "${taskId}".`,
+        message: !owned
+          ? `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another task.`
+          : `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another invocation.`,
       }),
     );
   }

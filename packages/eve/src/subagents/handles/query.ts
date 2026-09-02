@@ -28,41 +28,41 @@ function readAgentHandles(state: SessionStateMap | undefined): readonly AgentHan
 
 /** Preserves driver-owned task leases when a concurrent turn returns an older snapshot. */
 export function mergeTaskOwnedAgentHandlesIntoTurnState(input: {
+  readonly baseState: SessionStateMap | undefined;
   readonly driverState: SessionStateMap | undefined;
   readonly turnState: SessionStateMap | undefined;
 }): SessionStateMap | undefined {
-  const driverStore = readAgentHandleStore(input.driverState);
-  if (driverStore === undefined) return input.turnState;
-
-  const taskHandles = new Map(
-    driverStore.handles
-      .filter(isTaskOwnedAgentHandle)
-      .map((handle) => [handle.identity.id, handle] as const),
+  const baseHandles = new Map(
+    readAgentHandles(input.baseState).map((handle) => [handle.identity.id, handle] as const),
   );
+  const driverHandles = new Map(
+    readAgentHandles(input.driverState).map((handle) => [handle.identity.id, handle] as const),
+  );
+  const mutatedIds = new Set([...baseHandles.keys(), ...driverHandles.keys()]);
+  for (const id of mutatedIds) {
+    if (handlesEqual(baseHandles.get(id), driverHandles.get(id))) mutatedIds.delete(id);
+  }
+  if (mutatedIds.size === 0) return input.turnState;
+
   const merged: AgentHandle[] = [];
   for (const handle of readAgentHandles(input.turnState)) {
-    if (isTaskOwnedAgentHandle(handle)) {
-      const current = taskHandles.get(handle.identity.id);
-      if (current !== undefined) {
-        merged.push(current);
-        taskHandles.delete(handle.identity.id);
-      }
+    if (!mutatedIds.has(handle.identity.id)) {
+      merged.push(handle);
       continue;
     }
-    if (taskHandles.has(handle.identity.id)) {
+    const current = driverHandles.get(handle.identity.id);
+    const base = baseHandles.get(handle.identity.id);
+    if (!handlesEqual(handle, base) && !handlesEqual(handle, current)) {
       throw new Error(
         `Agent handle "${handle.identity.id}" changed ownership while its turn was running.`,
       );
     }
-    merged.push(handle);
+    if (current !== undefined) merged.push(current);
+    mutatedIds.delete(handle.identity.id);
   }
-  for (const handle of taskHandles.values()) {
-    if (merged.some((candidate) => candidate.identity.id === handle.identity.id)) {
-      throw new Error(
-        `Agent handle "${handle.identity.id}" changed ownership while its turn was running.`,
-      );
-    }
-    merged.push(handle);
+  for (const id of mutatedIds) {
+    const current = driverHandles.get(id);
+    if (current !== undefined) merged.push(current);
   }
 
   return {
@@ -71,15 +71,28 @@ export function mergeTaskOwnedAgentHandlesIntoTurnState(input: {
   };
 }
 
-function readAgentHandleStore(state: SessionStateMap | undefined): AgentHandleStore | undefined {
-  if (state?.[AGENT_HANDLES_STATE_KEY] === undefined) return undefined;
-  return { handles: readAgentHandles(state) };
+function handlesEqual(left: AgentHandle | undefined, right: AgentHandle | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => valuesEqual(Reflect.get(left, key), Reflect.get(right, key)))
+  );
 }
 
-function isTaskOwnedAgentHandle(
-  handle: AgentHandle,
-): handle is Extract<AgentHandle, { phase: "available" | "claimed" | "reserved" }> {
-  return handle.phase === "available" || handle.phase === "claimed" || handle.phase === "reserved";
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) {
+    return false;
+  }
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key) => valuesEqual(Reflect.get(left, key), Reflect.get(right, key)))
+  );
 }
 
 /**

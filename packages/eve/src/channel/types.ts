@@ -5,6 +5,7 @@ import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/can
 import type { RunMode } from "#shared/run-mode.js";
 import type {
   RuntimeSubagentChildResult,
+  RuntimeSubagentDispatchFailure,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -296,11 +297,16 @@ export interface ClearSessionHookPayload {
 /**
  * Results resumed back into a parked parent workflow by the work it
  * dispatched: child-produced subagent results and authored workflow tool
- * results. Parent-produced dispatch results never travel through this hook.
+ * results. Workflow-owner dispatch failures use the same private reply hook so
+ * `agent()` can settle instead of waiting forever.
  */
 export interface RuntimeActionResultHookPayload {
   readonly kind: "runtime-action-result";
-  readonly results: readonly (RuntimeSubagentChildResult | RuntimeToolResultActionResult)[];
+  readonly results: readonly (
+    | RuntimeSubagentChildResult
+    | RuntimeSubagentDispatchFailure
+    | RuntimeToolResultActionResult
+  )[];
 }
 
 /**

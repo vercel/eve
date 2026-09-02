@@ -6,6 +6,7 @@ import { mergeTaskOwnedAgentHandlesIntoTurnState } from "#subagents/handles/quer
 export function rebaseTaskAgentHandleMutations(
   action: TurnDriverAction,
   driverState: DurableSessionState,
+  baseState: DurableSessionState,
 ): TurnDriverAction {
   const snapshot = action.sessionState.snapshot;
   if (snapshot === undefined) {
@@ -22,6 +23,7 @@ export function rebaseTaskAgentHandleMutations(
         session: {
           ...snapshot.session,
           state: mergeTaskOwnedAgentHandlesIntoTurnState({
+            baseState: baseState.snapshot?.session.state,
             driverState: driverState.snapshot?.session.state,
             turnState: snapshot.session.state,
           }),

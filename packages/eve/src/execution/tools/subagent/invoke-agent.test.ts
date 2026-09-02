@@ -188,7 +188,36 @@ describe("background agent invocation routing", () => {
     expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects agent calls outside a background workflow tool", async () => {
+  it("waits for agent calls inside a blocking workflow tool", async () => {
+    const result = {
+      callId: "call-1:research",
+      kind: "subagent-result" as const,
+      origin: "child" as const,
+      outcome: {
+        kind: "parked" as const,
+        result: { kind: "succeeded" as const, output: "inline" },
+        usageDelta: {
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+        },
+      },
+      output: "inline",
+      subagentName: "research",
+    };
+    mocks.createHook.mockReturnValue({
+      [Symbol.asyncIterator]: () => ({
+        next: vi
+          .fn()
+          .mockResolvedValueOnce({
+            done: false,
+            value: { kind: "runtime-action-result", results: [result] },
+          })
+          .mockResolvedValue({ done: true }),
+      }),
+      token: "agent-reply",
+    });
     const ctx = { callId: "call-1" } as ToolContext;
     attachWorkflowToolRunContext(ctx, {
       from: {
@@ -211,9 +240,17 @@ describe("background agent invocation routing", () => {
 
     await expect(
       agent(ctx, { key: "research", message: "Find it", target: "research" }),
-    ).rejects.toThrow("agent() is only available inside a background workflow tool.");
-    expect(mocks.createHook).not.toHaveBeenCalled();
-    expect(mocks.resumeHook).not.toHaveBeenCalled();
+    ).resolves.toBe("inline");
+    expect(mocks.resumeHook).toHaveBeenCalledTimes(2);
+    expect(mocks.resumeHook).toHaveBeenNthCalledWith(1, "owner-request", {
+      from: expect.objectContaining({ execution: "blocking", runId: "run-1" }),
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: "call-1:research",
+        kind: "agent-invoke",
+      },
+    });
   });
 
   it("preserves each child HITL event's coordinates when relaying repeated requests", async () => {

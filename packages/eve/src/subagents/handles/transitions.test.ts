@@ -5,10 +5,10 @@ import {
   EMPTY_AGENT_HANDLE_STORE,
   deriveAgentId,
   getAgentHandleStore,
+  writeHandles,
   type AgentAddress,
   type AgentHandle,
   type AgentIdentity,
-  type ContinueOperation,
   type StartOperation,
   type TaskOwnedAgentHandle,
 } from "#subagents/handles/store.js";
@@ -16,7 +16,6 @@ import {
   abandonRunningAgentTurns,
   applyAgentHandleStoreCommand,
   confirmAgentStarted,
-  prepareAgentContinuation,
   prepareAgentStart,
   rejectAgentEffect,
   settleAgentTurn,
@@ -146,83 +145,6 @@ describe("confirmAgentStarted", () => {
   });
 });
 
-describe("prepareAgentContinuation", () => {
-  const continueOperation: ContinueOperation = {
-    callId: "call_2",
-    id: deriveAgentOperationId({
-      callId: "call_2",
-      parentSessionId: "session_parent",
-      parentTurnId: "turn_2",
-    }),
-    kind: "continue",
-    parentTurnId: "turn_2",
-    previousStatus: "",
-  };
-
-  it("moves parked to running and captures the previous status", () => {
-    const result = prepareAgentContinuation(parkedSession(), {
-      agentId: identity.id,
-      invokedName: "research",
-      operation: continueOperation,
-    });
-    expect(result.kind).toBe("ready");
-    if (result.kind !== "ready") {
-      return;
-    }
-    expect(result.handle.phase).toBe("running");
-    expect(result.handle.operation).toEqual({
-      ...continueOperation,
-      previousStatus: "initial findings",
-    });
-    expect(handlesOf(result.session)).toEqual([result.handle]);
-  });
-
-  it("reports unknown, mismatch, and busy without changing the session", () => {
-    expect(
-      prepareAgentContinuation(parkedSession(), {
-        agentId: "ag_missing:000000000000",
-        invokedName: "research",
-        operation: continueOperation,
-      }),
-    ).toEqual({ kind: "unknown" });
-
-    expect(
-      prepareAgentContinuation(parkedSession(), {
-        agentId: identity.id,
-        invokedName: "writer",
-        operation: continueOperation,
-      }),
-    ).toEqual({ kind: "mismatch" });
-
-    expect(
-      prepareAgentContinuation(runningSession(), {
-        agentId: identity.id,
-        invokedName: "research",
-        operation: continueOperation,
-      }),
-    ).toEqual({ kind: "busy" });
-  });
-
-  it("treats the operation already recorded on a running handle as a replay", () => {
-    const running = runningSession();
-    const replay = prepareAgentContinuation(running, {
-      agentId: identity.id,
-      invokedName: "research",
-      operation: {
-        callId: startOperation.callId,
-        id: startOperation.id,
-        kind: "continue",
-        parentTurnId: startOperation.parentTurnId,
-        previousStatus: "",
-      },
-    });
-    expect(replay.kind).toBe("ready");
-    if (replay.kind === "ready") {
-      expect(replay.session).toBe(running);
-    }
-  });
-});
-
 describe("rejectAgentEffect", () => {
   it("deletes a dead start", () => {
     const session = rejectAgentEffect(preparedSession(), {
@@ -233,21 +155,18 @@ describe("rejectAgentEffect", () => {
   });
 
   it("restores parked with the previous status for a retryable continuation", () => {
-    const continueOperation: ContinueOperation = {
+    const continueOperation = {
       callId: "call_2",
       id: "op_continue",
       kind: "continue",
       parentTurnId: "turn_2",
-      previousStatus: "",
+      previousStatus: "initial findings",
+    } as const;
+    const prepared = {
+      session: writeHandles(parkedSession(), [
+        { address, identity, operation: continueOperation, phase: "running" },
+      ]),
     };
-    const prepared = prepareAgentContinuation(parkedSession(), {
-      agentId: identity.id,
-      invokedName: "research",
-      operation: continueOperation,
-    });
-    if (prepared.kind !== "ready") {
-      throw new Error("expected ready");
-    }
 
     const restored = rejectAgentEffect(prepared.session, {
       disposition: "retryable",
@@ -288,6 +207,40 @@ describe("abandonRunningAgentTurns", () => {
 
     const empty = createSession();
     expect(abandonRunningAgentTurns(empty)).toBe(empty);
+  });
+});
+
+describe("owner-scoped handle claims", () => {
+  it("keeps a recorded workflow run's claim separate from a task claim", () => {
+    const available: TaskOwnedAgentHandle = { address, identity, phase: "available" };
+    const workflowClaim = applyAgentHandleStoreCommand(
+      { handles: [available] },
+      {
+        agentId: identity.id,
+        callId: "call-workflow",
+        expectedTarget: "local",
+        invokedName: identity.name,
+        kind: "claim",
+        operationId: "operation-workflow",
+        ownerId: "workflow-run-1",
+      },
+    );
+
+    expect(workflowClaim.result).toMatchObject({
+      handle: { ownerId: "workflow-run-1", phase: "claimed" },
+      kind: "ready",
+    });
+    expect(
+      applyAgentHandleStoreCommand(workflowClaim.store, {
+        agentId: identity.id,
+        callId: "call-task",
+        expectedTarget: "local",
+        invokedName: identity.name,
+        kind: "claim",
+        operationId: "operation-task",
+        ownerId: "task_1",
+      }).result,
+    ).toMatchObject({ handle: { ownerId: "workflow-run-1" }, kind: "busy" });
   });
 });
 
@@ -363,7 +316,7 @@ describe("agent handle store task leases", () => {
       identity,
       kind: "reserve",
       operationId: "operation-1",
-      taskId: "task-1",
+      ownerId: "task-1",
     });
     expect(reserved.result).toMatchObject({ handle: { phase: "reserved" }, kind: "ready" });
 
@@ -371,7 +324,7 @@ describe("agent handle store task leases", () => {
       address,
       kind: "confirm",
       operationId: "operation-1",
-      taskId: "task-1",
+      ownerId: "task-1",
     });
     expect(confirmed.result).toEqual({
       kind: "ready",
@@ -380,13 +333,13 @@ describe("agent handle store task leases", () => {
         identity,
         operationId: "operation-1",
         phase: "claimed",
-        taskId: "task-1",
+        ownerId: "task-1",
       },
     });
 
     const released = applyAgentHandleStoreCommand(confirmed.store, {
-      kind: "release-task",
-      taskId: "task-1",
+      kind: "release-owner",
+      ownerId: "task-1",
     });
     expect(released.store.handles).toEqual([{ address, identity, phase: "available" }]);
   });
@@ -401,7 +354,7 @@ describe("agent handle store task leases", () => {
         invokedName: identity.name,
         kind: "claim",
         operationId: "operation-2",
-        taskId: "task-2",
+        ownerId: "task-2",
       },
     );
     expect(claimed.result).toMatchObject({ handle: { phase: "claimed" }, kind: "ready" });
@@ -412,9 +365,9 @@ describe("agent handle store task leases", () => {
       invokedName: identity.name,
       kind: "claim",
       operationId: "operation-3",
-      taskId: "task-3",
+      ownerId: "task-3",
     });
-    expect(competing.result).toMatchObject({ handle: { taskId: "task-2" }, kind: "busy" });
+    expect(competing.result).toMatchObject({ handle: { ownerId: "task-2" }, kind: "busy" });
     expect(competing.store).toBe(claimed.store);
   });
 
@@ -432,7 +385,7 @@ describe("agent handle store task leases", () => {
           ...command,
           kind: "claim",
           operationId: "operation-2",
-          taskId: "task-2",
+          ownerId: "task-2",
         },
       );
       expect(result.result).toMatchObject({ kind: "mismatch" });
@@ -446,11 +399,11 @@ describe("agent handle store task leases", () => {
       identity,
       operationId: "operation-1",
       phase: "claimed",
-      taskId: "task-1",
+      ownerId: "task-1",
     };
     const result = applyAgentHandleStoreCommand(
       { handles: [claimed] },
-      { agentId: identity.id, kind: "remove", taskId: "task-2" },
+      { agentId: identity.id, kind: "remove", ownerId: "task-2" },
     );
 
     expect(result.result).toEqual({ handle: claimed, kind: "busy" });

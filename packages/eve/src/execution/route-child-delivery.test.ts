@@ -219,6 +219,7 @@ describe("task HITL delivery routing", () => {
 
     expect(dispatchTaskAgentInvocationStep).toHaveBeenCalledWith({
       callbackBaseUrl: "https://parent.example",
+      ownerId: "task-1",
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", target: "research" },

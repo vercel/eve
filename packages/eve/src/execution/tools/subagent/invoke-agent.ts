@@ -11,7 +11,7 @@ import {
   readWorkflowToolRunRef,
 } from "#execution/tools/workflow/ask.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
-import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
+import type { RuntimeSubagentChildResult, RuntimeSubagentResult } from "#shared/action-types.js";
 import type { JsonValue } from "#shared/json.js";
 import type { JsonObject } from "#shared/json.js";
 import { claimHookOwnership, disposeHook } from "#execution/hook-ownership.js";
@@ -83,15 +83,22 @@ export async function agent(ctx: ToolContext, input: AgentInput): Promise<JsonVa
 export async function invokeAgent(
   ctx: ToolContext,
   input: InternalAgentInput,
-  options: { readonly invocationId: string },
-): Promise<JsonValue> {
+  options: { readonly invocationId: string; readonly returnResult: true },
+): Promise<JsonValue | RuntimeSubagentResult>;
+export async function invokeAgent(
+  ctx: ToolContext,
+  input: InternalAgentInput,
+  options: { readonly invocationId: string; readonly returnResult?: false },
+): Promise<JsonValue>;
+export async function invokeAgent(
+  ctx: ToolContext,
+  input: InternalAgentInput,
+  options: { readonly invocationId: string; readonly returnResult?: boolean },
+): Promise<JsonValue | RuntimeSubagentResult> {
   validateAgentInput(input, false);
   const run = readWorkflowToolRunRef(ctx);
   const owner = readWorkflowToolRunOwner(ctx);
   const admission = readWorkflowToolRunAdmission(ctx);
-  if (run.execution !== "background") {
-    throw new Error("agent() is only available inside a background workflow tool.");
-  }
   claimInvocationId(ctx, options.invocationId);
   const replies = createHook<AgentInvocationReply>();
   let ownsReplies = false;
@@ -115,17 +122,18 @@ export async function invokeAgent(
       const reply = next.value;
       if (reply.kind === "runtime-action-result") {
         const result = reply.results.find(
-          (candidate): candidate is RuntimeSubagentChildResult =>
-            candidate.kind === "subagent-result" &&
-            candidate.origin === "child" &&
-            candidate.callId === options.invocationId,
+          (candidate): candidate is RuntimeSubagentResult =>
+            candidate.kind === "subagent-result" && candidate.callId === options.invocationId,
         );
         if (result !== undefined) {
-          await resumeHookStep(owner.request, {
-            from: run,
-            replyTo: replies.token,
-            request: { kind: "agent-settled", result },
-          });
+          if (result.origin === "child") {
+            await resumeHookStep(owner.request, {
+              from: run,
+              replyTo: replies.token,
+              request: { kind: "agent-settled", result },
+            });
+          }
+          if (options.returnResult === true && run.execution === "blocking") return result;
           if (result.isError === true) throw result.output;
           return result.output;
         }

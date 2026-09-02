@@ -38,11 +38,7 @@ import {
   type WorkflowToolRunOwnerChannels,
   type WorkflowToolRunOwnerReaders,
 } from "#execution/tools/workflow/owner.js";
-import {
-  workflowToolRunOutcomeToToolResult,
-  workflowToolRunOutcomeToSubagentResult,
-  workflowToolRunRequestToInputRequestPayload,
-} from "#execution/tools/workflow/owner-inbox.js";
+import { workflowToolRunOutcomeToToolResult } from "#execution/tools/workflow/owner-inbox.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -54,6 +50,10 @@ import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import {
+  handleWorkflowToolRunOutcome,
+  handleWorkflowToolRunRequest,
+} from "#execution/turn-workflow-tool-run.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
@@ -413,10 +413,16 @@ async function waitForRuntimeActionResults(input: {
     if (read.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
     if (read.channel === "outcome") {
-      const subagentResult = workflowToolRunOutcomeToSubagentResult(read.next.value);
+      const message = read.next.value;
+      const subagentResult = await handleWorkflowToolRunOutcome({
+        callbackMetadataUrl: getWorkflowMetadata().url,
+        cursor: input.cursor,
+        message,
+      });
+      if (subagentResult === undefined) continue;
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
       const result =
-        subagentResult.callId === read.next.value.from.callId &&
+        subagentResult.callId === message.from.callId &&
         isInboxSubagentResultFromRecordedWorkflowToolRun(sessionSnapshotState, subagentResult)
           ? subagentResult
           : workflowToolRunOutcomeToToolResult(read.next.value);
@@ -431,14 +437,11 @@ async function waitForRuntimeActionResults(input: {
       continue;
     }
     if (read.channel === "request") {
-      const proxyResult = await runProxySubagentEventStep({
-        answerHook: { runId: read.next.value.from.runId },
-        hookPayload: workflowToolRunRequestToInputRequestPayload(read.next.value),
-        parentWritable: input.cursor.parentWritable,
-        serializedContext: input.cursor.serializedContext,
-        sessionState: input.cursor.sessionState,
+      await handleWorkflowToolRunRequest({
+        callbackMetadataUrl: getWorkflowMetadata().url,
+        cursor: input.cursor,
+        message: read.next.value,
       });
-      await input.cursor.adopt(proxyResult);
       continue;
     }
     if (read.channel === "report") {
@@ -463,7 +466,8 @@ async function waitForRuntimeActionResults(input: {
       const accepted = value.results.filter((result) =>
         result.kind === "tool-result"
           ? isInboxToolResultFromRecordedWorkflowToolRun(sessionSnapshotState, result)
-          : isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result) ||
+          : (result.origin === "child" &&
+              isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result)) ||
             isInboxSubagentResultFromRecordedWorkflowToolRun(sessionSnapshotState, result),
       );
       if (accepted.length > 0) {

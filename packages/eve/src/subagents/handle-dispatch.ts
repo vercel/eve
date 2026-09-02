@@ -71,15 +71,15 @@ export type DispatchOutcome =
       readonly session: RuntimeSession;
     };
 
-/** Delivers a continuation after the session handle store atomically claimed it for one task. */
-export async function dispatchToTaskAgentAddress(input: {
+/** Delivers a continuation after the session handle store atomically claimed it for one owner. */
+export async function dispatchToClaimedAgentAddress(input: {
   readonly action: RuntimeAgentHandleAction;
   readonly auth: SessionAuthContext | null;
   readonly bundle: CompiledBundle;
   readonly currentSession: RuntimeSession;
   readonly parentToken: string;
   readonly handle: Extract<TaskOwnedAgentHandle, { phase: "claimed" }>;
-  readonly taskId: string;
+  readonly taskId?: string;
 }): Promise<DispatchOutcome> {
   return await dispatchToAgentAddress(input);
 }

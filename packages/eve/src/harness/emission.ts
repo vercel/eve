@@ -39,6 +39,7 @@ import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
 import { interruptStreamOnFailure } from "#harness/interruptible-stream.js";
 import { isInlineAuthorizationToolResult } from "#harness/inline-tool-authorization.js";
+import { normalizeAssistantStepFinishReason } from "#harness/turn-emission.js";
 import type { HarnessEmissionState } from "#harness/emission-state.js";
 import type { HarnessEmitFn, HarnessToolMap } from "#harness/types.js";
 
@@ -48,8 +49,6 @@ export {
   setHarnessEmissionState,
 } from "#harness/emission-state.js";
 export type { HarnessEmissionState } from "#harness/emission-state.js";
-
-import { normalizeAssistantStepFinishReason } from "#harness/turn-emission.js";
 
 export {
   advanceStep,

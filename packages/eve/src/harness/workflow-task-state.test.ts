@@ -78,16 +78,20 @@ describe("workflow task state", () => {
       {
         callId: "echo-marker_workflow-call_tool-1_interrupt",
         input: { message: "alpha" },
-        kind: "subagent-call",
+        kind: "workflow-task",
         nodeId: "subagents/researcher",
-        subagentName: "echo-marker",
+        resultKind: "subagent",
+        toolName: "echo-marker",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
       {
         callId: "echo-marker_workflow-call_tool-2_interrupt",
         input: { message: "beta" },
-        kind: "subagent-call",
+        kind: "workflow-task",
         nodeId: "subagents/researcher",
-        subagentName: "echo-marker",
+        resultKind: "subagent",
+        toolName: "echo-marker",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ]);
     expect(getWorkflowTaskCallIds(interrupt)).toEqual([

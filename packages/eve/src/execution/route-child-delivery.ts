@@ -55,12 +55,15 @@ export async function routeDeliverToChildren(input: {
   }
 
   for (const request of payload.task?.agentRequests ?? []) {
-    const applied = await applyTaskAgentRequest(request, {
-      callbackBaseUrl: input.callbackBaseUrl,
-      parentWritable: input.parentWritable,
-      serializedContext,
-      sessionState,
-    });
+    const applied = await applyTaskAgentRequest(
+      { ...request, ownerId: request.taskId },
+      {
+        callbackBaseUrl: input.callbackBaseUrl,
+        parentWritable: input.parentWritable,
+        serializedContext,
+        sessionState,
+      },
+    );
     serializedContext = applied.serializedContext;
     sessionState = applied.sessionState;
   }

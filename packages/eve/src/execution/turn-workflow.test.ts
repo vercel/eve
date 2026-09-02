@@ -6,6 +6,9 @@ import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-st
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
+import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
+import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invoke-step.js";
+import { cancelAgentInvocationOwnerStep } from "#execution/tools/subagent/task-cancel.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
 import { turnWorkflow } from "#execution/turn-workflow.js";
 import {
@@ -82,6 +85,18 @@ vi.mock("./tasks/parent/delegate.js", () => ({
   acknowledgeDelegatedTasksStep: vi.fn(),
 }));
 
+vi.mock("./tools/subagent/task-agent-requests.js", () => ({
+  applyTaskAgentRequest: vi.fn(),
+}));
+
+vi.mock("./tools/subagent/invoke-step.js", () => ({
+  releaseAgentInvocationOwnerStep: vi.fn(),
+}));
+
+vi.mock("./tools/subagent/task-cancel.js", () => ({
+  cancelAgentInvocationOwnerStep: vi.fn(),
+}));
+
 vi.mock("./workflow-callback-url.js", () => ({
   resolveWorkflowCallbackBaseUrl: vi.fn((metadataUrl: string) => metadataUrl),
 }));
@@ -92,6 +107,9 @@ describe("turnWorkflow", () => {
     resumeHookMock.mockReset();
     createHookMock.mockReset();
     sleepMock.mockClear();
+    vi.mocked(applyTaskAgentRequest).mockReset();
+    vi.mocked(releaseAgentInvocationOwnerStep).mockReset();
+    vi.mocked(cancelAgentInvocationOwnerStep).mockReset();
     definedHookPayloads.clear();
   });
 
@@ -1043,6 +1061,126 @@ describe("turnWorkflow", () => {
     });
   });
 
+  it("routes blocking workflow agent lifecycle requests through the recorded run owner", async () => {
+    const pendingState = createSessionState();
+    const dispatchedState = withWorkflowToolRun(createSessionState(), "research");
+    const invokedState = withWorkflowToolRun(createSessionState(), "research");
+    const settledState = withWorkflowToolRun(createSessionState(), "research");
+    const completedState = createSessionState();
+    const childResult = {
+      callId: "call-1",
+      kind: "subagent-result" as const,
+      origin: "child" as const,
+      outcome: {
+        kind: "parked" as const,
+        result: { kind: "succeeded" as const, output: "done" },
+        usageDelta: {
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+        },
+      },
+      output: "done",
+      subagentName: "research",
+    };
+    definedHookPayloads.set("turn-token:inbox:request", [
+      {
+        from: {
+          callId: "call-1",
+          execution: "blocking",
+          input: {},
+          resultKind: "subagent",
+          runId: "run-1",
+          sequence: 0,
+          stepIndex: 0,
+          toolName: "research",
+          turnId: "turn_0",
+        },
+        replyTo: "agent-reply",
+        request: {
+          input: { message: "Find it", target: "research" },
+          invocationId: "call-1",
+          kind: "agent-invoke",
+        },
+      },
+      {
+        from: {
+          callId: "call-1",
+          execution: "blocking",
+          input: {},
+          resultKind: "subagent",
+          runId: "run-1",
+          sequence: 0,
+          stepIndex: 0,
+          toolName: "research",
+          turnId: "turn_0",
+        },
+        replyTo: "agent-reply",
+        request: { kind: "agent-settled", result: childResult },
+      },
+    ]);
+    definedHookPayloads.set("turn-token:inbox:outcome", [
+      {
+        from: {
+          callId: "call-1",
+          execution: "blocking",
+          input: {},
+          resultKind: "subagent",
+          runId: "run-1",
+          sequence: 0,
+          stepIndex: 0,
+          toolName: "research",
+          turnId: "turn_0",
+        },
+        result: { output: childResult, status: "completed" },
+      },
+    ]);
+    installInbox([]);
+    vi.mocked(dispatchCoordinationStep).mockResolvedValue({
+      results: [],
+      sessionState: dispatchedState,
+      pendingTasks: [],
+    });
+    vi.mocked(applyTaskAgentRequest)
+      .mockResolvedValueOnce({ serializedContext: {}, sessionState: invokedState })
+      .mockResolvedValueOnce({ serializedContext: {}, sessionState: settledState });
+    vi.mocked(releaseAgentInvocationOwnerStep).mockResolvedValue({ sessionState: settledState });
+    vi.mocked(turnStep)
+      .mockResolvedValueOnce({
+        action: "park",
+        hasPendingAuthorization: false,
+        hasPendingInputBatch: false,
+        pendingCoordinationCallIds: ["call-1"],
+        serializedContext: {},
+        sessionState: pendingState,
+      })
+      .mockResolvedValueOnce({
+        action: "done",
+        output: "done",
+        serializedContext: {},
+        sessionState: completedState,
+      });
+
+    const { input } = createInput({
+      driverCapabilities: { turnInbox: true },
+      mode: "task",
+      sessionState: pendingState,
+    });
+    await turnWorkflow(input);
+
+    expect(vi.mocked(applyTaskAgentRequest).mock.calls.map(([delivery]) => delivery)).toEqual([
+      expect.objectContaining({
+        ownerId: "run-1",
+        request: { kind: "agent-invoke", invocationId: "call-1", input: expect.any(Object) },
+      }),
+      expect.objectContaining({
+        ownerId: "run-1",
+        request: { kind: "agent-settled", result: childResult },
+      }),
+    ]);
+  });
+
   it("drops an unbound legacy child event before proxying it", async () => {
     const pendingState = createSessionState();
     installInbox([
@@ -1597,7 +1735,10 @@ function withRunningChildren(
   };
 }
 
-function withWorkflowToolRun(state: DurableSessionState): DurableSessionState {
+function withWorkflowToolRun(
+  state: DurableSessionState,
+  toolName = "confirm_deploy",
+): DurableSessionState {
   const baseSession: HarnessSession = {
     agent: { dynamicModel: true, system: "", tools: [] },
     compaction: { recentWindowSize: 5, threshold: 10_000 },
@@ -1609,7 +1750,8 @@ function withWorkflowToolRun(state: DurableSessionState): DurableSessionState {
     callId: "call-1",
     hookToken: "eve:workflow-tool-run:run-1",
     runId: "run-1",
-    toolName: "confirm_deploy",
+    resultKind: toolName === "research" ? "subagent" : undefined,
+    toolName,
   });
   return {
     ...state,

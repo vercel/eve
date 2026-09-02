@@ -20,7 +20,7 @@ export async function acceptTaskAuthorizationEventStep(input: {
   const claimed = handles.find(
     (candidate) =>
       candidate.phase === "claimed" &&
-      candidate.taskId === taskId &&
+      candidate.ownerId === taskId &&
       candidate.identity.name === hookPayload.subagentName &&
       candidate.address.sessionId === hookPayload.childSessionId,
   );
@@ -30,7 +30,7 @@ export async function acceptTaskAuthorizationEventStep(input: {
   const reserved = handles.filter(
     (candidate) =>
       candidate.phase === "reserved" &&
-      candidate.taskId === taskId &&
+      candidate.ownerId === taskId &&
       candidate.identity.name === hookPayload.subagentName,
   );
   if (claimed === undefined && reserved.length !== 1) return false;

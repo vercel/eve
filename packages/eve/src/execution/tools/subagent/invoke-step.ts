@@ -1,6 +1,6 @@
 import {
   createAgentErrorResult,
-  dispatchToTaskAgentAddress,
+  dispatchToClaimedAgentAddress,
   type DispatchOutcome,
 } from "#subagents/handle-dispatch.js";
 import { createAgentContinuationBundle } from "#subagents/continuation-bundle.js";
@@ -33,7 +33,10 @@ import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus } from "#tasks/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { clearProxyInputRequestsForTask } from "#harness/proxy-input-requests.js";
+import {
+  clearProxyInputRequestsForChild,
+  clearProxyInputRequestsForTask,
+} from "#harness/proxy-input-requests.js";
 import {
   accumulateSessionUsage,
   getTurnUsageState,
@@ -57,7 +60,7 @@ export type TaskAgentInvocationDispatchResult =
   | { readonly kind: "not-admitted"; readonly sessionState: DurableSessionState }
   | AgentInvocationDispatchResult;
 
-/** Dispatches one task-owned local or remote agent invocation. */
+/** Dispatches one owner-scoped local or remote agent invocation. */
 export async function dispatchAgentInvocation(input: {
   readonly callbackBaseUrl?: string;
   readonly emit?: HandleEventFn;
@@ -65,7 +68,8 @@ export async function dispatchAgentInvocation(input: {
   readonly request: AgentInvocationRequest;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
-  readonly taskId: string;
+  readonly ownerId: string;
+  readonly taskId?: string;
 }): Promise<AgentInvocationDispatchResult> {
   const durableSession = await readDurableSession(input.sessionState);
   const agentHandles = getAgentHandleStore(durableSession.state)?.handles ?? [];
@@ -77,7 +81,7 @@ export async function dispatchAgentInvocation(input: {
     sessionState: input.sessionState,
   });
   const entry = prepared.plan[0];
-  if (entry === undefined || entry.kind === "task-control" || entry.kind === "workflow-task") {
+  if (entry === undefined) {
     throw new Error("Agent invocation produced no executable plan entry.");
   }
   let session = prepared.session;
@@ -103,12 +107,14 @@ export async function dispatchAgentInvocation(input: {
     const existingClaims = currentAgentHandles().filter(
       (handle): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "claimed" }> =>
         handle.phase === "claimed" &&
-        handle.taskId === input.taskId &&
+        handle.ownerId === input.ownerId &&
         handle.callId === entry.action.callId &&
         handle.identity.id === entry.agentId,
     );
     if (existingClaims.length > 1) {
-      throw new Error(`Task "${input.taskId}" has multiple claims for "${entry.action.callId}".`);
+      throw new Error(
+        `Invocation owner "${input.ownerId}" has multiple claims for "${entry.action.callId}".`,
+      );
     }
     let claimed = existingClaims[0];
     if (claimed === undefined) {
@@ -127,7 +133,7 @@ export async function dispatchAgentInvocation(input: {
             : entry.action.subagentName,
         kind: "claim",
         operationId,
-        taskId: input.taskId,
+        ownerId: input.ownerId,
       });
       claimed = readClaimedHandle(claim);
       if (claimed === undefined) {
@@ -143,7 +149,7 @@ export async function dispatchAgentInvocation(input: {
       bundle: prepared.bundle,
       dynamicRemoteAgent: entry.dynamicRemoteAgent,
     });
-    outcome = await dispatchToTaskAgentAddress({
+    outcome = await dispatchToClaimedAgentAddress({
       action: entry.action,
       auth: prepared.auth,
       bundle,
@@ -153,7 +159,7 @@ export async function dispatchAgentInvocation(input: {
       taskId: input.taskId,
     });
     if (outcome.kind === "error" && outcome.deliveryPermanent === true) {
-      applyHandleCommand({ agentId: entry.agentId, kind: "remove", taskId: input.taskId });
+      applyHandleCommand({ agentId: entry.agentId, kind: "remove", ownerId: input.ownerId });
     }
     agentId = claimed.identity.id;
   } else {
@@ -161,7 +167,7 @@ export async function dispatchAgentInvocation(input: {
     const reserved = currentAgentHandles().filter(
       (handle): handle is Extract<TaskOwnedAgentHandle, { readonly phase: "reserved" }> =>
         handle.phase === "reserved" &&
-        handle.taskId === input.taskId &&
+        handle.ownerId === input.ownerId &&
         handle.callId === action.callId &&
         handle.identity.name === action.name &&
         handle.identity.nodeId === action.nodeId,
@@ -178,7 +184,9 @@ export async function dispatchAgentInvocation(input: {
             parentTurnId: prepared.batch.event.turnId,
           });
     if (reserved.length > 1) {
-      throw new Error(`Task "${input.taskId}" has multiple reservations for "${action.callId}".`);
+      throw new Error(
+        `Invocation owner "${input.ownerId}" has multiple reservations for "${action.callId}".`,
+      );
     }
     if (reserved.length === 0) {
       const reservation = applyHandleCommand({
@@ -186,7 +194,7 @@ export async function dispatchAgentInvocation(input: {
         callId: action.callId,
         kind: "reserve",
         operationId: start.operation.id,
-        taskId: input.taskId,
+        ownerId: input.ownerId,
       });
       if (reservation.kind !== "ready") {
         throw new Error(`Agent handle store rejected start operation "${start.operation.id}".`);
@@ -213,13 +221,13 @@ export async function dispatchAgentInvocation(input: {
     });
     agentId = start.identity.id;
     if (outcome.kind === "error") {
-      applyHandleCommand({ agentId, kind: "remove", taskId: input.taskId });
+      applyHandleCommand({ agentId, kind: "remove", ownerId: input.ownerId });
     } else {
       const confirmed = applyHandleCommand({
         address: outcome.address,
         kind: "confirm",
         operationId: start.operation.id,
-        taskId: input.taskId,
+        ownerId: input.ownerId,
       });
       if (readClaimedHandle(confirmed) === undefined) {
         throw new Error(
@@ -267,34 +275,38 @@ export async function dispatchAgentInvocation(input: {
   return { kind: "dispatched", agentId, event, sessionState: sessionState() };
 }
 
-/** Dispatches one task-owned agent request after the task is admitted. */
+/** Dispatches one agent request after any task-owned invocation is admitted. */
 export async function dispatchTaskAgentInvocationStep(
   input: Omit<Parameters<typeof dispatchAgentInvocation>[0], "emit">,
 ): Promise<TaskAgentInvocationDispatchResult> {
   "use step";
 
-  const session = await readDurableSession(input.sessionState);
-  const entry = findSessionTaskEntry(session.state, input.taskId);
-  if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
-  const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
-  if (view === undefined || isTerminalTaskStatus(view.status)) {
-    return { kind: "not-admitted", sessionState: input.sessionState };
+  if (input.taskId !== undefined) {
+    const session = await readDurableSession(input.sessionState);
+    const entry = findSessionTaskEntry(session.state, input.taskId);
+    if (entry === undefined) return { kind: "not-admitted", sessionState: input.sessionState };
+    const view = await readLatestTaskView({ taskRunId: entry.taskRunId });
+    if (view === undefined || isTerminalTaskStatus(view.status)) {
+      return { kind: "not-admitted", sessionState: input.sessionState };
+    }
   }
   return await dispatchAgentInvocation(input);
 }
 
-/** Applies a task-owned child settlement to the parent session's canonical state. */
+/** Applies an owner-scoped child settlement to the parent session's canonical state. */
 export async function settleTaskAgentInvocationStep(input: {
+  readonly accumulateUsage?: boolean;
+  readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
   readonly sessionState: DurableSessionState;
-  readonly taskId: string;
+  readonly taskId?: string;
 }): Promise<{ readonly sessionState: DurableSessionState }> {
   "use step";
 
   const durable = await readDurableSession(input.sessionState);
   const handles = getAgentHandleStore(durable.state)?.handles ?? [];
   const candidates = handles.filter(
-    (candidate) => candidate.phase === "claimed" && candidate.taskId === input.taskId,
+    (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
   );
   const handle =
     candidates.find(
@@ -316,17 +328,47 @@ export async function settleTaskAgentInvocationStep(input: {
         );
   let session = writeHandles(durable, nextHandles);
   if (input.result.outcome.kind === "terminal") {
-    session = clearProxyInputRequestsForTask(session, input.taskId);
+    session =
+      input.taskId === undefined
+        ? "continuationToken" in handle.address
+          ? clearProxyInputRequestsForChild(
+              session as Parameters<typeof clearProxyInputRequestsForChild>[0],
+              handle.address.continuationToken,
+            )
+          : session
+        : clearProxyInputRequestsForTask(session, input.taskId);
   }
-  session = setTurnUsageState(
-    session,
-    accumulateSessionUsage({
-      previous: getTurnUsageState(session.state),
-      usage: input.result.outcome.usageDelta,
-    }),
-  );
+  if (input.accumulateUsage !== false) {
+    session = setTurnUsageState(
+      session,
+      accumulateSessionUsage({
+        previous: getTurnUsageState(session.state),
+        usage: input.result.outcome.usageDelta,
+      }),
+    );
+  }
   return {
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
+  };
+}
+
+/** Releases any child leases still owned by a completed workflow-tool run. */
+export async function releaseAgentInvocationOwnerStep(input: {
+  readonly ownerId: string;
+  readonly sessionState: DurableSessionState;
+}): Promise<{ readonly sessionState: DurableSessionState }> {
+  "use step";
+
+  const durable = await readDurableSession(input.sessionState);
+  const session = applyTaskAgentHandleCommand(durable, {
+    kind: "release-owner",
+    ownerId: input.ownerId,
+  }).session;
+  return {
+    sessionState:
+      session === durable
+        ? input.sessionState
+        : replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
 }
 
@@ -350,14 +392,13 @@ function createTaskClaimError(
     });
   }
   if (result.kind === "busy") {
-    const taskId = "taskId" in result.handle ? result.handle.taskId : undefined;
+    const owned = "ownerId" in result.handle;
     return createAgentErrorResult({
       action,
       code: AGENT_BUSY,
-      message:
-        taskId === undefined
-          ? `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another task.`
-          : `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on task "${taskId}".`,
+      message: !owned
+        ? `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another task.`
+        : `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another invocation.`,
     });
   }
   return createAgentErrorResult({

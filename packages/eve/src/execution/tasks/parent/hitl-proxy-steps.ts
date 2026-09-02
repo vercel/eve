@@ -55,7 +55,7 @@ export async function recordTaskInputRequestStep(input: {
     requestId: createTaskInputRequestId(input.request.taskId, request.requestId),
   }));
   const handle = getAgentHandleStore(durableSession.state)?.handles.find(
-    (candidate) => candidate.phase === "claimed" && candidate.taskId === input.request.taskId,
+    (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.request.taskId,
   );
   const remoteResponseUrl =
     handle?.phase === "claimed" && handle.address.kind === "agent/remote"
@@ -111,8 +111,8 @@ export async function recordTerminalTaskViewsStep(input: {
     const state = cacheTerminalTaskView(session.state, view);
     if (state !== session.state) session = { ...session, state };
     session = applyTaskAgentHandleCommand(session, {
-      kind: "release-task",
-      taskId: view.taskId,
+      kind: "release-owner",
+      ownerId: view.taskId,
     }).session;
   }
   if (session === durableSession) return input.sessionState;

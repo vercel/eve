@@ -44,6 +44,16 @@ describe("planWorkflowSubagentDispatch", () => {
     expect(plan.usedCalls).toBe(1);
   });
 
+  it("does not charge ordinary workflow tasks against the subagent budget", () => {
+    const toolTask = { ...createTask(2), resultKind: "tool" as const };
+    const tasks = [createTask(1), toolTask, createTask(3)];
+
+    const plan = planWorkflowSubagentDispatch({ tasks, maxSubagents: 1, usedCalls: 0 });
+
+    expect(plan.allowed).toEqual([tasks[0], toolTask]);
+    expect(plan.blocked).toEqual([tasks[2]]);
+  });
+
   it("blocks everything once the persisted budget is spent", () => {
     const plan = planWorkflowSubagentDispatch({
       tasks: [createTask(1)],

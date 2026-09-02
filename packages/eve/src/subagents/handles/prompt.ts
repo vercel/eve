@@ -19,23 +19,26 @@ export interface AgentView {
   readonly taskStatus?: "working" | "input_required";
 }
 
-/** Returns the resumable handles: the only phase the model may continue. */
+/** Returns the resumable handles: the only phases the model may continue. */
 export function projectParkedAgentHandles(
   store: AgentHandleStore,
-): readonly Extract<AgentHandle, { phase: "parked" }>[] {
-  return store.handles.filter((handle) => handle.phase === "parked");
+): readonly Extract<AgentHandle, { phase: "available" | "parked" }>[] {
+  return store.handles.filter(
+    (handle): handle is Extract<AgentHandle, { phase: "available" | "parked" }> =>
+      handle.phase === "available" || handle.phase === "parked",
+  );
 }
 
 /**
- * Renders the model-visible agent listing. Only parked handles appear:
+ * Renders the model-visible agent listing. Only idle handles appear:
  * starting and running children cannot accept a continuation, and private
  * delivery coordinates never render.
  */
 export function renderAgentsSnippet(store: AgentHandleStore): string {
-  const agents = projectParkedAgentHandles(store).map(
-    (handle) =>
-      `<agent id="${escapeXml(handle.identity.id)}" name="${escapeXml(handle.identity.name)}">${escapeXml(handle.lastStatus === "" ? "(no status)" : handle.lastStatus)}</agent>`,
-  );
+  const agents = projectParkedAgentHandles(store).map((handle) => {
+    const status = handle.phase === "parked" ? handle.lastStatus : "(available)";
+    return `<agent id="${escapeXml(handle.identity.id)}" name="${escapeXml(handle.identity.name)}">${escapeXml(status === "" ? "(no status)" : status)}</agent>`;
+  });
   return [AGENTS_SNIPPET_LABEL, "<agents>", ...agents, "</agents>"].join("\n");
 }
 

@@ -14,11 +14,7 @@ import {
 } from "#harness/coordination.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { deriveAgentId, getAgentHandleStore } from "#subagents/handles/store.js";
-import {
-  confirmAgentStarted,
-  prepareAgentContinuation,
-  prepareAgentStart,
-} from "#subagents/handles/transitions.js";
+import { confirmAgentStarted, prepareAgentStart } from "#subagents/handles/transitions.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
 import { getWorkflowToolRuns, recordWorkflowToolRun } from "#harness/workflow-tool-runs.js";
 import { toolOutput } from "#tools/model-output.js";
@@ -584,25 +580,36 @@ describe("resolvePendingCoordination", () => {
       expect.objectContaining({ phase: "parked" }),
     ]);
 
-    // The parked handle stays resumable: a continuation prepares cleanly.
+    // The parked handle stays resumable through the owner-scoped store.
     const continueOperationId = deriveAgentOperationId({
       callId: "call-2",
       parentSessionId: "test-session",
       parentTurnId: "turn_1",
     });
-    const continued = prepareAgentContinuation(parkedResolve.session, {
-      agentId,
-      invokedName: "researcher",
-      operation: {
-        callId: "call-2",
-        id: continueOperationId,
-        kind: "continue",
-        parentTurnId: "turn_1",
-        previousStatus: "",
+    const parkedHandle = getAgentHandleStore(parkedResolve.session.state)?.handles[0];
+    if (parkedHandle?.phase !== "parked") throw new Error("expected parked handle");
+    const continuedSession = {
+      ...parkedResolve.session,
+      state: {
+        ...parkedResolve.session.state,
+        "eve.agent.handles": {
+          handles: [
+            {
+              address: parkedHandle.address,
+              identity: parkedHandle.identity,
+              operation: {
+                callId: "call-2",
+                id: continueOperationId,
+                kind: "continue",
+                parentTurnId: "turn_1",
+                previousStatus: parkedHandle.lastStatus,
+              },
+              phase: "running",
+            },
+          ],
+        },
       },
-    });
-    expect(continued.kind).toBe("ready");
-    if (continued.kind !== "ready") throw new Error("expected ready continuation");
+    } as HarnessSession;
 
     // A terminal failure on the follow-up turn deletes the handle.
     const secondBatch = setPendingCoordinationBatch({
@@ -620,7 +627,7 @@ describe("resolvePendingCoordination", () => {
       ],
       event: { sequence: 1, stepIndex: 0, turnId: "turn_1" },
       responseMessages: [],
-      session: continued.session,
+      session: continuedSession,
     });
     const terminalResolve = await resolvePendingCoordination({
       session: secondBatch,
@@ -697,22 +704,34 @@ describe("resolvePendingCoordination", () => {
     });
 
     // Turn 2: the child spent another 1000/100 (cumulative 5000/500).
-    const continued = prepareAgentContinuation(firstResolve.session, {
-      agentId,
-      invokedName: "researcher",
-      operation: {
-        callId: "call-2",
-        id: deriveAgentOperationId({
-          callId: "call-2",
-          parentSessionId: "test-session",
-          parentTurnId: "turn_1",
-        }),
-        kind: "continue",
-        parentTurnId: "turn_1",
-        previousStatus: "",
+    const parkedHandle = getAgentHandleStore(firstResolve.session.state)?.handles[0];
+    if (parkedHandle?.phase !== "parked") throw new Error("expected parked handle");
+    const continuedSession = {
+      ...firstResolve.session,
+      state: {
+        ...firstResolve.session.state,
+        "eve.agent.handles": {
+          handles: [
+            {
+              address: parkedHandle.address,
+              identity: parkedHandle.identity,
+              operation: {
+                callId: "call-2",
+                id: deriveAgentOperationId({
+                  callId: "call-2",
+                  parentSessionId: "test-session",
+                  parentTurnId: "turn_1",
+                }),
+                kind: "continue",
+                parentTurnId: "turn_1",
+                previousStatus: parkedHandle.lastStatus,
+              },
+              phase: "running",
+            },
+          ],
+        },
       },
-    });
-    if (continued.kind !== "ready") throw new Error("expected ready continuation");
+    } as HarnessSession;
     const secondBatch = setPendingCoordinationBatch({
       runtimeActions: [],
       tasks: [
@@ -728,7 +747,7 @@ describe("resolvePendingCoordination", () => {
       ],
       event: { sequence: 1, stepIndex: 0, turnId: "turn_1" },
       responseMessages: [],
-      session: continued.session,
+      session: continuedSession,
     });
     const secondResolve = await resolvePendingCoordination({
       session: secondBatch,
