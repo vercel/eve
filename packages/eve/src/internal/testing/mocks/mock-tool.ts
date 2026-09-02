@@ -13,7 +13,7 @@ import { toInputSchema } from "#tools/schema.js";
  * and an `execute` function. Everything else is overrideable.
  */
 export interface MockToolInput {
-  /** Human-readable activity label derived from one invocation's input. */
+  /** Human-readable label start callback derived from one invocation's input. */
   readonly activityLabel?: (input: unknown) => string;
   /** Tool name exposed to the model. */
   readonly name: string;

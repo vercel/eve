@@ -11,24 +11,22 @@ import { writeFile } from "#tools/provided/write-file.js";
 
 describe("provided tool activity labels", () => {
   it("labels every tool previously formatted by Slack", () => {
-    expect(bash.activity?.label({ command: "pnpm test" })).toBe("Run pnpm test");
-    expect(glob.activity?.label({ pattern: "**/*.ts" })).toBe("Find **/*.ts");
-    expect(grep.activity?.label({ pattern: "slackActivityMessage" })).toBe(
+    expect(bash.label?.start({ command: "pnpm test" })).toBe("Run pnpm test");
+    expect(glob.label?.start({ pattern: "**/*.ts" })).toBe("Find **/*.ts");
+    expect(grep.label?.start({ pattern: "slackActivityMessage" })).toBe(
       "Search slackActivityMessage",
     );
-    expect(loadSkill.activity?.label({ skill: "technical-writing" })).toBe(
-      "Load technical-writing",
-    );
-    expect(readFile.activity?.label({ filePath: "channels/slack/activity.ts" })).toBe(
+    expect(loadSkill.label?.start({ skill: "technical-writing" })).toBe("Load technical-writing");
+    expect(readFile.label?.start({ filePath: "channels/slack/activity.ts" })).toBe(
       "Read channels/slack/activity.ts",
     );
-    expect(webFetch.activity?.label({ url: "https://docs.slack.dev" })).toBe(
+    expect(webFetch.label?.start({ url: "https://docs.slack.dev" })).toBe(
       "Fetch https://docs.slack.dev",
     );
     expect(resolveWebSearchActivityLabel({ query: "Slack plan blocks" })).toBe(
       "Search Slack plan blocks",
     );
-    expect(writeFile.activity?.label({ content: "", filePath: "activity.ts" })).toBe(
+    expect(writeFile.label?.start({ content: "", filePath: "activity.ts" })).toBe(
       "Write activity.ts",
     );
   });

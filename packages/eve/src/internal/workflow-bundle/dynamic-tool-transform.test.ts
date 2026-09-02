@@ -52,7 +52,7 @@ async function transformAndEval(
     stampDurableDynamicToolCallbacks(
       entry,
       collectDurableDynamicToolCallbacks({
-        activityLabel: (entry.activity as { label?: never } | undefined)?.label,
+        activityLabel: (entry.label as { start?: never } | undefined)?.start,
         approval: entry.approval as never,
         approvalKey: entry.approvalKey as never,
         execute: entry.execute as never,
@@ -114,8 +114,8 @@ export default defineDynamic({
         guarded: defineTool({
           description: "Guarded",
           inputSchema: { type: "object" },
-          activity: {
-            label(input) {
+          label: {
+            start(input) {
               return activityPrefix + " " + input.value;
             },
           },

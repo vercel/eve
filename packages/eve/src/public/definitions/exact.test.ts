@@ -80,7 +80,7 @@ describe("definition helper exact inputs", () => {
 
   it("preserves ordinary async tool executor return types", () => {
     const ordinaryTool = defineTool({
-      activity: { label: (input) => `React with ${input.reaction}` },
+      label: { start: (input) => `React with ${input.reaction}` },
       description: "React to a message.",
       inputSchema: z.object({ reaction: z.string() }),
       async execute(input) {

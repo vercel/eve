@@ -14,6 +14,7 @@ import {
 } from "#internal/workflow-bundle/dynamic-tool-ast-references.js";
 
 type CallbackPhase =
+  | "activityLabel"
   | "approvalKey"
   | "approvalRequest"
   | "approvalResponse"
@@ -21,8 +22,10 @@ type CallbackPhase =
   | "toModelOutput";
 type CallbackPropertyName =
   | "approvalKey"
+  | "label"
   | "approval"
   | "execute"
+  | "start"
   | "request"
   | "response"
   | "toModelOutput";
@@ -182,14 +185,14 @@ function collectToolCallbacks(
   if (!isWorkflowExecute(execute, context)) {
     collectCallbackProperty(source, execute, "execute", "execute", results, nestedScopes);
   }
-  const activity = findProperty(tool, "activity");
-  const activityValue = activity?.value as AstNode | undefined;
-  if (activityValue?.type === "ObjectExpression") {
+  const label = findProperty(tool, "label");
+  const labelValue = label?.value as AstNode | undefined;
+  if (labelValue?.type === "ObjectExpression") {
     collectCallbackProperty(
       source,
-      findProperty(activityValue, "label"),
+      findProperty(labelValue, "start"),
       "activityLabel",
-      "label",
+      "start",
       results,
       nestedScopes,
     );

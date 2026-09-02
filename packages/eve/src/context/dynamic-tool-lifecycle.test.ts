@@ -1536,7 +1536,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
-  it("replays an activity label callback", () => {
+  it("replays an label start callback callback", () => {
     const ctx = createCtx();
     registerTestCallback("deploy", "execute", () => ({ ok: true }));
     registerTestCallback(

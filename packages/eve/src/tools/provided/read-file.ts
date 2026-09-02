@@ -43,7 +43,7 @@ export type ReadFileToolOutput = z.infer<typeof READ_FILE_OUTPUT_SCHEMA>;
  * Framework-owned executor that delegates to the default sandbox.
  */
 export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = defineTool({
-  activity: { label: (input) => activityLabel("Read", input.filePath) },
+  label: { start: (input) => activityLabel("Read", input.filePath) },
   description: [
     "Read a file from the local filesystem. If the path does not exist, an error is returned.",
     "",
