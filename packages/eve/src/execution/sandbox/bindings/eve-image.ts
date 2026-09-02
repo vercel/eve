@@ -1,10 +1,15 @@
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 
-const EVE_SANDBOX_IMAGE_REPOSITORY = "vcr.vercel.com/vercel/eve/base";
-
-// TODO: Replace with resolveEveSandboxImage() after the release workflow publishes its first VCR image.
-export const DEFAULT_EVE_SANDBOX_IMAGE = "ghcr.io/vercel/eve:latest";
+const GHCR_EVE_SANDBOX_IMAGE_REPOSITORY = "ghcr.io/vercel/eve";
+const VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY = "vcr.vercel.com/vercel/eve/base";
 
 export function resolveEveSandboxImage(): string {
-  return `${EVE_SANDBOX_IMAGE_REPOSITORY}:${resolveInstalledPackageInfo().version}`;
+  return `${GHCR_EVE_SANDBOX_IMAGE_REPOSITORY}:${resolveInstalledPackageInfo().version}`;
 }
+
+export function resolveVercelEveSandboxImage(): string {
+  return `${VERCEL_EVE_SANDBOX_IMAGE_REPOSITORY}:${resolveInstalledPackageInfo().version}`;
+}
+
+export const DEFAULT_EVE_SANDBOX_IMAGE = resolveEveSandboxImage();
+export const VERCEL_EVE_SANDBOX_IMAGE = resolveVercelEveSandboxImage();
