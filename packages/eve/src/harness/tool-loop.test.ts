@@ -61,12 +61,12 @@ import {
   requestAuthorization,
 } from "#harness/authorization.js";
 import {
-  getPendingInputRequestIds,
+  openRequestIds,
   hasDeferredStepInput,
-  hasPendingInputBatch,
-  appendPendingInputBatch,
+  hasOpenRequests,
+  createRequests,
 } from "#harness/input-requests.js";
-import { getPendingInputBatches } from "#harness/pending-input-batches.js";
+import { openRequestGroups } from "#harness/hitl/request-ledger.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import { AGENT_HANDLES_STATE_KEY } from "#harness/handles/store.js";
@@ -661,7 +661,7 @@ function pendingBashApprovalResult(): Record<string, unknown> {
 }
 
 function createPendingBashApprovalSession(): HarnessSession {
-  return appendPendingInputBatch({
+  return createRequests({
     requests: [
       {
         action: {
@@ -712,7 +712,7 @@ function createPendingBashApprovalSession(): HarnessSession {
 }
 
 function createPendingProtectedActionApprovalSessionWithSiblingCall(): HarnessSession {
-  return appendPendingInputBatch({
+  return createRequests({
     requests: [
       {
         action: {
@@ -1791,7 +1791,7 @@ describe("createToolLoopHarness", () => {
         target: expect.objectContaining({ kind: "subagent-call" }),
       }),
     ]);
-    expect(hasPendingInputBatch(parked.session.state)).toBe(true);
+    expect(hasOpenRequests(parked.session.state)).toBe(true);
     expect(events.filter((event) => event.type === "input.requested")).toHaveLength(1);
     expect(
       parked.session.history.flatMap((message) =>
@@ -1856,7 +1856,7 @@ describe("createToolLoopHarness", () => {
 
     expect(reparked.next).toBeNull();
     expect(getPendingRuntimeActionBatch(reparked.session.state)).toBeUndefined();
-    expect(hasPendingInputBatch(reparked.session.state)).toBe(true);
+    expect(hasOpenRequests(reparked.session.state)).toBe(true);
     const toolMessages = reparked.session.history.filter((message) => message.role === "tool");
     expect(JSON.stringify(toolMessages)).toContain("delegated-done");
     expect(events.filter((event) => event.type === "subagent.completed")).toHaveLength(1);
@@ -3626,7 +3626,7 @@ describe("createToolLoopHarness", () => {
     const result = await runStep(session, { message: "Ask me a question." });
 
     expect(typeof result.next).toBe("function");
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(hasOpenRequests(result.session.state)).toBe(false);
     expect(events.some((event) => event.type === "input.requested")).toBe(false);
     expect(result.session.history.at(-1)?.role).toBe("tool");
   });
@@ -7064,8 +7064,7 @@ describe("createToolLoopHarness", () => {
       { message: "Search, then ask me a question." },
     );
 
-    const pendingResponseMessages = getPendingInputBatches(result.session.state)[0]
-      ?.responseMessages;
+    const pendingResponseMessages = openRequestGroups(result.session.state)[0]?.responseMessages;
 
     expect(result.next).toBeNull();
     expect(pendingResponseMessages).toEqual([
@@ -7827,7 +7826,7 @@ describe("createToolLoopHarness", () => {
     expect(serializedProjection).toMatch(/pending/iu);
     expect(serializedProjection).toContain("approval-1");
     expect(serializedProjection).toContain("bash");
-    expect(hasPendingInputBatch(result.session.state)).toBe(true);
+    expect(hasOpenRequests(result.session.state)).toBe(true);
     expect(getCompatibilityEventTypes(events)).toEqual([
       "session.started",
       "turn.started",
@@ -8078,7 +8077,7 @@ describe("createToolLoopHarness", () => {
     expect(parked.next).toBeNull();
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0].toolChoice).not.toBe("none");
     expect(parked.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
-    expect(hasPendingInputBatch(parked.session.state)).toBe(true);
+    expect(hasOpenRequests(parked.session.state)).toBe(true);
 
     // Every follow-up runs as an ordinary turn with tools available while the
     // original approval remains unresolved.
@@ -8105,7 +8104,7 @@ describe("createToolLoopHarness", () => {
       expect(pendingApprovalInstructions(callIndex)).not.toContain("rm -rf /tmp/demo");
       expect(followup.session.history.filter(isPendingApprovalProjection)).toHaveLength(1);
       expect(hasDeferredStepInput(followup.session)).toBe(false);
-      expect(hasPendingInputBatch(followup.session.state)).toBe(true);
+      expect(hasOpenRequests(followup.session.state)).toBe(true);
       pendingSession = followup.session;
     }
 
@@ -8164,7 +8163,7 @@ describe("createToolLoopHarness", () => {
       content: "Delete the temp directory.",
       role: "user",
     });
-    expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
+    expect(hasOpenRequests(deniedResult.session.state)).toBe(false);
     expect(deniedResult.session.history.at(-1)).toEqual({
       content: "Okay, I will not run that command.",
       role: "assistant",
@@ -8281,7 +8280,7 @@ describe("createToolLoopHarness", () => {
 
     expect(statusExecute).toHaveBeenCalledOnce();
     expect(bashExecute).not.toHaveBeenCalled();
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+    expect(openRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("parks a second input batch while an earlier approval stays open", async () => {
@@ -8374,7 +8373,7 @@ describe("createToolLoopHarness", () => {
       return this;
     } as MockAgentConstructor);
 
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -8452,7 +8451,7 @@ describe("createToolLoopHarness", () => {
     const questionSettings = vi.mocked(ToolLoopAgent).mock.calls[0]?.[0];
     expect(questionSettings?.toolChoice).not.toBe("none");
     expect(questionSettings?.tools).toHaveProperty("bash");
-    expect(getPendingInputRequestIds(questionTurn.session.state)).toEqual(
+    expect(openRequestIds(questionTurn.session.state)).toEqual(
       new Set(["approval-1", "question-call"]),
     );
 
@@ -8460,7 +8459,7 @@ describe("createToolLoopHarness", () => {
     const answered = await createToolLoopHarness(config)(questionTurn.session, {
       inputResponses: [{ requestId: "question-call", optionId: "red" }],
     });
-    expect(getPendingInputRequestIds(answered.session.state)).toEqual(new Set(["approval-1"]));
+    expect(openRequestIds(answered.session.state)).toEqual(new Set(["approval-1"]));
     const answeredPrompt = generateCalls[1] ?? [];
     expect(
       answeredPrompt.some((message) => JSON.stringify(message.content).includes("question-call")),
@@ -8473,7 +8472,7 @@ describe("createToolLoopHarness", () => {
     const denied = await createToolLoopHarness(config)(answered.session, {
       inputResponses: [{ requestId: "approval-1", optionId: "cancel" }],
     });
-    expect(hasPendingInputBatch(denied.session.state)).toBe(false);
+    expect(hasOpenRequests(denied.session.state)).toBe(false);
     expect(denied.session.history.at(-1)).toEqual({
       content: "Understood, not running it.",
       role: "assistant",
@@ -8579,7 +8578,7 @@ describe("createToolLoopHarness", () => {
     expect(JSON.stringify(lastMessages)).toContain("Wedged hello.");
     expect(JSON.stringify(lastMessages)).toContain("Are you there?");
     expect(hasDeferredStepInput(result.session)).toBe(false);
-    expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+    expect(openRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
   });
 
   it("consumes text approval shortcuts without appending them as user messages", async () => {
@@ -8616,7 +8615,7 @@ describe("createToolLoopHarness", () => {
       ? (settings: S) => ToolLoopAgent
       : never);
 
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -8879,7 +8878,7 @@ describe("createToolLoopHarness", () => {
       ? (settings: S) => ToolLoopAgent
       : never);
 
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -8949,7 +8948,7 @@ describe("createToolLoopHarness", () => {
     expect(firstResult.next).toBeNull();
     expect(generateCalls).toHaveLength(1);
     expect(generateCalls[0]?.at(-1)).toEqual({ content: "Do something else", role: "user" });
-    expect(hasPendingInputBatch(firstResult.session.state)).toBe(true);
+    expect(hasOpenRequests(firstResult.session.state)).toBe(true);
 
     // Step 2: the late denial restores the withheld batch behind the
     // intervening exchange; the model sees the denial as the tail.
@@ -8967,7 +8966,7 @@ describe("createToolLoopHarness", () => {
       content: "I will not run that command.",
       role: "assistant",
     });
-    expect(hasPendingInputBatch(deniedResult.session.state)).toBe(false);
+    expect(hasOpenRequests(deniedResult.session.state)).toBe(false);
   });
 
   it.each([
@@ -9007,7 +9006,7 @@ describe("createToolLoopHarness", () => {
 
       expect(vi.mocked(ToolLoopAgent)).not.toHaveBeenCalled();
       expect(result.next).toBeNull();
-      expect(getPendingInputRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
+      expect(openRequestIds(result.session.state)).toEqual(new Set(["approval-1"]));
       expect(hasDeferredStepInput(result.session)).toBe(true);
       expect(events.some((event) => event.type === "session.completed")).toBe(false);
     },
@@ -9088,7 +9087,7 @@ describe("createToolLoopHarness", () => {
       expect(approvalMessage?.content).toEqual(
         expect.arrayContaining([expect.objectContaining({ approvalId: "approval-1", approved })]),
       );
-      expect(hasPendingInputBatch(resolved.session.state)).toBe(false);
+      expect(hasOpenRequests(resolved.session.state)).toBe(false);
       expect(hasDeferredStepInput(resolved.session)).toBe(true);
       expect(typeof resolved.next).toBe("function");
       if (typeof resolved.next !== "function") throw new Error("Expected deferred replay step.");
@@ -9181,7 +9180,7 @@ describe("createToolLoopHarness", () => {
     });
 
     expect(typeof first.next).toBe("function");
-    expect(getPendingInputRequestIds(first.session.state)).toEqual(new Set(["question-1"]));
+    expect(openRequestIds(first.session.state)).toEqual(new Set(["question-1"]));
     if (typeof first.next !== "function") {
       throw new TypeError("Expected deferred input to continue after the new question.");
     }
@@ -9189,7 +9188,7 @@ describe("createToolLoopHarness", () => {
 
     expect(result.next).toBeNull();
     expect(hasDeferredStepInput(result.session)).toBe(false);
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(hasOpenRequests(result.session.state)).toBe(false);
     expect(JSON.stringify(result.session.history)).toContain("Use this instead.");
   });
 
@@ -9350,7 +9349,7 @@ describe("createToolLoopHarness", () => {
     );
 
     expect(typeof result.next).toBe("function");
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(hasOpenRequests(result.session.state)).toBe(false);
     expect(events.filter((event) => event.type === "input.requested")).toEqual([]);
     expect(events.filter((event) => event.type === "actions.requested")).toHaveLength(1);
     expect(events.filter((event) => event.type === "action.result")).toHaveLength(1);
@@ -9427,7 +9426,7 @@ describe("createToolLoopHarness", () => {
       ],
       prompt: "Which context should I use?",
     };
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -9467,7 +9466,7 @@ describe("createToolLoopHarness", () => {
     });
 
     expect(followupResult.next).toBeNull();
-    expect(hasPendingInputBatch(followupResult.session.state)).toBe(true);
+    expect(hasOpenRequests(followupResult.session.state)).toBe(true);
 
     const secondTurnEventIndex = events.length;
     const result = await runStep(followupResult.session, {
@@ -9481,7 +9480,7 @@ describe("createToolLoopHarness", () => {
     const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
 
     expect(result.next).toBeNull();
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(hasOpenRequests(result.session.state)).toBe(false);
     expect(modelMessages?.at(-1)).toEqual({
       content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
       role: "user",
@@ -9518,7 +9517,7 @@ describe("createToolLoopHarness", () => {
       ],
       prompt: "Which context should I use?",
     };
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -9560,7 +9559,7 @@ describe("createToolLoopHarness", () => {
     });
 
     expect(followupResult.next).toBeNull();
-    expect(hasPendingInputBatch(followupResult.session.state)).toBe(false);
+    expect(hasOpenRequests(followupResult.session.state)).toBe(false);
 
     const secondTurnEventIndex = events.length;
     const result = await runStep(followupResult.session, {
@@ -9574,7 +9573,7 @@ describe("createToolLoopHarness", () => {
     const modelMessages = vi.mocked(agent.stream).mock.calls[0]?.[0].messages;
 
     expect(result.next).toBeNull();
-    expect(hasPendingInputBatch(result.session.state)).toBe(false);
+    expect(hasOpenRequests(result.session.state)).toBe(false);
     expect(modelMessages?.at(-1)).toEqual({
       content: expect.stringContaining("STALE-CANDIDATE-7Q4M"),
       role: "user",

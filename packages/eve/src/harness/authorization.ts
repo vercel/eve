@@ -40,11 +40,7 @@ import type { AuthorizationCallback, ConnectionPrincipal } from "#shared/connect
 import type { JsonValue } from "#shared/json.js";
 import { createEveConnectionCallbackRoutePath } from "#protocol/routes.js";
 import { createUlid } from "#shared/ulid.js";
-import {
-  clearPendingAuthorizationState,
-  readPendingAuthorizationState,
-  writePendingAuthorizationState,
-} from "#harness/hitl/request-ledger.js";
+export { getPendingAuthorization, hasPendingAuthorization } from "#harness/hitl/request-ledger.js";
 
 const AUTHORIZATION_BRAND = "__eveAuthorization" as const;
 const AUTHORIZATION_PENDING_BRAND = "__eveAuthorizationPending" as const;
@@ -232,26 +228,6 @@ export interface PendingAuthorizationState {
   readonly challenges: readonly AuthorizationChallenge[];
 }
 
-export function setPendingAuthorization(
-  sessionState: Record<string, unknown> | undefined,
-  value: PendingAuthorizationState,
-): Record<string, unknown> {
-  const active = resolveActiveAuthorizationChallenges(value.challenges);
-  const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
-  const superseded = getSupersededAuthorizationChallenges(sessionState, active);
-  const challenges = [
-    ...previous.filter((challenge) => !superseded.includes(challenge)),
-    ...active,
-  ];
-  return writePendingAuthorizationState(
-    sessionState,
-    challenges.map((challenge) => ({
-      challenge,
-      responseAttemptId: challenge.candidateId,
-    })),
-  );
-}
-
 export function resolveActiveAuthorizationChallenges(
   challenges: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
@@ -268,10 +244,9 @@ export function resolveActiveAuthorizationChallenges(
 }
 
 export function getSupersededAuthorizationChallenges(
-  sessionState: Record<string, unknown> | undefined,
+  previous: readonly AuthorizationChallenge[],
   replacements: readonly AuthorizationChallenge[],
 ): readonly AuthorizationChallenge[] {
-  const previous = getPendingAuthorization(sessionState)?.challenges ?? [];
   return previous.filter((candidate) =>
     replacements.some(
       (replacement) =>
@@ -281,56 +256,11 @@ export function getSupersededAuthorizationChallenges(
   );
 }
 
-function samePrincipal(
+export function samePrincipal(
   left: ConnectionPrincipal | undefined,
   right: ConnectionPrincipal | undefined,
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
   if (left.type === "app" || right.type === "app") return left.type === right.type;
   return left.id === right.id && left.issuer === right.issuer;
-}
-
-export function clearPendingAuthorization(
-  sessionState: Record<string, unknown> | undefined,
-  attemptIds?: readonly string[],
-): Record<string, unknown> | undefined {
-  if (getPendingAuthorization(sessionState) === undefined) return sessionState;
-
-  if (attemptIds !== undefined) {
-    if (attemptIds.length === 0) return sessionState;
-
-    const pending = getPendingAuthorization(sessionState);
-    if (pending !== undefined) {
-      const completedAttemptIds = new Set(attemptIds);
-      const challenges = pending.challenges.filter(
-        (challenge) => !completedAttemptIds.has(challenge.attemptId ?? challenge.name),
-      );
-      if (challenges.length === pending.challenges.length) return sessionState;
-      if (challenges.length > 0) {
-        return writePendingAuthorizationState(
-          sessionState,
-          challenges.map((challenge) => ({
-            challenge,
-            responseAttemptId: challenge.candidateId,
-          })),
-        );
-      }
-    }
-  }
-
-  return clearPendingAuthorizationState(sessionState);
-}
-
-export function getPendingAuthorization(
-  sessionState: Record<string, unknown> | undefined,
-): PendingAuthorizationState | undefined {
-  const value = readPendingAuthorizationState(sessionState);
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  return { challenges: value.map((entry) => entry.challenge) };
-}
-
-export function hasPendingAuthorization(
-  sessionState: Record<string, unknown> | undefined,
-): boolean {
-  return getPendingAuthorization(sessionState) !== undefined;
 }

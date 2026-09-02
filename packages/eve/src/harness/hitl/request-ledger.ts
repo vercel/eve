@@ -1,16 +1,30 @@
 import type { ModelMessage } from "ai";
 
-import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
-import type { AuthorizationChallenge } from "#harness/authorization.js";
-import type { DurableResponseAttemptState } from "#harness/hitl/approval-response-attempts.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import type {
+  AuthorizationChallenge,
+  AuthorizationResult,
+  PendingAuthorizationState,
+} from "#harness/authorization.js";
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import { isInputRequest, type InputRequest } from "#shared/input.js";
+import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
+import { isInputRequest, type InputRequest, type InputResponse } from "#shared/input.js";
+import {
+  importLegacyBatches,
+  normalizePersistedLedger,
+} from "#harness/hitl/request-ledger-legacy.js";
 
 const KEY = "eve.runtime.hitl.requestLedger";
 const LEGACY_BATCHES_KEY = "eve.runtime.pendingInputBatches";
 const LEGACY_BATCH_KEY = "eve.runtime.pendingInputBatch";
 const LEGACY_APPROVAL_STATE_KEY = "eve.runtime.hitl.approvalState";
 const LEGACY_PENDING_AUTHORIZATION_KEY = "eve.runtime.pendingAuthorization";
+
+export interface RequestGroupEvent {
+  readonly sequence: number;
+  readonly stepIndex: number;
+  readonly turnId: string;
+}
 
 export interface InternalAuthorizationRequest {
   readonly authorization: AuthorizationChallenge;
@@ -21,18 +35,110 @@ export interface InternalAuthorizationRequest {
 
 export type DurableRequest = InputRequest | InternalAuthorizationRequest;
 
+export type ResponderIdentity = Pick<
+  SessionAuthContext,
+  "authenticator" | "issuer" | "principalId" | "principalType"
+>;
+
+export type ResponseAttemptStatus = "pending" | "awaiting-authorization";
+
+export interface ResponseAttempt {
+  readonly id: string;
+  readonly deliveryId?: string;
+  readonly responder: SessionAuthContext;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  readonly status: ResponseAttemptStatus;
+  readonly authorizationRequestIds: readonly string[];
+}
+
+export type ClosedAttemptStatus =
+  | "allowed"
+  | "rejected"
+  | "failed"
+  | "timed-out"
+  | "stale"
+  | "cancelled";
+
+export interface ClosedAttempt {
+  readonly id: string;
+  readonly deliveryId?: string;
+  readonly responder: SessionAuthContext;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  readonly status: ClosedAttemptStatus;
+  readonly authorizationRequestIds: readonly string[];
+  readonly completedAt: number;
+  readonly reason?: string;
+  readonly eventEmitted?: boolean;
+}
+
+export type RequestOutcome =
+  | {
+      readonly kind: "approved";
+      readonly actor?: ResponderIdentity;
+      readonly attemptId?: string;
+      readonly at: number;
+    }
+  | { readonly kind: "denied"; readonly actor?: ResponderIdentity; readonly at: number }
+  | { readonly kind: "answered"; readonly response: InputResponse; readonly at: number }
+  | { readonly kind: "ignored"; readonly at: number }
+  | { readonly kind: "cancelled"; readonly at: number }
+  | { readonly kind: "authorized"; readonly result: AuthorizationResult; readonly at: number }
+  | { readonly kind: "expired"; readonly at: number };
+
 export interface RequestRecord {
   readonly groupId?: string;
   readonly id: string;
   readonly request: DurableRequest;
-  readonly state: "open" | "terminal";
+  readonly attempts?: readonly ResponseAttempt[];
+  readonly attemptHistory?: readonly ClosedAttempt[];
+  readonly outcome?: RequestOutcome;
+  readonly outcomeEventEmitted?: boolean;
+}
+
+export function isOpenRequest(request: RequestRecord): boolean {
+  return request.outcome === undefined;
 }
 
 export type RequestGroupOwner = "framework-approval-gate" | "session-turn";
 
+export interface ResolvedInputActionBatch {
+  readonly event: RequestGroupEvent;
+  readonly results: readonly RuntimeToolResultActionResult[];
+}
+
+export type GroupCompletion =
+  | {
+      readonly owner: "session-turn";
+      readonly messages: readonly ModelMessage[];
+      readonly limitContinuation?: { readonly granted: boolean };
+    }
+  | {
+      readonly owner: "framework-approval-gate";
+      readonly messages: readonly ModelMessage[];
+      readonly approvedToolKeys: readonly string[];
+      readonly rejectedActions: readonly ResolvedInputActionBatch[];
+    };
+
+export interface RequestGroupCompletionReady {
+  readonly deliveryKey: string;
+  readonly ownerCompletion: GroupCompletion;
+  readonly status: "ready";
+}
+
+export interface RequestGroupCompletionDelivered {
+  readonly deliveryKey: string;
+  readonly status: "delivered";
+}
+
 export interface RequestGroup {
-  readonly completion: "waiting" | "delivered" | "cancelled";
-  readonly event?: PendingInputBatchEvent;
+  readonly completion:
+    | "waiting"
+    | "cancelled"
+    | RequestGroupCompletionReady
+    | RequestGroupCompletionDelivered;
+  readonly event?: RequestGroupEvent;
   readonly id: string;
   readonly owner: RequestGroupOwner;
   readonly requestIds: readonly string[];
@@ -40,15 +146,22 @@ export interface RequestGroup {
   readonly responseMessages: readonly ModelMessage[];
 }
 
-export interface RequestLedgerAuthorizationRecord {
-  readonly challenge: AuthorizationChallenge;
-  readonly responseAttemptId?: string;
+export type OpenRequestGroup = RequestGroup & { readonly requests: readonly InputRequest[] };
+
+export interface ReadyRequestGroupDeliveryTarget {
+  readonly groupId: string;
+  readonly owner: RequestGroupOwner;
+}
+
+export interface ReadyRequestGroupDelivery {
+  readonly deliveryKey: string;
+  readonly ownerCompletion: GroupCompletion;
+  readonly targets: readonly ReadyRequestGroupDeliveryTarget[];
 }
 
 export interface RequestLedger {
   readonly groups: readonly RequestGroup[];
   readonly requests: readonly RequestRecord[];
-  readonly responseAttempts?: DurableResponseAttemptState;
   readonly version: number;
 }
 
@@ -67,19 +180,24 @@ export function classifyRequestResponse(
 ): RequestResponseClass {
   const request = readRequestLedger(state).requests.find((candidate) => candidate.id === requestId);
   if (request === undefined) return "invalid";
-  return request.state === "open" ? "open" : "stale";
+  return isOpenRequest(request) ? "open" : "stale";
 }
 
 export function readRequestLedger(state: SessionStateMap | undefined): RequestLedger {
-  const persisted = state?.[KEY] as RequestLedger | undefined;
-  if (persisted !== undefined) {
-    assertUniqueRequestIds(persisted.requests);
-    return persisted;
+  const persisted = state?.[KEY];
+  if (typeof persisted === "object" && persisted !== null) {
+    const ledger = normalizePersistedLedger({
+      authorizationRequestId,
+      persisted: persisted as Record<string, unknown>,
+      state,
+    });
+    assertUniqueRequestIds(ledger.requests);
+    return ledger;
   }
-  return importLegacyBatches(state);
+  return importLegacyBatches({ state, authorizationRequestId, assertUniqueRequestIds });
 }
 
-export function writeRequestLedger(input: {
+function writeRequestLedger(input: {
   readonly expectedVersion: number;
   readonly groups: readonly RequestGroup[];
   readonly requests: readonly RequestRecord[];
@@ -94,7 +212,6 @@ export function writeRequestLedger(input: {
   delete state[LEGACY_BATCHES_KEY];
   delete state[LEGACY_PENDING_AUTHORIZATION_KEY];
   state[KEY] = {
-    ...current,
     groups: input.groups,
     requests: input.requests,
     version: current.version + 1,
@@ -102,101 +219,78 @@ export function writeRequestLedger(input: {
   return { ...input.session, state };
 }
 
-export function readApprovalAttemptState(
-  state: SessionStateMap | undefined,
-): DurableResponseAttemptState | Record<string, unknown> | undefined {
-  const ledger = state?.[KEY] as RequestLedger | undefined;
-  if (ledger?.responseAttempts !== undefined) return ledger.responseAttempts;
-  const legacy = state?.[LEGACY_APPROVAL_STATE_KEY];
-  return typeof legacy === "object" && legacy !== null
-    ? (legacy as Record<string, unknown>)
-    : undefined;
-}
-
-export function writeApprovalAttemptState(
-  state: SessionStateMap | undefined,
-  responseAttempts: DurableResponseAttemptState,
-): SessionStateMap {
-  return writeLedgerExtension(state, { responseAttempts }, [LEGACY_APPROVAL_STATE_KEY]);
-}
-
-export function readPendingAuthorizationState(
-  state: SessionStateMap | undefined,
-): readonly RequestLedgerAuthorizationRecord[] | undefined {
-  const persisted = state?.[KEY] as
-    | (RequestLedger & { readonly authorizations?: readonly RequestLedgerAuthorizationRecord[] })
-    | undefined;
-  const requests = persisted?.requests
-    .filter(
-      (record): record is RequestRecord & { readonly request: InternalAuthorizationRequest } =>
-        record.state === "open" && record.request.kind === "authorization",
-    )
-    .map((record) => ({
-      challenge: record.request.authorization,
-      responseAttemptId: record.request.responseAttemptId,
-    }));
-  if ((requests?.length ?? 0) > 0) return requests;
-  if (Array.isArray(persisted?.authorizations) && persisted.authorizations.length > 0) {
-    return persisted.authorizations;
-  }
-  return readLegacyAuthorizations(state);
-}
-
-export function writePendingAuthorizationState(
-  state: SessionStateMap | undefined,
-  authorizations: readonly RequestLedgerAuthorizationRecord[],
-): SessionStateMap {
-  const ledger = readRequestLedger(state);
-  const desired = new Map(
-    authorizations.map((entry) => {
-      const id = authorizationRequestId(entry);
-      return [
-        id,
-        {
-          id,
-          request: {
-            authorization: entry.challenge,
-            kind: "authorization" as const,
-            requestId: id,
-            responseAttemptId: entry.responseAttemptId,
-          },
-          state: "open" as const,
-        } satisfies RequestRecord,
-      ] as const;
-    }),
-  );
-  const requests = ledger.requests.map((record) => {
-    if (record.request.kind !== "authorization") return record;
-    const replacement = desired.get(record.id);
-    if (replacement !== undefined) {
-      desired.delete(record.id);
-      return replacement;
-    }
-    return record.state === "terminal" ? record : { ...record, state: "terminal" as const };
+export function commitRequestLedger(
+  session: HarnessSession,
+  ledger: RequestLedger,
+  expectedVersion: number,
+): HarnessSession {
+  return writeRequestLedger({
+    expectedVersion,
+    groups: ledger.groups,
+    requests: ledger.requests,
+    session,
   });
-  const result: Record<string, unknown> = {
-    ...state,
-    [KEY]: {
-      ...ledger,
-      requests: [...requests, ...desired.values()],
-      version: ledger.version + 1,
-    } satisfies RequestLedger,
-  };
-  delete result[LEGACY_PENDING_AUTHORIZATION_KEY];
-  const persisted = result[KEY] as Record<string, unknown>;
-  delete persisted.authorizations;
-  return result;
 }
 
-export function clearPendingAuthorizationState(
+export function closeRequestLedger(session: HarnessSession, now: number): HarnessSession {
+  const ledger = readRequestLedger(session.state);
+  const openGroupIds = new Set(
+    ledger.groups
+      .filter((group) => group.completion === "waiting" || isReadyCompletion(group.completion))
+      .map((group) => group.id),
+  );
+  let changed = openGroupIds.size > 0;
+  const groups = ledger.groups.map((group) => {
+    if (!openGroupIds.has(group.id)) return group;
+    return { ...group, completion: "cancelled" as const };
+  });
+  const requests = ledger.requests.map((request) => {
+    if (!isOpenRequest(request)) return request;
+    changed = true;
+    return closeOpenRequest(request, now);
+  });
+  if (!changed) return session;
+  return writeRequestLedger({
+    expectedVersion: ledger.version,
+    groups,
+    requests,
+    session,
+  });
+}
+
+export function getPendingAuthorization(
   state: SessionStateMap | undefined,
-): SessionStateMap | undefined {
-  if (readPendingAuthorizationState(state) === undefined) return state;
-  return writePendingAuthorizationState(state, []);
+): PendingAuthorizationState | undefined {
+  const challenges = openAuthorizationRequests(readRequestLedger(state)).map(
+    (record) => record.request.authorization,
+  );
+  return challenges.length === 0 ? undefined : { challenges };
 }
 
-export function createRequestGroup(input: {
-  readonly event?: PendingInputBatchEvent;
+export function hasPendingAuthorization(state: SessionStateMap | undefined): boolean {
+  return getPendingAuthorization(state) !== undefined;
+}
+
+export function openAuthorizationRequests(ledger: RequestLedger): readonly (RequestRecord & {
+  readonly request: InternalAuthorizationRequest;
+  readonly outcome?: undefined;
+})[] {
+  return ledger.requests.filter(
+    (
+      record,
+    ): record is RequestRecord & {
+      readonly request: InternalAuthorizationRequest;
+      readonly outcome?: undefined;
+    } => isOpenRequest(record) && record.request.kind === "authorization",
+  );
+}
+
+export function createRequests(input: {
+  readonly authorizations?: readonly {
+    readonly challenge: AuthorizationChallenge;
+    readonly responseAttemptId?: string;
+  }[];
+  readonly event?: RequestGroupEvent;
   readonly owner?: RequestGroupOwner;
   readonly requests: readonly InputRequest[];
   readonly responseAuthRequiredRequestIds?: readonly string[];
@@ -208,164 +302,184 @@ export function createRequestGroup(input: {
     input.event === undefined
       ? `session-turn:${String(ledger.groups.length)}`
       : `session-turn:${input.event.turnId}:${String(input.event.stepIndex)}`;
+
+  const durableReplacements = new Map<string, RequestRecord>();
+  for (const request of input.requests) {
+    durableReplacements.set(request.requestId, {
+      groupId,
+      id: request.requestId,
+      request,
+    });
+  }
+  for (const entry of input.authorizations ?? []) {
+    const id = authorizationRequestId({
+      challenge: entry.challenge,
+      responseAttemptId: entry.responseAttemptId,
+    });
+    durableReplacements.set(id, {
+      id,
+      request: {
+        authorization: entry.challenge,
+        kind: "authorization" as const,
+        requestId: id,
+        responseAttemptId: entry.responseAttemptId,
+      },
+    } satisfies RequestRecord);
+  }
+
+  const requests = ledger.requests.map((record) => {
+    const replacement = durableReplacements.get(record.id);
+    if (replacement === undefined) return record;
+    if (isOpenRequest(record)) {
+      const isSameSessionLimitRequest =
+        record.groupId !== undefined &&
+        replacement.groupId === groupId &&
+        record.request.kind === "session-limit" &&
+        replacement.request.kind === "session-limit";
+      if (!isSameSessionLimitRequest) {
+        throw new TypeError(
+          `Internal pending input invariant violated: requestId must be unique across all pending batches: ${JSON.stringify(record.id)}.`,
+        );
+      }
+    }
+    durableReplacements.delete(record.id);
+    return replacement;
+  });
+
+  // Internal Authorization requests are ungrouped; only InputRequests open a Group.
+  const groups =
+    input.requests.length === 0
+      ? ledger.groups
+      : [
+          ...ledger.groups,
+          {
+            completion: "waiting" as const,
+            event: input.event,
+            id: groupId,
+            owner: input.owner ?? defaultGroupOwner(input.requests),
+            requestIds: input.requests.map((request) => request.requestId),
+            responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
+            responseMessages: input.responseMessages,
+          },
+        ];
   return writeRequestLedger({
     expectedVersion: ledger.version,
-    groups: [
-      ...ledger.groups,
-      {
-        completion: "waiting",
-        event: input.event,
-        id: groupId,
-        owner: input.owner ?? "session-turn",
-        requestIds: input.requests.map((request) => request.requestId),
-        responseAuthRequiredRequestIds: input.responseAuthRequiredRequestIds,
-        responseMessages: input.responseMessages,
-      },
-    ],
-    requests: [
-      ...ledger.requests,
-      ...input.requests.map((request): RequestRecord => ({
-        groupId,
-        id: request.requestId,
-        request,
-        state: "open",
-      })),
-    ],
+    groups,
+    requests: [...requests, ...durableReplacements.values()],
     session: input.session,
   });
 }
 
-export function openRequestGroups(
-  state: SessionStateMap | undefined,
-): readonly PendingInputBatch[] {
+export function openRequestGroups(state: SessionStateMap | undefined): readonly OpenRequestGroup[] {
   const ledger = readRequestLedger(state);
   const requests = new Map(ledger.requests.map((request) => [request.id, request]));
   return ledger.groups.flatMap((group) => {
     if (group.completion !== "waiting") return [];
     const open = group.requestIds.flatMap((id) => {
       const record = requests.get(id);
-      return record?.state === "open" && isInputRequest(record.request) ? [record.request] : [];
+      return record && isOpenRequest(record) && isInputRequest(record.request)
+        ? [record.request]
+        : [];
     });
-    return open.length === 0
-      ? []
-      : [
-          {
-            event: group.event,
-            requests: open,
-            responseAuthRequiredRequestIds: group.responseAuthRequiredRequestIds,
-            responseMessages: group.responseMessages,
-          },
-        ];
+    return open.length === 0 ? [] : [{ ...group, requests: open }];
   });
 }
 
-export function completeRequestGroups(
-  session: HarnessSession,
-  batches: readonly PendingInputBatch[],
-): HarnessSession {
-  const ledger = readRequestLedger(session.state);
-  const ids = new Set(
-    batches.flatMap((batch) => batch.requests.map((request) => request.requestId)),
-  );
-  const groupIds = new Set(
-    ledger.groups
-      .filter((group) => group.requestIds.some((id) => ids.has(id)))
-      .map((group) => group.id),
-  );
-  if (groupIds.size === 0) return session;
-  return writeRequestLedger({
-    expectedVersion: ledger.version,
-    groups: ledger.groups.map((group) =>
-      groupIds.has(group.id) ? { ...group, completion: "delivered" } : group,
-    ),
-    requests: ledger.requests.map((request) =>
-      request.groupId !== undefined && groupIds.has(request.groupId)
-        ? { ...request, state: "terminal" }
-        : request,
-    ),
-    session,
-  });
+export function hasOpenRequests(state: SessionStateMap | undefined): boolean {
+  return openRequestGroups(state).length > 0;
 }
 
-function importLegacyBatches(state: SessionStateMap | undefined): RequestLedger {
-  const collection = state?.[LEGACY_BATCHES_KEY];
-  const candidates = Array.isArray(collection) ? collection : [state?.[LEGACY_BATCH_KEY]];
-  const batches = candidates.filter((value): value is PendingInputBatch => {
-    if (typeof value !== "object" || value === null) return false;
-    const batch = value as PendingInputBatch;
-    return Array.isArray(batch.requests) && Array.isArray(batch.responseMessages);
-  });
-  const requests: RequestRecord[] = [];
-  const groups = batches.map((batch, index): RequestGroup => {
-    const id =
-      batch.event === undefined
-        ? `session-turn:${String(index)}`
-        : `session-turn:${batch.event.turnId}:${String(batch.event.stepIndex)}`;
-    requests.push(
-      ...batch.requests.map((request) => ({
-        groupId: id,
-        id: request.requestId,
-        request,
-        state: "open" as const,
-      })),
-    );
+export function openRequestIds(state: SessionStateMap | undefined): ReadonlySet<string> {
+  return new Set(
+    openRequestGroups(state).flatMap((group) => group.requests.map((request) => request.requestId)),
+  );
+}
+
+export function listReadyRequestGroupDeliveries(
+  state: SessionStateMap | undefined,
+): readonly ReadyRequestGroupDelivery[] {
+  const deliveries = new Map<string, ReadyRequestGroupDelivery>();
+  for (const group of readRequestLedger(state).groups) {
+    if (!isReadyCompletion(group.completion)) continue;
+    const existing = deliveries.get(group.completion.deliveryKey);
+    if (existing === undefined) {
+      deliveries.set(group.completion.deliveryKey, {
+        deliveryKey: group.completion.deliveryKey,
+        ownerCompletion: group.completion.ownerCompletion,
+        targets: [{ groupId: group.id, owner: group.owner }],
+      });
+      continue;
+    }
+    deliveries.set(group.completion.deliveryKey, {
+      ...existing,
+      targets: [...existing.targets, { groupId: group.id, owner: group.owner }],
+    });
+  }
+  return [...deliveries.values()];
+}
+
+export function acknowledgeReadyRequestGroupDelivery(input: {
+  readonly deliveryKey: string;
+  readonly session: HarnessSession;
+}): HarnessSession {
+  const ledger = readRequestLedger(input.session.state);
+  let changed = false;
+  const groups = ledger.groups.map((group) => {
+    if (
+      !isReadyCompletion(group.completion) ||
+      group.completion.deliveryKey !== input.deliveryKey
+    ) {
+      return group;
+    }
+    changed = true;
     return {
-      completion: "waiting",
-      event: batch.event,
-      id,
-      owner: "session-turn",
-      requestIds: batch.requests.map((request) => request.requestId),
-      responseAuthRequiredRequestIds: batch.responseAuthRequiredRequestIds,
-      responseMessages: batch.responseMessages,
+      ...group,
+      completion: { deliveryKey: group.completion.deliveryKey, status: "delivered" as const },
     };
   });
-  const authorizations = readLegacyAuthorizations(state) ?? [];
-  requests.push(
-    ...authorizations.map((entry): RequestRecord => {
-      const id = authorizationRequestId(entry);
-      return {
-        id,
-        request: {
-          authorization: entry.challenge,
-          kind: "authorization",
-          requestId: id,
-          responseAttemptId: entry.responseAttemptId,
-        },
-        state: "open",
-      };
-    }),
-  );
-  assertUniqueRequestIds(requests);
-  return { groups, requests, responseAttempts: undefined, version: 0 };
+  if (!changed) return input.session;
+  return writeRequestLedger({
+    expectedVersion: ledger.version,
+    groups,
+    requests: ledger.requests,
+    session: input.session,
+  });
 }
 
-function writeLedgerExtension(
-  state: SessionStateMap | undefined,
-  extension: Pick<RequestLedger, "responseAttempts">,
-  legacyKeys: readonly string[],
-): SessionStateMap {
-  const ledger = readRequestLedger(state);
-  const result: Record<string, unknown> = {
-    ...state,
-    [KEY]: { ...ledger, ...extension, version: ledger.version + 1 },
+function closeOpenRequest(request: RequestRecord, now: number): RequestRecord {
+  if (request.request.kind === "authorization") {
+    return { ...request, outcome: { kind: "cancelled", at: now } };
+  }
+  const attempts = request.attempts ?? [];
+  return {
+    ...request,
+    attempts: attempts.length === 0 ? undefined : [],
+    attemptHistory:
+      attempts.length === 0
+        ? request.attemptHistory
+        : [
+            ...(request.attemptHistory ?? []),
+            ...attempts.map((attempt): ClosedAttempt => ({
+              ...attempt,
+              status: "cancelled",
+              completedAt: now,
+              reason: "The waiting request was cancelled.",
+            })),
+          ],
+    outcome: { kind: "cancelled", at: now },
   };
-  for (const key of legacyKeys) delete result[key];
-  return result;
 }
 
-function readLegacyAuthorizations(
-  state: SessionStateMap | undefined,
-): readonly RequestLedgerAuthorizationRecord[] | undefined {
-  const legacy = state?.[LEGACY_PENDING_AUTHORIZATION_KEY] as
-    | { readonly challenges?: readonly AuthorizationChallenge[] }
-    | undefined;
-  return legacy?.challenges?.map((challenge) => ({
-    challenge,
-    responseAttemptId: challenge.candidateId,
-  }));
+function isReadyCompletion(
+  completion: RequestGroup["completion"],
+): completion is RequestGroupCompletionReady {
+  return typeof completion === "object" && completion.status === "ready";
 }
 
-function authorizationRequestId(entry: RequestLedgerAuthorizationRecord): string {
+export function authorizationRequestId(entry: {
+  readonly challenge: AuthorizationChallenge;
+  readonly responseAttemptId?: string;
+}): string {
   return `authorization:${JSON.stringify([
     entry.responseAttemptId ?? null,
     entry.challenge.attemptId ?? entry.challenge.name,
@@ -382,4 +496,14 @@ function assertUniqueRequestIds(requests: readonly RequestRecord[]): void {
     }
     seen.add(request.id);
   }
+}
+
+/**
+ * An Approval in a Group means the framework approval gate is what waits on
+ * it; every other Group resumes the session turn.
+ */
+function defaultGroupOwner(requests: readonly InputRequest[]): RequestGroupOwner {
+  return requests.some((request) => request.kind === "tool-approval")
+    ? "framework-approval-gate"
+    : "session-turn";
 }

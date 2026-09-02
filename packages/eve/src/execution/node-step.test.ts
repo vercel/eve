@@ -11,7 +11,7 @@ import {
   StepDynamicToolMetadataKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { createRequests } from "#harness/input-requests.js";
 import { getPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { createInstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
@@ -659,7 +659,7 @@ describe("createExecutionNodeStep", () => {
         resolverSlug: "wired",
       } satisfies OldSourceOffsetDynamicToolMetadata,
     ]);
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {

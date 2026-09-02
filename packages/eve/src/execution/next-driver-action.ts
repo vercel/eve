@@ -41,7 +41,7 @@ export type DurableStepResult = (
       readonly authorizationAttemptIds?: readonly string[];
       readonly authorizationNames?: readonly string[];
       readonly hasPendingAuthorization: boolean;
-      readonly hasPendingInputBatch: boolean;
+      readonly hasOpenRequests: boolean;
       readonly pendingRuntimeActionKeys?: readonly string[];
       /** The batch starts workflow tool runs, which report to the turn's run channels. */
       readonly startsWorkflowToolRuns?: boolean;

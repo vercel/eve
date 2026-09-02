@@ -33,9 +33,10 @@ import { setPendingRuntimeActionBatch } from "#harness/runtime-actions.js";
 import { AGENT_HANDLES_STATE_KEY, getAgentHandleStore } from "#harness/handles/store.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
-import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
+import { getPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { createRequests } from "#harness/input-requests.js";
+import { readRequestLedger } from "#harness/hitl/request-ledger.js";
 import type { HarnessSession, StepResult } from "#harness/types.js";
 import { createEmptyHookRegistry } from "#runtime/hooks/registry.js";
 import { createInputRequestedEvent } from "#protocol/message.js";
@@ -1889,8 +1890,24 @@ describe("turnStep", () => {
     );
   });
 
-  it("keeps a session-scoped dynamic model selection when the first turn is cancelled", async () => {
-    const session = createStubSession();
+  it("keeps session model selection and force-closes HITL when the first turn is cancelled", async () => {
+    const session = createRequests({
+      requests: [
+        {
+          action: {
+            callId: "call-question",
+            input: {},
+            kind: "tool-call",
+            toolName: "ask_question",
+          },
+          kind: "question",
+          prompt: "Continue?",
+          requestId: "question-1",
+        },
+      ],
+      responseMessages: [],
+      session: createStubSession(),
+    });
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       adapterRegistry: {
@@ -1946,10 +1963,13 @@ describe("turnStep", () => {
     expect(result.sessionState.snapshot?.session.history).toEqual([
       { content: "thread=unset; user=cancel this turn", role: "user" },
     ]);
+    expect(
+      readRequestLedger(result.sessionState.snapshot?.session.state).groups[0]?.completion,
+    ).toBe("cancelled");
   });
 
   it("rejects task completion while input requests remain pending", async () => {
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -2293,7 +2313,7 @@ describe("turnStep", () => {
   });
 
   it("carries a settled turn while an older input batch remains pending", async () => {
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {
@@ -2331,7 +2351,7 @@ describe("turnStep", () => {
 
     expect(result).toMatchObject({
       action: "park",
-      hasPendingInputBatch: true,
+      hasOpenRequests: true,
       settled: { output: "settled while approval remains open" },
     });
   });
@@ -2339,28 +2359,31 @@ describe("turnStep", () => {
   it.each([
     {
       name: "authorization",
-      withPending: (session: HarnessSession): HarnessSession => ({
-        ...session,
-        state: setPendingAuthorization(session.state, {
-          challenges: [
+      withPending: (session: HarnessSession): HarnessSession =>
+        createRequests({
+          authorizations: [
             {
-              attemptId: "attempt-statuspage",
               challenge: {
-                instructions: "Sign in to continue",
-                url: "https://idp.example/authorize",
+                attemptId: "attempt-statuspage",
+                challenge: {
+                  instructions: "Sign in to continue",
+                  url: "https://idp.example/authorize",
+                },
+                hookUrl: "https://app.example/callback",
+                name: "statuspage",
+                principal: { type: "app" },
               },
-              hookUrl: "https://app.example/callback",
-              name: "statuspage",
-              principal: { type: "app" },
             },
           ],
+          requests: [],
+          responseMessages: [],
+          session,
         }),
-      }),
     },
     {
       name: "input batch",
       withPending: (session: HarnessSession): HarnessSession =>
-        appendPendingInputBatch({
+        createRequests({
           requests: [
             {
               action: {
@@ -3002,8 +3025,11 @@ describe("turnStep", () => {
       name: "statuspage",
       resume: { nonce: "n1" },
     };
-    const session = createStubSession({
-      state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
+    const session = createRequests({
+      authorizations: [{ challenge }],
+      requests: [],
+      responseMessages: [],
+      session: createStubSession({ state: { retained: "yes" } }),
     });
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
@@ -3054,21 +3080,20 @@ describe("turnStep", () => {
       sessionState: createStubSessionState(),
     });
 
-    expect(observedPendingAuth).toBeUndefined();
-    expect(observedStepInput).toBeUndefined();
-    expect(result).toMatchObject({
-      action: "park",
-      hasPendingAuthorization: false,
+    // turnStep matches the callback and forwards it; the harness step (mocked
+    // here) is the authority that terminalizes the Authorization request.
+    expect(observedPendingAuth).toEqual({ challenges: [challenge] });
+    expect(observedStepInput).toMatchObject({
+      authorizationResults: [
+        expect.objectContaining({ callback: { code: "oauth-code" }, name: "statuspage" }),
+      ],
     });
-    if (result.action === "park") {
-      expect(result.authorizationNames).toBeUndefined();
-    }
+    expect(result).toMatchObject({ action: "park" });
     const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(persistedSession?.state?.retained).toBe("yes");
-    expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
   });
 
-  it("clears pending authorization after a matching callback resumes the turn", async () => {
+  it("forwards a matching authorization callback into the resumed turn", async () => {
     const challenge = {
       attemptId: "attempt-statuspage",
       challenge: {
@@ -3087,9 +3112,14 @@ describe("turnStep", () => {
     const instructionHandler = vi.fn(
       (_event: unknown, _context: { readonly messages: readonly ModelMessage[] }) => null,
     );
-    const session = createStubSession({
-      history: [{ content: "visible", role: "user" }, hidden],
-      state: setPendingAuthorization({ retained: "yes" }, { challenges: [challenge] }),
+    const session = createRequests({
+      authorizations: [{ challenge }],
+      requests: [],
+      responseMessages: [],
+      session: createStubSession({
+        history: [{ content: "visible", role: "user" }, hidden],
+        state: { retained: "yes" },
+      }),
     });
     installSessionStoreMocks([session]);
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
@@ -3155,18 +3185,19 @@ describe("turnStep", () => {
       sessionState: createStubSessionState(),
     });
 
-    expect(observedPendingAuth).toBeUndefined();
-    expect(observedStepInput).toBeUndefined();
-    expect(result).toMatchObject({
-      action: "park",
-      hasPendingAuthorization: false,
+    expect(observedPendingAuth).toEqual({ challenges: [challenge] });
+    expect(observedStepInput).toMatchObject({
+      authorizationResults: [
+        expect.objectContaining({
+          attemptId: "attempt-statuspage",
+          callback: { code: "oauth-code" },
+          name: "statuspage",
+        }),
+      ],
     });
-    if (result.action === "park") {
-      expect(result.authorizationNames).toBeUndefined();
-    }
+    expect(result).toMatchObject({ action: "park" });
     const persistedSession = vi.mocked(createDurableSessionState).mock.calls.at(-1)?.[0].session;
     expect(persistedSession?.state?.retained).toBe("yes");
-    expect(getPendingAuthorization(persistedSession?.state)).toBeUndefined();
     expect(instructionHandler).toHaveBeenCalledTimes(2);
     for (const call of instructionHandler.mock.calls) {
       expect(call[1]).toMatchObject({

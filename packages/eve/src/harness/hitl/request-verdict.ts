@@ -3,13 +3,13 @@ import type { ModelMessage } from "ai";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { ResolvedInputBatch } from "#harness/input-request-resolution.js";
-import type { PendingInputBatch, PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import type { OpenRequestGroup, RequestGroupEvent } from "#harness/hitl/request-ledger.js";
 import type { HarnessSession } from "#harness/types.js";
 
 export type ToolResponsePart = Extract<ModelMessage, { role: "tool" }>["content"][number];
 
 export interface ResolvedInputActionBatch {
-  readonly event: PendingInputBatchEvent;
+  readonly event: RequestGroupEvent;
   readonly results: readonly RuntimeToolResultActionResult[];
 }
 
@@ -21,7 +21,7 @@ export type RequestVerdict = {
 };
 
 export type RequestVerdictReducerInput = {
-  readonly batch: PendingInputBatch;
+  readonly batch: OpenRequestGroup;
   readonly messages: ModelMessage[];
   readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
   readonly responses: readonly InputResponse[];

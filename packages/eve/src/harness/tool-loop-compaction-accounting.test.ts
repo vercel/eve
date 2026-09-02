@@ -1,7 +1,7 @@
 import { generateText, jsonSchema, type LanguageModel, ToolLoopAgent } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { createRequests } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, StepFn, StepNext, ToolLoopHarnessConfig } from "#harness/types.js";
 import {
@@ -316,7 +316,7 @@ describe("tool-loop structured compaction accounting", () => {
     ]);
 
     const runStep = createToolLoopHarness(createTestConfig());
-    const session = appendPendingInputBatch({
+    const session = createRequests({
       requests: [
         {
           action: {

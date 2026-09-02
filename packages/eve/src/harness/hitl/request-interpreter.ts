@@ -1,405 +1,656 @@
-import type { ModelMessage, UserContent } from "ai";
+import type { ModelMessage } from "ai";
 
 import { resolveTextToResponses } from "#channel/resolve-text.js";
-import { extractHistoricalInputRequests } from "#harness/input-extraction.js";
-import { buildResolvedInputBatch } from "#harness/input-request-resolution.js";
-import { appendUserContent, normalizeUserContent } from "#harness/messages.js";
+import type { SessionAuthContext } from "#channel/types.js";
+import { type AuthorizationChallenge, type AuthorizationResult } from "#harness/authorization.js";
+import { normalizeUserContent } from "#harness/messages.js";
 import { isSessionLimitContinuationRequestId } from "#harness/session-limit-continuation.js";
 import {
-  findAnsweredApprovalBatches,
-  hasAnsweredApprovalBatch,
   limitApprovalTailBatch,
   reduceApprovalRequestVerdict,
 } from "#harness/hitl/approval-input-requests.js";
-import {
-  compactStepInput,
-  finishResolvedInput,
-  responsesForBatches,
-} from "#harness/hitl/pending-input-resolution.js";
-import type {
-  ResolvePendingInputResult,
-  ResolvedStepInput,
-} from "#harness/hitl/pending-input-resolution.js";
-import {
-  findAnsweredQuestionBatches,
-  reduceQuestionRequestVerdict,
-} from "#harness/hitl/question-input-requests.js";
-import type { RequestVerdict } from "#harness/hitl/request-verdict.js";
+import { isApprovalRequest } from "#harness/input-request-class.js";
+import { reduceQuestionRequestVerdict } from "#harness/hitl/question-input-requests.js";
 import {
   hasAnsweredSessionLimitBatch,
   isSessionLimitInputBatch,
   reduceSessionLimitRequestVerdict,
 } from "#harness/hitl/session-limit-input-requests.js";
-import { isApprovalRequest } from "#harness/input-request-class.js";
-import type { PendingInputBatch } from "#harness/pending-input-batches.js";
+import type { HarnessToolMap, StepInput } from "#harness/types.js";
+import { attachClientContext, readClientContext } from "#internal/client-context.js";
+import { isInputRequest, type InputRequest, type InputResponse } from "#shared/input.js";
 import {
-  getPendingInputBatches,
-  queueDeferredStepInput,
-  removePendingInputBatches,
-} from "#harness/pending-input-batches.js";
-import type { HarnessSession, HarnessToolMap, StepInput } from "#harness/types.js";
-import { readClientContext } from "#internal/client-context.js";
-import type { InputRequest, InputResponse } from "#shared/input.js";
+  applyAuthorizationResults,
+  evaluatePendingAttempts,
+  expireAttempts,
+  reduceApprovalRecord,
+  updateRecord,
+} from "#harness/hitl/approval-attempts.js";
+import {
+  type ClosedAttemptStatus,
+  type GroupCompletion,
+  type OpenRequestGroup,
+  type RequestGroup,
+  type RequestGroupEvent,
+  type RequestLedger,
+  type RequestOutcome,
+  type RequestRecord,
+  type ResolvedInputActionBatch,
+  isOpenRequest,
+} from "#harness/hitl/request-ledger.js";
 
-/**
- * Resolves pending input at the start of a harness step.
- *
- * Ordered batches remain independently answerable. Session-limit prompts own
- * resolution while open; approval batches preserve AI SDK's tail-message
- * requirement; question-only batches retain dismiss-and-continue behavior.
- */
-export function interpretRequestDelivery(input: {
-  readonly deferMessagesWhileApprovalsPending?: boolean;
-  readonly history?: readonly ModelMessage[];
-  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
-  readonly session: HarnessSession;
+export interface RequestDelivery {
+  readonly now: number;
   readonly stepInput?: StepInput;
-}): ResolvePendingInputResult {
-  const baseHistory = [...(input.history ?? input.session.history)];
-  const batches = getPendingInputBatches(input.session.state);
-  if (batches.length === 0) {
-    return { outcome: "continue", messages: baseHistory, session: input.session };
+  readonly authorizationResults: readonly AuthorizationResult[];
+  readonly responder: SessionAuthContext | null;
+}
+
+/** Live approval policies; looked up per pass and never persisted. */
+export type ApprovalPolicyLookup = HarnessToolMap;
+
+export interface InterpretRequestsInput {
+  readonly delivery: RequestDelivery;
+  readonly history: readonly ModelMessage[];
+  readonly ledger: RequestLedger;
+  readonly policies: ApprovalPolicyLookup;
+  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  readonly deferMessagesWhileApprovalsPending: boolean;
+}
+
+export type RequestEffect =
+  | { readonly kind: "feedback"; readonly message: string }
+  | {
+      readonly kind: "authorization-required";
+      readonly challenges: readonly AuthorizationChallenge[];
+    }
+  | {
+      readonly kind: "authorization-completed";
+      readonly requestId: string;
+      readonly outcome: "completed" | "failed";
+      readonly reason?: string;
+    }
+  | {
+      readonly kind: "approval-attempt";
+      readonly attemptId: string;
+      readonly requestId: string;
+      readonly status: ClosedAttemptStatus | "pending";
+      readonly responderPrincipalId: string;
+      readonly reason?: string;
+    }
+  | {
+      readonly kind: "approval-settled";
+      readonly requestId: string;
+      readonly outcome: "approved" | "cancelled";
+      readonly responderPrincipalId: string;
+    }
+  | {
+      readonly kind: "input-resolved";
+      readonly group: RequestGroupEvent;
+      readonly resolutions: readonly InputResolution[];
+    }
+  | {
+      readonly kind: "action-rejected";
+      readonly group: RequestGroupEvent;
+      readonly results: readonly import("#shared/action-types.js").RuntimeToolResultActionResult[];
+    };
+
+export type InterpretRequestsResult =
+  | {
+      readonly kind: "wait";
+      readonly ledger: RequestLedger;
+      readonly effects: readonly RequestEffect[];
+      readonly heldInput?: StepInput;
+    }
+  | {
+      readonly kind: "continue";
+      readonly ledger: RequestLedger;
+      readonly effects: readonly RequestEffect[];
+      /** The text message was consumed as a request response and must not reach the model. */
+      readonly messageConsumed?: boolean;
+      readonly stepInput?: StepInput;
+      readonly messages: readonly ModelMessage[];
+    }
+  | {
+      readonly kind: "complete";
+      readonly ledger: RequestLedger;
+      readonly effects: readonly RequestEffect[];
+      /** The text message was consumed as a request response and must not reach the model. */
+      readonly messageConsumed?: boolean;
+      readonly deliveryKey: string;
+      readonly completions: readonly GroupCompletion[];
+      readonly messages: readonly ModelMessage[];
+      readonly stepInput?: StepInput;
+    };
+
+export interface ReducerInput {
+  readonly group: OpenRequestGroup;
+  readonly records: readonly RequestRecord[];
+  readonly responses: readonly InputResponse[];
+  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
+  readonly messages: readonly ModelMessage[];
+}
+
+export interface ReducerResult {
+  readonly outcomes: ReadonlyMap<string, RequestOutcome>;
+  readonly messages: readonly ModelMessage[];
+  readonly rejectedActions?: readonly ResolvedInputActionBatch[];
+  readonly approvedToolKeys?: readonly string[];
+  readonly limitContinuation?: { readonly granted: boolean };
+}
+
+export interface InputResolution {
+  readonly outcome: "answered" | "approved" | "denied" | "ignored" | "invalid";
+  readonly request: InputRequest;
+  readonly response?: InputResponse;
+}
+
+export async function interpretRequests(
+  input: InterpretRequestsInput,
+): Promise<InterpretRequestsResult> {
+  let ledger = expireAttempts(input.ledger, input.delivery.now);
+  const authorizationPass = applyAuthorizationResults(
+    ledger,
+    input.delivery.authorizationResults,
+    input.delivery.now,
+  );
+  ledger = authorizationPass.ledger;
+  const effects: RequestEffect[] = [...authorizationPass.effects];
+
+  const openGroups = materializeOpenGroups(ledger);
+
+  let stepInput: ResolvedStepInput | undefined = input.delivery.stepInput;
+
+  const sessionLimitGroup = openGroups.find((group) => isSessionLimitInputBatch(group));
+  const textResolutionGroup =
+    sessionLimitGroup ?? (openGroups.length === 1 ? openGroups[0] : undefined);
+  if (textResolutionGroup !== undefined) {
+    stepInput = resolveTextMessageInput(textResolutionGroup, stepInput);
   }
 
-  const route = routePendingInput(batches);
-  const deferTurnInput = hasTailApprovalResponse(baseHistory);
-  const textResolutionBatch =
-    route.kind === "session-limit" ? route.batch : batches.length === 1 ? batches[0] : undefined;
-  const resolvedStepInput =
-    textResolutionBatch === undefined
-      ? input.stepInput
-      : resolveTextMessageInput(textResolutionBatch, input.stepInput);
-  const responses = canonicalizeInputResponses(resolvedStepInput?.inputResponses ?? []);
+  // Attributed responses are the delivery boundary's responder-bound form of
+  // the same answers; both feed one canonical response set.
+  const deliveredResponses = materializeDeliveredResponses(stepInput, input.delivery.responder);
+  const canonicalResponses = canonicalizeInputResponses(
+    deliveredResponses.map((entry) => entry.response),
+  );
 
   if (
-    route.kind === "approval" &&
-    input.deferMessagesWhileApprovalsPending === true &&
-    resolvedStepInput?.message !== undefined &&
-    !hasAnsweredApprovalBatch(route.approvalBatches, responses)
+    input.deferMessagesWhileApprovalsPending &&
+    stepInput?.message !== undefined &&
+    hasOpenApprovalGroup(openGroups) &&
+    sessionLimitGroup === undefined &&
+    !hasAnyApprovalResponse(openGroups, canonicalResponses)
   ) {
-    return {
-      deferredMessage: true,
-      outcome: "unresolved",
-      messages: baseHistory,
-      session: queueDeferredStepInput(input.session, compactStepInput(resolvedStepInput)),
-    };
+    return { kind: "wait", ledger, effects, heldInput: compactStepInput(stepInput) };
+  }
+  // An open Limit prompt owns resolution: unrelated turn input waits behind it.
+  if (
+    sessionLimitGroup !== undefined &&
+    !hasAnsweredSessionLimitBatch(sessionLimitGroup, canonicalResponses)
+  ) {
+    return { kind: "wait", ledger, effects, heldInput: compactStepInput(stepInput) };
   }
 
-  if (responses.length === 0 && resolvedStepInput?.message === undefined) {
-    const deferredInput = compactStepInput(resolvedStepInput);
-    const session =
-      deferredInput.context !== undefined ||
-      readClientContext(deferredInput) !== undefined ||
-      deferredInput.outputSchema !== undefined
-        ? queueDeferredStepInput(input.session, deferredInput)
-        : input.session;
-    return { outcome: "unresolved", messages: baseHistory, session };
-  }
-
-  const resolverInput = {
-    baseHistory,
-    batches,
-    deferTurnInput,
-    resolvedStepInput,
-    responses,
-    session: input.session,
-  };
-  switch (route.kind) {
-    case "session-limit":
-      return resolveSessionLimitRoute({ ...resolverInput, pendingBatch: route.batch });
-    case "approval":
-      return resolveApprovalRoute({
-        ...resolverInput,
-        approvalBatches: route.approvalBatches,
-        questionBatches: route.questionBatches,
-        resolveApprovalKey: input.resolveApprovalKey,
-      });
-    case "question":
-      return resolveQuestionRoute(resolverInput);
-  }
-}
-
-type PendingInputRoute =
-  | { readonly batch: PendingInputBatch; readonly kind: "session-limit" }
-  | {
-      readonly approvalBatches: readonly PendingInputBatch[];
-      readonly kind: "approval";
-      readonly questionBatches: readonly PendingInputBatch[];
+  const recordsById = new Map(ledger.requests.map((record) => [record.id, record]));
+  const groupResponses = new Map<string, InputResponse[]>();
+  for (const group of openGroups) groupResponses.set(group.id, []);
+  for (const response of canonicalResponses) {
+    const record = recordsById.get(response.requestId);
+    if (record?.groupId !== undefined && groupResponses.has(record.groupId)) {
+      groupResponses.get(record.groupId)!.push(response);
     }
-  | { readonly kind: "question" };
-
-type PendingInputBatchDomain = "approval" | "question" | "session-limit";
-
-function routePendingInput(batches: readonly PendingInputBatch[]): PendingInputRoute {
-  const classified = batches.map((batch) => ({ batch, domain: classifyPendingInputBatch(batch) }));
-  const limitBatch = classified.find(({ domain }) => domain === "session-limit")?.batch;
-  if (limitBatch !== undefined) return { batch: limitBatch, kind: "session-limit" };
-
-  const approvalBatches = classified
-    .filter(({ domain }) => domain === "approval")
-    .map(({ batch }) => batch);
-  if (approvalBatches.length > 0) {
-    const approvalSet = new Set(approvalBatches);
-    return {
-      approvalBatches,
-      kind: "approval",
-      questionBatches: batches.filter((batch) => !approvalSet.has(batch)),
-    };
   }
 
-  return { kind: "question" };
-}
-
-function classifyPendingInputBatch(batch: PendingInputBatch): PendingInputBatchDomain {
-  for (const request of batch.requests) {
-    switch (request.kind) {
-      case "question":
-      case "session-limit":
-      case "tool-approval":
-        break;
-      default: {
-        const unhandled: never = request.kind;
-        throw new TypeError(`Unhandled pending input request kind: ${String(unhandled)}`);
+  // AI SDK collects approval responses from the tail tool message only, so at
+  // most one approval-bearing group settles per pass; later answered approval
+  // groups wait for the next step with their responses held.
+  let approvalGroupSettledThisPass = false;
+  for (const group of openGroups) {
+    const responseMap = new Map<string, InputResponse>(
+      (groupResponses.get(group.id) ?? []).map(
+        (response) => [response.requestId, response] as const,
+      ),
+    );
+    // A group that carries approvals settles only once every approval is
+    // answered; question answers alone are held. Once the approvals settle,
+    // its unanswered questions are dismissed with the group.
+    const approvals = group.requests.filter((request) => isApprovalRequest(request));
+    const approvalsAnswered =
+      approvals.length > 0 && approvals.every((request) => responseMap.has(request.requestId));
+    if (approvals.length > 0 && (!approvalsAnswered || approvalGroupSettledThisPass)) continue;
+    if (approvalsAnswered) approvalGroupSettledThisPass = true;
+    for (const request of group.requests) {
+      const record = ledger.requests.find((candidate) => candidate.id === request.requestId);
+      if (record === undefined || record.outcome !== undefined) continue;
+      switch (request.kind) {
+        case "tool-approval":
+          ledger = await reduceApprovalRecord({
+            delivery: input.delivery,
+            effects,
+            group,
+            ledger,
+            policyLookup: input.policies,
+            record,
+            requiresAuthorization: (group.responseAuthRequiredRequestIds ?? []).includes(
+              request.requestId,
+            ),
+            response: responseMap.get(request.requestId),
+            responder: resolveResponderForRequest(
+              request.requestId,
+              deliveredResponses,
+              input.delivery.responder,
+            ),
+          });
+          break;
+        case "question":
+          if (responseMap.has(request.requestId)) {
+            ledger = updateRecord(ledger, request.requestId, {
+              ...record,
+              outcome: {
+                kind: "answered",
+                response: responseMap.get(request.requestId)!,
+                at: input.delivery.now,
+              },
+            });
+          } else if (
+            approvalsAnswered ||
+            (openGroups.length === 1 && normalizeUserContent(stepInput?.message) !== undefined)
+          ) {
+            ledger = updateRecord(ledger, request.requestId, {
+              ...record,
+              outcome: { kind: "ignored", at: input.delivery.now },
+            });
+          }
+          break;
+        case "session-limit": {
+          const responses = groupResponses.get(group.id) ?? [];
+          if (responses.length > 0 && hasAnsweredSessionLimitBatch(group, responses)) {
+            const response = responses.find(
+              (candidate) => candidate.requestId === request.requestId,
+            );
+            ledger = updateRecord(ledger, request.requestId, {
+              ...record,
+              outcome:
+                response === undefined
+                  ? { kind: "ignored", at: input.delivery.now }
+                  : { kind: "answered", response, at: input.delivery.now },
+            });
+          }
+          break;
+        }
       }
     }
   }
 
-  if (isSessionLimitInputBatch(batch)) return "session-limit";
-  return batch.requests.some((request) => isApprovalRequest(request)) ? "approval" : "question";
-}
-
-function resolveApprovalRoute(input: {
-  readonly approvalBatches: readonly PendingInputBatch[];
-  readonly baseHistory: ModelMessage[];
-  readonly batches: readonly PendingInputBatch[];
-  readonly deferTurnInput: boolean;
-  readonly questionBatches: readonly PendingInputBatch[];
-  readonly resolveApprovalKey?: (request: InputRequest) => string | undefined;
-  readonly resolvedStepInput: ResolvedStepInput | undefined;
-  readonly responses: readonly InputResponse[];
-  readonly session: HarnessSession;
-}): ResolvePendingInputResult {
-  const answeredApprovalBatches = new Set(
-    findAnsweredApprovalBatches(input.approvalBatches, input.responses),
-  );
-  const answeredQuestionBatches = new Set(
-    findAnsweredQuestionBatches(input.questionBatches, input.responses),
-  );
-  let resolvedBatches = input.batches.filter(
-    (batch) => answeredApprovalBatches.has(batch) || answeredQuestionBatches.has(batch),
-  );
-  resolvedBatches = limitApprovalTailBatch(resolvedBatches);
-
-  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
-  const leftoverResponses = responsesForBatches(input.responses, openBatches);
-
-  if (resolvedBatches.length === 0) {
-    if (input.resolvedStepInput?.message === undefined) {
-      return {
-        outcome: "unresolved",
-        messages: [...input.baseHistory],
-        session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
-      };
-    }
-
-    const session =
-      leftoverResponses.length === 0
-        ? input.session
-        : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
-    return {
-      consumedMessage: input.resolvedStepInput.messageConsumed,
-      outcome: "continue",
-      messages: [...input.baseHistory],
-      session,
-    };
-  }
-
-  const verdict = reduceRequestVerdicts(
-    resolvedBatches,
-    {
-      messages: [...input.baseHistory],
-      session: input.session,
-    },
-    (batch, state) =>
-      batch.requests.some((request) => isApprovalRequest(request))
-        ? reduceApprovalRequestVerdict({
-            batch,
-            messages: state.messages,
-            resolveApprovalKey: input.resolveApprovalKey,
-            responses: input.responses,
-            session: state.session,
-          })
-        : reduceQuestionRequestVerdict({
-            batch,
-            messages: state.messages,
-            responses: input.responses,
-            session: state.session,
-          }),
-  );
-
-  const session = removePendingInputBatches(verdict.session, resolvedBatches);
-
-  return finishResolvedInput({
-    deferTurnInput:
-      resolvedBatches.some((batch) =>
-        batch.requests.some((request) => isApprovalRequest(request)),
-      ) || input.deferTurnInput,
-    leftoverResponses,
-    messages: verdict.messages,
-    rejectedActions: verdict.rejectedActions,
-    resolvedInputs: resolvedBatches.flatMap((batch) => {
-      const resolved = buildResolvedInputBatch(batch, input.responses);
-      return resolved === undefined ? [] : [resolved];
-    }),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
+  ledger = await evaluatePendingAttempts({
+    delivery: input.delivery,
+    effects,
+    ledger,
+    policyLookup: input.policies,
   });
-}
 
-function resolveQuestionRoute(input: {
-  readonly baseHistory: ModelMessage[];
-  readonly batches: readonly PendingInputBatch[];
-  readonly deferTurnInput: boolean;
-  readonly resolvedStepInput: ResolvedStepInput | undefined;
-  readonly responses: readonly InputResponse[];
-  readonly session: HarnessSession;
-}): ResolvePendingInputResult {
-  const resolvedBatches = findAnsweredQuestionBatches(input.batches, input.responses);
-  const openBatches = input.batches.filter((batch) => !resolvedBatches.includes(batch));
-  const leftoverResponses = responsesForBatches(input.responses, openBatches);
-
-  if (resolvedBatches.length === 0) {
-    if (input.resolvedStepInput?.message === undefined) {
-      return {
-        outcome: "unresolved",
-        messages: [...input.baseHistory],
-        session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
-      };
-    }
-
-    const sole = input.batches.length === 1 ? input.batches[0] : undefined;
-    if (sole === undefined) {
-      const session =
-        leftoverResponses.length === 0
-          ? input.session
-          : queueDeferredStepInput(input.session, { inputResponses: leftoverResponses });
-      return {
-        consumedMessage: input.resolvedStepInput.messageConsumed,
-        outcome: "continue",
-        messages: [...input.baseHistory],
-        session,
-      };
-    }
-
-    const verdict = reduceQuestionRequestVerdict({
-      batch: sole,
-      messages: [...input.baseHistory],
-      responses: [],
-      session: input.session,
-    });
-    const session = removePendingInputBatches(verdict.session, [sole]);
-    return {
-      consumedMessage: input.resolvedStepInput.messageConsumed,
-      outcome: "resolved",
-      messages: verdict.messages,
-      resolvedInputs: [buildResolvedInputBatch(sole, [])].filter(
-        (batch): batch is NonNullable<typeof batch> => batch !== undefined,
-      ),
-      session,
-    };
-  }
-
-  const verdict = reduceRequestVerdicts(
-    resolvedBatches,
-    {
-      messages: [...input.baseHistory],
-      session: input.session,
-    },
-    (batch, state) =>
-      reduceQuestionRequestVerdict({
-        batch,
-        messages: state.messages,
-        responses: input.responses,
-        session: state.session,
-      }),
-  );
-  const session = removePendingInputBatches(verdict.session, resolvedBatches);
-
-  return finishResolvedInput({
-    deferTurnInput: input.deferTurnInput,
-    leftoverResponses,
-    messages: verdict.messages,
-    resolvedInputs: resolvedBatches.flatMap((batch) => {
-      const resolved = buildResolvedInputBatch(batch, input.responses);
-      return resolved === undefined ? [] : [resolved];
-    }),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
-  });
-}
-
-function resolveSessionLimitRoute(input: {
-  readonly baseHistory: ModelMessage[];
-  readonly batches: readonly PendingInputBatch[];
-  readonly deferTurnInput: boolean;
-  readonly pendingBatch: PendingInputBatch;
-  readonly resolvedStepInput: ResolvedStepInput | undefined;
-  readonly responses: readonly InputResponse[];
-  readonly session: HarnessSession;
-}): ResolvePendingInputResult {
-  if (!hasAnsweredSessionLimitBatch(input.pendingBatch, input.responses)) {
-    return {
-      deferredMessage: true,
-      outcome: "unresolved",
-      messages: [...input.baseHistory],
-      session: queueDeferredStepInput(input.session, compactStepInput(input.resolvedStepInput)),
-    };
-  }
-
-  const openBatches = input.batches.filter((batch) => batch !== input.pendingBatch);
-  const leftoverResponses = responsesForBatches(input.responses, openBatches);
-  const limitBlocked = openBatches.some((batch) =>
-    batch.requests.some((request) => isSessionLimitContinuationRequestId(request.requestId)),
-  );
-  const verdict = reduceSessionLimitRequestVerdict({
-    batch: input.pendingBatch,
-    messages: [...input.baseHistory],
-    responses: input.responses,
-    session: input.session,
-  });
-  const session = removePendingInputBatches(verdict.session, [input.pendingBatch]);
-
-  return finishResolvedInput({
-    deferTurnInput: input.deferTurnInput || limitBlocked,
-    leftoverResponses,
-    limitContinuation: verdict.limitContinuation,
-    messages: verdict.messages,
-    resolvedInputs: [buildResolvedInputBatch(input.pendingBatch, input.responses)].filter(
-      (batch): batch is NonNullable<typeof batch> => batch !== undefined,
+  // Completion is judged over the groups that were open at pass start: a
+  // group whose every request just became terminal has no open requests left.
+  const refreshedOpenGroups = openGroups;
+  const completableGroups = refreshedOpenGroups.filter((group) =>
+    group.requests.every(
+      (request) =>
+        ledger.requests.find((record) => record.id === request.requestId)?.outcome !== undefined,
     ),
-    resolvedStepInput: input.resolvedStepInput,
-    session,
+  );
+  const completedGroups = limitApprovalTailBatch(completableGroups);
+  const completedGroupIds = completedGroups.map((group) => group.id);
+  const deliveryKey =
+    completedGroupIds.length > 0
+      ? `request-group-completion:${JSON.stringify(completedGroupIds)}`
+      : undefined;
+
+  const completions: GroupCompletion[] = [];
+  let messages = [...input.history];
+  let heldResponses: InputResponse[] = [];
+
+  for (const group of completedGroups) {
+    const records = group.requests
+      .map((request) => ledger.requests.find((record) => record.id === request.requestId))
+      .filter((record): record is RequestRecord => record !== undefined);
+    const responses = groupResponses.get(group.id) ?? [];
+    const reduced = buildGroupCompletion(group, {
+      group,
+      messages,
+      records,
+      resolveApprovalKey: input.resolveApprovalKey,
+      responses,
+    });
+    messages = [...reduced.messages];
+    if (group.event !== undefined) {
+      effects.push({
+        kind: "input-resolved",
+        group: group.event,
+        resolutions: buildInputResolutions(group, records, responses),
+      });
+    }
+    for (const rejected of reduced.rejectedActions ?? []) {
+      effects.push({ kind: "action-rejected", group: rejected.event, results: rejected.results });
+    }
+    completions.push(toGroupCompletion(group, reduced));
+  }
+
+  // Responses that reached a group still waiting after this pass are held for
+  // the next step; responses to completed groups were consumed above.
+  for (const group of refreshedOpenGroups) {
+    if (completedGroupIds.includes(group.id)) continue;
+    heldResponses = [...heldResponses, ...(groupResponses.get(group.id) ?? [])];
+  }
+
+  if (deliveryKey !== undefined) {
+    const completionMap = new Map(
+      completions.map((completion) => [completion.owner, completion] as const),
+    );
+    ledger = {
+      ...ledger,
+      groups: ledger.groups.map((group) =>
+        completedGroupIds.includes(group.id)
+          ? {
+              ...group,
+              completion: {
+                deliveryKey,
+                ownerCompletion: completionMap.get(group.owner) ?? completions[0]!,
+                status: "ready" as const,
+              },
+            }
+          : group,
+      ),
+    };
+  }
+
+  // AI SDK collects approval responses only from the tail tool message, so
+  // turn input replays after an isolated approval response; a still-open Limit
+  // prompt likewise holds turn input.
+  const limitStillOpen = materializeOpenGroups(ledger).some((group) =>
+    group.requests.some((request) => isSessionLimitContinuationRequestId(request.requestId)),
+  );
+  const stillOpenAfterPass = materializeOpenGroups(ledger).length > 0;
+  const deferred = finishStepInput({
+    deferContextOnly: stillOpenAfterPass && normalizeUserContent(stepInput?.message) === undefined,
+    deferTurnInput:
+      completedGroups.some((group) =>
+        group.requests.some((request) => isApprovalRequest(request)),
+      ) ||
+      hasTailApprovalResponse(input.history) ||
+      (completedGroups.length > 0 && limitStillOpen),
+    heldResponses,
+    resolvedStepInput: stepInput,
+  });
+
+  if (deliveryKey !== undefined) {
+    return {
+      completions,
+      deliveryKey,
+      effects,
+      kind: "complete",
+      messageConsumed: stepInput?.messageConsumed,
+      ledger,
+      messages,
+      stepInput: deferred.stepInput,
+    };
+  }
+
+  const refreshedStillOpenGroups = materializeOpenGroups(ledger);
+  // Only a message advances a turn past open requests; context alone is held
+  // with them.
+  const hasForwardableTurnInput = normalizeUserContent(stepInput?.message) !== undefined;
+  // Responses that resolved nothing this pass (answers to a group still
+  // waiting on its approvals) are held with the step input.
+  if (
+    !hasForwardableTurnInput &&
+    (refreshedStillOpenGroups.length > 0 || deferred.stepInput !== undefined)
+  ) {
+    return { kind: "wait", ledger, effects, heldInput: deferred.stepInput };
+  }
+
+  return {
+    effects,
+    kind: "continue",
+    ledger,
+    messageConsumed: stepInput?.messageConsumed,
+    messages,
+    stepInput: deferred.stepInput,
+  };
+}
+
+export function appendResolvedBatchTranscript(
+  messages: ModelMessage[],
+  group: OpenRequestGroup,
+  toolParts: readonly Extract<ModelMessage, { role: "tool" }>["content"][number][],
+): void {
+  messages.push(...group.responseMessages);
+  if (toolParts.length > 0) {
+    messages.push({ content: [...toolParts], role: "tool" });
+  }
+}
+
+export function compactStepInput(input: ResolvedStepInput | undefined): ResolvedStepInput {
+  if (input === undefined) return {};
+  const result: {
+    attributedInputResponses?: StepInput["attributedInputResponses"];
+    context?: StepInput["context"];
+    inputResponses?: StepInput["inputResponses"];
+    message?: StepInput["message"];
+    messageConsumed?: boolean;
+    outputSchema?: StepInput["outputSchema"];
+  } = {};
+  if ((input.attributedInputResponses?.length ?? 0) > 0)
+    result.attributedInputResponses = input.attributedInputResponses;
+  if ((input.context?.length ?? 0) > 0) result.context = input.context;
+  if ((input.inputResponses?.length ?? 0) > 0) result.inputResponses = input.inputResponses;
+  if (input.message !== undefined) result.message = input.message;
+  if (input.messageConsumed === true) result.messageConsumed = true;
+  if (input.outputSchema !== undefined) result.outputSchema = input.outputSchema;
+  return attachClientContext(result, readClientContext(input));
+}
+
+type ResolvedStepInput = StepInput & { readonly messageConsumed?: boolean };
+
+function materializeOpenGroups(ledger: RequestLedger): OpenRequestGroup[] {
+  const requests = new Map(ledger.requests.map((request) => [request.id, request]));
+  return ledger.groups.flatMap((group) => {
+    if (group.completion !== "waiting") return [];
+    const open: InputRequest[] = [];
+    for (const id of group.requestIds) {
+      const record = requests.get(id);
+      if (record !== undefined && isOpenRequest(record) && isInputRequest(record.request)) {
+        open.push(record.request);
+      }
+    }
+    return open.length === 0 ? [] : [{ ...group, requests: open }];
   });
 }
 
-function reduceRequestVerdicts(
-  batches: readonly PendingInputBatch[],
-  initial: RequestVerdict,
-  reduce: (batch: PendingInputBatch, state: RequestVerdict) => RequestVerdict,
-): RequestVerdict {
-  let state = initial;
-  for (const batch of batches) {
-    const verdict = reduce(batch, state);
-    state = {
-      messages: verdict.messages,
-      rejectedActions:
-        verdict.rejectedActions === undefined
-          ? state.rejectedActions
-          : [...(state.rejectedActions ?? []), ...verdict.rejectedActions],
-      session: verdict.session,
+function hasOpenApprovalGroup(groups: readonly OpenRequestGroup[]): boolean {
+  return groups.some((group) => group.requests.some((request) => isApprovalRequest(request)));
+}
+
+function hasAnyApprovalResponse(
+  groups: readonly OpenRequestGroup[],
+  responses: readonly InputResponse[],
+): boolean {
+  const ids = new Set(
+    groups.flatMap((group) =>
+      group.requests
+        .filter((request) => isApprovalRequest(request))
+        .map((request) => request.requestId),
+    ),
+  );
+  return responses.some((response) => ids.has(response.requestId));
+}
+
+function materializeDeliveredResponses(
+  stepInput: StepInput | undefined,
+  fallbackResponder: SessionAuthContext | null,
+): readonly {
+  readonly responder: SessionAuthContext | null;
+  readonly deliveryId?: string;
+  readonly response: InputResponse;
+}[] {
+  return [
+    ...(stepInput?.attributedInputResponses ?? []).map(({ auth, deliveryId, response }) => ({
+      deliveryId,
+      responder: auth,
+      response,
+    })),
+    ...(stepInput?.inputResponses ?? []).map((response) => ({
+      responder: fallbackResponder,
+      response,
+    })),
+  ];
+}
+
+function resolveResponderForRequest(
+  requestId: string,
+  deliveredResponses: readonly {
+    readonly responder: SessionAuthContext | null;
+    readonly deliveryId?: string;
+    readonly response: InputResponse;
+  }[],
+  fallbackResponder: SessionAuthContext | null,
+): { readonly responder: SessionAuthContext | null; readonly deliveryId?: string } {
+  const match = deliveredResponses.find((entry) => entry.response.requestId === requestId);
+  return { deliveryId: match?.deliveryId, responder: match?.responder ?? fallbackResponder };
+}
+
+/**
+ * Every pending attempt is (re)evaluated on every delivery: a new attempt on
+ * this pass, or one whose linked Authorization request was just satisfied.
+ */
+
+function buildGroupCompletion(group: OpenRequestGroup, input: ReducerInput): ReducerResult {
+  if (isSessionLimitInputBatch(group)) return reduceSessionLimitRequestVerdict(input);
+  if (group.requests.some((request) => isApprovalRequest(request)))
+    return reduceApprovalRequestVerdict(input);
+  return reduceQuestionRequestVerdict(input);
+}
+
+function toGroupCompletion(group: RequestGroup, result: ReducerResult): GroupCompletion {
+  if (group.owner === "framework-approval-gate") {
+    return {
+      approvedToolKeys: result.approvedToolKeys ?? [],
+      messages: result.messages,
+      owner: "framework-approval-gate",
+      rejectedActions: result.rejectedActions ?? [],
     };
   }
-  return state;
+  return {
+    limitContinuation: result.limitContinuation,
+    messages: result.messages,
+    owner: "session-turn",
+  };
+}
+
+function buildInputResolutions(
+  group: OpenRequestGroup,
+  records: readonly RequestRecord[],
+  responses: readonly InputResponse[],
+): readonly InputResolution[] {
+  const responseMap = new Map(responses.map((response) => [response.requestId, response] as const));
+  const recordMap = new Map(records.map((record) => [record.id, record] as const));
+  return group.requests.map((request) => ({
+    outcome: classifyResolutionOutcome(
+      recordMap.get(request.requestId)?.outcome,
+      responseMap.get(request.requestId),
+    ),
+    request,
+    response: responseMap.get(request.requestId),
+  }));
+}
+
+function classifyResolutionOutcome(
+  outcome: RequestOutcome | undefined,
+  response: InputResponse | undefined,
+): InputResolution["outcome"] {
+  switch (outcome?.kind) {
+    case "answered":
+      return "answered";
+    case "approved":
+      return "approved";
+    case "denied":
+      return "denied";
+    case "ignored":
+      return "ignored";
+    default:
+      return response === undefined ? "ignored" : "invalid";
+  }
+}
+
+function finishStepInput(input: {
+  readonly deferContextOnly?: boolean;
+  readonly deferTurnInput: boolean;
+  readonly heldResponses: readonly InputResponse[];
+  readonly resolvedStepInput: ResolvedStepInput | undefined;
+}): {
+  readonly deferredContext?: boolean;
+  readonly deferredMessage?: boolean;
+  readonly stepInput?: StepInput;
+} {
+  const deferredInput: {
+    context?: StepInput["context"];
+    inputResponses?: StepInput["inputResponses"];
+    message?: StepInput["message"];
+  } = {};
+  let clientContext: readonly string[] | undefined;
+  if (input.heldResponses.length > 0) deferredInput.inputResponses = input.heldResponses;
+  if (input.deferContextOnly === true && !input.deferTurnInput) {
+    if ((input.resolvedStepInput?.context?.length ?? 0) > 0) {
+      deferredInput.context = input.resolvedStepInput?.context;
+    }
+    const resolvedClientContext = readClientContext(input.resolvedStepInput);
+    if ((resolvedClientContext?.length ?? 0) > 0) clientContext = resolvedClientContext;
+  }
+  if (input.deferTurnInput) {
+    if ((input.resolvedStepInput?.context?.length ?? 0) > 0) {
+      deferredInput.context = input.resolvedStepInput?.context;
+    }
+    const resolvedClientContext = readClientContext(input.resolvedStepInput);
+    if ((resolvedClientContext?.length ?? 0) > 0) clientContext = resolvedClientContext;
+    if (
+      input.resolvedStepInput?.message !== undefined &&
+      input.resolvedStepInput.messageConsumed !== true
+    ) {
+      deferredInput.message = input.resolvedStepInput.message;
+    }
+  }
+  attachClientContext(deferredInput, clientContext);
+  const stepInput = Object.keys(deferredInput).length > 0 ? deferredInput : undefined;
+  return {
+    deferredContext:
+      stepInput?.context === undefined && readClientContext(stepInput) === undefined
+        ? undefined
+        : true,
+    deferredMessage: stepInput?.message === undefined ? undefined : true,
+    stepInput,
+  };
+}
+
+function resolveTextMessageInput(
+  group: OpenRequestGroup,
+  stepInput: StepInput | undefined,
+): ResolvedStepInput | undefined {
+  if (typeof stepInput?.message !== "string") return stepInput;
+  const groupRequestIds = new Set(group.requests.map((request) => request.requestId));
+  if (stepInput.inputResponses?.some((response) => groupRequestIds.has(response.requestId))) {
+    return stepInput;
+  }
+  const responseAuthRequired = new Set(group.responseAuthRequiredRequestIds ?? []);
+  const textRequests = group.requests.filter(
+    (request) => !responseAuthRequired.has(request.requestId),
+  );
+  const responses = resolveTextToResponses(stepInput.message, textRequests);
+  if (responses.length === 0) return stepInput;
+  return compactStepInput({
+    ...stepInput,
+    inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
+    messageConsumed: true,
+  });
 }
 
 function canonicalizeInputResponses(responses: readonly InputResponse[]): readonly InputResponse[] {
@@ -408,248 +659,17 @@ function canonicalizeInputResponses(responses: readonly InputResponse[]): readon
   return [...byRequestId.values()];
 }
 
-function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
-  const tail = messages.at(-1);
+function hasTailApprovalResponse(history: readonly ModelMessage[]): boolean {
+  const tail = history.at(-1);
   return (
-    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
+    tail?.role === "tool" &&
+    Array.isArray(tail.content) &&
+    tail.content.some(
+      (part) =>
+        typeof part === "object" &&
+        part !== null &&
+        "type" in part &&
+        part.type === "tool-approval-response",
+    )
   );
-}
-
-function resolveTextMessageInput(
-  pendingBatch: PendingInputBatch,
-  stepInput: StepInput | undefined,
-): ResolvedStepInput | undefined {
-  if (typeof stepInput?.message !== "string") return stepInput;
-
-  const batchRequestIds = new Set(pendingBatch.requests.map((request) => request.requestId));
-  if (stepInput.inputResponses?.some((response) => batchRequestIds.has(response.requestId))) {
-    return stepInput;
-  }
-
-  const responseAuthRequired = new Set(pendingBatch.responseAuthRequiredRequestIds ?? []);
-  const textRequests = pendingBatch.requests.filter(
-    (request) => !responseAuthRequired.has(request.requestId),
-  );
-  const responses = resolveTextToResponses(stepInput.message, textRequests);
-  if (responses.length === 0) return stepInput;
-
-  return compactStepInput({
-    ...stepInput,
-    inputResponses: [...(stepInput.inputResponses ?? []), ...responses],
-    messageConsumed: true,
-    message: undefined,
-  });
-}
-
-type StaleResponseConversion =
-  | {
-      readonly kind: "unchanged";
-      readonly stepInput?: StepInput;
-    }
-  | {
-      readonly displayMessage: string | UserContent;
-      readonly kind: "converted";
-      readonly stepInput: StepInput;
-    };
-
-/**
- * Filter pass: removes stale answers to session-limit continuation prompts
- * from the step input before any stale handling runs.
- *
- * These are dropped rather than converted: surfacing a stale "Stop" as
- * conversational prose would read fail-open, and a stale grant must not
- * extend any budget — a currently pending prompt (if any) stays parked and
- * re-raises. Stripping the responses also keeps them from resolving (and
- * clearing) a pending batch they never answered. Answers to a currently
- * pending continuation prompt pass through untouched.
- */
-export function dropStaleSessionLimitContinuationResponses(input: {
-  readonly pendingRequestIds: ReadonlySet<string>;
-  readonly stepInput?: StepInput;
-}): StepInput | undefined {
-  if (input.stepInput === undefined) return undefined;
-  const responses = input.stepInput.inputResponses ?? [];
-  const attributed = input.stepInput.attributedInputResponses ?? [];
-  const keep = (requestId: string) =>
-    input.pendingRequestIds.has(requestId) || !isSessionLimitContinuationRequestId(requestId);
-  const retained = responses.filter((response) => keep(response.requestId));
-  const retainedAttributed = attributed.filter(({ response }) => keep(response.requestId));
-  if (retained.length === responses.length && retainedAttributed.length === attributed.length) {
-    return input.stepInput;
-  }
-
-  const {
-    attributedInputResponses: _attributed,
-    inputResponses: _responses,
-    ...remainingInput
-  } = input.stepInput;
-  const result: { -readonly [K in keyof StepInput]: StepInput[K] } = remainingInput;
-  if (retained.length > 0) result.inputResponses = retained;
-  if (retainedAttributed.length > 0) result.attributedInputResponses = retainedAttributed;
-  return result;
-}
-
-/**
- * Transformation pass: a response is stale when its request ID is not in
- * the currently pending HITL batch — the request was already answered,
- * cleared by a follow-up message, or cancelled.
- *
- * Responses for pending requests stay structured; stale responses become
- * plain user-message text. A stale response never reaches structured HITL
- * processing, so a stale approval cannot authorize an earlier tool call.
- * Request details recovered from history are best-effort model context.
- *
- * Assumes {@link dropStaleSessionLimitContinuationResponses} already ran:
- * stale continuation answers must never reach this conversion.
- */
-export function convertStaleResponsesToUserMessage(input: {
-  readonly history: readonly ModelMessage[];
-  readonly pendingRequestIds: ReadonlySet<string>;
-  readonly stepInput?: StepInput;
-  readonly tools: HarnessToolMap;
-}): StaleResponseConversion {
-  if (input.stepInput === undefined) return { kind: "unchanged" };
-  const responses = input.stepInput.inputResponses ?? [];
-  const attributed = input.stepInput.attributedInputResponses ?? [];
-  if (responses.length === 0 && attributed.length === 0) {
-    return { kind: "unchanged", stepInput: input.stepInput };
-  }
-
-  const currentResponses: InputResponse[] = [];
-  const currentAttributed: NonNullable<StepInput["attributedInputResponses"]>[number][] = [];
-  const staleResponses: InputResponse[] = [];
-  for (const response of responses) {
-    (input.pendingRequestIds.has(response.requestId) ? currentResponses : staleResponses).push(
-      response,
-    );
-  }
-  for (const entry of attributed) {
-    if (input.pendingRequestIds.has(entry.response.requestId)) {
-      currentAttributed.push(entry);
-    } else {
-      staleResponses.push(entry.response);
-    }
-  }
-
-  if (staleResponses.length === 0) {
-    return { kind: "unchanged", stepInput: input.stepInput };
-  }
-
-  const requests = extractHistoricalInputRequests({
-    history: input.history,
-    requestIds: new Set(staleResponses.map((response) => response.requestId)),
-    tools: input.tools,
-  });
-  const modelMessage = appendOptionalUserContent(
-    input.stepInput.message,
-    formatModelMessage(staleResponses, requests),
-  );
-  const displayMessage = appendOptionalUserContent(
-    input.stepInput.message,
-    formatDisplayMessage(staleResponses, requests),
-  );
-  const {
-    attributedInputResponses: _attributed,
-    inputResponses: _responses,
-    ...remainingInput
-  } = input.stepInput;
-  const stepInput: { -readonly [K in keyof StepInput]: StepInput[K] } = {
-    ...remainingInput,
-    message: modelMessage,
-  };
-  if (currentResponses.length > 0) stepInput.inputResponses = currentResponses;
-  if (currentAttributed.length > 0) stepInput.attributedInputResponses = currentAttributed;
-
-  return { displayMessage, kind: "converted", stepInput };
-}
-
-function formatModelMessage(
-  responses: readonly InputResponse[],
-  requests: ReadonlyMap<string, InputRequest>,
-): string {
-  const resolvedResponses = responses.map((response) => {
-    const request = requests.get(response.requestId);
-    const option = request?.options?.find((candidate) => candidate.id === response.optionId);
-
-    const responseDetails: {
-      optionId?: string;
-      selectedOption?: { description?: string; id: string; label: string };
-      text?: string;
-    } = {};
-    if (response.optionId !== undefined) {
-      responseDetails.optionId = response.optionId;
-    }
-    if (option !== undefined) {
-      const selectedOption: { description?: string; id: string; label: string } = {
-        id: option.id,
-        label: option.label,
-      };
-      if (option.description !== undefined) {
-        selectedOption.description = option.description;
-      }
-      responseDetails.selectedOption = selectedOption;
-    }
-    if (response.text !== undefined) {
-      responseDetails.text = response.text;
-    }
-
-    const resolved: {
-      prompt?: string;
-      requestId: string;
-      requestType?: "approval" | "question";
-      response: typeof responseDetails;
-    } = { requestId: response.requestId, response: responseDetails };
-    if (request !== undefined) {
-      resolved.prompt = request.prompt;
-      resolved.requestType = isApprovalRequest(request) ? "approval" : "question";
-    }
-
-    return resolved;
-  });
-  // Request metadata can be missing (compacted history, subagent-proxied
-  // request), so a response without it may still be an approval: default to
-  // including the notice.
-  const mayIncludeApproval = responses.some((response) => {
-    const request = requests.get(response.requestId);
-    return request === undefined || isApprovalRequest(request);
-  });
-  const approvalNotice = mayIncludeApproval
-    ? " This does not authorize an earlier action; request approval again if that action is still needed."
-    : "";
-
-  return [
-    "The user submitted the following response to an earlier interactive prompt.",
-    `Treat it as new input at the current point in the conversation and decide whether it is still relevant.${approvalNotice}`,
-    JSON.stringify(resolvedResponses, null, 2),
-  ].join("\n");
-}
-
-function formatDisplayMessage(
-  responses: readonly InputResponse[],
-  requests: ReadonlyMap<string, InputRequest>,
-): string {
-  return responses
-    .map((response) => {
-      if (response.text !== undefined && response.text.length > 0) {
-        return response.text;
-      }
-
-      const option = requests
-        .get(response.requestId)
-        ?.options?.find((candidate) => candidate.id === response.optionId);
-      return option?.label ?? response.optionId ?? "Response to an earlier interactive prompt";
-    })
-    .join("\n");
-}
-
-function appendOptionalUserContent(
-  existing: string | UserContent | undefined,
-  appended: string,
-): string | UserContent {
-  const normalizedExisting = normalizeUserContent(existing);
-  if (normalizedExisting === undefined) {
-    return appended;
-  }
-
-  return appendUserContent({ appended, existing: normalizedExisting });
 }

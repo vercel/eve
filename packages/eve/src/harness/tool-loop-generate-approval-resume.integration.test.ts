@@ -10,7 +10,7 @@ import {
 import type { OldSourceOffsetDynamicToolMetadata } from "#context/dynamic-tool-metadata.js";
 import { AuthKey, SessionKey, StepDynamicToolMetadataKey } from "#context/keys.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
-import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { createRequests } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
@@ -100,7 +100,7 @@ function createPendingApprovalSession(
     sessionId: "generate-approval-resume-session",
   };
 
-  return appendPendingInputBatch({
+  return createRequests({
     requests: [
       {
         action: {
@@ -134,7 +134,7 @@ function createPendingApprovalSession(
 }
 
 function createTwoPendingApprovalSession(): HarnessSession {
-  return appendPendingInputBatch({
+  return createRequests({
     requests: [
       {
         action: {

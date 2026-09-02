@@ -238,7 +238,7 @@ describe("dispatchAndAwaitTurn", () => {
     vi.mocked(turnStep).mockResolvedValueOnce({
       action: "park",
       hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
+      hasOpenRequests: false,
       serializedContext: { state: "settled" },
       sessionState: state,
       settled: { output: "ok" },
@@ -304,7 +304,7 @@ describe("dispatchAndAwaitTurn", () => {
     const result = {
       action: "park" as const,
       hasPendingAuthorization: false,
-      hasPendingInputBatch: false,
+      hasOpenRequests: false,
       pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
       serializedContext: { state: "pending" },
       sessionState: state,

@@ -1,3 +1,4 @@
+import type { AuthorizationResult } from "#harness/authorization.js";
 import type { LanguageModel, ModelMessage, UserContent } from "ai";
 
 import type { SessionAuthContext, SessionCapabilities } from "#channel/types.js";
@@ -176,6 +177,11 @@ export interface StepInput {
    * produced by channels.
    */
   readonly runtimeActionResults?: readonly RuntimeActionResult[];
+  /**
+   * Authorization callbacks matched at the delivery boundary. Internal: the
+   * request interpreter terminalizes the matching Authorization requests.
+   */
+  readonly authorizationResults?: readonly AuthorizationResult[];
 }
 
 /**

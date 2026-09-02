@@ -50,7 +50,7 @@ import { readTurnSleepDurationMs } from "#harness/turn-sleep.js";
 import { isTurnCancellation, throwIfTurnAborted } from "#harness/turn-cancellation.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import { observeSessionActivity } from "#execution/session-activity-projection.js";
-import { hasPendingInputBatch } from "#harness/input-requests.js";
+import { hasOpenRequests } from "#harness/input-requests.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   getRuntimeActionKeysFromWorkflowInterrupt,
@@ -62,7 +62,6 @@ import { getTurnUsageState, takeSessionUsageDelta, toUsage } from "#harness/turn
 import type { DurableStepResult } from "#execution/next-driver-action.js";
 import { derivePendingState } from "#execution/pending-turn-state.js";
 import {
-  createAuthorizationCompletedEvent,
   createSessionStartedEvent,
   createTurnStartedEvent,
   encodeMessageStreamEvent,
@@ -72,7 +71,6 @@ import {
 } from "#protocol/message.js";
 import {
   CallbackBaseUrlKey,
-  clearPendingAuthorization,
   getPendingAuthorization,
   PendingAuthorizationResultKey,
 } from "#harness/authorization.js";
@@ -104,6 +102,7 @@ import { resolveRuntimeCompiledArtifactsVersionedCacheKey } from "#runtime/cache
 import { createWorkflowRuntime } from "#execution/workflow-runtime.js";
 import { bindDynamicConnections } from "#execution/dynamic-connections.js";
 import { preserveCancelledTurnMessage } from "#execution/cancelled-turn-message.js";
+import { closeRequestLedger } from "#harness/hitl/request-ledger.js";
 import { deferMismatchedInlineTurnStep } from "#execution/accepted-delivery-deployment.js";
 
 const TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE =
@@ -173,13 +172,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     if (matches.length > 0) {
       const authResults = matches.map((match) => match.result);
       ctx.set(PendingAuthorizationResultKey, authResults);
-      durableSession = {
-        ...durableSession,
-        state: clearPendingAuthorization(
-          durableSession.state,
-          authResults.map((result) => result.attemptId ?? result.name),
-        ),
-      };
       completedAuths = matches;
       if (remainingPayloads.length === 0) {
         input = { ...input, input: undefined };
@@ -250,6 +242,13 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       ctx.set(RuntimeActionSettlementTimesKey, input.input.acceptedAtMsByCallId);
     }
     resolved = { runtimeActionResults: input.input.results };
+  }
+
+  if (completedAuths !== undefined && completedAuths.length > 0) {
+    resolved = {
+      ...(resolved ?? {}),
+      authorizationResults: completedAuths.map((match) => match.result),
+    };
   }
 
   if (
@@ -484,23 +483,6 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
           }
           schemaSession = setHarnessEmissionState(schemaSession, emissionState);
         }
-        for (const { authorization, result } of completedAuths) {
-          const candidateId = pendingAuth?.challenges.find(
-            (challenge) => challenge.attemptId === result.attemptId,
-          )?.candidateId;
-          await handleEvent(
-            createAuthorizationCompletedEvent({
-              attemptId: result.attemptId,
-              authorization,
-              candidateId,
-              name: result.name,
-              outcome: "authorized",
-              sequence: emissionState.sequence,
-              stepIndex: emissionState.stepIndex,
-              turnId: emissionState.turnId,
-            }),
-          );
-        }
       }
 
       const capabilities = ctx.get(CapabilitiesKey);
@@ -556,10 +538,11 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     // again after this cancellation settles.
     const interrupted = serializeContext(ctx);
     const retained = readRetainedBackgroundToolResult(ctx);
-    const cancelledSession = await preserveCancelledTurnMessage(
+    const preservedSession = await preserveCancelledTurnMessage(
       retained?.backgroundTaskSession ?? initialSession,
       resolved,
     );
+    const cancelledSession = closeRequestLedger(preservedSession, Date.now());
     return {
       action: "cancelled",
       ...(retained === undefined
@@ -602,7 +585,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     typeof stepResult.next === "object" &&
     "done" in stepResult.next
   ) {
-    if (mode === "task" && hasPendingInputBatch(stepResult.session.state)) {
+    if (mode === "task" && hasOpenRequests(stepResult.session.state)) {
       writer.releaseLock();
       throw new Error(TASK_DONE_WITH_PENDING_INPUT_ERROR_MESSAGE);
     }

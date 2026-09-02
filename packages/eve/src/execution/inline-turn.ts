@@ -114,7 +114,7 @@ export async function runInlineTurn(input: {
     if (result.action === "park") {
       const canPark =
         result.hasPendingAuthorization ||
-        (result.hasPendingInputBatch && input.capabilities?.requestInput === true) ||
+        (result.hasOpenRequests && input.capabilities?.requestInput === true) ||
         input.mode === "conversation";
       if (!canPark) return childOutcome(control, initialStep);
       return {

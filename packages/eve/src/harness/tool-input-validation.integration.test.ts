@@ -2,7 +2,7 @@ import type { LanguageModel, ModelMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
-import { getPendingInputRequestIds } from "#harness/input-requests.js";
+import { openRequestIds } from "#harness/input-requests.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
 import { ASK_QUESTION_INPUT_SCHEMA, askQuestion } from "#tools/framework/ask-question.js";
@@ -125,7 +125,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     const malformedStep = await runStep(session, { message: "Ask me which option to use." });
 
     expect(typeof malformedStep.next).toBe("function");
-    expect(getPendingInputRequestIds(malformedStep.session.state)).toEqual(new Set());
+    expect(openRequestIds(malformedStep.session.state)).toEqual(new Set());
     expect(findToolResult(malformedStep.session.history, malformedCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
       toolName: "ask_question",
@@ -137,7 +137,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     const invalidStep = await malformedStep.next(malformedStep.session);
 
     expect(typeof invalidStep.next).toBe("function");
-    expect(getPendingInputRequestIds(invalidStep.session.state)).toEqual(new Set());
+    expect(openRequestIds(invalidStep.session.state)).toEqual(new Set());
     expect(findToolResult(invalidStep.session.history, invalidCallId)).toMatchObject({
       output: expect.objectContaining({ type: "error-text" }),
       toolName: "ask_question",
@@ -152,7 +152,7 @@ describe("framework tool input validation (real AI SDK)", () => {
     expect(findToolResult(model.doGenerateCalls[1]?.prompt ?? [], malformedCallId)).toBeDefined();
     expect(findToolResult(model.doGenerateCalls[2]?.prompt ?? [], invalidCallId)).toBeDefined();
     expect(validStep.next).toBeNull();
-    expect(getPendingInputRequestIds(validStep.session.state)).toEqual(new Set([validCallId]));
+    expect(openRequestIds(validStep.session.state)).toEqual(new Set([validCallId]));
   });
 
   it("rejects invalid final_output input instead of terminating the task", async () => {

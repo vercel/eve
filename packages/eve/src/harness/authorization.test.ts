@@ -4,13 +4,11 @@ import { ContextContainer, contextStorage } from "#context/container.js";
 import { SessionIdKey } from "#context/keys.js";
 import {
   CallbackBaseUrlKey,
-  clearPendingAuthorization,
   consumeAuthorizationResult,
-  getPendingAuthorization,
   getHookUrl,
   PendingAuthorizationResultKey,
   resolveActiveAuthorizationChallenges,
-  setPendingAuthorization,
+  getSupersededAuthorizationChallenges,
 } from "#harness/authorization.js";
 import type { ConnectionPrincipal } from "#shared/connection-types.js";
 
@@ -97,89 +95,43 @@ describe("authorization callback results", () => {
   });
 });
 
-function candidateChallenge(name: string, candidateId: string) {
+function challenge(
+  name: string,
+  attemptId: string,
+  principal: ConnectionPrincipal = { type: "app" },
+) {
   return {
-    candidateId,
-    challenge: { url: `https://idp.example/${candidateId}` },
-    hookUrl: `https://eve.example/${candidateId}`,
-    name,
-  };
-}
-
-describe("pending authorization state", () => {
-  it("merges concurrent candidate challenges by authorization name", () => {
-    const first = setPendingAuthorization(undefined, {
-      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
-    });
-    const second = setPendingAuthorization(first, {
-      challenges: [candidateChallenge("candidate-2:github", "candidate-2")],
-    });
-
-    expect(getPendingAuthorization(second)?.challenges).toEqual([
-      expect.objectContaining({ candidateId: "candidate-1", name: "candidate-1:github" }),
-      expect.objectContaining({ candidateId: "candidate-2", name: "candidate-2:github" }),
-    ]);
-  });
-
-  it("replaces a repeated challenge without duplicating it", () => {
-    const first = setPendingAuthorization(undefined, {
-      challenges: [candidateChallenge("candidate-1:github", "candidate-1")],
-    });
-    const second = setPendingAuthorization(first, {
-      challenges: [
-        {
-          ...candidateChallenge("candidate-1:github", "candidate-1"),
-          hookUrl: "https://eve.example/refreshed",
-        },
-      ],
-    });
-
-    expect(getPendingAuthorization(second)?.challenges).toEqual([
-      expect.objectContaining({ hookUrl: "https://eve.example/refreshed" }),
-    ]);
-  });
-});
-
-describe("pending authorization attempts", () => {
-  const challenge = (
-    name: string,
-    attemptId: string,
-    principal: ConnectionPrincipal = { type: "app" },
-  ) => ({
     attemptId,
     challenge: { url: `https://idp.example/${attemptId}` },
     hookUrl: `https://agent.example/${attemptId}`,
     name,
     principal,
-  });
+  };
+}
 
+describe("authorization challenge reduction", () => {
   it("keeps same-name attempts owned by different principals", () => {
     const userA = { id: "user-a", issuer: "idp", type: "user" } as const;
     const userB = { id: "user-b", issuer: "idp", type: "user" } as const;
-    const first = setPendingAuthorization(undefined, {
-      challenges: [challenge("linear", "linear-a", userA)],
-    });
-    const second = setPendingAuthorization(first, {
-      challenges: [challenge("linear", "linear-b", userB)],
-    });
 
-    expect(getPendingAuthorization(second)?.challenges).toEqual([
-      challenge("linear", "linear-a", userA),
-      challenge("linear", "linear-b", userB),
-    ]);
+    expect(
+      resolveActiveAuthorizationChallenges([
+        challenge("linear", "linear-a", userA),
+        challenge("linear", "linear-b", userB),
+      ]),
+    ).toEqual([challenge("linear", "linear-a", userA), challenge("linear", "linear-b", userB)]);
   });
 
-  it("merges distinct names and replaces only the same name", () => {
-    const first = setPendingAuthorization(undefined, {
-      challenges: [challenge("linear", "linear-1"), challenge("github", "github-1")],
-    });
-    const replaced = setPendingAuthorization(first, {
-      challenges: [challenge("linear", "linear-2")],
-    });
+  it("merges distinct names and replaces only the same name+principal", () => {
+    const first = [challenge("linear", "linear-1"), challenge("github", "github-1")];
+    const replacement = [challenge("linear", "linear-2")];
 
-    expect(getPendingAuthorization(replaced)?.challenges).toEqual([
+    expect(resolveActiveAuthorizationChallenges([...first, ...replacement])).toEqual([
       challenge("github", "github-1"),
       challenge("linear", "linear-2"),
+    ]);
+    expect(getSupersededAuthorizationChallenges(first, replacement)).toEqual([
+      challenge("linear", "linear-1"),
     ]);
   });
 
@@ -192,21 +144,19 @@ describe("pending authorization attempts", () => {
     const active = resolveActiveAuthorizationChallenges([first, otherPrincipal, latest]);
 
     expect(active).toEqual([otherPrincipal, latest]);
-    expect(
-      getPendingAuthorization(
-        setPendingAuthorization(undefined, { challenges: [first, otherPrincipal, latest] }),
-      )?.challenges,
-    ).toEqual([otherPrincipal, latest]);
   });
 
-  it("clears by exact attempt identity", () => {
-    const state = setPendingAuthorization(undefined, {
-      challenges: [challenge("linear", "linear-2"), challenge("github", "github-1")],
-    });
+  it("reports superseded challenges by exact replacement scope", () => {
+    const userA = { id: "user-a", issuer: "idp", type: "user" } as const;
+    const userB = { id: "user-b", issuer: "idp", type: "user" } as const;
+    const previous = [
+      challenge("linear", "linear-a-1", userA),
+      challenge("linear", "linear-b-1", userB),
+    ];
+    const replacements = [challenge("linear", "linear-a-2", userA)];
 
-    expect(clearPendingAuthorization(state, ["linear-1"])).toEqual(state);
-    expect(
-      getPendingAuthorization(clearPendingAuthorization(state, ["linear-2"]))?.challenges,
-    ).toEqual([challenge("github", "github-1")]);
+    expect(getSupersededAuthorizationChallenges(previous, replacements)).toEqual([
+      challenge("linear", "linear-a-1", userA),
+    ]);
   });
 });

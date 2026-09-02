@@ -1,5 +1,5 @@
 import { isApprovalRequest } from "#harness/input-request-class.js";
-import type { PendingInputBatchEvent } from "#harness/pending-input-batches.js";
+import type { RequestGroupEvent } from "#harness/hitl/request-ledger.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 
 const IGNORED_INPUT_REASON = "Ignored because the user continued without responding.";
@@ -9,7 +9,7 @@ const TOOL_EXECUTION_INVALID_APPROVAL_MESSAGE = "Invalid approval response.";
 type ApprovalTerminalStatus = "approved" | "denied" | "ignored" | "invalid";
 
 export interface ResolvedInputBatch {
-  readonly event: PendingInputBatchEvent;
+  readonly event: RequestGroupEvent;
   readonly inputs: readonly {
     readonly outcome: "answered" | ApprovalTerminalStatus;
     readonly request: InputRequest;
@@ -19,7 +19,7 @@ export interface ResolvedInputBatch {
 
 export function buildResolvedInputBatch(
   batch: {
-    readonly event?: PendingInputBatchEvent;
+    readonly event?: RequestGroupEvent;
     readonly requests: readonly InputRequest[];
   },
   responses: readonly InputResponse[],
