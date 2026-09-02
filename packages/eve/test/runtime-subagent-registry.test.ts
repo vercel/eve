@@ -58,7 +58,8 @@ describe("createRuntimeSubagentRegistry", () => {
 
     expect(registry.preparedTools).toMatchObject([
       {
-        description: "Investigate one task in depth.",
+        description:
+          "Investigate one task in depth.\n\nThis call starts a background task and returns a task receipt immediately.",
         execution: "background",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
@@ -68,7 +69,8 @@ describe("createRuntimeSubagentRegistry", () => {
         sourceId: "subagents/researcher",
       },
       {
-        description: "Review one draft for clarity.",
+        description:
+          "Review one draft for clarity.\n\nThis call starts a background task and returns a task receipt immediately.",
         execution: "background",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
