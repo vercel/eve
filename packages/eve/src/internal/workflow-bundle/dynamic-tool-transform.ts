@@ -28,8 +28,8 @@ type CallbackPropertyName =
   | "start"
   | "request"
   | "response"
-  | "result"
-  | "update"
+  | "complete"
+  | "delta"
   | "toModelOutput";
 
 interface CallbackInfo {
@@ -200,17 +200,17 @@ function collectToolCallbacks(
     );
     collectCallbackProperty(
       source,
-      findProperty(activityValue, "result"),
+      findProperty(labelValue, "complete"),
       "activityResult",
-      "result",
+      "complete",
       results,
       nestedScopes,
     );
     collectCallbackProperty(
       source,
-      findProperty(activityValue, "update"),
+      findProperty(labelValue, "delta"),
       "activityUpdate",
-      "update",
+      "delta",
       results,
       nestedScopes,
     );

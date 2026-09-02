@@ -3,7 +3,7 @@ import type { DynamicResolveContext, DynamicToolEventName } from "#dynamic/defin
 import type {
   PublicToolInputSchema,
   PublicToolOutputSchema,
-  ToolActivityDefinition,
+  ToolLabelDefinition,
   ToolContext,
 } from "#tools/definition.js";
 import type { TaskExec } from "#tools/task.js";
@@ -23,7 +23,7 @@ import type { ToolModelOutput } from "#tools/model-output.js";
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = any> {
-  readonly activity?: ToolActivityDefinition<TInput, TOutput>;
+  readonly label?: ToolLabelDefinition<TInput, TOutput>;
   readonly description: string;
   readonly inputSchema: PublicToolInputSchema<TInput>;
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;

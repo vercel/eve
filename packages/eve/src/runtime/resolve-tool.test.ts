@@ -33,10 +33,10 @@ describe("resolveToolDefinition", () => {
     const resolved = await resolveToolDefinition(
       definition,
       moduleMap({
-        activity: {
-          label: (input: { environment: string }) => `Deploy to ${input.environment}`,
-          result: (output: { url: string }) => `Deployed to ${output.url}`,
-          update: (partial: { phase: string }) => partial.phase,
+        label: {
+          start: (input: { environment: string }) => `Deploy to ${input.environment}`,
+          complete: (_input, output: { url: string }) => `Deployed to ${output.url}`,
+          delta: (_input, partial: { phase: string }) => partial.phase,
         },
         description: definition.description,
         execute: () => null,
@@ -47,9 +47,11 @@ describe("resolveToolDefinition", () => {
     );
 
     expect(resolved.activityLabel?.({ environment: "production" })).toBe("Deploy to production");
-    expect(resolved.activityResult?.({ url: "https://example.com" })).toBe(
-      "Deployed to https://example.com",
+    expect(
+      resolved.activityResult?.({ environment: "production" }, { url: "https://example.com" }),
+    ).toBe("Deployed to https://example.com");
+    expect(resolved.activityUpdate?.({ environment: "production" }, { phase: "Uploading" })).toBe(
+      "Uploading",
     );
-    expect(resolved.activityUpdate?.({ phase: "Uploading" })).toBe("Uploading");
   });
 });

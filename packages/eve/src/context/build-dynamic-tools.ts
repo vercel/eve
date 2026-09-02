@@ -165,21 +165,23 @@ export function replayDynamicTools(
       };
     }
     if (activityResultReference !== undefined) {
-      replayed.activityResult = (output: unknown) => {
+      replayed.activityResult = (input: unknown, output: unknown) => {
         if (activityResult === undefined) throw missingCallbackError(entry, "activityResult");
         return callDurableDynamicCallback(
           activityResult,
           activityResultReference.closure,
+          input,
           output,
         ) as string;
       };
     }
     if (activityUpdateReference !== undefined) {
-      replayed.activityUpdate = (partial: unknown) => {
+      replayed.activityUpdate = (input: unknown, partial: unknown) => {
         if (activityUpdate === undefined) throw missingCallbackError(entry, "activityUpdate");
         return callDurableDynamicCallback(
           activityUpdate,
           activityUpdateReference.closure,
+          input,
           partial,
         ) as string;
       };

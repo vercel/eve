@@ -168,7 +168,7 @@ describe("normalizeToolDefinition", () => {
     expect(() =>
       normalizeToolDefinition(
         {
-          activity: { label: () => "Fetch weather", result: "Done" },
+          label: { label: () => "Fetch weather", result: "Done" },
           description: "Fetch weather.",
           execute: () => null,
           inputSchema: { type: "object" },

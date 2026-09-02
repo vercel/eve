@@ -583,9 +583,9 @@ describe("emitStreamContent action requests", () => {
       [
         "web_search",
         {
-          activityResult: (output) =>
+          activityResult: (_input, output) =>
             `Found ${(output as { results: unknown[] }).results.length}\u0000 final results`,
-          activityUpdate: (partial) =>
+          activityUpdate: (_input, partial) =>
             `Found ${(partial as { results: unknown[] }).results.length}\u0000 results`,
           description: "Search the web.",
           execute: async () => ({ results: [] }),

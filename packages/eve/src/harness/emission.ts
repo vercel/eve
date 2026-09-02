@@ -37,7 +37,7 @@ import {
 } from "#protocol/message.js";
 import type { RunMode } from "#shared/run-mode.js";
 import { hasEmptyDeliverySentinel } from "#shared/empty-delivery.js";
-import type { JsonObject } from "#shared/json.js";
+import { parseJsonObject, type JsonObject } from "#shared/json.js";
 import { normalizeActivityText } from "#shared/activity-text.js";
 import {
   createRuntimeToolResultFromStepResult,
@@ -282,12 +282,13 @@ function readSubagentBackgroundTaskReceipt(
 }
 
 function resolveActivityText(
-  project: ((value: unknown) => string) | undefined,
+  project: ((input: unknown, value: unknown) => string) | undefined,
+  input: JsonObject | undefined,
   value: unknown,
 ): string | undefined {
-  if (project === undefined) return undefined;
+  if (project === undefined || input === undefined) return undefined;
   try {
-    const text = normalizeActivityText(project(value));
+    const text = normalizeActivityText(project(parseJsonObject(input), value));
     return text === "" ? undefined : text;
   } catch {
     return undefined;
@@ -349,7 +350,8 @@ async function consumeStreamContent(
   const invalidInputToolCallIds = new Set<string>();
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
-  const streamingActionInputs = new Map<string, { toolName: string }>();
+  const actionInputs = new Map<string, JsonObject>();
+  const streamingActionInputs = new Map<string, { offset: number; toolName: string }>();
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
@@ -394,6 +396,7 @@ async function consumeStreamContent(
     }
 
     emittedActionCallIds.add(action.callId);
+    actionInputs.set(action.callId, action.input);
     await emitFn(
       createActionsRequestedEvent({
         actions: [action],
@@ -434,6 +437,7 @@ async function consumeStreamContent(
       return;
     }
 
+    actionInputs.set(resolved.request.action.callId, resolved.request.action.input);
     providerActionBatch.observe(resolved.request);
   };
 
@@ -457,7 +461,11 @@ async function consumeStreamContent(
     const activityResult =
       result.isError === true
         ? undefined
-        : resolveActivityText(options?.tools.get(result.toolName)?.activityResult, result.output);
+        : resolveActivityText(
+            options?.tools.get(result.toolName)?.activityResult,
+            actionInputs.get(result.callId),
+            result.output,
+          );
     await emitFn(
       createActionResultEvent({
         result,
@@ -473,6 +481,7 @@ async function consumeStreamContent(
   const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
     const activityUpdate = resolveActivityText(
       options?.tools.get(result.toolName)?.activityUpdate,
+      actionInputs.get(result.callId),
       result.output,
     );
     await emitFn(

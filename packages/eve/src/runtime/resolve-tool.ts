@@ -136,15 +136,15 @@ function extractOptionalHooks(
       label.start,
       describe(definition, "to provide an label start callback function"),
     ) as ResolvedToolDefinition["activityLabel"];
-    if (activity.result !== undefined) {
+    if (label.complete !== undefined) {
       optional.activityResult = expectFunction(
-        activity.result,
+        label.complete,
         describe(definition, "to provide an activity result function"),
       ) as ResolvedToolDefinition["activityResult"];
     }
-    if (activity.update !== undefined) {
+    if (label.delta !== undefined) {
       optional.activityUpdate = expectFunction(
-        activity.update,
+        label.delta,
         describe(definition, "to provide an activity update function"),
       ) as ResolvedToolDefinition["activityUpdate"];
     }
