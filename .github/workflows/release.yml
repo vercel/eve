@@ -61,7 +61,8 @@ jobs:
 
       - name: Log in to Vercel Container Registry
         if: github.ref == 'refs/heads/main'
-        uses: vercel/vcr-login-action@9340c52f6b68b4758d9d2eebbd4c52b36e66f7f3 # main
+        # Public workflows cannot resolve the upstream action while its repository is private.
+        uses: ./.github/actions/vcr-login
         with:
           team: ${{ secrets.VCR_TEAM_ID }}
 
