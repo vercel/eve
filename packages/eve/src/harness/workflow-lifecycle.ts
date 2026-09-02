@@ -4,12 +4,8 @@ import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers
 import type { HarnessEmissionState } from "#harness/emission.js";
 import { collectActionActivityLabels } from "#harness/action-activity.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
-import type { HarnessToolMap } from "#harness/types.js";
-import {
-  createActionResultEvent,
-  createActionsRequestedEvent,
-  type UnstampedMessageStreamEvent,
-} from "#protocol/message.js";
+import type { HarnessEmitFn, HarnessToolMap } from "#harness/types.js";
+import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 import {
   getWorkflowSandboxInterrupt,
@@ -42,7 +38,7 @@ export function createWorkflowLifecycle(input: {
   };
 }
 
-type EmitWorkflowLifecycleEvent = (event: UnstampedMessageStreamEvent) => Promise<void>;
+type EmitWorkflowLifecycleEvent = HarnessEmitFn;
 
 /** Projects newly parked workflow calls onto eve's existing action stream. */
 export async function emitWorkflowActionsRequested(input: {
