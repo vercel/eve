@@ -1,5 +1,20 @@
 # eve
 
+## 0.49.0
+
+### Minor Changes
+
+- 1ee8fa9: Session creation on eve, MCP, and authored channels now returns as soon as Workflow accepts the run. Concurrent first messages on one channel address are settled inside the workflow, racing `operationId` requests may return different candidate IDs that callers resolve after startup, and Workflow starts target known deployment IDs without resolving a latest-deployment sentinel.
+
+### Patch Changes
+
+- 68d44b5: Addressed `/add <item>` confirmations now remain responsive in the dev TUI.
+- b20c2aa: Add Browser Use to the `eve connections add` picker. The generated MCP connection reads `BROWSER_USE_API_KEY` into Browser Use's required API-key header without adding Vercel Connect.
+- 0172af9: Preserve parent turn identity when dispatching a subagent after a parked child resumes, preventing handle-store corruption and fatal session failures.
+- fbc89e5: Registry items can now declare optional pnpm packages with build scripts. Before installation, eve asks whether to skip those packages, allow their scripts, or abort, and records the choice in the owning workspace policy.
+- 3f20c80: Add optional `audience` on Slack proactive `receive` / `ctx.send` targets so webhook and schedule handoffs can pass channel visibility without an extra Slack API call.
+- a40ebb0: Update Eve's bundled Workflow SDK packages to the latest 5.0.0 beta releases, which includes performance and stability improvements.
+
 ## 0.48.0
 
 ### Minor Changes
