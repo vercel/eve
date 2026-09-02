@@ -130,16 +130,20 @@ When authored telemetry is enabled, each turn currently produces a trace like:
 
 ```text
 ai.eve.turn  {eve.session.id}
-  +-- ai.streamText                           step 1
-  |     +-- ai.streamText.doStream            model call
-  |     +-- ai.toolCall  {toolName: search}   tool exec
-  +-- ai.streamText                           step 2
-  |     +-- ai.streamText.doStream
-  |     +-- ai.toolCall  {toolName: read}
-  +-- ai.streamText                           step 3 (final text)
+  +-- invoke_agent <model>                    gen_ai.operation.name=invoke_agent
+        +-- step 1                            gen_ai.operation.name=agent_step
+        |     +-- chat <model>                gen_ai.operation.name=chat
+        |     +-- execute_tool search         gen_ai.operation.name=execute_tool
+        +-- step 2
+        |     +-- chat <model>
+        |     +-- execute_tool read
+        +-- step 3 (final text)
+              +-- chat <model>
 ```
 
-eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
+eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry to the AI SDK so model calls and tool executions are traced automatically. The AI SDK's OpenTelemetry integration names these spans after the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/), so backends that understand `gen_ai.operation.name` can classify them without extra configuration. The `invoke_agent` span is named after the model; the agent name is on its `gen_ai.agent.name` attribute.
+
+This hierarchy applies when eve passes telemetry to the AI SDK. When the `otel()` provider layout is declared and eve owns the agent spans, eve names the span `invoke_agent <agent>` and emits no step spans. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
 Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route, which parents the turn tree above (and any `hook.resume` and outgoing HTTP spans):
 
