@@ -1,5 +1,5 @@
 ---
-"eve": patch
+"eve": minor
 ---
 
-Background workflow tools now use one durable run for execution and task lifecycle. Subagent receipts include `agentId`, and workflow `agent()` calls require a replay-stable `key`.
+Background workflow tools now execute as their task's durable workflow run, subagents can be invoked directly from waiting workflow tools and workflow sandboxes, and workflow `agent()` calls require a replay-stable `key`.
