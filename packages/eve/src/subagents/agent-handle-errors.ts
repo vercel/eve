@@ -15,6 +15,19 @@ export const AGENT_UNREACHABLE = "AGENT_UNREACHABLE";
 /** Error code for an agent that is starting or already running a turn. */
 export const AGENT_BUSY = "AGENT_BUSY";
 
+/** Describes the owner blocking a continuation without exposing workflow run ids. */
+export function formatAgentBusyMessage(input: {
+  readonly agentId: string;
+  readonly agentName: string;
+  readonly ownerId?: string;
+}): string {
+  const agent = `Agent "${input.agentName}" with id "${input.agentId}" is still working on`;
+  if (input.ownerId?.startsWith("task_")) {
+    return `${agent} task "${input.ownerId}".`;
+  }
+  return `${agent} ${input.ownerId === undefined ? "another task" : "another invocation"}.`;
+}
+
 /** Error code for a local subagent that failed to start. */
 export const SUBAGENT_START_FAILED = "SUBAGENT_START_FAILED";
 

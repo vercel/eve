@@ -29,7 +29,12 @@ import {
   type TaskOwnedAgentHandle,
 } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
-import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
+import {
+  AGENT_BUSY,
+  AGENT_MISMATCH,
+  AGENT_UNREACHABLE,
+  formatAgentBusyMessage,
+} from "#subagents/agent-handle-errors.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
 import { isTerminalTaskStatus } from "#tasks/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
@@ -392,13 +397,14 @@ function createTaskClaimError(
     });
   }
   if (result.kind === "busy") {
-    const owned = "ownerId" in result.handle;
     return createAgentErrorResult({
       action,
       code: AGENT_BUSY,
-      message: !owned
-        ? `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another task.`
-        : `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another invocation.`,
+      message: formatAgentBusyMessage({
+        agentId,
+        agentName: result.handle.identity.name,
+        ownerId: "ownerId" in result.handle ? result.handle.ownerId : undefined,
+      }),
     });
   }
   return createAgentErrorResult({

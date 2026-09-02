@@ -48,7 +48,12 @@ import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt
 import { parseJsonObject } from "#shared/json.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
-import { AGENT_BUSY, AGENT_MISMATCH, AGENT_UNREACHABLE } from "#subagents/agent-handle-errors.js";
+import {
+  AGENT_BUSY,
+  AGENT_MISMATCH,
+  AGENT_UNREACHABLE,
+  formatAgentBusyMessage,
+} from "#subagents/agent-handle-errors.js";
 import {
   getAgentHandleStore,
   writeHandles,
@@ -676,13 +681,14 @@ function throwAgentClaimError(agentId: string, result: AgentHandleStoreCommandRe
     );
   }
   if (result.kind === "busy") {
-    const owned = "ownerId" in result.handle;
     throw new Error(
       JSON.stringify({
         code: AGENT_BUSY,
-        message: !owned
-          ? `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another task.`
-          : `Agent "${result.handle.identity.name}" with id "${agentId}" is still working on another invocation.`,
+        message: formatAgentBusyMessage({
+          agentId,
+          agentName: result.handle.identity.name,
+          ownerId: "ownerId" in result.handle ? result.handle.ownerId : undefined,
+        }),
       }),
     );
   }
