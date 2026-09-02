@@ -179,7 +179,10 @@ function projectPlan(snapshot: ActivitySnapshotV1, rootTurnId: string): PlanView
     title: todo.content,
   }));
   const actions = Object.values(snapshot.actions).filter(
-    (action) => action.rootTurnId === rootTurnId && action.id !== planState.sourceActionId,
+    (action) =>
+      action.rootTurnId === rootTurnId &&
+      action.name !== planState.sourceToolName &&
+      action.id !== planState.sourceActionId,
   );
   const blockers = Object.values(snapshot.blockers).filter(
     (blocker) => blocker.rootTurnId === rootTurnId,
