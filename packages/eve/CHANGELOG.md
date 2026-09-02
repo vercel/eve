@@ -1,5 +1,22 @@
 # eve
 
+## 0.50.0
+
+### Minor Changes
+
+- 70c8a2e: Store message and reasoning appends as plain deltas instead of repeating cumulative text. Streamed tool-input appends now use the same delta-only shape.
+
+  Empty tool-input start markers no longer emit an append event; the first append contains actual input text.
+
+  Extensions built against the previous dynamic-tool, channel, schedule, subagent, connection, hook, dynamic-skill, or dynamic-instructions capability contracts must be rebuilt and republished with this release.
+
+### Patch Changes
+
+- 5b90f3d: Fix approved tool calls silently not executing when task state or a dynamic skill announcement was injected on the resume step. The runtime context was appended after the approval response, so the AI SDK skipped the approved tool and providers rejected the prompt with errors like `No tool output found for function call`.
+- 884cba8: Prevent approving one tool call from auto-authorizing other already-pending calls with the same approval key. Existing approval prompts now remain independent, while `once()` still auto-allows calls proposed after the pending requests are resolved.
+- 2b52714: Reduce the published sandbox image by avoiding a duplicate ownership-only layer while preserving global npm and pnpm installs for sandbox users.
+- ffcd817: Bundle eve's private integration catalog into the published package so setup runtime code and TypeScript declarations no longer reference an unavailable workspace dependency.
+
 ## 0.49.1
 
 ### Patch Changes
