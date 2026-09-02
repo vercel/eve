@@ -149,6 +149,13 @@ describe("integration catalog", () => {
     });
   });
 
+  it("exposes Mux Video as a gallery-only extension", () => {
+    expect(getIntegrationEntry("mux-video")).toMatchObject({
+      kind: "extension",
+      surfaces: { scaffoldable: false, registry: false, gallery: true },
+    });
+  });
+
   it("exposes GitHub Tools as an extension distinct from the GitHub channel", () => {
     expect(getIntegrationEntry("github")?.kind).toBe("channel");
     expect(getIntegrationEntry("github-tools")?.kind).toBe("extension");

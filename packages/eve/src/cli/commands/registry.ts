@@ -512,6 +512,7 @@ export async function runAddCommand(
               setups,
               options: {
                 yes: options.yes,
+                force: options.overwrite,
                 nonInteractive: options.nonInteractive,
                 answers: options.answers,
                 prompter,
@@ -630,7 +631,7 @@ export async function runAddCommand(
       appRoot,
       item,
       setups: eveMetadata.setup,
-      options,
+      options: { ...options, force: options.overwrite },
       dependencies,
       cancelledReminder: setupReminder(item, "cancelled"),
       resumeCommand: setupResumeCommand(item),

@@ -26,6 +26,7 @@ export function registerIntegrationCommands(input: {
 
   applicationCommand(integration.command("setup <kind>"), applicationContext)
     .option("-y, --yes")
+    .option("--force", "Overwrite files created by setup.")
     .option(
       "--non-interactive",
       "Run without interactive prompts, instead emit structured NDJSON when further input is required",
@@ -41,6 +42,7 @@ export function registerIntegrationCommands(input: {
         kind: string,
         options: {
           yes?: boolean;
+          force?: boolean;
           nonInteractive?: boolean;
           answer?: Record<string, unknown>;
         },
@@ -48,6 +50,7 @@ export function registerIntegrationCommands(input: {
         const { runIntegrationSetupCommand } = await import("./integration-setup.js");
         await runIntegrationSetupCommand(logger, applicationContext.root, kind, {
           yes: options.yes,
+          force: options.force,
           nonInteractive: options.nonInteractive,
           answers: options.answer,
         });

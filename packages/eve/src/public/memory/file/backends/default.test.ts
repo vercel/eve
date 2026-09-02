@@ -89,6 +89,19 @@ describe("default file-memory backend", () => {
     expect(get).toHaveBeenCalledOnce();
   });
 
+  it("uses Vercel Blob with an attached store and request-scoped OIDC", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("EVE_DEV", undefined);
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", undefined);
+    vi.stubEnv("VERCEL_OIDC_TOKEN", undefined);
+    vi.stubEnv("BLOB_STORE_ID", "store_test");
+    vi.mocked(get).mockResolvedValue(null);
+
+    const backend = defaultFileMemoryBackend();
+    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    expect(get).toHaveBeenCalledOnce();
+  });
+
   it("gives Vercel selection precedence over eve dev", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("EVE_DEV", "1");
@@ -105,7 +118,6 @@ describe("default file-memory backend", () => {
   it.each([
     { label: "no Blob environment", oidcToken: undefined, storeId: undefined, token: undefined },
     { label: "OIDC without a store ID", oidcToken: "oidc", storeId: undefined, token: undefined },
-    { label: "store ID without OIDC", oidcToken: undefined, storeId: "store", token: undefined },
     { label: "empty Blob values", oidcToken: " ", storeId: " ", token: " " },
   ])("rejects Vercel without usable Blob credentials: $label", async (environment) => {
     vi.stubEnv("VERCEL", "1");

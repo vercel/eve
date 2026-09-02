@@ -8,6 +8,7 @@ export type TemplateIntegration =
   | "GitHub"
   | "HTTP API"
   | "Linear"
+  | "Mux"
   | "Notion"
   | "Resend"
   | "Sanity"
@@ -313,6 +314,32 @@ export const templateManifest: TemplateManifestEntry[] = [
       "agent/subagents/researcher/agent.ts",
       "agent/subagents/reviewer/agent.ts",
       "agent/tools/lint_against_style.ts",
+    ],
+  },
+  {
+    slug: "mux-video-agent",
+    title: "Mux video",
+    setupPrompt:
+      "Set up the Mux Video Agent template in my current workspace using https://github.com/muxinc/mux-video-agent as the source. Copy the project files, install its dependencies, and follow the repository README to configure it. Preserve the existing project if the workspace is not empty, and tell me about the required Mux credentials, AI Gateway setup, and manual deployment steps.",
+    description:
+      "A durable video agent that creates and inspects Mux assets, makes clips, and runs supported Mux Robots workflows with human approval for write actions.",
+    sourceHref: "https://github.com/muxinc/mux-video-agent",
+    category: "Example",
+    model: "openai/gpt-5.6-luna",
+    integrations: ["Mux"],
+    source: "GitHub",
+    github: { owner: "muxinc", repo: "mux-video-agent", ref: "main" },
+    files: [
+      "agent/agent.ts",
+      "agent/channels/eve.ts",
+      "agent/extensions/mux_video.ts",
+      "agent/instructions.md",
+      "packages/eve-video/extension/extension.ts",
+      "packages/eve-video/extension/instructions.md",
+      "packages/eve-video/extension/skills/workflows/SKILL.md",
+      "packages/eve-video/extension/tools/create_asset.ts",
+      "packages/eve-video/extension/tools/create_clip.ts",
+      "packages/eve-video/extension/tools/run_workflow.ts",
     ],
   },
   {

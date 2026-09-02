@@ -12,9 +12,9 @@ interface DefaultFileMemoryBackendProbes {
 }
 
 const ENVIRONMENT_PROBES: DefaultFileMemoryBackendProbes = {
+  // OIDC is request-scoped on Vercel, so the store ID is the stable attachment signal.
   hasVercelBlobStore: () =>
-    hasEnvironmentValue("BLOB_READ_WRITE_TOKEN") ||
-    (hasEnvironmentValue("BLOB_STORE_ID") && hasEnvironmentValue("VERCEL_OIDC_TOKEN")),
+    hasEnvironmentValue("BLOB_READ_WRITE_TOKEN") || hasEnvironmentValue("BLOB_STORE_ID"),
   isEveDevelopment: isEveDevEnvironment,
   isDeployedOnVercel: () => hasEnvironmentValue("VERCEL"),
 };

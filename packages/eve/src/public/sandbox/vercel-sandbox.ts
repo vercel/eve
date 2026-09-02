@@ -30,7 +30,8 @@ type VercelSandboxAuthorCreateOptions<T> = T extends unknown
  * author-supplied values.
  *
  * `runtime` is excluded as well: eve always boots its sandboxes from the
- * published eve image, which is mutually exclusive with a stock runtime.
+ * published `vcr.vercel.com/vercel/eve/base` image tag matching the installed
+ * eve version, which is mutually exclusive with a stock runtime.
  *
  * `source` is honored only on the template create at prewarm time, so
  * an author-supplied snapshot, git revision, or tarball becomes the
