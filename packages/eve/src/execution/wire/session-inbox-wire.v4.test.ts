@@ -94,6 +94,23 @@ describe("session inbox wire v4", () => {
     },
   );
 
+  it.each([1, 2, 3] as const)(
+    "rejects v4 task input requests falsely declared as immutable v%i",
+    (version) => {
+      const { request: _request, ...inputRequestBase } = inputRequest;
+      for (const request of [inputRequest, { ...inputRequestBase, requests: [] }]) {
+        expect(() =>
+          sessionInboxWireDecoder.decode({
+            kind: "deliver",
+            payload: { task: { inputRequests: [request] } },
+            payloads: [{ task: { inputRequests: [request] } }],
+            version,
+          }),
+        ).toThrow(new RegExp(`does not match wire version ${version}`));
+      }
+    },
+  );
+
   it("round-trips batched task input requests", () => {
     const { request: _request, ...batch } = inputRequest;
     const batchedRequest = { ...batch, requests: [inputRequest.request] };

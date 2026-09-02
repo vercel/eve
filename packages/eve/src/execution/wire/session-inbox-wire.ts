@@ -69,7 +69,7 @@ function decode(value: unknown): DecodedSessionInbox {
   const normalized = normalizeSessionInboxWireV2(value);
   if (
     (declaredVersion === 1 || declaredVersion === 2 || declaredVersion === 3) &&
-    containsTaskAgentRequests(normalized)
+    containsCurrentTaskMessages(normalized)
   ) {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
@@ -110,13 +110,20 @@ function decode(value: unknown): DecodedSessionInbox {
 /** Workflow-safe consumer facade. */
 export const sessionInboxWire = { decode } as const;
 
-function containsTaskAgentRequests(value: unknown): boolean {
+function containsCurrentTaskMessages(value: unknown): boolean {
   if (!isObject(value) || value.kind !== "deliver") return false;
   const payloads = Array.isArray(value.payloads) ? value.payloads : [];
-  return payloads.some(
-    (payload) =>
-      isObject(payload) && isObject(payload.task) && Object.hasOwn(payload.task, "agentRequests"),
-  );
+  return payloads.some((payload) => {
+    if (!isObject(payload) || !isObject(payload.task)) return false;
+    if (Object.hasOwn(payload.task, "agentRequests")) return true;
+    const inputRequests = payload.task.inputRequests;
+    return (
+      Array.isArray(inputRequests) &&
+      inputRequests.some(
+        (request) => isObject(request) && ("request" in request || "requests" in request),
+      )
+    );
+  });
 }
 
 /** Strips wire-only fields (`version`, the deliver mirror) for consumption. */

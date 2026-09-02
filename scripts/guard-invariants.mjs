@@ -627,6 +627,16 @@ const PURE_MIGRATION_IMPORTS = new Map([
   ["#execution/durable-session-migrations/chain.js", new Map([["VersionMigration", "type"]])],
   ["#shared/guards.js", new Map([["isObject", "value"]])],
 ]);
+const WORKFLOW_DECODER_RUNTIME_IMPORTS = new Set([
+  "#execution/durable-session-migrations/chain.js",
+  "#execution/wire/session-inbox-contract.js",
+  "#execution/wire/session-inbox-wire.v0.js",
+  "#execution/wire/session-inbox-wire.v2-migration.js",
+  "#execution/wire/session-inbox-wire.v2.migration.js",
+  "#execution/wire/session-inbox-wire.v3.migration.js",
+  "#execution/wire/session-inbox-wire.v4.migration.js",
+  "#shared/guards.js",
+]);
 
 function gitOutput(args) {
   try {
@@ -744,9 +754,7 @@ function checkRule40WorkflowDecoderImports(source) {
     if (
       specifier !== undefined &&
       isRuntimeImportReference(node) &&
-      (specifier.text.startsWith("#compiled/") ||
-        specifier.text === "#runtime/validation.js" ||
-        /^#execution\/wire\/session-inbox-wire\.v[1-9]\d*\.js$/.test(specifier.text))
+      !WORKFLOW_DECODER_RUNTIME_IMPORTS.has(specifier.text)
     ) {
       violations.push({
         rule: 40,
