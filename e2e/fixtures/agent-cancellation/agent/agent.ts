@@ -31,7 +31,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
     );
   }
   if (message.includes(RECOVERY_TOKEN)) {
-    const result = [...request.toolResults].reverse().find((entry) => entry.name === "Workflow");
+    const result = request.toolResults.find((entry) => entry.id === "resume-sleeper");
     if (result !== undefined) {
       return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
     }
