@@ -1052,6 +1052,11 @@ describe("workflowEntry integration", () => {
 
       const contender = await start(workflowEntry, [
         {
+          continuationConflictCommand: {
+            auth: null,
+            kind: "send",
+            payload: { message: "contending message" },
+          },
           input: { message: "contending message" },
           serializedContext: buildSerializedContext({
             channelKind: "http",
@@ -1062,11 +1067,6 @@ describe("workflowEntry integration", () => {
       ]);
       try {
         await expect(contender.returnValue).resolves.toEqual({ output: "" });
-
-        await resumeHook(continuationToken, {
-          kind: "send",
-          payload: { message: "owner follow up" },
-        });
         const ownerFollowUp = await ownerStream.nextTurn();
 
         expect(ownerFollowUp.at(-1)?.type).toBe("session.waiting");
@@ -1074,7 +1074,7 @@ describe("workflowEntry integration", () => {
           ownerFollowUp.some(
             (event) =>
               event.type === "message.completed" &&
-              event.data.message?.includes("owner follow up") === true,
+              event.data.message?.includes("contending message") === true,
           ),
         ).toBe(true);
       } finally {

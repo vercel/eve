@@ -107,6 +107,10 @@ export const CUSTOM_CONNECTION_SLUG = "custom";
 // URL. Keep these provider-owned keys explicit instead of deriving them from
 // the endpoint path.
 const CONNECTION_AUTH: Readonly<Record<string, ConnectionAuthSpec>> = {
+  "browser-use": {
+    kind: "header",
+    headers: [{ header: "x-browser-use-api-key", envVar: "BROWSER_USE_API_KEY" }],
+  },
   linear: { kind: "connect", connector: "linear", service: "mcp.linear.app" },
   notion: { kind: "connect", connector: "notion", service: "mcp.notion.com" },
   datadog: { kind: "connect", connector: "datadog", service: "mcp.datadoghq.com" },

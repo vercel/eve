@@ -1,7 +1,8 @@
 /**
- * Closed-contract dispatch surface between session-mutating step
- * bodies (latest deployment) and the durable driver workflow (pinned
- * to whichever deployment called `start()`).
+ * Closed-contract dispatch surface between session-mutating step bodies
+ * (the accepting deployment when stamped, otherwise the driver's deployment)
+ * and the durable driver workflow (pinned to whichever deployment called
+ * `start()`).
  *
  * The driver matches on `kind` and follows a fixed playbook per arm.
  * Adding a new arm is breaking (pinned drivers can't dispatch an
@@ -24,7 +25,7 @@ interface DurableStepResultFields {
   readonly sessionState: DurableSessionState;
 }
 
-/** Result returned by the latest turn step to its durable driver workflow. */
+/** Result returned by a turn step to its durable driver workflow. */
 export type DurableStepResult = (
   | {
       readonly action: "continue" | "done";

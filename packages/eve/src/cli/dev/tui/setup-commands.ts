@@ -173,6 +173,10 @@ export async function runTuiSetupCommand(
       cancelActiveRegistryItem = undefined;
     }
   };
+  // Arm the idle trap before a flow can synchronously open its first question.
+  // Otherwise it replaces the question's key consumer, leaving addressed `/add`
+  // confirmations visible but unresponsive.
+  let interrupt = input.renderer.waitForInterrupt();
   const execution = executeSetupCommand(
     input,
     prompter,
@@ -183,7 +187,7 @@ export async function runTuiSetupCommand(
   const outcomePromise = execution.then((value) => ({ kind: "outcome" as const, value }));
   try {
     while (true) {
-      const interrupt = input.renderer.waitForInterrupt();
+      let rearm = false;
       try {
         const settled = await Promise.race([
           outcomePromise,
@@ -196,22 +200,24 @@ export async function runTuiSetupCommand(
           cancelActiveRegistryItem !== undefined
         ) {
           cancelActiveRegistryItem();
-          continue;
+          rearm = true;
+        } else {
+          interrupted = true;
+          controller.abort(new WizardCancelledError());
+          const outcome = await execution;
+          return outcome.partial === true
+            ? outcome
+            : {
+                ...outcome,
+                message: `/${command} interrupted.`,
+                tone: "error",
+                preserveFlowDiagnostics: true,
+              };
         }
-        interrupted = true;
-        controller.abort(new WizardCancelledError());
-        const outcome = await execution;
-        return outcome.partial === true
-          ? outcome
-          : {
-              ...outcome,
-              message: `/${command} interrupted.`,
-              tone: "error",
-              preserveFlowDiagnostics: true,
-            };
       } finally {
         interrupt.dispose();
       }
+      if (rearm) interrupt = input.renderer.waitForInterrupt();
     }
   } finally {
     // A flow that threw or was abandoned mid-wait must not leave the footer spinning.

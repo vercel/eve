@@ -23,6 +23,7 @@ const {
   applyPackageManagerWorkspaceConfiguration,
   getRegistryItems,
   isEveProject,
+  prepareDeclaredPnpmBuildPolicy,
   readFile,
   resolveInstalledPackageInfo,
   unlink,
@@ -33,6 +34,7 @@ const {
   applyPackageManagerWorkspaceConfiguration: vi.fn(),
   getRegistryItems: vi.fn(),
   isEveProject: vi.fn(),
+  prepareDeclaredPnpmBuildPolicy: vi.fn(async () => true),
   readFile: vi.fn(),
   resolveInstalledPackageInfo: vi.fn(() => ({ name: "eve", version: "0.27.8" })),
   unlink: vi.fn(),
@@ -47,6 +49,7 @@ vi.mock("#compiled/shadcn-registry/index.js", () => ({
 }));
 
 vi.mock("#setup/scaffold/index.js", () => ({ isEveProject }));
+vi.mock("./registry-pnpm-build-policy-flow.js", () => ({ prepareDeclaredPnpmBuildPolicy }));
 vi.mock("#setup/scaffold/workspace-root.js", () => ({ applyPackageManagerWorkspaceConfiguration }));
 vi.mock("#internal/application/package.js", () => ({ resolveInstalledPackageInfo }));
 vi.mock("node:fs/promises", () => ({ readFile, unlink, writeFile }));
@@ -128,6 +131,70 @@ describe("registry commands", () => {
       silent: undefined,
     });
     expect(logger.errors).toEqual([]);
+  });
+
+  it("prepares declared pnpm build policy before installing", async () => {
+    const logger = createLogger();
+    const buildScripts = [
+      {
+        packages: ["node-liblzma", "@mongodb-js/zstd"],
+        optional: true,
+        recommendedAction: "ignore-optional",
+        reason: "Optional accelerators are not required.",
+      },
+    ];
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "experimental/tool",
+        type: "registry:item",
+        meta: { eve: { install: { pnpm: { buildScripts } } } },
+      },
+    ]);
+
+    await runAddCommand(logger, "/project", "experimental/tool", {});
+
+    expect(prepareDeclaredPnpmBuildPolicy).toHaveBeenCalledWith({
+      logger,
+      appRoot: "/project",
+      item: "experimental/tool",
+      policies: buildScripts,
+      options: {},
+    });
+    expect(prepareDeclaredPnpmBuildPolicy.mock.invocationCallOrder[0]).toBeLessThan(
+      addRegistryItems.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("propagates an interactive build-policy abort without reporting an install", async () => {
+    const { prompter } = createFakePrompter();
+    getRegistryItems.mockResolvedValue([
+      {
+        name: "experimental/tool",
+        type: "registry:item",
+        meta: {
+          eve: {
+            install: {
+              pnpm: {
+                buildScripts: [
+                  {
+                    packages: ["optional-package"],
+                    optional: true,
+                    recommendedAction: "ignore-optional",
+                    reason: "Optional package is not required.",
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    ]);
+    prepareDeclaredPnpmBuildPolicy.mockResolvedValueOnce(false);
+
+    await expect(
+      installRegistryItem("/project", "experimental/tool", { prompter }),
+    ).rejects.toBeInstanceOf(WizardCancelledError);
+    expect(addRegistryItems).not.toHaveBeenCalled();
   });
 
   it("reports completion after installing an item without setup headlessly", async () => {

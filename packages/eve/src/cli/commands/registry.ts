@@ -16,6 +16,7 @@ import { installRegistryItemTransaction } from "./registry-install-transaction.j
 import { runDeclaredSetups } from "./registry-declared-setups.js";
 import {
   errorMessage,
+  reportRegistryCompletion as reportCompletion,
   resolveRegistryItemForAdd,
   runRegistryAction,
   setupReminder,
@@ -28,6 +29,7 @@ import {
   type RegistrySearchMetadata,
 } from "./registry-metadata.js";
 import { runRegistryPackage } from "./registry-package.js";
+import { prepareDeclaredPnpmBuildPolicy } from "./registry-pnpm-build-policy-flow.js";
 import {
   printRegistrySearchResults,
   registryViewText,
@@ -35,7 +37,7 @@ import {
   type RegistrySearchPresentationSection,
 } from "./registry-presentation.js";
 import type { runRegistrySetupCommand } from "./registry-setup-command.js";
-import { reportHeadlessSetupCompletion, serializeHeadlessSetupEvent } from "./setup-headless.js";
+import { serializeHeadlessSetupEvent } from "./setup-headless.js";
 import {
   addRegistryMappings,
   prepareWebRegistryProject,
@@ -445,6 +447,7 @@ export async function installRegistryItem(
   );
   process.exitCode = previousExitCode;
   if (failure !== undefined) throw new Error(failure);
+  if (setup === false) throw new WizardCancelledError();
   const result: { output: readonly string[]; setup?: RegistrySetupCompletion } = { output };
   if (setup !== undefined) result.setup = setup;
   return result;
@@ -457,7 +460,7 @@ export async function runAddCommand(
   item: string,
   options: RunAddCommandOptions,
   dependencies: AddCommandDependencies = defaultAddCommandDependencies,
-): Promise<RegistrySetupCompletion | undefined> {
+): Promise<RegistrySetupCompletion | false | undefined> {
   return runRegistryAction(logger, appRoot, async () => {
     const config = await readEveRegistryConfig(appRoot);
     const address = itemAddress(item);
@@ -540,6 +543,15 @@ export async function runAddCommand(
       });
       return reportCompletion(logger, item, completion, options);
     }
+
+    const installReady = await prepareDeclaredPnpmBuildPolicy({
+      logger,
+      appRoot,
+      item,
+      policies: eveMetadata?.install?.pnpm?.buildScripts,
+      options,
+    });
+    if (!installReady) return false;
 
     if (address === itemAddress("channel/web")) {
       await (dependencies.prepareWebRegistryProject ?? prepareWebRegistryProject)(appRoot);
@@ -624,19 +636,6 @@ export async function runAddCommand(
       resumeCommand: setupResumeCommand(item),
     });
     return reportCompletion(logger, item, completion, options);
-  });
-}
-function reportCompletion(
-  logger: RegistryCommandLogger,
-  item: string,
-  completion: RegistrySetupCompletion | false,
-  options: AddCommandOptions,
-): RegistrySetupCompletion | undefined {
-  return reportHeadlessSetupCompletion({
-    logger,
-    item,
-    completion,
-    nonInteractive: options.nonInteractive,
   });
 }
 /** Adds registry namespace mappings to the project's package.json. */

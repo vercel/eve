@@ -29,6 +29,7 @@ import { settleCancelledTurnStep } from "#execution/settle-cancelled-turn-step.j
 import { emitTerminalSessionFailureStep } from "#execution/terminal-session-failure-step.js";
 import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { settleContinuationConflictStep } from "#execution/continuation-conflict-step.js";
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: vi.fn(),
@@ -113,6 +114,10 @@ vi.mock("./settle-cancelled-turn-step.js", () => ({
 
 vi.mock("./session-timeout-control.js", () => ({
   createSessionTimeoutControl: vi.fn(),
+}));
+
+vi.mock("./continuation-conflict-step.js", () => ({
+  settleContinuationConflictStep: vi.fn().mockResolvedValue(undefined),
 }));
 
 function createSessionStateForMock(
@@ -439,6 +444,12 @@ describe("workflowEntry", () => {
 
     await expect(
       workflowEntry({
+        activityCollectorRunId: "wrun_collector",
+        continuationConflictCommand: {
+          auth: null,
+          kind: "send",
+          payload: { message: "duplicate" },
+        },
         input: { message: "duplicate" },
         serializedContext: createSerializedContext(),
       }),
@@ -447,6 +458,16 @@ describe("workflowEntry", () => {
     expect(emitTerminalSessionFailureStep).not.toHaveBeenCalled();
     expect(dispatchTurnStep).not.toHaveBeenCalled();
     expect(dispose).toHaveBeenCalledOnce();
+    expect(settleContinuationConflictStep).toHaveBeenCalledWith({
+      activityCollectorRunId: "wrun_collector",
+      command: {
+        auth: null,
+        kind: "send",
+        payload: { message: "duplicate" },
+      },
+      continuationToken: "http:test",
+      ownerSessionId: "wrun_owner",
+    });
   });
 
   it("also exits when a legacy world reports the initial continuation conflict", async () => {

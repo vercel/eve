@@ -1,5 +1,18 @@
 # @eve/self-modification
 
+## 0.0.6
+
+### Patch Changes
+
+- Updated dependencies [68d44b5]
+- Updated dependencies [b20c2aa]
+- Updated dependencies [0172af9]
+- Updated dependencies [fbc89e5]
+- Updated dependencies [3f20c80]
+- Updated dependencies [1ee8fa9]
+- Updated dependencies [a40ebb0]
+  - eve@0.49.0
+
 ## 0.0.5
 
 ### Patch Changes

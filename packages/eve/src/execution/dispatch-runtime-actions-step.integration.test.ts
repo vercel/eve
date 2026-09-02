@@ -5,12 +5,12 @@ import type { SessionAuthContext } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import { ContextContainer, loadContext } from "#context/container.js";
 import { RemoteAgentContinueRequestError } from "#execution/remote-agent-dispatch.js";
-import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
 import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
 import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
 import {
+  getPendingRuntimeActionBatch,
   resolvePendingRuntimeActions,
   setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
@@ -57,7 +57,8 @@ const mocks = vi.hoisted(() => ({
   resumeHook: vi.fn(),
   createSession: vi.fn(),
   startRemoteAgentSession: vi.fn(),
-  startWorkflowPreferLatest: vi.fn(),
+  startWorkflowOnCurrentDeployment: vi.fn(),
+  waitForCommandHookOwner: vi.fn(),
 }));
 
 vi.mock("#context/serialize.js", () => ({
@@ -85,9 +86,9 @@ vi.mock("#execution/workflow-runtime.js", () => ({
     dispatchSession: mocks.dispatchSession,
   }),
   workflowEntryReference: { workflowId: "workflow//eve//workflowEntry" },
-  startWorkflowPreferLatest: mocks.startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment: mocks.startWorkflowOnCurrentDeployment,
   taskRunWorkflowReference: { workflowId: "workflow//eve//taskRun" },
-  waitForCommandHookOwner: vi.fn().mockResolvedValue({ runId: "task-run-1" }),
+  waitForCommandHookOwner: mocks.waitForCommandHookOwner,
 }));
 
 // Only the network calls are mocked; error classification and registry
@@ -168,12 +169,15 @@ const REMOTE_REGISTRY_DEFINITION = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.createSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID });
+  mocks.waitForCommandHookOwner.mockImplementation(async (token: string) => ({
+    runId: token.startsWith("subagent:") ? CHILD_SESSION_ID : "task-run-1",
+  }));
   mocks.dispatchSession.mockResolvedValue({ sessionId: CHILD_SESSION_ID, status: "accepted" });
   mocks.continueRemoteAgentSession.mockResolvedValue(undefined);
   mocks.startRemoteAgentSession.mockResolvedValue({
     sessionId: "remote-session-123456789012",
   });
-  mocks.startWorkflowPreferLatest.mockResolvedValue({ runId: "task-run-1" });
+  mocks.startWorkflowOnCurrentDeployment.mockResolvedValue({ runId: "task-run-1" });
   mocks.resumeHook.mockResolvedValue({ runId: "task-run-1" });
   mocks.hydrateDurableSession.mockImplementation(({ durable }) => durable);
   mocks.createDurableSessionState.mockImplementation(({ session }) => ({
@@ -345,6 +349,88 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
 
     expect(mocks.createSession).toHaveBeenCalledOnce();
+  });
+
+  it("uses the active session turn when pending batch metadata has an empty turn id", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(session, {
+      definition: { description: "Research", kind: "subagent" },
+      nodeId: "subagents/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getAgentHandleStore(resultState)).toMatchObject({
+      handles: [{ operation: { parentTurnId: "turn_3" } }],
+    });
+  });
+
+  it("persists the active turn when dispatch leaves agent handles unchanged", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "remote",
+    });
+    installContext(session, {
+      definition: REMOTE_REGISTRY_DEFINITION,
+      nodeId: "remote/research",
+    });
+
+    const result = await dispatchRuntimeActionsStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getAgentHandleStore(resultState)).toBeUndefined();
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(mocks.createDurableSessionState).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the active session turn for task-mode dispatch", async () => {
+    const session = createStartSession({
+      event: { sequence: 3, stepIndex: 2, turnId: "" },
+      kind: "local",
+    });
+    installContext(
+      session,
+      { definition: { description: "Research", kind: "subagent" }, nodeId: "subagents/research" },
+      true,
+    );
+    vi.spyOn(taskRunControl, "sendTaskCommandToOwner").mockResolvedValue({ runId: "task-run-1" });
+
+    const result = await dispatchTaskStep({
+      parentContinuationToken: "turn-inbox",
+      parentWritable: createWritable(),
+      serializedContext: {},
+      sessionState: {
+        ...BASE_STATE,
+        emissionState: { sequence: 3, sessionStarted: true, stepIndex: 2, turnId: "" },
+      },
+    });
+
+    const resultState = readResultSessionState(result, session);
+    expect(getPendingRuntimeActionBatch(resultState)?.event.turnId).toBe("turn_3");
+    expect(getSessionTaskIndex(resultState)).toEqual([
+      expect.objectContaining({ createdByTurnId: "turn_3" }),
+    ]);
   });
 
   it("opens a shared parent sandbox with session context and durable backend tags", async () => {
@@ -559,13 +645,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     // A retried dispatch step re-derives the same deterministic child
     // continuation token, so the first attempt's child owns it.
-    mocks.createSession.mockRejectedValue(
-      new RuntimeSessionOwnershipConflictError({
-        continuationToken: "subagent:parent-session:call-1",
-        ownerSessionId: CHILD_SESSION_ID,
-        sessionId: "duplicate-child",
-      }),
-    );
+    mocks.createSession.mockResolvedValue({ sessionId: "duplicate-child" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
@@ -614,13 +694,7 @@ describe("dispatchRuntimeActionsStep child starts", () => {
     });
     // A retried dispatch step re-derives the same deterministic child
     // continuation token, so the first attempt's child owns it.
-    mocks.createSession.mockRejectedValue(
-      new RuntimeSessionOwnershipConflictError({
-        continuationToken: "subagent:parent-session:call-1",
-        ownerSessionId: CHILD_SESSION_ID,
-        sessionId: "duplicate-child",
-      }),
-    );
+    mocks.createSession.mockResolvedValue({ sessionId: "duplicate-child" });
 
     const result = await dispatchRuntimeActionsStep({
       parentContinuationToken: "turn-inbox",
@@ -880,7 +954,7 @@ describe("dispatchRuntimeActionsStep agent delivery", () => {
       output: { code: "AGENT_BUSY", message: expect.stringContaining("task_active") },
     });
     expect(mocks.dispatchSession).not.toHaveBeenCalled();
-    expect(mocks.startWorkflowPreferLatest).not.toHaveBeenCalled();
+    expect(mocks.startWorkflowOnCurrentDeployment).not.toHaveBeenCalled();
   });
 
   it("passes the active turn principal to a tasks-mode continuation", async () => {

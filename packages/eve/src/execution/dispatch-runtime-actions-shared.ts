@@ -3,8 +3,8 @@
  * `dispatchRuntimeActionsStep` (plain mode) and `dispatchTaskStep`
  * (task mode). Both run the same preflight → plan → dispatch → emit
  * skeleton over one pending batch and differ only in the per-entry
- * delegation lifecycle, so planning, subagent starts, and the
- * replay-safe `subagent.called` emission tail live here.
+ * delegation lifecycle, so planning and the replay-safe
+ * `subagent.called` emission tail live here.
  */
 
 import { buildAdapterContext } from "#channel/adapter-context.js";
@@ -39,11 +39,12 @@ import {
 } from "#execution/agent-handle-dispatch.js";
 import { getAgentHandleStore } from "#harness/handles/store.js";
 import { deriveRootTurnActivityWorkId } from "#execution/activity-work-id.js";
-import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
 import {
   assertUniqueRuntimeActionCallIds,
   getPendingRuntimeActionBatch,
+  setPendingRuntimeActionBatch,
 } from "#harness/runtime-actions.js";
+import { activeTurnId } from "#harness/active-turn-id.js";
 import {
   createSubagentCalledEvent,
   encodeMessageStreamEvent,
@@ -62,14 +63,16 @@ import type {
   PendingTaskControlAction,
   PendingWorkflowToolAction,
 } from "#shared/dispatch-action.js";
-import { type DurableSessionState, readDurableSession } from "#execution/durable-session-store.js";
+import {
+  createDurableSessionState,
+  type DurableSessionState,
+  readDurableSession,
+} from "#execution/durable-session-store.js";
 import {
   createRecursiveAgentRootOnlyResult,
   createUnavailableDynamicSubagentResult,
   getSubagentName,
 } from "#execution/dispatch-action-failures.js";
-import { startLocalSubagent } from "#execution/subagent-start-local.js";
-import { startRemoteSubagent } from "#execution/subagent-start-remote.js";
 import { hydrateDurableSession } from "#execution/session.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#execution/subagent-tool.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
@@ -82,11 +85,6 @@ import { isTaskControlAction } from "#execution/tasks/parent/dispatch.js";
 import { isWorkflowToolAction } from "#execution/tool-run/dispatch.js";
 import { isSubagentDelegationAction } from "#harness/subagent-depth.js";
 import { resolvePreparedAgentAction } from "#execution/prepared-agent-action.js";
-import { normalizeChannelAudience } from "#shared/channel-audience.js";
-import {
-  applyLiveDeliveryAudienceCeiling,
-  readForwardedTraceAssertion,
-} from "#shared/forwarded-trace-policy.js";
 
 const log = createLogger("execution.dispatch-runtime-actions");
 
@@ -186,6 +184,11 @@ export interface PreparedRuntimeActionDispatch {
   readonly session: RuntimeSession;
 }
 
+interface PreparedPendingRuntimeActionDispatch extends PreparedRuntimeActionDispatch {
+  /** Returns the durable baseline corresponding to `session`. */
+  readonly getBaselineSessionState: () => DurableSessionState;
+}
+
 /**
  * Runs every dispatch precondition that may throw — durable reads, context
  * deserialization, handle-store validation, and batch planning — before
@@ -202,19 +205,38 @@ export async function prepareRuntimeActionDispatch(input: {
    * those calls fail as unsupported batch actions.
    */
   readonly taskControls: boolean;
-}): Promise<PreparedRuntimeActionDispatch | undefined> {
+}): Promise<PreparedPendingRuntimeActionDispatch | undefined> {
   const durableSession = await readDurableSession(input.sessionState);
   const batch = getPendingRuntimeActionBatch(durableSession.state);
 
   if (batch === undefined || batch.actions.length === 0) return undefined;
+  const parentTurnId = batch.event.turnId || activeTurnId(input.sessionState.emissionState);
+  const sessionStateRepaired = batch.event.turnId !== parentTurnId;
+  const repairedBatch = sessionStateRepaired
+    ? { ...batch, event: { ...batch.event, turnId: parentTurnId } }
+    : batch;
   const ctx = await deserializeContext(input.serializedContext);
-  return await prepareActionDispatch({
-    batch,
+  const prepared = await prepareActionDispatch({
+    batch: repairedBatch,
     ctx,
     durableSession,
     serializedContext: input.serializedContext,
     taskControls: input.taskControls,
   });
+  if (!sessionStateRepaired) {
+    return { ...prepared, getBaselineSessionState: () => input.sessionState };
+  }
+
+  const session = setPendingRuntimeActionBatch({
+    ...repairedBatch,
+    session: prepared.session,
+  });
+
+  return {
+    ...prepared,
+    getBaselineSessionState: () => createDurableSessionState({ session }),
+    session,
+  };
 }
 
 export async function prepareAgentActionDispatch(input: {
@@ -601,99 +623,6 @@ function classifyFreshStart(input: {
       };
     default: {
       const _exhaustive: never = action;
-      return _exhaustive;
-    }
-  }
-}
-
-/** Starts one planned fresh child against its local or remote target. */
-export async function startSubagent(input: {
-  readonly auth: Parameters<typeof buildSubagentRunInput>[0]["auth"];
-  readonly batchEvent: { readonly sequence: number; readonly turnId: string };
-  readonly bundle: CompiledBundle;
-  readonly callbackBaseUrl: string | undefined;
-  readonly capabilities: Parameters<typeof buildSubagentRunInput>[0]["capabilities"];
-  readonly channelMetadata: Parameters<typeof buildSubagentRunInput>[0]["channelMetadata"];
-  readonly currentSession: RuntimeSession;
-  readonly fanoutSize: number;
-  readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
-  readonly localDevRequest?: LocalDevRequestProvenance;
-  readonly parentContinuationToken: string | undefined;
-  readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly activityObserver?: ActivityObserverConfig & {
-    readonly workIdentity: ActivityWorkIdentityV1;
-  };
-  readonly sandboxSessionId: string;
-  readonly serializedContext: Record<string, unknown>;
-  readonly session: RuntimeSession;
-  readonly taskOwned: boolean;
-  readonly target: DispatchStartTarget;
-}): Promise<DispatchOutcome> {
-  const storedParentTraceContext =
-    readActionTraceContext(
-      input.serializedContext,
-      input.session.sessionId,
-      input.batchEvent.turnId,
-      input.target.action.callId,
-    ) ?? input.parentTraceContext;
-  const forwardedTracePolicy = readForwardedTraceAssertion(
-    storedParentTraceContext?.forwardedTracePolicy,
-  );
-  const liveAudience = normalizeChannelAudience(input.channelMetadata?.metadata.audience);
-  const parentTraceContext =
-    storedParentTraceContext?.decision === undefined
-      ? storedParentTraceContext
-      : {
-          ...storedParentTraceContext,
-          decision: applyLiveDeliveryAudienceCeiling(
-            storedParentTraceContext.decision,
-            liveAudience,
-            forwardedTracePolicy,
-          ),
-        };
-
-  switch (input.target.kind) {
-    case "local":
-      return startLocalSubagent({
-        action: input.target.action,
-        auth: input.auth,
-        batchEvent: input.batchEvent,
-        bundle: input.bundle,
-        capabilities: input.capabilities,
-        channelMetadata: input.channelMetadata,
-        currentSession: input.currentSession,
-        dynamicSubagentAgentConfig: input.target.dynamicSubagentAgentConfig,
-        fanoutSize: input.fanoutSize,
-        initiatorAuth: input.initiatorAuth,
-        localDevRequest: input.localDevRequest,
-        parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
-        activityObserver: input.activityObserver,
-        sandboxSessionId: input.sandboxSessionId,
-        selfAgent: input.target.selfAgent,
-        session: input.session,
-        source: input.target.source,
-        taskOwned: input.taskOwned,
-      });
-    case "remote":
-      return startRemoteSubagent({
-        action: input.target.action,
-        auth: input.auth,
-        batchEvent: input.batchEvent,
-        bundle: input.bundle,
-        callbackBaseUrl: input.callbackBaseUrl,
-        originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
-        currentSession: input.currentSession,
-        dynamicRemoteAgent: input.target.dynamicRemoteAgent,
-        initiatorAuth: input.initiatorAuth,
-        parentContinuationToken: input.parentContinuationToken,
-        parentTraceContext,
-        activityObserver: input.activityObserver,
-        session: input.session,
-        taskOwned: input.taskOwned,
-      });
-    default: {
-      const _exhaustive: never = input.target;
       return _exhaustive;
     }
   }

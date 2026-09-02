@@ -1,7 +1,7 @@
 /**
  * eve workflow functions whose bundled id carries no `@<version>` stamp, so
- * `start(ref, args, { deploymentId: "latest" })` finds them on a newer
- * deployment. Dependency-free so the bundler can import it.
+ * an explicitly stamped deployment can find them across eve versions.
+ * Dependency-free so the bundler can import it.
  */
 export const WORKFLOW_ENTRY_NAME = "workflowEntry";
 export const TURN_WORKFLOW_NAME = "turnWorkflow";

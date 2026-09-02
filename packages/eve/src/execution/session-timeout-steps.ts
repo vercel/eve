@@ -6,7 +6,7 @@ import {
 } from "#compiled/@workflow/errors/index.js";
 
 import {
-  startWorkflowPreferLatest,
+  startWorkflowOnCurrentDeployment,
   sessionTimeoutWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import type { SessionTimeoutWorkflowInput } from "#execution/session-timeout-workflow.js";
@@ -20,7 +20,7 @@ export async function startSessionTimeoutStep(
 ): Promise<{ readonly runId: string }> {
   "use step";
 
-  const run = await startWorkflowPreferLatest(sessionTimeoutWorkflowReference, [input]);
+  const run = await startWorkflowOnCurrentDeployment(sessionTimeoutWorkflowReference, [input]);
   return { runId: run.runId };
 }
 

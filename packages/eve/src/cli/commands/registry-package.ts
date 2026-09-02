@@ -11,6 +11,10 @@ import type { RegistrySetupCompletion } from "#setup/registry-setup-protocol.js"
 
 import { hasInteractiveTerminal } from "./preconditions.js";
 import type { AddCommandOptions, RegistryCommandLogger } from "./registry.js";
+import {
+  prepareDeclaredPnpmBuildPolicy,
+  type DeclaredPnpmBuildPolicy,
+} from "./registry-pnpm-build-policy-flow.js";
 import type { RegistrySetupCommand } from "./registry-setup-command.js";
 import { headlessSetupContinuation, serializeHeadlessSetupEvent } from "./setup-headless.js";
 
@@ -23,6 +27,7 @@ export const RegistryPackageComponentSchema = z.object({
 export type RegistryPackageComponent = z.infer<typeof RegistryPackageComponentSchema>;
 interface PackageMetadata {
   requires?: string;
+  install?: { pnpm?: { buildScripts: readonly DeclaredPnpmBuildPolicy[] } };
   setup?: RegistrySetupCommand[];
 }
 export interface RegistryPackageDependencies {
@@ -140,6 +145,17 @@ export async function runRegistryPackage(input: {
     operations.assertCompatibleVersion(metadata?.requires);
     return metadata;
   });
+  if (
+    options.skipInstall !== true &&
+    !(await prepareDeclaredPnpmBuildPolicy({
+      logger,
+      appRoot,
+      item,
+      policies: entries.flatMap((entry) => entry?.install?.pnpm?.buildScripts ?? []),
+      options,
+    }))
+  )
+    return false;
   if (options.skipInstall !== true)
     await addRegistryItems(addresses, {
       config,

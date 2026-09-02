@@ -12,7 +12,7 @@ const sha = "a".repeat(40);
 
 describe("package artifacts", () => {
   test("derives a main build version", () => {
-    expect(packageVersion("0.33.0", sha)).toBe(`0.33.0+main.${sha}`);
+    expect(packageVersion("0.33.0", sha)).toBe("0.33.0+main.aaaaaaaaaaaaaaaa");
   });
 
   test("derives immutable artifact and dependency URLs", () => {
@@ -33,7 +33,7 @@ describe("package artifacts", () => {
     const source = { name: "eve", version: "0.33.0" };
     expect(preparePackageJson(source, sha)).toEqual({
       name: "eve",
-      version: `0.33.0+main.${sha}`,
+      version: "0.33.0+main.aaaaaaaaaaaaaaaa",
     });
     expect(source.version).toBe("0.33.0");
   });

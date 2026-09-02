@@ -29,7 +29,6 @@ import {
   readParentLineage,
 } from "#execution/eve-workflow-attributes.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
-import { isEveDevEnvironment } from "#internal/application/dev-environment.js";
 import { createLogger, logError } from "#internal/logging.js";
 import {
   cancelRun,
@@ -50,7 +49,6 @@ import { getCompiledRuntimeAgentBundle } from "#runtime/sessions/compiled-agent-
 import { buildRunContext } from "#execution/runtime-context.js";
 import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
 import { parseNdjsonStream } from "#execution/ndjson-stream.js";
-import { RuntimeSessionOwnershipConflictError } from "#execution/runtime-errors.js";
 import type { WorkflowEntryInput } from "#execution/workflow-entry.js";
 import type { ActivityCollectorInput } from "#execution/activity-collector.js";
 import { createEveActivityRoutePath } from "#protocol/routes.js";
@@ -77,9 +75,6 @@ const EVE_PACKAGE_INFO = resolveInstalledPackageInfo();
 const COMMAND_HOOK_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ACTIVITY_COLLECTOR_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
-export const LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE =
-  "deploymentId 'latest' requires a World that implements resolveLatestDeploymentId()";
-
 const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 
 const log = createLogger("execution.workflow-runtime");
@@ -100,10 +95,9 @@ export const workflowEntryReference = {
 
 /**
  * Stable workflow reference used by the driver to dispatch per-turn
- * child workflow runs. The id omits the package version stamp so
- * `start(turnWorkflowReference, args, { deploymentId: "latest" })`
- * routes to the latest deployment's turn workflow even when the eve
- * version differs from the caller's deployment.
+ * child workflow runs. The id omits the package version stamp so an
+ * explicitly stamped accepting deployment can resolve the workflow even
+ * when its eve version differs from the driver's deployment.
  */
 export const turnWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${TURN_WORKFLOW_NAME}`,
@@ -176,9 +170,10 @@ export function createWorkflowRuntime(config: {
           token,
         };
         try {
-          const collector = await startWorkflowPreferLatest(activityCollectorWorkflowReference, [
-            collectorInput,
-          ]);
+          const collector = await startWorkflowOnCurrentDeployment(
+            activityCollectorWorkflowReference,
+            [collectorInput],
+          );
           collectorRunId = collector.runId;
           const fallbackOrigin = process.env.VERCEL_URL
             ? `https://${process.env.VERCEL_URL}`
@@ -206,6 +201,12 @@ export function createWorkflowRuntime(config: {
         limits: input.limits,
         serializedContext,
       };
+      if (collectorRunId !== undefined) {
+        workflowInput.activityCollectorRunId = collectorRunId;
+      }
+      if (input.continuationConflictCommand !== undefined) {
+        workflowInput.continuationConflictCommand = input.continuationConflictCommand;
+      }
       if (sessionTimeoutMs !== undefined) {
         workflowInput.sessionTimeoutMs = sessionTimeoutMs;
       }
@@ -230,9 +231,9 @@ export function createWorkflowRuntime(config: {
           : buildInvocationAttributes(input.externalInvocation)),
       };
 
-      let run: Awaited<ReturnType<typeof startWorkflowPreferLatest>>;
+      let run: Awaited<ReturnType<typeof startWorkflowOnCurrentDeployment>>;
       try {
-        run = await startWorkflowPreferLatest(workflowEntryReference, [workflowInput], {
+        run = await startWorkflowOnCurrentDeployment(workflowEntryReference, [workflowInput], {
           allowReservedAttributes: true,
           attributes: normalizeEveAttributes(attributes),
         });
@@ -242,22 +243,6 @@ export function createWorkflowRuntime(config: {
           continuationToken: input.continuationToken,
         });
         throw error;
-      }
-
-      if (input.continuationToken) {
-        try {
-          const owner = await waitForCommandHookOwner(input.continuationToken);
-          if (owner.runId !== run.runId) {
-            throw new RuntimeSessionOwnershipConflictError({
-              continuationToken: input.continuationToken,
-              ownerSessionId: owner.runId,
-              sessionId: run.runId,
-            });
-          }
-        } catch (error) {
-          await cancelActivityCollector(collectorRunId);
-          throw error;
-        }
       }
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
@@ -411,6 +396,11 @@ function isInactiveCommandTarget(error: unknown): boolean {
   return false;
 }
 
+/**
+ * Resolves hook ownership for replay-idempotent work already running inside a
+ * durable step. Request handlers must return from start/resume acceptance and
+ * leave ownership arbitration to the workflow.
+ */
 export async function waitForCommandHookOwner(token: string): Promise<WorkflowHookRecord> {
   const deadline = Date.now() + COMMAND_HOOK_READY_TIMEOUT_MS;
   while (true) {
@@ -441,58 +431,51 @@ async function waitForCommandHookRelease(token: string, sessionId: string): Prom
   }
 }
 
-/**
- * Starts a workflow on the latest deployment when latest routing applies,
- * while preserving local/dev worlds that do not implement latest routing.
- */
-export async function startWorkflowPreferLatest<TArgs extends unknown[], TResult>(
+/** Starts a workflow on the deployment executing this call. */
+export async function startWorkflowOnCurrentDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  return await withWorkflowStartContext(async () => {
-    if (!shouldRouteToLatestDeployment()) {
-      return options === undefined
-        ? await start(workflow, args)
-        : await start(workflow, args, options);
-    }
-
-    try {
-      return await start(workflow, args, { ...options, deploymentId: "latest" });
-    } catch (error) {
-      if (!isLatestDeploymentUnsupportedError(error)) {
-        throw error;
-      }
-
-      return options === undefined
-        ? await start(workflow, args)
-        : await start(workflow, args, options);
-    }
-  });
+  return await startWorkflowOnDeployment(
+    workflow,
+    args,
+    process.env.VERCEL_DEPLOYMENT_ID?.trim() || undefined,
+    options,
+  );
 }
 
 /**
- * Starts on the deployment that accepted a delivery when this step is running
- * there, otherwise preserves latest-deployment routing.
+ * Starts on the deployment that accepted a delivery when one was stamped,
+ * otherwise stays on the deployment executing this call.
  */
-export async function startWorkflowPreferAcceptedDeployment<TArgs extends unknown[], TResult>(
+export async function startWorkflowOnAcceptedDeployment<TArgs extends unknown[], TResult>(
   workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
   args: TArgs,
   acceptedDeploymentId: string | undefined,
   options?: StartOptionsWithoutDeploymentId,
 ): Promise<Run<unknown> | Run<TResult>> {
-  const currentDeploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
-  if (
-    acceptedDeploymentId === undefined ||
-    currentDeploymentId === undefined ||
-    acceptedDeploymentId !== currentDeploymentId
-  ) {
-    return await startWorkflowPreferLatest(workflow, args, options);
+  if (acceptedDeploymentId === undefined) {
+    return await startWorkflowOnCurrentDeployment(workflow, args, options);
   }
 
-  return await withWorkflowStartContext(
-    async () => await start(workflow, args, { ...options, deploymentId: acceptedDeploymentId }),
-  );
+  return await startWorkflowOnDeployment(workflow, args, acceptedDeploymentId, options);
+}
+
+async function startWorkflowOnDeployment<TArgs extends unknown[], TResult>(
+  workflow: WorkflowFunction<TArgs, TResult> | WorkflowMetadata,
+  args: TArgs,
+  deploymentId: string | undefined,
+  options?: StartOptionsWithoutDeploymentId,
+): Promise<Run<unknown> | Run<TResult>> {
+  return await withWorkflowStartContext(async () => {
+    if (deploymentId !== undefined) {
+      return await start(workflow, args, { ...options, deploymentId });
+    }
+    return options === undefined
+      ? await start(workflow, args)
+      : await start(workflow, args, options);
+  });
 }
 
 async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult>) {
@@ -504,19 +487,6 @@ async function withWorkflowStartContext<TResult>(callback: () => Promise<TResult
     ? trace.deleteSpan(activeContext)
     : activeContext;
   return await context.with(workflowContext, callback);
-}
-
-/**
- * Local development resolves "latest" to the active promoted generation.
- * Vercel resolves it only for production deployments; previews and CLI
- * deployments have no branch reference and remain pinned to themselves.
- */
-function shouldRouteToLatestDeployment(): boolean {
-  return process.env.VERCEL_ENV === "production" || isEveDevEnvironment();
-}
-
-function isLatestDeploymentUnsupportedError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes(LATEST_DEPLOYMENT_UNSUPPORTED_MESSAGE);
 }
 
 function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {

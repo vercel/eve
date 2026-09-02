@@ -8,10 +8,8 @@ import {
 } from "#execution/agent-handle-dispatch.js";
 import { createAgentContinuationBundle } from "#execution/agent-continuation-bundle.js";
 import { deriveChildActivityObserverConfig } from "#execution/activity-work.js";
-import {
-  prepareAgentActionDispatch,
-  startSubagent,
-} from "#execution/dispatch-runtime-actions-shared.js";
+import { prepareAgentActionDispatch } from "#execution/dispatch-runtime-actions-shared.js";
+import { startSubagent } from "#execution/dispatch-runtime-actions-start.js";
 import { createDurableSessionState } from "#execution/durable-session-store.js";
 import {
   checkTaskContinuationAvailability,

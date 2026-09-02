@@ -82,6 +82,10 @@ part of the authored channel API.
 
 Channel operations are dynamic: every call targets whichever session currently
 owns the address. Only `send()` can create a session when the address is unowned.
+Cold-start sends return their accepted candidate without waiting for address
+ownership. If simultaneous sends race, eve forwards the losing candidate's
+message to the winner; resolve the address after startup when you need a fixed
+handle to the canonical owner.
 
 ```ts
 const source = from(threadId);

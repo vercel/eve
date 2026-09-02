@@ -106,6 +106,32 @@ function run(input: {
 }
 
 describe("runTuiSetupCommand", () => {
+  it("arms the interrupt trap before an addressed add opens its confirmation", async () => {
+    const calls: string[] = [];
+    const renderer = fakePanelRenderer();
+    renderer.waitForInterrupt = vi.fn(() => {
+      calls.push("interrupt");
+      return { promise: new Promise<"escape" | "ctrl-c">(() => {}), dispose: vi.fn() };
+    });
+    renderer.readSelect = vi.fn(async () => {
+      calls.push("select");
+      return ["install"];
+    });
+    const flows = fakeFlows({
+      runRegistryFlow: vi.fn<TuiSetupFlows["runRegistryFlow"]>(async ({ prompter }) => {
+        await prompter.select({
+          message: "Add experimental/self-modification?",
+          options: [{ value: "install", label: "Install and set up" }],
+        });
+        return registryResult();
+      }),
+    });
+
+    await run({ command: "add", flows, renderer, useDefaultPrompter: true });
+
+    expect(calls).toEqual(["interrupt", "select"]);
+  });
+
   it("suspends the runtime during registry installation", async () => {
     const calls: string[] = [];
     const runRegistryFlow = vi.fn<TuiSetupFlows["runRegistryFlow"]>(async (input) => {
