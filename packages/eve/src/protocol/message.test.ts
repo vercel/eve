@@ -11,7 +11,9 @@ import {
   createAuthorizationRequiredEvent,
   createContextClearedEvent,
   createInputResolvedEvent,
+  createMessageAppendedEvent,
   createMessageReceivedEvent,
+  createReasoningAppendedEvent,
   createResultCompletedEvent,
   createSessionWaitingEvent,
   createStepStartedEvent,
@@ -188,6 +190,44 @@ describe("message stream protocol", () => {
     const decoded = JSON.parse(new TextDecoder().decode(encoded).trim()) as typeof stamped;
 
     expect(decoded).toEqual(stamped);
+  });
+
+  it("keeps encoded text append bytes linear as streams grow", () => {
+    const encodedBytes = (chunkCount: number): number => {
+      const delta = "x".repeat(40);
+      let bytes = 0;
+
+      for (let index = 0; index < chunkCount; index += 1) {
+        const offset = index * delta.length;
+        const events = [
+          createMessageAppendedEvent({
+            messageDelta: delta,
+            messageOffset: offset,
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_0",
+          }),
+          createReasoningAppendedEvent({
+            reasoningDelta: delta,
+            reasoningOffset: offset,
+            sequence: 0,
+            stepIndex: 0,
+            turnId: "turn_0",
+          }),
+        ];
+
+        for (const event of events) {
+          bytes += encodeMessageStreamEvent(stampMessageStreamEvent(event)).byteLength;
+        }
+      }
+
+      return bytes;
+    };
+
+    const halfStreamBytes = encodedBytes(250);
+    const fullStreamBytes = encodedBytes(500);
+
+    expect(fullStreamBytes / halfStreamBytes).toBeLessThan(2.1);
   });
 
   it("mints a distinct id for each emission of an identical payload", () => {

@@ -4,6 +4,7 @@ import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionFailedEvent,
@@ -29,6 +30,35 @@ function turnEvents(): MessageStreamEvent[] {
   ] as UnstampedMessageStreamEvent[]);
 }
 
+function streamingTurnEvents(): MessageStreamEvent[] {
+  return stampTestEvents([
+    createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+    createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+    createMessageAppendedEvent({
+      messageDelta: "Hel",
+      messageOffset: 0,
+      sequence: 2,
+      stepIndex: 0,
+      turnId: "turn_1",
+    }),
+    createMessageAppendedEvent({
+      messageDelta: "lo",
+      messageOffset: 3,
+      sequence: 3,
+      stepIndex: 0,
+      turnId: "turn_1",
+    }),
+    createMessageCompletedEvent({
+      finishReason: "stop",
+      message: "Hello",
+      sequence: 4,
+      stepIndex: 0,
+      turnId: "turn_1",
+    }),
+    createSessionWaitingEvent(),
+  ] as UnstampedMessageStreamEvent[]);
+}
+
 function startedResponse(): Response {
   return new Response(JSON.stringify({ ok: true, sessionId: "session_1", status: "accepted" }), {
     headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
@@ -45,6 +75,24 @@ function streamResponse(events: readonly MessageStreamEvent[]): Response {
           controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         }
         controller.close();
+      },
+    }),
+  );
+}
+
+function disconnectingStreamResponse(events: readonly MessageStreamEvent[]): Response {
+  const encoder = new TextEncoder();
+  let index = 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const event = events[index];
+        if (event !== undefined) {
+          index += 1;
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          return;
+        }
+        controller.error(new TypeError("terminated"));
       },
     }),
   );
@@ -106,6 +154,39 @@ afterEach(() => {
 });
 
 describe("EveAgentStore stream overlap", () => {
+  it("reconstructs a split message across an in-memory stream reconnect", async () => {
+    const events = streamingTurnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(disconnectingStreamResponse(events.slice(0, 3)))
+      .mockResolvedValueOnce(streamResponse(events.slice(3)));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const streamingText: string[] = [];
+    store.subscribe(() => {
+      const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+      if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+    });
+
+    await store.send({ message: "Hello" });
+
+    expect(streamingText).toContain("Hel");
+    expect(streamingText).toContain("Hello");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+      type: "text",
+    });
+    expect(
+      fetchMock.mock.calls
+        .slice(1)
+        .map(([request]) =>
+          new URL(request.toString(), "http://localhost").searchParams.get("startIndex"),
+        ),
+    ).toEqual([null, "3"]);
+  });
+
   it("rejects a prepared turn containing both a message and input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const store = new EveAgentStore({ reducer: defaultMessageReducer() });
@@ -213,6 +294,72 @@ describe("EveAgentStore stream overlap", () => {
 });
 
 describe("EveAgentStore session resume", () => {
+  it("continues a split message from a complete hydrated prefix", async () => {
+    const events = streamingTurnEvents();
+    const prefix = events.slice(0, 3);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse([events[3]!], 3))
+      .mockResolvedValueOnce(streamResponse(events.slice(4)));
+    const store = new EveAgentStore({
+      initialEvents: prefix,
+      initialSession: { sessionId: "session_1", streamIndex: prefix.length },
+      reducer: defaultMessageReducer(),
+    });
+    const streamingText: string[] = [];
+    store.subscribe(() => {
+      const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+      if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+    });
+
+    await store.resume();
+
+    expect(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBe(String(prefix.length));
+    expect(streamingText).toContain("Hello");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+      type: "text",
+    });
+  });
+
+  it("replays a split message from index zero when only its cursor was retained", async () => {
+    const events = streamingTurnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse(events.slice(0, 4), 3))
+      .mockResolvedValueOnce(streamResponse(events.slice(4)));
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 3 },
+      reducer: defaultMessageReducer(),
+    });
+    const streamingText: string[] = [];
+    store.subscribe(() => {
+      const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+      if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+    });
+
+    await store.resume();
+
+    expect(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBeNull();
+    expect(streamingText).toContain("Hello");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+      type: "text",
+    });
+  });
+
   it("keeps a settled hydrated snapshot resuming until catch-up returns ready", async () => {
     const events = turnEvents();
     const fetchMock = vi
