@@ -11,7 +11,7 @@ import { parseJsonValue, type JsonValue } from "#shared/json.js";
 export interface DatadogReporterConfig {
   /** Datadog LLM Observability project name. Defaults to `DD_LLMOBS_PROJECT_NAME`, the configured ml_app, `DD_SERVICE`, or the first eval id. */
   readonly projectName?: string;
-  /** Name for the placeholder dataset used by the experiment. Defaults to `<experimentName> dataset`. */
+  /** Name for the dataset used by the experiment. Defaults to `<experimentName> dataset`. */
   readonly datasetName?: string;
   /** Name for the created experiment. Defaults to a timestamped eve eval run name. */
   readonly experimentName?: string;
@@ -31,22 +31,20 @@ export interface DatadogReporterConfig {
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** JSON-serializable Datadog Experiment config. */
   readonly config?: Readonly<Record<string, unknown>>;
-  /** Include the first sent message, falling back to the eval description, in the synthetic experiment row input. Defaults to false. */
+  /** Include the first sent message, falling back to the eval description, in the experiment row and a linked dataset record. Defaults to false. */
   readonly recordInputs?: boolean;
   /** Include eval outputs in the synthetic experiment row output. Defaults to false. */
   readonly recordOutputs?: boolean;
   /** Include `metadata.expectedOutput`, `metadata.expected`, or `metadata.expected_output` on experiment rows. Defaults to false. */
   readonly recordExpectedOutputs?: boolean;
-  /** Include assertion names and failure messages, which may contain inputs, outputs, or expectations. Defaults to false. */
+  /** Include raw assertion names as metric tags and failure messages in row metadata. Defaults to false. */
   readonly recordAssertionDetails?: boolean;
   /** Include execution error messages, which may contain application data. Defaults to false. */
   readonly recordErrors?: boolean;
   /** Console hook used for tests. */
   readonly log?: (line: string) => void;
   /** eve-owned client seam for tests and custom Datadog SDK wiring. */
-  readonly client?: {
-    startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExternalExperiment>;
-  };
+  readonly client?: DatadogExperimentsClient;
 }
 
 type DatadogJsonValue =
@@ -56,6 +54,38 @@ type DatadogJsonValue =
   | null
   | DatadogJsonValue[]
   | { [key: string]: DatadogJsonValue };
+
+interface DatadogDatasetRecordInput {
+  inputData: DatadogJsonValue;
+  expectedOutput?: DatadogJsonValue;
+  metadata?: Record<string, DatadogJsonValue>;
+  tags?: string[];
+}
+
+interface DatadogDatasetRecord {
+  readonly id: string | null;
+}
+
+interface DatadogDataset {
+  id(): string | null;
+  name(): string;
+  version(): number | null;
+  records(): readonly DatadogDatasetRecord[];
+  url(): string | null;
+  push(): Promise<{ pushedCount: number; totalCount: number }>;
+}
+
+interface DatadogExperimentsClient {
+  createDataset?(
+    name: string,
+    options?: {
+      projectName?: string;
+      description?: string;
+      records?: DatadogDatasetRecordInput[];
+    },
+  ): DatadogDataset;
+  startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExternalExperiment>;
+}
 
 interface DatadogStartExperimentOptions {
   name: string;
@@ -130,13 +160,20 @@ export function Datadog(config: DatadogReporterConfig = {}): EvalReporter {
 class DatadogReporter implements EvalReporter {
   readonly #config: DatadogReporterConfig;
   readonly #evaluations = new Map<string, EveEval>();
+  #client: DatadogExperimentsClient | undefined;
+  #experimentOptions: DatadogStartExperimentOptions | undefined;
   #experiment: DatadogExternalExperiment | undefined;
+  #datasetUrl: string | undefined;
 
   constructor(config: DatadogReporterConfig) {
     this.#config = config;
   }
 
   async onRunStart(evaluations: readonly EveEval[], target: EveEvalTarget): Promise<void> {
+    this.#client = undefined;
+    this.#experimentOptions = undefined;
+    this.#experiment = undefined;
+    this.#datasetUrl = undefined;
     this.#evaluations.clear();
     for (const evaluation of evaluations) {
       this.#evaluations.set(evaluation.id, evaluation);
@@ -153,7 +190,7 @@ class DatadogReporter implements EvalReporter {
     }
     Object.assign(metadata, this.#config.metadata);
 
-    this.#experiment = await client.startExperiment({
+    const experimentOptions: DatadogStartExperimentOptions = {
       name: experimentName,
       projectName: resolveProjectName(this.#config, evaluations),
       description: this.#config.description,
@@ -161,10 +198,119 @@ class DatadogReporter implements EvalReporter {
       tags: resolveExperimentTags(this.#config, target),
       metadata: toDatadogJsonRecord(metadata),
       config: toDatadogJsonRecord(this.#config.config),
-    });
+    };
+
+    if (this.#config.recordInputs) {
+      if (!client.createDataset) {
+        throw new Error(
+          "The installed 'dd-trace' package does not expose tracer.llmobs.experiments.createDataset().",
+        );
+      }
+      this.#client = client;
+      this.#experimentOptions = experimentOptions;
+      return;
+    }
+
+    this.#experiment = await client.startExperiment(experimentOptions);
   }
 
   async onEvalComplete(result: EveEvalResult): Promise<void> {
+    if (this.#config.recordInputs || !this.#experiment) return;
+    await this.#submitResult(result);
+  }
+
+  async onRunComplete(summary: EveEvalRunSummary): Promise<void> {
+    try {
+      if (this.#config.recordInputs) {
+        await this.#startDatasetBackedExperiment(summary.results);
+      }
+      if (!this.#experiment) return;
+
+      const failed = summary.failed > 0 || summary.errored > 0;
+      await this.#experiment.close({
+        status: failed ? "failed" : "completed",
+        error: failed ? `${summary.failed} failed, ${summary.errored} errored` : undefined,
+      });
+
+      const log = this.#config.log ?? console.log;
+      if (this.#datasetUrl) {
+        log(`Datadog dataset URL: ${this.#datasetUrl}\n`);
+      }
+      const experimentUrl = this.#experiment.url();
+      if (experimentUrl) {
+        log(`Datadog experiment URL: ${experimentUrl}\n`);
+      }
+    } finally {
+      this.#client = undefined;
+      this.#experimentOptions = undefined;
+      this.#experiment = undefined;
+      this.#datasetUrl = undefined;
+    }
+  }
+
+  async #startDatasetBackedExperiment(results: readonly EveEvalResult[]): Promise<void> {
+    const client = this.#client;
+    const experimentOptions = this.#experimentOptions;
+    if (!client?.createDataset || !experimentOptions) return;
+
+    const datasetName = experimentOptions.dataset?.name ?? `${experimentOptions.name} dataset`;
+    const records = results.map((result): DatadogDatasetRecordInput => {
+      const evaluation = this.#evaluations.get(result.id);
+      const record: DatadogDatasetRecordInput = {
+        inputData: toDatadogJsonValue(resolveInput(result, evaluation)),
+        metadata: { eveEvalId: result.id },
+      };
+      if (this.#config.recordExpectedOutputs) {
+        const expectedOutput = toOptionalDatadogJsonValue(resolveExpectedOutput(evaluation));
+        if (expectedOutput !== undefined) {
+          record.expectedOutput = expectedOutput;
+        }
+      }
+      return record;
+    });
+    const dataset = client.createDataset(datasetName, {
+      projectName: experimentOptions.projectName,
+      description:
+        this.#config.description ?? `Eve eval inputs for experiment '${experimentOptions.name}'.`,
+      records,
+    });
+
+    await dataset.push();
+    const datasetId = dataset.id();
+    if (!datasetId) {
+      throw new Error(`Datadog dataset '${datasetName}' has no id after push().`);
+    }
+    const datasetRecords = dataset.records();
+    if (datasetRecords.length !== results.length) {
+      throw new Error(
+        `Datadog dataset '${datasetName}' has ${datasetRecords.length} records for ${results.length} eval results.`,
+      );
+    }
+
+    const datasetOptions: NonNullable<DatadogStartExperimentOptions["dataset"]> = {
+      id: datasetId,
+      name: dataset.name(),
+    };
+    const datasetVersion = dataset.version();
+    if (datasetVersion !== null) {
+      datasetOptions.version = datasetVersion;
+    }
+    this.#datasetUrl = dataset.url() ?? undefined;
+    this.#experiment = await client.startExperiment({
+      ...experimentOptions,
+      dataset: datasetOptions,
+    });
+
+    for (const [index, result] of results.entries()) {
+      const datasetRecordId = datasetRecords[index]?.id;
+      if (!datasetRecordId) {
+        throw new Error(`Datadog dataset record ${index + 1} has no id after push().`);
+      }
+      await this.#submitResult(result, datasetRecordId);
+    }
+  }
+
+  async #submitResult(result: EveEvalResult, datasetRecordId?: string): Promise<void> {
     if (!this.#experiment) return;
 
     const evaluation = this.#evaluations.get(result.id);
@@ -190,31 +336,15 @@ class DatadogReporter implements EvalReporter {
     if (this.#config.recordErrors && result.error !== undefined) {
       spanInput.error = result.error;
     }
+    if (datasetRecordId !== undefined) {
+      spanInput.datasetRecordId = datasetRecordId;
+    }
 
     const span = await this.#experiment.submitSpan(spanInput);
     await this.#experiment.submitEvaluationMetrics(
       span,
       resolveEvaluationMetrics(result, this.#config.recordAssertionDetails === true),
     );
-  }
-
-  async onRunComplete(summary: EveEvalRunSummary): Promise<void> {
-    if (!this.#experiment) return;
-
-    try {
-      const failed = summary.failed > 0 || summary.errored > 0;
-      await this.#experiment.close({
-        status: failed ? "failed" : "completed",
-        error: failed ? `${summary.failed} failed, ${summary.errored} errored` : undefined,
-      });
-
-      const url = this.#experiment.url();
-      if (url) {
-        (this.#config.log ?? console.log)(`Datadog experiment URL: ${url}\n`);
-      }
-    } finally {
-      this.#experiment = undefined;
-    }
   }
 }
 
@@ -234,9 +364,7 @@ const BUILT_IN_METRIC_LABELS = [
 async function resolveDatadogClient(
   config: DatadogReporterConfig,
   evaluations: readonly EveEval[],
-): Promise<{
-  startExperiment(options: DatadogStartExperimentOptions): Promise<DatadogExternalExperiment>;
-}> {
+): Promise<DatadogExperimentsClient> {
   if (config.client) return config.client;
 
   const sdk = await loadDatadogSdk();
@@ -415,11 +543,7 @@ function resolveEvaluationMetrics(
   const usedLabels = new Set<string>(BUILT_IN_METRIC_LABELS);
 
   for (const [index, assertion] of result.assertions.entries()) {
-    const rawLabel = recordAssertionDetails
-      ? assertion.severity === "gate"
-        ? `gate_${assertion.name}`
-        : assertion.name
-      : `${assertion.severity === "gate" ? "gate_" : ""}assertion_${index + 1}`;
+    const rawLabel = assertion.severity === "gate" ? `gate_${assertion.name}` : assertion.name;
     const tags: Record<string, string> = {
       assertion_index: String(index + 1),
       assertion_severity: assertion.severity,

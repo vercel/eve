@@ -41,6 +41,8 @@ evals.config.ts ── Datadog(...) ──► Experiment
 
 Target the public external Experiment API in `dd-trace@6.13.0`:
 
+- `tracer.llmobs.experiments.createDataset(...)`
+- `dataset.push()`
 - `tracer.llmobs.experiments.startExperiment(...)`
 - `experiment.submitSpan(...)`
 - `experiment.submitEvaluationMetrics(...)`
@@ -60,13 +62,18 @@ project from explicit reporter config, `DD_LLMOBS_PROJECT_NAME`, ml_app config,
 
 - `name`: the path-derived eve eval id.
 - `input`, `output`, and expected output: opt-in because they may contain user
-  data.
+  data. When input recording is enabled, completed evals are buffered until run
+  completion, their inputs are pushed as versioned dataset records, and each
+  experiment span carries its generated dataset record id. Expected output is
+  included in the dataset record only when present and explicitly enabled.
 - `metadata`: verdict, status, session id, tool/subagent names, authored eval
   metadata, sanitized target origin, and local git metadata when available.
 - `tags`: eval id, verdict, status, and authored eval tags.
-- metrics: assertion scores under position-based labels plus tool, subagent,
-  message, and reasoning counts. Assertion names and failure messages require
-  the explicit `recordAssertionDetails` privacy opt-in.
+- metrics: assertion scores under normalized descriptive assertion names plus
+  tool, subagent, message, and reasoning counts. Gate labels receive a `gate_`
+  prefix, and authors can set stable names with `.label(...)`. Raw assertion-name
+  tags and failure messages require the explicit `recordAssertionDetails`
+  privacy opt-in.
 - timestamps: the values already captured by the eval runner.
 - error: opt-in because exception messages may contain application data.
 
@@ -87,8 +94,9 @@ remain the fallback for remote or uninstrumented targets.
 
 ## Validation
 
-- Unit-test experiment lifecycle, row mapping, privacy switches, metric labels,
-  project resolution, summary status, and URL logging with an injected client.
+- Unit-test experiment lifecycle, dataset creation and record linkage, row
+  mapping, privacy switches, metric labels, project resolution, summary status,
+  and URL logging with an injected client.
 - Pin `dd-trace@6.13.0` as an eve development dependency and in the deterministic
   reporter fixture so TypeScript and runtime API smoke checks exercise the
   supported release.

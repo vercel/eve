@@ -105,7 +105,44 @@ function makeConfig(overrides: Partial<DatadogReporterConfig> = {}) {
     submitEvaluationMetrics: vi.fn(async (_span: unknown, _metrics: unknown) => undefined),
     close: vi.fn(async () => undefined),
   };
+  let datasetName = "dataset-1";
+  let datasetRecords: Array<{
+    id: string;
+    inputData: unknown;
+    expectedOutput?: unknown;
+    metadata?: Readonly<Record<string, unknown>>;
+  }> = [];
+  const dataset = {
+    id: vi.fn(() => "dataset-1"),
+    name: vi.fn(() => datasetName),
+    version: vi.fn(() => 3),
+    records: vi.fn(() => datasetRecords),
+    url: vi.fn(() => "https://dd.test/dataset"),
+    push: vi.fn(async () => ({
+      pushedCount: datasetRecords.length,
+      totalCount: datasetRecords.length,
+    })),
+  };
   const client = {
+    createDataset: vi.fn(
+      (
+        name: string,
+        options?: {
+          records?: Array<{
+            inputData: unknown;
+            expectedOutput?: unknown;
+            metadata?: Readonly<Record<string, unknown>>;
+          }>;
+        },
+      ) => {
+        datasetName = name;
+        datasetRecords = (options?.records ?? []).map((record, index) => ({
+          id: `record-${index + 1}`,
+          ...record,
+        }));
+        return dataset;
+      },
+    ),
     startExperiment: vi.fn(async (_options: unknown) => experiment),
   };
   const lines: string[] = [];
@@ -116,7 +153,7 @@ function makeConfig(overrides: Partial<DatadogReporterConfig> = {}) {
     ...overrides,
   } satisfies DatadogReporterConfig;
 
-  return { client, config, lines, experiment, span };
+  return { client, config, dataset, experiment, lines, span };
 }
 
 describe("Datadog", () => {
@@ -129,6 +166,7 @@ describe("Datadog", () => {
     await reporter.onRunStart([evaluation], makeTarget());
     await reporter.onEvalComplete(result);
 
+    expect(client.createDataset).not.toHaveBeenCalled();
     expect(client.startExperiment).toHaveBeenCalledWith(
       expect.objectContaining({
         name: "run-1",
@@ -164,9 +202,9 @@ describe("Datadog", () => {
     expect(submittedSpan).not.toHaveProperty("metadata.expected");
     expect(submittedSpan).not.toHaveProperty("metadata.expected_output");
     expect(experiment.submitEvaluationMetrics).toHaveBeenCalledWith(span, [
-      expect.objectContaining({ label: "gate_assertion_1", value: 1 }),
-      expect.objectContaining({ label: "assertion_2", value: 0.9 }),
-      expect.objectContaining({ label: "assertion_3", value: 1 }),
+      expect.objectContaining({ label: "gate_succeeded", value: 1 }),
+      expect.objectContaining({ label: "similarity", value: 0.9 }),
+      expect.objectContaining({ label: "judge_autoevals_closedQA", value: 1 }),
       expect.objectContaining({ label: "eve_tool_call_count", value: 1 }),
       expect.objectContaining({ label: "eve_subagent_call_count", value: 0 }),
       expect.objectContaining({ label: "eve_message_count", value: 1 }),
@@ -238,7 +276,7 @@ describe("Datadog", () => {
     expect(experiment.submitEvaluationMetrics.mock.calls[0]?.[1]).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          label: "gate_assertion_1",
+          label: "gate_messageIncludes_private_expectation",
           tags: {
             assertion_index: "1",
             assertion_severity: "gate",
@@ -249,7 +287,7 @@ describe("Datadog", () => {
     );
   });
 
-  it("records assertion names and failure messages only when enabled", async () => {
+  it("records assertion name tags and failure messages only when enabled", async () => {
     const { config, experiment } = makeConfig({ recordAssertionDetails: true });
     const reporter = Datadog(config);
     const result = makeEvalResult({
@@ -316,24 +354,78 @@ describe("Datadog", () => {
     ]);
   });
 
-  it("records eval input and output only when enabled", async () => {
-    const { config, experiment } = makeConfig({
+  it("creates dataset records from opted-in eval inputs and links experiment rows", async () => {
+    const { client, config, dataset, experiment, lines } = makeConfig({
+      datasetName: "greeting inputs",
+      experimentName: "run-1",
       recordInputs: true,
       recordOutputs: true,
       recordExpectedOutputs: true,
     });
     const reporter = Datadog(config);
+    const result = makeEvalResult();
 
     await reporter.onRunStart([makeEval()], makeTarget());
-    await reporter.onEvalComplete(makeEvalResult());
+    await reporter.onEvalComplete(result);
 
+    expect(client.startExperiment).not.toHaveBeenCalled();
+    expect(experiment.submitSpan).not.toHaveBeenCalled();
+
+    await reporter.onRunComplete(makeSummary(result));
+
+    expect(client.createDataset).toHaveBeenCalledWith(
+      "greeting inputs",
+      expect.objectContaining({
+        projectName: "test-project",
+        records: [
+          {
+            inputData: "What should I send you?",
+            expectedOutput: "helpful onboarding answer",
+            metadata: { eveEvalId: "eval-1" },
+          },
+        ],
+      }),
+    );
+    expect(dataset.push).toHaveBeenCalledOnce();
+    expect(dataset.push.mock.invocationCallOrder[0]).toBeLessThan(
+      client.startExperiment.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(client.startExperiment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "run-1",
+        dataset: { id: "dataset-1", name: "greeting inputs", version: 3 },
+      }),
+    );
     expect(experiment.submitSpan).toHaveBeenCalledWith(
       expect.objectContaining({
         input: "What should I send you?",
         output: "actual output",
         expectedOutput: "helpful onboarding answer",
+        datasetRecordId: "record-1",
       }),
     );
+    expect(lines.join("\n")).toContain("Datadog dataset URL: https://dd.test/dataset");
+  });
+
+  it("creates an input-only dataset record when no expected output is authored", async () => {
+    const { client, config } = makeConfig({
+      datasetName: "input-only dataset",
+      recordInputs: true,
+      recordExpectedOutputs: true,
+    });
+    const reporter = Datadog(config);
+    const evaluation = makeEval({ metadata: { suite: "unit" } });
+    const result = makeEvalResult();
+
+    await reporter.onRunStart([evaluation], makeTarget());
+    await reporter.onEvalComplete(result);
+    await reporter.onRunComplete(makeSummary(result));
+
+    const record = client.createDataset.mock.calls[0]?.[1]?.records?.[0];
+    expect(record).toEqual({
+      inputData: "What should I send you?",
+      metadata: { eveEvalId: "eval-1" },
+    });
   });
 
   it("uses the dd-trace project environment variable by default", async () => {

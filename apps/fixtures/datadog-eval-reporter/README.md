@@ -11,8 +11,9 @@ export DD_SITE="datadoghq.com"
 pnpm --filter datadog-eval-reporter-fixture eval
 ```
 
-The run creates one Datadog LLM Observability Experiment, submits one synthetic
-experiment span for the smoke eval, attaches the assertion metrics, and prints
-the Experiment URL. The fixture does not export the agent runtime's OpenTelemetry
-spans; Datadog's external Experiment API generates the experiment row's trace
-and span identifiers.
+The run creates a Datadog dataset with one record containing `Say hello.`,
+creates one LLM Observability Experiment against that dataset version, links the
+record to the smoke eval's synthetic experiment span, attaches the assertion
+metrics, and prints the Dataset and Experiment URLs. The fixture does not export
+the agent runtime's OpenTelemetry spans; Datadog's public dataset and external
+Experiment APIs generate the record, trace, and span identifiers.
