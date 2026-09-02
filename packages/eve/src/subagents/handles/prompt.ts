@@ -36,7 +36,7 @@ export function projectParkedAgentHandles(
  */
 export function renderAgentsSnippet(store: AgentHandleStore): string {
   const agents = projectParkedAgentHandles(store).map((handle) => {
-    const status = handle.lastStatus ?? "(available)";
+    const status = handle.phase === "parked" ? handle.lastStatus : "(available)";
     return `<agent id="${escapeXml(handle.identity.id)}" name="${escapeXml(handle.identity.name)}">${escapeXml(status === "" ? "(no status)" : status)}</agent>`;
   });
   return [AGENTS_SNIPPET_LABEL, "<agents>", ...agents, "</agents>"].join("\n");

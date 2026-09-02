@@ -26,8 +26,8 @@ import {
   hasProxyInputRequests,
 } from "#harness/proxy-input-requests.js";
 import {
+  abandonAgentInvocationOwners,
   abandonRunningAgentTurns,
-  applyTaskAgentHandleCommand,
 } from "#subagents/handles/transitions.js";
 import { clearPendingCoordinationBatch } from "#harness/coordination.js";
 import { clearWorkflowToolRuns, getWorkflowToolRuns } from "#harness/workflow-tool-runs.js";
@@ -138,18 +138,15 @@ export async function settleCancelledTurnStep(input: {
   // violation holds, so the next delivery gets a fresh prompt instead of
   // queueing forever behind a stale one.
   //
-  // `abandonRunningAgentTurns`: `cancelDescendantTurnsStep` already ran and
-  // the cancelled turn's inbox is gone, so a child settlement can never
-  // reach this store again. This is the last write that can move those
-  // handles out of `running`.
+  // Descendant cancellation already ran and the cancelled turn's inbox is
+  // gone, so a child settlement can never reach this store again. This is the
+  // last write that can park turn-owned `running` and workflow-owned `claimed`
+  // handles.
   const workflowToolRuns = getWorkflowToolRuns(session.state);
-  for (const run of workflowToolRuns) {
-    session = applyTaskAgentHandleCommand(session, {
-      kind: "release-owner",
-      lastStatus: "(cancelled)",
-      ownerId: run.runId,
-    }).session;
-  }
+  session = abandonAgentInvocationOwners(
+    session,
+    new Set(workflowToolRuns.map((run) => run.runId)),
+  );
   const cancelledSession = reconcileSessionContinuationToken(
     ctx,
     setHarnessEmissionState(

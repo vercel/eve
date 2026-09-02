@@ -11,6 +11,8 @@ import type { RuntimeSubagentResult } from "#shared/action-types.js";
 import type { HandleEventFn } from "#harness/types.js";
 import { createSubagentCalledEvent, type SubagentCalledStreamEvent } from "#protocol/message.js";
 import { workflowEntryReference } from "#execution/workflow-runtime.js";
+import { getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
+import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { deriveAgentOperationId } from "#subagents/handles/operation-id.js";
 import { createSubagentReceiptIdentity } from "#execution/tools/subagent/receipt-identity.js";
 import {
@@ -29,6 +31,7 @@ import {
   type TaskOwnedAgentHandle,
 } from "#subagents/handles/store.js";
 import { applyTaskAgentHandleCommand } from "#subagents/handles/transitions.js";
+import { abandonAgentInvocationOwners } from "#subagents/handles/transitions.js";
 import {
   AGENT_BUSY,
   AGENT_MISMATCH,
@@ -67,14 +70,14 @@ export type TaskAgentInvocationDispatchResult =
 
 /** Dispatches one owner-scoped local or remote agent invocation. */
 export async function dispatchAgentInvocation(input: {
-  readonly callbackBaseUrl?: string;
+  readonly callbackBaseUrl: string;
   readonly emit?: HandleEventFn;
   readonly replyTo: string;
   readonly request: AgentInvocationRequest;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly ownerId: string;
-  readonly taskId?: string;
+  readonly taskId?: string | undefined;
 }): Promise<AgentInvocationDispatchResult> {
   const durableSession = await readDurableSession(input.sessionState);
   const agentHandles = getAgentHandleStore(durableSession.state)?.handles ?? [];
@@ -280,9 +283,13 @@ export async function dispatchAgentInvocation(input: {
   return { kind: "dispatched", agentId, event, sessionState: sessionState() };
 }
 
-/** Dispatches one agent request after any task-owned invocation is admitted. */
+/**
+ * Dispatches one agent request after any task-owned invocation is admitted.
+ * The callback origin is parent-owned, so it is derived from this workflow's
+ * own metadata rather than accepted from the inbound request.
+ */
 export async function dispatchTaskAgentInvocationStep(
-  input: Omit<Parameters<typeof dispatchAgentInvocation>[0], "emit">,
+  input: Omit<Parameters<typeof dispatchAgentInvocation>[0], "callbackBaseUrl" | "emit">,
 ): Promise<TaskAgentInvocationDispatchResult> {
   "use step";
 
@@ -295,7 +302,10 @@ export async function dispatchTaskAgentInvocationStep(
       return { kind: "not-admitted", sessionState: input.sessionState };
     }
   }
-  return await dispatchAgentInvocation(input);
+  return await dispatchAgentInvocation({
+    ...input,
+    callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
+  });
 }
 
 /** Applies an owner-scoped child settlement to the parent session's canonical state. */
@@ -304,7 +314,7 @@ export async function settleTaskAgentInvocationStep(input: {
   readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
   readonly sessionState: DurableSessionState;
-  readonly taskId?: string;
+  readonly taskId?: string | undefined;
 }): Promise<{ readonly sessionState: DurableSessionState }> {
   "use step";
 
@@ -324,11 +334,18 @@ export async function settleTaskAgentInvocationStep(input: {
       ? handles.filter((candidate) => candidate !== handle)
       : handles.map((candidate) =>
           candidate === handle
-            ? {
-                address: handle.address,
-                identity: handle.identity,
-                phase: "available" as const,
-              }
+            ? input.result.outcome.result.kind === "cancelled"
+              ? {
+                  address: handle.address,
+                  identity: handle.identity,
+                  lastStatus: "(cancelled)",
+                  phase: "parked" as const,
+                }
+              : {
+                  address: handle.address,
+                  identity: handle.identity,
+                  phase: "available" as const,
+                }
             : candidate,
         );
   let session = writeHandles(durable, nextHandles);
@@ -359,16 +376,19 @@ export async function settleTaskAgentInvocationStep(input: {
 
 /** Releases any child leases still owned by a completed workflow-tool run. */
 export async function releaseAgentInvocationOwnerStep(input: {
+  readonly cancelled?: boolean;
   readonly ownerId: string;
   readonly sessionState: DurableSessionState;
 }): Promise<{ readonly sessionState: DurableSessionState }> {
   "use step";
 
   const durable = await readDurableSession(input.sessionState);
-  const session = applyTaskAgentHandleCommand(durable, {
-    kind: "release-owner",
-    ownerId: input.ownerId,
-  }).session;
+  const session = input.cancelled
+    ? abandonAgentInvocationOwners(durable, new Set([input.ownerId]))
+    : applyTaskAgentHandleCommand(durable, {
+        kind: "release-owner",
+        ownerId: input.ownerId,
+      }).session;
   return {
     sessionState:
       session === durable

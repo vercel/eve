@@ -313,7 +313,6 @@ export function applyAgentHandleStoreCommand(
       if (
         existing.phase === "starting" ||
         existing.phase === "running" ||
-        existing.phase === "parked" ||
         existing.identity.name !== command.invokedName ||
         (existing.phase !== "reserved" &&
           (existing.address.kind === "agent/remote") !== (command.expectedTarget === "remote"))
@@ -353,14 +352,7 @@ export function applyAgentHandleStoreCommand(
       const handles = store.handles.flatMap((handle): readonly AgentHandle[] => {
         if (handle.phase === "reserved" && handle.ownerId === command.ownerId) return [];
         if (handle.phase !== "claimed" || handle.ownerId !== command.ownerId) return [handle];
-        const available: {
-          address: typeof handle.address;
-          identity: typeof handle.identity;
-          lastStatus?: string;
-          phase: "available";
-        } = { address: handle.address, identity: handle.identity, phase: "available" };
-        if (command.lastStatus !== undefined) available.lastStatus = command.lastStatus;
-        return [available];
+        return [{ address: handle.address, identity: handle.identity, phase: "available" }];
       });
       return {
         result: { kind: "ready" },
@@ -368,6 +360,27 @@ export function applyAgentHandleStoreCommand(
       };
     }
   }
+}
+
+/** Parks child turns still owned by workflow runs when their parent turn is cancelled. */
+export function abandonAgentInvocationOwners<Session extends { readonly state?: SessionStateMap }>(
+  session: Session,
+  ownerIds: ReadonlySet<string>,
+): Session {
+  const handles = getAgentHandleStore(session.state)?.handles ?? [];
+  const abandoned = handles.flatMap((handle): readonly AgentHandle[] => {
+    if (handle.phase === "reserved" && ownerIds.has(handle.ownerId)) return [];
+    if (handle.phase !== "claimed" || !ownerIds.has(handle.ownerId)) return [handle];
+    return [
+      {
+        address: handle.address,
+        identity: handle.identity,
+        lastStatus: "(cancelled)",
+        phase: "parked",
+      },
+    ];
+  });
+  return handlesEqual(handles, abandoned) ? session : writeHandles(session, abandoned);
 }
 
 /** Applies one owner-scoped handle transition to a harness session. */

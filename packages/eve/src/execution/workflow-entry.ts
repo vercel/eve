@@ -41,7 +41,6 @@ import {
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { DEFAULT_SESSION_TIMEOUT_MS } from "#execution/session-timeout.js";
 import { createSessionTimeoutControl } from "#execution/session-timeout-control.js";
-import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url.js";
 import { terminateChildSessionsStep } from "#execution/terminate-child-sessions-step.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { attachClientContext, readClientContext } from "#internal/client-context.js";
@@ -429,7 +428,6 @@ async function runDriverLoop(input: {
         awaitAuthorizationCallbacks: expectedAttemptIds.size > 0,
         bufferedDeliveries,
         bufferedSessionControls,
-        callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
         cancelledTaskIds,
         commandInbox,
         deferDeliveries: input.mode === "task" && expectedAttemptIds.size > 0,

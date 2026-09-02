@@ -27,7 +27,6 @@ import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requ
  * re-export plain helpers into a workflow body).
  */
 export async function routeDeliverToChildren(input: {
-  readonly callbackBaseUrl?: string;
   readonly delivery: DeliverHookPayload;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly sessionState: DurableSessionState;
@@ -58,7 +57,6 @@ export async function routeDeliverToChildren(input: {
     const applied = await applyTaskAgentRequest(
       { ...request, ownerId: request.taskId },
       {
-        callbackBaseUrl: input.callbackBaseUrl,
         parentWritable: input.parentWritable,
         serializedContext,
         sessionState,

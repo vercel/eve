@@ -151,7 +151,6 @@ export type TaskOwnedAgentHandle =
       readonly phase: "available";
       readonly identity: AgentIdentity;
       readonly address: AgentAddress;
-      readonly lastStatus?: string;
     };
 
 /**
@@ -199,7 +198,7 @@ export type AgentHandleStoreCommand =
       readonly ownerId: string;
     }
   | { readonly agentId: string; readonly kind: "remove"; readonly ownerId: string }
-  | { readonly kind: "release-owner"; readonly lastStatus?: string; readonly ownerId: string };
+  | { readonly kind: "release-owner"; readonly ownerId: string };
 
 export type AgentHandleStoreCommandResult =
   | { readonly kind: "ready"; readonly handle?: TaskOwnedAgentHandle }
@@ -292,11 +291,7 @@ const agentHandleStoreCommandSchema: z.ZodType<AgentHandleStoreCommand> = z.disc
       kind: z.literal("remove"),
       ownerId: nonEmptyString,
     }),
-    z.strictObject({
-      kind: z.literal("release-owner"),
-      lastStatus: z.string().max(MAX_STATUS_LENGTH).optional(),
-      ownerId: nonEmptyString,
-    }),
+    z.strictObject({ kind: z.literal("release-owner"), ownerId: nonEmptyString }),
   ],
 );
 
@@ -340,7 +335,6 @@ const taskOwnedAgentHandleSchema: z.ZodType<TaskOwnedAgentHandle> = z.discrimina
   z.strictObject({
     address: addressSchema,
     identity: identitySchema,
-    lastStatus: z.string().max(MAX_STATUS_LENGTH).optional(),
     phase: z.literal("available"),
   }),
 ]);

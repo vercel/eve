@@ -10,11 +10,20 @@ import { releaseAgentInvocationOwnerStep } from "#execution/tools/subagent/invok
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
 import {
   workflowToolRunOutcomeToSubagentResult,
+  workflowToolRunOutcomeToToolResult,
   workflowToolRunRequestToInputRequestPayload,
 } from "#execution/tools/workflow/owner-inbox.js";
-import { findWorkflowToolRun } from "#harness/workflow-tool-runs.js";
+import {
+  findWorkflowToolRun,
+  isInboxSubagentResultFromRecordedWorkflowToolRun,
+  isInboxToolResultFromRecordedWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
-import type { RuntimeSubagentResult } from "#shared/action-types.js";
+import type {
+  RuntimeActionResult,
+  RuntimeSubagentResult,
+  RuntimeToolResultActionResult,
+} from "#shared/action-types.js";
 
 interface HandlerInput<T> {
   readonly callbackMetadataUrl: string;
@@ -22,17 +31,58 @@ interface HandlerInput<T> {
   readonly message: T;
 }
 
+/**
+ * Settles a workflow tool run outcome against the turn's recorded runs and
+ * returns the runtime action result the turn should accept, or `undefined`
+ * when the outcome does not bind to a run this turn owns.
+ */
 export async function handleWorkflowToolRunOutcome(
   input: HandlerInput<WorkflowToolRunOutcomeMessage>,
-): Promise<RuntimeSubagentResult | undefined> {
+): Promise<RuntimeActionResult | undefined> {
   const { cursor, message } = input;
   const recorded = findWorkflowToolRun(
     cursor.sessionState.snapshot?.session.state,
     message.from.callId,
   );
   if (recorded?.runId !== message.from.runId) return undefined;
+
+  const result: RuntimeSubagentResult | RuntimeToolResultActionResult =
+    recorded.resultKind === "subagent"
+      ? await settleSubagentOutcome(input)
+      : workflowToolRunOutcomeToToolResult(message);
+
+  // Any workflow tool run may have invoked agents through its request channel,
+  // so leases are released regardless of the run's result kind.
+  await cancelAgentInvocationOwnerStep({
+    ownerId: message.from.runId,
+    serializedContext: cursor.serializedContext,
+    sessionState: cursor.sessionState,
+  });
+  const released = await releaseAgentInvocationOwnerStep({
+    cancelled: message.result.status === "cancelled",
+    ownerId: message.from.runId,
+    sessionState: cursor.sessionState,
+  });
+  await cursor.adopt({
+    serializedContext: cursor.serializedContext,
+    sessionState: released.sessionState,
+  });
+
+  const sessionSnapshotState = cursor.sessionState.snapshot?.session.state;
+  const accepted =
+    result.kind === "subagent-result"
+      ? result.callId === message.from.callId &&
+        isInboxSubagentResultFromRecordedWorkflowToolRun(sessionSnapshotState, result)
+      : isInboxToolResultFromRecordedWorkflowToolRun(sessionSnapshotState, result);
+  return accepted ? result : undefined;
+}
+
+async function settleSubagentOutcome(
+  input: HandlerInput<WorkflowToolRunOutcomeMessage>,
+): Promise<RuntimeSubagentResult> {
+  const { cursor, message } = input;
   const result = workflowToolRunOutcomeToSubagentResult(message);
-  if (message.from.resultKind === "subagent" && result.origin === "child") {
+  if (result.origin === "child") {
     await cursor.adopt(
       await applyTaskAgentRequest(
         {
@@ -45,19 +95,6 @@ export async function handleWorkflowToolRunOutcome(
       ),
     );
   }
-  await cancelAgentInvocationOwnerStep({
-    ownerId: message.from.runId,
-    serializedContext: cursor.serializedContext,
-    sessionState: cursor.sessionState,
-  });
-  const released = await releaseAgentInvocationOwnerStep({
-    ownerId: message.from.runId,
-    sessionState: cursor.sessionState,
-  });
-  await cursor.adopt({
-    serializedContext: cursor.serializedContext,
-    sessionState: released.sessionState,
-  });
   return result;
 }
 

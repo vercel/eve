@@ -1,3 +1,4 @@
+import type { ContextReader } from "#context/key.js";
 import { deserializeContext } from "#context/serialize.js";
 import {
   prepareActionDispatch,
@@ -11,8 +12,9 @@ import type {
   RuntimeSubagentDispatchFailure,
   RuntimeSubagentDispatchRequest,
 } from "#shared/action-types.js";
+import type { JsonObject } from "#shared/json.js";
 import type { AgentInvocationRequest } from "#execution/tools/subagent/invoke-agent.js";
-import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
+import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { AGENT_TOOL_DESCRIPTION, AGENT_TOOL_NAME } from "#tools/framework/agent-contract.js";
 import {
@@ -89,8 +91,8 @@ export async function prepareOwnerAgentInvocation(input: {
 
 export function planAgentDispatch(input: {
   readonly action: RuntimeAgentDispatchRequest;
-  readonly bundle: import("#runtime/sessions/runtime-context-keys.js").CompiledBundle;
-  readonly ctx: Parameters<typeof getDynamicSubagentSelection>[0];
+  readonly bundle: CompiledBundle;
+  readonly ctx: ContextReader;
   readonly knownAgentIds?: readonly string[];
   readonly session: RuntimeSession;
 }): OwnerAgentDispatchPlanEntry {
@@ -127,8 +129,8 @@ export function planAgentDispatch(input: {
 
 function classifyFreshStart(input: {
   readonly action: RuntimeAgentDispatchRequest;
-  readonly bundle: import("#runtime/sessions/runtime-context-keys.js").CompiledBundle;
-  readonly ctx: Parameters<typeof getDynamicSubagentSelection>[0];
+  readonly bundle: CompiledBundle;
+  readonly ctx: ContextReader;
   readonly session: RuntimeSession;
 }): Extract<OwnerAgentDispatchPlanEntry, { kind: "reject" | "start" }> {
   const { action } = input;
@@ -198,7 +200,7 @@ function classifyFreshStart(input: {
 }
 
 function ownerPlanSharesSandbox(input: {
-  readonly bundle: import("#runtime/sessions/runtime-context-keys.js").CompiledBundle;
+  readonly bundle: CompiledBundle;
   readonly plan: readonly OwnerAgentDispatchPlanEntry[];
 }): boolean {
   return input.plan.some((entry) => {
@@ -260,7 +262,7 @@ function resolveAgentInvocationAction(input: {
   const actionInput: {
     agentId?: string;
     message: string;
-    outputSchema?: import("#shared/json.js").JsonObject;
+    outputSchema?: JsonObject;
   } = { message: input.input.message };
   if (input.input.agentId !== undefined) actionInput.agentId = input.input.agentId;
   if (input.input.outputSchema !== undefined) actionInput.outputSchema = input.input.outputSchema;

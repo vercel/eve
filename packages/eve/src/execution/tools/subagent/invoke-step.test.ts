@@ -144,6 +144,7 @@ describe("owner agent invocation dispatch", () => {
     vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue(called);
 
     const first = await dispatchAgentInvocation({
+      callbackBaseUrl: "https://parent.example",
       replyTo: "first-reply",
       request: {
         input: { agentId: "agent-1", message: "First", target: "research" },
@@ -170,6 +171,7 @@ describe("owner agent invocation dispatch", () => {
       state: setAgentHandleStore(undefined, { handles: [availableRecord] }),
     } as never);
     const second = await dispatchAgentInvocation({
+      callbackBaseUrl: "https://parent.example",
       replyTo: "second-reply",
       request: {
         input: { agentId: "agent-1", message: "Second", target: "research" },
@@ -300,10 +302,83 @@ describe("task-owned agent settlement", () => {
       availableRecord,
     ]);
   });
+
+  it("parks every remaining claim for a cancelled workflow run", async () => {
+    const claimed = {
+      ...availableRecord,
+      operationId: "operation-1",
+      ownerId: "workflow-run-1",
+      phase: "claimed" as const,
+    };
+    vi.mocked(readDurableSession).mockResolvedValue({
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+    } as never);
+
+    const released = await releaseAgentInvocationOwnerStep({
+      cancelled: true,
+      ownerId: "workflow-run-1",
+      sessionState: {} as never,
+    });
+
+    expect(getAgentHandleStore(released.sessionState.snapshot?.session.state)?.handles).toEqual([
+      {
+        address: availableRecord.address,
+        identity: availableRecord.identity,
+        lastStatus: "(cancelled)",
+        phase: "parked",
+      },
+    ]);
+  });
+
+  it("keeps a cancelled parked child resumable after settlement", async () => {
+    const claimed = {
+      ...availableRecord,
+      operationId: "operation-1",
+      phase: "claimed" as const,
+      ownerId: "workflow-run-1",
+    };
+    vi.mocked(readDurableSession).mockResolvedValue({
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [claimed] }),
+    } as never);
+
+    const settled = await settleTaskAgentInvocationStep({
+      ownerId: "workflow-run-1",
+      result: {
+        callId: "call-1",
+        kind: "subagent-result",
+        origin: "child",
+        outcome: {
+          kind: "parked",
+          result: { kind: "cancelled" },
+          usageDelta: {
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+          },
+        },
+        output: "cancelled",
+        subagentName: "research",
+      },
+      sessionState: {} as never,
+    });
+
+    expect(getAgentHandleStore(settled.sessionState.snapshot?.session.state)?.handles).toEqual([
+      {
+        address: availableRecord.address,
+        identity: availableRecord.identity,
+        lastStatus: "(cancelled)",
+        phase: "parked",
+      },
+    ]);
+  });
 });
 
 async function dispatch() {
   return await dispatchAgentInvocation({
+    callbackBaseUrl: "https://parent.example",
     emit: vi.fn(),
     replyTo: "agent-reply",
     request: {

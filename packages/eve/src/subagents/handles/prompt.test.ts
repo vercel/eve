@@ -64,9 +64,6 @@ describe("projectParkedAgentHandles / renderAgentsSnippet", () => {
     expect(renderAgentsSnippet({ handles: [availableHandle] })).toContain(
       `<agent id="${identity.id}" name="research">(available)</agent>`,
     );
-    expect(
-      renderAgentsSnippet({ handles: [{ ...availableHandle, lastStatus: "(cancelled)" }] }),
-    ).toContain(`<agent id="${identity.id}" name="research">(cancelled)</agent>`);
   });
 
   it("omits private delivery coordinates and renders a placeholder for empty statuses", () => {

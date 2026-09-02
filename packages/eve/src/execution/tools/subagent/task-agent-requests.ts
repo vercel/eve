@@ -16,7 +16,6 @@ export interface AgentRequestDelivery {
 }
 
 export interface TaskAgentRequestContext {
-  readonly callbackBaseUrl?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -39,29 +38,24 @@ export async function applyTaskAgentRequest(
   const { request } = delivery;
   switch (request.kind) {
     case "agent-settled": {
-      const settlement = {
+      const settled = await settleTaskAgentInvocationStep({
         accumulateUsage: delivery.accumulateUsage,
         ownerId: delivery.ownerId,
         result: request.result,
         sessionState: ctx.sessionState,
-      };
-      const settled = await settleTaskAgentInvocationStep(
-        delivery.taskId === undefined ? settlement : { ...settlement, taskId: delivery.taskId },
-      );
+        taskId: delivery.taskId,
+      });
       return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
     }
     case "agent-invoke": {
-      const invocation = {
-        callbackBaseUrl: ctx.callbackBaseUrl,
+      const dispatched = await dispatchTaskAgentInvocationStep({
         ownerId: delivery.ownerId,
         replyTo: delivery.replyTo,
         request,
         serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
-      };
-      const dispatched = await dispatchTaskAgentInvocationStep(
-        delivery.taskId === undefined ? invocation : { ...invocation, taskId: delivery.taskId },
-      );
+        taskId: delivery.taskId,
+      });
       switch (dispatched.kind) {
         case "dispatched": {
           const emitted = await emitTaskSubagentCalledStep({

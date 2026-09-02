@@ -38,7 +38,6 @@ import {
   type WorkflowToolRunOwnerChannels,
   type WorkflowToolRunOwnerReaders,
 } from "#execution/tools/workflow/owner.js";
-import { workflowToolRunOutcomeToToolResult } from "#execution/tools/workflow/owner-inbox.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -413,26 +412,14 @@ async function waitForRuntimeActionResults(input: {
     if (read.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
     if (read.channel === "outcome") {
-      const message = read.next.value;
-      const subagentResult = await handleWorkflowToolRunOutcome({
+      const result = await handleWorkflowToolRunOutcome({
         callbackMetadataUrl: getWorkflowMetadata().url,
         cursor: input.cursor,
-        message,
+        message: read.next.value,
       });
-      if (subagentResult === undefined) continue;
-      const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
-      const result =
-        subagentResult.callId === message.from.callId &&
-        isInboxSubagentResultFromRecordedWorkflowToolRun(sessionSnapshotState, subagentResult)
-          ? subagentResult
-          : workflowToolRunOutcomeToToolResult(read.next.value);
-      if (
-        result.kind === "subagent-result" ||
-        isInboxToolResultFromRecordedWorkflowToolRun(sessionSnapshotState, result)
-      ) {
-        const acceptedAtMs = Date.now();
+      if (result !== undefined) {
         results.push(result);
-        acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
+        acceptedAtMsByCallId.set(result.callId, Date.now());
       }
       continue;
     }
@@ -509,7 +496,6 @@ async function waitForRuntimeActionResults(input: {
       pendingDeliveryRequest = undefined;
 
       const routed = await routeDeliverToChildren({
-        callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
         delivery: value.delivery,
         parentWritable: input.cursor.parentWritable,
         serializedContext: input.cursor.serializedContext,

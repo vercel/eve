@@ -183,7 +183,7 @@ describe("settleCancelledTurnStep handle store", () => {
             address: CLAIMED_HANDLE.address,
             identity: CLAIMED_HANDLE.identity,
             lastStatus: "(cancelled)",
-            phase: "available",
+            phase: "parked",
           },
         ],
       });

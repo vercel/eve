@@ -63,7 +63,6 @@ export async function nextTurnDelivery(input: {
   readonly awaitAuthorizationCallbacks?: boolean;
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-  readonly callbackBaseUrl?: string;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -86,7 +85,6 @@ export async function nextTurnDelivery(input: {
 async function awaitNextTurnDelivery(input: {
   readonly bufferedDeliveries: DeliverHookPayload[];
   readonly bufferedSessionControls: Array<"clear" | "compact" | "expired" | "reset">;
-  readonly callbackBaseUrl?: string;
   readonly cancelledTaskIds?: Set<string>;
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
@@ -120,7 +118,6 @@ async function awaitNextTurnDelivery(input: {
     }
 
     const routed = await routeDeliverToChildren({
-      callbackBaseUrl: input.callbackBaseUrl,
       delivery: deliver,
       parentWritable: input.driverWritable,
       serializedContext: input.stateCursor.serializedContext,

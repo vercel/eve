@@ -4,7 +4,7 @@ import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js"
 import { cancelRemoteAgentTurn, resolveRemoteAgentForAction } from "#subagents/remote-dispatch.js";
 import { deserializeContext } from "#context/serialize.js";
 import { BundleKey } from "#runtime/sessions/runtime-context-keys.js";
-import { getAgentHandleStore } from "#subagents/handles/store.js";
+import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
 import { createLogger, logError } from "#internal/logging.js";
@@ -48,12 +48,8 @@ export async function cancelAgentInvocationOwnerStep(input: {
 
   const session = await readDurableSession(input.sessionState);
   const handles = (getAgentHandleStore(session.state)?.handles ?? []).filter(
-    (
-      candidate,
-    ): candidate is Extract<
-      import("#subagents/handles/store.js").AgentHandle,
-      { phase: "claimed" }
-    > => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
+    (candidate): candidate is Extract<AgentHandle, { phase: "claimed" }> =>
+      candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
   );
   if (handles.length === 0) return;
   const remoteContext = handles.some((handle) => handle.address.kind === "agent/remote")

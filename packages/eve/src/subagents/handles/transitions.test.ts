@@ -13,6 +13,7 @@ import {
   type TaskOwnedAgentHandle,
 } from "#subagents/handles/store.js";
 import {
+  abandonAgentInvocationOwners,
   abandonRunningAgentTurns,
   applyAgentHandleStoreCommand,
   confirmAgentStarted,
@@ -342,14 +343,45 @@ describe("agent handle store task leases", () => {
       ownerId: "task-1",
     });
     expect(released.store.handles).toEqual([{ address, identity, phase: "available" }]);
+  });
 
-    const cancelled = applyAgentHandleStoreCommand(confirmed.store, {
-      kind: "release-owner",
-      lastStatus: "(cancelled)",
-      ownerId: "task-1",
+  it("claims a parked child through the owner-scoped continuation path", () => {
+    const parked: AgentHandle = { address, identity, lastStatus: "(cancelled)", phase: "parked" };
+    const claimed = applyAgentHandleStoreCommand(
+      { handles: [parked] },
+      {
+        agentId: identity.id,
+        expectedTarget: "local",
+        invokedName: identity.name,
+        kind: "claim",
+        operationId: "operation-2",
+        ownerId: "workflow-run-2",
+      },
+    );
+
+    expect(claimed.result).toMatchObject({
+      handle: { ownerId: "workflow-run-2", phase: "claimed" },
+      kind: "ready",
     });
-    expect(cancelled.store.handles).toEqual([
-      { address, identity, lastStatus: "(cancelled)", phase: "available" },
+  });
+
+  it("parks claimed workflow owners as cancelled without changing available handles", () => {
+    const claimed: AgentHandle = {
+      address,
+      identity,
+      operationId: "operation-1",
+      ownerId: "workflow-run-1",
+      phase: "claimed",
+    };
+    const availableIdentity = { ...identity, id: "agent-2" };
+    const session = writeHandles(createSession(), [
+      claimed,
+      { address, identity: availableIdentity, phase: "available" },
+    ]);
+
+    expect(handlesOf(abandonAgentInvocationOwners(session, new Set(["workflow-run-1"])))).toEqual([
+      { address, identity, lastStatus: "(cancelled)", phase: "parked" },
+      { address, identity: availableIdentity, phase: "available" },
     ]);
   });
 

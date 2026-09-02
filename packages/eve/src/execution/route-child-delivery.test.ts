@@ -191,7 +191,6 @@ describe("task HITL delivery routing", () => {
     });
 
     const routed = await routeDeliverToChildren({
-      callbackBaseUrl: "https://parent.example",
       delivery: {
         kind: "deliver",
         payloads: [
@@ -218,7 +217,6 @@ describe("task HITL delivery routing", () => {
     });
 
     expect(dispatchTaskAgentInvocationStep).toHaveBeenCalledWith({
-      callbackBaseUrl: "https://parent.example",
       ownerId: "task-1",
       replyTo: "agent-reply",
       request: {

@@ -89,6 +89,7 @@ describe("blocking workflow agent continuation", () => {
     for (const [index, message] of ["first", "second"].entries()) {
       const callId = `workflow-call:${String(index)}`;
       const dispatched = await dispatchAgentInvocation({
+        callbackBaseUrl: "https://parent.example",
         ownerId: "workflow-run-1",
         replyTo: `reply-${String(index)}`,
         request: {

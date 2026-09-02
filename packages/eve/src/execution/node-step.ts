@@ -21,7 +21,7 @@ import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts
 import { createTaskToolHarnessDefinitions } from "#execution/tools/tasks.js";
 import type { ResolvedRuntimeAgentNode } from "#runtime/graph.js";
 import type { HistoryViewProjector, PreparedHistoryView } from "#shared/history-view.js";
-import type { PreparedRuntimeTool } from "#runtime/sessions/turn.js";
+import type { PreparedRuntimeTool, PreparedRuntimeWorkflowTask } from "#runtime/sessions/turn.js";
 import { findRegisteredRuntimeTool } from "#runtime/tools/registry.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
@@ -246,7 +246,7 @@ function resolveHarnessToolDefinition(input: {
 }
 
 type PreparedRuntimeWorkflowTool = PreparedRuntimeTool & {
-  readonly task: import("#runtime/sessions/turn.js").PreparedRuntimeWorkflowTask;
+  readonly task: PreparedRuntimeWorkflowTask;
 };
 
 function isPreparedRuntimeWorkflowTool(
