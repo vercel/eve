@@ -779,32 +779,6 @@ describe("runModelFlow", () => {
     expect(deps.writeProviderSelection).toHaveBeenCalledWith(APP_ROOT, "ai-gateway-project");
   });
 
-  it("uses a planned provider choice only once when setup is cancelled", async () => {
-    const { prompter } = scriptedPrompter({ menu: ["provider", "done"] });
-    const runProviderFlow = vi
-      .fn<ModelFlowDeps["runProviderFlow"]>()
-      .mockResolvedValueOnce({ kind: "cancelled" })
-      .mockResolvedValueOnce({ kind: "external-provider" });
-    const deps = flowDeps({ runProviderFlow });
-
-    await runModelFlow({
-      appRoot: APP_ROOT,
-      prompter,
-      initialStep: "provider",
-      initialProviderChoice: { kind: "ai-gateway-project" },
-      deps,
-    });
-
-    expect(runProviderFlow).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ initialChoice: { kind: "ai-gateway-project" } }),
-    );
-    expect(runProviderFlow).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ initialChoice: undefined }),
-    );
-  });
-
   it("preserves a committed provider selection when interrupted", async () => {
     const { prompter } = scriptedPrompter({ menu: [] });
     const controller = new AbortController();

@@ -46,12 +46,10 @@ describe("runInitOnboarding", () => {
       order.push("provider-planned");
       return { kind: "ai-gateway-project" };
     });
-    vi.mocked(deps.planRegistryFlow).mockImplementation(async (input) => {
-      order.push("registry-planned");
-      expect(order).toEqual(["provider-planned", "registry-planned"]);
+    vi.mocked(deps.planRegistryFlow).mockImplementation(async () => {
+      order.push("registry-planned", "reviewed");
+      expect(order).toEqual(["provider-planned", "registry-planned", "reviewed"]);
       install.resolve(packageInstallResult());
-      await input.beforeReview?.();
-      order.push("reviewed");
       return { kind: "done", items: [WEB] };
     });
     vi.mocked(deps.runTuiSetupCommand).mockImplementation(async (input) => {
@@ -73,8 +71,8 @@ describe("runInitOnboarding", () => {
     expect(order).toEqual([
       "provider-planned",
       "registry-planned",
-      "git",
       "reviewed",
+      "git",
       "model",
       "add",
     ]);
@@ -96,10 +94,7 @@ describe("runInitOnboarding", () => {
     const failedInstall = packageInstallResult(1);
     const { deps } = createDeps();
     const afterInstall = vi.fn(async () => {});
-    vi.mocked(deps.planRegistryFlow).mockImplementation(async (input) => {
-      await input.beforeReview?.();
-      throw new Error("review should not open");
-    });
+    vi.mocked(deps.planRegistryFlow).mockResolvedValue({ kind: "done", items: [WEB] });
 
     await expect(
       runInitOnboarding({

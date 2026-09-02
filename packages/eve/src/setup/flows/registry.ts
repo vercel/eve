@@ -194,11 +194,9 @@ async function editPlan(input: {
   selected: Set<string>;
   notices?: readonly SelectNotice[];
   plannerContext?: RegistryPlannerContext;
-  beforeReview?: () => Promise<void>;
 }): Promise<"install" | "cancelled"> {
   let screen: PlannerScreen = "channels";
   let notices = input.notices;
-  let reviewPrepared = false;
   while (true) {
     if (screen !== "review") {
       try {
@@ -218,11 +216,6 @@ async function editPlan(input: {
         return "cancelled";
       }
       continue;
-    }
-
-    if (!reviewPrepared) {
-      await input.beforeReview?.();
-      reviewPrepared = true;
     }
 
     try {
@@ -292,8 +285,6 @@ export async function planRegistryFlow(input: {
   appRoot: string;
   prompter: Prompter;
   plannerContext?: RegistryPlannerContext;
-  /** Work that must settle before the final mutation-authorizing review is shown. */
-  beforeReview?: () => Promise<void>;
   deps?: Pick<Partial<RegistryFlowDeps>, "browseRegistryCatalog">;
 }): Promise<RegistryPlanResult> {
   const browseRegistryCatalog =
@@ -316,7 +307,6 @@ export async function planRegistryFlow(input: {
     selected,
     notices,
     plannerContext: input.plannerContext,
-    beforeReview: input.beforeReview,
   });
   if (plan !== "install") return { kind: "cancelled" };
   return {

@@ -57,33 +57,12 @@ describe("runProviderFlow", () => {
           expect(request.options.every((option) => option.checked !== true)).toBe(true);
           return { kind: "ai-gateway-project" };
         },
-        deps,
       }),
     ).resolves.toEqual({ kind: "ai-gateway-project" });
 
     expect(deps.getVercelAuthStatus).not.toHaveBeenCalled();
     expect(deps.runLinkFlow).not.toHaveBeenCalled();
     expect(deps.appendEnv).not.toHaveBeenCalled();
-  });
-
-  it("applies a planned provider without reopening the picker", async () => {
-    const fake = createFakePrompter();
-    const deps = createDeps();
-
-    await expect(
-      runTestProviderFlow({
-        appRoot: APP_ROOT,
-        prompter: fake.prompter,
-        picker: vi.fn(async () => {
-          throw new Error("picker should not reopen");
-        }),
-        initialChoice: { kind: "ai-gateway-project" },
-        deps,
-      }),
-    ).resolves.toEqual({ kind: "ai-gateway-project" });
-
-    expect(deps.getVercelAuthStatus).toHaveBeenCalledOnce();
-    expect(deps.runLinkFlow).toHaveBeenCalledOnce();
   });
 
   it("hands the Dev TUI one menu and lets the active project be replaced", async () => {

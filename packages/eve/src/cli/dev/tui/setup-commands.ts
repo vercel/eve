@@ -257,7 +257,13 @@ async function executeSetupCommand(
         return loginResultMessage(await flows.runLoginFlow({ appRoot, prompter, signal }));
       }
       case "model": {
-        const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
+        let initialProviderChoice = input.initialProviderChoice;
+        const pickProvider: ProviderPicker = (request) => {
+          if (initialProviderChoice === undefined) return renderer.readProviderPicker(request);
+          const choice = initialProviderChoice;
+          initialProviderChoice = undefined;
+          return Promise.resolve(choice);
+        };
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
           appRoot,
           prompter,
@@ -280,9 +286,6 @@ async function executeSetupCommand(
         };
         if (input.initialModelStep !== undefined) {
           modelInput.initialStep = input.initialModelStep;
-        }
-        if (input.initialProviderChoice !== undefined) {
-          modelInput.initialProviderChoice = input.initialProviderChoice;
         }
         modelInput.withExclusiveTerminal = (task) =>
           renderer.withInheritedStdio(() => input.withExclusiveTerminal?.(task) ?? task());

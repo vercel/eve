@@ -34,7 +34,7 @@ The transcript remains in your terminal scrollback after you exit. Run `/help` i
 
 ## Set up a new agent
 
-After `eve init`, the terminal UI guides you through **Model**, **Channels**, **Integrations**, and **Review** before the first chat prompt. For a fresh interactive project, this onboarding starts while the initial dependency install runs; eve waits for the install to succeed before Review can authorize project changes. The progress rail keeps the four steps visible throughout onboarding. Model setup can install or upgrade the Vercel CLI, open Vercel login, and resume project linking without leaving the flow.
+After `eve init`, the terminal UI guides you through **Model**, **Channels**, **Integrations**, and **Review** before the first chat prompt. For a fresh interactive project, this onboarding starts while the initial dependency install runs. After you finish Review, eve waits for the install to succeed before applying your choices. The progress rail keeps the four steps visible throughout onboarding. Model setup can install or upgrade the Vercel CLI, open Vercel login, and resume project linking without leaving the flow.
 
 Provider, channel, and integration selections remain drafts until you finish Review. You can move back and forth between Channels, Integrations, and Review; use `/model` after onboarding to change the committed model configuration.
 

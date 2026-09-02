@@ -39,7 +39,7 @@ function deps(overrides: Partial<RegistryFlowDeps> = {}): RegistryFlowDeps {
 }
 
 describe("runRegistryFlow", () => {
-  it("collects a plan and waits before the final review without installing", async () => {
+  it("collects and reviews a plan without installing", async () => {
     const order: string[] = [];
     const fake = createFakePrompter({
       multiple: (options) => {
@@ -57,9 +57,6 @@ describe("runRegistryFlow", () => {
       planRegistryFlow({
         appRoot: APP_ROOT,
         prompter: fake.prompter,
-        beforeReview: async () => {
-          order.push("install-settled");
-        },
         deps: flowDeps,
       }),
     ).resolves.toMatchObject({
@@ -70,7 +67,6 @@ describe("runRegistryFlow", () => {
     expect(order).toEqual([
       "Where should people reach your agent?",
       "What should your agent be able to work with?",
-      "install-settled",
       "Review additions",
     ]);
     expect(flowDeps.installRegistryItem).not.toHaveBeenCalled();

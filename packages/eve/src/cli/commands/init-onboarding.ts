@@ -8,15 +8,6 @@ import {
   type PackageManagerInstallResult,
 } from "#setup/primitives/index.js";
 
-class InstallFailed extends Error {
-  readonly result: PackageManagerInstallResult;
-
-  constructor(result: PackageManagerInstallResult) {
-    super("The base package install failed.");
-    this.result = result;
-  }
-}
-
 export interface InitOnboardingDeps {
   createRenderer(): Pick<TerminalRenderer, "renderCommandResult" | "setupFlow" | "shutdown">;
   planProviderChoice: typeof planProviderChoice;
@@ -56,17 +47,13 @@ export async function runInitOnboarding(input: {
   const renderer = deps.createRenderer();
   const flow = renderer.setupFlow;
   const prompter = createTuiPrompter(flow);
-  let install: PackageManagerInstallResult | undefined;
   const results: Array<{ message: string; tone?: "success" | "error" }> = [];
-  let afterInstall: Promise<void> | undefined;
-  const settleInstall = async (): Promise<PackageManagerInstallResult> => {
-    install ??= await input.install;
-    if (packageManagerInstallSucceeded(install)) {
-      afterInstall ??= input.afterInstall?.() ?? Promise.resolve();
-      await afterInstall;
-    }
-    return install;
-  };
+  let ready: Promise<PackageManagerInstallResult> | undefined;
+  const settleInstall = () =>
+    (ready ??= input.install.then(async (install) => {
+      if (packageManagerInstallSucceeded(install)) await input.afterInstall?.();
+      return install;
+    }));
   try {
     flow.begin("Set up your agent", "pulse");
     flow.setNavigation?.(navigation(0));
@@ -86,14 +73,9 @@ export async function runInitOnboarding(input: {
         primaryActionLabel: "Install and finish setup",
         emptyActionLabel: "Finish setup",
       },
-      beforeReview: async () => {
-        flow.setStatus("Preparing project");
-        install = await settleInstall();
-        if (!packageManagerInstallSucceeded(install)) throw new InstallFailed(install);
-        flow.setStatus(undefined);
-      },
     });
-    install = await settleInstall();
+    flow.setStatus("Preparing project");
+    const install = await settleInstall();
     if (!packageManagerInstallSucceeded(install)) return { install, onboarded: false };
     if (registry.kind === "cancelled") return { install, onboarded: true };
 
@@ -120,7 +102,6 @@ export async function runInitOnboarding(input: {
     }
     return { install, onboarded: true };
   } catch (error) {
-    if (error instanceof InstallFailed) return { install: error.result, onboarded: false };
     const settled = await settleInstall();
     if (!packageManagerInstallSucceeded(settled)) return { install: settled, onboarded: false };
     flow.renderLine(
