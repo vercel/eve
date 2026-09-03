@@ -55,7 +55,7 @@ describe("createSession#cancel", () => {
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_1", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", taskId: undefined, tasks: undefined, turnId: undefined },
+      command: { kind: "cancel" },
       sessionId: "sess_1",
     });
   });
@@ -67,7 +67,7 @@ describe("createSession#cancel", () => {
     await session.cancel({ tasks: true, turnId: "turn_2" });
 
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", taskId: undefined, tasks: true, turnId: "turn_2" },
+      command: { kind: "cancel", tasks: true, turnId: "turn_2" },
       sessionId: "sess_1",
     });
   });
@@ -78,7 +78,7 @@ describe("createSession#cancel", () => {
 
     await expect(session.cancel()).resolves.toEqual({ sessionId: "sess_2", status: "accepted" });
     expect(runtime.dispatchSession).toHaveBeenCalledWith({
-      command: { kind: "cancel", taskId: undefined, tasks: undefined, turnId: undefined },
+      command: { kind: "cancel" },
       sessionId: "sess_2",
     });
   });

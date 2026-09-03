@@ -148,15 +148,13 @@ export function createSession(
       });
     },
     async cancel(options?: { taskId?: string; tasks?: boolean; turnId?: string }) {
-      return await runtime.dispatchSession({
-        command: {
-          kind: "cancel",
-          taskId: options?.taskId,
-          tasks: options?.tasks,
-          turnId: options?.turnId,
-        },
-        sessionId: id,
-      });
+      const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
+        kind: "cancel",
+      };
+      if (options?.taskId !== undefined) command.taskId = options.taskId;
+      if (options?.tasks !== undefined) command.tasks = options.tasks;
+      if (options?.turnId !== undefined) command.turnId = options.turnId;
+      return await runtime.dispatchSession({ command, sessionId: id });
     },
     async compact() {
       return await runtime.dispatchSession({ command: { kind: "compact" }, sessionId: id });

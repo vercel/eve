@@ -21,6 +21,7 @@ import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { cleanupEvalSessions } from "#evals/session-cleanup.js";
 import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
@@ -622,19 +623,9 @@ export class EvalSessionManager {
   hasActivity(): boolean {
     return this.#sessions.length > 0;
   }
-
   /** @internal */
   async cleanup(signal: AbortSignal): Promise<readonly PromiseSettledResult<void>[]> {
-    const knownRoots = new Map<string, EvalSessionDriver>();
-    for (const session of this.#sessions) {
-      const sessionId = session.sessionId;
-      if (sessionId !== undefined && !knownRoots.has(sessionId)) {
-        knownRoots.set(sessionId, session);
-      }
-    }
-    return await Promise.allSettled(
-      [...knownRoots.values()].map(async (session) => await session.cleanup(signal)),
-    );
+    return await cleanupEvalSessions(this.#sessions, signal);
   }
 
   #createSession(primary: boolean): EvalSessionDriver {
