@@ -274,7 +274,6 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
     record.task = task;
 
     const taskExec: TaskExec = {
-      batch: input.batch.calls,
       postMessage: createTaskMessage,
       setState: createTaskSetState,
       taskId: task.taskId,
@@ -537,11 +536,9 @@ async function executeBackgroundIterable(input: {
   readonly task: BackgroundTask;
 }): Promise<unknown> {
   const iterator = input.output[Symbol.asyncIterator]();
-  let last: unknown;
   let updateIndex = 0;
   let next = await iterator.next();
   while (!next.done) {
-    last = next.value;
     if (isTaskSetState(next.value)) {
       await deliverTaskCommand(input.task, { kind: "set-state", state: next.value.state });
     } else {
@@ -570,7 +567,7 @@ async function executeBackgroundIterable(input: {
     }
     next = await iterator.next();
   }
-  return next.value ?? last;
+  return next.value ?? null;
 }
 
 function hasAgentHandle(session: HarnessSession, agentId: string): boolean {

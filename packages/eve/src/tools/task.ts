@@ -1,4 +1,3 @@
-import type { BackgroundToolCall } from "#harness/background-tools.js";
 import type { JsonObject } from "#shared/json.js";
 
 const TASK_SET_STATE_KIND = "eve:task-set-state" as const;
@@ -51,8 +50,6 @@ export interface TaskReceipt {
 
 /** Capability passed only to tools declared with `execution: "background"`. */
 export interface TaskExec {
-  /** Sibling background calls admitted in the same model step. */
-  readonly batch: readonly BackgroundToolCall[];
   /** Model-facing durable task identity. */
   readonly taskId: string;
   /** Returns a descriptor which replaces the task's durable model-visible state when yielded. */

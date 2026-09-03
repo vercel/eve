@@ -1097,7 +1097,6 @@ describe("dispatchDynamicToolEvent", () => {
     const [tool] = buildDynamicTools(restored);
     expect(tool?.execution).toBe("background");
     const task: TaskExec = {
-      batch: [],
       postMessage: (message) => ({ kind: "eve:task-message", message }),
       setState: (state) => ({ kind: "eve:task-set-state", state }),
       taskId: "task-1",

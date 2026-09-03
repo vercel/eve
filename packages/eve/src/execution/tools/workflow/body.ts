@@ -66,7 +66,10 @@ export async function executeWorkflowBody(
         await resumeHookStep(input.owner.report, report);
         next = await iterator.next();
       }
-      output = (next.value as JsonValue | undefined) ?? last ?? null;
+      output =
+        (next.value as JsonValue | undefined) ??
+        (input.execution === "blocking" ? last : undefined) ??
+        null;
     }
     return { output, status: "completed" };
   } catch (error) {
@@ -134,7 +137,6 @@ function createWorkflowTaskExec(input: WorkflowBodyInput): TaskExec {
     throw new Error(`Background workflow tool "${input.toolName}" has no task id.`);
   }
   return {
-    batch: [],
     postMessage: createTaskMessage,
     setState: createTaskSetState,
     taskId: input.taskId,

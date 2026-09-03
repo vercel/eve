@@ -58,12 +58,20 @@ can retry a step and replay overlapping snapshots.
 
 ### Background execution
 
-`defineTool({ execution: "background" })` receives a third `task` argument. Returning a normal
-value completes the durable task with that value. Returning `task.delegated({ executor, receipt })`
-returns a `working` receipt immediately while an external executor continues the task. Background
-tools are a normal execution mode and need no root-agent flag.
+`defineTool({ execution: "background" })` receives a third `task` argument and immediately returns
+`{ status: "working", taskId }` to the model. Return completes the durable task; throw fails it. An
+async generator may additionally yield:
 
-Built-in, declared local, and remote subagents use this background task lifecycle automatically.
+```ts
+yield { progress: 0.5 }; // stream-only progress; does not wake the agent
+yield task.setState({ jobId, status: "running" }); // durable model-visible state; no wake
+yield task.postMessage("The export needs review."); // one new parent turn; state unchanged
+```
+
+`setState` replaces the task's prior authored state. `postMessage` is the only yield that wakes the
+agent; use [`ask`](/docs/tools/workflows#ask-a-human-ask) when the body needs an answer from the human.
+Background tools are a normal execution mode and need no root-agent flag. Built-in, declared local,
+and remote subagents use this task lifecycle automatically.
 After delegating, an
 in-process executor reports
 progress with `task.send({ kind: "update", message })` and the terminal result with

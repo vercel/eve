@@ -15,8 +15,10 @@ ends.
 
 Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`,
 `createHook`, `createWebhook`, `sleep`, retries, and replay. eve adds `ask` from `eve/workflow` for
-questions answered through the session's channel and `agent` for durable subagent delegation. Each
-`yield` becomes a durable progress report.
+questions answered through the session's channel and `agent` for durable subagent delegation. A
+waiting workflow's `yield` is turn progress. A background workflow also receives `task`: yield an
+ordinary value for stream-only progress, `task.setState(...)` for durable task state, or
+`task.postMessage(...)` to wake the parent agent with one message.
 
 A workflow tool runs code you wrote and appears to the model under its path-derived tool name, such
 as `deploy`.
@@ -77,7 +79,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
   `start`, `getRun`, and `resumeHook` from `workflow/api` belong in steps. Your app does not install
   the SDK; for types, new projects list `eve/workflow-modules` in the tsconfig `types`.
 - In the body, `ctx` has `session`, `callId`, `toolName`, and `abortSignal`. `getSandbox`,
-  `getSkill`, `getToken`, and `requireAuth` throw there; read credentials in a step instead.
+  `getSkill`, `getToken`, and `requireAuth` throw there. Read credentials from `process.env` in a
+  step; session-scoped workflow authorization is not yet available.
 - The tool's input must be a JSON object. Workflow bodies are for static tools under `agent/tools/`,
   not tools returned from `defineDynamic` resolvers.
 
@@ -88,7 +91,9 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 | tool result              | the run's return value              | `{ status: "working", taskId }`             |
 | turn while the run lives | parked                              | continues                                   |
 | when the run ends        | result lands in the tool call       | agent is woken with the result or the error |
-| progress (`yield`)       | `action.partial` on the turn        | wakes the agent with a note                 |
+| progress (`yield`)       | `action.partial` on the turn        | stream-only; does not wake the agent        |
+| task state               | not applicable                      | `yield task.setState(...)`                  |
+| parent message           | not applicable                      | `yield task.postMessage(...)`               |
 | cancel                   | cancelling the turn cancels the run | `task_cancel`, or the session ending        |
 
 Wait when the model needs the answer to continue. Go background when the wait may outlive the
