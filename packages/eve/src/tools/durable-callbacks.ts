@@ -3,10 +3,9 @@ import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type DurableDynamicCallbackPhase =
-  | "activityLabel"
-  | "activityResult"
-  | "activityUpdate"
-  | "approvalKey"
+  | "activityComplete"
+  | "activityDelta"
+  | "activityStart"
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
@@ -27,10 +26,11 @@ export interface DurableDynamicCallbackReference {
 
 export interface DurableDynamicToolCallbacks {
   readonly execute: DurableDynamicCallbackReference;
-  readonly activityLabel?: DurableDynamicCallbackReference;
-  readonly activityResult?: DurableDynamicCallbackReference;
-  readonly activityUpdate?: DurableDynamicCallbackReference;
-  readonly approvalKey?: DurableDynamicCallbackReference;
+  readonly activity?: {
+    readonly complete?: DurableDynamicCallbackReference;
+    readonly delta?: DurableDynamicCallbackReference;
+    readonly start?: DurableDynamicCallbackReference;
+  };
   readonly approvalRequest?: DurableDynamicCallbackReference;
   readonly approvalResponse?: DurableDynamicCallbackReference;
   readonly toModelOutput?: DurableDynamicCallbackReference;
@@ -44,10 +44,11 @@ export interface StampedDurableDynamicCallback {
 
 export type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
-  activityLabel: StampedDurableDynamicCallback;
-  activityResult: StampedDurableDynamicCallback;
-  activityUpdate: StampedDurableDynamicCallback;
-  approvalKey: StampedDurableDynamicCallback;
+  activity: {
+    readonly complete?: StampedDurableDynamicCallback;
+    readonly delta?: StampedDurableDynamicCallback;
+    readonly start?: StampedDurableDynamicCallback;
+  };
   approvalRequest: StampedDurableDynamicCallback;
   approvalResponse: StampedDurableDynamicCallback;
   toModelOutput: StampedDurableDynamicCallback;
@@ -188,17 +189,18 @@ export function stampDurableDynamicToolCallbacks(
 }
 
 export function collectDurableDynamicToolCallbacks(input: {
-  readonly activityLabel?: (...args: never[]) => unknown;
-  readonly activityResult?: (...args: never[]) => unknown;
-  readonly activityUpdate?: (...args: never[]) => unknown;
+  readonly activity?: {
+    readonly complete?: (...args: never[]) => unknown;
+    readonly delta?: (...args: never[]) => unknown;
+    readonly start?: (...args: never[]) => unknown;
+  };
   readonly approval?: Approval<never>;
-  readonly approvalKey?: (...args: never[]) => unknown;
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
-  const activityLabel = readDurableDynamicCallback(input.activityLabel);
-  const activityResult = readDurableDynamicCallback(input.activityResult);
-  const activityUpdate = readDurableDynamicCallback(input.activityUpdate);
+  const activityComplete = readDurableDynamicCallback(input.activity?.complete);
+  const activityDelta = readDurableDynamicCallback(input.activity?.delta);
+  const activityStart = readDurableDynamicCallback(input.activity?.start);
   const approvalRequest =
     input.approval === undefined
       ? undefined
@@ -208,15 +210,21 @@ export function collectDurableDynamicToolCallbacks(input: {
       ? undefined
       : readDurableDynamicCallback(input.approval.response);
 
-  const approvalKey = readDurableDynamicCallback(input.approvalKey);
   const execute = readDurableDynamicCallback(input.execute);
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
   if (execute !== undefined) callbacks.execute = execute;
-  if (activityLabel !== undefined) callbacks.activityLabel = activityLabel;
-  if (activityResult !== undefined) callbacks.activityResult = activityResult;
-  if (activityUpdate !== undefined) callbacks.activityUpdate = activityUpdate;
-  if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
+  if (
+    activityComplete !== undefined ||
+    activityDelta !== undefined ||
+    activityStart !== undefined
+  ) {
+    callbacks.activity = {
+      complete: activityComplete,
+      delta: activityDelta,
+      start: activityStart,
+    };
+  }
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

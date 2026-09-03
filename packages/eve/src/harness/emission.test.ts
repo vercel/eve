@@ -583,10 +583,12 @@ describe("emitStreamContent action requests", () => {
       [
         "web_search",
         {
-          activityResult: (_input, output) =>
-            `Found ${(output as { results: unknown[] }).results.length}\u0000 final results`,
-          activityUpdate: (_input, partial) =>
-            `Found ${(partial as { results: unknown[] }).results.length}\u0000 results`,
+          activity: {
+            complete: (_input, output) =>
+              `Found ${(output as { results: unknown[] }).results.length}\u0000 final results`,
+            delta: (_input, partial) =>
+              `Found ${(partial as { results: unknown[] }).results.length}\u0000 results`,
+          },
           description: "Search the web.",
           execute: async () => ({ results: [] }),
           inputSchema: jsonSchema({ type: "object" }),
@@ -844,11 +846,13 @@ describe("emitStreamContent action requests", () => {
       [
         "build_report",
         {
-          activityResult: () => {
-            throw new Error("result projection failed");
-          },
-          activityUpdate: () => {
-            throw new Error("update projection failed");
+          activity: {
+            complete: () => {
+              throw new Error("result projection failed");
+            },
+            delta: () => {
+              throw new Error("update projection failed");
+            },
           },
           description: "Build a report.",
           execute: async () => ({ phase: "complete" }),

@@ -9,7 +9,7 @@ export function projectResultActivity(
   input: JsonObject | undefined,
   output: unknown,
 ): ActionPresentationByCallId | undefined {
-  return projectActivityText(definition?.activityResult, callId, input, output);
+  return projectActivityText(definition?.activity?.complete, callId, input, output);
 }
 
 export function projectUpdateActivity(
@@ -18,7 +18,7 @@ export function projectUpdateActivity(
   input: JsonObject | undefined,
   output: unknown,
 ): ActionPresentationByCallId | undefined {
-  return projectActivityText(definition?.activityUpdate, callId, input, output);
+  return projectActivityText(definition?.activity?.delta, callId, input, output);
 }
 
 function projectActivityText(
