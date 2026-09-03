@@ -193,6 +193,31 @@ describe("createVercelSandbox", () => {
     expect(templateSandbox.update).toHaveBeenCalledWith({ networkPolicy: "deny-all" });
   });
 
+  it("uses an author-supplied image for fresh Vercel sandboxes", async () => {
+    const templateSandbox = createMockSandbox({ name: "template-key" });
+    const sandboxModule = {
+      Sandbox: {
+        create: vi.fn().mockResolvedValueOnce(templateSandbox),
+        get: vi.fn().mockResolvedValueOnce(null),
+      },
+    };
+
+    const backend = createVercelSandbox({
+      createOptions: { image: "registry.example/eve-python:1.0.0" } as never,
+      loadSandboxModule: async () => sandboxModule as never,
+    });
+
+    await backend.prewarm({
+      runtimeContext: { appRoot: "/tmp/test-app-root" },
+      seedFiles: [],
+      templateKey: "template-key",
+    });
+
+    expect(sandboxModule.Sandbox.create).toHaveBeenCalledWith(
+      expect.objectContaining({ image: "registry.example/eve-python:1.0.0" }),
+    );
+  });
+
   it("forwards double-underscore create fields through Sandbox.create", async () => {
     const templateSandbox = createMockSandbox({ name: "template-key" });
     const sandboxModule = {
