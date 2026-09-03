@@ -315,6 +315,8 @@ function deserializeState(data: unknown): AgentTraceContextState {
     }
     return {
       context: value.context,
+      currentPrincipal: deserializePrincipalSummary(value.currentPrincipal),
+      initiatorPrincipal: deserializePrincipalSummary(value.initiatorPrincipal),
       modelUsage: deserializeModelUsage(value.modelUsage),
       parentLineage: deserializeParentLineage(value.parentLineage),
       parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
@@ -327,6 +329,30 @@ function deserializeState(data: unknown): AgentTraceContextState {
     } satisfies AgentTurnTraceState;
   });
   return { actions, sessions, turns };
+}
+
+function deserializePrincipalSummary(
+  value: unknown,
+): AgentTurnTraceState["currentPrincipal"] | undefined {
+  if (!isRecord(value) || !isPrincipalType(value.type)) return undefined;
+  return {
+    fingerprint: typeof value.fingerprint === "string" ? value.fingerprint : undefined,
+    type: value.type,
+  };
+}
+
+function isPrincipalType(
+  value: unknown,
+): value is NonNullable<AgentTurnTraceState["currentPrincipal"]>["type"] {
+  return (
+    value === "anonymous" ||
+    value === "app" ||
+    value === "local-dev" ||
+    value === "none" ||
+    value === "other" ||
+    value === "service" ||
+    value === "user"
+  );
 }
 
 function deserializeParentLineage(

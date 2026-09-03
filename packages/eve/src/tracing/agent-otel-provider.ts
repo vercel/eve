@@ -321,6 +321,12 @@ export function createAgentOtelInstrumentation(
                     turn.parentLineage === undefined
                       ? AGENT_SESSION_KINDS.root
                       : AGENT_SESSION_KINDS.delegated,
+                  [AGENT_TRACE_ATTRIBUTES.principalCurrentType]: turn.currentPrincipal?.type,
+                  [AGENT_TRACE_ATTRIBUTES.principalCurrentFingerprint]:
+                    turn.currentPrincipal?.fingerprint,
+                  [AGENT_TRACE_ATTRIBUTES.principalInitiatorType]: turn.initiatorPrincipal?.type,
+                  [AGENT_TRACE_ATTRIBUTES.principalInitiatorFingerprint]:
+                    turn.initiatorPrincipal?.fingerprint,
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,

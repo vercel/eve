@@ -36,6 +36,10 @@ describe("agent invocation trace protocol", () => {
     expect(AGENT_TRACE_ATTRIBUTES).toEqual({
       childTraceId: "agent.child.trace.id",
       invocationRole: "agent.invocation.role",
+      principalCurrentFingerprint: "agent.principal.current.fingerprint",
+      principalCurrentType: "agent.principal.current.type",
+      principalInitiatorFingerprint: "agent.principal.initiator.fingerprint",
+      principalInitiatorType: "agent.principal.initiator.type",
       schemaVersion: "agent.trace.schema.version",
       sessionKind: "agent.session.kind",
     });

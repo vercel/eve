@@ -317,7 +317,15 @@ async function emitAttempt(input: {
 
 async function publishTurnStarted(input: {
   readonly channelAudience?: ChannelAudience;
+  readonly currentPrincipal?: {
+    readonly fingerprint?: string;
+    readonly type: "anonymous" | "app" | "local-dev" | "none" | "other" | "service" | "user";
+  };
   readonly hooks: InstrumentationHooks;
+  readonly initiatorPrincipal?: {
+    readonly fingerprint?: string;
+    readonly type: "anonymous" | "app" | "local-dev" | "none" | "other" | "service" | "user";
+  };
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
@@ -340,7 +348,9 @@ async function publishTurnStarted(input: {
     type: "session.started",
   });
   await input.hooks.publish({
+    currentPrincipal: input.currentPrincipal,
     idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
+    initiatorPrincipal: input.initiatorPrincipal,
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
@@ -466,7 +476,12 @@ describe("createAgentOtelInstrumentation", () => {
     };
 
     await publishTurnStarted({
+      currentPrincipal: {
+        fingerprint: "c".repeat(32),
+        type: "user",
+      },
       hooks: runtime.hooks,
+      initiatorPrincipal: { type: "none" },
       parentLineage,
       parentTraceContext: parent,
       rootSessionId: "root-session",
@@ -499,12 +514,16 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.invocation.role": "execution",
       "agent.parent_call.id": "call-child",
       "agent.parent_run.id": "parent-session",
+      "agent.principal.current.fingerprint": "c".repeat(32),
+      "agent.principal.current.type": "user",
+      "agent.principal.initiator.type": "none",
       "agent.root_run.id": "root-session",
       "agent.session.kind": "delegated",
       "agent.trace.schema.version": 4,
       "gen_ai.conversation.id": "child-session",
       "gen_ai.operation.name": "invoke_agent",
     });
+    expect(execution.attributes).not.toHaveProperty("agent.principal.initiator.fingerprint");
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {

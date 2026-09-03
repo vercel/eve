@@ -47,7 +47,9 @@ import type { OtelHarnessSettings, RuntimeContextResolver } from "#tracing/otel-
 import type { SessionTraceSeed } from "#context/keys.js";
 import { contextStorage, type ContextContainer } from "#context/container.js";
 import {
+  AuthKey,
   ChannelInstrumentationKey,
+  InitiatorAuthKey,
   OtelTraceEnabledKey,
   ParentSessionKey,
   ParentTraceContextKey,
@@ -61,6 +63,7 @@ import {
   resolveTracePolicyDecision,
 } from "#tracing/sampled-trace.js";
 import { resolveParentLineage } from "#instrumentation/parent-lineage.js";
+import { summarizeInstrumentationPrincipal } from "#instrumentation/principal-summary.js";
 import type { ChannelInstrumentationProjection, SessionTraceContext } from "#channel/types.js";
 import { readSessionTraceDecision } from "#tracing/agent-trace-context-store.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -214,12 +217,14 @@ export function bindInstrumentationRuntime(
         : { ...storedTraceSeed, ...resolvedTraceState };
     const parentTraceContext = context.get(ParentTraceContextKey);
     return {
+      currentPrincipal: summarizeInstrumentationPrincipal(context.get(AuthKey)),
       channel: context.get(ChannelKey),
       context,
       instrumentation: context.get(ChannelInstrumentationKey),
       forwardedTracePolicy: readForwardedTraceAssertion(traceSeed?.forwardedTracePolicy),
       parent: context.get(ParentSessionKey),
       parentTraceContext,
+      initiatorPrincipal: summarizeInstrumentationPrincipal(context.get(InitiatorAuthKey)),
       traceSeed,
     };
   };
@@ -256,7 +261,9 @@ export function bindInstrumentationRuntime(
       agentName: boundSession.agentName,
       channelAudience: audience,
       channelType: channel?.channelType,
+      currentPrincipal: sessionContext.currentPrincipal,
       instrumentation: runtime,
+      initiatorPrincipal: sessionContext.initiatorPrincipal,
       parentLineage: resolveParentLineage(sessionContext.parent, sessionContext.channel),
       parentTraceContext: sessionContext.parentTraceContext,
       rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
