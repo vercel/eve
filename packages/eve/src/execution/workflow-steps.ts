@@ -376,7 +376,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
     await writer.write(encodeMessageStreamEvent(stamped));
     return stamped;
   };
-  const handleEvent: HandleEventFn = async (event, messages, activityLabels): Promise<void> => {
+  const handleEvent: HandleEventFn = async (event, messages): Promise<void> => {
     // A remote task's parent owns its HITL. Forward blocking events over
     // the task callback and keep them out of the child's local channel;
     // otherwise two TUIs can present and answer the same request.
@@ -391,12 +391,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       messages,
       nodeId: bundle.nodeId ?? "__root__",
     });
-    void observeSessionActivity({
-      ctx,
-      event: emitted,
-      activityLabels,
-      sessionId: initialSession.sessionId,
-    });
+    void observeSessionActivity({ ctx, event: emitted, sessionId: initialSession.sessionId });
     await dispatchStreamEventHooks({ ctx, registry: hookRegistry, event: emitted });
     if (emitted.type !== "step.started") {
       await dispatchDynamicModelEvent({

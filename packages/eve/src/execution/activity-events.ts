@@ -1,11 +1,9 @@
 import { normalizeActivityText } from "#shared/activity-text.js";
-import type { ActionActivityLabels } from "#harness/action-activity.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
 import type { ActivityEventV1, ActivityWorkIdentityV1 } from "#protocol/activity.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 export function projectActivityEvents(input: {
-  readonly activityLabels?: ActionActivityLabels;
   readonly at: string;
   readonly event: UnstampedMessageStreamEvent;
   readonly lineage: ActivityWorkIdentityV1;
@@ -18,7 +16,7 @@ export function projectActivityEvents(input: {
       const rawName = action.kind === "load-skill" ? "load_skill" : action.toolName;
       const name = normalizeActivityText(rawName) || (kind === "skill" ? "Skill" : "Tool");
       const id = actionId(lineage.id, action.callId);
-      const label = activityLabel(input.activityLabels?.[action.callId]);
+      const label = activityLabel(event.data.presentation?.[action.callId]?.label);
       return [
         {
           action: {

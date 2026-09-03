@@ -383,12 +383,11 @@ async function consumeStreamContent(
     await emitFn(
       createActionsRequestedEvent({
         actions: [action],
+        presentation: collectActionActivityLabels([projection]),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
-      undefined,
-      collectActionActivityLabels([projection]),
     );
   };
 

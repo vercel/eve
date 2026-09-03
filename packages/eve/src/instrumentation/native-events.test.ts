@@ -134,20 +134,20 @@ describe("createInstrumentationHandleEvent", () => {
     ]);
   });
 
-  it("forwards activity labels to the durable handler", async () => {
-    const activityLabels = { "call-1": "Search issues" };
-    let forwardedLabels: unknown;
+  it("forwards the source event to the durable handler", async () => {
+    const source = createSessionStartedEvent();
+    let forwarded: unknown;
     const handleEvent = createInstrumentationHandleEvent({
-      handleEvent: async (_event, _messages, labels) => {
-        forwardedLabels = labels;
+      handleEvent: async (event) => {
+        forwarded = event;
       },
       hooks: { capturesContent: false, publish: async () => {} },
       sessionId: "session-1",
     })!;
 
-    await handleEvent(createSessionStartedEvent(), undefined, activityLabels);
+    await handleEvent(source);
 
-    expect(forwardedLabels).toBe(activityLabels);
+    expect(forwarded).toBe(source);
   });
 
   it("does not change execution mode when hooks have no durable handler", () => {

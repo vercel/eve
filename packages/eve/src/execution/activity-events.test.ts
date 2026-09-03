@@ -15,7 +15,6 @@ describe("projectActivityEvents", () => {
   it("projects tools and skills without inputs", () => {
     expect(
       projectActivityEvents({
-        activityLabels: { "tool-1": "Search issues" },
         at: "2026-01-01T00:00:00Z",
         event: {
           data: {
@@ -28,6 +27,7 @@ describe("projectActivityEvents", () => {
               },
               { callId: "skill-1", input: { skill: "private" }, kind: "load-skill" },
             ],
+            presentation: { "tool-1": { label: "Search issues" } },
             sequence: 0,
             stepIndex: 0,
             turnId: "turn",

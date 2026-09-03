@@ -57,8 +57,8 @@ export function createInstrumentationHandleEvent(
   const publishedActions = new Set<string>();
   const publishedInputs = new Set<string>();
   let activeTurnId = input.turnId;
-  return async (event, messages, activityLabels) => {
-    await handleEvent(event, messages, activityLabels);
+  return async (event, messages) => {
+    await handleEvent(event, messages);
     const lifecycleEvent = toLifecycleEvent(event, input, activeTurnId);
     if (event.type === "turn.started") activeTurnId = event.data.turnId;
     if (

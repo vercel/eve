@@ -59,12 +59,11 @@ export async function emitWorkflowActionsRequested(input: {
     await input.emit(
       createActionsRequestedEvent({
         actions: [projection.action],
+        presentation: collectActionActivityLabels([projection]),
         sequence: input.emissionState.sequence,
         stepIndex: input.emissionState.stepIndex,
         turnId: input.emissionState.turnId,
       }),
-      undefined,
-      collectActionActivityLabels([projection]),
     );
   }
 }
