@@ -508,9 +508,13 @@ const compiledVercelConnectMetadataSchema = z
 
 const compiledSlackAppManifestMetadataSchema = z
   .object({
+    alwaysOnline: z.boolean().optional(),
+    backgroundColor: z.string().optional(),
     botEvents: z.array(z.string()).readonly().optional(),
     botScopes: z.array(z.string()).readonly().optional(),
+    description: z.string().optional(),
     displayName: z.string().optional(),
+    longDescription: z.string().optional(),
   })
   .strict() satisfies z.ZodType<SlackAppManifestMetadata>;
 

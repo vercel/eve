@@ -133,9 +133,13 @@ describe("buildVercelConnectRequirements", () => {
             name: "support",
             logicalPath: "channels/support.ts",
             slackAppManifest: {
-              displayName: "Support agent",
+              alwaysOnline: true,
+              backgroundColor: "#000000",
               botEvents: ["app_mention", "message.channels"],
               botScopes: ["chat:write", "channels:history"],
+              description: "Answers support questions.",
+              displayName: "Support agent",
+              longDescription: "Answers support questions using the team's knowledge base.",
             },
           },
           {
@@ -149,14 +153,19 @@ describe("buildVercelConnectRequirements", () => {
 
     expect(Object.fromEntries(manifests)).toEqual({
       "channels/support.slack-app-manifest.json": {
-        display_information: { name: "Support agent" },
+        display_information: {
+          background_color: "#000000",
+          description: "Answers support questions.",
+          long_description: "Answers support questions using the team's knowledge base.",
+          name: "Support agent",
+        },
         features: {
           app_home: {
             home_tab_enabled: false,
             messages_tab_enabled: true,
             messages_tab_read_only_enabled: false,
           },
-          bot_user: { display_name: "Support agent", always_online: false },
+          bot_user: { display_name: "Support agent", always_online: true },
         },
         oauth_config: {
           scopes: { bot: ["app_mentions:read", "chat:write", "channels:history"] },

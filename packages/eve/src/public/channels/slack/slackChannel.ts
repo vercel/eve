@@ -605,7 +605,15 @@ export interface SlackChannelInternalEvents extends Omit<
 
 export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
-  /** Display name used for the Slack bot. */
+  /** Whether the Slack bot always appears online. Defaults to `false`. */
+  readonly botAlwaysOnline?: boolean;
+  /** Hex color used behind the Slack app's information hovercard. */
+  readonly botBackgroundColor?: string;
+  /** Short Slack app description, up to 140 characters. */
+  readonly botDescription?: string;
+  /** Longer Slack app description, up to 4,000 characters. */
+  readonly botLongDescription?: string;
+  /** Display name used for the Slack app and bot. */
   readonly botName?: string;
   /** Additional Slack Events API bot events delivered to this channel. */
   readonly botEvents?: readonly string[];
@@ -997,12 +1005,24 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
   });
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
   const slackAppManifest: {
+    alwaysOnline?: boolean;
+    backgroundColor?: string;
     botEvents?: readonly string[];
     botScopes?: readonly string[];
+    description?: string;
     displayName?: string;
+    longDescription?: string;
   } = {};
-  if (config.botName !== undefined) slackAppManifest.displayName = config.botName;
+  if (config.botAlwaysOnline !== undefined) slackAppManifest.alwaysOnline = config.botAlwaysOnline;
+  if (config.botBackgroundColor !== undefined) {
+    slackAppManifest.backgroundColor = config.botBackgroundColor;
+  }
+  if (config.botDescription !== undefined) slackAppManifest.description = config.botDescription;
   if (config.botEvents !== undefined) slackAppManifest.botEvents = config.botEvents;
+  if (config.botLongDescription !== undefined) {
+    slackAppManifest.longDescription = config.botLongDescription;
+  }
+  if (config.botName !== undefined) slackAppManifest.displayName = config.botName;
   if (config.botScopes !== undefined) slackAppManifest.botScopes = config.botScopes;
   return Object.assign(channel, {
     vercelConnect: credentials?.vercelConnect,

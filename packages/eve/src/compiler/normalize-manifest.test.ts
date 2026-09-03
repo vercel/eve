@@ -625,8 +625,12 @@ describe("compileAgentManifest source graph", () => {
         logicalPath: "channels/support.ts",
         loadNamespace: async () => ({
           default: slackChannel({
-            botName: "Support agent",
+            botAlwaysOnline: true,
+            botBackgroundColor: "#000000",
+            botDescription: "Answers support questions.",
             botEvents: ["message.channels"],
+            botLongDescription: "Answers support questions using the team's knowledge base.",
+            botName: "Support agent",
             botScopes: ["channels:history"],
           }),
         }),
@@ -639,9 +643,13 @@ describe("compileAgentManifest source graph", () => {
       (channel) => channel.logicalPath === "channels/support.ts",
     );
     expect(support?.slackAppManifest).toEqual({
+      alwaysOnline: true,
+      backgroundColor: "#000000",
       botEvents: ["message.channels"],
       botScopes: ["channels:history"],
+      description: "Answers support questions.",
       displayName: "Support agent",
+      longDescription: "Answers support questions using the team's knowledge base.",
     });
   });
 

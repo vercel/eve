@@ -395,15 +395,23 @@ describe("slackChannel()", () => {
   it("preserves Slack app manifest options for compilation", () => {
     expect(
       slackChannel({
-        botName: "Support agent",
+        botAlwaysOnline: true,
+        botBackgroundColor: "#000000",
+        botDescription: "Answers support questions.",
         botEvents: ["message.channels"],
+        botLongDescription: "Answers support questions using the team's knowledge base.",
+        botName: "Support agent",
         botScopes: ["channels:history"],
       }),
     ).toMatchObject({
       slackAppManifest: {
+        alwaysOnline: true,
+        backgroundColor: "#000000",
         botEvents: ["message.channels"],
         botScopes: ["channels:history"],
+        description: "Answers support questions.",
         displayName: "Support agent",
+        longDescription: "Answers support questions using the team's knowledge base.",
       },
     });
   });
