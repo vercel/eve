@@ -13,6 +13,13 @@ export function resolvePetstoreBaseUrl(): string {
   return `http://127.0.0.1:${localPort === undefined || localPort.length === 0 ? "3000" : localPort}`;
 }
 
+export function resolvePetstoreHeaders(): Record<string, string> {
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+  return bypass === undefined || bypass.length === 0
+    ? {}
+    : { "x-vercel-protection-bypass": bypass };
+}
+
 export const PETSTORE_SPEC = {
   basePath: "/petstore",
   host: "127.0.0.1",
