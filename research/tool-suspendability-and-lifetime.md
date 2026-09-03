@@ -62,20 +62,24 @@ interface TaskExec {
 
 A background body may `yield` three kinds of value:
 
-| form                          | `view.state`          | parent                               | use                                         |
-| ----------------------------- | --------------------- | ------------------------------------ | ------------------------------------------- |
-| `yield value` (untagged)      | untouched             | progress note (today's behaviour)    | transient progress                          |
-| `yield task.setState(state)`  | replaced with `state` | not woken                            | receipt, identifiers, state for later turns |
-| `yield task.postMessage(msg)` | untouched             | woken with `msg` as the turn's input | something the parent should act on now      |
+| form                          | `view.state`          | parent                                  | use                                         |
+| ----------------------------- | --------------------- | --------------------------------------- | ------------------------------------------- |
+| `yield value` (untagged)      | untouched             | not woken; streamed as `action.partial` | transient progress                          |
+| `yield task.setState(state)`  | replaced with `state` | not woken                               | receipt, identifiers, state for later turns |
+| `yield task.postMessage(msg)` | untouched             | woken with `msg` as the turn's input    | something the parent should act on now      |
 
-`setState` is the only writer of `view.state` (§4.1): replace, not merge,
-silent. `postMessage` is one delivery to the parent, like `postMessage`
-between windows: not stored, attributed to the task, run under the existing
-task-delivery policy. A body that wants both sets state and then posts.
+Progress is stream-only. Today an untagged yield from a background body wakes
+the parent with a framework-authored note; that goes away, so `postMessage` is
+the one way to wake the parent. `setState` is the only writer of `view.state`
+(§4.1): replace, not merge, silent. `postMessage` is one delivery to the
+parent, like `postMessage` between windows: not stored, attributed to the
+task, run under the existing task-delivery policy. A body that wants both sets
+state and then posts. Neither constructor is importable elsewhere; they live on
+`task` so the type system can withhold them by cell.
 
 The first `setState` observed by the launching turn is the receipt,
-`{ status: "working", taskId, ...view.state }`. Progress and messages yielded
-before it are delivered after it.
+`{ status: "working", taskId, ...view.state }`. Messages yielded before it are
+delivered after it.
 
 ### 3.2 Replies: `ask` and provider authorization
 
@@ -102,7 +106,9 @@ Connect-backed tool can be a workflow. Contract:
 
 - Both are callable inside a `"use step"` that received `ctx`. They resolve
   under the session identity in the run's serialized context, through the
-  scoped-authorization path a step tool uses (`execution/tool-auth.ts`).
+  scoped-authorization path a step tool uses (`execution/tool-auth.ts`). The
+  gate is the Workflow SDK's ambient step context: the same `ctx` method
+  succeeds when that context is present and throws when it is not.
 - A token is returned to the step and never enters the body's replay log.
 - Interactive authorization does not return an `AuthorizationSignal` to the
   model. The run parks the way `ask` parks: the challenge is a `RunRequestMessage`
@@ -279,7 +285,8 @@ task-delivery policy.
 
 - `runBody` already sends each yield as a `RunReport`. The owner maps
   `TaskSetState` → `set-state`, `TaskMessage` → parent `send`, untagged →
-  today's progress note.
+  `action.partial` on the stream. The `wakeTaskUpdateParentStep` path for
+  untagged reports is removed.
 - `createWorkflowToolBackgroundExecute` waits on the report channel for the
   first `setState`, raced against the run's outcome, and merges it into the
   receipt. No `setState` → `{ status: "working", taskId }`.
@@ -347,19 +354,12 @@ Both are required for the Devbox migration.
 - A token never enters a workflow body's replay log.
 - Subagent task behaviour is unchanged.
 
-## 9. Open decisions
+## 9. Deferred
 
-- Progress yields in a background body currently wake the parent with the
-  framework's note. With `postMessage` available, they should probably become
-  stream-only so there is one way to wake the parent. Leaning stream-only.
-- Whether `setState`/`postMessage` should also be importable from `eve/tools`
-  (matches `ask` from `eve/workflow`) or stay on `task` for type gating.
-  Leaning `task` only.
-- Whether `view.state` should be size-bounded, given it is projected into model
-  context on every task-triggered turn.
-- How a step detects ambient step context for the `getToken` gate. The Workflow
-  SDK exposes it; whether eve marks it explicitly is for the PR.
-- Structured `ask` responses. Deferred.
+- Structured `ask` responses (a response schema instead of
+  `{ optionId?, text? }`).
+- A size bound on `view.state`. It is projected into model context on every
+  task-triggered turn; revisit if it becomes a problem in practice.
 
 ## 10. Testing
 
