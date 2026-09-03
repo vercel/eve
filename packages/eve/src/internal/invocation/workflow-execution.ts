@@ -22,7 +22,7 @@ import {
 } from "#internal/invocation/metadata.js";
 import type { RouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { getRun, getWorld } from "#internal/workflow/runtime.js";
-import type { HandleMessageStreamEvent } from "#protocol/message.js";
+import type { HandleMessageStreamEvent, InputResolution } from "#protocol/message.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import { parseJsonValue } from "#shared/json.js";
@@ -94,6 +94,12 @@ export class WorkflowAgentInvocationExecution {
     const current = await this.read(input);
     if (current === undefined) return { type: "not_found" };
     if (current.status !== "input_required") {
+      // A retry after a lost response is the common case here: the answer
+      // already landed, so acknowledge it instead of demanding a new one.
+      const events = await readRecentPersistedEvents(input.invocationId);
+      if (replaysResolvedBatch(events, input.responses)) {
+        return { invocation: current, type: "success" };
+      }
       return conflict("Invocation is not waiting for input.");
     }
     const run = await this.#readInvocationRun(input.invocationId, input.auth);
@@ -218,15 +224,90 @@ function pendingInputBatch(
   return { id: event.meta.id, rawRequestIds, requests };
 }
 
+/**
+ * Removes resolved requests from a batch. The harness resolves a batch as a
+ * whole today, but request-level bookkeeping keeps this correct if it ever
+ * resolves them separately.
+ */
+function withoutResolved(
+  batch: PendingInputBatch,
+  resolutions: readonly InputResolution[],
+): PendingInputBatch | undefined {
+  const resolvedRawIds = new Set(resolutions.map((resolution) => resolution.requestId));
+  const rawRequestIds: Record<string, string> = {};
+  const requests: Record<string, InputRequest> = {};
+  for (const [requestId, rawRequestId] of Object.entries(batch.rawRequestIds)) {
+    if (resolvedRawIds.has(rawRequestId)) continue;
+    rawRequestIds[requestId] = rawRequestId;
+    const request = batch.requests[requestId];
+    if (request !== undefined) requests[requestId] = request;
+  }
+  return Object.keys(rawRequestIds).length === 0
+    ? undefined
+    : { id: batch.id, rawRequestIds, requests };
+}
+
+interface ResolvedInputBatch {
+  readonly batch: PendingInputBatch;
+  readonly responses: ReadonlyMap<string, InputResponse | undefined>;
+}
+
+/**
+ * Folds the event window into the currently pending batch and the most
+ * recently resolved batch. Both are needed: the first to accept an answer,
+ * the second to recognize a client re-sending an answer that already landed.
+ */
+function foldInputBatches(events: readonly HandleMessageStreamEvent[]): {
+  readonly pending: PendingInputBatch | undefined;
+  readonly resolved: ResolvedInputBatch | undefined;
+} {
+  let pending: PendingInputBatch | undefined;
+  let requested: PendingInputBatch | undefined;
+  let resolved: ResolvedInputBatch | undefined;
+  for (const event of events) {
+    if (event.type === "input.requested") {
+      requested = pendingInputBatch(event);
+      pending = requested;
+    } else if (event.type === "input.resolved") {
+      if (requested === undefined) continue;
+      const responses = new Map<string, InputResponse | undefined>();
+      for (const resolution of event.data.resolutions) {
+        responses.set(resolution.requestId, resolution.response);
+      }
+      resolved = { batch: requested, responses };
+      if (pending !== undefined) pending = withoutResolved(pending, event.data.resolutions);
+    } else if (event.type === "turn.started") {
+      pending = undefined;
+    }
+  }
+  return { pending, resolved };
+}
+
 function latestPendingInputBatch(
   events: readonly HandleMessageStreamEvent[],
 ): PendingInputBatch | undefined {
-  let batch: PendingInputBatch | undefined;
-  for (const event of events) {
-    if (event.type === "input.requested") batch = pendingInputBatch(event);
-    else if (event.type === "turn.started") batch = undefined;
+  return foldInputBatches(events).pending;
+}
+
+/** True when `responses` exactly repeats the answers eve already accepted for the last batch. */
+function replaysResolvedBatch(
+  events: readonly HandleMessageStreamEvent[],
+  responses: readonly InputResponse[],
+): boolean {
+  const resolved = foldInputBatches(events).resolved;
+  if (resolved === undefined || responses.length !== resolved.responses.size) return false;
+  const seen = new Set<string>();
+  for (const response of responses) {
+    const rawRequestId = resolved.batch.rawRequestIds[response.requestId];
+    if (rawRequestId === undefined || seen.has(rawRequestId)) return false;
+    seen.add(rawRequestId);
+    if (!resolved.responses.has(rawRequestId)) return false;
+    const accepted = resolved.responses.get(rawRequestId);
+    if (accepted?.optionId !== response.optionId || accepted?.text !== response.text) {
+      return false;
+    }
   }
-  return batch;
+  return true;
 }
 
 function projectNonterminal(
@@ -241,6 +322,10 @@ function projectNonterminal(
   for (const event of events) {
     if (event.type === "input.requested") {
       inputBatch = pendingInputBatch(event);
+    } else if (event.type === "input.resolved") {
+      if (inputBatch !== undefined) {
+        inputBatch = withoutResolved(inputBatch, event.data.resolutions);
+      }
     } else if (event.type === "turn.started") {
       authorizations.clear();
       inputBatch = undefined;
