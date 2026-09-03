@@ -543,7 +543,7 @@ export async function turnStep(rawInput: TurnStepInput): Promise<DurableStepResu
       return runHarnessStep(schemaSession, resolved);
     });
   } catch (error) {
-    if (!isTurnCancellation(error)) {
+    if (!isTurnCancellation(error) && input.abortSignal?.aborted !== true) {
       await failChannelDeliveries(error);
       throw error;
     }
