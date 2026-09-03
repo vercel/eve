@@ -42,6 +42,11 @@ import {
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import {
+  normalizePersistedMessageStreamEvent,
+  type MessageStreamEventForVersion,
+  type MessageStreamVersion,
+} from "#protocol/message-version.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -249,7 +254,10 @@ export function createWorkflowRuntime(config: {
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
+        events ??= parseNdjsonStream<MessageStreamEvent>(
+          () => getRun(run.runId).getReadable(),
+          normalizePersistedEvent,
+        );
         return events;
       };
 
@@ -277,8 +285,9 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<MessageStreamEvent>> {
-      return parseNdjsonStream<MessageStreamEvent>(() =>
-        getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
+      return parseNdjsonStream<MessageStreamEvent>(
+        () => getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
+        normalizePersistedEvent,
       );
     },
 
@@ -309,6 +318,12 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+function normalizePersistedEvent(value: unknown): MessageStreamEvent {
+  return normalizePersistedMessageStreamEvent(
+    value as MessageStreamEventForVersion<MessageStreamVersion>,
+  );
 }
 
 async function cancelActivityCollector(runId: string | undefined): Promise<void> {

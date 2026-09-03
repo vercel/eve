@@ -1,40 +1,6 @@
-export interface TranscriptMessageReceivedEvent {
-  readonly data: {
-    readonly message: string;
-  };
-  readonly type: "message.received";
-}
+import type { MessageStreamEvent } from "eve/client";
 
-export interface TranscriptMessageCompletedEvent {
-  readonly data: {
-    readonly finishReason?: string;
-    readonly message: string | null;
-  };
-  readonly type: "message.completed";
-}
-
-export interface TranscriptSessionFailedEvent {
-  readonly data: {
-    readonly message: string;
-  };
-  readonly type: "session.failed";
-}
-
-export interface TranscriptEventMeta {
-  readonly at: string;
-}
-
-export type TranscriptStreamEvent = (
-  | TranscriptMessageCompletedEvent
-  | TranscriptMessageReceivedEvent
-  | TranscriptSessionFailedEvent
-  | {
-      readonly data?: unknown;
-      readonly type: string;
-    }
-) & {
-  readonly meta?: TranscriptEventMeta;
-};
+export type TranscriptStreamEvent = MessageStreamEvent;
 
 /**
  * Derived status for one trace step in the local trace viewer.

@@ -4,7 +4,11 @@ import { effectScope } from "vue";
 import { EveAgentStore, type EveAgentStoreSnapshot } from "#client/eve-agent-store.js";
 import { useEveAgent } from "#vue/use-eve-agent.js";
 import type { EveMessageData } from "#client/message-reducer.js";
-import { EVE_SESSION_ID_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_SESSION_ID_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 import {
   createMessageCompletedEvent,
   createMessageReceivedEvent,
@@ -37,6 +41,9 @@ function createEagerStreamResponse(events: readonly UnstampedMessageStreamEvent[
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 

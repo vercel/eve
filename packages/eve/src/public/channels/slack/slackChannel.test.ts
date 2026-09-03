@@ -911,8 +911,7 @@ describe("slackChannel() default event handlers", () => {
     await callEvent(
       adapter,
       makeEvent("reasoning.appended", {
-        reasoningDelta: longReasoning,
-        reasoningSoFar: `${longReasoning}\nThen continue.`,
+        reasoningDelta: `${longReasoning}\nThen continue.`,
         sequence: 0,
         stepIndex: 0,
         turnId: "t1",
@@ -942,26 +941,26 @@ describe("slackChannel() default event handlers", () => {
       THREAD_STATE,
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
-    const reasoningEvent = (reasoningDelta: string, reasoningSoFar: string) =>
+    const reasoningEvent = (reasoningDelta: string) =>
       makeEvent("reasoning.appended", {
         reasoningDelta,
-        reasoningSoFar,
         sequence: 0,
         stepIndex: 0,
         turnId: "t1",
       });
 
-    await callEvent(adapter, reasoningEvent("I", "I"), ctx);
-    await callEvent(adapter, reasoningEvent(" ca", "I ca"), ctx);
-    await callEvent(adapter, reasoningEvent("n", "I can"), ctx);
+    await callEvent(adapter, reasoningEvent("I"), ctx);
+    await callEvent(adapter, reasoningEvent(" ca"), ctx);
+    await callEvent(adapter, reasoningEvent("n"), ctx);
 
     const statuses = fetchMock.mock.calls.map(
       ([, init]) => parseSlackRequestBody(init as RequestInit).status,
     );
     expect(statuses).toEqual(["I", "I can"]);
+    expect(ctx.state).not.toHaveProperty("reasoningText");
   });
 
-  it("reasoning.appended requires a matching prefix and four new characters", async () => {
+  it("reasoning.appended refreshes a short extension after the throttle interval", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));
     const adapter = withState(
@@ -969,10 +968,9 @@ describe("slackChannel() default event handlers", () => {
       THREAD_STATE,
     );
     const ctx = buildAdapterContext(adapter, stubAccessor());
-    const reasoningEvent = (reasoningSoFar: string) =>
+    const reasoningEvent = (reasoningDelta: string) =>
       makeEvent("reasoning.appended", {
-        reasoningDelta: reasoningSoFar,
-        reasoningSoFar,
+        reasoningDelta,
         sequence: 0,
         stepIndex: 0,
         turnId: "t1",
@@ -980,16 +978,51 @@ describe("slackChannel() default event handlers", () => {
 
     await callEvent(adapter, reasoningEvent("Need"), ctx);
     vi.setSystemTime(new Date("2026-06-18T12:00:01Z"));
-    await callEvent(adapter, reasoningEvent("Need to"), ctx);
-    await callEvent(adapter, reasoningEvent("Check something else"), ctx);
+    await callEvent(adapter, reasoningEvent(" to"), ctx);
     vi.setSystemTime(new Date("2026-06-18T12:00:05Z"));
-    await callEvent(adapter, reasoningEvent("Need to"), ctx);
+    await callEvent(adapter, reasoningEvent("."), ctx);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const statuses = fetchMock.mock.calls.map(
       ([, init]) => parseSlackRequestBody(init as RequestInit).status,
     );
-    expect(statuses).toEqual(["Need", "Need to"]);
+    expect(statuses).toEqual(["Need", "Need to."]);
+  });
+
+  it("starts fresh reasoning status for completed blocks and new steps", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-18T12:00:00Z"));
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      THREAD_STATE,
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+    const reasoningEvent = (reasoningDelta: string, stepIndex: number) =>
+      makeEvent("reasoning.appended", {
+        reasoningDelta,
+        sequence: 0,
+        stepIndex,
+        turnId: "t1",
+      });
+
+    await callEvent(adapter, reasoningEvent("First block", 0), ctx);
+    await callEvent(
+      adapter,
+      makeEvent("reasoning.completed", {
+        reasoning: "First block",
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "t1",
+      }),
+      ctx,
+    );
+    await callEvent(adapter, reasoningEvent("Second block", 0), ctx);
+    await callEvent(adapter, reasoningEvent("Next step", 1), ctx);
+
+    const statuses = fetchMock.mock.calls.map(
+      ([, init]) => parseSlackRequestBody(init as RequestInit).status,
+    );
+    expect(statuses).toEqual(["First block", "Second block", "Next step"]);
   });
 
   it("turn.started resets reasoning status throttling", async () => {
@@ -1005,7 +1038,6 @@ describe("slackChannel() default event handlers", () => {
       adapter,
       makeEvent("reasoning.appended", {
         reasoningDelta: "Need to inspect the repo.",
-        reasoningSoFar: "Need to inspect the repo.",
         sequence: 0,
         stepIndex: 0,
         turnId: "t1",
@@ -1022,7 +1054,6 @@ describe("slackChannel() default event handlers", () => {
       adapter,
       makeEvent("reasoning.appended", {
         reasoningDelta: "Fresh turn reasoning.",
-        reasoningSoFar: "Fresh turn reasoning.",
         sequence: 1,
         stepIndex: 0,
         turnId: "t2",

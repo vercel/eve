@@ -16,11 +16,14 @@ import {
   TurnTaskStateKey,
 } from "#context/keys.js";
 import { setHarnessEmissionState } from "#harness/emission.js";
+import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { InputRequest } from "#shared/input.js";
 import { appendPendingInputBatch } from "#harness/input-requests.js";
+import { getPendingInputBatches } from "#harness/pending-input-batches.js";
 import { createToolLoopHarness } from "#harness/tool-loop.js";
 import { setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, ToolLoopHarnessConfig } from "#harness/types.js";
+import { once } from "#tools/approval/policies.js";
 import { defineTool } from "#tools/definition.js";
 import { stampDurableDynamicCallback } from "#tools/durable-callbacks.js";
 
@@ -51,6 +54,26 @@ function textStreamResult(text: string): StreamResult {
         { id: "answer", type: "text-end" },
         {
           finishReason: { raw: undefined, unified: "stop" },
+          type: "finish",
+          usage,
+        },
+      ] satisfies StreamPart[],
+    }),
+  };
+}
+
+function toolCallStreamResult(call: {
+  readonly input: string;
+  readonly toolCallId: string;
+  readonly toolName: string;
+}): StreamResult {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "stream-start", warnings: [] },
+        { ...call, type: "tool-call" },
+        {
+          finishReason: { raw: undefined, unified: "tool-calls" },
           type: "finish",
           usage,
         },
@@ -173,6 +196,24 @@ function createTwoPendingApprovalSession(): HarnessSession {
   });
 }
 
+function createApprovalContext(): ContextContainer {
+  const responder = {
+    attributes: {},
+    authenticator: "test",
+    issuer: "test",
+    principalId: "user-1",
+    principalType: "user" as const,
+  };
+  const ctx = new ContextContainer();
+  ctx.set(AuthKey, responder);
+  ctx.set(SessionKey, {
+    auth: { current: responder, initiator: null },
+    sessionId: "generate-approval-resume-session",
+    turn: { id: "turn-1", sequence: 1 },
+  });
+  return ctx;
+}
+
 function createModel(): MockLanguageModelV4 {
   return new MockLanguageModelV4({
     doGenerate: {
@@ -189,11 +230,13 @@ function createModel(): MockLanguageModelV4 {
 function createConfig(
   model: MockLanguageModelV4,
   execute: (input: unknown, options: unknown) => Promise<string>,
+  approval?: HarnessToolDefinition["approval"],
 ): ToolLoopHarnessConfig {
   const tools: ToolLoopHarnessConfig["tools"] = new Map([
     [
       toolCall.toolName,
       {
+        approval,
         description: "Run a shell command.",
         execute,
         inputSchema: jsonSchema({ type: "object" }),
@@ -501,6 +544,112 @@ describe("tool loop generate approval resume (real AI SDK)", () => {
         : [],
     );
     expect(toolResultCallIds).toEqual([toolCall.toolCallId, secondToolCall.toolCallId]);
+  });
+
+  // Regression: approving one once()-gated call recorded the grant immediately,
+  // so a new same-tool call proposed on the resume step executed without a
+  // prompt while the other parked card was still visible to the user.
+  it("keeps prompting a once() tool while a sibling approval is still pending", async () => {
+    const thirdToolCall = {
+      input: JSON.stringify({ command: "ls" }),
+      toolCallId: "call-3",
+      toolName: "bash",
+    };
+    const execute = vi.fn(async () => "/workspace");
+    const model = new MockLanguageModelV4({
+      doStream: async () => toolCallStreamResult(thirdToolCall),
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const requested: InputRequest[] = [];
+    const config = {
+      ...createConfig(model, execute, once()),
+      handleEvent: async (event) => {
+        if (event.type === "input.requested") requested.push(...event.data.requests);
+      },
+    } satisfies ToolLoopHarnessConfig;
+
+    const result = await contextStorage.run(createApprovalContext(), () =>
+      createToolLoopHarness(config)(createTwoPendingApprovalSession(), {
+        inputResponses: [{ optionId: "approve", requestId: approvalRequest.approvalId }],
+      }),
+    );
+
+    expect(execute).toHaveBeenCalledExactlyOnceWith(
+      toolCall.input,
+      expect.objectContaining({ toolCallId: toolCall.toolCallId }),
+    );
+    expect(requested.map((request) => request.action.callId)).toEqual([thirdToolCall.toolCallId]);
+    expect(result.next).toBeNull();
+    const pendingCallIds = getPendingInputBatches(result.session.state).flatMap((batch) =>
+      batch.requests.map((request) => request.action.callId),
+    );
+    expect(pendingCallIds).toEqual([secondToolCall.toolCallId, thirdToolCall.toolCallId]);
+  });
+
+  it("auto-allows a once() tool after every pending approval with its key is settled", async () => {
+    const thirdToolCall = {
+      input: JSON.stringify({ command: "ls" }),
+      toolCallId: "call-3",
+      toolName: "bash",
+    };
+    const execute = vi.fn(async () => "/workspace");
+    // Batches settle one per step, so the model is called between them. It
+    // proposes the third call only once both pending prompts are gone.
+    const responses = [
+      textStreamResult("Ran pwd."),
+      toolCallStreamResult(thirdToolCall),
+      textStreamResult("All done."),
+    ];
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        const next = responses.shift();
+        if (next === undefined) throw new Error("Unexpected extra model call.");
+        return next;
+      },
+      modelId: "generate-approval-resume-model",
+      provider: "eve-integration-mock",
+    });
+    const requested: InputRequest[] = [];
+    const config = {
+      ...createConfig(model, execute, once()),
+      handleEvent: async (event) => {
+        if (event.type === "input.requested") requested.push(...event.data.requests);
+      },
+    } satisfies ToolLoopHarnessConfig;
+    const ctx = createApprovalContext();
+    const runStep = createToolLoopHarness(config);
+
+    const first = await contextStorage.run(ctx, () =>
+      runStep(createTwoPendingApprovalSession(), {
+        inputResponses: [
+          { optionId: "approve", requestId: approvalRequest.approvalId },
+          { optionId: "cancel", requestId: secondApprovalRequest.approvalId },
+        ],
+      }),
+    );
+    // The second batch's denial replays on a deferred step; drain until the turn settles.
+    if (typeof first.next !== "function") {
+      throw new TypeError("Expected the deferred approval response to schedule another step.");
+    }
+    let result = first;
+    while (typeof result.next === "function") {
+      const { next, session } = result;
+      result = await contextStorage.run(ctx, () => next(session));
+    }
+
+    expect(requested).toEqual([]);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenNthCalledWith(
+      2,
+      { command: "ls" },
+      expect.objectContaining({ toolCallId: thirdToolCall.toolCallId }),
+    );
+    expect(responses).toEqual([]);
+    expect(result.session.history.at(-1)).toMatchObject({
+      content: [{ text: "All done.", type: "text" }],
+      role: "assistant",
+    });
   });
 
   it("executes an approval before replaying its message after a limit continuation", async () => {

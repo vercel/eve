@@ -854,6 +854,48 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(getRunMock).toHaveBeenCalledWith("driver-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
   });
+
+  it("normalizes persisted v24 appends before exposing a current event stream", async () => {
+    const legacy = {
+      data: {
+        messageDelta: "lo",
+        messageSoFar: "Hello",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt-v24" },
+      type: "message.appended",
+    };
+    const bytes = new TextEncoder().encode(`${JSON.stringify(legacy)}\n`);
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+    });
+
+    const stream = await buildRuntime({} as RuntimeCompiledArtifactsSource).getEventStream(
+      "driver-run",
+    );
+
+    await expect(stream.getReader().read()).resolves.toEqual({
+      done: false,
+      value: {
+        data: {
+          messageDelta: "lo",
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn-1",
+        },
+        meta: legacy.meta,
+        type: "message.appended",
+      },
+    });
+  });
 });
 
 describe("createWorkflowRuntime#createSession trace seed allocation", () => {
