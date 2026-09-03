@@ -14,6 +14,11 @@ import { SessionStateCursor } from "#execution/session-state-cursor.js";
 vi.mock("./route-child-delivery.js", () => ({
   routeDeliverToChildren: vi.fn(),
 }));
+vi.mock("./cancel-indexed-session-tasks-step.js", () => ({
+  cancelAllIndexedSessionTasksStep: vi.fn(),
+}));
+
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 
 interface ScriptedRead {
   readonly result: IteratorResult<SessionInboxPayload>;
@@ -77,9 +82,9 @@ function authorizationRead(): ScriptedRead {
   };
 }
 
-function cancelRead(): ScriptedRead {
+function cancelRead(command: Record<string, unknown> = {}): ScriptedRead {
   return {
-    result: { done: false, value: { kind: "cancel" } },
+    result: { done: false, value: { kind: "cancel", ...command } },
     source: "session",
   };
 }
@@ -121,6 +126,19 @@ describe("nextTurnDelivery", () => {
     expect(next.closed).toBe(false);
     expect(next.payloads).toHaveLength(1);
     expect(inbox.windowTransitions).toEqual([true, false]);
+  });
+
+  it("cancels indexed tasks and keeps waiting for ordinary parked activity", async () => {
+    const inbox = createMockInbox([cancelRead({ tasks: true }), authorizationRead()]);
+    const input = waitInput(inbox);
+
+    const next = await nextTurnDelivery(input);
+
+    expect(next.kind).toBe("authorization");
+    expect(cancelAllIndexedSessionTasksStep).toHaveBeenCalledWith({
+      serializedContext: input.stateCursor.serializedContext,
+      sessionState: input.stateCursor.sessionState,
+    });
   });
 
   it("keeps the authorization window open across a consumed no-op cancel", async () => {

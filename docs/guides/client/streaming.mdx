@@ -237,7 +237,7 @@ stream index after the captured prefix.
 
 ## Abort a request
 
-Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops the server-side turn — it keeps running and remains attachable by index. To stop the turn itself, POST the session's [cancel route](../../channels/eve#routes) and watch the stream settle with `turn.cancelled` followed by `session.waiting`.
+Pass an `AbortSignal` to cancel the POST or stream. Aborting is local transport cancellation: turns are resumable across disconnects, so detaching never stops server-side work. Use `session.cancel()` to stop the active turn, or `session.cancel({ tasks: true })` to also stop background tasks owned by the session. Cancellation is asynchronous; watch the stream for `turn.cancelled` followed by `session.waiting`, and inspect task state in a later turn to confirm task cancellation.
 
 Arm the timeout before awaiting `send()` so it covers the POST as well as the stream:
 

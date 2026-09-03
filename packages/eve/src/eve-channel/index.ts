@@ -380,6 +380,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         try {
           result = await attachSession(sessionId).cancel({
             taskId: body.taskId,
+            tasks: body.tasks,
             turnId: body.turnId,
           });
         } catch (error) {

@@ -91,7 +91,7 @@ Stream a session as newline-delimited JSON from `GET /eve/v1/session/:sessionId/
 
 ### Cancel a turn
 
-Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Cancellation is asynchronous; confirm it on the stream as `turn.cancelled` followed by `session.waiting`.
+Post to `/eve/v1/session/:sessionId/cancel` to request cancellation of the active turn. You can include the observed `turnId` to keep a late request from cancelling a newer turn. Include `tasks: true` to also cancel every background task owned by the session, including while the session is parked. Cancellation is asynchronous; confirm the turn boundary on the stream as `turn.cancelled` followed by `session.waiting`, and inspect task state in a later turn to confirm task cancellation.
 
 See [Cancel the in-flight turn](../concepts/sessions-runs-and-streaming#cancel-the-in-flight-turn) for response statuses, HTTP status codes, subagent cancellation, and race behavior.
 

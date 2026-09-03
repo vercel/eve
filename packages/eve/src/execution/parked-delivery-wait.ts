@@ -1,4 +1,5 @@
 import type { DeliverHookPayload, DeliverPayload } from "#channel/types.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
 import type { SessionStateCursor } from "#execution/session-state-cursor.js";
@@ -102,6 +103,7 @@ async function awaitNextTurnDelivery(input: {
       commandInbox: input.commandInbox,
       deferDeliveries: input.deferDeliveries,
       seenTaskDeliveries,
+      stateCursor: input.stateCursor,
     });
 
     if (nextAction.kind === "authorization") {
@@ -145,6 +147,7 @@ async function waitForNextSessionAction(input: {
   readonly commandInbox: SessionCommandInbox;
   readonly deferDeliveries?: boolean;
   readonly seenTaskDeliveries: Set<string>;
+  readonly stateCursor: SessionStateCursor;
 }): Promise<NextSessionAction> {
   const pendingSessionControl = input.bufferedSessionControls.shift();
   if (pendingSessionControl !== undefined) {
@@ -214,6 +217,12 @@ async function waitForNextSessionAction(input: {
     }
 
     if (decoded.kind === "cancel") {
+      if ("tasks" in decoded && decoded.tasks === true) {
+        await cancelAllIndexedSessionTasksStep({
+          serializedContext: input.stateCursor.serializedContext,
+          sessionState: input.stateCursor.sessionState,
+        });
+      }
       if (decoded.taskId !== undefined) {
         input.cancelledTaskIds.add(decoded.taskId);
         const kept = input.bufferedDeliveries.filter(

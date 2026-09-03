@@ -45,8 +45,8 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   schedule: {
-    current: 8,
-    supported: [1, 2, 3, 4, 6, 7, 8],
+    current: 9,
+    supported: [1, 2, 3, 4, 6, 7, 8, 9],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },

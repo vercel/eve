@@ -1,20 +1,16 @@
 import { deserializeContext } from "#context/serialize.js";
 import type { ContextContainer } from "#context/container.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { readDurableSession, type DurableSessionState } from "#execution/durable-session-store.js";
-import { resolveEffectiveAgentRuntime } from "#execution/effective-agent-config.js";
-import { hydrateDurableSession } from "#execution/session.js";
 import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
 } from "#subagents/remote-dispatch.js";
-import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
-import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
 import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
-import { getSessionTaskIndex } from "#tasks/session-index.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 
 const log = createLogger("execution.terminate-child-sessions");
@@ -45,12 +41,6 @@ export async function terminateChildSessionsStep(input: {
     return;
   }
 
-  // Cooperatively cancel live tasks first: their runs are the single
-  // writers for task state, and committing `cancelled` before the child
-  // terminations below means no child termination can race a completion
-  // into an ended parent. Already-terminal tasks report `unreachable`,
-  // which is the expected no-op.
-  const taskEntries = readSessionTaskIndex(session.state, session.sessionId);
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
   const hasRemoteHandle = handles.some(
     (handle) => "address" in handle && handle.address.kind === "agent/remote",
@@ -61,35 +51,18 @@ export async function terminateChildSessionsStep(input: {
         readonly ctx: ContextContainer;
       }
     | undefined;
-  if (taskEntries.length > 0 || hasRemoteHandle) {
+  // Cooperatively cancel live tasks first: their runs are the single writers
+  // for task state, so child termination cannot race completion into an ended parent.
+  await cancelAllIndexedSessionTasksStep({
+    serializedContext: input.serializedContext,
+    sessionState: input.sessionState,
+  });
+  if (hasRemoteHandle) {
     if (input.serializedContext === undefined) {
       throw new Error("Child finalization requires serialized runtime context.");
     }
     const ctx = await deserializeContext(input.serializedContext);
     runtimeContext = { bundle: ctx.require(BundleKey), ctx };
-  }
-  if (taskEntries.length > 0) {
-    const { bundle, ctx } = runtimeContext!;
-    const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
-    const runtimeSession = hydrateDurableSession({
-      durable: session,
-      turnAgent: effectiveAgent.turnAgent,
-    });
-    for (const entry of taskEntries) {
-      try {
-        await cancelOwnedTask({
-          cancelOwnedWork: cancelBackgroundAgentTask,
-          entry,
-          serializedContext: input.serializedContext,
-          session: runtimeSession,
-        });
-      } catch (error) {
-        logError(log, "failed to cancel task during parent finalization", error, {
-          parentSessionId: session.sessionId,
-          taskId: entry.taskId,
-        });
-      }
-    }
   }
 
   if (handles.length === 0) {
@@ -157,19 +130,5 @@ export async function terminateChildSessionsStep(input: {
         parentSessionId: session.sessionId,
       });
     }
-  }
-}
-
-function readSessionTaskIndex(
-  state: Parameters<typeof getSessionTaskIndex>[0],
-  parentSessionId: string,
-): ReturnType<typeof getSessionTaskIndex> {
-  try {
-    return getSessionTaskIndex(state);
-  } catch (error) {
-    logError(log, "failed to read the task index during parent finalization", error, {
-      parentSessionId,
-    });
-    return [];
   }
 }

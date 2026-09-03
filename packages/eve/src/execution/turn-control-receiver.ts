@@ -1,12 +1,14 @@
 import { createHook, type Hook } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { forwardTurnCancellationStep } from "#execution/forward-turn-cancellation-step.js";
 import type { TurnControlPayload } from "#execution/turn-control-protocol.js";
 import { forwardTurnDeliveryStep } from "#execution/forward-turn-delivery-step.js";
 import { closeHookIterator, disposeHook } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import type { SessionStateCursor } from "#execution/session-state-cursor.js";
 import { turnCancellationHookToken } from "#execution/turn-cancellation-token.js";
 import { reportDroppedWirePayloadStep } from "#execution/report-dropped-wire-payload-step.js";
 import {
@@ -30,6 +32,7 @@ export class TurnControlReceiver {
   private readonly expectedTurnId: string;
   private readonly cancelledTaskIds: Set<string>;
   private readonly seenTaskDeliveries: Set<string>;
+  private readonly stateCursor: SessionStateCursor;
   private pendingControl: Promise<IteratorResult<TurnControlPayload>> | null = null;
 
   constructor(input: {
@@ -39,6 +42,7 @@ export class TurnControlReceiver {
     readonly commandInbox: SessionCommandInbox;
     readonly expectedTurnId: string;
     readonly seenTaskDeliveries?: Set<string>;
+    readonly stateCursor: SessionStateCursor;
     readonly token: string;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
@@ -46,6 +50,7 @@ export class TurnControlReceiver {
     this.cancelledTaskIds = input.cancelledTaskIds ?? new Set();
     this.commandInbox = input.commandInbox;
     this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
+    this.stateCursor = input.stateCursor;
     this.control = createHook<TurnControlPayload>({ token: input.token });
     this.controlIterator = this.control[Symbol.asyncIterator]();
     this.expectedTurnId = input.expectedTurnId;
@@ -100,6 +105,12 @@ export class TurnControlReceiver {
       return undefined;
     }
     if (command.kind === "cancel") {
+      if ("tasks" in command && command.tasks === true) {
+        await cancelAllIndexedSessionTasksStep({
+          serializedContext: this.stateCursor.serializedContext,
+          sessionState: this.stateCursor.sessionState,
+        });
+      }
       if (command.taskId !== undefined) this.discardTaskDeliveries(command.taskId);
       const turnId =
         command.taskId !== undefined &&
@@ -107,8 +118,10 @@ export class TurnControlReceiver {
         command.turnId !== this.expectedTurnId
           ? undefined
           : command.turnId;
+      const payload: { tasks?: boolean; turnId?: string } = { tasks: command.tasks };
+      if (turnId !== undefined) payload.turnId = turnId;
       await forwardTurnCancellationStep({
-        payload: turnId === undefined ? {} : { turnId },
+        payload,
         token: turnCancellationHookToken(this.control.token),
       });
       return undefined;

@@ -618,8 +618,9 @@ export async function runInitCommand(
     }
   }
 
-  const selectedAgentArguments = options.agents?.[0] ? ["--agent", options.agents[0]] : [];
-  const baseDevArguments = [...eveDevArguments(result.packageManager), ...selectedAgentArguments];
+  // A workspace has no implicit primary agent. Let `eve dev` ask the person
+  // which member to run, rather than silently selecting the first --agents value.
+  const baseDevArguments = eveDevArguments(result.packageManager);
   const agentDevCommand = [result.packageManager, ...baseDevArguments].join(" ");
   const agentHandoff = initAgentDevHandoff({
     projectPath: result.projectPath,
@@ -627,7 +628,11 @@ export async function runInitCommand(
   });
 
   if (result.agentLaunched) {
-    logger.log(initAgentReadySummary(options.model, result.projectPath));
+    logger.log(
+      initAgentReadySummary(options.model, result.projectPath, {
+        workspace: options.agents !== undefined,
+      }),
+    );
     logger.log(agentHandoff);
     return;
   }
@@ -667,11 +672,7 @@ export async function runInitCommand(
   // the command the way run-scripts do, so the handoff line is printed here.
   const freshScaffold = result.kind === "created";
   const devArguments = freshScaffold ? [...baseDevArguments, "--onboard"] : baseDevArguments;
-  logger.log(
-    pc.dim(
-      `$ eve dev${selectedAgentArguments.length > 0 ? ` --agent ${selectedAgentArguments[1]}` : ""}`,
-    ),
-  );
+  logger.log(pc.dim("$ eve dev"));
   if (
     !resultSucceeded(
       await dependencies.spawnPackageManager(

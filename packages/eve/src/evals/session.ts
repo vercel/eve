@@ -21,6 +21,7 @@ import { summarizeTurnEvents } from "#client/session-utils.js";
 import { extractCompletedResult } from "#client/output-schema.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { deriveRunFacts } from "#evals/runner/derive-run-facts.js";
+import { cleanupEvalSessions } from "#evals/session-cleanup.js";
 import { formatEvalTranscript, inferMediaType } from "#evals/session-content.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createOutputAssertions, createScopedAssertions } from "#evals/assertions/scoped.js";
@@ -139,6 +140,12 @@ export class EvalSessionDriver implements EveEvalSession {
   async cancel(): Promise<CancelSessionResult> {
     if (this.#session === undefined) throw new Error("Eval session has not started.");
     return await this.#session.cancel();
+  }
+
+  /** @internal */
+  async cleanup(signal: AbortSignal): Promise<void> {
+    if (this.#session === undefined) return;
+    await this.#session.reset({ reason: "Eval timed out", signal });
   }
 
   requireInputRequest(filter: EveEvalInputRequestMatchOptions = {}): InputRequest {
@@ -615,6 +622,10 @@ export class EvalSessionManager {
 
   hasActivity(): boolean {
     return this.#sessions.length > 0;
+  }
+  /** @internal */
+  async cleanup(signal: AbortSignal): Promise<readonly PromiseSettledResult<void>[]> {
+    return await cleanupEvalSessions(this.#sessions, signal);
   }
 
   #createSession(primary: boolean): EvalSessionDriver {
