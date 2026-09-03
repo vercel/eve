@@ -1,10 +1,12 @@
 import { defineOpenAPIConnection } from "eve/connections";
 import { always } from "eve/tools/approval";
 
+import { PETSTORE_BASE_URL, PETSTORE_SPEC } from "../lib/petstore.js";
+
 export default defineOpenAPIConnection({
   approval: always(),
-  baseUrl: "https://petstore.swagger.io/v2",
-  spec: "https://petstore.swagger.io/v2/swagger.json",
-  description: "Approval-gated Swagger Petstore API from its public Swagger 2.0 document.",
+  baseUrl: PETSTORE_BASE_URL,
+  spec: PETSTORE_SPEC,
+  description: "Approval-gated local Swagger Petstore API fixture.",
   operations: { allow: ["getInventory"] },
 });

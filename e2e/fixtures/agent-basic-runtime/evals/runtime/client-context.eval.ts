@@ -32,7 +32,7 @@ export default defineEval({
     const tokens = second.message?.match(CLIENT_CONTEXT_TOKEN_PATTERN) ?? [];
     await t.require(
       tokens,
-      satisfies(
+      satisfies<readonly string[]>(
         (observed) =>
           observed.filter((token) => token === SECOND_CLIENT_CONTEXT_TOKEN).length === 1,
         "contains the fresh client context token exactly once",
@@ -40,7 +40,7 @@ export default defineEval({
     );
     await t.require(
       tokens,
-      satisfies(
+      satisfies<readonly string[]>(
         (observed) => !observed.includes(FIRST_CLIENT_CONTEXT_TOKEN),
         "does not contain the first turn's client context token",
       ),

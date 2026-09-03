@@ -4,9 +4,8 @@ const SEARCH_TOOL = "connection_search";
 const PETSTORE_INVENTORY_TOOL = "petstore__getInventory";
 
 export default defineEval({
-  tags: ["real-model"],
   description:
-    "OpenAPI connection smoke: Swagger Petstore's Swagger 2.0 document exposes and calls getInventory.",
+    "OpenAPI connection smoke: a local Swagger 2.0 document exposes and calls getInventory.",
 
   async test(t) {
     const turn = await t.send(
