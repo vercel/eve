@@ -1507,7 +1507,7 @@ importers:
   packages/eve-self-modification:
     devDependencies:
       eve:
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../eve
       typescript:
         specifier: 'catalog:'

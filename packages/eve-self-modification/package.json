@@ -62,11 +62,11 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.scaffold.json --noEmit"
   },
   "devDependencies": {
-    "eve": "workspace:^",
+    "eve": "workspace:*",
     "typescript": "catalog:"
   },
   "peerDependencies": {
-    "eve": ">=0.52.0 <1.0.0"
+    "eve": "workspace:*"
   },
   "engines": {
     "node": ">=24"
