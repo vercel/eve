@@ -7,17 +7,17 @@ import type { SessionAuthContext } from "eve/context";
  * deterministic principals, no injected env (the deployment is deliberately
  * open — fixture-only; do not pattern production channels off this):
  *
- * - The `remote-loopback` hop authenticates with a fixed bearer and runs as
+ * - The `remote-loopback` hop authenticates with a fixture authorization and runs as
  *   the `router-app` service principal — the trusted forwarder.
- * - Bob and the observer each have a fixed bearer, so the eval can continue
+ * - Bob and the observer each have a fixture authorization, so the eval can continue
  *   Alice's child as two distinct callers. Bob has his own user grant; the
  *   observer deliberately has none.
  * - Every other caller (the local eval driver is anonymous; the Vercel one
  *   may carry ambient OIDC) falls through to Alice's fixed user principal.
  */
-const ROUTER_AUTHORIZATION = "Bearer e2e-principal-forwarding-router";
-const BOB_AUTHORIZATION = "Bearer e2e-principal-forwarding-bob";
-const OBSERVER_AUTHORIZATION = "Bearer e2e-principal-forwarding-observer";
+const ROUTER_AUTHORIZATION = "Bearer e2e-workspace-label-router";
+const BOB_AUTHORIZATION = "Bearer e2e-workspace-label-bob";
+const OBSERVER_AUTHORIZATION = "Bearer e2e-workspace-label-observer";
 
 function createFixtureUserPrincipal(principalId: string): SessionAuthContext {
   return {
