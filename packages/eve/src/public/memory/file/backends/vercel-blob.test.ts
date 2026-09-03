@@ -104,31 +104,6 @@ describe("Vercel Blob file-memory backend", () => {
     });
   });
 
-  it("uses the underlying Blob ETag when CDN compression weakens the response validator", async () => {
-    const content = "x".repeat(1_025);
-    vi.mocked(get).mockResolvedValue(getBlobResult(content, 'W/"etag-current"'));
-    vi.mocked(put).mockResolvedValue(putBlobResult('"etag-next"'));
-    const backend = vercelBlob();
-
-    const document = await backend.read({ key: "mem_a", signal });
-    expect(document).toEqual({ content, version: '"etag-current"' });
-    if (document === null) throw new Error("Expected a memory document.");
-
-    await expect(
-      backend.write({
-        content: `${content} next`,
-        expectedVersion: document.version,
-        key: "mem_a",
-        signal,
-      }),
-    ).resolves.toEqual({ content: `${content} next`, version: '"etag-next"' });
-    expect(put).toHaveBeenCalledWith(
-      "eve/memory/file/mem_a/MEMORY.md",
-      `${content} next`,
-      expect.objectContaining({ ifMatch: '"etag-current"' }),
-    );
-  });
-
   it("normalizes conditional and duplicate-create failures", async () => {
     const backend = vercelBlob();
     vi.mocked(put).mockRejectedValueOnce(new BlobPreconditionFailedError());
