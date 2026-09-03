@@ -62,6 +62,7 @@
     "@eve/self-modification": "workspace:*",
     "@getdial/chat-sdk-adapter": "0.2.0",
     "@github-tools/eve-extension": "^0.1.0",
+    "@inference/tracing": "0.1.11",
     "@jetty/eve": "^0.3.0",
     "@kapso/chat-adapter": "0.1.1",
     "@kybernesis/arcana": "0.2.0",

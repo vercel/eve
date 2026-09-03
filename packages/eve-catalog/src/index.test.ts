@@ -142,6 +142,15 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("supermemory")?.connection).toBeUndefined();
   });
 
+  it("exposes Inference.net as an instrumentation provider", () => {
+    expect(getIntegrationEntry("inference")).toMatchObject({
+      kind: "instrumentation",
+      name: "Inference.net",
+      surfaces: { scaffoldable: false, registry: true, gallery: true },
+    });
+    expect(getIntegrationEntry("inference")?.connection).toBeUndefined();
+  });
+
   it("exposes file memory as a memory provider", () => {
     expect(getIntegrationEntry("file")?.kind).toBe("memory");
     expect(getIntegrationEntry("file")?.connection).toBeUndefined();
