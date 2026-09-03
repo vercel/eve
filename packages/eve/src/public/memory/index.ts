@@ -8,6 +8,10 @@ import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
 import { MEMORY_DEFINITION_BRAND } from "#shared/memory-definition.js";
+import {
+  EVE_PUBLIC_ROUTE_PREFIX_ENV,
+  normalizePublicRoutePrefix,
+} from "#shared/public-route-prefix.js";
 import { resolveVercelProjectIdFromEnvironment } from "#shared/vercel-project.js";
 import type { ToolContext, ToolModelOutput } from "#tools/definition.js";
 
@@ -186,12 +190,14 @@ export function defaultNamespace(context: MemoryNamespaceContext): string {
         process.env.VERCEL_URL?.trim() ||
         "unknown-preview"
       : null;
+  const publicRoutePrefix = normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]);
   return JSON.stringify([
     "eve-memory-default-namespace-v1",
     "vercel",
     projectId,
     environment,
     previewIdentity,
+    ...(publicRoutePrefix === undefined ? [] : [publicRoutePrefix]),
     context.node,
     context.slot,
   ]);
