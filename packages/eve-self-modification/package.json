@@ -1,6 +1,7 @@
 {
   "name": "@eve/self-modification",
   "version": "0.0.8",
+  "private": true,
   "description": "Development-only source editing subagent for eve applications.",
   "keywords": [
     "agents",
@@ -51,9 +52,6 @@
       "types": "./dist/tools/index.d.ts",
       "default": "./dist/tools/index.mjs"
     }
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "scripts": {
     "build": "eve extension build && pnpm run build:scaffold",
