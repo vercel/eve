@@ -1,5 +1,6 @@
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
+import { classifyAgentRootEntry, getDirectoryEntryType } from "#discover/filesystem.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
@@ -35,6 +36,19 @@ export type EveProjectContext =
 function containsPath(parent: string, child: string): boolean {
   const relativePath = relative(parent, child);
   return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
+async function hasFlatAgentRoot(root: string, source: ProjectSource): Promise<boolean> {
+  const entries = await source.readDirectory(root);
+  return entries.some((entry) => {
+    const kind = classifyAgentRootEntry(entry.name, getDirectoryEntryType(entry));
+    return (
+      kind !== "unknown" &&
+      kind !== "ignored-directory" &&
+      kind !== "lib-directory" &&
+      kind !== "memory-directory"
+    );
+  });
 }
 
 async function resolveWorkspace(root: string, source: ProjectSource): Promise<AgentWorkspace> {
@@ -74,13 +88,16 @@ export async function findEveProjectContext(
 
   const hasAgent = (await source.stat(join(projectRoot, "agent"))) === "directory";
   const hasAgents = (await source.stat(join(projectRoot, "agents"))) === "directory";
-  if (hasAgent === hasAgents) {
-    const detail = hasAgent ? "both agent/ and agents/" : "neither agent/ nor agents/";
-    throw new Error(`Invalid eve project at ${projectRoot}: found ${detail}.`);
+  if (hasAgent && hasAgents) {
+    throw new Error(`Invalid eve project at ${projectRoot}: found both agent/ and agents/.`);
   }
 
-  if (hasAgent) {
+  if (hasAgent || (!hasAgents && (await hasFlatAgentRoot(projectRoot, source)))) {
     return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
+  }
+
+  if (!hasAgents) {
+    throw new Error(`Invalid eve project at ${projectRoot}: found no agent files.`);
   }
 
   const workspace = await resolveWorkspace(projectRoot, source);

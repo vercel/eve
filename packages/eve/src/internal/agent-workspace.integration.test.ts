@@ -155,6 +155,20 @@ describe("resolveEveProjectContext", () => {
     });
   });
 
+  it("resolves a flat standalone agent", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-flat-agent-"));
+    await Promise.all([
+      writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } })),
+      writeFile(join(root, "agent.ts"), "export default {};\n"),
+    ]);
+
+    await expect(resolveEveProjectContext(root)).resolves.toEqual({
+      appRoot: root,
+      environmentRoot: root,
+      kind: "standalone",
+    });
+  });
+
   it("resolves workspace-owned paths outside any member to the workspace", async () => {
     const root = await createWorkspace();
     const sourceRoot = join(root, "src");
@@ -176,10 +190,10 @@ describe("resolveEveProjectContext", () => {
     await expect(findEveProjectContext(packageRoot)).resolves.toBeUndefined();
   });
 
-  it("rejects an eve package with neither project directory", async () => {
+  it("rejects an eve package without agent files", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-invalid-shape-"));
     await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
 
-    await expect(resolveEveProjectContext(root)).rejects.toThrow(/neither agent\/ nor agents\//);
+    await expect(resolveEveProjectContext(root)).rejects.toThrow(/found no agent files/);
   });
 });
