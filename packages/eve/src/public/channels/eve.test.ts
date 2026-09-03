@@ -674,6 +674,7 @@ describe("eveChannel — onMessage", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        context: ["Client-provided workspace: Acme"],
         clientContext: "selection: jazz",
         message: "What word is selected?",
       }),
@@ -685,7 +686,7 @@ describe("eveChannel — onMessage", () => {
     const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
     expect(payload).toMatchObject({
       message: "What word is selected?",
-      context: ["Authenticated caller profile: enterprise"],
+      context: ["Authenticated caller profile: enterprise", "Client-provided workspace: Acme"],
     });
     expect(readClientContext(payload)).toEqual(["Client context:\nselection: jazz"]);
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
@@ -799,6 +800,35 @@ describe("eveChannel — onMessage", () => {
     expect(handler.respond).not.toHaveBeenCalled();
   });
 
+  it("orders onMessage context before request context on continue messages", async () => {
+    const onMessage = vi.fn((ctx, message) => {
+      expect(ctx.eve.sessionId).toBe("test-session-id");
+      expect(message).toBe("continue");
+      return { auth: defaultEveAuth(ctx), context: ["Authenticated continuation context"] };
+    });
+    const handler = createEveContinueHandler({
+      auth: () => ACCEPTED_AUTH,
+      onMessage,
+    });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        context: ["Client-provided workspace: Acme"],
+        message: "continue",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(onMessage).toHaveBeenCalledTimes(1);
+    expect(handler.send).toHaveBeenCalledWith(
+      "continue",
+      expect.objectContaining({
+        auth: ACCEPTED_AUTH,
+        context: ["Authenticated continuation context", "Client-provided workspace: Acme"],
+      }),
+    );
+  });
+
   it("does not run onMessage for inputResponses-only continue requests", async () => {
     const onMessage = vi.fn(() => ({ auth: OVERRIDE_AUTH, context: ["never"] }));
     const handler = createEveContinueHandler({
@@ -808,6 +838,8 @@ describe("eveChannel — onMessage", () => {
 
     const response = await handler.fetch(
       createJsonMessageRequest({
+        context: ["The cancellation applies to deployment dep_1."],
+        clientContext: "approval modal open",
         inputResponses: [{ requestId: "req-1", optionId: "cancel" }],
       }),
     );
@@ -816,8 +848,13 @@ describe("eveChannel — onMessage", () => {
     expect(onMessage).not.toHaveBeenCalled();
     expect(handler.respond).toHaveBeenCalledWith(
       [{ requestId: "req-1", optionId: "cancel" }],
-      expect.objectContaining({ auth: ACCEPTED_AUTH }),
+      expect.objectContaining({
+        auth: ACCEPTED_AUTH,
+        context: ["The cancellation applies to deployment dep_1."],
+      }),
     );
+    const options = handler.respond.mock.calls[0]?.[1];
+    expect(readClientContext(options)).toEqual(["Client context:\napproval modal open"]);
     expect(handler.send).not.toHaveBeenCalled();
   });
 
@@ -1186,6 +1223,25 @@ describe("eveChannel — create session (text)", () => {
     expect(readClientContext(payload)).toEqual(['Client context:\n{"selectedWord":"jazz"}']);
   });
 
+  it("forwards durable context with a create-session message", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        context: ["The workspace is Acme.", "The project is Atlas."],
+        message: "Summarize the project.",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    const payload = handler.send.mock.calls[0]?.[0] as SendPayload;
+    expect(payload).toEqual({
+      context: ["The workspace is Acme.", "The project is Atlas."],
+      message: "Summarize the project.",
+    });
+    expect(readClientContext(payload)).toBeUndefined();
+  });
+
   it("forwards outputSchema with a create-session message", async () => {
     const handler = createEveCreateHandler({ auth: none() });
     const outputSchema = {
@@ -1257,6 +1313,20 @@ describe("eveChannel — create session (text)", () => {
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringContaining("clientContext"),
+    });
+  });
+
+  it("rejects invalid create-session context", async () => {
+    const handler = createEveCreateHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ context: ["valid", 42], message: "hi" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("context"),
     });
   });
 
@@ -1589,6 +1659,23 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     ]);
   });
 
+  it("forwards durable context on continue-session requests", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        context: ["The workspace is Acme."],
+        message: "continue",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send).toHaveBeenCalledWith(
+      "continue",
+      expect.objectContaining({ context: ["The workspace is Acme."] }),
+    );
+  });
+
   it("forwards outputSchema with a continue-session message", async () => {
     const handler = createEveContinueHandler({ auth: none() });
     const outputSchema = {
@@ -1642,6 +1729,20 @@ describe("eveChannel — continue session HITL (inputResponses)", () => {
     expect(handler.send).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: expect.stringContaining("clientContext"),
+    });
+  });
+
+  it("rejects invalid continue-session context", async () => {
+    const handler = createEveContinueHandler({ auth: none() });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({ context: "not-an-array", message: "hi" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(handler.send).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("context"),
     });
   });
 

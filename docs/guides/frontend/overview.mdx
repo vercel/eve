@@ -199,6 +199,18 @@ function AuthorizationPrompt({ part }: { part: EveMessagePart }) {
 
 For fully custom state machines, `authorization.required` and `authorization.completed` are still available on `events` and `onEvent`.
 
+## Attach durable context
+
+Pass `context` when application context should become part of the durable conversation. Each string is appended as a user-role message before the current delivery, so later turns see it through normal session history:
+
+```tsx
+await agent.send("Summarize this project.", {
+  context: ["The workspace is Acme.", "The active project is Atlas."],
+});
+```
+
+Compaction can summarize durable context, and `clear()` removes it. Sending the same value again appends another copy.
+
 ## Attach page context per turn
 
 `clientContext` adds ephemeral context for the next model call only. Strings (or an array of strings) become user-role context messages; an object is JSON-serialized into one. It rides along with a message or HITL response, so it never dispatches a turn on its own and never lands in durable session history. Pass it in the second argument to `send()` or `respond()`:

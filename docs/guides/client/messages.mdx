@@ -1,6 +1,6 @@
 ---
 title: "Messages"
-description: "Send text, full turn payloads, client context, attachments, and HITL responses with eve/client."
+description: "Send text, durable context, client context, attachments, and HITL responses with eve/client."
 ---
 
 Create a session with its first turn, then use the returned `ClientSession` for follow-ups. Each handle targets one durable session ID.
@@ -42,21 +42,33 @@ errors, `session.respond()`, control methods, and raw HTTP requests do not use t
 session still throws `ClientError` immediately, while a terminal session throws after the final
 attempt. The client never creates a replacement session.
 
-## Send a full turn payload
+## Add durable context
 
-Pass the full payload to `create()` for the first turn or `send()` for a follow-up:
+Pass `context` to `create()` for the first turn or in the options to `send()` and `respond()`. Each string becomes a user-role message immediately before the delivery and remains in durable session history:
 
 ```ts
 const { session, response } = await client.sessions.create({
-  message: "What should I do on this screen?",
+  message: "Summarize this project.",
+  context: ["The workspace is Acme.", "The active project is Atlas."],
+});
+
+await response.result();
+```
+
+Later turns see this context through normal conversation history. Compaction can summarize it, and `clear()` removes it. Sending the same context again appends another copy; eve does not replace or deduplicate durable context.
+
+## Add ephemeral client context
+
+Use `clientContext` for volatile page state that should not remain in conversation history:
+
+```ts
+await session.send("What should I do on this screen?", {
   clientContext: {
     route: "/billing",
     plan: "pro",
     seatsUsed: 4,
   },
 });
-
-await response.result();
 ```
 
 `clientContext` is one-turn context for the next model call. Strings become user-role context messages, arrays of strings become multiple context messages, and objects are JSON-serialized into one context message. It isn't persisted to durable session history and doesn't dispatch a turn by itself.
@@ -135,7 +147,7 @@ await resumed.result();
 
 After eve accepts the reply, the durable stream emits `input.resolved`. Its `resolutions` array includes each request's `requestId`, `kind`, terminal `outcome`, and the accepted `response` when the client provided one. Persist this authoritative event instead of relying on the submitting client's optimistic state when rebuilding message history.
 
-`send(message, options)` and `respond(inputResponses, options)` are separate operations. Put `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
+`send(message, options)` and `respond(inputResponses, options)` are separate operations. Put `context`, `clientContext`, `outputSchema`, headers, or stream options in the second argument to either method.
 
 ## Single-use responses
 

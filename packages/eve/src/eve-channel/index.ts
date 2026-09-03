@@ -257,10 +257,10 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             input: attachClientContext(
               {
                 message: body.message,
-                context: messageResult.context,
+                context: mergeDeliveryContext(messageResult.context, body.context),
                 outputSchema: body.outputSchema,
               },
-              body.context,
+              body.clientContext,
             ),
             mode: body.mode ?? "conversation",
             parentTraceContext,
@@ -306,7 +306,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
 
-        let context: readonly string[] | undefined;
+        let context = body.context;
         let dispatchAuth: SessionAuthContext | null = forwarded.auth;
         if (body.message !== undefined) {
           const messageResult = await resolveOnMessage({
@@ -317,7 +317,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             sessionId,
           });
           if (messageResult instanceof Response) return messageResult;
-          context = messageResult.context;
+          context = mergeDeliveryContext(messageResult.context, body.context);
           dispatchAuth = messageResult.auth;
         }
 
@@ -333,7 +333,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               outputSchema: body.outputSchema,
               turnPolicy: body.turnPolicy,
             },
-            body.context,
+            body.clientContext,
           );
           result =
             body.inputResponses === undefined
@@ -608,4 +608,13 @@ export function eveChannel(input: EveChannelInput): EveChannel {
     ],
     events: input.events,
   });
+}
+
+function mergeDeliveryContext(
+  channelContext: readonly string[] | undefined,
+  requestContext: readonly string[] | undefined,
+): readonly string[] | undefined {
+  if (channelContext === undefined) return requestContext;
+  if (requestContext === undefined) return channelContext;
+  return [...channelContext, ...requestContext];
 }

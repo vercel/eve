@@ -114,6 +114,16 @@ export interface SendTurnOptions<TOutput = unknown> {
   readonly turnPolicy?: TurnPolicy;
 
   /**
+   * Durable context for this delivery and subsequent turns in the session.
+   *
+   * Each entry is appended to session history as a user-role model context
+   * message immediately before the delivery. Context rides along with a
+   * message or HITL response; it does not dispatch a turn by itself. It follows
+   * the normal history lifecycle, including compaction and clear.
+   */
+  readonly context?: readonly string[];
+
+  /**
    * Ephemeral client/page context for the next model call only.
    *
    * Strings are rendered as user-role model context messages. Objects are

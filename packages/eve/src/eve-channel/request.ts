@@ -36,9 +36,10 @@ interface ParsedCreateBody {
   activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
   capabilities?: SessionCapabilities;
+  clientContext?: readonly string[];
+  context?: readonly string[];
   message: string | UserContent;
   mode?: RunMode;
-  context?: readonly string[];
   operationId?: string;
   outputSchema?: JsonObject;
 }
@@ -73,8 +74,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
   const message = parseMessageField(payload.message);
   if (message instanceof Response) return message;
 
-  const context = parseClientContextField(payload.clientContext);
+  const context = parseContextField(payload.context);
   if (context instanceof Response) return context;
+  const clientContext = parseClientContextField(payload.clientContext);
+  if (clientContext instanceof Response) return clientContext;
 
   const callback = parseCallbackField(payload.callback);
   if (callback instanceof Response) return callback;
@@ -114,9 +117,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
     activityObserver,
     callback,
     capabilities,
+    clientContext,
+    context,
     message,
     mode,
-    context,
     outputSchema,
   };
   if (typeof rawOperationId === "string") result.operationId = rawOperationId;
@@ -126,9 +130,10 @@ export function parseCreateBody(payload: Record<string, unknown>): ParsedCreateB
 interface ParsedSessionMessageBody {
   activityObserver?: ActivityObserverConfig;
   callback?: SessionCallback;
-  message?: string | UserContent;
-  inputResponses?: readonly ValidatedInputResponse[];
+  clientContext?: readonly string[];
   context?: readonly string[];
+  inputResponses?: readonly ValidatedInputResponse[];
+  message?: string | UserContent;
   outputSchema?: JsonObject;
   turnPolicy?: TurnPolicy;
 }
@@ -151,8 +156,10 @@ export function parseSessionMessageBody(
   }
   const inputResponses = parseInputResponses(payload.inputResponses);
   if (inputResponses instanceof Response) return inputResponses;
-  const context = parseClientContextField(payload.clientContext);
+  const context = parseContextField(payload.context);
   if (context instanceof Response) return context;
+  const clientContext = parseClientContextField(payload.clientContext);
+  if (clientContext instanceof Response) return clientContext;
   const outputSchema = parseOutputSchemaField(payload.outputSchema);
   if (outputSchema instanceof Response) return outputSchema;
   const turnPolicy = parseTurnPolicyField(payload.turnPolicy);
@@ -178,9 +185,10 @@ export function parseSessionMessageBody(
   return {
     activityObserver,
     callback,
-    message,
-    inputResponses,
+    clientContext,
     context,
+    inputResponses,
+    message,
     outputSchema,
     turnPolicy,
   };
@@ -530,6 +538,24 @@ function parseInputResponses(
     );
   }
   return inputResponses;
+}
+
+function parseContextField(value: unknown): readonly string[] | Response | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    return Response.json(
+      { error: "Expected 'context' to be an array of non-empty strings.", ok: false },
+      { status: 400 },
+    );
+  }
+  if (value.length === 0) return undefined;
+  if (!value.every((entry): entry is string => typeof entry === "string" && entry.length > 0)) {
+    return Response.json(
+      { error: "Expected 'context' array entries to be non-empty strings.", ok: false },
+      { status: 400 },
+    );
+  }
+  return value;
 }
 
 const CLIENT_CONTEXT_PREFIX = "Client context:\n";
