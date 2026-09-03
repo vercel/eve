@@ -204,6 +204,8 @@ export interface AgentLimitsDefinition {
  * These options are unstable and may change or be removed in any release.
  */
 export interface AgentExperimentalDefinition {
+  /** Runs executable tools through the framework `code_mode` workflow tool. */
+  readonly codeMode?: false | "eager" | "lazy";
   /**
    * Reads instrumentation from an `instrumentation/` directory of providers
    * rather than a single `agent/instrumentation.ts` config object.

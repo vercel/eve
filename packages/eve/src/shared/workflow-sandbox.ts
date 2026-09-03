@@ -45,9 +45,9 @@ export async function createWorkflowSandboxTool(input: {
 
 export async function requestWorkflowSandboxInterrupt(input: {
   readonly kind: string;
-  readonly task: unknown;
   readonly toolInput: unknown;
   readonly toolName: string;
+  readonly [key: string]: unknown;
 }): Promise<unknown> {
   const { requestCodeModeInterrupt } = await loadWorkflowSandboxModule();
   return requestCodeModeInterrupt(input);
