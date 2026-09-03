@@ -22,24 +22,24 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 26,
+    current: 27,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
     ],
     dropped: { 15: "TaskExec replaces stageEffect with send" },
   },
   dynamicTool: {
-    current: 26,
+    current: 27,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   channel: {
-    current: 15,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15],
+    current: 16,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16],
     dropped: {
       12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
@@ -61,16 +61,16 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   connection: {
-    current: 13,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13],
+    current: 14,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
       10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   hook: {
-    current: 19,
-    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19],
+    current: 20,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18, 19, 20],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
