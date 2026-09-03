@@ -619,19 +619,21 @@ describe("compileAgentManifest source graph", () => {
     expect(compiled.diagnosticsSummary.warnings).toBe(1);
   });
 
-  it("preserves Slack app manifest options on compiled channel routes", async () => {
+  it("preserves Slack bot configuration on compiled channel routes", async () => {
     const sourceRegistry = registry([
       {
         logicalPath: "channels/support.ts",
         loadNamespace: async () => ({
           default: slackChannel({
-            botAlwaysOnline: true,
-            botBackgroundColor: "#000000",
-            botDescription: "Answers support questions.",
-            botEvents: ["message.channels"],
-            botLongDescription: "Answers support questions using the team's knowledge base.",
-            botName: "Support agent",
-            botScopes: ["channels:history"],
+            bot: {
+              alwaysOnline: true,
+              backgroundColor: "#000000",
+              description: "Answers support questions.",
+              longDescription: "Answers support questions using the team's knowledge base.",
+              name: "Support agent",
+            },
+            eventSubscriptions: ["message.channels"],
+            scopes: ["channels:history"],
           }),
         }),
       },

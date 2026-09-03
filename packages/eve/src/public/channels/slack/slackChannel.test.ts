@@ -392,16 +392,18 @@ describe("slackChannel()", () => {
     expect(slackChannel({ credentials })).toMatchObject({ vercelConnect });
   });
 
-  it("preserves Slack app manifest options for compilation", () => {
+  it("preserves Slack bot configuration for compilation", () => {
     expect(
       slackChannel({
-        botAlwaysOnline: true,
-        botBackgroundColor: "#000000",
-        botDescription: "Answers support questions.",
-        botEvents: ["message.channels"],
-        botLongDescription: "Answers support questions using the team's knowledge base.",
-        botName: "Support agent",
-        botScopes: ["channels:history"],
+        bot: {
+          alwaysOnline: true,
+          backgroundColor: "#000000",
+          description: "Answers support questions.",
+          longDescription: "Answers support questions using the team's knowledge base.",
+          name: "Support agent",
+        },
+        eventSubscriptions: ["message.channels"],
+        scopes: ["channels:history"],
       }),
     ).toMatchObject({
       slackAppManifest: {

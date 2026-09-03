@@ -124,7 +124,7 @@ describe("buildVercelConnectRequirements", () => {
     );
   });
 
-  it("builds a Slack-native app manifest for each Slack channel", () => {
+  it("builds a Slack-native app manifest for channels without Connect metadata", () => {
     const manifests = buildSlackAppManifests({
       channelRoutes: {
         effective: [
