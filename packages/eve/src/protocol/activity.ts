@@ -1,9 +1,16 @@
 import type { JsonValue } from "#shared/json.js";
+import {
+  isPresentationStateKey,
+  isPresentationStateValue,
+  MAX_PRESENTATION_STATE_BYTES,
+  MAX_PRESENTATION_STATE_DEPTH,
+  MAX_PRESENTATION_STATE_ENTRIES,
+} from "#shared/presentation-state.js";
 
 export const MAX_ACTIVITY_EVENTS_PER_BATCH = 100;
-export const MAX_ACTIVITY_STATE_BYTES = 32 * 1024;
-export const MAX_ACTIVITY_STATE_DEPTH = 10;
-export const MAX_ACTIVITY_STATE_ENTRIES = 500;
+export const MAX_ACTIVITY_STATE_BYTES = MAX_PRESENTATION_STATE_BYTES;
+export const MAX_ACTIVITY_STATE_DEPTH = MAX_PRESENTATION_STATE_DEPTH;
+export const MAX_ACTIVITY_STATE_ENTRIES = MAX_PRESENTATION_STATE_ENTRIES;
 
 export type ActivityWorkKind = "root-turn" | "subagent" | "remote-agent" | "task";
 export type ActivityWorkPhase = "running" | "completed" | "failed" | "cancelled";
@@ -406,45 +413,11 @@ function parseStructuredState(value: unknown): ActivityStructuredStateV1 | undef
 }
 
 export function isActivityStateKey(value: unknown): value is string {
-  return isStateKey(value);
+  return isPresentationStateKey(value);
 }
 
 export function isActivityStateValue(value: unknown): value is JsonValue {
-  return isBoundedJsonValue(value);
-}
-
-function isStateKey(value: unknown): value is string {
-  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$/u.test(value);
-}
-
-function isBoundedJsonValue(value: unknown): value is JsonValue {
-  try {
-    if (new TextEncoder().encode(JSON.stringify(value)).byteLength > MAX_ACTIVITY_STATE_BYTES) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-  let entries = 0;
-  const visit = (candidate: unknown, depth: number): boolean => {
-    if (depth > MAX_ACTIVITY_STATE_DEPTH || entries > MAX_ACTIVITY_STATE_ENTRIES) return false;
-    if (
-      candidate === null ||
-      typeof candidate === "string" ||
-      typeof candidate === "boolean" ||
-      (typeof candidate === "number" && Number.isFinite(candidate))
-    )
-      return true;
-    if (Array.isArray(candidate)) {
-      entries += candidate.length;
-      return candidate.every((item) => visit(item, depth + 1));
-    }
-    if (!isRecord(candidate)) return false;
-    const values = Object.values(candidate);
-    entries += values.length;
-    return values.every((item) => visit(item, depth + 1));
-  };
-  return visit(value, 0);
+  return isPresentationStateValue(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
