@@ -396,15 +396,16 @@ async function resolvePackageRoot(input: {
   }
 }
 
-/**
- * Returns the package portion of a bare specifier, dropping any deep subpath.
- * `@acme/crm/mount` → `@acme/crm`; `gizmo/mount` → `gizmo`.
- */
+/** Returns the export subpath of a bare package specifier. */
 function packageSpecifierSubpath(specifier: string): string {
   const subpath = specifier.slice(bareSpecifierPackagePath(specifier).length);
   return subpath.length === 0 ? "." : `.${subpath}`;
 }
 
+/**
+ * Returns the package portion of a bare specifier, dropping any deep subpath.
+ * `@acme/crm/mount` → `@acme/crm`; `gizmo/mount` → `gizmo`.
+ */
 function bareSpecifierPackagePath(specifier: string): string {
   const segments = specifier.split("/");
   if (specifier.startsWith("@")) {
