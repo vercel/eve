@@ -31,8 +31,11 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import { collectActionActivityLabels } from "#harness/action-activity.js";
-import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
+import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
+import {
+  collectActionActivityLabels,
+  createPresentedRuntimeActionRequestFromToolCall,
+} from "#harness/action-activity.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
@@ -272,7 +275,7 @@ export async function emitStepActions(
         !options.emittedActionCallIds?.has(toolCall.toolCallId),
     )
     .map((toolCall) =>
-      createRuntimeActionRequestFromToolCall({
+      createPresentedRuntimeActionRequestFromToolCall({
         toolCall,
         tools: options.tools,
       }),

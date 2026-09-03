@@ -43,7 +43,6 @@ import {
   createRuntimeToolResultFromToolError,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
-import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import {
   createInvalidToolCallInputError,
   isInvalidToolCall,
@@ -52,6 +51,7 @@ import {
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
   collectActionActivityLabels,
+  createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
 } from "#harness/action-activity.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
@@ -472,7 +472,7 @@ async function consumeStreamContent(
 
     try {
       await emitActionRequest(
-        createRuntimeActionRequestFromToolCall({
+        createPresentedRuntimeActionRequestFromToolCall({
           toolCall,
           tools: options.tools,
         }),

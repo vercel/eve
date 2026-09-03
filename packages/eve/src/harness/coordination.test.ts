@@ -4,6 +4,7 @@ import {
 } from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
 
+import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-activity.js";
 import {
   createCoordinationRequestFromToolCall,
   createRuntimeActionRequestFromToolCall,
@@ -61,16 +62,14 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         ]),
       }),
     ).toEqual({
-      action: {
-        callId: "call-skill",
-        input: { skill: "research" },
-        kind: "load-skill",
-      },
+      callId: "call-skill",
+      input: { skill: "research" },
+      kind: "load-skill",
     });
   });
 
   it("uses the tool-authored label start callback without exposing it in event data", () => {
-    const action = createRuntimeActionRequestFromToolCall({
+    const action = createPresentedRuntimeActionRequestFromToolCall({
       toolCall: {
         input: { environment: "production", secret: "hidden" },
         toolCallId: "call-deploy",
@@ -105,7 +104,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
   });
 
   it("does not let the label start callback callback mutate the action input", () => {
-    const result = createRuntimeActionRequestFromToolCall({
+    const result = createPresentedRuntimeActionRequestFromToolCall({
       toolCall: {
         input: { nested: { value: "original" } },
         toolCallId: "call-mutate",
@@ -144,7 +143,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
 
   it("ignores an label start callback callback that fails", () => {
     expect(
-      createRuntimeActionRequestFromToolCall({
+      createPresentedRuntimeActionRequestFromToolCall({
         toolCall: {
           input: {},
           toolCallId: "call-deploy",
@@ -179,12 +178,10 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         tools: new Map(),
       }),
     ).toEqual({
-      action: {
-        callId: "call-skill",
-        input: { skill: "research" },
-        kind: "tool-call",
-        toolName: "load_skill",
-      },
+      callId: "call-skill",
+      input: { skill: "research" },
+      kind: "tool-call",
+      toolName: "load_skill",
     });
   });
 });

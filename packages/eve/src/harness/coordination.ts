@@ -1,9 +1,7 @@
 import type { ModelMessage, ToolSet, TypedToolCall } from "ai";
 
 import { createActionResultEvent, type UnstampedMessageStreamEvent } from "#protocol/message.js";
-import type { RuntimeActionRequestProjection } from "#harness/action-activity.js";
 import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
-import { normalizeActivityText } from "#shared/activity-text.js";
 import type {
   RuntimeActionRequest,
   RuntimeActionResult,
@@ -424,35 +422,20 @@ function readBackgroundTaskReceipt(
 export function createRuntimeActionRequestFromToolCall(input: {
   readonly toolCall: TypedToolCall<ToolSet>;
   readonly tools: HarnessToolMap;
-}): RuntimeActionRequestProjection {
+}): RuntimeActionRequest {
   const definition = input.tools.get(input.toolCall.toolName);
   const toolInput = resolveToolCallInputObject(input.toolCall.input, {
     callId: input.toolCall.toolCallId,
     toolName: input.toolCall.toolName,
   });
-  const action: RuntimeActionRequest =
-    definition?.frameworkAction === "load-skill"
-      ? { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" }
-      : {
-          callId: input.toolCall.toolCallId,
-          input: toolInput,
-          kind: "tool-call",
-          toolName: input.toolCall.toolName,
-        };
-  return { action, activityLabel: resolveActivityLabel(definition?.activity?.start, toolInput) };
-}
-
-function resolveActivityLabel(
-  label: NonNullable<HarnessToolDefinition["activity"]>["start"],
-  input: JsonObject,
-): string | undefined {
-  if (label === undefined) return undefined;
-  try {
-    const value = normalizeActivityText(label(parseJsonObject(input)));
-    return value === "" ? undefined : value;
-  } catch {
-    return undefined;
-  }
+  return definition?.frameworkAction === "load-skill"
+    ? { callId: input.toolCall.toolCallId, input: toolInput, kind: "load-skill" }
+    : {
+        callId: input.toolCall.toolCallId,
+        input: toolInput,
+        kind: "tool-call",
+        toolName: input.toolCall.toolName,
+      };
 }
 
 /** Projects one deferred harness tool call into task/control coordination. */

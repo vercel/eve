@@ -1,10 +1,10 @@
 import type { ToolSet, TypedToolCall, TypedToolError } from "ai";
 
-import type { RuntimeActionRequestProjection } from "#harness/action-activity.js";
 import {
-  createRuntimeActionRequestFromToolCall,
-  resolveToolCallInputObject,
-} from "#harness/coordination.js";
+  createPresentedRuntimeActionRequestFromToolCall,
+  type RuntimeActionRequestProjection,
+} from "#harness/action-activity.js";
+import { resolveToolCallInputObject } from "#harness/coordination.js";
 import type { HarnessToolMap } from "#harness/types.js";
 
 /**
@@ -81,7 +81,7 @@ export function resolveProviderToolCallRequest(
   | { readonly request?: undefined; readonly toolError: TypedToolError<ToolSet> } {
   try {
     return {
-      request: createRuntimeActionRequestFromToolCall({
+      request: createPresentedRuntimeActionRequestFromToolCall({
         toolCall: {
           ...toolCall,
           providerExecuted: true,
