@@ -30,6 +30,7 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
       )} build`,
       name: member.name,
       publicRoutePrefix: `/${member.name}`,
+      workspaceMember: true,
     },
     target: {
       hostOutputDirectory: join(workspace.root, ".vercel", "output"),

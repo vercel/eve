@@ -211,7 +211,7 @@ The namespace separates an application's memory domains before scope is
 applied. Omit it to use `defaultNamespace`, which combines the slot name, the
 graph node, and a deployment-aware identity:
 
-- Production and other Vercel environments use the project and environment. Agents mounted under different route prefixes in the same project use separate namespaces.
+- Production and other Vercel environments use the project and environment. Members of a top-level `agents/` workspace use separate namespaces.
 - Preview also uses the branch or deployment identity.
 - Local development uses a digest of the application root, never the raw path.
 

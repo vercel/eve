@@ -309,6 +309,7 @@ async function buildApplicationInWorkspace(
       buildDir: workspace.nitro.buildDir,
       outputDir: workspace.publication.output.stagedDir,
       publicRoutePrefix,
+      workspaceMember: options.workspaceMember,
     }),
   );
 

@@ -1,3 +1,4 @@
+import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/build-output-environment.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { EVE_PACKAGE_NAME } from "#internal/package-name.js";
 import { createEveWorkflowQueueTrigger } from "#internal/workflow/queue-namespace.js";
@@ -22,6 +23,7 @@ export function createEveVercelOptions(input: {
   agentName: string;
   enabled: boolean;
   publicRoutePrefix?: string;
+  workspaceMember?: boolean;
 }) {
   if (!input.enabled) {
     return undefined;
@@ -39,6 +41,9 @@ export function createEveVercelOptions(input: {
   const publicRoutePrefix = normalizePublicRoutePrefix(input.publicRoutePrefix);
   if (publicRoutePrefix !== undefined) {
     environment[EVE_PUBLIC_ROUTE_PREFIX_ENV] = publicRoutePrefix;
+  }
+  if (input.workspaceMember === true) {
+    environment[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] = "1";
   }
 
   return {

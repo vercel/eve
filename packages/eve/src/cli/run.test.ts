@@ -1004,6 +1004,7 @@ describe("eve build output ownership", () => {
       profileOutputPath: resolve(process.cwd(), profilePath),
       skipVercelSandboxPrewarm: false,
       vercelServiceOutput: undefined,
+      workspaceMember: false,
     });
   });
 
@@ -1026,6 +1027,7 @@ describe("eve build output ownership", () => {
         hostOutputDirectory: resolve(process.cwd(), configuredHostDirectory),
         serviceOutputDirectory: resolve(process.cwd(), configuredDirectory),
       },
+      workspaceMember: false,
     });
   });
 

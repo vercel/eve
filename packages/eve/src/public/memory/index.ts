@@ -7,6 +7,7 @@ import type { Approval } from "#public/definitions/approval.js";
 import type { SessionContext } from "#public/definitions/callback-context.js";
 import type { ExactDefinition } from "#public/definitions/exact.js";
 import type { DynamicResolveContext } from "#dynamic/definition.js";
+import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/build-output-environment.js";
 import { MEMORY_DEFINITION_BRAND } from "#shared/memory-definition.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
@@ -190,7 +191,10 @@ export function defaultNamespace(context: MemoryNamespaceContext): string {
         process.env.VERCEL_URL?.trim() ||
         "unknown-preview"
       : null;
-  const publicRoutePrefix = normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]);
+  const publicRoutePrefix =
+    process.env[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] === "1"
+      ? normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV])
+      : undefined;
   return JSON.stringify([
     "eve-memory-default-namespace-v1",
     "vercel",

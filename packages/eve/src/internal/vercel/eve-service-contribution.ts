@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import {
+  EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV,
   EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV,
   EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV,
 } from "#internal/application/build-output-environment.js";
@@ -28,6 +29,7 @@ export interface EveVercelAgentTarget {
   readonly buildCommand: string;
   readonly name?: string;
   readonly publicRoutePrefix: string;
+  readonly workspaceMember?: boolean;
 }
 
 export interface EveVercelBuildTarget {
@@ -93,9 +95,13 @@ function createIsolatedBuild(input: {
     prefix === undefined
       ? ""
       : ` && export ${EVE_PUBLIC_ROUTE_PREFIX_ENV}=${quoteVercelShellArgument(prefix)}`;
+  const workspaceMemberExport =
+    input.agent.workspaceMember === true
+      ? ` && export ${EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV}=1`
+      : "";
 
   return {
-    buildCommand: `cd ${quoteVercelShellArgument(toVercelRelativePath(rootDirectory, input.agent.appRoot))} && export ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, outputDirectory))} && export ${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, input.hostOutputDirectory))}${prefixExport} && ${input.agent.buildCommand}`,
+    buildCommand: `cd ${quoteVercelShellArgument(toVercelRelativePath(rootDirectory, input.agent.appRoot))} && export ${EVE_INTERNAL_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, outputDirectory))} && export ${EVE_INTERNAL_HOST_BUILD_OUTPUT_DIRECTORY_ENV}=${quoteVercelShellArgument(toVercelRelativePath(input.agent.appRoot, input.hostOutputDirectory))}${prefixExport}${workspaceMemberExport} && ${input.agent.buildCommand}`,
     root: toVercelRelativePath(input.projectRoot, rootDirectory),
     rootDirectory,
   };
