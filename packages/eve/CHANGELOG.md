@@ -1,5 +1,23 @@
 # eve
 
+## 0.51.0
+
+### Minor Changes
+
+- aae2631: Background workflow tools now execute as their task's durable workflow run, subagents can be invoked directly from waiting workflow tools and workflow sandboxes, and workflow `agent()` calls require a replay-stable `key`.
+
+### Patch Changes
+
+- fc123f4: Discover multi-agent projects from their `agents/` directory, add consistent `--agent` selection to agent-scoped CLI commands, and let `eve init --agents <name,...>` create or extend an agent workspace.
+- b03290a: Preserve background execution for durable dynamic tools so replayed callbacks receive their task runtime.
+- 6e630b4: Deploy conventional `agents/<name>/agent/` workspaces as inferred peer Vercel services at `/<name>/eve/v1/*`, with no generated `vercel.json` step.
+- ecf0b6a: Prevent Vercel Blob file memory from receiving compressed responses with weak ETags that cannot be used for conditional writes. Blob reads now request identity encoding so memory documents continue saving as they grow.
+- 4c45d2f: Fix file-memory setup failing after it creates a Vercel Blob store when the project uses Vercel CLI 57. Setup now connects the store without passing that release an unsupported output flag, so retrying repairs the partial setup normally.
+- bad0813: Fix the sandbox base image so a non-interactive `bash -lc` login shell exits cleanly as `vercel-sandbox`. Ubuntu's default `.bash_logout` ran `clear_console` on exit, which wrote `TERM environment variable not set.` to stderr and, under `set -e`, turned a successful `exit 0` into exit 1 on Vercel Sandbox. `sudo` no longer warns about unresolvable sandbox hostnames, `$HOME/.local/bin` exists on `PATH` for user-scoped installs, and Node is root-owned on every architecture.
+- f9b760a: Ignore unrelated ancestor `agents/` directories when resolving standalone projects so local CLI commands do not misclassify neighboring repositories as agent workspaces.
+- 3cccd71: Preserve inherited channel audience metadata when local subagents persist adapter state. Public parent traces now continue capturing local child inputs and outputs while destination-specific redaction remains independent.
+- 29b9056: Run approved background tool calls even when the AI SDK skips its input callback during resume.
+
 ## 0.50.0
 
 ### Minor Changes
