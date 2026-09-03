@@ -5,6 +5,7 @@ import { taskRunWorkflow } from "#execution/tasks/child/workflow.js";
 import type { TaskView } from "#tasks/types.js";
 
 const mocks = vi.hoisted(() => ({
+  appendTaskProgressStep: vi.fn(),
   appendTaskViewStep: vi.fn(),
   cancelWorkflowToolRunStep: vi.fn(),
   claimHookOwnership: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("#execution/hook-ownership.js", () => ({
   isHookConflictError: () => false,
 }));
 vi.mock("#execution/tasks/child/steps.js", () => ({
+  appendTaskProgressStep: mocks.appendTaskProgressStep,
   appendTaskViewStep: mocks.appendTaskViewStep,
   deliverTaskInputResponsesStep: mocks.deliverTaskInputResponsesStep,
   wakeTaskAgentRequestParentStep: mocks.wakeTaskAgentRequestParentStep,
@@ -219,7 +221,7 @@ describe("taskRunWorkflow", () => {
     expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
   });
 
-  it("flushes an update queued before readiness ahead of terminal completion", async () => {
+  it("streams progress without waking the parent", async () => {
     const update = {
       callId: "call-1",
       kind: "task-update" as const,
@@ -250,14 +252,16 @@ describe("taskRunWorkflow", () => {
       taskInboxToken: "task-token",
     });
 
-    expect(mocks.wakeTaskUpdateParentStep).toHaveBeenCalledWith({
-      token: "parent-token",
-      update,
-      view: expect.objectContaining({ status: "completed" }),
+    expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
+      progress: {
+        callId: "call-1",
+        kind: "task-progress",
+        taskId: "task-1",
+        update: "progress",
+        updateIndex: 0,
+      },
     });
-    expect(mocks.wakeTaskUpdateParentStep.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
-    );
+    expect(mocks.wakeTaskUpdateParentStep).not.toHaveBeenCalled();
   });
 
   it("publishes cancellation after the workflow body observes its abort", async () => {

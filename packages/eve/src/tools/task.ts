@@ -5,6 +5,42 @@ import type { JsonObject, JsonValue } from "#shared/json.js";
 
 const TASK_DELEGATED_KIND = "eve:task-delegated";
 
+const TASK_SET_STATE_KIND = "eve:task-set-state" as const;
+const TASK_MESSAGE_KIND = "eve:task-message" as const;
+
+export type TaskSetState = JsonObject & {
+  readonly kind: typeof TASK_SET_STATE_KIND;
+  readonly state: JsonObject;
+};
+
+export type TaskMessage = JsonObject & {
+  readonly kind: typeof TASK_MESSAGE_KIND;
+  readonly message: string;
+};
+
+export function createTaskSetState(state: JsonObject): TaskSetState {
+  return { kind: TASK_SET_STATE_KIND, state };
+}
+
+export function createTaskMessage(message: string): TaskMessage {
+  if (message.trim() === "") throw new TypeError("Task messages must not be empty.");
+  return { kind: TASK_MESSAGE_KIND, message };
+}
+
+export function isTaskSetState(value: unknown): value is TaskSetState {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Reflect.get(value, "kind") === TASK_SET_STATE_KIND
+  );
+}
+
+export function isTaskMessage(value: unknown): value is TaskMessage {
+  return (
+    typeof value === "object" && value !== null && Reflect.get(value, "kind") === TASK_MESSAGE_KIND
+  );
+}
+
 /** Private address an executor uses to report lifecycle changes to its owning task. */
 export interface TaskBinding {
   readonly taskId: string;
@@ -60,6 +96,12 @@ export type TaskSendCommand =
 
 /** Task capability passed only to tools declared with `execution: "background"`. */
 export interface TaskExec {
+  /** Durable model-visible state; yielding the descriptor applies it. */
+  setState(state: JsonObject): TaskSetState;
+  /** One message delivered to the parent; yielding the descriptor sends it. */
+  postMessage(message: string): TaskMessage;
+  /** Model-facing durable task identity. */
+  readonly taskId: string;
   /**
    * The sibling background calls admitted in the same step. The only view a
    * tool has of what launched alongside it, for enforcing batch-wide

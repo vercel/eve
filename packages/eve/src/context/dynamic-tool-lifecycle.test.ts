@@ -1100,9 +1100,12 @@ describe("dispatchDynamicToolEvent", () => {
         kind: "eve:task-delegated",
         receipt: { ...receipt, status: "working", taskId: binding.taskId },
       }),
+      postMessage: (message) => ({ kind: "eve:task-message", message }),
       send: vi.fn(),
       session: {} as TaskExec["session"],
+      setState: (state) => ({ kind: "eve:task-set-state", state }),
       task: {} as TaskExec["task"],
+      taskId: "task-1",
     };
     await expect(tool!.execute!({}, executeOptions, task)).resolves.toMatchObject({
       kind: "eve:task-delegated",

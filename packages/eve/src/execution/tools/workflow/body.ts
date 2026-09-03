@@ -13,6 +13,7 @@ import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
+import { createTaskMessage, createTaskSetState, type TaskExec } from "#tools/task.js";
 
 export interface WorkflowBodyDefinition {
   readonly callId: string;
@@ -21,6 +22,7 @@ export interface WorkflowBodyDefinition {
   readonly resultKind?: "subagent" | "tool";
   readonly session: SessionContext["session"];
   readonly stepIndex: number;
+  readonly taskId?: string;
   readonly toolName: string;
   readonly workflowId: string;
 }
@@ -32,6 +34,7 @@ export interface WorkflowBodyInput extends WorkflowBodyDefinition {
 type WorkflowToolExecute = (
   input: unknown,
   ctx: ToolContext,
+  task?: TaskExec,
 ) => Promise<JsonValue> | AsyncIterable<JsonValue>;
 
 /** Executes one registered workflow body and reports progress to its owner. */
@@ -48,7 +51,8 @@ export async function executeWorkflowBody(
 
   try {
     const execute = resolveWorkflowToolExecute(input);
-    const result = execute(input.executeInput ?? input.input, ctx);
+    const task = input.execution === "background" ? createWorkflowTaskExec(input) : undefined;
+    const result = execute(input.executeInput ?? input.input, ctx, task);
     let output: JsonValue;
     if (!isAsyncIterable(result)) {
       output = await result;
@@ -122,6 +126,27 @@ function createWorkflowBodyContext(input: WorkflowBodyInput, signal: AbortSignal
     requireAuth: () => unavailable("requireAuth()", "a workflow body cannot park on authorization"),
     session: input.session,
     toolName: input.toolName,
+  };
+}
+
+function createWorkflowTaskExec(input: WorkflowBodyInput): TaskExec {
+  if (input.taskId === undefined) {
+    throw new Error(`Background workflow tool "${input.toolName}" has no task id.`);
+  }
+  return {
+    batch: [],
+    binding: { taskId: input.owner.admission, token: input.owner.admission },
+    delegated: () => {
+      throw new Error("A workflow body is already the task executor and cannot delegate.");
+    },
+    postMessage: createTaskMessage,
+    send: async () => {
+      throw new Error("A workflow body reports with yield, return, and throw.");
+    },
+    session: undefined as never,
+    setState: createTaskSetState,
+    task: undefined as never,
+    taskId: input.taskId,
   };
 }
 

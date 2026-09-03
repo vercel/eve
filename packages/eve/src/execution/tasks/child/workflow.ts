@@ -3,10 +3,12 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 import type { ActivityObserverConfig } from "#channel/types.js";
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import {
+  appendTaskProgressStep,
   appendTaskViewStep,
   deliverTaskInputResponsesStep,
   wakeTaskAgentRequestParentStep,
   wakeTaskAuthorizationParentStep,
+  wakeTaskMessageParentStep,
   wakeTaskParentStep,
   wakeTaskUpdateParentStep,
   wakeWorkflowTaskInputRequestParentStep,
@@ -24,7 +26,7 @@ import { createChannelReader, raceChannelReads } from "#execution/tools/workflow
 import { openWorkflowToolRunOwnerChannels } from "#execution/tools/workflow/owner.js";
 import {
   workflowToolRunOutcomeToTaskCommand,
-  workflowToolRunReportToTaskUpdate,
+  workflowToolRunReportToTaskPayload,
   workflowToolRunRequestToTaskInputRequest,
 } from "#execution/tools/workflow/owner-inbox.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
@@ -35,6 +37,7 @@ import {
   readTaskInputRequestId,
   type TaskCommand,
   type TaskInboundAnswerInput,
+  type TaskInboundMessage,
   type TaskInputRequest,
   type TaskInboundUpdate,
   type TaskRunInboundPayload,
@@ -65,6 +68,7 @@ export type WorkflowToolRunTaskInputRequest = WorkflowToolRunTaskInputRequestBas
   );
 
 interface PendingWorkflowToolTraffic {
+  readonly messages: TaskInboundMessage[];
   readonly ownerRequests: WorkflowToolRunRequestMessage[];
 }
 
@@ -85,7 +89,7 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   let pendingInputRequest: WorkflowToolRunTaskInputRequest | undefined;
   let pendingUpdates: TaskInboundUpdate[] = [];
   let updateIndex = 0;
-  const pendingTraffic: PendingWorkflowToolTraffic = { ownerRequests: [] };
+  const pendingTraffic: PendingWorkflowToolTraffic = { messages: [], ownerRequests: [] };
   const answerHooks = new Map<string, AnswerHookRoute>();
   const bodyController = new AbortController();
   let bodyReader:
@@ -129,9 +133,16 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
       if (read.next.done) return;
 
       if (read.channel === "report") {
-        await applyPayload(
-          workflowToolRunReportToTaskUpdate(read.next.value, view.taskId, updateIndex++),
+        const payload = workflowToolRunReportToTaskPayload(
+          read.next.value,
+          view.taskId,
+          updateIndex++,
         );
+        if (payload.kind === "task-message") {
+          await handleMessage(payload);
+        } else {
+          await applyPayload(payload);
+        }
         continue;
       }
       if (read.channel === "outcome") {
@@ -173,11 +184,28 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   }
 
   async function handleUpdate(update: TaskInboundUpdate): Promise<void> {
-    if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
-      await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
-    } else {
-      pendingUpdates.push(update);
+    await appendTaskProgressStep({
+      progress: {
+        callId: update.callId,
+        kind: "task-progress",
+        taskId: view.taskId,
+        update: update.message,
+        updateIndex: update.updateIndex,
+      },
+    });
+  }
+
+  async function handleMessage(message: TaskInboundMessage): Promise<void> {
+    if (dispatchRejected || isTerminalTaskStatus(view.status)) return;
+    if (!dispatchAcknowledged) {
+      pendingTraffic.messages.push(message);
+      return;
     }
+    await wakeTaskMessageParentStep({
+      message,
+      taskId: view.taskId,
+      token: input.parentContinuationToken,
+    });
   }
 
   async function applyPayload(
@@ -210,6 +238,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
 
     if (payload.kind === "task-input-request") pendingInputRequest = payload;
+    if (payload.kind === "task-message") {
+      await handleMessage(payload);
+      return;
+    }
     if (payload.kind === "task-update") {
       await handleUpdate(payload);
       return;
@@ -298,8 +330,10 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   async function flushPendingTraffic(): Promise<void> {
     if (!dispatchRejected) {
+      for (const message of pendingTraffic.messages) await handleMessage(message);
       for (const request of pendingTraffic.ownerRequests) await wakeTaskOwnerRequestParent(request);
     }
+    pendingTraffic.messages.length = 0;
     pendingTraffic.ownerRequests.length = 0;
   }
 

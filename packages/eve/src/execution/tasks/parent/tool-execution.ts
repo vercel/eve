@@ -23,7 +23,11 @@ import { parseJsonValue } from "#shared/json.js";
 import type { ToolExecuteOptions } from "#tools/definition.js";
 import {
   createTaskDelegated,
+  createTaskMessage,
+  createTaskSetState,
   isTaskDelegated,
+  isTaskMessage,
+  isTaskSetState,
   type TaskExec,
   type TaskSendCommand,
 } from "#tools/task.js";
@@ -293,9 +297,12 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       batch: input.batch.calls,
       binding,
       delegated: ({ executor, receipt }) => createTaskDelegated({ binding, executor, receipt }),
+      postMessage: createTaskMessage,
       send: createTaskSender(task, input.options.toolCallId),
+      setState: createTaskSetState,
       session: this.initialSession,
       task,
+      taskId: task.taskId,
     };
     if (input.definition.workflowId !== undefined) {
       record.settled = true;
@@ -306,10 +313,13 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       };
     }
     const output = input.definition.execute(input.toolInput, input.options, taskExec);
-    if (isAsyncIterable(output)) {
-      throw new Error("Background tools cannot return AsyncIterable output.");
-    }
-    const settled = await output;
+    const settled = isAsyncIterable(output)
+      ? await executeBackgroundIterable({
+          callId: input.options.toolCallId,
+          output,
+          task,
+        })
+      : await output;
     if (isAuthorizationSignal(settled)) return settled;
     if (isTaskDelegated(settled)) {
       if (settled.executor !== undefined) {
@@ -486,6 +496,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
         session: buildCallbackContext().session,
         stepIndex: input.emission.stepIndex,
         toolName: input.input.definition.name,
+        taskId: task.taskId,
         workflowId: workflow.workflowId,
       },
     });
@@ -556,6 +567,48 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
       );
     }
   }
+}
+
+async function executeBackgroundIterable(input: {
+  readonly callId: string;
+  readonly output: AsyncIterable<unknown>;
+  readonly task: BackgroundTask;
+}): Promise<unknown> {
+  const iterator = input.output[Symbol.asyncIterator]();
+  let last: unknown;
+  let updateIndex = 0;
+  let next = await iterator.next();
+  while (!next.done) {
+    last = next.value;
+    if (isTaskSetState(next.value)) {
+      await deliverTaskCommand(input.task, { kind: "set-state", state: next.value.state });
+    } else {
+      const payload = isTaskMessage(next.value)
+        ? {
+            callId: input.callId,
+            kind: "task-message" as const,
+            message: next.value.message,
+            messageEpoch: input.task.taskId,
+            messageIndex: updateIndex++,
+          }
+        : {
+            callId: input.callId,
+            kind: "task-update" as const,
+            message: typeof next.value === "string" ? next.value : JSON.stringify(next.value),
+            updateEpoch: input.task.taskId,
+            updateIndex: updateIndex++,
+          };
+      const outcome = await sendTaskInboundPayload({
+        payload,
+        taskInboxToken: input.task.taskInboxToken,
+      });
+      if (outcome !== "delivered") {
+        throw new Error(`Task run "${input.task.taskId}" did not accept "${payload.kind}".`);
+      }
+    }
+    next = await iterator.next();
+  }
+  return next.value ?? last;
 }
 
 function hasAgentHandle(session: HarnessSession, agentId: string): boolean {

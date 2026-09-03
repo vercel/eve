@@ -8,6 +8,7 @@ import type {
 import type { InputRequest } from "#shared/input.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolInputRequest } from "#tools/definition.js";
+import type { TaskMessage, TaskSetState } from "#tools/task.js";
 
 export interface WorkflowToolRunOwner {
   readonly admission: string;
@@ -74,7 +75,7 @@ export type WorkflowToolRunOutcome =
 
 export interface WorkflowToolRunReport {
   readonly from: WorkflowToolRunRef;
-  readonly update: JsonValue;
+  readonly update: JsonValue | TaskMessage | TaskSetState;
 }
 
 export interface WorkflowToolRunRequestMessage {
