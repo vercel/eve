@@ -20,6 +20,32 @@ export function deriveRootTurnWorkIdentity(session: Session): ActivityWorkIdenti
   };
 }
 
+export function deriveBackgroundTaskActivityObserver(input: {
+  readonly activityObserver: ActivityObserverConfig | undefined;
+  readonly callId: string;
+  readonly name: string;
+  readonly parentSessionId: string;
+  readonly parentTurnId: string;
+  readonly rootSessionId: string;
+}): ActivityObserverConfig | undefined {
+  if (input.activityObserver === undefined) return undefined;
+  const parentWork = input.activityObserver.workIdentity ?? {
+    id: deriveRootTurnActivityWorkId({
+      sessionId: input.parentSessionId,
+      turnId: input.parentTurnId,
+    }),
+    kind: "root-turn" as const,
+    rootSessionId: input.rootSessionId,
+    rootTurnId: input.parentTurnId,
+    sessionId: input.parentSessionId,
+    turnId: input.parentTurnId,
+  };
+  return {
+    sink: input.activityObserver.sink,
+    workIdentity: deriveChildWorkIdentity({ ...input, kind: "task", parentWork }),
+  };
+}
+
 export function deriveChildActivityObserverConfig(input: {
   readonly callId: string;
   readonly kind: Exclude<ActivityWorkKind, "root-turn">;
