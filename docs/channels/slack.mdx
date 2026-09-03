@@ -33,7 +33,7 @@ export default slackChannel({
 
 `connectSlackCredentials` returns `{ botToken, webhookVerifier }`, keeping token rotation, multi-workspace tenancy, and request verification inside Connect rather than your code.
 
-A Connect-backed build generates a Slack app manifest for each Slack channel. The manifest always includes the `app_mentions:read` and `chat:write` bot scopes, the `app_mention` event, and interactivity. Add requirements for your authored handlers with `appManifest`; eve deduplicates them against the baseline:
+A Connect-backed build generates a Slack app manifest for each Slack channel. The manifest always includes the `app_mentions:read` and `chat:write` bot scopes, the `app_mention` event, and interactivity. Add requirements for your authored handlers with `botEvents` and `botScopes`; eve deduplicates them against the baseline:
 
 ```ts title="agent/channels/slack.ts"
 import { connectSlackCredentials } from "@vercel/connect/eve";
@@ -41,14 +41,12 @@ import { slackChannel } from "eve/channels/slack";
 
 export default slackChannel({
   credentials: connectSlackCredentials("slack/my-agent"),
-  appManifest: {
-    botEvents: ["message.channels", "message.groups"],
-    botScopes: ["channels:history", "groups:history"],
-  },
+  botEvents: ["message.channels", "message.groups"],
+  botScopes: ["channels:history", "groups:history"],
 });
 ```
 
-`appManifest` adds Slack Events API subscriptions and bot OAuth scopes; it does not infer requirements from an open-ended `onEvent` handler. Add every event the handler accepts and the corresponding Slack scope. Scope changes may require reinstalling the Slack app.
+`botEvents` adds Slack Events API subscriptions, and `botScopes` adds bot OAuth scopes. eve does not infer requirements from an open-ended `onEvent` handler, so add every event the handler accepts and the corresponding Slack scope. Scope changes may require reinstalling the Slack app.
 
 Function-form bot tokens receive `{ teamId }` when Slack supplies the app installation workspace. Use it to select an installation in a self-managed multi-workspace app. The id can differ from the actor or content workspace for Slack Connect events:
 
@@ -260,7 +258,7 @@ export default slackChannel({
 });
 ```
 
-`isDMOrPrivateChannel()` returns `true` for DMs, group DMs, and private channels. Slack message events identify public channels as `channel` and private channels as `group`, so those events do not require an API lookup. Events such as `app_mention` omit the conversation type; for those, the helper calls Slack's `conversations.info` API and checks `is_private`. Missing scopes, API errors, and ambiguous responses return `true` so privacy-sensitive behavior fails closed. `isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. Add `message.channels` and `channels:history` through `appManifest` for public channels. Private channels additionally need `message.groups` and `groups:history`.
+`isDMOrPrivateChannel()` returns `true` for DMs, group DMs, and private channels. Slack message events identify public channels as `channel` and private channels as `group`, so those events do not require an API lookup. Events such as `app_mention` omit the conversation type; for those, the helper calls Slack's `conversations.info` API and checks `is_private`. Missing scopes, API errors, and ambiguous responses return `true` so privacy-sensitive behavior fails closed. `isBotMentioned()` identifies an explicit mention. `isSubscribed()` checks whether the message belongs to a thread with an active eve session. Add `message.channels` through `botEvents` and `channels:history` through `botScopes` for public channels. Private channels additionally need `message.groups` and `groups:history`.
 
 Use `ctx.thread.listParticipants()` when routing depends on who has joined the thread. It fetches the current thread and returns unique human Slack user ids in first-appearance order, so the first id is the starting author for a human-started thread. Bot and system messages are excluded:
 
@@ -397,7 +395,7 @@ const session = await ctx.resolveSession({ target });
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
-`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`; add every desired event and required OAuth scope through `appManifest` for Connect-backed apps, or in Slack app settings when you manage credentials yourself.
+`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`; add every desired event through `botEvents` and required OAuth scope through `botScopes` for Connect-backed apps, or in Slack app settings when you manage credentials yourself.
 
 ### Slack API calls outside a handler
 

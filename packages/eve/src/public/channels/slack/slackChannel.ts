@@ -59,7 +59,6 @@ import {
   type LoadThreadContextMessagesOptions,
 } from "#public/channels/slack/thread.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
-import type { SlackAppManifestOptions } from "#public/channels/slack/app-manifest.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
@@ -606,10 +605,12 @@ export interface SlackChannelInternalEvents extends Omit<
 
 export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
-  /** Display name used for the generated Slack app and bot. */
+  /** Display name used for the Slack bot. */
   readonly botName?: string;
-  /** Additional OAuth scopes and Events API subscriptions for the generated Slack app manifest. */
-  readonly appManifest?: SlackAppManifestOptions;
+  /** Additional Slack Events API bot events delivered to this channel. */
+  readonly botEvents?: readonly string[];
+  /** Additional Slack bot OAuth scopes required by this channel. */
+  readonly botScopes?: readonly string[];
 
   /** Optional presentation-only activity rendered without starting parent turns. */
   readonly activity?: {
@@ -999,8 +1000,10 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     botEvents?: readonly string[];
     botScopes?: readonly string[];
     displayName?: string;
-  } = { ...config.appManifest };
+  } = {};
   if (config.botName !== undefined) slackAppManifest.displayName = config.botName;
+  if (config.botEvents !== undefined) slackAppManifest.botEvents = config.botEvents;
+  if (config.botScopes !== undefined) slackAppManifest.botScopes = config.botScopes;
   return Object.assign(channel, {
     vercelConnect: credentials?.vercelConnect,
     slackAppManifest,

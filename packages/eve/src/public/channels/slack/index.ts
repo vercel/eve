@@ -52,8 +52,6 @@ export {
   type SlackWorkspaceHandle,
 } from "#public/channels/slack/slackChannel.js";
 
-export type { SlackAppManifestOptions } from "#public/channels/slack/app-manifest.js";
-
 export type {
   SlackAttachment,
   SlackAuthor,
