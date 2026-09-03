@@ -529,7 +529,10 @@ describe("runCli", () => {
     }
 
     expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
+      publicRoutePrefix: undefined,
       skipVercelSandboxPrewarm: false,
+      vercelServiceOutput: undefined,
+      workspaceMember: false,
     });
     expect(observedEnvironment).toEqual({
       EVE_BUILD_DEFAULT_ONLY: "from-env",
@@ -562,7 +565,10 @@ describe("runCli", () => {
     }
 
     expect(buildHost).toHaveBeenCalledWith(resolvedWorkspaceRoot, {
+      publicRoutePrefix: undefined,
       skipVercelSandboxPrewarm: true,
+      vercelServiceOutput: undefined,
+      workspaceMember: false,
     });
   });
 });
