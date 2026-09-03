@@ -159,6 +159,14 @@ describe("compatibilityRedirects", () => {
       permanent: true,
     });
   });
+
+  it("redirects the Arcana extension registry item to its memory provider", () => {
+    expect(compatibilityRedirects).toContainEqual({
+      source: "/r/extension/arcana.json",
+      destination: "/r/memory/arcana.json",
+      permanent: true,
+    });
+  });
 });
 
 describe("defaultLanguageRedirects", () => {

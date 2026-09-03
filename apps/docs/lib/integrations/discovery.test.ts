@@ -124,16 +124,17 @@ describe("integration discovery", () => {
     expect(integrationSearchText(agentkit!)).toContain("long-term memory");
   });
 
-  it("renders the Kybernesis Arcana memory extension setup", () => {
+  it("renders the Kybernesis Arcana memory provider setup", () => {
     const arcana = getIntegration("arcana");
     expect(arcana).toBeDefined();
 
     const markdown = integrationMarkdown(arcana!);
-    expect(markdown).toContain("eve add extension/arcana");
-    expect(markdown).toContain('import arcana from "@kybernesis/arcana"');
+    expect(markdown).toContain("eve add memory/arcana");
+    expect(markdown).toContain('import { arcanaMemory } from "@kybernesis/arcana/memory"');
     expect(markdown).toContain("ARCANA_API_KEY");
     expect(markdown).toContain("ARCANA_WORKSPACE");
-    expect(integrationSearchText(arcana!)).toContain("long-term memory");
+    expect(markdown).toContain("capture: { enabled: true }");
+    expect(integrationSearchText(arcana!)).toContain("Memory provider");
   });
 
   it("renders the Supermemory provider setup", () => {

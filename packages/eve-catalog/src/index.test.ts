@@ -127,8 +127,8 @@ describe("integration catalog", () => {
     expect(getIntegrationEntry("upstash-agentkit")?.connection).toBeUndefined();
   });
 
-  it("exposes Kybernesis Arcana as an extension", () => {
-    expect(getIntegrationEntry("arcana")?.kind).toBe("extension");
+  it("exposes Kybernesis Arcana as a memory provider", () => {
+    expect(getIntegrationEntry("arcana")?.kind).toBe("memory");
     expect(getIntegrationEntry("arcana")?.connection).toBeUndefined();
   });
 
