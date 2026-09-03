@@ -37,18 +37,8 @@ export async function runInteractiveDevelopmentUi(input: {
     projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined;
   const target =
     input.remoteTarget === undefined || input.existingLocalServer
-      ? {
-          kind: "local" as const,
-          serverUrl: input.server.serverUrl,
-          workspaceRoot,
-          ...(agentRoot === undefined ? {} : { agentRoot }),
-        }
-      : {
-          kind: "remote" as const,
-          serverUrl: input.server.serverUrl,
-          workspaceRoot,
-          ...(agentRoot === undefined ? {} : { agentRoot }),
-        };
+      ? { kind: "local" as const, serverUrl: input.server.serverUrl, workspaceRoot, agentRoot }
+      : { kind: "remote" as const, serverUrl: input.server.serverUrl, workspaceRoot, agentRoot };
   const display = resolveTuiDisplayOptions(input.options);
   const name = resolveTuiTitle({ name: input.options.name, target });
   if (name !== undefined) display.name = name;

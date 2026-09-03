@@ -116,11 +116,11 @@ export function createPromptCommandHandler(
         const commandInput: TuiSetupCommandInput = {
           command: command.name,
           appRoot: target.workspaceRoot,
-          ...(target.agentRoot === undefined ? {} : { agentRoot: target.agentRoot }),
           renderer: flow,
           withExclusiveTerminal: context.withExclusiveTerminal,
           chatGptAccountLabel: context.chatGptAccountLabel,
         };
+        if (target.agentRoot !== undefined) commandInput.agentRoot = target.agentRoot;
         if (context.initialModelStep !== undefined) {
           commandInput.initialModelStep = context.initialModelStep;
         }
