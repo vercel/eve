@@ -163,6 +163,9 @@ function createTestNode(
 
 async function createNodeWithSourceOwnedTools(input: {
   readonly names: readonly string[];
+  readonly owner?:
+    | { readonly kind: "application" }
+    | { readonly feature: string; readonly kind: "framework" };
   readonly turnTools?: StaticRuntimeTurnAgent["tools"];
 }): Promise<ResolvedRuntimeAgentNode> {
   const toolRegistry = await createRuntimeToolRegistry({
@@ -173,7 +176,7 @@ async function createNodeWithSourceOwnedTools(input: {
       inputSchema: name === AGENT_TOOL_NAME ? SUBAGENT_TOOL_INPUT_SCHEMA : null,
       logicalPath: `tools/${name}.ts`,
       name,
-      owner: { feature: "test", kind: "framework" },
+      owner: input.owner ?? { feature: "test", kind: "framework" },
       sourceId: `framework:tools/${name}.ts`,
       sourceKind: "module",
     })),
@@ -216,7 +219,7 @@ function createNoopRuntime(): Runtime {
 describe("createNodeHarnessTools", () => {
   it("adds the framework label start callback to provider-managed web search", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["web_search"] });
-    const label = createNodeHarnessTools({ node }).get("web_search")?.activity?.start;
+    const label = createNodeHarnessTools({ node }).get("web_search")?.label?.start;
 
     expect(label?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
   });
@@ -227,7 +230,7 @@ describe("createNodeHarnessTools", () => {
       owner: { kind: "application" },
     });
 
-    expect(createNodeHarnessTools({ node }).get("web_search")?.activity?.start).toBeUndefined();
+    expect(createNodeHarnessTools({ node }).get("web_search")?.label?.start).toBeUndefined();
   });
 
   it("keeps the compiled framework question tool client-side", async () => {
