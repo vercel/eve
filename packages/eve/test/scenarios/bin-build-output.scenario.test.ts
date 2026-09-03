@@ -77,6 +77,7 @@ async function createTemporaryAppRoot(input: {
     join(appRoot, "package.json"),
     `${JSON.stringify(
       {
+        dependencies: { eve: "*" },
         name: "eve-bin-build-output-test",
         private: true,
         type: "module",

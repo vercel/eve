@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   accumulateSessionUsage,
   accumulateTurnUsage,
-  bumpSessionRuntimeTokenLimits,
-  getSessionRemainingTokenQuota,
-  getSessionRuntimeTokenLimits,
-  getSessionTokenLimitViolation,
+  bumpSessionRuntimeUsageLimits,
+  getSessionRemainingUsageQuota,
+  getSessionRuntimeUsageLimits,
+  getSessionUsageLimitViolation,
   getSessionTokenUsage,
   getTurnUsageState,
   setTurnUsageState,
@@ -322,7 +322,7 @@ describe("session token limits", () => {
       },
     });
 
-    expect(getSessionTokenLimitViolation({ ...session, limits: testCase.limits })).toEqual(
+    expect(getSessionUsageLimitViolation({ ...session, limits: testCase.limits })).toEqual(
       testCase.expected,
     );
   });
@@ -341,17 +341,17 @@ describe("session token limits", () => {
       limits: { maxInputTokensPerSession: 10, maxOutputTokensPerSession: 3 },
     };
 
-    expect(getSessionTokenLimitViolation(session)).toEqual({
+    expect(getSessionUsageLimitViolation(session)).toEqual({
       kind: "input",
       limit: 10,
       usedTokens: 10,
     });
 
-    const bumped = bumpSessionRuntimeTokenLimits(session);
+    const bumped = bumpSessionRuntimeUsageLimits(session);
 
     // Both axes bump together so a session near two limits gets one prompt.
-    expect(getSessionRuntimeTokenLimits(bumped)).toEqual({ inputTokens: 20, outputTokens: 6 });
-    expect(getSessionTokenLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
+    expect(getSessionRuntimeUsageLimits(bumped)).toEqual({ inputTokens: 20, outputTokens: 6 });
+    expect(getSessionUsageLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
 
     const laterUsage = { ...usage, inputTokens: 20, outputTokens: 3 };
     const later = setTurnUsageState(bumped, {
@@ -361,7 +361,7 @@ describe("session token limits", () => {
     });
 
     // `limit` reports the configured window size; `usedTokens` the lifetime total.
-    expect(getSessionTokenLimitViolation({ ...later, limits: session.limits })).toEqual({
+    expect(getSessionUsageLimitViolation({ ...later, limits: session.limits })).toEqual({
       kind: "input",
       limit: 10,
       usedTokens: 20,
@@ -383,13 +383,13 @@ describe("session token limits", () => {
       limits: { maxInputTokensPerSession: 10 },
     };
 
-    expect(getSessionTokenLimitViolation(session)?.usedTokens).toBe(35);
+    expect(getSessionUsageLimitViolation(session)).toMatchObject({ usedTokens: 35 });
 
     // One approval always unblocks: the runtime limit re-anchors to
     // usage + configured limit rather than incrementing by the limit.
-    const bumped = bumpSessionRuntimeTokenLimits(session);
-    expect(getSessionRuntimeTokenLimits(bumped)).toEqual({ inputTokens: 45 });
-    expect(getSessionTokenLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
+    const bumped = bumpSessionRuntimeUsageLimits(session);
+    expect(getSessionRuntimeUsageLimits(bumped)).toEqual({ inputTokens: 45 });
+    expect(getSessionUsageLimitViolation({ ...bumped, limits: session.limits })).toBeNull();
 
     // A second grant cycle moves the ceiling again -- never idempotent.
     const laterUsage = { ...usage, inputTokens: 45 };
@@ -398,10 +398,10 @@ describe("session token limits", () => {
       ...laterUsage,
       session: laterUsage,
     });
-    expect(getSessionTokenLimitViolation({ ...later, limits: session.limits })).not.toBeNull();
-    const bumpedAgain = bumpSessionRuntimeTokenLimits(later);
-    expect(getSessionRuntimeTokenLimits(bumpedAgain)).toEqual({ inputTokens: 55 });
-    expect(getSessionTokenLimitViolation({ ...bumpedAgain, limits: session.limits })).toBeNull();
+    expect(getSessionUsageLimitViolation({ ...later, limits: session.limits })).not.toBeNull();
+    const bumpedAgain = bumpSessionRuntimeUsageLimits(later);
+    expect(getSessionRuntimeUsageLimits(bumpedAgain)).toEqual({ inputTokens: 55 });
+    expect(getSessionUsageLimitViolation({ ...bumpedAgain, limits: session.limits })).toBeNull();
   });
 
   it("reports remaining quota from the runtime limit", () => {
@@ -418,11 +418,13 @@ describe("session token limits", () => {
       limits: { maxInputTokensPerSession: 10 },
     };
 
-    expect(getSessionRemainingTokenQuota(session)).toEqual({
+    expect(getSessionRemainingUsageQuota(session)).toEqual({
+      costUsd: false,
       inputTokens: 6,
       outputTokens: false,
     });
-    expect(getSessionRemainingTokenQuota(makeSession())).toEqual({
+    expect(getSessionRemainingUsageQuota(makeSession())).toEqual({
+      costUsd: false,
       inputTokens: false,
       outputTokens: false,
     });

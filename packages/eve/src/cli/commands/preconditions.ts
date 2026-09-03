@@ -1,5 +1,5 @@
 import type { EveProjectContext } from "#internal/project-context.js";
-import { resolveEveProjectContext } from "#internal/project-context.js";
+import { findEveProjectContext } from "#internal/project-context.js";
 import { isEveProject } from "#setup/scaffold/index.js";
 
 /**
@@ -22,15 +22,16 @@ export async function validateWorkspaceProjectCommand(input: {
     workspace: Extract<EveProjectContext, { kind: "workspace" }>["workspace"],
   ) => string;
 }): Promise<boolean> {
-  const projectContext = await resolveEveProjectContext(input.appRoot);
-  if (projectContext.kind === "workspace-member") {
+  const projectContext = await findEveProjectContext(input.appRoot);
+  if (projectContext?.kind === "workspace-member") {
     input.logger.error(input.workspaceMemberMessage(projectContext.workspace));
     process.exitCode = 1;
     return false;
   }
   if (
-    projectContext.kind === "standalone" &&
-    !(await (input.isEveProject ?? isEveProject)(input.appRoot))
+    projectContext === undefined ||
+    (projectContext.kind === "standalone" &&
+      !(await (input.isEveProject ?? isEveProject)(input.appRoot)))
   ) {
     input.logger.error(NOT_AN_AGENT_MESSAGE);
     process.exitCode = 1;

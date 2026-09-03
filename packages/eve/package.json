@@ -281,6 +281,24 @@
       "import": "./dist/src/public/local-dev.js",
       "default": "./dist/src/public/local-dev.js"
     },
+    "./self-modification": {
+      "eve-source": "./src/self-modification/extension/extension.ts",
+      "types": "./dist/src/self-modification/extension/extension.d.ts",
+      "import": "./dist/src/self-modification/extension/extension.js",
+      "default": "./dist/src/self-modification/extension/extension.js"
+    },
+    "./self-modification/agent": {
+      "eve-source": "./src/self-modification/agent.ts",
+      "types": "./dist/src/self-modification/agent.d.ts",
+      "import": "./dist/src/self-modification/agent.js",
+      "default": "./dist/src/self-modification/agent.js"
+    },
+    "./self-modification/sandbox": {
+      "eve-source": "./src/self-modification/sandbox.ts",
+      "types": "./dist/src/self-modification/sandbox.d.ts",
+      "import": "./dist/src/self-modification/sandbox.js",
+      "default": "./dist/src/self-modification/sandbox.js"
+    },
     "./extension": {
       "types": "./dist/src/public/extension/index.d.ts",
       "import": "./dist/src/public/extension/index.js",
@@ -509,5 +527,12 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "eve": {
+    "builtInExtensions": {
+      "./self-modification": {
+        "dist": "./dist/src/self-modification/extension"
+      }
+    }
   }
 }

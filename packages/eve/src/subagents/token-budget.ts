@@ -1,5 +1,5 @@
 import type { RunSessionLimits } from "#channel/types.js";
-import { getSessionRemainingTokenQuota } from "#harness/turn-tag-state.js";
+import { getSessionRemainingUsageQuota } from "#harness/turn-tag-state.js";
 import type { HarnessSession } from "#harness/types.js";
 
 /**
@@ -20,17 +20,29 @@ export function resolveRemainingSessionTokenLimits(
   fanoutSize = 1,
 ): RunSessionLimits {
   const normalizedFanoutSize = Math.max(1, Math.floor(fanoutSize));
-  const remaining = getSessionRemainingTokenQuota(session);
+  const remaining = getSessionRemainingUsageQuota(session);
 
-  return {
-    maxInputTokensPerSession: grantShare(remaining.inputTokens, normalizedFanoutSize),
-    maxOutputTokensPerSession: grantShare(remaining.outputTokens, normalizedFanoutSize),
+  const limits: {
+    maxInputTokensPerSession: number | false;
+    maxOutputTokensPerSession: number | false;
+    maxTokenCostUsdPerSession?: number;
+  } = {
+    maxInputTokensPerSession: grantTokenShare(remaining.inputTokens, normalizedFanoutSize),
+    maxOutputTokensPerSession: grantTokenShare(remaining.outputTokens, normalizedFanoutSize),
   };
+  const maxTokenCostUsdPerSession = grantCostShare(remaining.costUsd, normalizedFanoutSize);
+  if (maxTokenCostUsdPerSession !== false) {
+    limits.maxTokenCostUsdPerSession = maxTokenCostUsdPerSession;
+  }
+  return limits;
 }
 
-function grantShare(remaining: number | false, fanOut: number): number | false {
-  if (remaining === false) {
-    return false;
-  }
+function grantTokenShare(remaining: number | false, fanOut: number): number | false {
+  if (remaining === false) return false;
   return Math.floor(remaining / fanOut);
+}
+
+function grantCostShare(remaining: number | false, fanOut: number): number | false {
+  if (remaining === false) return false;
+  return remaining / fanOut;
 }

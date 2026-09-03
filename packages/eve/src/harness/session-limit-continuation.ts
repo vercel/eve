@@ -1,14 +1,15 @@
 /**
- * Deterministic HITL continuation prompt for session token limits.
+ * Deterministic HITL continuation prompt for session usage limits.
  *
- * When a durable session reaches its configured token budget, the harness
+ * When a durable session reaches its configured token or token-cost budget, the harness
  * parks on a harness-authored input request instead of failing the session.
  * The request is derived only from the session identity and violation, so
  * identical session state always produces an identical prompt — no model call
  * is involved.
  */
 import type { InputRequest, InputResponse } from "#shared/input.js";
-import type { SessionTokenLimitViolation } from "#harness/turn-tag-state.js";
+import type { JsonObject } from "#shared/json.js";
+import type { SessionUsageLimitViolation } from "#harness/turn-tag-state.js";
 
 /** Synthetic action tool name carried by session-limit continuation requests. */
 export const SESSION_LIMIT_CONTINUATION_TOOL_NAME = "session_limit_continuation";
@@ -20,30 +21,36 @@ export const SESSION_LIMIT_CONTINUE_OPTION_ID = "continue";
 export const SESSION_LIMIT_STOP_OPTION_ID = "stop";
 
 /**
- * Builds the deterministic continuation prompt for one session token limit
+ * Builds the deterministic continuation prompt for one session usage-limit
  * violation.
  */
 export function createSessionLimitContinuationRequest(input: {
   readonly sessionId: string;
-  readonly violation: SessionTokenLimitViolation;
+  readonly violation: SessionUsageLimitViolation;
 }): InputRequest {
   const { sessionId, violation } = input;
-  // `usedTokens` is the absolute session total, which is strictly increasing
-  // across violations, so each prompt gets its own id while staying
-  // deterministic: stale chat controls from an earlier, already-resolved
-  // prompt carry an unknown requestId, resolve nothing, and the harness
-  // harmlessly re-prompts instead of letting an old "Stop" button end a
-  // freshly granted session.
-  const requestId = `${sessionId}:limit:${violation.kind}:${String(violation.usedTokens)}`;
+  const used = violation.kind === "token-cost" ? violation.usedCostUsd : violation.usedTokens;
+  // The absolute session usage is strictly increasing across violations, so
+  // each prompt gets a deterministic id and stale controls cannot resolve a
+  // later prompt.
+  const requestId = `${sessionId}:limit:${violation.kind}:${String(used)}`;
+  const actionInput: JsonObject =
+    violation.kind === "token-cost"
+      ? {
+          kind: violation.kind,
+          limitUsd: violation.limitUsd,
+          usedCostUsd: violation.usedCostUsd,
+        }
+      : {
+          kind: violation.kind,
+          limit: violation.limit,
+          usedTokens: violation.usedTokens,
+        };
 
   return {
     action: {
       callId: requestId,
-      input: {
-        kind: violation.kind,
-        limit: violation.limit,
-        usedTokens: violation.usedTokens,
-      },
+      input: actionInput,
       kind: "tool-call",
       toolName: SESSION_LIMIT_CONTINUATION_TOOL_NAME,
     },
@@ -52,7 +59,10 @@ export function createSessionLimitContinuationRequest(input: {
     kind: "session-limit",
     options: [
       {
-        description: "Grant a fresh token budget",
+        description:
+          violation.kind === "token-cost"
+            ? "Grant a fresh model token-cost budget"
+            : "Grant a fresh token budget",
         id: SESSION_LIMIT_CONTINUE_OPTION_ID,
         label: "Approve",
         style: "primary",
@@ -64,11 +74,7 @@ export function createSessionLimitContinuationRequest(input: {
         style: "danger",
       },
     ],
-    prompt:
-      `This session has hit the ${violation.kind}-token limit ` +
-      `(${formatCompactTokenCount(violation.limit)}) per session. This is a guardrail ` +
-      `against defective long-running sessions. If session activity looks fine, ` +
-      `just approve to keep going.`,
+    prompt: formatSessionLimitPrompt(violation),
     requestId,
   };
 }
@@ -92,6 +98,23 @@ function trimTrailingZero(value: number): string {
   return rounded.endsWith(".0") ? rounded.slice(0, -2) : rounded;
 }
 
+function formatSessionLimitPrompt(violation: SessionUsageLimitViolation): string {
+  const reachedLimit =
+    violation.kind === "token-cost"
+      ? `${formatUsd(violation.limitUsd)} model token-cost limit per session`
+      : `${violation.kind}-token limit (${formatCompactTokenCount(violation.limit)}) per session`;
+  return (
+    `This session has hit the ${reachedLimit}. This is a guardrail ` +
+    `against defective long-running sessions. If session activity looks fine, ` +
+    `just approve to keep going.`
+  );
+}
+
+function formatUsd(costUsd: number): string {
+  const value = costUsd < 0.000001 ? String(costUsd) : costUsd.toFixed(6);
+  return `$${value.replace(/0+$/u, "").replace(/\.$/u, "")}`;
+}
+
 /**
  * Returns true when a request is a harness-authored session-limit
  * continuation prompt.
@@ -108,7 +131,10 @@ export function isSessionLimitContinuationRequest(request: InputRequest): boolea
  * stale continuation answer after its request left the pending batch.
  */
 export function isSessionLimitContinuationRequestId(requestId: string): boolean {
-  return /:limit:(?:input|output):\d+$/u.test(requestId);
+  return (
+    /:limit:(?:input|output):\d+$/u.test(requestId) ||
+    /:limit:token-cost:\d+(?:\.\d+)?(?:e[+-]?\d+)?$/iu.test(requestId)
+  );
 }
 
 /**

@@ -21,6 +21,7 @@ export const DEFAULT_ROOT_MAX_INPUT_TOKENS_PER_SESSION = 40_000_000;
 export interface AuthoredSessionLimits {
   readonly maxInputTokensPerSession?: number | false;
   readonly maxOutputTokensPerSession?: number | false;
+  readonly maxTokenCostUsdPerSession?: number | false;
 }
 
 /**
@@ -337,12 +338,24 @@ function resolveSessionLimits(input: {
     fallback: undefined,
   });
 
-  const limits: { maxInputTokensPerSession?: number; maxOutputTokensPerSession?: number } = {};
+  const maxTokenCostUsdPerSession = resolveSessionTokenLimit({
+    authored: input.limits?.maxTokenCostUsdPerSession,
+    fallback: undefined,
+  });
+
+  const limits: {
+    maxInputTokensPerSession?: number;
+    maxOutputTokensPerSession?: number;
+    maxTokenCostUsdPerSession?: number;
+  } = {};
   if (maxInputTokensPerSession !== undefined) {
     limits.maxInputTokensPerSession = maxInputTokensPerSession;
   }
   if (maxOutputTokensPerSession !== undefined) {
     limits.maxOutputTokensPerSession = maxOutputTokensPerSession;
+  }
+  if (maxTokenCostUsdPerSession !== undefined) {
+    limits.maxTokenCostUsdPerSession = maxTokenCostUsdPerSession;
   }
   return limits;
 }

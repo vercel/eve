@@ -4,8 +4,8 @@ import type { Command } from "#compiled/commander/index.js";
 import type { CliApplicationContext } from "#cli/application-command.js";
 import { resolveInternalVercelServiceOutput } from "#cli/vercel-service-output.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
+import { EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV } from "#internal/application/build-output-environment.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
-import { resolveEveProjectContext } from "#internal/project-context.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -34,7 +34,7 @@ export function registerBuildCommand(input: {
   input.program
     .command("build")
     .hook("preAction", async () => {
-      const context = await resolveEveProjectContext(input.applicationContext.root);
+      const context = await input.applicationContext.resolveAgent();
       if (context.kind !== "workspace") await input.applicationContext.resolve();
     })
     .description("Build the current eve application.")
@@ -48,7 +48,7 @@ export function registerBuildCommand(input: {
 
       await loadDevelopmentEnvironmentFiles(input.applicationContext.root);
 
-      const projectContext = await resolveEveProjectContext(input.applicationContext.root);
+      const projectContext = await input.applicationContext.resolveAgent();
       if (projectContext.kind === "workspace") {
         if (options.profile !== undefined || options.skipSandboxPrewarm === true) {
           throw new Error(
@@ -78,10 +78,14 @@ export function registerBuildCommand(input: {
         readonly publicRoutePrefix: ApplicationBuildOptions["publicRoutePrefix"];
         readonly skipVercelSandboxPrewarm: boolean;
         readonly vercelServiceOutput: ApplicationBuildOptions["vercelServiceOutput"];
+        readonly workspaceMember: boolean;
       } = {
         publicRoutePrefix: normalizePublicRoutePrefix(process.env[EVE_PUBLIC_ROUTE_PREFIX_ENV]),
         skipVercelSandboxPrewarm: options.skipSandboxPrewarm === true,
         vercelServiceOutput: resolveInternalVercelServiceOutput(input.applicationContext.root),
+        workspaceMember:
+          projectContext.kind === "workspace-member" ||
+          process.env[EVE_INTERNAL_AGENT_WORKSPACE_MEMBER_ENV] === "1",
       };
       if (profileOutputPath !== undefined) {
         buildOptions.profileOutputPath = profileOutputPath;

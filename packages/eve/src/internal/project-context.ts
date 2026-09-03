@@ -1,11 +1,19 @@
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
+import { getDirectoryEntryType, isDiscoverableAgentRootEntry } from "#discover/filesystem.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
-import {
-  resolveAgentWorkspace,
-  type AgentWorkspace,
-  type AgentWorkspaceMember,
-} from "#internal/agent-workspace.js";
+import { assertValidPublicAgentName } from "#internal/agent-name.js";
+import { findEveProjectRoot } from "#internal/eve-project-root.js";
+
+export interface AgentWorkspaceMember {
+  readonly appRoot: string;
+  readonly name: string;
+}
+
+export interface AgentWorkspace {
+  readonly members: readonly AgentWorkspaceMember[];
+  readonly root: string;
+}
 
 export type EveProjectContext =
   | {
@@ -25,47 +33,81 @@ export type EveProjectContext =
       readonly kind: "standalone";
     };
 
-function standalone(appRoot: string): Extract<EveProjectContext, { kind: "standalone" }> {
-  return { appRoot, environmentRoot: appRoot, kind: "standalone" };
+function containsPath(parent: string, child: string): boolean {
+  const relativePath = relative(parent, child);
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
-/** Classify an app root included by the nearest declared agent workspace. */
-export async function resolveNamedAgentProjectContext(
-  appRoot: string,
+async function hasFlatAgentRoot(root: string, source: ProjectSource): Promise<boolean> {
+  const entries = await source.readDirectory(root);
+  return entries.some((entry) =>
+    isDiscoverableAgentRootEntry(entry.name, getDirectoryEntryType(entry)),
+  );
+}
+
+async function resolveWorkspace(root: string, source: ProjectSource): Promise<AgentWorkspace> {
+  const agentsRoot = join(root, "agents");
+  const entries = (await source.readDirectory(agentsRoot))
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const members = entries.map((entry) => {
+    assertValidPublicAgentName(entry.name, "Agent workspace member");
+    return { appRoot: join(agentsRoot, entry.name), name: entry.name };
+  });
+  return { members, root };
+}
+
+/** Try to resolve the owning eve package and classify the input path within it. */
+export async function findEveProjectContext(
+  startPath: string,
   options: { readonly source?: ProjectSource } = {},
-): Promise<Extract<EveProjectContext, { kind: "workspace-member" | "standalone" }> | undefined> {
-  const resolvedAppRoot = resolve(appRoot);
+): Promise<EveProjectContext | undefined> {
   const source = options.source ?? createDiskProjectSource();
-  const agentsRoot = dirname(resolvedAppRoot);
-  if (basename(agentsRoot) !== "agents") return undefined;
+  const resolvedStartPath = resolve(startPath);
+  const searchDirectory =
+    (await source.stat(resolvedStartPath)) === "directory"
+      ? resolvedStartPath
+      : dirname(resolvedStartPath);
+  const projectRoot = await findEveProjectRoot(searchDirectory, { source });
+  if (projectRoot === undefined) return undefined;
 
-  const workspaceRoot = dirname(agentsRoot);
-  if ((await source.stat(join(workspaceRoot, "agent"))) === "directory") return undefined;
+  const hasAgent = (await source.stat(join(projectRoot, "agent"))) === "directory";
+  const hasAgents = (await source.stat(join(projectRoot, "agents"))) === "directory";
+  if (hasAgent) {
+    return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
+  }
 
-  const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
-  const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
-  if (workspace === undefined || member === undefined) return undefined;
+  if (!hasAgents) {
+    if (await hasFlatAgentRoot(projectRoot, source)) {
+      return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
+    }
+    throw new Error(`Invalid eve project at ${projectRoot}: found no agent files.`);
+  }
 
-  return {
-    workspace,
-    environmentRoot: workspace.root,
-    kind: "workspace-member",
-    member,
-  };
+  const workspace = await resolveWorkspace(projectRoot, source);
+  const member = workspace.members.find((candidate) =>
+    containsPath(candidate.appRoot, searchDirectory),
+  );
+  if (member !== undefined) {
+    return {
+      workspace,
+      environmentRoot: workspace.root,
+      kind: "workspace-member",
+      member,
+    };
+  }
+
+  return { workspace, environmentRoot: workspace.root, kind: "workspace" };
 }
 
-/** Classify the current filesystem scope before command-specific policy runs. */
+/** Resolve the owning eve project, throwing when the path has no eve package owner. */
 export async function resolveEveProjectContext(
-  appRoot: string,
+  startPath: string,
   options: { readonly source?: ProjectSource } = {},
 ): Promise<EveProjectContext> {
-  const resolvedAppRoot = resolve(appRoot);
-  const source = options.source ?? createDiskProjectSource();
-  const namedAgent = await resolveNamedAgentProjectContext(resolvedAppRoot, { source });
-  if (namedAgent !== undefined) return namedAgent;
-
-  const workspace = await resolveAgentWorkspace(resolvedAppRoot, { source });
-  return workspace === undefined
-    ? standalone(resolvedAppRoot)
-    : { workspace, environmentRoot: workspace.root, kind: "workspace" };
+  const context = await findEveProjectContext(startPath, options);
+  if (context === undefined) {
+    throw new Error(`No eve project contains ${resolve(startPath)}.`);
+  }
+  return context;
 }

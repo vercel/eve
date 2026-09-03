@@ -45,15 +45,15 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
     },
   },
   schedule: {
-    current: 7,
-    supported: [1, 2, 3, 4, 6, 7],
+    current: 8,
+    supported: [1, 2, 3, 4, 6, 7, 8],
     dropped: {
       5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   subagent: {
-    current: 7,
-    supported: [3, 4, 6, 7],
+    current: 8,
+    supported: [3, 4, 6, 7, 8],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
@@ -86,16 +86,16 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   },
   skill: { current: 1, supported: [1], dropped: {} },
   dynamicSkill: {
-    current: 15,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15],
+    current: 16,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16],
     dropped: {
       13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 16,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16],
+    current: 17,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17],
     dropped: {
       14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },

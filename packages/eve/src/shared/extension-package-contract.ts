@@ -29,6 +29,15 @@ export function parseExtensionPackageRoots(value: unknown): ExtensionPackageRoot
     : null;
 }
 
+/** Parses package-local extension distributions keyed by their export subpath. */
+export function parseBuiltInExtensionPackageRoots(
+  value: unknown,
+  subpath: string,
+): ExtensionPackageRoots | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return parseExtensionPackageRoots((value as Record<string, unknown>)[subpath]);
+}
+
 function parseExternalDependencies(value: unknown): readonly string[] | undefined | null {
   if (value === undefined) return undefined;
   if (!Array.isArray(value)) return null;

@@ -1,5 +1,5 @@
 /** Every explicit session-inbox wire version still supported by producers. */
-export const SESSION_INBOX_WIRE_VERSIONS = [1, 2, 3, 4] as const;
+export const SESSION_INBOX_WIRE_VERSIONS = [1, 2, 3, 4, 5] as const;
 
 export type SessionInboxWireVersion = (typeof SESSION_INBOX_WIRE_VERSIONS)[number];
 
