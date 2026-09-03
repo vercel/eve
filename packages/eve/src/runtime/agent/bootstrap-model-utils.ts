@@ -1,6 +1,6 @@
 import type { MockLanguageModelV3 } from "ai/test";
 
-import { AGENTS_SNIPPET_LABEL } from "#harness/handles/prompt.js";
+import { AGENTS_SNIPPET_LABEL } from "#subagents/handles/prompt.js";
 
 export type BootstrapGenerateOptions = Parameters<MockLanguageModelV3["doGenerate"]>[0];
 export type BootstrapPrompt = BootstrapGenerateOptions["prompt"];

@@ -22,11 +22,15 @@ import {
   type SessionInboxWireVersion,
 } from "#execution/wire/session-inbox-contract.js";
 import { encodeSessionCommandV0 } from "#execution/wire/session-inbox-wire.v0.js";
+import {
+  encodeSessionCommandV4,
+  type SessionInboxWireV4,
+} from "#execution/wire/session-inbox-wire.v4.js";
 
 type SessionInboxCommand = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 
 /** Current wire type consumed after migration. */
-export type SessionInboxWire = SessionInboxWireV3;
+export type SessionInboxWire = SessionInboxWireV4;
 
 type LegacySessionInboxWireTarget = Extract<SessionInboxWireTarget, { readonly version: 0 }>;
 type VersionedSessionInboxEncoder = (command: SessionInboxCommand) => unknown;
@@ -35,12 +39,14 @@ const versionedEncoders = {
   1: (command: SessionInboxCommand) => encodeSessionCommandV1(withoutAcceptedDeployment(command)),
   2: (command: SessionInboxCommand) => encodeSessionCommandV2(withoutAcceptedDeployment(command)),
   3: encodeSessionCommandV3,
+  4: encodeSessionCommandV4,
 } satisfies Record<SessionInboxWireVersion, VersionedSessionInboxEncoder>;
 
 /** Encodes a command for the selected session-inbox consumer. */
 function encode(command: SessionInboxCommand, target: { readonly version: 1 }): SessionInboxWireV1;
 function encode(command: SessionInboxCommand, target: { readonly version: 2 }): SessionInboxWireV2;
 function encode(command: SessionInboxCommand, target: { readonly version: 3 }): SessionInboxWireV3;
+function encode(command: SessionInboxCommand, target: { readonly version: 4 }): SessionInboxWireV4;
 function encode(
   command: SessionInboxCommand,
   target: { readonly version: SessionInboxWireVersion },
@@ -52,16 +58,33 @@ function encode(
 function encode(
   command: SessionInboxCommand,
   target: SessionInboxWireTarget,
-): SessionInboxWireV1 | SessionInboxWireV2 | SessionInboxWireV3 | Record<string, unknown>;
+):
+  | SessionInboxWireV1
+  | SessionInboxWireV2
+  | SessionInboxWireV3
+  | SessionInboxWireV4
+  | Record<string, unknown>;
 function encode(
   command: SessionInboxCommand,
   target: SessionInboxWireTarget,
-): SessionInboxWireV1 | SessionInboxWireV2 | SessionInboxWireV3 | Record<string, unknown> {
+):
+  | SessionInboxWireV1
+  | SessionInboxWireV2
+  | SessionInboxWireV3
+  | SessionInboxWireV4
+  | Record<string, unknown> {
   if (target.version === 0) {
-    const legacy = encodeSessionCommandV0(
-      encodeSessionCommandV1(withoutAcceptedDeployment(command)),
+    const currentTaskWire =
+      target.variant === "send" && command.kind === "send" && command.payload.task !== undefined
+        ? encodeSessionCommandV4(command)
+        : undefined;
+    let legacy = encodeSessionCommandV0(
+      encodeSessionCommandV1(withoutCurrentTaskMessages(withoutAcceptedDeployment(command))),
       target.variant,
     );
+    if (currentTaskWire?.kind === "deliver") {
+      legacy = { ...legacy, payload: currentTaskWire.payload };
+    }
     const legacyRecord = legacy as Record<string, unknown>;
     const delivery = legacyRecord.delivery;
     const acceptedDeploymentId = readAcceptedDeploymentId(command);
@@ -83,11 +106,22 @@ function encode(
     return versionedEncoders[target.version](command) as
       | SessionInboxWireV1
       | SessionInboxWireV2
-      | SessionInboxWireV3;
+      | SessionInboxWireV3
+      | SessionInboxWireV4;
   }
   throw new SessionInboxWireError(
     `Cannot encode session inbox payload for unknown wire version ${JSON.stringify((target as { version?: unknown }).version)}.`,
   );
+}
+
+function withoutCurrentTaskMessages(command: SessionInboxCommand): SessionInboxCommand {
+  if (command.kind !== "send" || command.payload.task === undefined) return command;
+  const {
+    agentRequests: _agentRequests,
+    inputRequests: _inputRequests,
+    ...task
+  } = command.payload.task;
+  return { ...command, payload: { ...command.payload, task } };
 }
 
 function withoutAcceptedDeployment(command: SessionInboxCommand): SessionInboxCommand {

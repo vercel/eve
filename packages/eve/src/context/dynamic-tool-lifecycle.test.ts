@@ -1,6 +1,7 @@
 import { asSchema } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
+import { z } from "#compiled/zod/index.js";
 import type { DynamicToolEntry } from "#tools/dynamic.js";
 import {
   isCurrentDynamicToolMetadata,
@@ -9,7 +10,7 @@ import {
   type OldStepFunctionDynamicToolMetadata,
 } from "#context/dynamic-tool-metadata.js";
 import { resolveApprovalPolicy, type ApprovalContext } from "#approval/definition.js";
-import { defineTool, type ToolContext } from "#tools/definition.js";
+import { defineTool, type TaskExec, type ToolContext } from "#tools/definition.js";
 import type { JsonObject } from "#shared/json.js";
 import { serializeOutputSchema, type ToolSchema } from "#tools/schema.js";
 
@@ -1054,6 +1055,60 @@ describe("dispatchDynamicToolEvent", () => {
     // Step tools are live (no durable metadata for step scope)
     // buildDynamicTools sees both session (replayed) + step (live)
     expect(buildDynamicTools(ctx)).toHaveLength(2);
+  });
+
+  it("persists background execution and forwards TaskExec when replaying", async () => {
+    const ctx = createCtx();
+    const stepFn = vi.fn((_closure: unknown, _input: unknown, _toolCtx: unknown, task: TaskExec) =>
+      task.delegated({
+        executor: { data: {}, kind: "test" },
+        receipt: {},
+      }),
+    );
+    const resolver = createResolver("background", ["session.started"], () => {
+      const entry = defineTool({
+        description: "delegate background work",
+        execution: "background",
+        inputSchema: z.strictObject({}),
+        execute: (_input, _toolCtx, task) =>
+          task.delegated({ executor: { data: {}, kind: "test" }, receipt: {} }),
+      });
+      stampDurableDynamicToolCallbacks(entry, {
+        execute: { callback: stepFn as never, closure: {} },
+      });
+      return { background_task: entry };
+    });
+
+    await dispatchDynamicToolEvent({
+      ctx,
+      resolvers: [resolver],
+      messages: [],
+      event: makeEvent("session.started"),
+    });
+    const restored = await deserializeContext(serializeContext(ctx));
+    const [metadata] = restored.get(SessionDynamicToolMetadataKey) ?? [];
+    expect(metadata?.execution).toBe("background");
+
+    const [tool] = buildDynamicTools(restored);
+    expect(tool?.execution).toBe("background");
+    const binding = { taskId: "task-1", token: "token-1" };
+    const task: TaskExec = {
+      batch: [],
+      binding,
+      delegated: ({ executor, receipt }) => ({
+        executor,
+        kind: "eve:task-delegated",
+        receipt: { ...receipt, status: "working", taskId: binding.taskId },
+      }),
+      send: vi.fn(),
+      session: {} as TaskExec["session"],
+      task: {} as TaskExec["task"],
+    };
+    await expect(tool!.execute!({}, executeOptions, task)).resolves.toMatchObject({
+      kind: "eve:task-delegated",
+      receipt: { status: "working", taskId: "task-1" },
+    });
+    expect(stepFn).toHaveBeenCalledWith({}, {}, expect.anything(), task);
   });
 
   it("replays session tools from durable metadata on a fresh step", async () => {

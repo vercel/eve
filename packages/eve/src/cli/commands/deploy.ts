@@ -1,7 +1,8 @@
+import { isEveProject } from "#setup/scaffold/index.js";
 import { runDeployFlow, type DeployFlowDeps } from "#setup/flows/deploy.js";
 import { createPrompter, type Prompter } from "#setup/prompter.js";
 
-import { hasInteractiveTerminal } from "./preconditions.js";
+import { hasInteractiveTerminal, validateWorkspaceProjectCommand } from "./preconditions.js";
 import {
   isNonInteractiveProjectCommand,
   runNonInteractiveLink,
@@ -16,12 +17,14 @@ export interface DeployCliLogger {
 export interface DeployCommandDependencies {
   createPrompter?: () => Prompter;
   hasInteractiveTerminal(): boolean;
+  isEveProject?: typeof isEveProject;
   /** Test seam into the flow's detection and box effects. */
   flowDeps?: Partial<DeployFlowDeps>;
 }
 
 const defaultDependencies: DeployCommandDependencies = {
   hasInteractiveTerminal,
+  isEveProject,
 };
 
 /**
@@ -37,6 +40,17 @@ export async function runDeployCommand(
   dependencies: DeployCommandDependencies = defaultDependencies,
   options: VercelProjectCliOptions & { yes?: boolean } = {},
 ): Promise<void> {
+  if (
+    !(await validateWorkspaceProjectCommand({
+      appRoot,
+      isEveProject: dependencies.isEveProject,
+      logger,
+      workspaceMemberMessage: (workspace) =>
+        `This agent belongs to the workspace at ${workspace.root}. Run \`eve deploy\` from the workspace root to deploy every peer agent together.`,
+    }))
+  ) {
+    return;
+  }
   if (isNonInteractiveProjectCommand(options)) {
     if (options.yes !== true) {
       logger.error(
@@ -49,7 +63,6 @@ export async function runDeployCommand(
       if (!(await runNonInteractiveLink({ logger, appRoot, options }))) return;
     }
   }
-
   const prompter = dependencies.createPrompter?.() ?? createPrompter();
   prompter.intro("Deploy your eve agent to Vercel");
   try {

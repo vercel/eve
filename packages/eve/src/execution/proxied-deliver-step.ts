@@ -5,10 +5,10 @@ import {
   readDurableSession,
   replaceDurableSessionSnapshot,
 } from "#execution/durable-session-store.js";
-import { routeDeliverPayload } from "#execution/subagent-hitl-proxy.js";
+import { routeDeliverPayload } from "#subagents/hitl-proxy.js";
 import { sendTaskInboundPayload } from "#execution/tasks/parent/run-parent.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
-import { resumeToolRunAnswers } from "#execution/tool-run/answer.js";
+import { resumeWorkflowToolRunAnswers } from "#execution/tools/workflow/answer.js";
 import type { AnswerHookRoute } from "#harness/proxy-input-requests.js";
 import type { InputResponse } from "#shared/input.js";
 import { findSessionTaskEntry } from "#tasks/session-index.js";
@@ -143,10 +143,9 @@ export async function routeProxiedDeliverStep(
 
   let retired = false;
   for (const child of children.values()) {
-    // Task-owned children are addressed through their run, never
-    // directly: the run must forward and clear the batch under one
-    // durable decision, or a late answer could unblock a question the
-    // child raised after this one.
+    // A task-owned executor is addressed through its task controller. The
+    // controller forwards the answer and clears `input_required` as one
+    // durable decision, so its view cannot claim the child resumed first.
     const taskId = child.taskId;
     if (taskId !== undefined) {
       const entry = findSessionTaskEntry(durableSession.state, taskId);
@@ -169,16 +168,13 @@ export async function routeProxiedDeliverStep(
         mergeStrandedResponses(parentPayloads, child, taskId);
         continue;
       }
-      // Hand-off to the task run succeeded. Retire the parent-visible
-      // routes so a later click cannot re-enter the same batch after the
-      // run has already accepted (or no-op'd) this answer.
       durableSession = retireProxyInputRequests(durableSession, child.retireRequestIds);
       retired = true;
       continue;
     }
 
     if (child.answerHook !== undefined) {
-      await resumeToolRunAnswers(
+      await resumeWorkflowToolRunAnswers(
         child.childContinuationToken,
         coalesceDeliverPayloads(child.payloads).inputResponses,
       );

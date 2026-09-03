@@ -25,9 +25,7 @@ function createSession(state?: HarnessSession["state"]): HarnessSession {
 
 describe("session task index", () => {
   const metadata = {
-    agentId: "ag_research:abcdef123456",
-    kind: "subagent" as const,
-    mode: "local" as const,
+    kind: "tool" as const,
     name: "research",
   };
   it("returns an empty index when the key is absent", () => {
@@ -40,7 +38,6 @@ describe("session task index", () => {
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
-      operationId: "operation-1",
       taskId: "task_a",
       taskRunId: "run-1",
     });
@@ -49,11 +46,29 @@ describe("session task index", () => {
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
-      operationId: "operation-1",
       taskId: "task_a",
       taskRunId: "run-1",
     });
     expect(findSessionTaskEntry(session.state, "task_other")).toBeUndefined();
+  });
+
+  it("keeps subagent metadata in the persisted task index", () => {
+    const subagentMetadata = {
+      agentId: "ag_worker",
+      kind: "subagent",
+      mode: "remote",
+      name: "research",
+    } as const;
+
+    const session = recordSessionTask(createSession(), {
+      taskInboxToken: "task:token-1",
+      createdByTurnId: "turn-1",
+      metadata: subagentMetadata,
+      taskId: "task_a",
+      taskRunId: "run-1",
+    });
+
+    expect(findSessionTaskEntry(session.state, "task_a")?.metadata).toEqual(subagentMetadata);
   });
 
   it("replaces the entry on replayed creation instead of duplicating it", () => {
@@ -61,7 +76,6 @@ describe("session task index", () => {
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
-      operationId: "operation-1",
       taskId: "task_a",
       taskRunId: "run-1",
     });
@@ -69,7 +83,6 @@ describe("session task index", () => {
       taskInboxToken: "task:token-2",
       createdByTurnId: "turn-1",
       metadata,
-      operationId: "operation-1",
       taskId: "task_a",
       taskRunId: "run-2",
     });
@@ -84,7 +97,6 @@ describe("session task index", () => {
       taskInboxToken: "task:token-1",
       createdByTurnId: "turn-1",
       metadata,
-      operationId: "operation-1",
       taskId: "task_a",
       taskRunId: "run-1",
     };
@@ -125,6 +137,7 @@ describe("session task index", () => {
         getSessionTaskIndex({
           [SESSION_TASKS_STATE_KEY]: {
             tasks: [{ ...base, terminalView: invalidView }],
+            version: 2,
           },
         }),
       ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
@@ -133,8 +146,18 @@ describe("session task index", () => {
 
   it("throws on a corrupt index instead of treating it as absent", () => {
     expect(() =>
-      getSessionTaskIndex({ [SESSION_TASKS_STATE_KEY]: { tasks: [{ taskId: 42 }] } }),
+      getSessionTaskIndex({
+        [SESSION_TASKS_STATE_KEY]: { tasks: [{ taskId: 42 }], version: 2 },
+      }),
     ).toThrow(`Corrupt task index under session state key "${SESSION_TASKS_STATE_KEY}"`);
+  });
+
+  it("rejects the old task index version explicitly", () => {
+    expect(() =>
+      getSessionTaskIndex({ [SESSION_TASKS_STATE_KEY]: { tasks: [], version: 1 } }),
+    ).toThrow(
+      `Unsupported task index version 1 under session state key "${SESSION_TASKS_STATE_KEY}"`,
+    );
   });
 });
 

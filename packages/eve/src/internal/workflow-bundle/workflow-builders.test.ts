@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
@@ -21,6 +23,31 @@ describe("applyWorkflowTransform", () => {
     expect(transformed.workflowManifest.workflows?.[filename]?.turnWorkflow).toEqual({
       workflowId: "workflow//eve//turnWorkflow",
     });
+  });
+
+  it("keeps the shared subagent tool workflow stable", async () => {
+    const filename = "src/runtime/subagents/workflow.ts";
+    const transformed = await applyWorkflowTransform(
+      filename,
+      [
+        "export async function subagentToolExecuteWorkflow(): Promise<void> {",
+        '  "use workflow";',
+        "}",
+        "",
+      ].join("\n"),
+      "workflow",
+      resolvePackageSourceFilePath(filename),
+      resolvePackageRoot(),
+    );
+
+    expect(transformed.workflowManifest.workflows?.[filename]?.subagentToolExecuteWorkflow).toEqual(
+      {
+        workflowId: "workflow//eve//subagentToolExecuteWorkflow",
+      },
+    );
+    expect(transformed.code).toContain(
+      'globalThis.__private_workflows.set("workflow//eve//subagentToolExecuteWorkflow", subagentToolExecuteWorkflow);',
+    );
   });
 
   it("registers step functions in step mode", async () => {
@@ -373,5 +400,22 @@ describe("applyWorkflowTransform for authored application modules", () => {
     expect(transformed.workflowManifest.workflows?.[filename]?.turnWorkflow?.workflowId).toBe(
       "workflow//eve//turnWorkflow",
     );
+  });
+
+  it("keeps the session command inbox factory visible in workflow driver builds", async () => {
+    const eveRoot = resolvePackageRoot();
+    const filename = "src/execution/session-command-inbox.ts";
+    const source = readFileSync(resolvePackageSourceFilePath(filename), "utf8");
+    const transformed = await applyWorkflowTransform(
+      filename,
+      source,
+      "workflow",
+      resolvePackageSourceFilePath(filename),
+      eveRoot,
+    );
+
+    expect(transformed.code).toContain("export function createSessionCommandInbox");
+    expect(transformed.code).not.toContain("subagent");
+    expect(transformed.code).not.toContain("WORKFLOW_USE_STEP");
   });
 });

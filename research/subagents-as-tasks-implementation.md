@@ -24,7 +24,7 @@ session-addressing dependency the design doc declares:
   replay-safe operation ids, commit-before-side-effect dispatch, and `starting/running/parked`
   phases. Handles hold the child `continuationToken` (local) or `url` + `continuationToken`
   (remote); credentials never render to the model.
-- **Follow-up delivery**: `dispatchToAgentHandle` / `continueRemoteAgentSession`, with
+- **Follow-up delivery**: `dispatchToTaskAgentAddress` / `continueRemoteAgentSession`, with
   `AGENT_BUSY` / `AGENT_MISMATCH` / `AGENT_UNREACHABLE` classification and `intent: "resume"`
   sends that 404 instead of silently starting a new session.
 - **Reply envelope**: `TurnCaller` (`replyTo: hook token | callback URL`) and the

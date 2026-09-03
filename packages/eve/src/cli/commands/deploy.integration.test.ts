@@ -8,6 +8,7 @@ import { createFakePrompter } from "#internal/testing/fake-prompter.js";
 import { packageInstallResult } from "#internal/testing/package-process.js";
 import type { DeployProjectDeps } from "#setup/boxes/deploy-project.js";
 import type { DeploymentInfo } from "#setup/project-resolution.js";
+import { isEveProject } from "#setup/scaffold/index.js";
 
 import { runDeployCommand, type DeployCliLogger } from "./deploy.js";
 
@@ -22,6 +23,13 @@ class TestLogger implements DeployCliLogger {
   log(message: string): void {
     this.logs.push(message);
   }
+}
+
+async function createWorkspaceProject(): Promise<string> {
+  const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-workspace-"));
+  await mkdir(join(projectRoot, "agents/support/agent"), { recursive: true });
+  await writeFile(join(projectRoot, "package.json"), JSON.stringify({ private: true }), "utf8");
+  return projectRoot;
 }
 
 async function createAgentProject(): Promise<string> {
@@ -63,6 +71,34 @@ afterEach(() => {
 });
 
 describe("runDeployCommand", () => {
+  test("refuses a directory without an eve agent", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "eve-deploy-empty-"));
+    const logger = new TestLogger();
+
+    await runDeployCommand(logger, projectRoot, {
+      isEveProject,
+      hasInteractiveTerminal: () => true,
+    });
+
+    expect(logger.errors).toEqual([
+      "No eve agent in this directory. Run `eve init <name>`, then run this command from inside the new project.",
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test("refuses to deploy one member of a workspace", async () => {
+    const projectRoot = await createWorkspaceProject();
+    const logger = new TestLogger();
+
+    await runDeployCommand(logger, join(projectRoot, "agents/support"), {
+      isEveProject,
+      hasInteractiveTerminal: () => true,
+    });
+
+    expect(logger.errors[0]).toContain("workspace root");
+    expect(process.exitCode).toBe(1);
+  });
+
   test("points an unlinked non-interactive run at eve link", async () => {
     const projectRoot = await createAgentProject();
     const logger = new TestLogger();

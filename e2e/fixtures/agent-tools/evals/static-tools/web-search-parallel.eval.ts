@@ -4,10 +4,16 @@ import { defineEval } from "eve/evals";
 const TOOL_NAME = "web_search";
 const MIN_COMPLETED_SEARCHES = 8;
 
-const EXPECTED_WINNERS =
-  "2026 New York Knicks; 2025 Oklahoma City Thunder; 2024 Boston Celtics; " +
-  "2023 Denver Nuggets; 2022 Golden State Warriors; 2021 Milwaukee Bucks; " +
-  "2020 Los Angeles Lakers; 2019 Toronto Raptors.";
+const EXPECTED_WINNERS = [
+  /Knicks/iu,
+  /Thunder/iu,
+  /Celtics/iu,
+  /Nuggets/iu,
+  /Warriors/iu,
+  /Bucks/iu,
+  /Lakers/iu,
+  /Raptors/iu,
+];
 
 function completedToolResultCount(events: readonly MessageStreamEvent[], toolName: string) {
   const callIds = new Set<string>();
@@ -42,6 +48,8 @@ export default defineEval({
       (events) => completedToolResultCount(events, TOOL_NAME) >= MIN_COMPLETED_SEARCHES,
     );
     t.noFailedActions();
-    t.judge.autoevals.factuality(EXPECTED_WINNERS, { on: turn.message }).atLeast(0.5);
+    for (const winner of EXPECTED_WINNERS) {
+      turn.messageIncludes(winner);
+    }
   },
 });

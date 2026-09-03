@@ -203,7 +203,7 @@ async function publishActionStarts(
         callId: action.callId,
         idempotencyKey,
         input: capturesInputs ? action.input : undefined,
-        kind: action.kind,
+        kind: action.kind === "workflow-tool-call" ? "tool-call" : action.kind,
         name: actionName(action),
         scope,
         type: "action.started",
@@ -285,7 +285,7 @@ function actionUsage(result: RuntimeActionResult): InstrumentationUsage | undefi
 }
 
 function actionName(action: RuntimeActionRequest): string {
-  if (action.kind === "tool-call") return action.toolName;
+  if (action.kind === "tool-call" || action.kind === "workflow-tool-call") return action.toolName;
   if (action.kind === "load-skill") return "load_skill";
   return action.name;
 }

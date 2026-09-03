@@ -10,7 +10,6 @@ import { formatElapsed } from "#cli/format-elapsed.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createLogger, isLogLevelEnabled } from "#internal/logging.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
-import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { formatNodeEngineOverrideWarning, type NodeEngineOverride } from "#setup/node-engine.js";
 import {
   detectInvokingPackageManager,
@@ -41,6 +40,12 @@ import {
 } from "#setup/scaffold/create/project.js";
 
 import { initAgentDevHandoff, initAgentReplPrompt } from "./agent-instructions.js";
+import {
+  addAgentsToWorkspace,
+  convertScaffoldToAgentWorkspace,
+  type InitCliLogger,
+  type InitCommandOptions,
+} from "./init-agent-workspace.js";
 import { initAgentReadySummary } from "./agent-instructions.js";
 import { confirmInitInNonEmptyDirectory } from "./init-confirm.js";
 import {
@@ -52,19 +57,7 @@ import { tryInitializeGit, type GitInitResult } from "./init-git.js";
 import { selectInitHandoff, spawnCodingAgentRepl, type InitHandoff } from "./init-repl.js";
 import { resolveInitTarget } from "./init-target.js";
 
-export interface InitCliLogger {
-  error(message: string): void;
-  log(message: string): void;
-}
-
-export interface InitCommandOptions {
-  /** Add the Web Chat channel (a Next.js app). Set by `--channel-web-nextjs`. */
-  channelWebNextjs?: boolean;
-  /** Model id written to the root agent config. Set by `--model`. */
-  model?: string;
-  /** Reasoning effort written to the root agent config. Set by `--reasoning`. */
-  reasoning?: AgentReasoningDefinition;
-}
+export type { InitCliLogger, InitCommandOptions } from "./init-agent-workspace.js";
 
 export interface InitCommandDependencies {
   addAgentToProject: typeof addAgentToProject;
@@ -241,6 +234,9 @@ async function scaffoldProject(
       },
     };
     const stagedProjectPath = await dependencies.scaffoldBaseProject(scaffoldOptions);
+    if (options.agents !== undefined) {
+      await convertScaffoldToAgentWorkspace(stagedProjectPath, options.agents, options);
+    }
 
     if (options.channelWebNextjs === true) {
       await dependencies.ensureChannel({
@@ -572,6 +568,17 @@ export async function runInitCommand(
   options: InitCommandOptions,
   dependencies: InitCommandDependencies = defaultDependencies,
 ): Promise<void> {
+  if (
+    await addAgentsToWorkspace(
+      logger,
+      parentDirectory,
+      target,
+      options,
+      dependencies.validateModelSlug,
+    )
+  )
+    return;
+
   let result: InitResult;
   try {
     result = await runInitSteps({ dependencies, logger, options, parentDirectory, target });
@@ -611,7 +618,8 @@ export async function runInitCommand(
     }
   }
 
-  const baseDevArguments = [...eveDevArguments(result.packageManager)];
+  const selectedAgentArguments = options.agents?.[0] ? ["--agent", options.agents[0]] : [];
+  const baseDevArguments = [...eveDevArguments(result.packageManager), ...selectedAgentArguments];
   const agentDevCommand = [result.packageManager, ...baseDevArguments].join(" ");
   const agentHandoff = initAgentDevHandoff({
     projectPath: result.projectPath,
@@ -659,7 +667,11 @@ export async function runInitCommand(
   // the command the way run-scripts do, so the handoff line is printed here.
   const freshScaffold = result.kind === "created";
   const devArguments = freshScaffold ? [...baseDevArguments, "--onboard"] : baseDevArguments;
-  logger.log(pc.dim("$ eve dev"));
+  logger.log(
+    pc.dim(
+      `$ eve dev${selectedAgentArguments.length > 0 ? ` --agent ${selectedAgentArguments[1]}` : ""}`,
+    ),
+  );
   if (
     !resultSucceeded(
       await dependencies.spawnPackageManager(

@@ -154,4 +154,19 @@ describe("compiled agent manifest v44", () => {
       }),
     ).toThrow();
   });
+
+  it("rejects the removed tasks field in compiled manifests", async () => {
+    const { manifest } = await compileFromMemory({ model: "openai/gpt-5.4" });
+    const removedExperimentalConfig = { tasks: true } as unknown;
+
+    expect(() =>
+      compiledAgentManifestSchema.parse({
+        ...manifest,
+        config: {
+          ...manifest.config,
+          experimental: removedExperimentalConfig,
+        },
+      }),
+    ).toThrow();
+  });
 });

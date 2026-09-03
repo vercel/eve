@@ -305,7 +305,7 @@ describe("dispatchAndAwaitTurn", () => {
       action: "park" as const,
       hasPendingAuthorization: false,
       hasPendingInputBatch: false,
-      pendingRuntimeActionKeys: ["subagent-call:delegate:call-1"],
+      pendingCoordinationCallIds: ["call-1"],
       serializedContext: { state: "pending" },
       sessionState: state,
     };

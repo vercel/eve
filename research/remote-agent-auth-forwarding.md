@@ -154,15 +154,15 @@ export default eveChannel({
 
 ## Boundaries and surfaces
 
-| Surface                                                                              | Change                                                                                                                  |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `public/definitions/remote-agent.ts`                                                 | `forwardPrincipal?: boolean`                                                                                            |
-| `execution/dispatch-runtime-actions-step.ts`                                         | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                                     |
-| `execution/tasks/parent/dispatch-task-step.ts`, `execution/agent-handle-dispatch.ts` | pass active `auth` through persistent local and remote continuation                                                     |
-| `execution/remote-agent-dispatch.ts`                                                 | build `forwardedPrincipal` body field                                                                                   |
-| `channel/forwarded-principal.ts` (new)                                               | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
-| `public/channels/eve.ts`                                                             | `trustedForwarders` option; forwarded-principal gate + principal replacement on create and continuation routes          |
-| `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md`           | forwarding section on each side + trust-model warning                                                                   |
+| Surface                                                                       | Change                                                                                                                  |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `public/definitions/remote-agent.ts`                                          | `forwardPrincipal?: boolean`                                                                                            |
+| `execution/dispatch-runtime-actions-step.ts`                                  | pass `auth` / `initiatorAuth` (already in scope) to remote dispatch                                                     |
+| `execution/tasks/parent/dispatch-task-step.ts`, `harness/handles/dispatch.ts` | pass active `auth` through persistent local and remote continuation                                                     |
+| `execution/remote-agent-dispatch.ts`                                          | build `forwardedPrincipal` body field                                                                                   |
+| `channel/forwarded-principal.ts` (new)                                        | strict wire schema for `{ current, initiator? }` (open `authenticator` / `principalType`), beside `session-callback.ts` |
+| `public/channels/eve.ts`                                                      | `trustedForwarders` option; forwarded-principal gate + principal replacement on create and continuation routes          |
+| `docs/guides/remote-agents.md`, `docs/guides/auth-and-route-protection.md`    | forwarding section on each side + trust-model warning                                                                   |
 
 Docs must carry the security guidance explicitly: match the transport principal precisely (e.g.
 `subject === vercelSubject({ teamSlug, projectName })`); a permissive predicate (`() => true`)

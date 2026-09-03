@@ -37,6 +37,7 @@ type SemanticEvent =
   | "input-requested"
   | "authorization-required"
   | "authorization-completed"
+  | "task-failed-notification"
   | "task-ready-notification"
   | "task-update-notification";
 
@@ -276,10 +277,10 @@ export const TASK_TRANSITIONS = {
     input: "dispatch-start",
     guards: ["child-start-is-unreachable"],
     expected: {
-      outcome: "rejected",
-      postState: { lifecycle: "absent", dispatch: "rejected", ownership: "unowned" },
-      events: { suppressed: ["background-receipt"] },
-      sideEffects: { executed: ["child-dispatch"], suppressed: ["task-index-write"] },
+      outcome: "accepted",
+      postState: { lifecycle: "failed", dispatch: "acknowledged", ownership: "owned" },
+      events: { emitted: ["background-receipt", "task-failed-notification"] },
+      sideEffects: { executed: ["child-dispatch", "task-index-write"] },
     },
   }),
   "task.dispatch-batch.start.accepted-partial-failure": transition({
@@ -288,8 +289,8 @@ export const TASK_TRANSITIONS = {
     guards: ["one-member-is-unreachable", "other-members-are-reachable"],
     expected: {
       outcome: "accepted",
-      postState: { dispatch: "acknowledged", ownership: "owned" },
-      events: { emitted: ["background-receipt"] },
+      postState: { lifecycle: ["working", "failed"], dispatch: "acknowledged", ownership: "owned" },
+      events: { emitted: ["background-receipt", "task-failed-notification"] },
       sideEffects: { executed: ["child-dispatch", "task-index-write"] },
     },
   }),

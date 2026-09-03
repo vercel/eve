@@ -5,6 +5,7 @@ import type {
   PublicToolOutputSchema,
   ToolContext,
 } from "#tools/definition.js";
+import type { TaskDelegated, TaskExec } from "#tools/task.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
 
 /**
@@ -24,7 +25,12 @@ export interface DynamicToolEntry<TInput = Record<string, unknown>, TOutput = an
   readonly description: string;
   readonly inputSchema: PublicToolInputSchema<TInput>;
   readonly outputSchema?: PublicToolOutputSchema<TOutput>;
-  execute(input: TInput, ctx: ToolContext): TOutput | Promise<TOutput>;
+  readonly execution?: "background";
+  execute(
+    input: TInput,
+    ctx: ToolContext,
+    task?: TaskExec,
+  ): TOutput | TaskDelegated | Promise<TOutput | TaskDelegated>;
   readonly toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
   /**
    * Optional per-call approval gate, mirroring the authored-tool

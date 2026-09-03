@@ -172,6 +172,7 @@ async function resolveRuntimeAgentNode(
     toolRegistry,
     turnAgent: createResolvedRuntimeTurnAgent({
       agent,
+      dynamicSubagentsAvailable: subagentRegistry.dynamicResolvers.length > 0,
       id: input.agentId,
       nodeId,
       tools: [...toolRegistry.preparedTools, ...subagentRegistry.preparedTools],

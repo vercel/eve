@@ -250,8 +250,8 @@ describe("createSession", () => {
   it("leaves delegated subagent sessions uncapped by default", () => {
     const session = createSession({
       continuationToken: "subagent-token",
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
       turnAgent: createTestTurnAgent(),
     });
 
@@ -273,8 +273,8 @@ describe("createSession", () => {
     const session = createSession({
       continuationToken: "subagent-token",
       limits: { maxInputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
       turnAgent: createTestTurnAgent(),
     });
 
@@ -302,8 +302,8 @@ describe("createSession", () => {
         continuationToken: "subagent-token",
         history: [],
         limits: {},
+        rootSessionId: "sess-root",
         sessionId: "sess-child",
-        subagentDepth: 1,
       },
       turnAgent: createTestTurnAgent(),
     });
@@ -341,11 +341,11 @@ describe("createSession", () => {
     expect(hydrated.outputSchema).toEqual(runOutputSchema);
   });
 
-  it("persists subagent depth through durable session projection and hydration", () => {
+  it("persists delegated root lineage through durable session projection and hydration", () => {
     const session = createSession({
-      continuationToken: "root-token",
-      sessionId: "sess-root",
-      subagentDepth: 2,
+      continuationToken: "subagent-token",
+      rootSessionId: "sess-root",
+      sessionId: "sess-child",
       turnAgent: createTestTurnAgent(),
     });
 
@@ -355,8 +355,8 @@ describe("createSession", () => {
       turnAgent: createTestTurnAgent(),
     });
 
-    expect(durable.subagentDepth).toBe(2);
-    expect(hydrated.subagentDepth).toBe(2);
+    expect(durable.rootSessionId).toBe("sess-root");
+    expect(hydrated.rootSessionId).toBe("sess-root");
   });
 
   it("persists session token limits through durable session projection and hydration", () => {

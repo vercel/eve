@@ -6,7 +6,7 @@ import {
   handleLegacyConnectionCallbackRequest,
 } from "#execution/connections/callback-route.js";
 import { handleActivityRequest } from "#execution/activity-route.js";
-import { handleSessionCallbackRequest } from "#execution/session-callback-route.js";
+import { handleSessionCallbackRequest } from "#subagents/callback-route.js";
 import { handleTaskInputResponseRequest } from "#execution/task-input-response-route.js";
 import {
   handleWorkflowWebhookRequest,

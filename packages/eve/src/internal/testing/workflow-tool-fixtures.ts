@@ -8,7 +8,7 @@
 
 import { createHook, sleep as workflowSleep } from "#compiled/@workflow/core/index.js";
 
-import { ask } from "#execution/tool-run/messages.js";
+import { ask } from "#execution/tools/workflow/ask.js";
 import type { ToolContext } from "#tools/definition.js";
 
 export interface DeployInput {
@@ -48,6 +48,26 @@ export async function failingDeployWorkflow(input: DeployInput): Promise<never> 
 
   await planDeployStep(input.service);
   throw new Error(`deploy of ${input.service} exploded`);
+}
+
+export async function subagentShapedDeployWorkflow(): Promise<{
+  readonly callId: string;
+  readonly isError: true;
+  readonly kind: "subagent-result";
+  readonly origin: "dispatch";
+  readonly output: string;
+  readonly subagentName: string;
+}> {
+  "use workflow";
+
+  return {
+    callId: "authored-call",
+    isError: true,
+    kind: "subagent-result",
+    origin: "dispatch",
+    output: "authored payload",
+    subagentName: "authored-name",
+  };
 }
 
 export async function* reportingDeployWorkflow(

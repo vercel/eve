@@ -77,6 +77,7 @@ jobs:
     env:
       EVE_E2E_MODEL: mock
       EVE_EVAL_JUNIT_DIR: ${{ github.workspace }}/.junit
+      EVE_SANDBOX_IMAGE_TAG: latest
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -165,7 +166,9 @@ jobs:
             VERCEL_PROJECT_ID="$VERCEL_PROJECT_ID" \
             pnpm exec eve build --profile "$EVE_BUILD_PROFILE"
           DEPLOYMENT_URL="$(pnpm exec vc deploy --prebuilt --yes --target=preview \
-            --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" "${token_args[@]}" | tail -n 1)"
+            --env "EVE_E2E_MODEL=$EVE_E2E_MODEL" \
+            --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
+            "${token_args[@]}" | tail -n 1)"
 
           npx eve eval --strict --verbose --exclude-tag real-model \
             --url "$DEPLOYMENT_URL" \

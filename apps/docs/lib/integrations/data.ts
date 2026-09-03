@@ -1681,6 +1681,44 @@ A bank is one isolated memory store, and both files must use the same bank. Do n
 };
 
 const memoryPresentations: Record<string, MemoryPresentation> = {
+  file: {
+    logo: "vercel",
+    docsHref: "/docs/memory/file",
+    keywords: [
+      "memory",
+      "file memory",
+      "Vercel Blob",
+      "private storage",
+      "long-term memory",
+      "per-principal memory",
+      "OIDC",
+    ],
+    install: `Install and provision file memory for eve:
+
+\`\`\`bash
+eve add memory/file
+\`\`\`
+
+After you approve setup, eve creates or reuses a dedicated private Vercel Blob store, connects it to production, preview, and development, and pulls the resulting environment variables. Vercel Blob usage may incur charges.`,
+    quickStart: `The registry writes this memory slot:
+
+\`\`\`ts title="agent/memory/file.ts"
+import { fileMemory } from "eve/memory/file";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Remember stable facts and preferences about the caller.",
+  provider: fileMemory(),
+  scope: byPrincipal,
+});
+\`\`\`
+
+During \`eve dev\`, file memory stays in the local process. On Vercel, the default backend uses the private Blob store provisioned by setup.`,
+    configure: `Run \`eve integration setup file-memory\` to repair or re-run provisioning without reinstalling the registry item. Setup uses the first configured function region, preserves an existing eve-owned store if the project region later changes, and never adopts or changes an application store connected with \`BLOB_*\`.
+
+Provisioned bindings use the \`EVE_MEMORY_BLOB_*\` namespace. \`fileMemory()\` prefers \`EVE_MEMORY_BLOB_READ_WRITE_TOKEN\`, then \`EVE_MEMORY_BLOB_STORE_ID\` with Vercel OIDC from the environment or request context. Generic \`BLOB_*\` credentials remain a fallback for manually connected stores. See [File memory](/docs/memory/file) for backend behavior and manual configuration.`,
+  },
   supermemory: {
     logo: "supermemory",
     docsHref: "https://github.com/supermemoryai/eve-supermemory#readme",

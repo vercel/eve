@@ -191,7 +191,9 @@ describe("emitStreamContent empty delivery", () => {
     expect(appended.map((event) => event.data.messageDelta.length)).toEqual([
       1, 64, 64, 64, 64, 64, 47,
     ]);
-    expect(appended.at(-1)?.data.messageSoFar).toBe("x".repeat(deltaCount));
+    expect(appended.reduce((total, event) => total + event.data.messageDelta.length, 0)).toBe(
+      deltaCount,
+    );
     expect(events.at(-1)?.type).toBe("message.completed");
   });
 
@@ -316,24 +318,13 @@ describe("emitStreamContent action requests", () => {
     expect(events.map((event) => event.type)).toEqual([
       "action.input.appended",
       "action.input.appended",
-      "action.input.appended",
       "actions.requested",
     ]);
     const inputEvents = events.filter((event) => event.type === "action.input.appended");
     expect(inputEvents.map((event) => event.data)).toEqual([
       {
         callId: "call-render",
-        inputTextDelta: "",
-        inputTextOffset: 0,
-        sequence: 0,
-        stepIndex: 0,
-        toolName: "render",
-        turnId: "turn_0",
-      },
-      {
-        callId: "call-render",
         inputTextDelta: '{"title":"Hel',
-        inputTextOffset: 0,
         sequence: 0,
         stepIndex: 0,
         toolName: "render",
@@ -342,7 +333,6 @@ describe("emitStreamContent action requests", () => {
       {
         callId: "call-render",
         inputTextDelta: 'lo"}',
-        inputTextOffset: 13,
         sequence: 0,
         stepIndex: 0,
         toolName: "render",
@@ -481,20 +471,11 @@ describe("emitStreamContent action requests", () => {
       [
         "delegate",
         {
-          behavior: {
-            availability: [],
-            handling: {
-              kind: "dispatch",
-              target: {
-                kind: "subagent-call",
-                nodeId: "subagents/researcher",
-                subagentName: "researcher",
-              },
-            },
-          },
           description: "Delegate work to a subagent.",
           inputSchema: jsonSchema({ type: "object" }),
           name: "delegate",
+          resultKind: "subagent",
+          workflowId: "workflow//./agent/subagents/researcher//execute",
         },
       ],
     ]);
@@ -525,7 +506,6 @@ describe("emitStreamContent action requests", () => {
     expect(events.map((event) => event.type)).toEqual([
       "message.appended",
       "message.completed",
-      "action.input.appended",
       "action.input.appended",
       "actions.requested",
     ]);
@@ -619,6 +599,59 @@ describe("emitStreamContent action requests", () => {
       "message.appended",
       "message.completed",
     ]);
+  });
+
+  it("marks a background subagent receipt on subagent.completed", async () => {
+    const emit = createEmitStub();
+    const tools = new Map<string, HarnessToolDefinition>([
+      [
+        "delegate",
+        {
+          description: "Delegate work to a subagent.",
+          execution: "background",
+          inputSchema: jsonSchema({ type: "object" }),
+          name: "delegate",
+          resultKind: "subagent",
+          workflowId: "workflow//./agent/subagents/researcher//execute",
+        },
+      ],
+    ]);
+
+    await emitStreamContent(
+      emit,
+      EMISSION_STATE,
+      streamOf([
+        {
+          input: { message: "research the release" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-call",
+        },
+        {
+          output: { status: "working", taskId: "task-1" },
+          toolCallId: "call-delegate",
+          toolName: "delegate",
+          type: "tool-result",
+        },
+        { finishReason: "tool-calls", type: "finish-step" },
+      ] as TextStreamPart<ToolSet>[]),
+      { excludedActionToolNames: new Set(), tools },
+    );
+
+    const events = vi.mocked(emit).mock.calls.map(([event]) => event);
+    expect(events.map((event) => event.type)).toEqual([
+      "actions.requested",
+      "subagent.completed",
+      "action.result",
+    ]);
+    expect(events[1]).toMatchObject({
+      data: {
+        backgroundTask: { status: "working", taskId: "task-1" },
+        callId: "call-delegate",
+        subagentName: "delegate",
+      },
+      type: "subagent.completed",
+    });
   });
 
   it("projects local and provider tool failures at the same stream position", async () => {

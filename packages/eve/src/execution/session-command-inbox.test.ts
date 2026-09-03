@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { SessionInboxPayload } from "#execution/session-command-inbox.js";
-import { createSessionCommandInbox } from "#execution/session-command-inbox.js";
-import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import {
+  createSessionCommandInbox,
+  type SessionInboxPayload,
+} from "#execution/session-command-inbox.js";
 
 const createHookMock = vi.fn();
 
 vi.mock("#compiled/@workflow/core/index.js", () => ({
   createHook: (...args: unknown[]) => createHookMock(...args),
+  getWritable: vi.fn(),
 }));
 
 describe("createSessionCommandInbox", () => {
@@ -121,7 +123,7 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionInboxWireVersion: SESSION_INBOX_WIRE_VERSION },
+      metadata: { sessionInboxWireVersion: 4 },
       token: "stable",
     });
     await inbox.dispose();

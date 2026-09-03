@@ -131,10 +131,10 @@ export function clearProxyInputRequestsForChild(
 }
 
 /** Removes every proxy route the predicate selects. */
-export function clearProxyInputRequestsWhere(
-  session: HarnessSession,
+export function clearProxyInputRequestsWhere<T extends { readonly state?: SessionStateMap }>(
+  session: T,
   select: (route: ProxyInputRequest) => boolean,
-): HarnessSession {
+): T {
   const current = readMap(session.state);
   const next: Record<string, ProxyInputRequest> = {};
   let changed = false;
@@ -170,10 +170,10 @@ export function retireProxyInputRequests<T extends { readonly state?: SessionSta
 }
 
 /** Removes every proxy route owned by one durable task. */
-export function clearProxyInputRequestsForTask(
-  session: HarnessSession,
+export function clearProxyInputRequestsForTask<T extends { readonly state?: SessionStateMap }>(
+  session: T,
   taskId: string,
-): HarnessSession {
+): T {
   return clearProxyInputRequestsWhere(session, (route) => route.taskId === taskId);
 }
 

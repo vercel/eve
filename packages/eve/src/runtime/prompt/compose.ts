@@ -12,9 +12,6 @@ const PARALLEL_ACTION_INSTRUCTION =
   "Tool execution\nA single tool or subagent call runs as one serial action. If you call multiple independent tools or subagents in one response, eve treats that batch as parallel work. Only batch work that is independent and does not rely on another call in the same response.";
 
 const AGENT_MESSAGING_INSTRUCTION =
-  "Agent messaging\nAgents you have already delegated to stay available after they answer. eve injects the current `<agents>` list into the conversation as a note labeled `[Agents]`; it is added automatically by the framework, not written by the user, and never requires a reply. The list is only a record of those existing agents — their `agentId`, name, and latest status. It does not limit which subagent tools you can call: your tool list is the source of truth, and any subagent tool can always be called without `agentId` to start a new agent, including when the `<agents>` list is empty or absent. Pass `agentId` to the same subagent tool only to continue one of those existing agents' sessions.";
-
-const TASK_AGENT_MESSAGING_INSTRUCTION =
   "Agent messaging\nSubagent calls start durable background tasks and return immediately with a task receipt. After delegating, continue helping the user or end your turn. The task will notify you when it completes, fails, needs input, or sends an update; completion and failure notifications include the task's result. Agents you have already delegated to remain visible in the framework-authored `<agents>` conversation note. `availability=busy` means the listed task still owns that agent session: wait for its notification or use task_cancel with its taskId instead of starting a continuation. `availability=available` means no nonterminal task owns the session, so you may pass agentId to the original subagent tool to continue it. Calling a subagent without agentId always starts a new agent session.";
 
 /**
@@ -24,7 +21,6 @@ const TASK_AGENT_MESSAGING_INSTRUCTION =
 interface ComposeRuntimeBasePromptInput {
   connections?: readonly ResolvedConnectionDefinition[];
   instructions?: readonly ResolvedInstructionsDefinition[];
-  tasksEnabled?: boolean;
   skills?: readonly ResolvedSkillDefinition[];
   subagentsAvailable?: boolean;
   toolsAvailable?: boolean;
@@ -40,9 +36,7 @@ export function composeRuntimeBasePrompt(input: ComposeRuntimeBasePromptInput): 
     ...createInstructionsPromptBlocks(input.instructions),
     ...createWorkspacePromptBlocks(input.workspaceSpec),
     ...(input.toolsAvailable ? [PARALLEL_ACTION_INSTRUCTION] : []),
-    ...(input.subagentsAvailable
-      ? [input.tasksEnabled ? TASK_AGENT_MESSAGING_INSTRUCTION : AGENT_MESSAGING_INSTRUCTION]
-      : []),
+    ...(input.subagentsAvailable ? [AGENT_MESSAGING_INSTRUCTION] : []),
     ...createConnectionsPromptBlocks(input.connections),
     ...createSkillsPromptBlocks(input.skills),
   ];

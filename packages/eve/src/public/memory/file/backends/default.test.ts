@@ -55,7 +55,12 @@ describe("default file-memory backend", () => {
     await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
     expect(get).toHaveBeenCalledWith(
       "eve/memory/file/mem_a/MEMORY.md",
-      expect.objectContaining({ access: "private", useCache: false }),
+      expect.objectContaining({
+        access: "private",
+        oidcToken: "oidc_test",
+        storeId: "store_test",
+        useCache: false,
+      }),
     );
   });
 
@@ -86,6 +91,71 @@ describe("default file-memory backend", () => {
 
     const backend = defaultFileMemoryBackend();
     await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    expect(get).toHaveBeenCalledWith(
+      "eve/memory/file/mem_a/MEMORY.md",
+      expect.objectContaining({ token: "vercel_blob_rw_store_test_secret" }),
+    );
+  });
+
+  it("prefers namespaced read-write credentials over generic Blob credentials", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("EVE_DEV", undefined);
+    vi.stubEnv("EVE_MEMORY_BLOB_READ_WRITE_TOKEN", "eve-memory-token");
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "application-token");
+    vi.mocked(get).mockResolvedValue(null);
+
+    const backend = defaultFileMemoryBackend();
+    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    expect(get).toHaveBeenCalledWith(
+      "eve/memory/file/mem_a/MEMORY.md",
+      expect.objectContaining({ token: "eve-memory-token" }),
+    );
+  });
+
+  it("uses namespaced store identity with Vercel OIDC", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("EVE_DEV", undefined);
+    vi.stubEnv("EVE_MEMORY_BLOB_READ_WRITE_TOKEN", undefined);
+    vi.stubEnv("EVE_MEMORY_BLOB_STORE_ID", "store_eve_memory");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "oidc_test");
+    vi.stubEnv("BLOB_STORE_ID", "store_application");
+    vi.mocked(get).mockResolvedValue(null);
+
+    const backend = defaultFileMemoryBackend();
+    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    expect(get).toHaveBeenCalledWith(
+      "eve/memory/file/mem_a/MEMORY.md",
+      expect.objectContaining({ oidcToken: "oidc_test", storeId: "store_eve_memory" }),
+    );
+  });
+
+  it("uses namespaced store identity with request-scoped OIDC", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("EVE_DEV", undefined);
+    vi.stubEnv("EVE_MEMORY_BLOB_READ_WRITE_TOKEN", undefined);
+    vi.stubEnv("EVE_MEMORY_BLOB_STORE_ID", "store_eve_memory");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", undefined);
+    vi.stubEnv("BLOB_STORE_ID", "store_application");
+    vi.mocked(get).mockResolvedValue(null);
+
+    const backend = defaultFileMemoryBackend();
+    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
+    expect(get).toHaveBeenCalledWith(
+      "eve/memory/file/mem_a/MEMORY.md",
+      expect.objectContaining({ storeId: "store_eve_memory" }),
+    );
+  });
+
+  it("uses Vercel Blob with an attached store and request-scoped OIDC", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("EVE_DEV", undefined);
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", undefined);
+    vi.stubEnv("VERCEL_OIDC_TOKEN", undefined);
+    vi.stubEnv("BLOB_STORE_ID", "store_test");
+    vi.mocked(get).mockResolvedValue(null);
+
+    const backend = defaultFileMemoryBackend();
+    await expect(backend.read({ key: "mem_a", signal })).resolves.toBeNull();
     expect(get).toHaveBeenCalledOnce();
   });
 
@@ -98,14 +168,13 @@ describe("default file-memory backend", () => {
     const backend = defaultFileMemoryBackend();
 
     await expect(async () => await backend.read({ key: "mem_a", signal })).rejects.toThrow(
-      "requires an attached Vercel Blob store on Vercel",
+      "/add memory/file",
     );
   });
 
   it.each([
     { label: "no Blob environment", oidcToken: undefined, storeId: undefined, token: undefined },
     { label: "OIDC without a store ID", oidcToken: "oidc", storeId: undefined, token: undefined },
-    { label: "store ID without OIDC", oidcToken: undefined, storeId: "store", token: undefined },
     { label: "empty Blob values", oidcToken: " ", storeId: " ", token: " " },
   ])("rejects Vercel without usable Blob credentials: $label", async (environment) => {
     vi.stubEnv("VERCEL", "1");
@@ -116,7 +185,7 @@ describe("default file-memory backend", () => {
     const backend = defaultFileMemoryBackend();
 
     await expect(async () => await backend.read({ key: "mem_a", signal })).rejects.toThrow(
-      "requires an attached Vercel Blob store on Vercel",
+      "eve integration setup file-memory",
     );
     expect(get).not.toHaveBeenCalled();
     expect(put).not.toHaveBeenCalled();

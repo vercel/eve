@@ -22,35 +22,55 @@ interface ExtensionCapabilityContract {
 const EXTENSION_CAPABILITY_CONTRACTS = {
   extension: { current: 1, supported: [1], dropped: {} },
   tool: {
-    current: 24,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24],
+    current: 25,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    ],
     dropped: { 15: "TaskExec replaces stageEffect with send" },
   },
   dynamicTool: {
-    current: 21,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21],
-    dropped: {},
+    current: 25,
+    supported: [
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25,
+    ],
+    dropped: {
+      21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
   },
-  channel: { current: 12, supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], dropped: {} },
-  schedule: { current: 5, supported: [1, 2, 3, 4, 5], dropped: {} },
+  channel: {
+    current: 14,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14],
+    dropped: {
+      12: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
+  },
+  schedule: {
+    current: 7,
+    supported: [1, 2, 3, 4, 6, 7],
+    dropped: {
+      5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
+  },
   subagent: {
-    current: 5,
-    supported: [3, 4, 5],
+    current: 7,
+    supported: [3, 4, 6, 7],
     dropped: {
       1: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
       2: "Persistent subagent sessions are now the default and the experimental opt-in was removed",
+      5: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   connection: {
-    current: 10,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 10],
+    current: 12,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 11, 12],
     dropped: {
       9: "Dynamic connection resolvers no longer receive conversation or channel continuation data",
+      10: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   hook: {
-    current: 16,
-    supported: [10, 11, 12, 13, 14, 15, 16],
+    current: 18,
+    supported: [10, 11, 12, 13, 14, 15, 17, 18],
     dropped: {
       1: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       2: "Model identity moved from session.started runtime metadata to step.started call attribution.",
@@ -61,19 +81,24 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
       7: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       8: "Model identity moved from session.started runtime metadata to step.started call attribution.",
       9: "Model identity moved from session.started runtime metadata to step.started call attribution.",
+      16: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
     },
   },
   skill: { current: 1, supported: [1], dropped: {} },
   dynamicSkill: {
-    current: 13,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
-    dropped: {},
+    current: 15,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15],
+    dropped: {
+      13: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
   },
   instructions: { current: 2, supported: [1, 2], dropped: {} },
   dynamicInstructions: {
-    current: 14,
-    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
-    dropped: {},
+    current: 16,
+    supported: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16],
+    dropped: {
+      14: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+    },
   },
   config: { current: 1, supported: [1], dropped: {} },
   state: { current: 4, supported: [1, 2, 3, 4], dropped: {} },

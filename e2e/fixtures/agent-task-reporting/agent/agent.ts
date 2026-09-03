@@ -3,10 +3,4 @@ import { defineAgent } from "eve";
 
 const base = e2eAgentConfig();
 
-export default defineAgent({
-  ...base,
-  experimental: {
-    ...base.experimental,
-    tasks: true,
-  },
-});
+export default defineAgent({ ...base });

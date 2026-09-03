@@ -17,7 +17,7 @@
  * - `$eve.type`         — `"session" | "turn" | "subagent"`
  * - `$eve.parent`       — sessionId of the **immediate** parent
  * - `$eve.root`         — sessionId of the **root** session in the chain
- * - `$eve.parent_call`  — parent runtime-action tool call id (subagent rows only)
+ * - `$eve.parent_call`  — parent task tool-call id (subagent rows only)
  * - `$eve.parent_turn`  — parent turn id that dispatched the subagent (subagent rows only)
  * - `$eve.subagent`     — active compiled graph node id (subagent rows only)
  * - `$eve.trigger`      — channel adapter kind (session/subagent rows)

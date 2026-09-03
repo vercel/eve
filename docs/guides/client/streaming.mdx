@@ -75,7 +75,23 @@ for await (const event of response) {
 }
 ```
 
-`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. eve may combine adjacent deltas for the same text block or tool call while a durable stream write is in flight, but preserves their text and event ordering. A different event type, tool `callId`, or stream coordinate is a barrier. The completed text forms, `message.completed` and `reasoning.completed`, are the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
+`message.appended`, `reasoning.appended`, and `action.input.appended` are incremental delta events. Each carries only its new text and existing stream coordinates. eve may combine adjacent deltas for the same event type, stream coordinates, and tool `callId` while a durable stream write is in flight, but preserves their text and event ordering. The completed text forms, `message.completed` and `reasoning.completed`, carry the authoritative value for each finalized block and remain the compatibility path for clients that don't render deltas. A streamed tool input is complete when the matching validated call arrives in `actions.requested`.
+
+The default message reducer accumulates these events for you. A raw stream consumer can apply the same rule directly:
+
+```ts
+let message = "";
+
+for await (const event of response) {
+  if (event.type !== "message.appended") continue;
+
+  message += event.data.messageDelta;
+}
+```
+
+After reconnecting without local state, replay the earlier events or wait for the completed event instead of appending a later delta to an empty value. Apply the same rule to `reasoningDelta` and `inputTextDelta`. If a model provider fails after partial output and eve retries the call, the durable stream keeps events from both attempts. A later completed event replaces provisional text only when the failed attempt did not already complete that block; the protocol has no attempt identity with which to retract earlier completed blocks.
+
+The eve client validates the stream version on every connection. It accepts v21–v24 cumulative message and reasoning append events and v24 offset-based tool-input appends, then exposes them through the current delta-only `MessageStreamEvent` contract. This also applies when an automatic reconnect reaches a newer deployment. A missing or unsupported `x-eve-stream-version` header fails the stream instead of treating unknown JSON as the current event type.
 
 ## Handle event types
 
@@ -116,7 +132,7 @@ The most common UI events are:
 
 For the complete event table, see [Sessions, runs & streaming](../../concepts/sessions-runs-and-streaming).
 
-Each `action.input.appended` event stores `inputTextDelta` and its zero-based UTF-16 code-unit `inputTextOffset`, so consumers can reject a gap instead of concatenating corrupt input. The default message reducer starts or restarts at offset `0` and ignores a nonzero offset that is not contiguous. It accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
+For `action.input.appended`, the default message reducer accumulates accepted deltas into a `dynamic-tool` part with `state: "input-streaming"`; its `inputText` field contains cumulative raw text that may be incomplete JSON. The matching `actions.requested` event upgrades the same `toolCallId` to `state: "input-available"` and puts the validated value in `input`.
 
 When a submitted message includes attachments, `message.received.data.message` stays the
 flattened compatibility summary, while `message.received.data.parts` carries renderable text and

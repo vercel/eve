@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { getPendingWorkflowInterrupt } from "#harness/workflow-interrupt-state.js";
-import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
+import { WORKFLOW_TASK_INTERRUPT_KIND } from "#harness/workflow-task-state.js";
 import type { SessionStateMap } from "#harness/types.js";
 
 describe("pending workflow interrupt state", () => {
@@ -17,7 +17,7 @@ describe("pending workflow interrupt state", () => {
           },
           interruptId: "workflow-call:tool-1:interrupt",
           outerToolCallId: "workflow-call",
-          payload: { kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND },
+          payload: { kind: WORKFLOW_TASK_INTERRUPT_KIND },
           type: "code-mode-interrupt",
         },
         responseMessages: [],
@@ -40,7 +40,7 @@ describe("pending workflow interrupt state", () => {
           },
           interruptId: "workflow-call:tool-1:interrupt",
           outerToolCallId: "workflow-call",
-          payload: { kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND },
+          payload: { kind: WORKFLOW_TASK_INTERRUPT_KIND },
           type: "code-mode-interrupt",
         },
         responseMessages: [],

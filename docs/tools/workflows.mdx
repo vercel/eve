@@ -1,26 +1,33 @@
 ---
-title: "Durable Tools"
-description: "Write a tool as a workflow so it can wait for a person, a webhook, or a timer for as long as it takes, with nothing running in between."
+title: "Workflows as Tools"
+description: "Define durable workflow tools that wait for people, webhooks, or timers without holding compute."
 url: /tools/workflows
 ---
 
-A tool's `execute` may be a workflow. eve starts one durable run per tool call and, by default,
-waits for it: the run's return value is the tool result, however long it takes. While the run waits
-on a person, a webhook, or a sleep, the turn is parked and nothing is running. Mark the same tool
-`execution: "background"` and the model gets a receipt instead; eve wakes the agent with the return
-value when the run ends.
+A workflow tool is an authored tool whose `execute` function starts with `"use workflow"`. Each
+call starts a durable Workflow run. Use one when a tool must wait for a person, webhook, or timer,
+delegate work to subagents, or coordinate retryable steps over a long period.
 
-Inside the tool, everything is the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`,
-`"use step"`, `createHook`, `createWebhook`, `sleep`, retries, replay. eve adds `ask` from
-`eve/workflow` — a question the human on the session's channel answers — and treats each `yield` as
-a durable progress report.
+By default, the model's tool call waits for the run's return value. While the run is suspended, the
+turn is parked and holds no compute. Set `execution: "background"` when the conversation should
+continue; the model receives a task receipt, and eve wakes the agent with the result when the run
+ends.
 
-## Write one
+Workflow tools use the [Workflow SDK](https://workflow-sdk.dev): `"use workflow"`, `"use step"`,
+`createHook`, `createWebhook`, `sleep`, retries, and replay. eve adds `ask` from `eve/workflow` for
+questions answered through the session's channel and `agent` for durable subagent delegation. Each
+`yield` becomes a durable progress report.
+
+A workflow tool runs code you wrote and appears to the model under its path-derived tool name, such
+as `deploy`.
+
+## Define a workflow tool
 
 ```ts title="agent/tools/deploy.ts"
 import { defineTool } from "eve/tools";
 import { ask } from "eve/workflow";
 import { z } from "zod";
+import { computePlan, runDeploy, type DeployPlan } from "../lib/deploy";
 
 export default defineTool({
   description: "Deploy a service to production. Pauses for a human to approve the plan.",
@@ -85,8 +92,8 @@ or days later, the run resumes, deploys, and returns. The model sees one tool re
 | cancel                   | cancelling the turn cancels the run | `task_cancel`, or the session ending        |
 
 Wait when the model needs the answer to continue. Go background when the wait may outlive the
-conversation or the user should keep talking in the meantime. Background tools require
-`experimental.tasks` on the root agent, like every background tool.
+conversation or the user should keep talking in the meantime. Background tools need no root-agent
+flag.
 
 ## Ask a human: `ask`
 
@@ -122,6 +129,25 @@ if (answer === undefined) return { deployed: false, reason: "timed out" };
 
 Compare the [`approval`](/docs/human-in-the-loop) policy, which gates the call before `execute` runs
 and can only show the model's input. Both compose: `approval` before the run, `ask` inside it.
+
+## Delegate work: `agent`
+
+Workflow tools can call a visible subagent and wait for its result:
+
+```ts
+import { agent } from "eve/workflow";
+
+const result = await agent(ctx, {
+  key: "security-review",
+  target: "reviewer",
+  message: "Review the deployment plan for security risks.",
+});
+```
+
+`key` is required, non-empty, and unique within the workflow run. It makes the invocation identity
+stable across replay, so use a fixed key for each logical call site. Parallel calls must use distinct
+keys. `target` is the model-visible subagent name; pass `agentId` to continue an existing child and
+`outputSchema` to require structured output.
 
 ## Report progress: `yield`
 
@@ -167,7 +193,7 @@ as cancelled whether or not it did. A body parked on a hook or a `sleep` does no
 it is abandoned when the grace period ends. Steps that received the signal are how you clean up
 first.
 
-## Flows
+## Workflow tool examples
 
 ### Approve with a deadline and an escalation
 
@@ -195,8 +221,11 @@ and returning withdraws the request.
 
 ### Wait for an external system to call back
 
-```ts
+```ts title="agent/tools/render_video.ts"
+import { defineTool } from "eve/tools";
 import { createWebhook, FatalError } from "workflow";
+import { z } from "zod";
+import { submitRender } from "../lib/render";
 
 export default defineTool({
   description: "Render a video. Returns the URL once the render farm finishes.",
@@ -220,8 +249,11 @@ system posts to it when it is done. Nothing runs in between.
 
 ### Ask now, act when answered
 
-```ts
+```ts title="agent/tools/refund_order.ts"
+import { defineTool } from "eve/tools";
 import { ask } from "eve/workflow";
+import { z } from "zod";
+import { issueRefund } from "../lib/refunds";
 
 export default defineTool({
   description: "Request approval to refund an order, then issue the refund once approved.",
@@ -250,8 +282,10 @@ on the channel. When it is answered, the refund runs and the agent is woken with
 
 ### Remind me later
 
-```ts
+```ts title="agent/tools/remind.ts"
+import { defineTool } from "eve/tools";
 import { sleep } from "workflow";
+import { z } from "zod";
 
 export default defineTool({
   description: "Remind the user about something after a delay.",

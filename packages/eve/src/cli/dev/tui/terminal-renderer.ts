@@ -3519,10 +3519,7 @@ export class TerminalRenderer implements AgentTUIRenderer {
 
       case "assistant-complete": {
         const existing = turnState.text.get(event.id) ?? "";
-        const text =
-          event.text !== undefined && existing.length === 0
-            ? stripTerminalControls(event.text ?? "")
-            : existing;
+        const text = typeof event.text === "string" ? stripTerminalControls(event.text) : existing;
         turnState.text.set(event.id, text);
         this.#upsertAssistantBlock(event.id, text, false);
         break;

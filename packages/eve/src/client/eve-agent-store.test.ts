@@ -4,16 +4,23 @@ import { detachEveAgentStore, EveAgentStore } from "#client/eve-agent-store.js";
 import { defaultMessageReducer } from "#client/message-reducer.js";
 import { stampTestEvents } from "#internal/testing/events.js";
 import {
+  createMessageAppendedEvent,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createSessionFailedEvent,
   createSessionWaitingEvent,
   createTurnCancelledEvent,
   createTurnStartedEvent,
+  EVE_MESSAGE_STREAM_VERSION,
   EVE_SESSION_ID_HEADER,
+  EVE_STREAM_VERSION_HEADER,
   type UnstampedMessageStreamEvent,
   type MessageStreamEvent,
 } from "#protocol/message.js";
+import type {
+  MessageStreamEventForVersion,
+  MessageStreamVersion,
+} from "#protocol/message-version.js";
 
 function turnEvents(): MessageStreamEvent[] {
   return stampTestEvents([
@@ -29,6 +36,33 @@ function turnEvents(): MessageStreamEvent[] {
   ] as UnstampedMessageStreamEvent[]);
 }
 
+function streamingTurnEvents(): MessageStreamEvent[] {
+  return stampTestEvents([
+    createMessageReceivedEvent({ message: "Hello", sequence: 0, turnId: "turn_1" }),
+    createTurnStartedEvent({ sequence: 1, turnId: "turn_1" }),
+    createMessageAppendedEvent({
+      messageDelta: "Hel",
+      sequence: 2,
+      stepIndex: 0,
+      turnId: "turn_1",
+    }),
+    createMessageAppendedEvent({
+      messageDelta: "lo",
+      sequence: 3,
+      stepIndex: 0,
+      turnId: "turn_1",
+    }),
+    createMessageCompletedEvent({
+      finishReason: "stop",
+      message: "Hello",
+      sequence: 4,
+      stepIndex: 0,
+      turnId: "turn_1",
+    }),
+    createSessionWaitingEvent(),
+  ] as UnstampedMessageStreamEvent[]);
+}
+
 function startedResponse(): Response {
   return new Response(JSON.stringify({ ok: true, sessionId: "session_1", status: "accepted" }), {
     headers: { "content-type": "application/json", [EVE_SESSION_ID_HEADER]: "session_1" },
@@ -36,7 +70,10 @@ function startedResponse(): Response {
   });
 }
 
-function streamResponse(events: readonly MessageStreamEvent[]): Response {
+function versionedStreamResponse<Version extends MessageStreamVersion>(
+  version: Version,
+  events: readonly MessageStreamEventForVersion<Version>[],
+): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
@@ -47,6 +84,41 @@ function streamResponse(events: readonly MessageStreamEvent[]): Response {
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: version },
+    },
+  );
+}
+
+function streamResponse(events: readonly MessageStreamEvent[]): Response {
+  return versionedStreamResponse(EVE_MESSAGE_STREAM_VERSION, events);
+}
+
+function disconnectingStreamResponse(events: readonly MessageStreamEvent[]): Response {
+  return versionedDisconnectingStreamResponse(EVE_MESSAGE_STREAM_VERSION, events);
+}
+
+function versionedDisconnectingStreamResponse<Version extends MessageStreamVersion>(
+  version: Version,
+  events: readonly MessageStreamEventForVersion<Version>[],
+): Response {
+  const encoder = new TextEncoder();
+  let index = 0;
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const event = events[index];
+        if (event !== undefined) {
+          index += 1;
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          return;
+        }
+        controller.error(new TypeError("terminated"));
+      },
+    }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: version },
+    },
   );
 }
 
@@ -68,6 +140,9 @@ function controlledStreamResponse() {
         controller = nextController;
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 
   return {
@@ -106,6 +181,95 @@ afterEach(() => {
 });
 
 describe("EveAgentStore stream overlap", () => {
+  it("reconstructs a split message across an in-memory stream reconnect", async () => {
+    const events = streamingTurnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(startedResponse())
+      .mockResolvedValueOnce(disconnectingStreamResponse(events.slice(0, 3)))
+      .mockResolvedValueOnce(streamResponse(events.slice(3)));
+    const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+    const streamingText: string[] = [];
+    store.subscribe(() => {
+      const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+      if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+    });
+
+    await store.send({ message: "Hello" });
+
+    expect(streamingText).toContain("Hel");
+    expect(streamingText).toContain("Hello");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+      type: "text",
+    });
+    expect(
+      fetchMock.mock.calls
+        .slice(1)
+        .map(([request]) =>
+          new URL(request.toString(), "http://localhost").searchParams.get("startIndex"),
+        ),
+    ).toEqual([null, "3"]);
+  });
+
+  it.each(["21", "24"] as const)(
+    "reconstructs a split message across a v%s-to-v25 reconnect",
+    async (legacyVersion) => {
+      const current = streamingTurnEvents();
+      const received = current[0]!;
+      const started = current[1]!;
+      if (received.type !== "message.received" || started.type !== "turn.started") {
+        throw new Error("Expected the streaming fixture to begin a turn.");
+      }
+      const legacyPrefix = [
+        received,
+        started,
+        {
+          data: {
+            messageDelta: "Hel",
+            messageSoFar: "Hel",
+            sequence: 2,
+            stepIndex: 0,
+            turnId: "turn_1",
+          },
+          meta: current[2]!.meta,
+          type: "message.appended",
+        },
+      ] satisfies readonly MessageStreamEventForVersion<typeof legacyVersion>[];
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(startedResponse())
+        .mockResolvedValueOnce(versionedDisconnectingStreamResponse(legacyVersion, legacyPrefix))
+        .mockResolvedValueOnce(versionedStreamResponse("25", current.slice(3)));
+      const store = new EveAgentStore({ reducer: defaultMessageReducer() });
+      const streamingText: string[] = [];
+      store.subscribe(() => {
+        const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+        if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+      });
+
+      await store.send({ message: "Hello" });
+
+      expect(streamingText).toContain("Hel");
+      expect(streamingText).toContain("Hello");
+      expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+        state: "done",
+        stepIndex: 0,
+        text: "Hello",
+        type: "text",
+      });
+      expect(
+        fetchMock.mock.calls
+          .slice(1)
+          .map(([request]) =>
+            new URL(request.toString(), "http://localhost").searchParams.get("startIndex"),
+          ),
+      ).toEqual([null, "3"]);
+    },
+  );
+
   it("rejects a prepared turn containing both a message and input responses", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
     const store = new EveAgentStore({ reducer: defaultMessageReducer() });
@@ -213,6 +377,72 @@ describe("EveAgentStore stream overlap", () => {
 });
 
 describe("EveAgentStore session resume", () => {
+  it("continues a split message from a complete hydrated prefix", async () => {
+    const events = streamingTurnEvents();
+    const prefix = events.slice(0, 3);
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse([events[3]!], 3))
+      .mockResolvedValueOnce(streamResponse(events.slice(4)));
+    const store = new EveAgentStore({
+      initialEvents: prefix,
+      initialSession: { sessionId: "session_1", streamIndex: prefix.length },
+      reducer: defaultMessageReducer(),
+    });
+    const streamingText: string[] = [];
+    store.subscribe(() => {
+      const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+      if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+    });
+
+    await store.resume();
+
+    expect(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBe(String(prefix.length));
+    expect(streamingText).toContain("Hello");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+      type: "text",
+    });
+  });
+
+  it("replays a split message from index zero when only its cursor was retained", async () => {
+    const events = streamingTurnEvents();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(boundedStreamResponse(events.slice(0, 4), 3))
+      .mockResolvedValueOnce(streamResponse(events.slice(4)));
+    const store = new EveAgentStore({
+      initialSession: { sessionId: "session_1", streamIndex: 3 },
+      reducer: defaultMessageReducer(),
+    });
+    const streamingText: string[] = [];
+    store.subscribe(() => {
+      const part = store.snapshot.data.messages.at(-1)?.parts.at(-1);
+      if (part?.type === "text" && part.state === "streaming") streamingText.push(part.text);
+    });
+
+    await store.resume();
+
+    expect(
+      new URL(fetchMock.mock.calls[0]![0].toString(), "http://localhost").searchParams.get(
+        "startIndex",
+      ),
+    ).toBeNull();
+    expect(streamingText).toContain("Hello");
+    expect(store.snapshot.data.messages.at(-1)?.parts).toContainEqual({
+      state: "done",
+      stepIndex: 0,
+      text: "Hello",
+      type: "text",
+    });
+  });
+
   it("keeps a settled hydrated snapshot resuming until catch-up returns ready", async () => {
     const events = turnEvents();
     const fetchMock = vi

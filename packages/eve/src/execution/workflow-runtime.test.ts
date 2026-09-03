@@ -18,6 +18,7 @@ import {
   startWorkflowOnCurrentDeployment,
   turnWorkflowReference,
   workflowEntryReference,
+  workflowToolRunWorkflowReference,
 } from "#execution/workflow-runtime.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { registerInstrumentationRuntime } from "#instrumentation/runtime.js";
@@ -84,6 +85,10 @@ describe("workflowEntryReference", () => {
     expect(activityCollectorWorkflowReference.workflowId).toBe(
       `workflow//${packageInfo.name}//activityCollectorWorkflow`,
     );
+    expect(workflowToolRunWorkflowReference.workflowId).toBe(
+      `workflow//${packageInfo.name}//workflowToolRunWorkflow`,
+    );
+    expect(workflowToolRunWorkflowReference.workflowId).not.toContain("@");
   });
 });
 
@@ -768,6 +773,23 @@ describe("createWorkflowRuntime#createSession", () => {
     });
   });
 
+  it("passes explicit task ownership to the durable session workflow", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "subagent-run" });
+    getHookByTokenMock.mockResolvedValue({ runId: "subagent-run" });
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      adapter: { kind: "subagent", state: { parentContinuationToken: "opaque-reply-hook" } },
+      auth: null,
+      input: { message: "research this" },
+      mode: "conversation",
+      taskId: "task-1",
+    });
+
+    expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({ taskId: "task-1" });
+  });
+
   it("lets the Workflow world provide its current deployment when Vercel has no id", async () => {
     const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
     mockBundleAndRun(compiledArtifactsSource);
@@ -831,6 +853,48 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(event.value).toEqual({ type: "test.event" });
     expect(getRunMock).toHaveBeenCalledWith("driver-run");
     expect(getReadable).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes persisted v24 appends before exposing a current event stream", async () => {
+    const legacy = {
+      data: {
+        messageDelta: "lo",
+        messageSoFar: "Hello",
+        sequence: 2,
+        stepIndex: 0,
+        turnId: "turn-1",
+      },
+      meta: { at: "2026-09-02T00:00:00.000Z", id: "evt-v24" },
+      type: "message.appended",
+    };
+    const bytes = new TextEncoder().encode(`${JSON.stringify(legacy)}\n`);
+    getRunMock.mockReturnValue({
+      getReadable: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+          },
+        }),
+    });
+
+    const stream = await buildRuntime({} as RuntimeCompiledArtifactsSource).getEventStream(
+      "driver-run",
+    );
+
+    await expect(stream.getReader().read()).resolves.toEqual({
+      done: false,
+      value: {
+        data: {
+          messageDelta: "lo",
+          sequence: 2,
+          stepIndex: 0,
+          turnId: "turn-1",
+        },
+        meta: legacy.meta,
+        type: "message.appended",
+      },
+    });
   });
 });
 

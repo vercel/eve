@@ -59,6 +59,35 @@ describe("createCurrentMessages", () => {
     ]);
   });
 
+  it("keeps later context out of the tail when history ends with an approval response", () => {
+    const approvalTail = {
+      role: "tool" as const,
+      content: [
+        {
+          approvalId: "approval-1",
+          approved: true,
+          type: "tool-approval-response" as const,
+        },
+      ],
+    };
+    const current = createCurrentMessages([
+      { role: "user", content: "history" },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call-1", toolName: "bash", input: {} },
+          { type: "tool-approval-request", approvalId: "approval-1", toolCallId: "call-1" },
+        ],
+      },
+      approvalTail,
+    ]);
+
+    current.add(1, "task state");
+
+    expect(current.systemMessages).toEqual([{ role: "system", content: "task state" }]);
+    expect(current.nonSystemMessages.at(-1)).toBe(approvalTail);
+  });
+
   it("keeps hierarchy-sensitive context in instructions when requested", () => {
     const current = createCurrentMessages([]);
 

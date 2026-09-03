@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { Command } from "#compiled/commander/index.js";
+import { describe, expect, it, vi } from "vitest";
 
-import { parseConnectPrincipalType } from "./register-integration-commands.js";
+import {
+  parseConnectPrincipalType,
+  registerIntegrationCommands,
+} from "./register-integration-commands.js";
 
 describe("parseConnectPrincipalType", () => {
   it.each(["app", "user"] as const)("accepts %s", (principalType) => {
@@ -11,5 +15,23 @@ describe("parseConnectPrincipalType", () => {
     expect(() => parseConnectPrincipalType("jwt-bearer")).toThrow(
       'Expected principal type "app" or "user".',
     );
+  });
+
+  it("documents setup while keeping the registry-only connect command hidden", () => {
+    const program = new Command();
+    registerIntegrationCommands({
+      program,
+      logger: { error: vi.fn(), log: vi.fn() },
+      applicationContext: {
+        root: "/workspace",
+        resolve: vi.fn(async () => {}),
+        resolveAgent: vi.fn(),
+      },
+    });
+
+    expect(program.helpInformation()).toContain("integration");
+    const integration = program.commands.find((command) => command.name() === "integration");
+    expect(integration?.helpInformation()).toContain("setup [options] <kind>");
+    expect(integration?.helpInformation()).not.toContain("connect <slug>");
   });
 });

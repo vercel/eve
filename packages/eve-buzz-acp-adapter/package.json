@@ -1,6 +1,6 @@
 {
   "name": "@eve/buzz-acp-adapter",
-  "version": "0.0.20",
+  "version": "0.0.21",
   "description": "Buzz ACP compatibility adapter for eve agents.",
   "keywords": [
     "acp",

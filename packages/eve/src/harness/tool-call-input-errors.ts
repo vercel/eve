@@ -1,7 +1,7 @@
 import type { ToolSet, TypedToolCall, TypedToolError } from "ai";
 
 import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
-import { resolveToolCallInputObject } from "#harness/runtime-actions.js";
+import { resolveToolCallInputObject } from "#harness/coordination.js";
 
 /**
  * Returns true when the AI SDK marked the tool call `invalid` (typically

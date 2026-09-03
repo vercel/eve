@@ -7,7 +7,7 @@ import {
   emitWorkflowActionResults,
   emitWorkflowActionsRequested,
 } from "#harness/workflow-lifecycle.js";
-import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
+import { WORKFLOW_TASK_INTERRUPT_KIND } from "#harness/workflow-task-state.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import { defineState } from "#public/definitions/state.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
@@ -25,20 +25,11 @@ function createTools(): HarnessToolMap {
     [
       "researcher",
       {
-        behavior: {
-          availability: [],
-          handling: {
-            kind: "dispatch",
-            target: {
-              kind: "subagent-call",
-              nodeId: "subagents/researcher",
-              subagentName: "researcher",
-            },
-          },
-        },
         description: "Delegate to the researcher.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "researcher",
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
   ]);
@@ -46,11 +37,10 @@ function createTools(): HarnessToolMap {
 
 function workflowInterrupt(): WorkflowSandboxInterrupt {
   const payload = {
-    kind: WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND,
-    runtimeAction: {
-      kind: "subagent-call" as const,
-      nodeId: "subagents/researcher",
-      subagentName: "researcher",
+    kind: WORKFLOW_TASK_INTERRUPT_KIND,
+    task: {
+      resultKind: "subagent" as const,
+      workflowId: "workflow//./agent/subagents/researcher//execute",
     },
     toolInput: { message: "Investigate" },
     toolName: "researcher",
@@ -116,8 +106,8 @@ describe("workflow lifecycle projection", () => {
         actions: [
           {
             callId: "outer-call:tool-1",
-            kind: "subagent-call",
-            subagentName: "researcher",
+            kind: "tool-call",
+            toolName: "researcher",
           },
         ],
         sequence: 2,

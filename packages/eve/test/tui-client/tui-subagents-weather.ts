@@ -40,7 +40,7 @@ const WEATHER_SMOKE_TARGET: RunOptions = {
   kind: "local-build",
   // The spawned server must use the deterministic authored-model adapter;
   // otherwise this TUI rendering smoke depends on an AI Gateway credential.
-  startEnv: { ...process.env, EVE_MOCK_AUTHORED_MODELS: "1" },
+  startEnv: { ...process.env, EVE_E2E_MODEL: "mock" },
 };
 
 run(WEATHER_SMOKE_TARGET, async (target) => {

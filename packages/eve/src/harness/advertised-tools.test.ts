@@ -5,7 +5,6 @@ import { getAdvertisedTools } from "#harness/advertised-tools.js";
 import type { HarnessToolDefinition } from "#harness/execute-tool.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 import { buildToolSet } from "#harness/tools.js";
-import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { WORKFLOW_TOOL_NAME } from "#shared/workflow-sandbox.js";
 
 describe("getAdvertisedTools", () => {
@@ -20,14 +19,14 @@ describe("getAdvertisedTools", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
   });
 
-  it("keeps declared subagent tools at any subagent depth", () => {
+  it("keeps declared subagent tools in delegated sessions", () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["delegate", createSubagentTool("delegate")],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { subagentDepth: 99 },
+      session: { rootSessionId: "root-session" },
       tools,
     });
 
@@ -41,7 +40,7 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      session: { rootSessionId: "root-session" },
       tools,
     });
 
@@ -55,42 +54,11 @@ describe("getAdvertisedTools", () => {
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      session: { rootSessionId: "root-session" },
       tools,
     });
 
     expect([...advertisedTools.keys()]).toEqual(["add", "agent"]);
-  });
-
-  it("removes the built-in agent tool when depth identifies a delegated session", () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["agent", createBuiltInAgentTool()],
-    ]) satisfies HarnessToolMap;
-
-    const advertisedTools = getAdvertisedTools({
-      session: { subagentDepth: 1 },
-      tools,
-    });
-
-    expect([...advertisedTools.keys()]).toEqual(["add"]);
-  });
-
-  it("keeps declared subagent tools in runtime subagent sessions", () => {
-    const tools = new Map([
-      ["add", createTool("add")],
-      ["delegate", createSubagentTool("delegate")],
-    ]) satisfies HarnessToolMap;
-
-    const advertisedTools = getAdvertisedTools({
-      session: {
-        rootSessionId: "root-session",
-        subagentDepth: 99,
-      },
-      tools,
-    });
-
-    expect([...advertisedTools.keys()]).toEqual(["add", "delegate"]);
   });
 
   it("does not add Workflow in runtime subagent sessions", async () => {
@@ -98,7 +66,7 @@ describe("getAdvertisedTools", () => {
 
     const advertisedTools = await getAdvertisedTools({
       modelTools: buildToolSet({ tools }),
-      session: createSession({ rootSessionId: "root-session", subagentDepth: 1 }),
+      session: createSession({ rootSessionId: "root-session" }),
       tools,
       workflow: {},
     });
@@ -107,7 +75,7 @@ describe("getAdvertisedTools", () => {
     expect(advertisedTools.modelTools[WORKFLOW_TOOL_NAME]).toBeUndefined();
   });
 
-  it("adds Workflow in root sessions below the depth limit", async () => {
+  it("adds Workflow in root sessions", async () => {
     const tools = new Map([
       ["add", createTool("add")],
       ["delegate", createSubagentTool("delegate")],
@@ -128,7 +96,7 @@ describe("getAdvertisedTools", () => {
 describe("getAdvertisedTools for definition arrays", () => {
   it("removes built-in agent tool definitions from delegated sessions", () => {
     const advertisedTools = getAdvertisedTools({
-      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      session: { rootSessionId: "root-session" },
       tools: [createTool("add"), createSubagentTool("delegate"), createBuiltInAgentTool()],
     });
 
@@ -138,8 +106,8 @@ describe("getAdvertisedTools for definition arrays", () => {
   it("keeps the task tools in the root session", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_cancel", createTaskControlTool("task_cancel")],
-      ["task_update", createTaskControlTool("task_update")],
+      ["task_cancel", createTaskControlTool("task_cancel", ["root-session"])],
+      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({ session: {}, tools });
@@ -147,26 +115,25 @@ describe("getAdvertisedTools for definition arrays", () => {
     expect([...advertisedTools.keys()]).toEqual(["add", "task_cancel"]);
   });
 
-  it("keeps only task_update in delegated sessions", () => {
+  it("exposes delegated-task-child tools from persisted session ownership", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_cancel", createTaskControlTool("task_cancel")],
-      ["task_update", createTaskControlTool("task_update")],
+      ["task_cancel", createTaskControlTool("task_cancel", ["root-session"])],
+      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({
-      delegatedCaller: true,
-      session: { rootSessionId: "root-session", subagentDepth: 1 },
+      session: { rootSessionId: "root-session", taskId: "task-1" },
       tools,
     });
 
     expect([...advertisedTools.keys()]).toEqual(["add", "task_update"]);
   });
 
-  it("removes task_update from sessions without a delegated caller", () => {
+  it("removes task_update from sessions without task ownership", () => {
     const tools = new Map([
       ["add", createTool("add")],
-      ["task_update", createTaskControlTool("task_update")],
+      ["task_update", createTaskControlTool("task_update", ["delegated-task-child"])],
     ]) satisfies HarnessToolMap;
 
     const advertisedTools = getAdvertisedTools({ session: {}, tools });
@@ -186,43 +153,26 @@ function createTool(name: string): HarnessToolDefinition {
 function createSubagentTool(name: string): HarnessToolDefinition {
   return {
     ...createTool(name),
-    behavior: {
-      availability: [],
-      handling: {
-        kind: "dispatch",
-        target: { kind: "subagent-call", nodeId: "workers", subagentName: name },
-      },
-    },
+    resultKind: "subagent",
+    workflowId: "workflow//./agent/subagents/researcher//execute",
   };
 }
 
 function createBuiltInAgentTool(): HarnessToolDefinition {
   return {
     ...createSubagentTool("agent"),
-    behavior: {
-      availability: ["root-session"],
-      handling: {
-        kind: "dispatch",
-        target: {
-          kind: "self-agent-call",
-          nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
-          subagentName: "agent",
-        },
-      },
-    },
+    rootOnly: true,
   };
 }
 
-function createTaskControlTool(name: string): HarnessToolDefinition {
+function createTaskControlTool(
+  name: string,
+  availability: NonNullable<HarnessToolDefinition["behavior"]>["availability"],
+): HarnessToolDefinition {
   return {
     ...createTool(name),
-    behavior: {
-      availability: [name === "task_update" ? "delegated-task-child" : "root-session"],
-      handling: {
-        kind: "dispatch",
-        target: { kind: name === "task_update" ? "task-update" : "task-cancel" },
-      },
-    },
+    behavior: { availability },
+    runtimeAction: { kind: "task-control" },
   };
 }
 

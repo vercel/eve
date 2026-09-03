@@ -9,6 +9,8 @@ import {
 } from "../src/client/index.js";
 import {
   EVE_SESSION_ID_HEADER,
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
   createMessageCompletedEvent,
   createMessageReceivedEvent,
   createResultCompletedEvent,
@@ -50,6 +52,9 @@ function createControlledStreamResponse(): {
           controller = streamController;
         },
       }),
+      {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      },
     ),
   };
 }
@@ -83,6 +88,9 @@ function createEagerStreamResponse(events: readonly unknown[]): Response {
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 

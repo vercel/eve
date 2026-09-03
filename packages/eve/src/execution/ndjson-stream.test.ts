@@ -61,6 +61,24 @@ describe("parseNdjsonStream", () => {
     expect(values).toEqual([{ i: 0 }]);
   });
 
+  it("maps parsed values before exposing them", async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('{"i":1}\n'));
+        controller.close();
+      },
+    });
+
+    const values = await drain(
+      parseNdjsonStream(
+        () => source,
+        (value) => ({ i: (value as { i: number }).i + 1 }),
+      ),
+    );
+
+    expect(values).toEqual([{ i: 2 }]);
+  });
+
   // Regression guard for the parked-session streaming leak: a parked
   // (`session.waiting`) durable run never closes its event stream, so the
   // world-local streamer keeps a filesystem poll alive until its reader is

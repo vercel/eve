@@ -73,16 +73,19 @@ RUN set -eux; \
   if ! id -u vercel-sandbox >/dev/null 2>&1; then \
     useradd --create-home --shell /bin/bash vercel-sandbox; \
   fi; \
-  npm_prefix="$(npm prefix -g)"; \
-  mkdir -p "${npm_prefix}/bin" "${npm_prefix}/lib/node_modules" "${npm_prefix}/share"; \
-  chown -R vercel-sandbox:vercel-sandbox \
-    "${npm_prefix}/bin" \
-    "${npm_prefix}/lib/node_modules" \
-    "${npm_prefix}/share"; \
+  # Keep Node and pnpm root-owned: recursively changing their ownership copies
+  # them into another image layer. A small user-owned prefix retains global installs.
+  install -d --owner=vercel-sandbox --group=vercel-sandbox \
+    /home/vercel-sandbox/.local \
+    /home/vercel-sandbox/.local/share/pnpm; \
   mkdir -p /workspace; \
   chown vercel-sandbox:vercel-sandbox /workspace; \
   printf 'vercel-sandbox ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/vercel-sandbox; \
   chmod 0440 /etc/sudoers.d/vercel-sandbox
+
+ENV NPM_CONFIG_PREFIX=/home/vercel-sandbox/.local
+ENV PNPM_HOME=/home/vercel-sandbox/.local/share/pnpm
+ENV PATH=/home/vercel-sandbox/.local/share/pnpm/bin:/home/vercel-sandbox/.local/bin:${PATH}
 
 USER vercel-sandbox
 WORKDIR /workspace

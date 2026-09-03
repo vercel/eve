@@ -138,7 +138,11 @@ describe("WorkflowBundleBuilder", () => {
 
     expect(builder.snapshot.projectRoot).toBe(appRoot);
     expect(builder.snapshot.workingDir).toBe(rootDir);
-    expect(builder.snapshot.dirs).toEqual([resolvePackageSourceDirectoryPath("src/execution")]);
+    expect(builder.snapshot.dirs).toEqual([
+      resolvePackageSourceDirectoryPath("src/execution"),
+      resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+      resolvePackageSourceDirectoryPath("src/subagents"),
+    ]);
   });
 
   it("writes a Nitro-owned step registration entry", async () => {

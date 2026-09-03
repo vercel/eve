@@ -51,17 +51,17 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 | `turn.started`            | A new turn began; carries the active `trace` when the runtime is traced.                                         |
 | `message.received`        | An inbound user message was accepted; carries flattened text plus structured text/file parts.                    |
 | `step.started`            | A model step began.                                                                                              |
-| `action.input.appended`   | A raw tool-input text delta, its character offset, and tool-call identity.                                       |
+| `action.input.appended`   | A raw tool-input text delta and its tool-call identity.                                                          |
 | `actions.requested`       | The model requested one or more actions, including tool calls; calls stream before execution.                    |
 | `action.partial`          | A locally executed tool generator yielded a preliminary output snapshot.                                         |
 | `action.result`           | A tool call returned.                                                                                            |
 | `input.requested`         | The run paused for human input ([HITL](/docs/human-in-the-loop) approval or `ask_question`); carries `requests`. |
 | `input.resolved`          | The server accepted terminal human-input outcomes; carries `resolutions` with responses when provided.           |
 | `subagent.called`         | A subagent was delegated; carries `childSessionId` to attach to.                                                 |
-| `subagent.completed`      | A delegated subagent finished.                                                                                   |
-| `reasoning.appended`      | A reasoning delta (incremental, with cumulative text so far).                                                    |
+| `subagent.completed`      | A background subagent was admitted and returned its task receipt.                                                |
+| `reasoning.appended`      | A reasoning text delta.                                                                                          |
 | `reasoning.completed`     | The finalized reasoning block.                                                                                   |
-| `message.appended`        | An assistant text delta (incremental, with cumulative text so far).                                              |
+| `message.appended`        | An assistant text delta.                                                                                         |
 | `message.completed`       | A finalized assistant text block.                                                                                |
 | `result.completed`        | The finalized structured result for a turn that requested an output schema; carries `result`.                    |
 | `compaction.requested`    | Context-window compaction began; carries `modelId`, `sessionId`, `turnId`, `usageInputTokens`.                   |
@@ -79,9 +79,15 @@ The stream is newline-delimited JSON (NDJSON), one event per line:
 
 The optional `data.trace` on session and turn starts contains eve-owned W3C trace coordinates: `traceId`, `spanId`, and `traceFlags`. Use it to correlate stream consumers such as eval reporters with an observability backend. An uninstrumented target omits it.
 
-`reasoning.appended`, `message.appended`, and `action.input.appended` stream incremental output as it arrives. When the durable stream writer is busy, eve may coalesce adjacent deltas for the same text block or tool call; the text remains in source order, and a different event type, tool `callId`, or stream coordinate forms an ordering barrier. Text and reasoning appends carry both the new delta and the cumulative text for the current block. The finalized blocks show up on `message.completed` and `reasoning.completed`, which is the compatibility path for clients that don't render incremental streaming.
+`reasoning.appended`, `message.appended`, and `action.input.appended` stream incremental output as it arrives. Each append stores only its new text in `reasoningDelta`, `messageDelta`, or `inputTextDelta`. Accumulate the deltas in stream order when you need the text so far. When the durable stream writer is busy, eve may coalesce adjacent deltas for the same event type, stream coordinates, and tool `callId`. The resulting text and event ordering stay the same.
 
-When a streamed tool input becomes a validated call, its `action.input.appended` events precede the matching `actions.requested` event. Each append carries `callId`, `toolName`, `inputTextDelta`, and `inputTextOffset`; the offset is the zero-based UTF-16 code-unit position where the delta begins. Storing only the delta and offset avoids repeating the cumulative input in every durable event. The default client reducer starts or restarts accumulation at offset `0`, ignores a nonzero offset that is not contiguous, and projects the potentially incomplete JSON as a `dynamic-tool` part with `state: "input-streaming"` and cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
+The default client reducer accumulates assistant text, reasoning, and streamed tool input. A raw consumer can append each delta to its local accumulator. If it reconnects without that state, it must replay the earlier events or wait for `message.completed` or `reasoning.completed`. Those completed events carry the authoritative value for each finalized block and remain the compatibility path for clients that do not render incremental streaming.
+
+If a model provider fails after partial output and eve retries the call, the durable stream keeps events from both attempts. When the failed attempt emitted only deltas, a later completed event lets replaceable projections converge on the successful attempt. A completed block does not mean the provider attempt itself later succeeded; removing abandoned completed blocks would require attempt identity, which these events do not carry.
+
+The client validates the `x-eve-stream-version` header on every connection. It normalizes v21–v24 cumulative message and reasoning appends, plus v24 offset-based tool-input appends, to the v25 delta-only contract. This lets a reconnect cross deployments without changing the reducer input. A current server performs the same normalization when replaying a session written by an earlier deployment. A missing or unsupported version, or an append whose fields do not match its declared version, fails instead of being interpreted as a current event.
+
+When a streamed tool input becomes a validated call, its `action.input.appended` events precede the matching `actions.requested` event. The default client reducer projects the potentially incomplete JSON as a `dynamic-tool` part with `state: "input-streaming"` and cumulative text in `inputText`. `actions.requested` replaces that part with `state: "input-available"` and the validated `input`. Excluded internal actions never publish their input stream.
 
 `action.partial` carries one complete preliminary output snapshot from an authored async-generator tool. A later partial for the same `callId` replaces it, and `action.result` is the final snapshot. When the durable writer is busy, eve may keep only the newest adjacent partial for a call. Treat partials as last-write-wins: a durable step can retry and replay overlapping event runs. Provider-executed tool progress and MCP progress notifications are not projected as `action.partial` events.
 
@@ -89,7 +95,7 @@ Note: consider the privacy, confidentiality, and user-experience implications fo
 
 `message.completed` can fire more than once in a turn: the agent often emits interim assistant text before a tool call. To tell tool-call narration from a terminal reply, check `message.completed.data.finishReason`. `step.completed.data.finishReason` mirrors the step outcome, and usage lives on `step.completed`.
 
-A delegated subagent publishes progress on its own child-session stream. The parent only emits `subagent.called` with a `childSessionId`, which a client uses to attach.
+A delegated subagent publishes progress on its own child-session stream. The parent emits `subagent.called` with a `childSessionId`, which a client uses to attach. `subagent.completed` carries a working task receipt after admission; later updates and outcomes arrive as task-triggered `message.received` notifications.
 
 `step.failed` and `turn.failed` carry `{ code, message, details? }` for the failed fragment or turn, and `session.failed` is the terminal session-level variant. `turn.cancelled` is not a failure: the cancelled turn ends without any failure event, `session.waiting` follows, and the session accepts the next message normally. Whatever the turn streamed before cancellation stays on the stream. Durable history keeps the accepted user input and previously settled work, but discards incomplete assistant output and unfinished tool state. When a turn requested an output schema, the finalized payload lands on `result.completed` as `data.result` before the turn boundary. `authorization.required` carries the sign-in challenge (`data.authorization` may include `url`, `userCode`, `expiresAt`, `instructions`), and `authorization.completed` carries `data.outcome` (`"authorized" | "declined" | "failed" | "timed-out"`).
 
@@ -116,7 +122,7 @@ Alongside `type` and `data`, every event carries a `meta` envelope:
 
 `meta.id` is stable. eve mints it once, when the event is written to the durable stream, and stores it with the event. Reconnecting from a cursor, rewinding to `startIndex=0`, or replaying a finished session all return the same id for the same event.
 
-`meta.at` has always been there; `meta.id` arrived in stream version 20, and `action.input.appended` arrived in version 24. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. The exposure ends when the sessions that predate your upgrade do.
+`meta.at` has always been there; `meta.id` arrived in stream version 20, `action.input.appended` arrived in version 24, and delta-only message and reasoning appends replaced cumulative snapshots in version 25. Events written by an earlier version are stored with the envelope but no id inside it, so rewinding into the part of a session that ran before you upgraded yields events whose `meta.id` is absent, even though the type says it is always a string. eve passes those events through rather than dropping them, and they cannot be deduplicated. The exposure ends when the sessions that predate your upgrade do.
 
 That makes it the key for ingesting a stream into a database without duplicating rows when you re-read it:
 
@@ -185,7 +191,7 @@ curl -X POST http://127.0.0.1:2000/eve/v1/session/<sessionId>/cancel
 # {"ok":true,"sessionId":"<sessionId>","status":"accepted"}
 ```
 
-`"accepted"` means the live session durably queued the request. Confirm an actual cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. If the turn is waiting on active local or remote subagents, eve also requests cancellation of every adopted child, recursively, before settling the parent. Each child reports its own cancellation boundary on its child-session stream; the parent does not emit `subagent.completed` for cancelled work. A live but already-parked session also returns `"accepted"` and consumes the command as a no-op. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
+`"accepted"` means the live session durably queued the request. Confirm an actual cancellation on the stream as `turn.cancelled` followed by `session.waiting`; the session then accepts the next message normally. Background tasks that were already admitted survive initiating-turn cancellation and are stopped with `task_cancel`; background work that has not yet been admitted is rejected with the cancelled step. Each cancelled child reports its own boundary on its child-session stream. A live but already-parked session also returns `"accepted"` and consumes the command as a no-op. `"no_active_turn"` means the session or channel address is unknown or terminal. Both statuses are success, so clients can fire and forget. See the [eve channel](../channels/eve) for the full route contract.
 
 The HTTP route returns `202` for `"accepted"` and `200` for
 `"no_active_turn"`. Only the accepted result includes `sessionId`.

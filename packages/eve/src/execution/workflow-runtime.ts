@@ -42,6 +42,11 @@ import {
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import {
+  normalizePersistedMessageStreamEvent,
+  type MessageStreamEventForVersion,
+  type MessageStreamVersion,
+} from "#protocol/message-version.js";
 import type { RuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { ROOT_RUNTIME_AGENT_NODE_ID } from "#runtime/graph.js";
 import { normalizeEveAttributes } from "#runtime/attributes/normalize.js";
@@ -67,7 +72,7 @@ import {
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
-  TOOL_RUN_WORKFLOW_NAME,
+  WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
@@ -119,8 +124,8 @@ export const activityCollectorWorkflowReference = {
 };
 
 /** Stable workflow reference for authored workflow tool runs. */
-export const toolRunWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${TOOL_RUN_WORKFLOW_NAME}`,
+export const workflowToolRunWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
 };
 
 /**
@@ -201,6 +206,8 @@ export function createWorkflowRuntime(config: {
         limits: input.limits,
         serializedContext,
       };
+      const taskId = input.taskId ?? input.callback?.taskId;
+      if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
       }
@@ -247,7 +254,10 @@ export function createWorkflowRuntime(config: {
 
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
-        events ??= parseNdjsonStream<MessageStreamEvent>(() => getRun(run.runId).getReadable());
+        events ??= parseNdjsonStream<MessageStreamEvent>(
+          () => getRun(run.runId).getReadable(),
+          normalizePersistedEvent,
+        );
         return events;
       };
 
@@ -275,8 +285,9 @@ export function createWorkflowRuntime(config: {
       sessionId: string,
       options?: GetEventStreamOptions,
     ): Promise<ReadableStream<MessageStreamEvent>> {
-      return parseNdjsonStream<MessageStreamEvent>(() =>
-        getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
+      return parseNdjsonStream<MessageStreamEvent>(
+        () => getRun(sessionId).getReadable({ startIndex: options?.startIndex }),
+        normalizePersistedEvent,
       );
     },
 
@@ -307,6 +318,12 @@ export function createWorkflowRuntime(config: {
       }
     },
   };
+}
+
+function normalizePersistedEvent(value: unknown): MessageStreamEvent {
+  return normalizePersistedMessageStreamEvent(
+    value as MessageStreamEventForVersion<MessageStreamVersion>,
+  );
 }
 
 async function cancelActivityCollector(runId: string | undefined): Promise<void> {

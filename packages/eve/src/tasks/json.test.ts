@@ -9,15 +9,13 @@ describe("taskViewToJson", () => {
   it("projects only the model-visible task fields", () => {
     const view: TaskView = {
       executor: {
-        childSessionId: "child-session-1",
-        childTurnId: "child-turn-1",
-        lifecycle: "terminal",
+        binding: { data: { runId: "run-1" }, kind: "workflow-tool" },
       },
       lastOutput: { data: { answer: 42 }, type: "result" },
       metadata: {
         agentId: "agent-1",
         kind: "subagent",
-        mode: "local",
+        mode: "remote",
         name: "researcher",
       },
       status: "completed",
@@ -35,7 +33,7 @@ describe("taskViewToJson", () => {
       metadata: {
         agentId: "agent-1",
         kind: "subagent",
-        mode: "local",
+        mode: "remote",
         name: "researcher",
       },
       status: "completed",

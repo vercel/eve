@@ -440,6 +440,7 @@ describe("buildApplication", () => {
       {
         buildDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
         outputDir: expect.stringContaining(join(appRoot, ".eve", "builds")),
+        publicRoutePrefix: "/_eve_internal/eve",
       },
     );
     const nestedFunctionStats = await lstat(

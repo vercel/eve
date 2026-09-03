@@ -5,8 +5,10 @@ import type {
   ResolvedRuntimeDelegationNode,
 } from "#runtime/types.js";
 import type { JsonObject } from "#shared/json.js";
-import { serializeInputSchema } from "#tools/schema.js";
+import { serializeInputSchema, serializeOutputSchema } from "#tools/schema.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA } from "#tools/framework/agent-contract.js";
+import { SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA } from "#tools/framework/task-contract.js";
+import { subagentToolExecuteWorkflowReference } from "#runtime/subagents/workflow-reference.js";
 
 /**
  * One runtime-owned subagent tracked by the prepared registry.
@@ -38,6 +40,7 @@ export interface RuntimeSubagentRegistry {
  * accept one free-form `message` string from the parent agent.
  */
 const SUBAGENT_TOOL_INPUT_JSON_SCHEMA = serializeInputSchema(SUBAGENT_TOOL_INPUT_SCHEMA);
+const SUBAGENT_TOOL_OUTPUT_JSON_SCHEMA = serializeOutputSchema(SUBAGENT_TASK_RECEIPT_OUTPUT_SCHEMA);
 
 /**
  * Builds the runtime-owned registry for the resolved subagents visible from one
@@ -73,7 +76,10 @@ export function createRuntimeSubagentRegistry(input: {
     let registeredSubagent: RuntimeRegisteredSubagent;
     const dynamic = subagentDefinition.kind === "subagent" ? subagentDefinition.dynamic : undefined;
     if (dynamic === undefined) {
-      const prepared = createPreparedRuntimeSubagentTool(subagentDefinition);
+      const prepared = createPreparedRuntimeSubagentTool(
+        subagentDefinition,
+        SUBAGENT_TOOL_INPUT_JSON_SCHEMA,
+      );
       registeredSubagent = {
         definition: subagentDefinition,
         prepared,
@@ -137,13 +143,19 @@ export function createPreparedRuntimeSubagentTool(
               },
       },
     },
-    description: definition.description,
+    description: `${definition.description}\n\nThis call starts a background task and returns a task receipt immediately.`,
+    execution: "background",
     inputSchema,
     kind: definition.kind,
     logicalPath: definition.logicalPath,
     name: definition.name,
     nodeId: definition.nodeId,
-    outputSchema: definition.kind === "remote" ? definition.outputSchema : undefined,
+    outputSchema: SUBAGENT_TOOL_OUTPUT_JSON_SCHEMA,
     sourceId: definition.sourceId,
+    task: {
+      nodeId: definition.nodeId,
+      resultKind: "subagent",
+      workflowId: subagentToolExecuteWorkflowReference.workflowId,
+    },
   };
 }

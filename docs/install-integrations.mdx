@@ -14,6 +14,7 @@ Run `eve add` from an eve agent project. This installs the integration's depende
 eve add extension/agent-browser
 eve add linear
 eve add instrumentation/braintrust
+eve add memory/file
 ```
 
 If an item is not found, `eve add` searches the available catalogs and prints close matches without installing anything.
@@ -25,6 +26,8 @@ Extensions may create a mount under `agent/extensions/`. Connections write their
 Some integrations package several independently installable components. For example, `eve add linear` lets you choose the Linear Channel, Linear MCP, or both; both are selected by default. The specific `eve add channel/linear-agent` and `eve add connection/linear` commands remain available.
 
 When an official item declares an interactive setup flow or flows, eve asks whether to run them after installation and runs multiple flows in declaration order. Run the printed `eve add <item> --skip-install` command to resume a skipped or cancelled setup later; it reruns the selected components' declared flows from the beginning.
+
+For example, `eve add memory/file` can provision its required storage through the same setup flow. After **Install and set up**, eve creates or reuses a dedicated private Vercel Blob store, connects production, preview, and development with namespaced credentials, pulls the environment, and offers to deploy. The review and setup transcript show the project, store, primary function region, environments, and possible Blob usage charges before provisioning.
 
 An official item may identify optional pnpm dependencies that have build scripts. Before installation, eve asks whether to skip those optional packages, allow their build scripts, or abort. Your choice updates `ignoredOptionalDependencies` or `allowBuilds` in the pnpm workspace that owns the project. Allow build scripts only when you trust the packages named in the prompt.
 

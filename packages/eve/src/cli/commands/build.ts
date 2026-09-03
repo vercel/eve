@@ -1,10 +1,11 @@
 import { resolve } from "node:path";
 
 import type { Command } from "#compiled/commander/index.js";
-import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import type { CliApplicationContext } from "#cli/application-command.js";
 import { resolveInternalVercelServiceOutput } from "#cli/vercel-service-output.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import type { ApplicationBuildOptions } from "#internal/nitro/host/types.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import {
   EVE_PUBLIC_ROUTE_PREFIX_ENV,
   normalizePublicRoutePrefix,
@@ -30,7 +31,12 @@ export function registerBuildCommand(input: {
 }): void {
   const theme = createCliTheme();
 
-  applicationCommand(input.program.command("build"), input.applicationContext)
+  input.program
+    .command("build")
+    .hook("preAction", async () => {
+      const context = await resolveEveProjectContext(input.applicationContext.root);
+      if (context.kind !== "workspace") await input.applicationContext.resolve();
+    })
     .description("Build the current eve application.")
     .option("--profile <path>", "Write best-effort timing and output-size profile JSON to a file")
     .option(
@@ -40,7 +46,26 @@ export function registerBuildCommand(input: {
     .action(async (options: BuildCliOptions) => {
       const { loadDevelopmentEnvironmentFiles } = await import("#cli/dev/environment.js");
 
-      loadDevelopmentEnvironmentFiles(input.applicationContext.root);
+      await loadDevelopmentEnvironmentFiles(input.applicationContext.root);
+
+      const projectContext = await resolveEveProjectContext(input.applicationContext.root);
+      if (projectContext.kind === "workspace") {
+        if (options.profile !== undefined || options.skipSandboxPrewarm === true) {
+          throw new Error(
+            "Workspace builds do not support --profile or --skip-sandbox-prewarm. Run those options from an individual agent directory.",
+          );
+        }
+        const { buildAgentWorkspace } = await import("#internal/vercel/build-agent-workspace.js");
+        const outputDir = await buildAgentWorkspace(projectContext.workspace);
+        input.logger.log(
+          renderCliTaggedLine(theme, {
+            message: `built output at ${outputDir}`,
+            tag: "build",
+            tone: "success",
+          }),
+        );
+        return;
+      }
 
       const buildHost =
         input.buildHost ?? (await import("#internal/nitro/host.js")).buildApplication;

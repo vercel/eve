@@ -99,17 +99,41 @@ export function replayDynamicTools(
 
     return {
       description: entry.description,
-      execute: createToolExecuteWithAuth({
-        scope: entry.name,
-        execute: (input, context) => {
-          if (execute === undefined) {
-            throw missingCallbackError(entry, "execute");
-          }
-          return callDurableDynamicCallback(execute, executeReference.closure, input, context);
-        },
-      }),
+      execute:
+        entry.execution === "background"
+          ? createToolExecuteWithAuth({
+              execution: "background",
+              scope: entry.name,
+              execute: (input, context, task) => {
+                if (execute === undefined) {
+                  throw missingCallbackError(entry, "execute");
+                }
+                return callDurableDynamicCallback(
+                  execute,
+                  executeReference.closure,
+                  input,
+                  context,
+                  task,
+                );
+              },
+            })
+          : createToolExecuteWithAuth({
+              scope: entry.name,
+              execute: (input, context) => {
+                if (execute === undefined) {
+                  throw missingCallbackError(entry, "execute");
+                }
+                return callDurableDynamicCallback(
+                  execute,
+                  executeReference.closure,
+                  input,
+                  context,
+                );
+              },
+            }),
       inputSchema: toInputSchema(entry.inputSchema),
       name: entry.name,
+      execution: entry.execution,
       approval: buildReplayedApproval(entry),
       outputSchema: toOutputSchema(entry.outputSchema),
       ...(toModelOutputReference === undefined

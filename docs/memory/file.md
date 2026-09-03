@@ -10,7 +10,21 @@ Use it when a short list of durable facts and preferences is enough; use
 [another provider](/docs/memory#choose-a-provider) when you need semantic
 retrieval or automatic capture.
 
-```ts title="agent/memory/profile.ts"
+Add and provision file memory from an eve project:
+
+```bash
+eve add memory/file
+```
+
+After you choose **Install and set up**, eve creates or reuses one private
+Vercel Blob store for the linked project, connects it to production, preview,
+and development with `EVE_MEMORY_`-prefixed variables, and pulls the updated
+environment. It uses the project's first configured function region, falling
+back to `iad1`. Blob usage may incur charges.
+
+The registry writes:
+
+```ts title="agent/memory/file.ts"
 import { defineMemory } from "eve/memory";
 import { byPrincipal } from "eve/memory/scope";
 import { fileMemory } from "eve/memory/file";
@@ -25,8 +39,8 @@ export default defineMemory({
 ## How it behaves
 
 The provider implements recall and tools but no automatic capture. The model
-decides when to call `profile__save_memory` and `profile__remove_memory`, where
-`profile` is the slot name. The slot `description` is prepended to both tool
+decides when to call `file__save_memory` and `file__remove_memory`, where
+`file` is the slot name. The slot `description` is prepended to both tool
 descriptions.
 
 Each saved entry receives a permanent numeric index that the model uses to
@@ -58,12 +72,12 @@ same document use optimistic versioning and retry on conflict.
 The document lives in a backend, not in the agent's sandbox filesystem. With no
 `backend` option, `fileMemory()` selects one lazily on first use:
 
-| Environment                                                       | Backend                                  |
-| ----------------------------------------------------------------- | ---------------------------------------- |
-| Vercel with Blob credentials (token, or attached store with OIDC) | Private Vercel Blob                      |
-| Vercel without Blob configuration                                 | Error asking you to attach a Blob store  |
-| `eve dev`                                                         | Shared process-local in-memory storage   |
-| Every other environment                                           | Error asking you for an explicit backend |
+| Environment                                                       | Backend                                                                      |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Vercel with Blob credentials (token, or attached store with OIDC) | Private Vercel Blob                                                          |
+| Vercel without Blob configuration                                 | Error recommending `/add memory/file` or `eve integration setup file-memory` |
+| `eve dev`                                                         | Shared process-local in-memory storage                                       |
+| Every other environment                                           | Error asking you for an explicit backend                                     |
 
 `NODE_ENV=development` alone does not select in-memory storage, and a Blob
 token outside Vercel does not select Blob.
@@ -81,6 +95,30 @@ provider: fileMemory({ backend: inMemory() });
 
 ### Vercel Blob
 
+Provisioned bindings use the `EVE_MEMORY_BLOB_*` namespace so file memory does
+not take over an application's own Blob store. `fileMemory()` checks Vercel
+credentials in this order:
+
+1. `EVE_MEMORY_BLOB_READ_WRITE_TOKEN`
+2. `EVE_MEMORY_BLOB_STORE_ID` with Vercel OIDC from the environment or request context
+3. `BLOB_READ_WRITE_TOKEN`
+4. `BLOB_STORE_ID` with Vercel OIDC from the environment or request context
+
+Generic `BLOB_*` variables remain supported for a store you attach manually.
+Run setup again without reinstalling the memory definition when a previous
+attempt stopped after creating or connecting the store:
+
+```bash
+eve integration setup file-memory
+```
+
+Setup repairs the deterministic unconnected private store left by a partial
+run and reuses a complete `EVE_MEMORY_` connection. It does not adopt an
+arbitrary application store, change a `BLOB_*` connection, or replace a public
+or incompatible store. If the linked project later moves to another primary
+region, setup preserves the existing memory store and warns about the drift
+instead of risking data loss.
+
 Use `vercelBlob()` from `eve/memory/file/vercel` to configure credentials or an
 object prefix explicitly instead of relying on environment detection:
 
@@ -95,7 +133,8 @@ provider: fileMemory({
 
 `vercelBlob()` accepts `token`, `oidcToken`, `storeId`, and `prefix`. The
 default prefix is `eve/memory/file`; documents are stored privately under
-`<prefix>/<scope key>/MEMORY.md`.
+`<prefix>/<scope key>/MEMORY.md`. Passing these options continues to override
+the generic environment defaults directly.
 
 ### Custom backend
 
