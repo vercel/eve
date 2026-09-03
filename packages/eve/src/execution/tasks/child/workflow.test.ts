@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   raceChannelReads: vi.fn(),
   resumeHookStep: vi.fn(),
   wakeTaskAgentRequestParentStep: vi.fn(),
+  wakeTaskMessageParentStep: vi.fn(),
   wakeTaskParentStep: vi.fn(),
   wakeTaskUpdateParentStep: vi.fn(),
   wakeWorkflowTaskInputRequestParentStep: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock("#execution/tasks/child/steps.js", () => ({
   appendTaskViewStep: mocks.appendTaskViewStep,
   deliverTaskInputResponsesStep: mocks.deliverTaskInputResponsesStep,
   wakeTaskAgentRequestParentStep: mocks.wakeTaskAgentRequestParentStep,
+  wakeTaskMessageParentStep: mocks.wakeTaskMessageParentStep,
   wakeTaskAuthorizationParentStep: vi.fn(),
   wakeTaskParentStep: mocks.wakeTaskParentStep,
   wakeTaskUpdateParentStep: mocks.wakeTaskUpdateParentStep,
@@ -110,6 +112,39 @@ describe("taskRunWorkflow", () => {
     mocks.createHook.mockReturnValue({ token: "task-token" });
     mocks.openWorkflowToolRunOwnerChannels.mockReturnValue({ dispose: vi.fn(), readers: [] });
     mocks.executeWorkflowBody.mockResolvedValue({ output: "done", status: "completed" });
+  });
+
+  it("delivers an authored message queued before completion and dispatch acknowledgement", async () => {
+    const message = {
+      callId: "call-1",
+      kind: "task-message" as const,
+      message: "Review the export",
+      messageEpoch: "task-1",
+      messageIndex: 0,
+    };
+    for (const value of [
+      message,
+      { kind: "task-command", command: { kind: "complete", data: "done" } },
+      { kind: "task-command", command: { kind: "ready" } },
+    ]) {
+      mocks.raceChannelReads.mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value },
+      });
+    }
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+    });
+    expect(mocks.wakeTaskMessageParentStep).toHaveBeenCalledWith({
+      message,
+      taskId: "task-1",
+      token: "parent-token",
+    });
+    expect(mocks.wakeTaskMessageParentStep.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("buffers agent requests until task dispatch is acknowledged", async () => {

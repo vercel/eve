@@ -339,7 +339,13 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 
   async function flushPendingTraffic(): Promise<void> {
     if (!dispatchRejected) {
-      for (const message of pendingTraffic.messages) await handleMessage(message);
+      for (const message of pendingTraffic.messages) {
+        await wakeTaskMessageParentStep({
+          message,
+          taskId: view.taskId,
+          token: input.parentContinuationToken,
+        });
+      }
       for (const request of pendingTraffic.ownerRequests) await wakeTaskOwnerRequestParent(request);
     }
     pendingTraffic.messages.length = 0;
