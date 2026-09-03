@@ -42,6 +42,7 @@ export interface TestAppDescriptor {
     readonly limits?: {
       readonly maxInputTokensPerSession?: number | false;
       readonly maxOutputTokensPerSession?: number | false;
+      readonly maxTokenCostUsdPerSession?: number | false;
       readonly sessionTimeoutMs?: number | false;
     };
     readonly model?: string;

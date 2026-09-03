@@ -107,7 +107,7 @@ import {
 } from "#harness/turn-tag-state.js";
 import {
   applySessionLimitContinuation,
-  enforceSessionTokenLimit,
+  enforceSessionUsageLimit,
 } from "#harness/session-limit-enforcement.js";
 import { setEveAttributes } from "#runtime/attributes/emit.js";
 import {
@@ -1517,7 +1517,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
       return pendingWorkflowInterrupt;
     }
 
-    const limitResult = await enforceSessionTokenLimit({
+    const limitResult = await enforceSessionUsageLimit({
       config,
       emit,
       emissionState,

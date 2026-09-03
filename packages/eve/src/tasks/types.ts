@@ -30,6 +30,7 @@ export type TaskInputRequest = JsonValue;
 export interface TaskUsage {
   readonly cacheReadTokens: number;
   readonly cacheWriteTokens: number;
+  readonly costUsd?: number;
   readonly inputTokens: number;
   readonly outputTokens: number;
 }
@@ -39,6 +40,7 @@ export function readTaskUsage(value: unknown): TaskUsage | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const cacheReadTokens = readUsageAxis(value, "cacheReadTokens");
   const cacheWriteTokens = readUsageAxis(value, "cacheWriteTokens");
+  const costUsd = readUsageAxis(value, "costUsd");
   const inputTokens = readUsageAxis(value, "inputTokens");
   const outputTokens = readUsageAxis(value, "outputTokens");
   if (
@@ -49,7 +51,15 @@ export function readTaskUsage(value: unknown): TaskUsage | undefined {
   ) {
     return undefined;
   }
-  return { cacheReadTokens, cacheWriteTokens, inputTokens, outputTokens };
+  const usage: {
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    costUsd?: number;
+    inputTokens: number;
+    outputTokens: number;
+  } = { cacheReadTokens, cacheWriteTokens, inputTokens, outputTokens };
+  if (costUsd !== undefined) usage.costUsd = costUsd;
+  return usage;
 }
 
 function readUsageAxis(value: object, key: string): number | undefined {

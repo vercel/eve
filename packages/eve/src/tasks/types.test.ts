@@ -24,7 +24,13 @@ describe("task kernel types", () => {
   });
 
   it("accepts complete non-negative usage and drops malformed usage", () => {
-    const usage = { cacheReadTokens: 1, cacheWriteTokens: 2, inputTokens: 3, outputTokens: 4 };
+    const usage = {
+      cacheReadTokens: 1,
+      cacheWriteTokens: 2,
+      costUsd: 0.25,
+      inputTokens: 3,
+      outputTokens: 4,
+    };
     expect(readTaskUsage(usage)).toEqual(usage);
     expect(readTaskUsage({ ...usage, inputTokens: -1 })).toBeUndefined();
     expect(readTaskUsage({ inputTokens: 1 })).toBeUndefined();

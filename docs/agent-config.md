@@ -147,9 +147,9 @@ See [Default harness](./concepts/default-harness#compaction) for how the loop ap
 
 ## Runtime limits
 
-Use `limits` for framework-owned runtime caps. Session token limits stop the
+Use `limits` for framework-owned runtime caps. Session usage limits stop the
 current durable session from starting another model call after accumulated
-provider-reported input or output token usage reaches the configured limit:
+provider-reported tokens or model token cost reaches a configured limit:
 
 ```ts title="agent/agent.ts"
 export default defineAgent({
@@ -157,6 +157,7 @@ export default defineAgent({
   limits: {
     maxInputTokensPerSession: 200_000,
     maxOutputTokensPerSession: 20_000,
+    maxTokenCostUsdPerSession: 1.5,
     sessionTimeoutMs: 7 * 24 * 60 * 60 * 1_000,
   },
 });
@@ -169,14 +170,13 @@ then emits `session.completed` and releases the continuation; the next
 qualifying channel message starts fresh. Set it to `false` to disable the
 timeout. Expiration does not delete stored session data.
 
-Input and output budgets are checked independently. The model call that crosses
-either limit is allowed to finish because providers only report exact token
-usage after a call completes. Before the next model call, eve pauses the
+Input tokens, output tokens, and model token cost are checked independently.
+The model call that crosses a limit is allowed to finish because exact usage
+arrives after the call completes. Before the next model call, eve pauses the
 session and sends a deterministic continuation prompt with two options:
-**Approve** grants a fresh budget window of the configured size (both input
-and output windows reset together), and **Stop** cancels the in-flight turn
-through the standard cancellation path (`turn.cancelled` → `session.waiting`)
-— a user decision, not an error. The session stays resumable; because it is
+**Approve** grants a fresh window of each configured size, and **Stop**
+cancels the in-flight turn through the standard cancellation path
+(`turn.cancelled` → `session.waiting`) — a user decision, not an error. The session stays resumable; because it is
 still over budget, the next message re-raises the prompt. Declining a
 delegated child's prompt cancels the root turn, which cascades to the whole
 delegation tree — the delegating parent never receives an error result it
@@ -186,23 +186,28 @@ copy. The reply is processed once the budget is granted.
 
 Sessions that cannot reach a human — task-mode runs such as schedules and
 delegated runs without input proxying — skip the prompt and fail the next model
-call with `SESSION_TOKEN_LIMIT_REACHED`. A delegated task with no inherited
-quota also fails instead of raising a continuation prompt that could only
-grant another zero-token window.
+call with `SESSION_TOKEN_LIMIT_REACHED` for token budgets or
+`SESSION_TOKEN_COST_LIMIT_REACHED` for model token cost. A delegated task with
+no inherited quota also fails instead of raising a continuation prompt that
+could only grant another zero-value window.
 
 When `maxInputTokensPerSession` is omitted, root sessions apply a default
 input budget of `40_000_000` provider-reported input tokens.
-`maxOutputTokensPerSession` is unset unless configured. Setting either limit
-to `false` uncaps that axis — the session never stops on it.
+`maxOutputTokensPerSession` and `maxTokenCostUsdPerSession` are unset by
+default. `maxTokenCostUsdPerSession` is a US-dollar limit on model token cost,
+not tool or infrastructure spend. It uses the cost reported with each model
+step; AI Gateway supplies this value, while model steps without reported cost
+do not add to the limit. Set any usage limit to `false` to uncap that axis.
 
 Delegated subagent sessions have no fixed default. Each child receives a
 share of the delegating parent's remaining quota at dispatch time — the
 remainder in the current budget window split evenly across the batch's local
 subagent calls — and a completed child's usage counts against the parent's
-quota, so a delegation tree can never outspend the budget configured at its
-root. Approving a continuation opens a fresh parent window for later child
-grants without erasing lifetime usage. An authored child limit applies only
-when it is tighter than the parent's grant; an uncapped parent delegates
+quota. Token-cost budgets follow the same rules, including splitting the
+remaining US-dollar budget across a batch and adding completed child cost back
+to the parent. Approving a continuation opens a fresh parent window for later
+child grants without erasing lifetime usage. An authored child limit applies
+only when it is tighter than the parent's grant; an uncapped parent delegates
 uncapped children.
 
 ## Workflow world
@@ -250,7 +255,7 @@ installed package must stay external in hosted output, list it in
 | -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |
 | `modelOptions` | `AgentModelOptionsDefinition`           | none             | Provider option overrides forwarded to the model call.                                                                                                                                                        |
-| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; token-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
+| `limits`       | `AgentLimitsDefinition`                 | field-specific   | Framework-owned runtime limits. Sessions complete after 30 days by default; usage-limit defaults and inheritance are described above. Set a limit to `false` to disable it.                                   |
 | `experimental` | `{ workflow?: { world?: string } }`     | unset            | Opt-in settings that can change or disappear in any release. Treat them as unstable. `workflow.world` selects the Workflow world package backing session state, queues, hooks, and streams on the root agent. |
 | `outputSchema` | Standard Schema or a JSON Schema object | none             | Structured return type for function-like invocations such as a subagent turn, schedule, or remote job. Ordinary interactive turns ignore it unless the client supplies a per-message schema.                  |
 | `build`        | `{ externalDependencies?: string[] }`   | none             | Hosted-build packaging controls. `externalDependencies` keeps listed packages external while eve compiles authored modules such as tools and channels, and traces those packages into the hosted output.      |

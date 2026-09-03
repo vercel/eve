@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
-import { bumpSessionRuntimeTokenLimits, setTurnUsageState } from "#harness/turn-tag-state.js";
+import { bumpSessionRuntimeUsageLimits, setTurnUsageState } from "#harness/turn-tag-state.js";
 import type { HarnessSession, SessionLimits } from "#harness/types.js";
 
 function createSessionWithUsage(input: {
   readonly limits?: SessionLimits;
+  readonly usedCostUsd?: number;
   readonly usedInputTokens?: number;
   readonly usedOutputTokens?: number;
 }): HarnessSession {
@@ -22,17 +23,21 @@ function createSessionWithUsage(input: {
     base.limits = input.limits;
   }
 
-  if (input.usedInputTokens === undefined && input.usedOutputTokens === undefined) {
+  if (
+    input.usedCostUsd === undefined &&
+    input.usedInputTokens === undefined &&
+    input.usedOutputTokens === undefined
+  ) {
     return base;
   }
 
   const usage = {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
-    costUsd: 0,
+    costUsd: input.usedCostUsd ?? 0,
     inputTokens: input.usedInputTokens ?? 0,
     outputTokens: input.usedOutputTokens ?? 0,
-    sawCost: false,
+    sawCost: input.usedCostUsd !== undefined,
   };
   return setTurnUsageState(base, { ...usage, session: usage, turnId: "turn_0" });
 }
@@ -75,7 +80,7 @@ describe("resolveRemainingSessionTokenLimits", () => {
       usedInputTokens: 1_100_000,
       usedOutputTokens: 110_000,
     });
-    const continued = bumpSessionRuntimeTokenLimits(exhausted);
+    const continued = bumpSessionRuntimeUsageLimits(exhausted);
 
     expect(resolveRemainingSessionTokenLimits(continued)).toEqual({
       maxInputTokensPerSession: 1_000_000,
@@ -106,6 +111,20 @@ describe("resolveRemainingSessionTokenLimits", () => {
       maxInputTokensPerSession: 300_000,
       maxOutputTokensPerSession: 10_000,
     });
+  });
+
+  it("splits the remaining model token-cost budget across delegated calls", () => {
+    const session = createSessionWithUsage({
+      limits: { maxTokenCostUsdPerSession: 1.5 },
+      usedCostUsd: 0.3,
+    });
+
+    const limits = resolveRemainingSessionTokenLimits(session, 3);
+    expect(limits).toMatchObject({
+      maxInputTokensPerSession: false,
+      maxOutputTokensPerSession: false,
+    });
+    expect(limits.maxTokenCostUsdPerSession).toBeCloseTo(0.4);
   });
 
   it("floors uneven splits so a batch can never exceed the remainder", () => {
