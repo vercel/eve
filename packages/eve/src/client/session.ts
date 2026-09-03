@@ -56,8 +56,14 @@ export class ClientSession {
   static async create<TOutput = unknown>(
     context: ClientSessionContext,
     input: SendTurnInput<TOutput>,
+    options?: { readonly requestSignal?: AbortSignal },
   ): Promise<{ readonly response: MessageResponse<TOutput>; readonly session: ClientSession }> {
-    const response = await postTurn(context, EVE_SESSION_ROUTE_PATH, input, true);
+    const response = await postTurn(
+      context,
+      EVE_SESSION_ROUTE_PATH,
+      options?.requestSignal === undefined ? input : { ...input, signal: options.requestSignal },
+      true,
+    );
     const sessionId = await readSessionId(response);
     const session = new ClientSession(context, { sessionId, streamIndex: 0 });
 
@@ -147,10 +153,16 @@ export class ClientSession {
   }
 
   /** Terminally retires this exact session ID. The handle remains pinned to it. */
-  async reset(options?: { readonly reason?: string }): Promise<ResetResult> {
+  async reset(options?: {
+    readonly headers?: Readonly<Record<string, string>>;
+    readonly reason?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<ResetResult> {
     return await resetClientSession({
       context: this.#context,
-      options,
+      headers: options?.headers,
+      options: options?.reason === undefined ? undefined : { reason: options.reason },
+      signal: options?.signal,
       sessionId: this.#state.sessionId,
     });
   }

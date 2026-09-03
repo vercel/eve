@@ -12,11 +12,14 @@ import type {
   EveEvalTurn,
 } from "#evals/types.js";
 import { createEmptyDerivedFacts } from "#evals/runner/derive-run-facts.js";
-import { EvalSessionManager, type EvalSessionStartedEvent } from "#evals/session.js";
+import { EvalSessionManager } from "#evals/session-manager.js";
+import type { EvalSessionStartedEvent } from "#evals/session.js";
 import { createEvalContext } from "#evals/context.js";
 import { scopeEvalTargetHandle } from "#evals/target.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { EvalRequirementFailed, EvalSkipped } from "#evals/control-flow.js";
+
+const EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS = 31_000;
 
 /**
  * Options for executing one eval's task.
@@ -29,6 +32,8 @@ interface ExecuteTaskOptions {
   /** Receives the first trace context observed for each session. */
   readonly onSessionStart?: (event: EvalSessionStartedEvent) => void;
   readonly target: EveEvalTargetHandle;
+  /** Internal override used by cleanup timeout tests. */
+  readonly cleanupTimeoutMs?: number;
   readonly timeoutMs?: number;
 }
 
@@ -50,7 +55,7 @@ export interface ExecuteTaskResult {
  * against the completed task result.
  */
 export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteTaskResult> {
-  const { client, evaluation, target, timeoutMs } = options;
+  const { cleanupTimeoutMs, client, evaluation, target, timeoutMs } = options;
   const signal = timeoutMs !== undefined ? AbortSignal.timeout(timeoutMs) : neverAbortSignal();
   const collector = new AssertionCollector();
   const manager = new EvalSessionManager({
@@ -61,6 +66,7 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
   });
   const targetForRun = scopeEvalTargetHandle(target, {
     sessions: manager,
+    signal,
   });
 
   const logs: string[] = [];
@@ -78,13 +84,27 @@ export async function executeTask(options: ExecuteTaskOptions): Promise<ExecuteT
 
   let error: string | undefined;
   let skipReason: string | undefined;
+  let timedOut = false;
   try {
     await runUntilAborted(evaluation.test(context), signal);
   } catch (err) {
+    timedOut = signal.aborted;
     if (err instanceof EvalSkipped) {
       skipReason = err.reason;
     } else if (!(err instanceof EvalRequirementFailed)) {
       error = toErrorMessage(err);
+    }
+  }
+
+  if (timedOut) {
+    try {
+      await manager.terminateOwnedSessions(
+        "Eval execution timed out.",
+        AbortSignal.timeout(cleanupTimeoutMs ?? EVAL_TIMEOUT_CLEANUP_TIMEOUT_MS),
+      );
+    } catch (cleanupError) {
+      const cleanupMessage = `Timed-out eval cleanup failed: ${toErrorMessage(cleanupError)}`;
+      error = error === undefined ? cleanupMessage : `${error}\n${cleanupMessage}`;
     }
   }
 

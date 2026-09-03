@@ -20,8 +20,10 @@ export class ClientSessions {
   /** Creates a session immediately and returns its fixed handle plus first-turn response. */
   async create<TOutput = unknown>(
     input: SendTurnInput<TOutput>,
+    /** @internal Allows lifecycle owners to recover the accepted session before aborting its stream. */
+    options?: { readonly requestSignal?: AbortSignal },
   ): Promise<CreatedClientSession<TOutput>> {
-    return await ClientSession.create(this.#context, input);
+    return await ClientSession.create(this.#context, input, options);
   }
 
   /** Attaches a fixed handle to a known session ID without performing I/O. */

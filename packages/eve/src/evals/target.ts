@@ -5,7 +5,7 @@ import type { AgentInfoResult } from "#client/types.js";
 import { createEveDevDispatchSchedulePath } from "#protocol/routes.js";
 import { toErrorMessage } from "#shared/errors.js";
 import { stripNpmPackageScope } from "#shared/package-name.js";
-import { EvalSessionManager } from "#evals/session.js";
+import { EvalSessionManager } from "#evals/session-manager.js";
 import type {
   EveEvalScheduleDispatchResult,
   EveEvalSession,
@@ -62,6 +62,7 @@ export function scopeEvalTargetHandle(
   target: EveEvalTargetHandle,
   input: {
     readonly sessions?: EvalSessionManager;
+    readonly signal?: AbortSignal;
   },
 ): EveEvalTargetHandle {
   return createHandle({
@@ -70,6 +71,7 @@ export function scopeEvalTargetHandle(
     delegate: target,
     kind: target.kind,
     sessions: input.sessions,
+    signal: input.signal,
     url: target.url,
   });
 }
@@ -80,16 +82,26 @@ function createHandle(input: {
   readonly delegate?: EveEvalTargetHandle;
   readonly kind: "local" | "remote";
   readonly sessions: EvalSessionManager | undefined;
+  readonly signal?: AbortSignal;
   readonly url: string;
 }): EveEvalTargetHandle {
   const base = input.delegate;
   const client = input.client;
 
-  const fetchTarget = async (path: string, init?: RequestInit): Promise<Response> => {
-    if (base !== undefined) return await base.fetch(path, init);
+  const fetchTarget = async (
+    path: string,
+    init?: RequestInit,
+    useEvalSignal = true,
+  ): Promise<Response> => {
+    const scopedInit = useEvalSignal ? attachSignal(init, input.signal) : (init ?? {});
+    if (base !== undefined) return await base.fetch(path, scopedInit);
     if (client === undefined) throw new Error("Eval target cannot fetch without a client.");
-    return await client.fetch(path, init);
+    return await client.fetch(path, scopedInit);
   };
+  const runOperation = async <T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> =>
+    input.sessions === undefined
+      ? await operation(new AbortController().signal)
+      : await input.sessions.runOperation(operation);
 
   return {
     capabilities: input.capabilities,
@@ -138,24 +150,37 @@ function createHandle(input: {
         throw new Error("target.dispatchSchedule() requires a target with dev routes enabled.");
       }
 
-      const response = await fetchTarget(createEveDevDispatchSchedulePath(scheduleId), {
-        method: "POST",
-      });
-      if (!response.ok) {
-        const body = await readResponseBodySafely(response);
-        throw new Error(
-          `Schedule dispatch failed: ${response.status} ${response.statusText}` +
-            (body.length > 0 ? `, ${body}` : ""),
+      return await runOperation(async (requestSignal) => {
+        const response = await fetchTarget(
+          createEveDevDispatchSchedulePath(scheduleId),
+          { method: "POST", signal: requestSignal },
+          false,
         );
-      }
+        if (!response.ok) {
+          const body = await readResponseBodySafely(response);
+          throw new Error(
+            `Schedule dispatch failed: ${response.status} ${response.statusText}` +
+              (body.length > 0 ? `, ${body}` : ""),
+          );
+        }
 
-      return parseScheduleDispatchResult(await response.json());
+        const result = parseScheduleDispatchResult(await response.json());
+        input.sessions?.registerOwnedSessionIds(result.sessionIds);
+        return result;
+      });
     },
 
     async fetch(path: string, init?: RequestInit): Promise<Response> {
-      return await fetchTarget(path, init);
+      return await runOperation(async () => await fetchTarget(path, init));
     },
   };
+}
+
+function attachSignal(init: RequestInit | undefined, signal: AbortSignal | undefined): RequestInit {
+  if (signal === undefined) return init ?? {};
+  if (init?.signal == null) return { ...init, signal };
+  if (init.signal === signal) return init;
+  return { ...init, signal: AbortSignal.any([init.signal, signal]) };
 }
 
 function capabilitiesFromInfo(info: AgentInfoResult): EveEvalTargetCapabilities {

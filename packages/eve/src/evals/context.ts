@@ -1,4 +1,4 @@
-import { EvalSessionManager } from "#evals/session.js";
+import { EvalSessionManager } from "#evals/session-manager.js";
 import { AssertionCollector } from "#evals/assertions/collector.js";
 import { createScopedAssertions } from "#evals/assertions/scoped.js";
 import { buildJudgeContext } from "#evals/judge.js";

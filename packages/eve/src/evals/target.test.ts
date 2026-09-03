@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
-import { resolveEvalTargetHandle } from "#evals/target.js";
+import { EvalSessionManager } from "#evals/session-manager.js";
+import {
+  createEvalTargetHandle,
+  resolveEvalTargetHandle,
+  scopeEvalTargetHandle,
+} from "#evals/target.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 
 afterEach(() => {
@@ -110,6 +115,41 @@ describe("resolveEvalTargetHandle", () => {
         url: "http://127.0.0.1:4275",
       }),
     ).rejects.toThrow(/@acme\/agent/);
+  });
+});
+
+describe("scopeEvalTargetHandle", () => {
+  it("registers scheduled session creations for timeout cleanup", async () => {
+    const resets: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (request) => {
+      const url = new URL(fetchUrl(request));
+      if (url.pathname === "/eve/v1/dev/schedules/heartbeat") {
+        return Response.json({ scheduleId: "heartbeat", sessionIds: ["scheduled-session"] });
+      }
+      if (url.pathname.endsWith("/reset")) {
+        const sessionId = decodeURIComponent(url.pathname.split("/").at(-2) ?? "");
+        resets.push(sessionId);
+        return Response.json({ ok: true, previousSessionId: sessionId, status: "reset" });
+      }
+      return Response.json({ error: "not found" }, { status: 404 });
+    });
+
+    const client = new Client({ host: "http://127.0.0.1:3000" });
+    const manager = new EvalSessionManager({ client });
+    const target = scopeEvalTargetHandle(
+      createEvalTargetHandle({
+        capabilities: { devRoutes: true },
+        client,
+        kind: "local",
+        url: "http://127.0.0.1:3000",
+      }),
+      { sessions: manager },
+    );
+
+    await target.dispatchSchedule("heartbeat");
+    await manager.terminateOwnedSessions("Eval execution timed out.");
+
+    expect(resets).toEqual(["scheduled-session"]);
   });
 });
 
