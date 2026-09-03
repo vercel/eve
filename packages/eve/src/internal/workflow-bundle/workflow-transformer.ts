@@ -21,7 +21,7 @@ const BUILTIN_STEP_NAMES = new Set([
   "__builtin_set_attributes",
 ]);
 
-type WorkflowDirectiveMode = "workflow" | "step" | "client" | false;
+type WorkflowDirectiveMode = "workflow" | "step" | "client" | "metadata" | false;
 
 type DirectiveFunction = {
   directive: WorkflowDirective;
@@ -151,6 +151,8 @@ export async function transformWorkflowDirectives(input: {
           start: fn.rangeStart,
           text: `${exportPrefix}var ${fn.name} = globalThis[Symbol.for("WORKFLOW_USE_STEP")](${JSON.stringify(stepId)});`,
         });
+      } else if (input.mode === "metadata") {
+        continue;
       } else {
         replacements.push({ end: fn.directiveEnd, start: fn.directiveStart, text: "" });
 
@@ -177,6 +179,8 @@ export async function transformWorkflowDirectives(input: {
       suffixes.push(
         `globalThis.${WORKFLOW_REGISTRY_GLOBAL}.set(${JSON.stringify(workflowId)}, ${fn.name});`,
       );
+    } else if (input.mode === "metadata") {
+      suffixes.push(`${fn.name}.workflowId = ${JSON.stringify(workflowId)};`);
     } else {
       replacements.push({
         end: fn.directiveEnd,

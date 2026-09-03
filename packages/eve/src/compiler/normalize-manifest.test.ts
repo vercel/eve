@@ -114,6 +114,35 @@ describe("compileAgentManifest source graph", () => {
     expect(() => validateCompiledModuleMap(compiled, moduleMap)).not.toThrow();
   });
 
+  it("derives workflow handling from programmatic executor metadata", async () => {
+    const execute = async () => ({ ok: true });
+    Reflect.set(execute, "workflowId", "workflow//example/tool//execute");
+    const sourceRegistry = registry([
+      {
+        logicalPath: "tools/durable.ts",
+        loadNamespace: async () => ({
+          default: defineTool({
+            description: "Runs durably.",
+            execute,
+            inputSchema: { type: "object" },
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [sourceRegistry],
+    });
+
+    expect(compiled.tools.find((tool) => tool.name === "durable")?.behavior).toEqual({
+      availability: [],
+      handling: {
+        kind: "workflow-tool",
+        workflowId: "workflow//example/tool//execute",
+      },
+    });
+  });
+
   it("preserves selected native behavior through serialization and runtime preparation", async () => {
     const sourceRegistry = registry([
       {

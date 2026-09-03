@@ -31,7 +31,6 @@ export type DurableStepResult = (
       readonly action: "continue" | "done";
       readonly output?: unknown;
       readonly isError?: boolean;
-      readonly sleepDurationMs?: number;
       readonly usage?: TokenUsage;
       readonly usageDelta?: TokenUsage;
     }
@@ -43,13 +42,11 @@ export type DurableStepResult = (
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
       readonly pendingCoordinationCallIds?: readonly string[];
-      readonly sleepDurationMs?: number;
       readonly settled?: SettledTurn;
     }
   | {
       readonly action: "dispatch-workflow-tasks";
       readonly pendingTaskCallIds: readonly string[];
-      readonly sleepDurationMs?: number;
     }
 ) &
   DurableStepResultFields;

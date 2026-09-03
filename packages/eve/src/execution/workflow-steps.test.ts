@@ -28,7 +28,6 @@ import {
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
 import { serializeContext } from "#context/serialize.js";
 import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
-import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
 import { getPendingAuthorization, setPendingAuthorization } from "#harness/authorization.js";
 import { getProxyInputRequests, upsertProxyInputRequests } from "#harness/proxy-input-requests.js";
@@ -2130,36 +2129,6 @@ describe("turnStep", () => {
       '[Task state]\n{"tasks":[{"name":"report_probe","status":"pending","taskId":"task_1"}]}',
     );
     expect(observedInput).toBeUndefined();
-  });
-
-  it("projects a requested sleep onto the durable step result", async () => {
-    const session = createStubSession();
-    installSessionStoreMocks([session]);
-    vi.mocked(createExecutionNodeStep).mockImplementation(() => {
-      return async (stepSession): Promise<StepResult> => {
-        requestTurnSleep(2_500);
-        return {
-          next: async () => ({ next: null, session: stepSession }),
-          session: stepSession,
-        };
-      };
-    });
-
-    const result = await turnStep({
-      input: {
-        kind: "deliver",
-        payloads: [{ message: "wait before checking" }],
-      },
-      parentWritable: createTestWritable(),
-      serializedContext: createSerializedContext(),
-      sessionState: createStubSessionState(),
-    });
-
-    expect(result).toMatchObject({
-      action: "continue",
-      sleepDurationMs: 2_500,
-    });
-    expect(result.serializedContext).not.toHaveProperty("eve.pendingTurnSleepDuration");
   });
 
   it("persists onDeliver context into the next durable step", async () => {

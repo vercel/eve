@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { resolvePackageRoot, resolvePackageSourceFilePath } from "#internal/application/package.js";
+import {
+  resolveInstalledPackageInfo,
+  resolvePackageRoot,
+  resolvePackageSourceFilePath,
+} from "#internal/application/package.js";
 
 import { applyWorkflowTransform } from "./workflow-builders.js";
 import { transformWorkflowDirectives } from "./workflow-transformer.js";
@@ -48,6 +52,31 @@ describe("applyWorkflowTransform", () => {
     expect(transformed.code).toContain(
       'globalThis.__private_workflows.set("workflow//eve//subagentToolExecuteWorkflow", subagentToolExecuteWorkflow);',
     );
+  });
+
+  it("stamps versioned package workflow metadata without consuming the framework body", async () => {
+    const filename = "src/execution/tools/sleep.ts";
+    const transformed = await applyWorkflowTransform(
+      filename,
+      [
+        "export async function executeSleepTool(): Promise<string> {",
+        '  "use workflow";',
+        '  return "done";',
+        "}",
+        "",
+      ].join("\n"),
+      "metadata",
+      resolvePackageSourceFilePath(filename),
+      resolvePackageRoot(),
+    );
+
+    expect(transformed.code).toContain('"use workflow";');
+    expect(transformed.code).toContain('return "done";');
+    const packageInfo = resolveInstalledPackageInfo();
+    expect(transformed.code).toContain(
+      `executeSleepTool.workflowId = "workflow//${packageInfo.name}@${packageInfo.version}//executeSleepTool";`,
+    );
+    expect(transformed.code).not.toContain("__private_workflows.set");
   });
 
   it("registers step functions in step mode", async () => {

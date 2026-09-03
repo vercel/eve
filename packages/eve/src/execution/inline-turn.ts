@@ -83,7 +83,6 @@ export async function runInlineTurn(input: {
     if (
       control.initialCancellation !== undefined ||
       result.action === "cancelled" ||
-      result.sleepDurationMs !== undefined ||
       (result.backgroundTasks?.length ?? 0) > 0
     ) {
       return childOutcome(control, initialStep);

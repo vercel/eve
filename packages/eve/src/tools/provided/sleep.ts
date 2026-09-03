@@ -21,8 +21,8 @@ export type { SleepToolInput, SleepToolOutput };
  * export default sleep();
  * ```
  *
- * Calls pause the durable turn workflow rather than holding an application
- * runtime open with an in-process timer.
+ * Each call runs as a durable workflow, so the wait does not hold an
+ * application runtime open.
  */
 export function sleep(): ToolDefinition<SleepToolInput, SleepToolOutput> {
   return defineTool({

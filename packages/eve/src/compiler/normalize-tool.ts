@@ -6,9 +6,7 @@ import {
   loadModuleBackedDefinition,
   type ModuleBackedDefinitionLoadOptions,
 } from "#compiler/normalize-helpers.js";
-import type { AgentModuleBinding } from "#compiler/source-graph.js";
-import { resolveAuthoredPackageRoot } from "#internal/authored-module-loader.js";
-import { readAuthoredExecuteWorkflowId } from "#internal/workflow-bundle/authored-workflow-modules.js";
+import { readWorkflowFunctionId } from "#internal/workflow/reference.js";
 
 /**
  * Compiled tool entry produced from one authored `tools/*.ts` file.
@@ -108,7 +106,7 @@ export async function compileToolEntry(
     };
   }
 
-  const workflowId = await readToolWorkflowId(options.binding);
+  const workflowId = readWorkflowFunctionId(entry.definition.execute);
   return {
     kind: "tool",
     definition: {
@@ -130,13 +128,4 @@ export async function compileToolEntry(
       sourceKind: "module",
     },
   };
-}
-
-async function readToolWorkflowId(binding: AgentModuleBinding): Promise<string | undefined> {
-  if (binding.backing.kind !== "filesystem") return undefined;
-  const filePath = binding.backing.sourcePath;
-  return await readAuthoredExecuteWorkflowId({
-    appRoot: resolveAuthoredPackageRoot(filePath),
-    filePath,
-  });
 }

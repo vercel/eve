@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ROOT_COMPILED_AGENT_NODE_ID } from "#compiler/manifest.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
+import { executeSleepTool, SLEEP_INPUT_SCHEMA } from "#execution/tools/sleep.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
 import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harness.js";
@@ -53,12 +54,13 @@ function buildSerializedContext(input: {
 async function createWorkflowToolRuntime(input: {
   readonly agentName: string;
   readonly execute: (...args: never[]) => unknown;
+  readonly inputSchema?: ResolvedToolDefinition["inputSchema"];
   readonly toolName: string;
 }): Promise<TestRuntime> {
   const tool: ResolvedToolDefinition = {
     description: `Deploys a service (${input.toolName}).`,
     execute: input.execute as ResolvedToolDefinition["execute"],
-    inputSchema: DEPLOY_INPUT_SCHEMA,
+    inputSchema: input.inputSchema ?? DEPLOY_INPUT_SCHEMA,
     logicalPath: `tools/${input.toolName}.ts`,
     name: input.toolName,
     owner: { kind: "application" },
@@ -71,7 +73,7 @@ async function createWorkflowToolRuntime(input: {
     throw new Error(`Expected ${input.toolName} to be present in the test manifest.`);
   }
   runtime.moduleMap.nodes[ROOT_COMPILED_AGENT_NODE_ID]!.modules[manifestTool.sourceId] = {
-    default: { execute: input.execute },
+    default: { description: tool.description, execute: input.execute },
   };
   // The compiler derives the workflow id from authored source; an in-memory tool
   // has none, so record the id the test tier's transform stamped on the fixture.
@@ -130,6 +132,31 @@ function eventsText(events: readonly { readonly data?: unknown }[]): string {
 }
 
 describe("workflow tools", () => {
+  it("runs the framework sleep tool through the workflow tool path", async () => {
+    const runtime = await createWorkflowToolRuntime({
+      agentName: "workflow-tool-sleep",
+      execute: executeSleepTool,
+      inputSchema: SLEEP_INPUT_SCHEMA,
+      toolName: "sleep",
+    });
+
+    const output = await runtime.run(async () => {
+      const run = await start(workflowEntry, [
+        {
+          input: { message: "Run sleep" },
+          serializedContext: buildSerializedContext({
+            continuationToken: "schedule:workflow-tool-sleep",
+            mode: "task",
+          }),
+        },
+      ]);
+      const result = await run.returnValue;
+      return String(result.output);
+    });
+
+    expect(output).toContain('"waitedSeconds":1');
+  });
+
   it("parks the turn on a workflow tool and resumes with its return value", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-wait",
