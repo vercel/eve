@@ -4,12 +4,12 @@ import type { ActionPresentationByCallId } from "#protocol/message.js";
 import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import type { HarnessToolMap } from "#harness/types.js";
 import type { RuntimeActionRequest } from "#shared/action-types.js";
-import { normalizeActivityText } from "#shared/activity-text.js";
+import { normalizePresentationText } from "#shared/presentation-text.js";
 import { parseJsonObject } from "#shared/json.js";
 
 export interface RuntimeActionRequestProjection {
   readonly action: RuntimeActionRequest;
-  readonly activityLabel?: string;
+  readonly presentationLabel?: string;
 }
 
 export function createPresentedRuntimeActionRequestFromToolCall(input: {
@@ -17,22 +17,22 @@ export function createPresentedRuntimeActionRequestFromToolCall(input: {
   readonly tools: HarnessToolMap;
 }): RuntimeActionRequestProjection {
   const action = createRuntimeActionRequestFromToolCall(input);
-  const start = input.tools.get(input.toolCall.toolName)?.activity?.start;
+  const start = input.tools.get(input.toolCall.toolName)?.label?.start;
   if (start === undefined) return { action };
   try {
-    const label = normalizeActivityText(start(parseJsonObject(action.input)));
-    return label === "" ? { action } : { action, activityLabel: label };
+    const label = normalizePresentationText(start(parseJsonObject(action.input)));
+    return label === "" ? { action } : { action, presentationLabel: label };
   } catch {
     return { action };
   }
 }
 
-export function collectActionActivityLabels(
+export function collectActionPresentation(
   actions: readonly RuntimeActionRequestProjection[],
 ): ActionPresentationByCallId | undefined {
   const presentation = Object.fromEntries(
-    actions.flatMap(({ action, activityLabel }) =>
-      activityLabel === undefined ? [] : [[action.callId, { label: activityLabel }]],
+    actions.flatMap(({ action, presentationLabel }) =>
+      presentationLabel === undefined ? [] : [[action.callId, { label: presentationLabel }]],
     ),
   );
   return Object.keys(presentation).length === 0 ? undefined : presentation;

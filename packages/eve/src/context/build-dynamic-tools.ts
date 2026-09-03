@@ -92,11 +92,7 @@ export function replayDynamicTools(
   return metadata.map((entry) => {
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
-    const activityStart = bindDynamicCallback(
-      entry,
-      "activityStart",
-      entry.callbacks.activity?.start,
-    );
+    const labelStart = bindDynamicCallback(entry, "labelStart", entry.callbacks.label?.start);
     const toModelOutput = bindDynamicCallback(
       entry,
       "toModelOutput",
@@ -145,8 +141,8 @@ export function replayDynamicTools(
       approval: buildReplayedApproval(entry),
       outputSchema: toOutputSchema(entry.outputSchema),
     };
-    if (activityStart !== undefined) {
-      replayed.activity = { start: (input: unknown) => activityStart(input) as string };
+    if (labelStart !== undefined) {
+      replayed.label = { start: (input: unknown) => labelStart(input) as string };
     }
     if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
     return replayed;

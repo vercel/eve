@@ -1,4 +1,4 @@
-import { normalizeActivityText } from "#shared/activity-text.js";
+import { normalizePresentationText } from "#shared/presentation-text.js";
 import {
   type PendingActivitySettlementV1,
   type ActivityActionPhase,
@@ -92,7 +92,7 @@ function startWork(
       : "running");
   const work: ActivityWorkStateV1 = {
     ...event.work,
-    name: event.work.name === undefined ? undefined : normalizeActivityText(event.work.name),
+    name: event.work.name === undefined ? undefined : normalizePresentationText(event.work.name),
     phase: phase as ActivityWorkPhase,
     settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
     startedAt: event.startedAt,
@@ -139,7 +139,7 @@ function startAction(
     ...snapshot,
     actions: replaceBounded(snapshot.actions, event.action.id, {
       ...event.action,
-      name: normalizeActivityText(event.action.name),
+      name: normalizePresentationText(event.action.name),
       phase: phase as ActivityActionPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,
@@ -157,7 +157,7 @@ function updateActionLabel(
 ): ActivitySnapshotV1 {
   const current = snapshot.actions[event.actionId];
   if (current === undefined) return snapshot;
-  const label = normalizeActivityText(event.label);
+  const label = normalizePresentationText(event.label);
   if (current.label === label) return snapshot;
   return {
     ...snapshot,
@@ -197,7 +197,9 @@ function startBlocker(
     blockers: replaceBounded(snapshot.blockers, event.blocker.id, {
       ...event.blocker,
       label:
-        event.blocker.label === undefined ? undefined : normalizeActivityText(event.blocker.label),
+        event.blocker.label === undefined
+          ? undefined
+          : normalizePresentationText(event.blocker.label),
       phase: phase as ActivityBlockerPhase,
       settledAt: pending?.settledAt ?? (phase === "cancelled" ? parent?.settledAt : undefined),
       startedAt: event.startedAt,

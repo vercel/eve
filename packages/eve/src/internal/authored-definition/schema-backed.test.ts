@@ -134,7 +134,7 @@ describe("normalizeToolDefinition", () => {
     expect(() => normalizeToolDefinition(null, FAILURE_MESSAGE)).toThrow(FAILURE_MESSAGE);
   });
 
-  it("accepts and types authored activity labels", () => {
+  it("accepts and types authored tool labels", () => {
     const tool = defineTool({
       label: {
         start(input) {
@@ -153,7 +153,7 @@ describe("normalizeToolDefinition", () => {
     expect(normalizeToolDefinition(tool, FAILURE_MESSAGE).kind).toBe("tool");
   });
 
-  it("rejects malformed activity definitions", () => {
+  it("rejects malformed label definitions", () => {
     expect(() =>
       normalizeToolDefinition(
         {

@@ -3,9 +3,9 @@ import type { ToolSet, TypedToolCall } from "ai";
 import { createRuntimeToolResultFromValue } from "#harness/action-result-helpers.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
-  collectActionActivityLabels,
+  collectActionPresentation,
   createPresentedRuntimeActionRequestFromToolCall,
-} from "#harness/action-activity.js";
+} from "#harness/action-presentation.js";
 import type { HarnessEmitFn, HarnessToolMap } from "#harness/types.js";
 import { createActionResultEvent, createActionsRequestedEvent } from "#protocol/message.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
@@ -64,7 +64,7 @@ export async function emitWorkflowActionsRequested(input: {
     await input.emit(
       createActionsRequestedEvent({
         actions: [projection.action],
-        presentation: collectActionActivityLabels([projection]),
+        presentation: collectActionPresentation([projection]),
         sequence: input.emissionState.sequence,
         stepIndex: input.emissionState.stepIndex,
         turnId: input.emissionState.turnId,

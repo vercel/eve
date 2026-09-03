@@ -1481,13 +1481,13 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     registerTestCallback("deploy", "execute", () => ({ ok: true }));
     registerTestCallback(
       "deploy",
-      "activityStart",
+      "labelStart",
       (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
     );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
         callbacks: {
-          activity: { start: { closure: {} } },
+          label: { start: { closure: {} } },
           execute: { closure: {} },
         },
         description: "Deploy.",
@@ -1498,7 +1498,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       },
     ]);
 
-    expect(buildDynamicTools(ctx)[0]?.activity?.start?.({ environment: "preview" })).toBe(
+    expect(buildDynamicTools(ctx)[0]?.label?.start?.({ environment: "preview" })).toBe(
       "Deploy to preview",
     );
     getDynamicCallbackRegistry().delete("deploy");

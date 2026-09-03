@@ -4,7 +4,7 @@ import {
 } from "#subagents/handles/query.js";
 import { describe, expect, it } from "vitest";
 
-import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-activity.js";
+import { createPresentedRuntimeActionRequestFromToolCall } from "#harness/action-presentation.js";
 import {
   createCoordinationRequestFromToolCall,
   createRuntimeActionRequestFromToolCall,
@@ -80,7 +80,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         [
           "deploy",
           {
-            activity: {
+            label: {
               start: (input) =>
                 `Deploy to ${String((input as { environment: unknown }).environment)}`,
             },
@@ -99,7 +99,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         kind: "tool-call",
         toolName: "deploy",
       },
-      activityLabel: "Deploy to production",
+      presentationLabel: "Deploy to production",
     });
   });
 
@@ -115,7 +115,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         [
           "mutate",
           {
-            activity: {
+            label: {
               start: (input) => {
                 const mutable = input as { nested: { value: string }; self?: unknown };
                 mutable.nested.value = "changed";
@@ -154,7 +154,7 @@ describe("createRuntimeActionRequestFromToolCall", () => {
           [
             "deploy",
             {
-              activity: {
+              label: {
                 start: () => {
                   throw new Error("presentation failed");
                 },

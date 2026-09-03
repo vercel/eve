@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { type WebFetchInput, executeWebFetchTool } from "#execution/web-fetch/execute.js";
-import { activityLabel } from "#tools/activity-label.js";
+import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
 export const WEB_FETCH_INPUT_SCHEMA = z.strictObject({
@@ -26,7 +26,7 @@ export type WebFetchToolInput = z.infer<typeof WEB_FETCH_INPUT_SCHEMA>;
 export type WebFetchToolOutput = z.infer<typeof WEB_FETCH_OUTPUT_SCHEMA>;
 
 export const webFetch: ToolDefinition<WebFetchToolInput, WebFetchToolOutput> = defineTool({
-  label: { start: (input) => activityLabel("Fetch", input.url) },
+  label: { start: (input) => toolLabel("Fetch", input.url) },
   description: [
     "Fetch a webpage and return its content in the requested format. Use this to retrieve and analyze content from URLs.",
     "",

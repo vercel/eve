@@ -9,7 +9,7 @@ import { webFetch } from "#tools/provided/web-fetch.js";
 import { resolveWebSearchActivityLabel } from "#harness/provider-tool-schemas.js";
 import { writeFile } from "#tools/provided/write-file.js";
 
-describe("provided tool activity labels", () => {
+describe("provided tool labels", () => {
   it("labels every tool previously formatted by Slack", () => {
     expect(bash.label?.start({ command: "pnpm test" })).toBe("Run pnpm test");
     expect(glob.label?.start({ pattern: "**/*.ts" })).toBe("Find **/*.ts");

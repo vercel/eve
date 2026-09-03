@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { type GlobInput, executeGlobOnSandbox } from "#execution/sandbox/glob-tool.js";
-import { activityLabel } from "#tools/activity-label.js";
+import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -44,7 +44,7 @@ export type GlobToolOutput = z.infer<typeof GLOB_OUTPUT_SCHEMA>;
  * Framework-owned executor that delegates to the default sandbox.
  */
 export const glob: ToolDefinition<GlobToolInput, GlobToolOutput> = defineTool({
-  label: { start: (input) => activityLabel("Find", input.pattern) },
+  label: { start: (input) => toolLabel("Find", input.pattern) },
   description: [
     "Fast file pattern matching tool that works with any codebase size.",
     "",

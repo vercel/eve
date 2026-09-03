@@ -14,7 +14,7 @@ import { toInputSchema } from "#tools/schema.js";
  */
 export interface MockToolInput {
   /** Presentation callbacks derived from tool lifecycle values. */
-  readonly activity?: ResolvedToolDefinition["activity"];
+  readonly label?: ResolvedToolDefinition["label"];
   /** Tool name exposed to the model. */
   readonly name: string;
   /** Human-readable description surfaced in the prompt. */
@@ -50,7 +50,7 @@ export interface MockToolInput {
 export function mockTool(input: MockToolInput): ResolvedToolDefinition {
   const logicalPath = input.logicalPath ?? `tools/${sanitizeLogicalPathSegment(input.name)}.ts`;
   const definition: ResolvedToolDefinition = {
-    activity: input.activity,
+    label: input.label,
     description: input.description ?? `${input.name} mock tool.`,
     inputSchema: toInputSchema(input.inputSchema ?? null),
     logicalPath,
