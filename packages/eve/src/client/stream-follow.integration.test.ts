@@ -4,7 +4,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { Client } from "./client.js";
 import { followStreamIterable } from "./open-stream.js";
-import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_DEFERRED_TAIL_INDEX,
+  EVE_STREAM_ERROR_CONTROL,
+  EVE_STREAM_TAIL_INDEX_CONTROL,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+  EVE_STREAM_VERSION_HEADER,
+} from "#protocol/message.js";
 
 const servers: Server[] = [];
 const streamHeaders = {
@@ -199,6 +206,129 @@ describe("stream following over real sockets", () => {
     expect(connections).toBe(3);
     expect(tailRequests).toEqual(["1", null, null]);
     expect(session.state).toMatchObject({ sessionId: "s1", streamIndex: 6 });
+  });
+
+  it("reads a deferred tail after response headers without exposing its control line", async () => {
+    const requestedModes: Array<{ defer: string | null; include: string | null }> = [];
+    const host = await listen(
+      createServer((req, res) => {
+        const url = new URL(req.url ?? "", "http://127.0.0.1");
+        requestedModes.push({
+          defer: url.searchParams.get("deferTailIndex"),
+          include: url.searchParams.get("includeTailIndex"),
+        });
+        res.writeHead(200, {
+          ...streamHeaders,
+          [EVE_STREAM_TAIL_INDEX_HEADER]: EVE_STREAM_DEFERRED_TAIL_INDEX,
+        });
+        res.write("\n");
+        setTimeout(() => {
+          res.write(`${JSON.stringify({ $eve: EVE_STREAM_TAIL_INDEX_CONTROL, tailIndex: 1 })}\n`);
+          res.end(
+            `${JSON.stringify({ type: "step.started", data: {} })}\n` +
+              `${JSON.stringify({ type: "step.completed", data: {} })}\n`,
+          );
+        }, 40);
+      }),
+    );
+
+    const received: string[] = [];
+    for await (const event of follow(host, { follow: false })) {
+      received.push(event.type);
+    }
+
+    expect(received).toEqual(["step.started", "step.completed"]);
+    expect(requestedModes).toEqual([{ defer: "1", include: "1" }]);
+  });
+
+  it("does not retry a deferred stream that fails before reporting its tail", async () => {
+    let connections = 0;
+    const host = await listen(
+      createServer((_req, res) => {
+        connections += 1;
+        res.writeHead(200, {
+          ...streamHeaders,
+          [EVE_STREAM_TAIL_INDEX_HEADER]: EVE_STREAM_DEFERRED_TAIL_INDEX,
+        });
+        res.end(
+          `${JSON.stringify({
+            $eve: EVE_STREAM_ERROR_CONTROL,
+            body: {
+              code: "stream_tail_unavailable",
+              error: "Session stream is unavailable.",
+              ok: false,
+            },
+            status: 503,
+          })}\n`,
+        );
+      }),
+    );
+
+    await expect(async () => {
+      for await (const _event of follow(host, { follow: false })) {
+        // No event should escape the failed control response.
+      }
+    }).rejects.toMatchObject({
+      code: "stream_tail_unavailable",
+      message: "Session stream is unavailable.",
+      status: 503,
+    });
+    expect(connections).toBe(1);
+  });
+
+  it("retries a connection that drops before reporting its deferred tail", async () => {
+    let connections = 0;
+    const host = await listen(
+      createServer((_req, res) => {
+        connections += 1;
+        res.writeHead(200, {
+          ...streamHeaders,
+          [EVE_STREAM_TAIL_INDEX_HEADER]: EVE_STREAM_DEFERRED_TAIL_INDEX,
+        });
+        if (connections === 1) return void res.end("\n");
+        res.end(
+          `${JSON.stringify({ $eve: EVE_STREAM_TAIL_INDEX_CONTROL, tailIndex: 0 })}\n` +
+            `${JSON.stringify({ type: "step.completed", data: {} })}\n`,
+        );
+      }),
+    );
+
+    const received: string[] = [];
+    for await (const event of follow(host, { follow: false })) {
+      received.push(event.type);
+    }
+
+    expect(received).toEqual(["step.completed"]);
+    expect(connections).toBe(2);
+  });
+
+  it("retries once when a deferred tail stream stays idle", async () => {
+    let connections = 0;
+    const host = await listen(
+      createServer((_req, res) => {
+        connections += 1;
+        res.writeHead(200, {
+          ...streamHeaders,
+          [EVE_STREAM_TAIL_INDEX_HEADER]: EVE_STREAM_DEFERRED_TAIL_INDEX,
+        });
+        res.write("\n");
+      }),
+    );
+
+    const stream = followStreamIterable({
+      follow: false,
+      host,
+      resolveHeaders: () => Promise.resolve(new Headers()),
+      sessionId: "s",
+      startIndex: 0,
+      streamReadIdleTimeoutMs: 20,
+      streamReconnectPolicy: {
+        streamOpenReconnectPolicy: { baseDelayMs: 1, maxDelayMs: 1 },
+      },
+    });
+
+    await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" });
+    expect(connections).toBe(2);
   });
 
   it("ends a follow: false read immediately when the cursor is already past the tail", async () => {
