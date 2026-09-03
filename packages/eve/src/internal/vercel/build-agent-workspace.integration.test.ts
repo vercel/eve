@@ -63,7 +63,7 @@ describe("buildAgentWorkspace", () => {
       { handle: "filesystem" },
     ]);
     await expect(readFile(join(output, "static", "index.html"), "utf8")).resolves.toContain(
-      '<a href="/research/">research</a>',
+      "2 agents are up and accepting messages.",
     );
     await expect(
       access(join(root, ".eve", "vercel-services", "eve-support")),
