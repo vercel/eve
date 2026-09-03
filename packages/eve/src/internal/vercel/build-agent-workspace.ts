@@ -10,6 +10,7 @@ import {
 } from "#internal/vercel-agent-summary.js";
 import type { AgentWorkspace } from "#internal/project-context.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
+import { buildMultiAgentLandingPage } from "#internal/vercel/build-multi-agent-landing-page.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { readVercelJsonFile } from "#internal/vercel/vercel-services-config.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
@@ -73,12 +74,15 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
     join(workspace.root, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
     `${JSON.stringify(createMultiAgentSummary(workspace), null, 2)}\n`,
   );
+  const staticDirectory = join(outputDirectory, "static");
+  await mkdir(staticDirectory, { recursive: true });
+  await writeFile(join(staticDirectory, "index.html"), buildMultiAgentLandingPage(workspace));
   await writeFile(
     join(outputDirectory, "config.json"),
     `${JSON.stringify(
       {
         version: VERCEL_BUILD_OUTPUT_VERSION,
-        routes: assembled.routes,
+        routes: [...assembled.routes, { handle: "filesystem" }],
         services: assembled.services,
       },
       null,

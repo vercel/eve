@@ -38,6 +38,7 @@ export interface EveVercelBuildTarget {
 }
 
 export interface EveVercelServiceContribution {
+  readonly homeRouteSrc?: string;
   readonly rootDirectory: string;
   readonly routeSrc: string;
   readonly service: GeneratedVercelServiceConfig;
@@ -78,6 +79,20 @@ export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {
   };
 }
 
+export function createEveHomeRouteSrc(publicRoutePrefix: string): string | undefined {
+  if (publicRoutePrefix.length === 0) return undefined;
+  const prefix = publicRoutePrefix.startsWith("/") ? publicRoutePrefix : `/${publicRoutePrefix}`;
+  return `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/?$`;
+}
+
+/** Route a member's public base path to its package-owned home channel. */
+export function createEveHomePathRoute(publicRoutePrefix: string): VercelRouteConfig | undefined {
+  const src = createEveHomeRouteSrc(publicRoutePrefix);
+  return src === undefined
+    ? undefined
+    : { src, transforms: [{ args: "/", op: "set", type: "request.path" }] };
+}
+
 export function createEvePublicRoute(serviceName: string, routeSrc: string): VercelRouteConfig {
   return { destination: { service: serviceName, type: "service" }, src: routeSrc };
 }
@@ -114,6 +129,8 @@ export function compileEveVercelService(input: {
 }): EveVercelServiceContribution {
   const serviceName = createEveServiceName(input.agent.name);
   const routeSrc = createEveServiceRouteSrc(input.agent.publicRoutePrefix);
+  const homeRouteSrc = createEveHomeRouteSrc(input.agent.publicRoutePrefix);
+  const homeRoute = createEveHomePathRoute(input.agent.publicRoutePrefix);
   const build = createIsolatedBuild({
     agent: input.agent,
     hostOutputDirectory: input.target.hostOutputDirectory,
@@ -122,13 +139,17 @@ export function compileEveVercelService(input: {
   });
 
   return {
+    ...(homeRouteSrc === undefined ? {} : { homeRouteSrc }),
     rootDirectory: build.rootDirectory,
     routeSrc,
     service: {
       buildCommand: build.buildCommand,
       framework: "eve",
       root: build.root,
-      routes: [createEveRequestPathRoute(routeSrc)],
+      routes: [
+        ...(homeRoute === undefined ? [] : [homeRoute]),
+        createEveRequestPathRoute(routeSrc),
+      ],
       ...(input.agent.publicRoutePrefix.length > 0
         ? { routePrefix: input.agent.publicRoutePrefix }
         : {}),
