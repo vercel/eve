@@ -1,6 +1,6 @@
 import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
-import type { MockModelRequest, MockModelResponse } from "eve/evals";
+import { mockModel, type MockModelRequest, type MockModelResponse } from "eve/evals";
 
 const RECOVERY_TOKEN = "CANCELLED-SUBAGENT-RECOVERED";
 
@@ -52,8 +52,12 @@ function respond(request: MockModelRequest): MockModelResponse | string {
   return `Mock reply: ${message}`;
 }
 
-const base = e2eAgentConfig({ mock: respond });
+const base = e2eAgentConfig();
 
 export default defineAgent({
   ...base,
+  // Cancellation changes the model-visible agent state mid-turn. Keep this
+  // fixture's control flow deterministic in every E2E environment.
+  model: mockModel(respond),
+  modelContextWindowTokens: base.modelContextWindowTokens ?? 1_000_000,
 });

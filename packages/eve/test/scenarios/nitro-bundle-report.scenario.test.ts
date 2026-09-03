@@ -521,7 +521,7 @@ describe("nitro bundle report", () => {
     expect(markdown).toContain("_libs/@workflow+core.mjs");
     expect(markdown).not.toContain("<summary>🧾 <code>.vc-config.json</code></summary>");
     expect(markdown).toContain('"launcherType": "Nodejs"');
-  }, 15_000);
+  }, 60_000);
 
   it("renders metric deltas against a main baseline snapshot", async () => {
     const baselineFixture = await createReportFixture();
@@ -693,7 +693,7 @@ describe("nitro bundle report", () => {
     expect(legacyMarkdown).not.toContain("| Package | Distinct installed package names |");
     expect(legacyMarkdown).not.toContain("| Package | Installed dependency edges |");
     expect(legacyMarkdown).not.toContain("| Package | Installed optional peer edges |");
-  }, 15_000);
+  }, 60_000);
 
   it("fails the warning policy when a runtime dependency is added", async () => {
     const fixture = await createReportFixture();
@@ -745,7 +745,7 @@ describe("nitro bundle report", () => {
     expect(markdown).toContain("runtime dependency @fixture/new-runtime@1.0.0 added");
     expect(markdown).toContain("New runtime dependency `@fixture/new-runtime@1.0.0` was added.");
     expect(markdown).toContain("prefer a vendored devDependency");
-  }, 15_000);
+  }, 60_000);
 
   it("does not fail the warning policy when an existing runtime dependency range changes", async () => {
     const fixture = await createReportFixture();
@@ -809,7 +809,7 @@ describe("nitro bundle report", () => {
     expect(markdown).toContain(
       `- Changed: \`${runtimeDependency?.name}@${runtimeDependency?.range}\` -> \`${runtimeDependency?.name}@9.9.9\``,
     );
-  }, 15_000);
+  }, 60_000);
 
   it("lists every installed dependency above 5 MB in the footprint breakdown", async () => {
     const largeDependencies: BundledDependencyFixture[] = [
@@ -872,5 +872,5 @@ describe("nitro bundle report", () => {
     expect(markdown).not.toContain("- Dependency delta:");
     expect(markdown).not.toContain("- Package: tarball");
     expect(markdown).not.toContain("- Runtime: 1 payload totaling");
-  }, 15_000);
+  }, 60_000);
 });

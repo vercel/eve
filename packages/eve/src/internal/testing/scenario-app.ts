@@ -301,6 +301,13 @@ async function installScenarioDependencies(input: {
     return;
   }
 
+  // Keep temporary scenario installs independent of developer and runner
+  // scoped registries. The project-local config also disables release-age
+  // gating for the freshly packed eve tarball.
+  await writeFile(
+    join(input.appRoot, ".npmrc"),
+    ["registry=https://registry.npmjs.org/", "minimum-release-age=0", ""].join("\n"),
+  );
   await runPnpmCommand({
     args: [
       "install",
@@ -311,6 +318,11 @@ async function installScenarioDependencies(input: {
       "--config.minimum-release-age=0",
     ],
     cwd: input.appRoot,
+    env: {
+      ...process.env,
+      NPM_CONFIG_USERCONFIG: join(input.appRoot, ".npmrc"),
+      npm_config_userconfig: join(input.appRoot, ".npmrc"),
+    },
   });
 }
 
