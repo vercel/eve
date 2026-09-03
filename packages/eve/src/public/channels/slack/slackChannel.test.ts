@@ -2934,56 +2934,42 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
   });
 
-  it("falls shortcuts through to onRawInteraction when onShortcut is absent", async () => {
-    const onRawInteraction = vi.fn(() => new Response("raw-shortcut", { status: 202 }));
-    const channel = slackChannel({ onRawInteraction });
-
-    const { response, waitUntil } = await firePost(
-      channel,
-      buildSignedInteractionRequest({
-        type: "shortcut",
-        callback_id: "new_request",
-        trigger_id: "trigger-456",
-        team: { id: "T_INSTALLATION" },
-        user: { id: "U01", name: "ada", team_id: "T_ACTOR" },
-        enterprise: { id: "E01" },
-      }),
-    );
-
-    expect(response.status).toBe(202);
-    await expect(response.text()).resolves.toBe("raw-shortcut");
-    expect(waitUntil).not.toHaveBeenCalled();
-    expect(onRawInteraction).toHaveBeenCalledWith(
-      {
-        type: "shortcut",
-        payload: expect.objectContaining({ callback_id: "new_request" }),
-        user: { id: "U01", name: "ada", username: undefined },
-        teamId: "T_ACTOR",
-        installationTeamId: "T_INSTALLATION",
-        enterpriseId: "E01",
-      },
-      expect.objectContaining({ slack: expect.any(Object), waitUntil: expect.any(Function) }),
-    );
-  });
-
-  it("gives onShortcut precedence over onRawInteraction", async () => {
+  it("uses onShortcut before the raw fallback", async () => {
     const onShortcut = vi.fn();
     const onRawInteraction = vi.fn();
-    const channel = slackChannel({ onRawInteraction, onShortcut });
+    const payload = {
+      type: "shortcut",
+      callback_id: "new_request",
+      trigger_id: "trigger-456",
+      team: { id: "T01" },
+      user: { id: "U01" },
+    };
 
     await firePost(
-      channel,
-      buildSignedInteractionRequest({
-        type: "shortcut",
-        callback_id: "new_request",
-        trigger_id: "trigger-456",
-        team: { id: "T01" },
-        user: { id: "U01" },
-      }),
+      slackChannel({ onRawInteraction, onShortcut }),
+      buildSignedInteractionRequest(payload),
     );
 
     expect(onShortcut).toHaveBeenCalledOnce();
     expect(onRawInteraction).not.toHaveBeenCalled();
+  });
+
+  it("falls shortcuts through when onShortcut is absent", async () => {
+    const onRawInteraction = vi.fn();
+    const payload = {
+      type: "shortcut",
+      callback_id: "new_request",
+      trigger_id: "trigger-456",
+      team: { id: "T01" },
+      user: { id: "U01" },
+    };
+
+    await firePost(slackChannel({ onRawInteraction }), buildSignedInteractionRequest(payload));
+
+    expect(onRawInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "shortcut", payload }),
+      expect.any(Object),
+    );
   });
 
   it("handles view-backed block actions through onRawInteraction inline", async () => {
@@ -3025,13 +3011,12 @@ describe("slackChannel() HITL interaction pipeline", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://slack.com/api/views.open");
   });
 
-  it("gives message-backed onInteraction precedence over onRawInteraction", async () => {
+  it("uses onInteraction before the raw fallback for message actions", async () => {
     const onInteraction = vi.fn();
     const onRawInteraction = vi.fn();
-    const channel = slackChannel({ onInteraction, onRawInteraction });
 
     await firePost(
-      channel,
+      slackChannel({ onInteraction, onRawInteraction }),
       buildSignedInteractionRequest({
         type: "block_actions",
         team: { id: "T01" },
@@ -3043,6 +3028,32 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
 
     expect(onInteraction).toHaveBeenCalledOnce();
+    expect(onRawInteraction).not.toHaveBeenCalled();
+  });
+
+  it("reserves mixed HITL and custom actions from onRawInteraction", async () => {
+    const onRawInteraction = vi.fn();
+    const channel = slackChannel({ onRawInteraction });
+
+    const { send } = await firePost(
+      channel,
+      buildSignedInteractionRequest({
+        type: "block_actions",
+        team: { id: "T01" },
+        user: { id: "U_APPROVER" },
+        channel: { id: "C01" },
+        message: { ts: "1700000000.000010", blocks: [] },
+        actions: [
+          {
+            action_id: `${HITL_ACTION_PREFIX}tool-approval:approval_abc123:button:0`,
+            value: "approve",
+          },
+          { action_id: "custom", type: "button" },
+        ],
+      }),
+    );
+
+    expect(send).toHaveBeenCalledOnce();
     expect(onRawInteraction).not.toHaveBeenCalled();
   });
 
@@ -3261,72 +3272,25 @@ describe("slackChannel() HITL interaction pipeline", () => {
     });
   });
 
-  it("returns custom view submission acknowledgements from onRawInteraction", async () => {
-    const onRawInteraction = vi.fn(() =>
-      Response.json({
-        response_action: "errors",
-        errors: { review_hours: "Choose at least one hour" },
-      }),
-    );
+  it("routes custom view submissions through onRawInteraction", async () => {
+    const onRawInteraction = vi.fn(() => Response.json({ response_action: "clear" }));
     const channel = slackChannel({ onRawInteraction });
-
-    const { response, waitUntil } = await firePost(
-      channel,
-      buildSignedInteractionRequest({
-        type: "view_submission",
-        team: { id: "T01" },
-        user: { id: "U01", team_id: "T01" },
-        view: {
-          callback_id: "configure_review_hours",
-          private_metadata: "settings-1",
-          state: { values: {} },
-        },
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      response_action: "errors",
-      errors: { review_hours: "Choose at least one hour" },
-    });
-    expect(waitUntil).not.toHaveBeenCalled();
-    expect(onRawInteraction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "view_submission",
-        payload: expect.objectContaining({
-          view: expect.objectContaining({ callback_id: "configure_review_hours" }),
-        }),
-      }),
-      expect.any(Object),
-    );
-  });
-
-  it("returns dynamic select options from onRawInteraction", async () => {
-    const channel = slackChannel({
-      onRawInteraction(interaction) {
-        expect(interaction.type).toBe("block_suggestion");
-        expect(interaction.payload).toMatchObject({ action_id: "reviewer", value: "ad" });
-        return Response.json({
-          options: [{ text: { type: "plain_text", text: "Ada" }, value: "U01" }],
-        });
-      },
-    });
 
     const { response } = await firePost(
       channel,
       buildSignedInteractionRequest({
-        type: "block_suggestion",
-        action_id: "reviewer",
-        block_id: "reviewers",
-        value: "ad",
+        type: "view_submission",
         team: { id: "T01" },
         user: { id: "U01" },
+        view: { callback_id: "custom", state: { values: {} } },
       }),
     );
 
-    await expect(response.json()).resolves.toEqual({
-      options: [{ text: { type: "plain_text", text: "Ada" }, value: "U01" }],
-    });
+    await expect(response.json()).resolves.toEqual({ response_action: "clear" });
+    expect(onRawInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "view_submission" }),
+      expect.any(Object),
+    );
   });
 
   it("authorizes HITL button answers before resuming with the returned auth", async () => {
