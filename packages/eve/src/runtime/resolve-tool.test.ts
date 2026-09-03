@@ -29,7 +29,7 @@ function moduleMap(value: unknown): CompiledModuleMap {
 }
 
 describe("resolveToolDefinition", () => {
-  it("reattaches authored activity callbacks", async () => {
+  it("reattaches authored label callbacks", async () => {
     const resolved = await resolveToolDefinition(
       definition,
       moduleMap({
@@ -47,11 +47,11 @@ describe("resolveToolDefinition", () => {
       { kind: "application" },
     );
 
-    expect(resolved.activity?.start?.({ environment: "production" })).toBe("Deploy to production");
+    expect(resolved.label?.start?.({ environment: "production" })).toBe("Deploy to production");
     expect(
-      resolved.activity?.complete?.({ environment: "production" }, { url: "https://example.com" }),
+      resolved.label?.complete?.({ environment: "production" }, { url: "https://example.com" }),
     ).toBe("Deployed to https://example.com");
-    expect(resolved.activity?.delta?.({ environment: "production" }, { phase: "Uploading" })).toBe(
+    expect(resolved.label?.delta?.({ environment: "production" }, { phase: "Uploading" })).toBe(
       "Uploading",
     );
   });

@@ -52,7 +52,7 @@ async function transformAndEval(
     stampDurableDynamicToolCallbacks(
       entry,
       collectDurableDynamicToolCallbacks({
-        activity: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
+        label: entry.label as { complete?: never; delta?: never; start?: never } | undefined,
         approval: entry.approval as never,
         execute: entry.execute as never,
         toModelOutput: entry.toModelOutput as never,
@@ -79,7 +79,7 @@ async function transformAndEval(
 
 type StampedCallback = { callback: Function; closure: Record<string, unknown> };
 type StampedCallbacks = Record<string, StampedCallback> & {
-  activity?: { complete?: StampedCallback; delta?: StampedCallback; start?: StampedCallback };
+  label?: { complete?: StampedCallback; delta?: StampedCallback; start?: StampedCallback };
 };
 
 function durableCallbacks(tool: unknown): StampedCallbacks {
@@ -107,7 +107,7 @@ import { defineDynamic, defineTool } from "eve/tools";
 export default defineDynamic({
   events: {
     "session.started": async () => {
-      const activityPrefix = "Deploy";
+      const labelPrefix = "Deploy";
       const executePrefix = "execute";
       const resultPrefix = "Deployed to";
       const updateSuffix = " sources";
@@ -120,7 +120,7 @@ export default defineDynamic({
           inputSchema: { type: "object" },
           label: {
             start(input) {
-              return activityPrefix + " " + input.value;
+              return labelPrefix + " " + input.value;
             },
             complete(_input, output) {
               return resultPrefix + " " + output.url;
@@ -159,23 +159,23 @@ export default defineDynamic({
 
     expect(Object.keys(callbacks)).toEqual([
       "execute",
-      "activity",
+      "label",
       "approvalRequest",
       "approvalResponse",
       "toModelOutput",
     ]);
     expect(callbacks.execute!.closure).toEqual({ executePrefix: "execute" });
-    expect(callbacks.activity?.start?.closure).toEqual({ activityPrefix: "Deploy" });
-    expect(callbacks.activity?.complete?.closure).toEqual({ resultPrefix: "Deployed to" });
-    expect(callbacks.activity?.delta?.closure).toEqual({ updateSuffix: " sources" });
+    expect(callbacks.label?.start?.closure).toEqual({ labelPrefix: "Deploy" });
+    expect(callbacks.label?.complete?.closure).toEqual({ resultPrefix: "Deployed to" });
+    expect(callbacks.label?.delta?.closure).toEqual({ updateSuffix: " sources" });
     expect(callbacks.approvalRequest!.closure).toEqual({ requestReason: "confirm" });
     expect(callbacks.approvalResponse!.closure).toEqual({ allowedResponder: "user-123" });
     expect(callbacks.toModelOutput!.closure).toEqual({ projectionPrefix: "visible" });
     const callbackValues = [
       callbacks.execute,
-      callbacks.activity?.start,
-      callbacks.activity?.complete,
-      callbacks.activity?.delta,
+      callbacks.label?.start,
+      callbacks.label?.complete,
+      callbacks.label?.delta,
       callbacks.approvalRequest,
       callbacks.approvalResponse,
       callbacks.toModelOutput,

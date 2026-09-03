@@ -43,7 +43,7 @@ interface ToolDefinitionBase {
 export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
   /** Returns the presentation-safe label when one action invocation starts. */
   start(input: Readonly<TInput>): string;
-  /** Projects one preliminary output snapshot into presentation-safe activity text. */
+  /** Projects one preliminary output snapshot into presentation-safe label text. */
   delta?(input: Readonly<TInput>, partial: Readonly<TOutput>): string;
   /** Projects a successful final output into presentation-safe settlement text. */
   complete?(input: Readonly<TInput>, output: Readonly<TOutput>): string;
@@ -56,14 +56,14 @@ export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
  * Authored public definitions (see {@link PublicToolDefinition}) do not
  * carry `name`; identity comes from the file path.
  */
-export interface InternalToolActivityDefinition {
+export interface InternalToolLabelDefinition {
   readonly complete?: (input: unknown, output: unknown) => string;
   readonly delta?: (input: unknown, partial: unknown) => string;
   readonly start?: (input: unknown) => string;
 }
 
 export interface InternalToolDefinition extends ToolDefinitionBase {
-  activity?: InternalToolActivityDefinition;
+  label?: InternalToolLabelDefinition;
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
@@ -396,7 +396,7 @@ export function stampToolDefinition<
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
-      activity: definition.label,
+      label: definition.label,
       approval: definition.approval,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,

@@ -54,7 +54,7 @@ import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
 } from "#harness/action-presentation.js";
-import { projectResultActivity, projectUpdateActivity } from "#harness/activity-presentation.js";
+import { projectResultPresentation, projectDeltaPresentation } from "#harness/tool-presentation.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -436,10 +436,10 @@ async function consumeStreamContent(
         type: "subagent.completed",
       });
     }
-    const activityResult =
+    const resultPresentation =
       result.isError === true
         ? undefined
-        : projectResultActivity(
+        : projectResultPresentation(
             options?.tools.get(result.toolName),
             result.callId,
             actionInputs.get(result.callId),
@@ -447,7 +447,7 @@ async function consumeStreamContent(
           );
     await emitFn(
       createActionResultEvent({
-        presentation: activityResult,
+        presentation: resultPresentation,
         result,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
@@ -457,7 +457,7 @@ async function consumeStreamContent(
   };
 
   const emitActionPartial = async (result: RuntimeToolResultActionResult): Promise<void> => {
-    const activityUpdate = projectUpdateActivity(
+    const deltaPresentation = projectDeltaPresentation(
       options?.tools.get(result.toolName),
       result.callId,
       actionInputs.get(result.callId),
@@ -465,7 +465,7 @@ async function consumeStreamContent(
     );
     await emitFn(
       createActionPartialEvent({
-        presentation: activityUpdate,
+        presentation: deltaPresentation,
         result,
         sequence: state.sequence,
         stepIndex: state.stepIndex,

@@ -9,13 +9,13 @@ import {
 const reference = { closure: {} };
 
 describe("hasUnregisteredDurableDynamicCallbacks", () => {
-  it("checks nested activity references by their registry phases", () => {
-    const name = "nested-activity-registration-test";
+  it("checks nested label references by their registry phases", () => {
+    const name = "nested-label-registration-test";
     const phases: DurableDynamicCallbackPhase[] = [
       "execute",
-      "activityComplete",
-      "activityDelta",
-      "activityStart",
+      "labelComplete",
+      "labelDelta",
+      "labelStart",
     ];
     for (const phase of phases) {
       registerDurableDynamicCallback({ callback: () => undefined, phase, toolName: name });
@@ -25,7 +25,7 @@ describe("hasUnregisteredDurableDynamicCallbacks", () => {
       hasUnregisteredDurableDynamicCallbacks([
         {
           callbacks: {
-            activity: {
+            label: {
               complete: reference,
               delta: reference,
               start: reference,
@@ -38,8 +38,8 @@ describe("hasUnregisteredDurableDynamicCallbacks", () => {
     ).toBe(false);
   });
 
-  it("detects a missing nested activity phase", () => {
-    const name = "missing-nested-activity-registration-test";
+  it("detects a missing nested label phase", () => {
+    const name = "missing-nested-label-registration-test";
     registerDurableDynamicCallback({
       callback: () => undefined,
       phase: "execute",
@@ -49,7 +49,7 @@ describe("hasUnregisteredDurableDynamicCallbacks", () => {
     expect(
       hasUnregisteredDurableDynamicCallbacks([
         {
-          callbacks: { activity: { delta: reference }, execute: reference },
+          callbacks: { label: { delta: reference }, execute: reference },
           name,
         },
       ]),

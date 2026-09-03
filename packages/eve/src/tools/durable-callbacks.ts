@@ -3,9 +3,9 @@ import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type DurableDynamicCallbackPhase =
-  | "activityComplete"
-  | "activityDelta"
-  | "activityStart"
+  | "labelComplete"
+  | "labelDelta"
+  | "labelStart"
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
@@ -25,7 +25,7 @@ export interface DurableDynamicCallbackReference {
 
 export interface DurableDynamicToolCallbacks {
   readonly execute: DurableDynamicCallbackReference;
-  readonly activity?: {
+  readonly label?: {
     readonly complete?: DurableDynamicCallbackReference;
     readonly delta?: DurableDynamicCallbackReference;
     readonly start?: DurableDynamicCallbackReference;
@@ -43,7 +43,7 @@ export interface StampedDurableDynamicCallback {
 
 export type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
-  activity: {
+  label: {
     readonly complete?: StampedDurableDynamicCallback;
     readonly delta?: StampedDurableDynamicCallback;
     readonly start?: StampedDurableDynamicCallback;
@@ -123,9 +123,9 @@ function durableCallbackPhases(
     DurableDynamicCallbackReference | undefined,
   ])[] = [
     ["execute", callbacks.execute],
-    ["activityComplete", callbacks.activity?.complete],
-    ["activityDelta", callbacks.activity?.delta],
-    ["activityStart", callbacks.activity?.start],
+    ["labelComplete", callbacks.label?.complete],
+    ["labelDelta", callbacks.label?.delta],
+    ["labelStart", callbacks.label?.start],
     ["approvalRequest", callbacks.approvalRequest],
     ["approvalResponse", callbacks.approvalResponse],
     ["toModelOutput", callbacks.toModelOutput],
@@ -164,7 +164,7 @@ export function stampDurableDynamicToolCallbacks(
 }
 
 export function collectDurableDynamicToolCallbacks(input: {
-  readonly activity?: {
+  readonly label?: {
     readonly complete?: (...args: never[]) => unknown;
     readonly delta?: (...args: never[]) => unknown;
     readonly start?: (...args: never[]) => unknown;
@@ -173,9 +173,9 @@ export function collectDurableDynamicToolCallbacks(input: {
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
-  const activityComplete = readDurableDynamicCallback(input.activity?.complete);
-  const activityDelta = readDurableDynamicCallback(input.activity?.delta);
-  const activityStart = readDurableDynamicCallback(input.activity?.start);
+  const labelComplete = readDurableDynamicCallback(input.label?.complete);
+  const labelDelta = readDurableDynamicCallback(input.label?.delta);
+  const labelStart = readDurableDynamicCallback(input.label?.start);
   const approvalRequest =
     input.approval === undefined
       ? undefined
@@ -189,15 +189,11 @@ export function collectDurableDynamicToolCallbacks(input: {
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
   if (execute !== undefined) callbacks.execute = execute;
-  if (
-    activityComplete !== undefined ||
-    activityDelta !== undefined ||
-    activityStart !== undefined
-  ) {
-    callbacks.activity = {
-      complete: activityComplete,
-      delta: activityDelta,
-      start: activityStart,
+  if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
+    callbacks.label = {
+      complete: labelComplete,
+      delta: labelDelta,
+      start: labelStart,
     };
   }
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;

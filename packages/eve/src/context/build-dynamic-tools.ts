@@ -92,21 +92,13 @@ export function replayDynamicTools(
   return metadata.map((entry) => {
     const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(entry.name, "execute");
-    const activityComplete = bindDynamicCallback(
+    const labelComplete = bindDynamicCallback(
       entry,
-      "activityComplete",
-      entry.callbacks.activity?.complete,
+      "labelComplete",
+      entry.callbacks.label?.complete,
     );
-    const activityDelta = bindDynamicCallback(
-      entry,
-      "activityDelta",
-      entry.callbacks.activity?.delta,
-    );
-    const activityStart = bindDynamicCallback(
-      entry,
-      "activityStart",
-      entry.callbacks.activity?.start,
-    );
+    const labelDelta = bindDynamicCallback(entry, "labelDelta", entry.callbacks.label?.delta);
+    const labelStart = bindDynamicCallback(entry, "labelStart", entry.callbacks.label?.start);
     const toModelOutput = bindDynamicCallback(
       entry,
       "toModelOutput",
@@ -155,15 +147,11 @@ export function replayDynamicTools(
       approval: buildReplayedApproval(entry),
       outputSchema: toOutputSchema(entry.outputSchema),
     };
-    if (
-      activityComplete !== undefined ||
-      activityDelta !== undefined ||
-      activityStart !== undefined
-    ) {
-      replayed.activity = {
-        complete: activityComplete,
-        delta: activityDelta,
-        start: activityStart,
+    if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
+      replayed.label = {
+        complete: labelComplete,
+        delta: labelDelta,
+        start: labelStart,
       };
     }
     if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
