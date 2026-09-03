@@ -31,14 +31,14 @@ The data path remains a projection of the durable session event log:
 ```text
 model tool call
   -> validated tool execution
-  -> durable action.result
   -> authored completion projection
-  -> internal state.replaced activity event
+  -> durable action.result.data.presentation
+  -> observer-derived state.replaced activity event
   -> activity snapshot.states[key]
   -> channel renderer
 ```
 
-`action.result` remains the source event. `state.replaced` is internal reducer input rather than a new public session event or duplicated result payload.
+`action.result` remains the source event and carries the bounded presentation projection. `state.replaced` is derived observer output for the private activity reducer rather than a second public session event.
 
 ## Semantics
 
@@ -55,7 +55,7 @@ Projection is opt-in. Automatically forwarding tool results would disclose value
 
 Projection callbacks follow the existing activity failure boundary: an invalid key, callback exception, non-JSON result, or over-limit value drops the state update without changing tool execution, model output, or final-response delivery.
 
-The collector uses replacement time and source event identity to converge duplicate or out-of-order deliveries. Activity remains best-effort presentation; the public event stream remains the durable record available for replay and inspection.
+The collector uses replacement time and source event identity to converge duplicate or out-of-order deliveries. Activity remains best-effort presentation; the self-contained public event stream is the durable record available for replay and inspection.
 
 ## Built-in `todo`
 
