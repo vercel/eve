@@ -5,7 +5,6 @@ import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
   VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH,
   VERCEL_EVE_MULTI_AGENT_SUMMARY_KIND,
-  VERCEL_EVE_MULTI_AGENT_SUMMARY_OUTPUT_PATH,
   VERCEL_EVE_MULTI_AGENT_SUMMARY_VERSION,
   type VercelEveMultiAgentSummary,
 } from "#internal/vercel-agent-summary.js";
@@ -71,7 +70,7 @@ export async function buildAgentWorkspace(workspace: AgentWorkspace): Promise<st
   );
   await mkdir(join(workspace.root, ".eve"), { recursive: true });
   await writeFile(
-    join(workspace.root, VERCEL_EVE_MULTI_AGENT_SUMMARY_OUTPUT_PATH),
+    join(workspace.root, VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH),
     `${JSON.stringify(createMultiAgentSummary(workspace), null, 2)}\n`,
   );
   await writeFile(

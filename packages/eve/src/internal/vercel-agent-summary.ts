@@ -53,9 +53,6 @@ export const VERCEL_EVE_AGENT_SUMMARY_VERSION = 5;
  */
 export const VERCEL_EVE_AGENT_SUMMARY_OUTPUT_PATH = ".eve/agent-summary.json";
 
-/** Project-root manifest identifying the independently built agents in a multi-agent deployment. */
-export const VERCEL_EVE_MULTI_AGENT_SUMMARY_OUTPUT_PATH = ".eve/multi-agent-summary.json";
-
 export const VERCEL_EVE_MULTI_AGENT_SUMMARY_KIND = "vercel-eve-multi-agent-summary" as const;
 
 export const VERCEL_EVE_MULTI_AGENT_SUMMARY_VERSION = 1;
