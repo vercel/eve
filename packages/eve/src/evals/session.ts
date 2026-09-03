@@ -212,6 +212,7 @@ export class EvalSessionDriver implements EveEvalSession {
 
   async #start(input: SendTurnPayload): Promise<EveEvalLiveTurn> {
     const turnInput = attachSignal(input, this.#signal);
+    const startIndex = this.#session?.state.streamIndex ?? 0;
     let response;
     if (this.#session === undefined) {
       if (turnInput.message === undefined) {
@@ -236,6 +237,7 @@ export class EvalSessionDriver implements EveEvalSession {
       record: (events) => this.#recordObservedTurn(response.sessionId, events),
       session: this,
       sessionId: response.sessionId,
+      startIndex,
     });
   }
 
@@ -269,6 +271,7 @@ export class EvalSessionDriver implements EveEvalSession {
       record: (events) => this.#recordObservedTurn(sessionId, events),
       session: this,
       sessionId,
+      startIndex: options?.startIndex ?? this.#session.state.streamIndex,
     });
   }
 
@@ -372,6 +375,7 @@ class EvalLiveTurn implements EveEvalLiveTurn {
   readonly #completion: Promise<EveEvalTurn>;
   readonly #events: MessageStreamEvent[] = [];
   readonly #waiters = new Set<LiveEventWaiter>();
+  readonly #startIndex: number;
   #waitError: Error | undefined;
 
   constructor(input: {
@@ -380,9 +384,11 @@ class EvalLiveTurn implements EveEvalLiveTurn {
     readonly record: (events: readonly MessageStreamEvent[]) => EveEvalTurn;
     readonly session: EveEvalSession;
     readonly sessionId: string;
+    readonly startIndex: number;
   }) {
     this.session = input.session;
     this.sessionId = input.sessionId;
+    this.#startIndex = input.startIndex;
     this.#completion = this.#consume(input.events, input.observe, input.record);
     void this.#completion.catch(() => {});
   }
@@ -451,15 +457,28 @@ class EvalLiveTurn implements EveEvalLiveTurn {
       }
 
       if (!sawBoundary) {
-        throw new Error(`Stream for session "${this.sessionId}" closed before a turn boundary.`);
+        throw new Error("stream closed before a turn boundary");
       }
 
       return record(this.#events);
     } catch (error) {
-      const normalized = error instanceof Error ? error : new Error(String(error));
-      this.#closeWaiters(normalized);
-      throw error;
+      const diagnostic = this.#streamFailureDiagnostic(error);
+      this.#closeWaiters(diagnostic);
+      throw diagnostic;
     }
+  }
+
+  #streamFailureDiagnostic(error: unknown): Error {
+    const cause = error instanceof Error ? error : new Error(String(error));
+    const lastEvent = this.#events.at(-1);
+    const cursor = this.session.state?.streamIndex ?? this.#startIndex + this.#events.length;
+    const status = this.#events.findLast(isCurrentTurnBoundaryEvent)?.type ?? "no turn boundary";
+    return new Error(
+      `Eval stream failed for session ${this.sessionId}: ${cause.message}. ` +
+        `cursor=${cursor}, startIndex=${this.#startIndex}, events=${this.#events.length}, ` +
+        `lastEvent=${lastEvent?.type ?? "none"}, turnStatus=${status}.`,
+      { cause },
+    );
   }
 
   #resolveWaiters(event: MessageStreamEvent): void {

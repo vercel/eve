@@ -699,6 +699,29 @@ describe("executeTask", () => {
     expect(outcome.assertions.every((assertion) => assertion.passed)).toBe(true);
   });
 
+  it("reports durable stream context when a turn stream fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_request, init) => {
+      if ((init?.method ?? "GET") === "POST") {
+        return Response.json({ ok: true, sessionId: "session_diagnostic" }, { status: 202 });
+      }
+      return new Response('{"type":"turn.started"}\nnot-json\n', {
+        headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+      });
+    });
+
+    const { error } = await executeTask({
+      client: new Client({ host: target.url }),
+      target,
+      evaluation: createTestEval(async (t) => {
+        await t.send("diagnose stream failure");
+      }, "stream-diagnostic"),
+    });
+
+    expect(error).toContain("Eval stream failed for session session_diagnostic");
+    expect(error).toContain("cursor=1, startIndex=0, events=0");
+    expect(error).toContain("lastEvent=none, turnStatus=no turn boundary");
+  });
+
   it("captures a schedule-dispatch capability failure as the task error", async () => {
     // A throwing `test` body is caught by executeTask and surfaced as `error`
     // (executeEval turns it into a failed verdict) rather than rejecting.
