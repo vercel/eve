@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 
-import { resolveEveProjectContext } from "#internal/project-context.js";
+import { findEveProjectRoot } from "#internal/eve-project-root.js";
 import { isObject } from "#shared/guards.js";
 import { readProviderSelectionSync } from "#setup/provider-settings.js";
 
@@ -55,8 +55,8 @@ export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {
  */
 export async function loadDevelopmentEnvironmentFiles(appRoot: string): Promise<void> {
   const resolvedAppRoot = resolve(appRoot);
-  const context = await resolveEveProjectContext(resolvedAppRoot);
-  getDevelopmentEnvironmentLoader(resolvedAppRoot, context.environmentRoot).reload();
+  const environmentRoot = await findEveProjectRoot(resolvedAppRoot);
+  getDevelopmentEnvironmentLoader(resolvedAppRoot, environmentRoot).reload();
 }
 
 export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {

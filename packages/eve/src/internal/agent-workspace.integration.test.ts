@@ -68,6 +68,23 @@ describe("resolveEveProjectContext", () => {
     await expect(resolveEveProjectContext(root)).rejects.toThrow(/both agent\/ and agents\//);
   });
 
+  it("rejects an empty workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-workspace-empty-"));
+    await mkdir(join(root, "agents"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
+
+    await expect(resolveEveProjectContext(root)).rejects.toThrow(/agents\/ has no members/);
+  });
+
+  it("rejects a member without an agent directory", async () => {
+    const root = await createWorkspace();
+    await mkdir(join(root, "agents", "incomplete"));
+
+    await expect(resolveEveProjectContext(root)).rejects.toThrow(
+      /agents\/incomplete: expected an agent\/ directory/,
+    );
+  });
+
   it("keeps conventional members discoverable without project metadata", async () => {
     const root = await createWorkspace();
     const supportRoot = join(root, "agents", "support");

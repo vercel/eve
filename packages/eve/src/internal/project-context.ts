@@ -42,10 +42,19 @@ async function resolveWorkspace(root: string, source: ProjectSource): Promise<Ag
   const entries = (await source.readDirectory(agentsRoot))
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .sort((left, right) => left.name.localeCompare(right.name));
-  const members = entries.map((entry) => {
+  if (entries.length === 0) {
+    throw new Error(`Invalid eve workspace at ${root}: agents/ has no members.`);
+  }
+
+  const members: AgentWorkspaceMember[] = [];
+  for (const entry of entries) {
     assertValidPublicAgentName(entry.name, "Agent workspace member");
-    return { appRoot: join(agentsRoot, entry.name), name: entry.name };
-  });
+    const appRoot = join(agentsRoot, entry.name);
+    if ((await source.stat(join(appRoot, "agent"))) !== "directory") {
+      throw new Error(`Invalid eve workspace member at ${appRoot}: expected an agent/ directory.`);
+    }
+    members.push({ appRoot, name: entry.name });
+  }
   return { members, root };
 }
 
