@@ -129,8 +129,14 @@ export function compileEveVercelService(input: {
 }): EveVercelServiceContribution {
   const serviceName = createEveServiceName(input.agent.name);
   const routeSrc = createEveServiceRouteSrc(input.agent.publicRoutePrefix);
-  const homeRouteSrc = createEveHomeRouteSrc(input.agent.publicRoutePrefix);
-  const homeRoute = createEveHomePathRoute(input.agent.publicRoutePrefix);
+  const homeRouteSrc =
+    input.agent.workspaceMember === true
+      ? createEveHomeRouteSrc(input.agent.publicRoutePrefix)
+      : undefined;
+  const homeRoute =
+    input.agent.workspaceMember === true
+      ? createEveHomePathRoute(input.agent.publicRoutePrefix)
+      : undefined;
   const build = createIsolatedBuild({
     agent: input.agent,
     hostOutputDirectory: input.target.hostOutputDirectory,
