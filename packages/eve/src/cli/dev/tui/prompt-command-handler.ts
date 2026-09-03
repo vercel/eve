@@ -52,7 +52,7 @@ export function createPromptCommandHandler(
               "/model needs eve dev running the local server (it is not available with --url).",
           };
         }
-        const appRoot = target.workspaceRoot;
+        const appRoot = target.agentRoot ?? target.workspaceRoot;
         // Package-loading failures are command outcomes at this CLI boundary.
         try {
           const { modelChangeRefusalForUneditableModel } = await import("#setup/flows/model.js");
@@ -116,6 +116,7 @@ export function createPromptCommandHandler(
         const commandInput: TuiSetupCommandInput = {
           command: command.name,
           appRoot: target.workspaceRoot,
+          ...(target.agentRoot === undefined ? {} : { agentRoot: target.agentRoot }),
           renderer: flow,
           withExclusiveTerminal: context.withExclusiveTerminal,
           chatGptAccountLabel: context.chatGptAccountLabel,

@@ -53,8 +53,10 @@ type MuteableSetupRenderer = TuiPrompterRenderer &
 
 export interface TuiSetupCommandInput {
   command: TuiSetupCommand;
-  /** The local project the in-process dev server is running. */
+  /** Project root for setup that changes shared dependencies, links, or environment files. */
   appRoot: string;
+  /** Selected agent root whose authored settings are changed by `/model`. */
+  agentRoot?: string;
   /** The renderer surface the TUI-native prompter drives. */
   renderer: TuiSetupCommandRenderer;
   /** Initial model-flow step authorized by the runner's boot evidence. */
@@ -256,7 +258,8 @@ async function executeSetupCommand(
       case "model": {
         const pickProvider: ProviderPicker = (request) => renderer.readProviderPicker(request);
         const modelInput: Parameters<TuiSetupFlows["runModelFlow"]>[0] = {
-          appRoot,
+          appRoot: input.agentRoot ?? appRoot,
+          environmentRoot: appRoot,
           prompter,
           signal,
           chatGptAccountLabel: input.chatGptAccountLabel,

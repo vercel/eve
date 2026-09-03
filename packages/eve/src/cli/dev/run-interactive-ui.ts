@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { devBootPhase, type DevBootProgressReporter } from "#internal/dev-boot-progress.js";
+import { findEveProjectContext } from "#internal/project-context.js";
 import {
   resumeDevelopmentRuntimeArtifacts,
   suspendDevelopmentRuntimeArtifacts,
@@ -29,17 +30,24 @@ export async function runInteractiveDevelopmentUi(input: {
     async () => input.runDevelopmentTui ?? (await import("#cli/dev/tui/tui.js")).runDevelopmentTui,
     input.report,
   );
+  const applicationRoot = input.server.appRoot ?? input.applicationRoot;
+  const projectContext = await findEveProjectContext(applicationRoot);
+  const workspaceRoot = projectContext?.environmentRoot ?? applicationRoot;
+  const agentRoot =
+    projectContext?.kind === "workspace-member" ? projectContext.member.appRoot : undefined;
   const target =
     input.remoteTarget === undefined || input.existingLocalServer
       ? {
           kind: "local" as const,
           serverUrl: input.server.serverUrl,
-          workspaceRoot: input.server.appRoot ?? input.applicationRoot,
+          workspaceRoot,
+          ...(agentRoot === undefined ? {} : { agentRoot }),
         }
       : {
           kind: "remote" as const,
           serverUrl: input.server.serverUrl,
-          workspaceRoot: input.applicationRoot,
+          workspaceRoot,
+          ...(agentRoot === undefined ? {} : { agentRoot }),
         };
   const display = resolveTuiDisplayOptions(input.options);
   const name = resolveTuiTitle({ name: input.options.name, target });
