@@ -84,6 +84,8 @@ export function defineMcpTool<
 export interface McpStreamableHttpServerOptions {
   readonly name: string;
   readonly version: string;
+  /** Server-level usage guidance returned from `initialize` and `server/discover`. */
+  readonly instructions?: string;
   readonly tools: readonly McpServerTool[];
   authenticate(request: Request): Promise<SessionAuthContext | null | Response>;
 }
@@ -298,14 +300,15 @@ function readJsonRpcRequestId(body: unknown): string | number | null {
 }
 
 function createServer(
-  options: Pick<McpStreamableHttpServerOptions, "name" | "version">,
+  options: Pick<McpStreamableHttpServerOptions, "instructions" | "name" | "version">,
   tools: ReadonlyMap<string, McpServerTool>,
   auth: SessionAuthContext | null,
 ): McpServer {
-  const server = new McpServer(
-    { name: options.name, version: options.version },
-    { capabilities: { tools: { listChanged: false } } },
-  );
+  const serverOptions: { capabilities: Record<string, unknown>; instructions?: string } = {
+    capabilities: { tools: { listChanged: false } },
+  };
+  if (options.instructions !== undefined) serverOptions.instructions = options.instructions;
+  const server = new McpServer({ name: options.name, version: options.version }, serverOptions);
 
   for (const tool of tools.values()) tool.register(server, auth);
 

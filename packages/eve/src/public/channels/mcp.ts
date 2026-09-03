@@ -366,6 +366,7 @@ async function handleMcpRequest(
   });
   return await createMcpStreamableHttpServer({
     authenticate: async () => auth,
+    instructions: MCP_SERVER_INSTRUCTIONS,
     name: agentInfo.agent.name,
     tools: createInvocationTools(
       execution,
@@ -376,6 +377,22 @@ async function handleMcpRequest(
   })(request);
 }
 
+/**
+ * Hosted MCP clients receive this once per connection (legacy `initialize`)
+ * or per discovery (`server/discover`). Keep it short: clients truncate or
+ * drop long instructions, and the details live in each tool description.
+ */
+const MCP_SERVER_INSTRUCTIONS = [
+  "Each invocation is one durable agent task.",
+  "Call agent_start once per task and keep the returned invocationId.",
+  "Poll agent_get, waiting at least pollAfterMs between calls, until status is completed, failed, or cancelled.",
+  "If status is input_required, answer every entry in inputRequests in one agent_update call; repeating accepted answers is safe.",
+  "If status is authorization_required, show the user the authorization url or instructions and keep polling.",
+  "isError on a tool result means your call was rejected; a failed status means the task failed.",
+  "agent_start is not idempotent and a lost response leaves no invocationId, so ask the user before starting again.",
+  "Work continues after your connection drops; agent_cancel stops it, then poll until any terminal status.",
+].join(" ");
+
 function createInvocationTools(
   execution: WorkflowAgentInvocationExecution,
   agentDescription: string | undefined,
@@ -384,7 +401,10 @@ function createInvocationTools(
   const publicHandleDescription = publicAccess
     ? " On this public channel, the invocation ID is a bearer capability until workflow retention expires."
     : "";
-  const startDescription = `Starts durable work and returns an invocation handle immediately.${publicHandleDescription}`;
+  const startDescription =
+    "Starts durable work and returns an invocation handle immediately. " +
+    "Call once per task; keep invocationId and poll agent_get. Not idempotent: if the response is lost, " +
+    `ask the user before starting again rather than retrying.${publicHandleDescription}`;
   const tools: McpServerTool[] = [
     defineMcpTool({
       definition: {
@@ -422,7 +442,10 @@ function createInvocationTools(
           openWorldHint: false,
           readOnlyHint: true,
         },
-        description: `Reads complete durable invocation state.${publicHandleDescription}`,
+        description:
+          "Reads complete durable invocation state. Wait at least pollAfterMs between calls. " +
+          "Terminal statuses are completed, failed, and cancelled. input_required needs agent_update; " +
+          `authorization_required needs the user to follow the returned authorization.${publicHandleDescription}`,
         inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
         name: "agent_get",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
@@ -446,7 +469,10 @@ function createInvocationTools(
           openWorldHint: true,
           readOnlyHint: false,
         },
-        description: "Answers a pending input request on a durable invocation.",
+        description:
+          "Answers the pending input batch on an input_required invocation. Include one response per " +
+          "entry in inputRequests, each keyed by its requestId, in a single call; partial batches are rejected. " +
+          "Returns the current invocation state; repeating the same accepted answers is safe.",
         inputSchema: z.strictObject({
           invocationId: z.string().min(1),
           responses: z.array(inputResponseSchema).min(1),
@@ -475,7 +501,9 @@ function createInvocationTools(
           readOnlyHint: false,
         },
         description:
-          "Requests cancellation of a durable invocation. Read it again to observe acknowledgement.",
+          "Requests cooperative cancellation of a non-terminal invocation. Cancellation is asynchronous and " +
+          "can race with completion: poll agent_get until status is terminal (cancelled, completed, or failed). " +
+          "Safe to call repeatedly.",
         inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
         name: "agent_cancel",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,

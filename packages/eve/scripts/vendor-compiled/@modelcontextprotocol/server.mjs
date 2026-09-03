@@ -56,6 +56,7 @@ export declare class Server {
 export declare class McpServer {
   constructor(info: { readonly name: string; readonly version: string }, options?: {
     readonly capabilities?: Readonly<Record<string, unknown>>;
+    readonly instructions?: string;
   });
   registerTool<TInput = unknown, TOutput = TInput>(
     name: string,
