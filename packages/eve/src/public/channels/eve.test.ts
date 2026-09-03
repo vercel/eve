@@ -609,6 +609,111 @@ describe("eveChannel — stream cursor", () => {
     expect(response.headers.get("x-eve-stream-tail-index")).toBe("41");
   });
 
+  it("starts a deferred tail response before the tail lookup finishes", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const tail = Promise.withResolvers<number>();
+    handler.getStreamTailIndex.mockReturnValueOnce(tail.promise);
+
+    const responsePromise = handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1&deferTailIndex=1",
+    );
+    let settled: "response" | "timeout";
+    try {
+      settled = await Promise.race([
+        responsePromise.then(() => "response" as const),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 25)),
+      ]);
+    } finally {
+      tail.resolve(-1);
+    }
+
+    expect(settled).toBe("response");
+    const response = await responsePromise;
+    expect(response.headers.get("x-eve-stream-tail-index")).toBe("deferred");
+    const reader = response.body!.getReader();
+    const firstChunk = await reader.read();
+    expect(new TextDecoder().decode(firstChunk.value)).toBe("\n");
+    const tailControl = await reader.read();
+    expect(JSON.parse(new TextDecoder().decode(tailControl.value))).toEqual({
+      $eve: "stream-tail-index",
+      tailIndex: -1,
+    });
+    expect(await reader.read()).toMatchObject({ done: true });
+  });
+
+  it("keeps a deferred tail response active while the tail lookup is pending", async () => {
+    vi.useFakeTimers();
+    const tail = Promise.withResolvers<number>();
+    try {
+      const handler = createEveStreamHandler({ auth: none() });
+      handler.getStreamTailIndex.mockReturnValueOnce(tail.promise);
+      const response = await handler.fetch(
+        "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1&deferTailIndex=1",
+      );
+      const reader = response.body!.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toBe("\n");
+
+      const heartbeat = reader.read();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(new TextDecoder().decode((await heartbeat).value)).toBe("\n");
+      tail.resolve(-1);
+      expect(JSON.parse(new TextDecoder().decode((await reader.read()).value))).toEqual({
+        $eve: "stream-tail-index",
+        tailIndex: -1,
+      });
+      expect(await reader.read()).toMatchObject({ done: true });
+    } finally {
+      tail.resolve(-1);
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops a deferred tail response when its request is aborted", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    const tail = Promise.withResolvers<number>();
+    handler.getStreamTailIndex.mockReturnValueOnce(tail.promise);
+    const abort = new AbortController();
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1&deferTailIndex=1",
+      { signal: abort.signal },
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+
+    abort.abort();
+
+    await expect(reader.read()).rejects.toMatchObject({ name: "AbortError" });
+    tail.reject(new Error("tail lookup failed after abort"));
+    await Promise.resolve();
+    expect(handler.getEventStream).not.toHaveBeenCalled();
+  });
+
+  it("keeps deferred replay backpressure after reporting the tail", async () => {
+    const handler = createEveStreamHandler({ auth: none() });
+    let pulls = 0;
+    handler.getStreamTailIndex.mockResolvedValueOnce(99);
+    handler.getEventStream.mockResolvedValueOnce(
+      new ReadableStream({
+        pull(controller) {
+          pulls += 1;
+          controller.enqueue({ sequence: pulls });
+        },
+      }),
+    );
+    const response = await handler.fetch(
+      "https://eve.test/eve/v1/session/test-session-id/stream?includeTailIndex=1&deferTailIndex=1",
+    );
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.read();
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(pulls).toBeLessThan(10);
+    await reader.cancel();
+  });
+
   it("closes a tail-indexed replay after its durable events", async () => {
     const handler = createEveStreamHandler({ auth: none() });
     const cancelled = vi.fn();

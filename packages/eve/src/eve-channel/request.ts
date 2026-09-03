@@ -7,22 +7,12 @@ import type {
   SessionCapabilities,
   TurnPolicy,
 } from "#channel/types.js";
-import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import {
   parseActivityObserverField,
   validateActivityObserverBinding,
 } from "#eve-channel/activity-observer-request.js";
 import { hasInternalRefScheme } from "#internal/attachments/url-refs.js";
-import {
-  EVE_MESSAGE_STREAM_CONTENT_TYPE,
-  EVE_MESSAGE_STREAM_FORMAT,
-  EVE_MESSAGE_STREAM_VERSION,
-  EVE_SESSION_ID_HEADER,
-  EVE_STREAM_FORMAT_HEADER,
-  EVE_STREAM_TAIL_INDEX_HEADER,
-  EVE_STREAM_VERSION_HEADER,
-} from "#protocol/message.js";
 import {
   collectUploadPolicyViolations,
   formatUploadPolicyViolation,
@@ -290,37 +280,6 @@ export function requireSessionId(params: Readonly<Record<string, string>>): stri
   return sessionId || Response.json({ error: "Missing session id.", ok: false }, { status: 400 });
 }
 
-export async function createSessionStreamResponse(
-  request: Request,
-  session: Session,
-): Promise<Response> {
-  const startIndex = parseStartIndex(request);
-  if (startIndex instanceof Response) return startIndex;
-  const includeTailIndex = parseIncludeTailIndex(request);
-
-  try {
-    const tailIndex = includeTailIndex ? await session.getStreamTailIndex() : undefined;
-    const events = await session.getEventStream({ startIndex });
-    const headers = new Headers({
-      "cache-control": "no-store, no-transform",
-      "content-type": EVE_MESSAGE_STREAM_CONTENT_TYPE,
-      "x-accel-buffering": "no",
-      [EVE_SESSION_ID_HEADER]: session.id,
-      [EVE_STREAM_FORMAT_HEADER]: EVE_MESSAGE_STREAM_FORMAT,
-      [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION,
-    });
-    if (tailIndex !== undefined) {
-      headers.set(EVE_STREAM_TAIL_INDEX_HEADER, String(tailIndex));
-    }
-    return new Response(
-      serializeAsNdjson(events, request.signal, streamEventLimit(startIndex, tailIndex)),
-      { headers },
-    );
-  } catch {
-    return Response.json({ error: "Session not found.", ok: false }, { status: 404 });
-  }
-}
-
 function parseOutputSchemaField(value: unknown): JsonObject | Response | undefined {
   if (value === undefined) return undefined;
 
@@ -568,58 +527,4 @@ function parseClientContextField(value: unknown): string[] | Response | undefine
 
 function toClientContextMessage(content: string): string {
   return `${CLIENT_CONTEXT_PREFIX}${content}`;
-}
-
-export function parseIncludeTailIndex(request: Request): boolean {
-  const raw = new URL(request.url).searchParams.get("includeTailIndex");
-  return raw === "1" || raw === "true";
-}
-
-export function parseStartIndex(request: Request): number | undefined | Response {
-  const raw = new URL(request.url).searchParams.get("startIndex");
-  if (raw === null) return undefined;
-  const parsed = Number(raw);
-  if (!/^-?\d+$/.test(raw) || !Number.isSafeInteger(parsed)) {
-    return Response.json(
-      { error: "Expected startIndex to be an integer.", ok: false },
-      { status: 400 },
-    );
-  }
-  return parsed;
-}
-
-function streamEventLimit(
-  startIndex: number | undefined,
-  tailIndex: number | undefined,
-): number | undefined {
-  if (tailIndex === undefined) return undefined;
-  const resolvedStartIndex =
-    startIndex === undefined
-      ? 0
-      : startIndex < 0
-        ? Math.max(0, tailIndex + 1 + startIndex)
-        : startIndex;
-  return Math.max(0, tailIndex - resolvedStartIndex + 1);
-}
-
-function serializeAsNdjson(
-  events: ReadableStream<unknown>,
-  signal: AbortSignal,
-  eventLimit?: number,
-): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  let eventCount = 0;
-  const transform = new TransformStream<unknown, Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode("\n"));
-      if (eventLimit === 0) controller.terminate();
-    },
-    transform(event, controller) {
-      controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
-      eventCount += 1;
-      if (eventCount === eventLimit) controller.terminate();
-    },
-  });
-  void events.pipeTo(transform.writable, { signal }).catch(() => {});
-  return transform.readable;
 }

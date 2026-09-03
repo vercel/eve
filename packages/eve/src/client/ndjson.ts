@@ -102,7 +102,7 @@ function parseMessageStreamEvent<Version extends MessageStreamVersion>(
   return normalizeMessageStreamEvent(version, event);
 }
 
-async function readWithIdleTimeout(
+export async function readWithIdleTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   idleTimeoutMs: number | undefined,
 ): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {

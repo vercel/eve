@@ -1,9 +1,14 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
-import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import {
+  EVE_STREAM_DEFERRED_TAIL_INDEX,
+  EVE_STREAM_ERROR_CONTROL,
+  EVE_STREAM_TAIL_INDEX_CONTROL,
+  EVE_STREAM_TAIL_INDEX_HEADER,
+} from "#protocol/message.js";
 import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
-import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import { isStreamDisconnectError, readNdjsonStream, readWithIdleTimeout } from "#client/ndjson.js";
 import { readMessageStreamVersion } from "#client/stream-version.js";
 import type {
   ClientRedirectPolicy,
@@ -26,6 +31,7 @@ interface ResolvedStreamReconnectPolicy {
 }
 
 const DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS = 15_000;
+const MAX_DEFERRED_TAIL_TRANSPORT_RETRIES = 1;
 
 const DEFAULT_STREAM_RECONNECT_POLICY: ResolvedStreamReconnectPolicy = {
   retryableErrorStatuses: new Set([404, 409, 425, 500, 502, 503, 504]),
@@ -228,6 +234,7 @@ export async function openStreamBody(
   let lastBody: string | undefined;
   let lastHeaders: Headers | undefined;
   let retryDelayMs = openRetryPolicy.baseDelayMs;
+  let deferredTailTransportRetries = 0;
 
   const searchParams: Record<string, string> = {};
   if (input.startIndex !== 0) {
@@ -235,6 +242,7 @@ export async function openStreamBody(
   }
   if (input.requestTailIndex === true) {
     searchParams.includeTailIndex = "1";
+    searchParams.deferTailIndex = "1";
   }
 
   for (let attempt = 0; attempt < openRetryPolicy.maxAttempts; attempt += 1) {
@@ -274,12 +282,41 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
-      return {
-        body: response.body,
-        close: () => connectionController.abort(),
-        streamVersion: readMessageStreamVersion(response.headers),
-        tailIndex: parseTailIndexHeader(response.headers),
-      };
+      try {
+        const deferred =
+          response.headers.get(EVE_STREAM_TAIL_INDEX_HEADER) === EVE_STREAM_DEFERRED_TAIL_INDEX
+            ? await readDeferredTailIndex(
+                response.body,
+                response.headers,
+                input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
+              )
+            : undefined;
+        const body = deferred?.body ?? response.body;
+        return {
+          body,
+          close: () => {
+            connectionController.abort();
+            void body.cancel().catch(() => {});
+          },
+          streamVersion: readMessageStreamVersion(response.headers),
+          tailIndex: deferred?.tailIndex ?? parseTailIndexHeader(response.headers),
+        };
+      } catch (error) {
+        connectionController.abort();
+        if (
+          !input.signal?.aborted &&
+          !(error instanceof ClientError) &&
+          isStreamDisconnectError(error) &&
+          deferredTailTransportRetries < MAX_DEFERRED_TAIL_TRANSPORT_RETRIES &&
+          attempt < openRetryPolicy.maxAttempts - 1
+        ) {
+          deferredTailTransportRetries += 1;
+          await sleep(retryDelayMs, input.signal);
+          retryDelayMs = Math.min(retryDelayMs * 2, openRetryPolicy.maxDelayMs);
+          continue;
+        }
+        throw error;
+      }
     }
 
     lastStatus = response.status;
@@ -306,6 +343,137 @@ function parseTailIndexHeader(headers: Headers): number | undefined {
   }
   const parsed = Number(raw);
   return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+const MAX_DEFERRED_TAIL_CONTROL_BYTES = 1_024;
+
+async function readDeferredTailIndex(
+  body: ReadableStream<Uint8Array>,
+  headers: Headers,
+  idleTimeoutMs: number,
+): Promise<{ readonly body: ReadableStream<Uint8Array>; readonly tailIndex: number }> {
+  const reader = body.getReader();
+  const lineChunks: Uint8Array[] = [];
+  let lineLength = 0;
+  let transferredReader = false;
+
+  try {
+    while (true) {
+      const result = await readWithIdleTimeout(reader, idleTimeoutMs);
+      if (result.done) {
+        throw new Error("Session stream disconnected before reporting its tail index.");
+      }
+
+      let offset = 0;
+      while (offset < result.value.length) {
+        const newline = result.value.indexOf(10, offset);
+        const end = newline === -1 ? result.value.length : newline;
+        if (end > offset) {
+          const chunk = result.value.slice(offset, end);
+          lineChunks.push(chunk);
+          lineLength += chunk.byteLength;
+          if (lineLength > MAX_DEFERRED_TAIL_CONTROL_BYTES) {
+            throw new Error("Session stream tail-index control line is too large.");
+          }
+        }
+        if (newline === -1) break;
+
+        if (lineLength > 0) {
+          const control = parseDeferredTailControl(concatBytes(lineChunks, lineLength), headers);
+          const remainder = result.value.slice(newline + 1);
+          const remainderBody = continueReadableStream(reader, remainder);
+          transferredReader = true;
+          return { body: remainderBody, tailIndex: control };
+        }
+        lineChunks.length = 0;
+        lineLength = 0;
+        offset = newline + 1;
+      }
+    }
+  } finally {
+    if (!transferredReader) {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+}
+
+function parseDeferredTailControl(bytes: Uint8Array, headers: Headers): number {
+  let control: unknown;
+  try {
+    control = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    throw new Error("Session stream returned an invalid tail-index control line.");
+  }
+  if (typeof control !== "object" || control === null || Array.isArray(control)) {
+    throw new Error("Session stream returned an invalid tail-index control line.");
+  }
+  const value = control as Record<string, unknown>;
+  if (value.$eve === EVE_STREAM_ERROR_CONTROL) {
+    const status = typeof value.status === "number" ? value.status : 500;
+    const body = value.body === undefined ? "Session stream failed." : JSON.stringify(value.body);
+    throw new ClientError(status, body, headers);
+  }
+  if (
+    value.$eve !== EVE_STREAM_TAIL_INDEX_CONTROL ||
+    typeof value.tailIndex !== "number" ||
+    !Number.isSafeInteger(value.tailIndex)
+  ) {
+    throw new Error("Session stream returned an invalid tail-index control line.");
+  }
+  return value.tailIndex;
+}
+
+function concatBytes(chunks: readonly Uint8Array[], length: number): Uint8Array {
+  const result = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+function continueReadableStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  remainder: Uint8Array,
+): ReadableStream<Uint8Array> {
+  let firstChunk: Uint8Array | undefined = remainder.byteLength > 0 ? remainder : undefined;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    reader.releaseLock();
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (firstChunk !== undefined) {
+        controller.enqueue(firstChunk);
+        firstChunk = undefined;
+        return;
+      }
+      try {
+        const result = await reader.read();
+        if (result.done) {
+          release();
+          controller.close();
+        } else {
+          controller.enqueue(result.value);
+        }
+      } catch (error) {
+        release();
+        controller.error(error);
+      }
+    },
+    async cancel(reason) {
+      try {
+        await reader.cancel(reason);
+      } finally {
+        release();
+      }
+    },
+  });
 }
 
 export async function sleep(ms: number, signal?: AbortSignal): Promise<void> {

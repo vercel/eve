@@ -98,7 +98,7 @@ describe("eveChannel remote subagent stream", () => {
     const response = await harness.fetch(
       proxyRequest({
         headers: { authorization: "Bearer inbound", cookie: "parent=session" },
-        search: "?startIndex=-3&includeTailIndex=true",
+        search: "?startIndex=-3&includeTailIndex=true&deferTailIndex=true",
         signal: abort.signal,
       }),
     );
@@ -112,7 +112,7 @@ describe("eveChannel remote subagent stream", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
     expect(url.toString()).toBe(
-      "https://remote.example/base/eve/v1/session/child-1/stream?startIndex=-3&includeTailIndex=1",
+      "https://remote.example/base/eve/v1/session/child-1/stream?startIndex=-3&includeTailIndex=1&deferTailIndex=1",
     );
     expect(init.headers).toEqual({
       authorization: "Bearer authored",

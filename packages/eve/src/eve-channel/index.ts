@@ -59,19 +59,22 @@ import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
 import {
   checkUploadPolicy,
-  createSessionStreamResponse,
   deriveOperationContinuationToken,
   parseCancelTurnBody,
   parseCreateBody,
-  parseIncludeTailIndex,
   parseJsonRequest,
   parseResetBody,
   parseSessionControlBody,
   parseSessionMessageBody,
-  parseStartIndex,
   rejectSessionContinuationToken,
   requireSessionId,
 } from "#eve-channel/request.js";
+import {
+  createSessionStreamResponse,
+  parseDeferTailIndex,
+  parseIncludeTailIndex,
+  parseStartIndex,
+} from "#eve-channel/session-stream-response.js";
 import { attachClientContext } from "#internal/client-context.js";
 import {
   findRemoteSubagentBinding,
@@ -522,6 +525,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         const startIndex = parseStartIndex(req);
         if (startIndex instanceof Response) return startIndex;
         const includeTailIndex = parseIncludeTailIndex(req);
+        const deferTailIndex = parseDeferTailIndex(req);
 
         const childStreamPath = createEveSubagentStreamRoutePath({
           callId,
@@ -577,6 +581,9 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         }
         if (includeTailIndex) {
           upstreamUrl.searchParams.set("includeTailIndex", "1");
+        }
+        if (deferTailIndex) {
+          upstreamUrl.searchParams.set("deferTailIndex", "1");
         }
 
         const upstream = await fetch(upstreamUrl, {
