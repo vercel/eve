@@ -460,7 +460,7 @@ describe("emitStreamContent action requests", () => {
           [
             "web_search",
             {
-              activityLabel: resolveWebSearchActivityLabel,
+              activity: { start: resolveWebSearchActivityLabel },
               description: "Search the web.",
               inputSchema: jsonSchema({ type: "object" }),
               name: "web_search",
