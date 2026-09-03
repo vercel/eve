@@ -1,12 +1,12 @@
 /**
- * Session token limit policy for the tool-loop harness.
+ * Session token and token-cost limit policy for the tool-loop harness.
  *
  * Two seams into the harness step:
  *
  * 1. {@link applySessionLimitContinuation} runs after pending-input
  *    resolution and acts on the user's answer to a continuation prompt —
  *    grant a fresh budget window, or cancel the in-flight turn tree.
- * 2. {@link enforceSessionTokenLimit} runs before each model call and, when
+ * 2. {@link enforceSessionUsageLimit} runs before each model call and, when
  *    the session is over budget, parks it on the deterministic continuation
  *    prompt (sessions that can reach a human) or fails it (task-mode sessions
  *    without HITL — nobody can answer the prompt).
@@ -24,14 +24,15 @@ import { appendPendingInputBatch } from "#harness/input-requests.js";
 import { createSessionLimitContinuationRequest } from "#harness/session-limit-continuation.js";
 import { SessionLimitDeclinedError } from "#harness/turn-cancellation.js";
 import {
-  bumpSessionRuntimeTokenLimits,
-  getSessionTokenLimitViolation,
+  bumpSessionRuntimeUsageLimits,
+  getSessionUsageLimitViolation,
   getSessionTokenUsage,
-  type SessionTokenLimitViolation,
+  type SessionUsageLimitViolation,
 } from "#harness/turn-tag-state.js";
 import type { HarnessSession, StepResult, ToolLoopHarnessConfig } from "#harness/types.js";
 
 const SESSION_TOKEN_LIMIT_REACHED_CODE = "SESSION_TOKEN_LIMIT_REACHED";
+const SESSION_TOKEN_COST_LIMIT_REACHED_CODE = "SESSION_TOKEN_COST_LIMIT_REACHED";
 
 interface SessionLimitPolicyInput {
   readonly config: ToolLoopHarnessConfig;
@@ -44,7 +45,7 @@ interface SessionLimitPolicyInput {
  * Acts on a resolved session-limit continuation answer.
  *
  * Granted: bumps the runtime token limits via
- * {@link bumpSessionRuntimeTokenLimits} and lets the step continue
+ * {@link bumpSessionRuntimeUsageLimits} and lets the step continue
  * transparently.
  * Declined: a user decision, not an error — the decline cancels the
  * in-flight turn tree through the standard cancellation path, settling as
@@ -67,7 +68,7 @@ export async function applySessionLimitContinuation(
   }
 
   if (input.limitContinuation.granted) {
-    return { result: null, session: bumpSessionRuntimeTokenLimits(input.session) };
+    return { result: null, session: bumpSessionRuntimeUsageLimits(input.session) };
   }
 
   // A session parked on the continuation prompt always satisfies the
@@ -79,12 +80,12 @@ export async function applySessionLimitContinuation(
   const canSettleCancelledPark =
     input.config.mode === "conversation" || input.session.continuationToken !== "";
   if (!canSettleCancelledPark) {
-    const violation = getSessionTokenLimitViolation(input.session);
+    const violation = getSessionUsageLimitViolation(input.session);
     return {
       result:
         violation === null
           ? { next: { done: true, output: "" }, session: input.session }
-          : await failSessionTokenLimit({ ...input, violation }),
+          : await failSessionUsageLimit({ ...input, violation }),
       session: input.session,
     };
   }
@@ -100,10 +101,10 @@ export async function applySessionLimitContinuation(
  * task-mode sessions without HITL fail fast with
  * `SESSION_TOKEN_LIMIT_REACHED`.
  */
-export async function enforceSessionTokenLimit(
+export async function enforceSessionUsageLimit(
   input: SessionLimitPolicyInput & { readonly messages: readonly ModelMessage[] },
 ): Promise<StepResult | null> {
-  const violation = getSessionTokenLimitViolation(input.session);
+  const violation = getSessionUsageLimitViolation(input.session);
   if (violation === null) {
     return null;
   }
@@ -113,14 +114,14 @@ export async function enforceSessionTokenLimit(
   // Approving would bump the runtime limit by the configured limit -- zero --
   // so fail the child and let its parent reach the resumable limit gate.
   if (
-    violation.limit > 0 &&
+    violationWindow(violation) > 0 &&
     emit !== undefined &&
     (input.config.mode === "conversation" || input.config.capabilities?.requestInput === true)
   ) {
-    return parkOnSessionTokenLimit({ ...input, emit, violation });
+    return parkOnSessionUsageLimit({ ...input, emit, violation });
   }
 
-  return failSessionTokenLimit({ ...input, violation });
+  return failSessionUsageLimit({ ...input, violation });
 }
 
 /**
@@ -129,13 +130,13 @@ export async function enforceSessionTokenLimit(
  * carries the step's accumulated messages so the triggering user message
  * survives into the resumed turn.
  */
-async function parkOnSessionTokenLimit(input: {
+async function parkOnSessionUsageLimit(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly emit: NonNullable<ToolLoopHarnessConfig["handleEvent"]>;
   readonly emissionState: HarnessEmissionState;
   readonly messages: readonly ModelMessage[];
   readonly session: HarnessSession;
-  readonly violation: SessionTokenLimitViolation;
+  readonly violation: SessionUsageLimitViolation;
 }): Promise<StepResult> {
   const request = createSessionLimitContinuationRequest({
     sessionId: input.session.sessionId,
@@ -173,30 +174,47 @@ async function parkOnSessionTokenLimit(input: {
   };
 }
 
-function formatSessionTokenLimitMessage(kind: SessionTokenLimitViolation["kind"]): string {
-  return `The session reached its configured ${kind} token limit.`;
+function violationWindow(violation: SessionUsageLimitViolation): number {
+  return violation.kind === "token-cost" ? violation.limitUsd : violation.limit;
 }
 
-async function failSessionTokenLimit(input: {
+function formatSessionLimitMessage(kind: SessionUsageLimitViolation["kind"]): string {
+  return kind === "token-cost"
+    ? "The session reached its configured model token-cost limit."
+    : `The session reached its configured ${kind} token limit.`;
+}
+
+async function failSessionUsageLimit(input: {
   readonly config: ToolLoopHarnessConfig;
   readonly emit?: ToolLoopHarnessConfig["handleEvent"];
   readonly emissionState: HarnessEmissionState;
   readonly session: HarnessSession;
-  readonly violation: SessionTokenLimitViolation;
+  readonly violation: SessionUsageLimitViolation;
 }): Promise<StepResult> {
   const usage = getSessionTokenUsage(input.session);
-  const message = formatSessionTokenLimitMessage(input.violation.kind);
-  const details = {
-    inputTokens: usage.inputTokens,
-    kind: input.violation.kind,
-    limit: input.violation.limit,
-    outputTokens: usage.outputTokens,
-    usedTokens: input.violation.usedTokens,
-  };
+  const message = formatSessionLimitMessage(input.violation.kind);
+  const details: import("#shared/json.js").JsonObject =
+    input.violation.kind === "token-cost"
+      ? {
+          costUsd: usage.costUsd,
+          kind: input.violation.kind,
+          limitUsd: input.violation.limitUsd,
+          usedCostUsd: input.violation.usedCostUsd,
+        }
+      : {
+          inputTokens: usage.inputTokens,
+          kind: input.violation.kind,
+          limit: input.violation.limit,
+          outputTokens: usage.outputTokens,
+          usedTokens: input.violation.usedTokens,
+        };
 
   if (input.emit) {
     await emitFailedStep(input.emit, input.emissionState, {
-      code: SESSION_TOKEN_LIMIT_REACHED_CODE,
+      code:
+        input.violation.kind === "token-cost"
+          ? SESSION_TOKEN_COST_LIMIT_REACHED_CODE
+          : SESSION_TOKEN_LIMIT_REACHED_CODE,
       details,
       message,
       sessionId: input.session.sessionId,

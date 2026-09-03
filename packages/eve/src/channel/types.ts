@@ -28,7 +28,7 @@ import type { ChannelInstrumentationProjection } from "#channel/instrumentation.
 
 export type RunSessionLimits = Pick<
   AgentLimitsDefinition,
-  "maxInputTokensPerSession" | "maxOutputTokensPerSession"
+  "maxInputTokensPerSession" | "maxOutputTokensPerSession" | "maxTokenCostUsdPerSession"
 >;
 
 /** Identifies the session turn to cancel. */

@@ -183,6 +183,19 @@ export interface AgentLimitsDefinition {
    * inherit the parent's remaining output quota when the parent has one.
    */
   readonly maxOutputTokensPerSession?: number | false;
+  /**
+   * Maximum provider-reported model token cost accumulated by one durable
+   * session, in US dollars.
+   *
+   * eve checks this before starting each model call. The model call that
+   * crosses the limit is allowed to finish because providers report cost only
+   * after the call completes; later model calls in the same session are
+   * blocked.
+   *
+   * `false` disables the limit. Unset by default; delegated subagent sessions
+   * inherit the parent's remaining token-cost quota when the parent has one.
+   */
+  readonly maxTokenCostUsdPerSession?: number | false;
 }
 
 /**

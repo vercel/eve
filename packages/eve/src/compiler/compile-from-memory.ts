@@ -27,6 +27,7 @@ export interface CompileFromMemoryInput {
   readonly limits?: {
     readonly maxInputTokensPerSession?: number | false;
     readonly maxOutputTokensPerSession?: number | false;
+    readonly maxTokenCostUsdPerSession?: number | false;
     readonly sessionTimeoutMs?: number | false;
   };
   readonly outputSchema?: JsonObject;
