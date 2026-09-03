@@ -61,8 +61,8 @@ catalogs:
       specifier: npm:@vercel/sandbox@2.10.0-beta.0
       version: 2.10.0-beta.0
     '@workflow/world-postgres':
-      specifier: 5.0.0-beta.39
-      version: 5.0.0-beta.39
+      specifier: 5.0.0-beta.40
+      version: 5.0.0-beta.40
     ai:
       specifier: ^7.0.82
       version: 7.0.84
@@ -577,7 +577,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -599,7 +599,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -621,7 +621,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -643,7 +643,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -665,7 +665,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -690,7 +690,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -712,7 +712,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -734,7 +734,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -756,7 +756,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -775,7 +775,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -794,7 +794,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -816,7 +816,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -838,7 +838,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -860,7 +860,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -879,7 +879,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -898,7 +898,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -920,7 +920,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -942,7 +942,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -970,7 +970,7 @@ importers:
         version: file:e2e/fixtures/agent-tools/fixtures/dynamic-import-dependency
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -992,7 +992,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1014,7 +1014,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1036,7 +1036,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1058,7 +1058,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1077,7 +1077,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1099,7 +1099,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1143,7 +1143,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1174,7 +1174,7 @@ importers:
         version: link:../e2e-config
       '@workflow/world-postgres':
         specifier: 'catalog:'
-        version: 5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
+        version: 5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)
       eve:
         specifier: workspace:*
         version: link:../../../packages/eve
@@ -1377,14 +1377,14 @@ importers:
         specifier: 1.28.8
         version: 1.28.8
       '@workflow/builders':
-        specifier: 5.0.0-beta.47
-        version: 5.0.0-beta.47(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+        specifier: 5.0.0-beta.48
+        version: 5.0.0-beta.48(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/core':
-        specifier: 5.0.0-beta.47
-        version: 5.0.0-beta.47(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+        specifier: 5.0.0-beta.48
+        version: 5.0.0-beta.48(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
       '@workflow/errors':
-        specifier: 5.0.0-beta.19
-        version: 5.0.0-beta.19
+        specifier: 5.0.0-beta.20
+        version: 5.0.0-beta.20
       '@workflow/serde':
         specifier: 5.0.0-beta.2
         version: 5.0.0-beta.2
@@ -1392,14 +1392,14 @@ importers:
         specifier: 5.0.0-beta.10
         version: 5.0.0-beta.10
       '@workflow/world':
-        specifier: 5.0.0-beta.32
-        version: 5.0.0-beta.32
+        specifier: 5.0.0-beta.33
+        version: 5.0.0-beta.33
       '@workflow/world-local':
-        specifier: 5.0.0-beta.41
-        version: 5.0.0-beta.41(@opentelemetry/api@1.9.1)
+        specifier: 5.0.0-beta.42
+        version: 5.0.0-beta.42(@opentelemetry/api@1.9.1)
       '@workflow/world-vercel':
-        specifier: 5.0.0-beta.43
-        version: 5.0.0-beta.43(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
+        specifier: 5.0.0-beta.44
+        version: 5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       ai:
         specifier: 'catalog:'
         version: 7.0.84(zod@4.5.4)
@@ -8427,19 +8427,19 @@ packages:
   '@webgpu/types@0.1.71':
     resolution: {integrity: sha512-mMy8/ODcKhab808co15eW+yN+HgXoQxRQHTiBV9Mrvl1r0ufnid7YOcI+gi4eUWSWl9ezD6TW2KXccrL8HCh2A==}
 
-  '@workflow/builders@5.0.0-beta.47':
-    resolution: {integrity: sha512-KXOws/UvRrxaOkr/wZYePZHyaICLGLl0uK1WwH811+xI6cDdjtKFbIB8jz3FSqJ61Ux+Cy8EwMmT6VnuhNJnng==}
+  '@workflow/builders@5.0.0-beta.48':
+    resolution: {integrity: sha512-hkB4/Xzs4TRnvN3ZUkWaG1b3wUhOEeJeK2bVl29ABzYV0Q9HWLKR12ybIUJv9VNrm/dhqRQxaA7/nnaYkeFQXw==}
 
-  '@workflow/core@5.0.0-beta.47':
-    resolution: {integrity: sha512-3xqr37glJYAprslcooa53iGw3QPH+smPHkx0TxWiMmReSJSWB21wIxXu0ucxgFytXzhXbN/zjg68KB0ozwu7GQ==}
+  '@workflow/core@5.0.0-beta.48':
+    resolution: {integrity: sha512-XPgShb5N1AAtygHdnblIL50l2IsxlYNupbNbX+00qhKXDVnZI4LW00o66vRjpIDzRB6xPprhtVpRhAQ+RIQo8g==}
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/errors@5.0.0-beta.19':
-    resolution: {integrity: sha512-epOb27wDYFxP6Cu+Ore6pSKSVwc8E+vok23UUjitA3WNSLu64bAHP6us7ffQRODFIokEPxqCj/4JbctwRDXFdA==}
+  '@workflow/errors@5.0.0-beta.20':
+    resolution: {integrity: sha512-unNjhxAgwjZB54DasFvtG3U1BXKJS+qjyR47d7y34hs1uhTVNkq9HJ4uEgNCVgmyH7NzvieOC03Fkkp8cMF/3A==}
 
   '@workflow/serde@4.1.0':
     resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
@@ -8458,28 +8458,28 @@ packages:
   '@workflow/utils@5.0.0-beta.10':
     resolution: {integrity: sha512-LVypRMbZG3z1GHSSyChhR/7WaDFjjlIpeGcysX5eI3/1sOVv8NHNOfCxXConvqGj9fSkM1oBlieS/eLO5kDaow==}
 
-  '@workflow/world-local@5.0.0-beta.41':
-    resolution: {integrity: sha512-X2v6bo+5S59zfdFwYCNgS7kGLlvQiMcEBe0XDT2RYN1YF6mAmOvdyO6xPN/D/PT5EZGA9RGDb/hUbrPfj8iLIw==}
+  '@workflow/world-local@5.0.0-beta.42':
+    resolution: {integrity: sha512-0dSBToDQ4LVwacuaGVPHpY7x8n8pSqZySE6roWm/kWUAPxLTrXMFSErw4Z9TcstqbMogoJkH0d8h2yEUx+SNFA==}
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/world-postgres@5.0.0-beta.39':
-    resolution: {integrity: sha512-A4cECKzteA8IHGXuQxRP6hR9cTVivHSp20CDnxC1c4x7k/bsjBOOARW0EAfQtPzltDR377pP7wuNvstjF530lQ==}
+  '@workflow/world-postgres@5.0.0-beta.40':
+    resolution: {integrity: sha512-zj1pVYvsfCciEXTVJMMzE4ogHV1e/bq1E6pOehKf+ZVevJJp1Fbl7rYXxsABTFJNen0I10mCihR7iTpbKsq5gA==}
     hasBin: true
 
-  '@workflow/world-vercel@5.0.0-beta.43':
-    resolution: {integrity: sha512-xqMp2wjKz4ZzN//h3OOAyRUqV7LSNqfVC84ZXUe/O5aLBvJXCuxuAkdSKdK8dtWhwahbeBR1WV2IkW1VxyxNlA==}
+  '@workflow/world-vercel@5.0.0-beta.44':
+    resolution: {integrity: sha512-kcsW0vsssSe9cTzQyg6xRZW24pL28GEX0uxbXmSK3lWRV2ztRsG6JZqtu/eVvMnaShewUrfumm+iJAodbQVDNA==}
     peerDependencies:
       '@opentelemetry/api': '1'
     peerDependenciesMeta:
       '@opentelemetry/api':
         optional: true
 
-  '@workflow/world@5.0.0-beta.32':
-    resolution: {integrity: sha512-0pFuatB9nMH7TompdCLUe/YThMSvgunyh/U6YAiVW+RDsu2zYCkiEaMeZo7lAvHxiPiDzOYO1C7O7W3kPk3InQ==}
+  '@workflow/world@5.0.0-beta.33':
+    resolution: {integrity: sha512-Cn57JHXlx6jhzeJn8OqtqrCDNx+Xnaqy7FtMJPl15Z/TdAsUju6ZA5ShyYY+nBWj6Ibc9LOenBwmIhCCkvawlA==}
 
   '@zernio/chat-sdk-adapter@0.5.0':
     resolution: {integrity: sha512-YYcnbCqUhJOymTd3UPaKd1H6Kn8atFE075I5vDETYkTjToIeZd90as/JvShB7OurMdDLLSmJRMJs3RWVqAGW9w==}
@@ -23285,11 +23285,11 @@ snapshots:
 
   '@webgpu/types@0.1.71': {}
 
-  '@workflow/builders@5.0.0-beta.47(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
+  '@workflow/builders@5.0.0-beta.48(@opentelemetry/api@1.9.1)(@swc/helpers@0.5.23)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
     dependencies:
       '@swc/core': 1.15.3(@swc/helpers@0.5.23)
-      '@workflow/core': 5.0.0-beta.47(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
-      '@workflow/errors': 5.0.0-beta.19
+      '@workflow/core': 5.0.0-beta.48(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))
+      '@workflow/errors': 5.0.0-beta.20
       '@workflow/swc-plugin': 5.0.0-beta.5(@swc/core@1.15.3(@swc/helpers@0.5.23))
       '@workflow/utils': 5.0.0-beta.10
       builtin-modules: 5.0.0
@@ -23307,19 +23307,19 @@ snapshots:
       - utf-8-validate
       - ws
 
-  '@workflow/core@5.0.0-beta.47(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
+  '@workflow/core@5.0.0-beta.48(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)(supports-color@10.2.2)(ws@8.21.3(bufferutil@4.1.0))':
     dependencies:
       '@aws-sdk/credential-provider-web-identity': 3.972.49
       '@jridgewell/trace-mapping': 0.3.31
       '@standard-schema/spec': 1.0.0
       '@types/ms': 2.1.0
       '@vercel/functions': 3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0))
-      '@workflow/errors': 5.0.0-beta.19
+      '@workflow/errors': 5.0.0-beta.20
       '@workflow/serde': 5.0.0-beta.2
       '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.32
-      '@workflow/world-local': 5.0.0-beta.41(@opentelemetry/api@1.9.1)
-      '@workflow/world-vercel': 5.0.0-beta.43(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
+      '@workflow/world': 5.0.0-beta.33
+      '@workflow/world-local': 5.0.0-beta.42(@opentelemetry/api@1.9.1)
+      '@workflow/world-vercel': 5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)
       debug: 4.4.3(supports-color@10.2.2)
       devalue: 5.9.0
       ms: 2.1.3
@@ -23337,7 +23337,7 @@ snapshots:
       - utf-8-validate
       - ws
 
-  '@workflow/errors@5.0.0-beta.19':
+  '@workflow/errors@5.0.0-beta.20':
     dependencies:
       '@workflow/utils': 5.0.0-beta.10
       ms: 2.1.3
@@ -23356,12 +23356,12 @@ snapshots:
     dependencies:
       ms: 2.1.3
 
-  '@workflow/world-local@5.0.0-beta.41(@opentelemetry/api@1.9.1)':
+  '@workflow/world-local@5.0.0-beta.42(@opentelemetry/api@1.9.1)':
     dependencies:
       '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
-      '@workflow/errors': 5.0.0-beta.19
+      '@workflow/errors': 5.0.0-beta.20
       '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.32
+      '@workflow/world': 5.0.0-beta.33
       async-sema: 3.1.1
       proper-lockfile: 4.1.2
       ulid: 3.0.2
@@ -23370,13 +23370,13 @@ snapshots:
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
 
-  '@workflow/world-postgres@5.0.0-beta.39(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)':
+  '@workflow/world-postgres@5.0.0-beta.40(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(sql.js@1.14.1)(supports-color@10.2.2)(typescript@7.0.2)':
     dependencies:
       '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
-      '@workflow/errors': 5.0.0-beta.19
+      '@workflow/errors': 5.0.0-beta.20
       '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.32
-      '@workflow/world-local': 5.0.0-beta.41(@opentelemetry/api@1.9.1)
+      '@workflow/world': 5.0.0-beta.33
+      '@workflow/world-local': 5.0.0-beta.42(@opentelemetry/api@1.9.1)
       cbor-x: 1.6.0
       dotenv: 17.3.1
       drizzle-orm: 0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.20.0)(@upstash/redis@1.38.0)(pg@8.20.0)(sql.js@1.14.1)
@@ -23417,14 +23417,14 @@ snapshots:
       - supports-color
       - typescript
 
-  '@workflow/world-vercel@5.0.0-beta.43(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)':
+  '@workflow/world-vercel@5.0.0-beta.44(@aws-sdk/credential-provider-web-identity@3.972.49)(@opentelemetry/api@1.9.1)(bufferutil@4.1.0)':
     dependencies:
       '@vercel/functions': 3.9.3(@aws-sdk/credential-provider-web-identity@3.972.49)(ws@8.21.3(bufferutil@4.1.0))
       '@vercel/oidc': 3.2.0
       '@vercel/queue': 0.5.0(@opentelemetry/api@1.9.1)
-      '@workflow/errors': 5.0.0-beta.19
+      '@workflow/errors': 5.0.0-beta.20
       '@workflow/utils': 5.0.0-beta.10
-      '@workflow/world': 5.0.0-beta.32
+      '@workflow/world': 5.0.0-beta.33
       cbor-x: 1.6.0
       ulid: 3.0.2
       undici: 7.29.0
@@ -23437,7 +23437,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@workflow/world@5.0.0-beta.32':
+  '@workflow/world@5.0.0-beta.33':
     dependencies:
       ulid: 3.0.2
       zod: 4.3.6
