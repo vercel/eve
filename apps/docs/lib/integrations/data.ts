@@ -1623,46 +1623,6 @@ A bank is one isolated memory store, and both files must use the same bank. Do n
 };
 
 const memoryPresentations: Record<string, MemoryPresentation> = {
-  arcana: {
-    logo: "arcana",
-    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
-    keywords: ["memory", "long-term memory", "semantic search", "brain notes", "Kybernesis"],
-    install: `Install the Kybernesis Arcana provider for eve:
-
-\`\`\`bash
-eve add memory/arcana
-\`\`\`
-
-This installs \`@kybernesis/arcana\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.49 or later.`,
-    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
-
-\`\`\`bash title=".env.local"
-ARCANA_API_KEY=kb_your_api_key_here
-ARCANA_WORKSPACE=your-workspace
-\`\`\`
-
-The registry creates this memory slot:
-
-\`\`\`ts title="agent/memory/arcana.ts"
-import { arcanaMemory } from "@kybernesis/arcana/memory";
-import { defineMemory } from "eve/memory";
-import { byPrincipal } from "eve/memory/scope";
-
-export default defineMemory({
-  description: "Recall and manage durable context for the current user.",
-  provider: arcanaMemory({
-    apiKey: process.env.ARCANA_API_KEY!,
-    workspace: process.env.ARCANA_WORKSPACE!,
-  }),
-  scope: byPrincipal,
-});
-\`\`\`
-
-The filename creates the \`arcana\` memory slot. Before each turn with at least four words, Arcana searches memories and queries brain notes, then injects the result as one context message. The provider also gives the model \`arcana__remember\`, \`arcana__recall\`, and \`arcana__search\` tools.`,
-    configure: `Arcana does not capture turns automatically by default. The model stores memories deliberately with \`arcana__remember\`; set \`capture: { enabled: true }\` when you want it to capture completed turns automatically.
-
-An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The provider records eve's scope as a tag, but Arcana isolates data by workspace rather than by eve scope. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
-  },
   supermemory: {
     logo: "supermemory",
     docsHref: "https://github.com/supermemoryai/eve-supermemory#readme",
@@ -1710,6 +1670,46 @@ The filename creates the \`supermemory\` memory slot, so the provider's tools ar
 Supermemory automatically recalls relevant context before a turn and captures completed turns. It also provides tools to search, read sessions and documents, remember context, extract files, URLs, or text, and forget memories. The provider sends stored conversations and extracted sources to Supermemory; configure its retention and data handling for your application before enabling it for sensitive data.
 
 Keep \`SUPERMEMORY_API_KEY\` in the environment rather than prompts or source control. You can change the container-tag prefix, automatic search, capture policy, and profile-context time zone through \`supermemory(...)\`. See the [Supermemory eve provider documentation](https://github.com/supermemoryai/eve-supermemory#readme) for all options and tool behavior.`,
+  },
+  arcana: {
+    logo: "arcana",
+    docsHref: "https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme",
+    keywords: ["memory", "long-term memory", "semantic search", "brain notes", "Kybernesis"],
+    install: `Install the Kybernesis Arcana provider for eve:
+
+\`\`\`bash
+eve add memory/arcana
+\`\`\`
+
+This installs \`@kybernesis/arcana\` and writes a memory slot. The provider requires Node.js 24 or later and eve 0.49 or later.`,
+    quickStart: `Create an Arcana workspace and workspace-scoped API key, then add both values to the agent's environment:
+
+\`\`\`bash title=".env.local"
+ARCANA_API_KEY=kb_your_api_key_here
+ARCANA_WORKSPACE=your-workspace
+\`\`\`
+
+The registry creates this memory slot:
+
+\`\`\`ts title="agent/memory/arcana.ts"
+import { arcanaMemory } from "@kybernesis/arcana/memory";
+import { defineMemory } from "eve/memory";
+import { byPrincipal } from "eve/memory/scope";
+
+export default defineMemory({
+  description: "Recall and manage durable context for the current user.",
+  provider: arcanaMemory({
+    apiKey: process.env.ARCANA_API_KEY!,
+    workspace: process.env.ARCANA_WORKSPACE!,
+  }),
+  scope: byPrincipal,
+});
+\`\`\`
+
+The filename creates the \`arcana\` memory slot. Before each turn with at least four words, Arcana searches memories and queries brain notes, then injects the result as one context message. The provider also gives the model \`arcana__remember\`, \`arcana__recall\`, and \`arcana__search\` tools.`,
+    configure: `Arcana does not capture turns automatically by default. The model stores memories deliberately with \`arcana__remember\`; set \`capture: { enabled: true }\` when you want it to capture completed turns automatically.
+
+An Arcana key is scoped to a workspace. Keep the key in a sensitive environment variable and use a separate workspace and key when people or tenants must not share memory. The provider records eve's scope as a tag, but Arcana isolates data by workspace rather than by eve scope. See the [Arcana package documentation](https://github.com/KybernesisAI/platform/tree/master/packages/arcana#readme) for the full configuration and tool reference.`,
   },
 };
 
