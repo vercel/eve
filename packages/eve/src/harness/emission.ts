@@ -329,7 +329,7 @@ async function consumeStreamContent(
   const inlineAuthorizationResults: TypedToolResult<ToolSet>[] = [];
   const trailingInlineToolResultParts: InlineToolResultPart[] = [];
   const actionInputs = new Map<string, JsonObject>();
-  const streamingActionInputs = new Map<string, { offset: number; toolName: string }>();
+  const streamingActionInputs = new Map<string, { toolName: string }>();
 
   const flushCurrentMessage = async (): Promise<void> => {
     if (currentMessage.length === 0) {
