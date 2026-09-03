@@ -11,6 +11,7 @@ export {
   type SlackApiResponse,
   type SlackAuthorizationEventContext,
   type SlackAuthorizationRequiredHandler,
+  type SlackBlockActionsInteraction,
   type SlackBotToken,
   type SlackChannel,
   type SlackChannelConfig,

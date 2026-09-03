@@ -440,6 +440,13 @@ export interface SlackInteraction {
   readonly enterpriseId?: string;
 }
 
+/** Normalized `block_actions` callback handed to `onBlockActions`. */
+export interface SlackBlockActionsInteraction extends SlackInteraction {
+  readonly type: "block_actions";
+  readonly actions: readonly SlackInteractionAction[];
+  readonly triggerId?: string;
+}
+
 /** Workspace-scoped context handed to `slackChannel({ onSlashCommand })`. */
 export interface SlackSlashCommandContext {
   /** Slack workspace identity and raw Web API escape hatch. */
@@ -456,6 +463,10 @@ export interface SlackInteractionAction {
   readonly actionId: string;
   readonly value?: string;
   readonly blockId?: string;
+  /** Slack Block Kit element type, such as `button` or `static_select`. */
+  readonly type?: string;
+  /** The complete decoded action object, preserving Slack's fields and nesting. */
+  readonly raw: Readonly<Record<string, unknown>>;
   /**
    * `selected_option.value` for radio / select / external_select
    * widgets. `undefined` for buttons and multi-select widgets.
@@ -740,6 +751,20 @@ export interface SlackChannelConfig {
    */
   onInteraction?(
     interaction: SlackInteraction,
+    ctx: SlackInteractionContext,
+  ): void | Response | Promise<void | Response>;
+
+  /**
+   * Handles non-HITL Slack `block_actions` callbacks from messages, App Home,
+   * and modals. Runs once per callback with normalized actions while preserving
+   * the complete Slack payload. Message-backed callbacks expose thread and
+   * session operations through `ctx.message`.
+   *
+   * This hook takes precedence over `onInteraction`. Returning `void` sends an
+   * empty `200 OK`; returning a {@link Response} uses that acknowledgement.
+   */
+  onBlockActions?(
+    interaction: SlackBlockActionsInteraction,
     ctx: SlackInteractionContext,
   ): void | Response | Promise<void | Response>;
 

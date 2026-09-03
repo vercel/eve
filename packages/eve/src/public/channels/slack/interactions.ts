@@ -39,6 +39,7 @@ import {
   authorizeInputResponse,
 } from "#public/channels/slack/input-response.js";
 import type {
+  SlackBlockActionsInteraction,
   SlackChannelConfig,
   SlackChannelState,
   SlackInputResponseSubmission,
@@ -51,7 +52,10 @@ import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operat
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseInputResponse } from "#shared/input.js";
-import { handleAuthoredInteraction } from "#public/channels/slack/interaction-handler.js";
+import {
+  handleAuthoredBlockActions,
+  handleAuthoredInteraction,
+} from "#public/channels/slack/interaction-handler.js";
 import {
   isObjectRecord,
   readOptionalString,
@@ -66,7 +70,7 @@ const log = createLogger("slack.interactions");
  * {@link parseBlockActionsPayload} and read by the handler.
  */
 interface ParsedBlockActionsPayload {
-  readonly actions: SlackInteractionAction[];
+  readonly actions: readonly SlackInteractionAction[];
   readonly channelId: string;
   readonly installationTeamId: string | undefined;
   readonly threadTs: string;
@@ -114,6 +118,8 @@ export function parseBlockActionsPayload(
       actionId: String(a.action_id ?? ""),
       value: a.value != null ? String(a.value) : undefined,
       blockId: a.block_id != null ? String(a.block_id) : undefined,
+      type: typeof a.type === "string" ? a.type : undefined,
+      raw: a,
       selectedOptionValue: extractSelectedOptionValue(a),
       messageTs: message?.ts,
       label: extractActionLabel(a),
@@ -138,26 +144,45 @@ function parseSharedBlockActionsPayload(
 ): ParsedBlockActionsPayload | null {
   if (!body.channelId || !body.threadTs) return null;
 
-  const identity = readSlackInteractionIdentity(body.raw);
+  const normalized = normalizeSharedBlockActions(body);
   return {
+    actions: normalized.actions,
+    channelId: body.channelId,
+    installationTeamId: normalized.installationTeamId,
+    threadTs: body.threadTs,
+    teamId: normalized.teamId,
+    messageBlocks: body.messageBlocks ?? [],
+  };
+}
+
+function normalizeSharedBlockActions(body: SlackBlockActionsPayload): SlackBlockActionsInteraction {
+  const identity = readSlackInteractionIdentity(body.raw);
+  const user = identity.user ?? { id: body.userId };
+  return {
+    type: "block_actions",
     actions: body.actions.map((action) => ({
       actionId: action.actionId,
       value: action.value,
       blockId: action.blockId,
+      type: action.type,
+      raw: action.raw,
       selectedOptionValue: action.selectedOptionValue,
       messageTs: body.messageTs,
       label: action.label,
-      user: {
-        id: action.user?.id ?? body.userId,
-        username: action.user?.username,
-        name: action.user?.name,
-      },
+      user: action.user
+        ? {
+            id: action.user.id,
+            username: action.user.username,
+            name: action.user.name,
+          }
+        : user,
     })),
-    channelId: body.channelId,
-    installationTeamId: identity.installationTeamId,
-    threadTs: body.threadTs,
+    triggerId: body.triggerId,
+    payload: body.raw,
+    user,
     teamId: body.user?.teamId ?? identity.teamId ?? body.teamId,
-    messageBlocks: body.messageBlocks ?? [],
+    installationTeamId: identity.installationTeamId,
+    enterpriseId: identity.enterpriseId ?? body.enterpriseId,
   };
 }
 
@@ -268,8 +293,17 @@ export async function handleInteractionPost(
     return authoredInteraction(payload.raw, payload.kind);
   }
 
+  const blockActions = normalizeSharedBlockActions(payload);
   const interaction = parseBlockActionsPayload(payload);
-  if (!interaction) return authoredInteraction(payload.raw, payload.kind);
+  if (!interaction) {
+    if (blockActions.actions.some((action) => isHitlAction(action.actionId))) return ack;
+    return handleAuthoredBlockActions({
+      config: deps.config,
+      fallbackResponse: ack,
+      interaction: blockActions,
+      waitUntil: ctx.waitUntil,
+    });
+  }
 
   const freeformAction = interaction.actions.find((a) => isFreeformAction(a.actionId));
   if (freeformAction) {
@@ -338,7 +372,13 @@ export async function handleInteractionPost(
     thread,
     slack,
   };
-  return authoredInteraction(payload.raw, payload.kind, ack, message);
+  return handleAuthoredBlockActions({
+    config: deps.config,
+    fallbackResponse: ack,
+    interaction: blockActions,
+    message,
+    waitUntil: ctx.waitUntil,
+  });
 }
 
 /** Normalizes Slack's two shortcut payload variants. */

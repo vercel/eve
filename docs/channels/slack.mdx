@@ -161,11 +161,28 @@ Only the first available handler runs. A message hook returning `null` drops the
 
 Use `onShortcut(shortcut, ctx)` for message shortcuts and global shortcuts configured under **Interactivity & Shortcuts** in your Slack app. The handler receives the shortcut callback ID, user, workspace, and trigger ID. Message shortcuts also include the selected message and channel. The context exposes workspace-scoped Slack API access because global shortcuts have no channel or message. eve acknowledges shortcut requests immediately and keeps their handlers alive in the background.
 
-#### Interactions
+#### Block actions
 
-Use `onInteraction(interaction, ctx)` for signed interactive callbacks not consumed by eve's HITL handling or the more specific `onShortcut` hook. This includes message, App Home, and modal `block_actions`; custom `view_submission` callbacks; dynamic select `block_suggestion` requests; `view_closed`; shortcuts when `onShortcut` is absent; and interaction types added by Slack later. Slash commands only reach `onSlashCommand`.
+Use `onBlockActions(interaction, ctx)` for non-HITL `block_actions` callbacks from messages, App Home, and modals. It runs once per callback and exposes the normalized actions under `interaction.actions`; each action includes the old `actionId`, `blockId`, `value`, `selectedOptionValue`, and `label` conveniences, plus `type` and the complete Slack action under `raw`.
 
-The handler receives the complete decoded Slack payload under `interaction.payload`, plus its `type` and normalized `user`, `teamId`, `installationTeamId`, and `enterpriseId` fields when Slack supplies them. The workspace-scoped `ctx.slack` handle resolves credentials from `installationTeamId`, which can differ from the actor's `teamId` in Slack Connect callbacks. For message-backed callbacks, `ctx.message` also provides thread operations and eve session operations such as `cancel`, `reset`, and `send`; it is absent for view-backed callbacks.
+Message-backed callbacks provide thread and eve session operations such as `cancel`, `reset`, and `send` under `ctx.message`. App Home and modal callbacks have no message context, so use the workspace-scoped `ctx.slack` handle instead.
+
+```ts title="agent/channels/slack.ts"
+import { slackChannel } from "eve/channels/slack";
+
+export default slackChannel({
+  async onBlockActions(interaction, ctx) {
+    const action = interaction.actions.find(({ actionId }) => actionId === "stop");
+    if (action && ctx.message) await ctx.message.cancel();
+  },
+});
+```
+
+#### Other interactions
+
+Use `onInteraction(interaction, ctx)` as the raw fallback for signed interactive callbacks not consumed by eve's HITL handling, `onBlockActions`, or `onShortcut`. This includes custom `view_submission` callbacks, dynamic select `block_suggestion` requests, `view_closed`, shortcuts when `onShortcut` is absent, and interaction types added by Slack later. `block_actions` also fall through when `onBlockActions` is absent. Slash commands only reach `onSlashCommand`.
+
+The handler receives the complete decoded Slack payload under `interaction.payload`, plus its `type` and normalized `user`, `teamId`, `installationTeamId`, and `enterpriseId` fields when Slack supplies them. The workspace-scoped `ctx.slack` handle resolves credentials from `installationTeamId`, which can differ from the actor's `teamId` in Slack Connect callbacks. Message-backed `block_actions` additionally provide `ctx.message` when they fall through.
 
 The interaction handler runs inline because its response can acknowledge a modal submission or dynamic select request. Return a `Response` when Slack expects an acknowledgement body, or return nothing for an empty `200 OK`. Use `ctx.waitUntil(...)` for work that does not affect the acknowledgement:
 
@@ -201,7 +218,7 @@ export default slackChannel({
 });
 ```
 
-eve-owned HITL actions and submissions remain reserved and do not reach `onInteraction`. `onShortcut` takes precedence for shortcuts when configured; otherwise shortcuts fall through to `onInteraction`. A `block_actions` callback containing any eve-owned action remains reserved even when it also contains custom actions.
+eve-owned HITL actions and submissions remain reserved and do not reach authored interaction hooks. `onBlockActions` takes precedence for block actions, and `onShortcut` takes precedence for shortcuts; callbacks fall through to `onInteraction` when the corresponding specific hook is absent. A `block_actions` callback containing any eve-owned action remains reserved even when it also contains custom actions.
 
 #### Slash commands
 
@@ -378,7 +395,7 @@ export default slackChannel({
 });
 ```
 
-Reset returns `{ status: "reset", previousSessionId }` when the thread had a session, or `{ status: "no_active_session" }` when it was already free. Both outcomes are successful. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Message-backed `onInteraction` handlers receive the same operations under `ctx.message`, which is useful for a New conversation button.
+Reset returns `{ status: "reset", previousSessionId }` when the thread had a session, or `{ status: "no_active_session" }` when it was already free. Both outcomes are successful. Returning `null` after reset consumes the triggering message as a command; return `{ auth }` instead to deliver that message as the first turn of the fresh session. Message-backed `onBlockActions` and fallback `onInteraction` handlers receive the same operations under `ctx.message`, which is useful for a New conversation button.
 
 ### Other Events API callbacks
 
@@ -428,7 +445,7 @@ const session = await ctx.resolveSession({ target });
 
 `onEvent` is the raw fallback after the message hooks. If an event is not claimed by `onAppMention`, `onDirectMessage`, or `onMessage`, an authored `onEvent` receives it; otherwise eve applies the built-in mention/DM default or ignores it.
 
-`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`, while interactive payloads reach `onShortcut`, `onInteraction`, or eve's HITL handling; add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration so other callbacks reach their handlers.
+`onEvent` covers JSON `event_callback` deliveries only. URL verification, slash commands, and interactive payloads do not reach it. Slash commands reach `onSlashCommand`, while interactive payloads reach `onBlockActions`, `onShortcut`, `onInteraction`, or eve's HITL handling; add every desired event and required OAuth scope to the Slack app's Event Subscriptions configuration so other callbacks reach their handlers.
 
 ### Slack API calls outside a handler
 
