@@ -131,6 +131,41 @@ describe("resumeSessionInbox", () => {
     });
   });
 
+  it("negotiates v6 for stable session-owned task cancellation", async () => {
+    const token = sessionCommandHookToken("session-1");
+    const hook = sessionHook("session-1", token, { sessionInboxWireVersion: 6 });
+    getHookByTokenMock.mockResolvedValue(hook);
+    resumeHookMock.mockResolvedValue(hook);
+
+    await resumeSessionInbox(token, { kind: "cancel", tasks: true, turnId: "turn-1" });
+
+    expect(getHookByTokenMock).toHaveBeenCalledWith(token);
+    expect(resumeHookMock).toHaveBeenCalledWith(hook, {
+      kind: "cancel",
+      tasks: true,
+      turnId: "turn-1",
+      version: 6,
+    });
+  });
+
+  it.each([
+    ["markerless", undefined],
+    ["v5", { sessionInboxWireVersion: 5 }],
+  ])(
+    "rejects stable session-owned task cancellation for a %s consumer before persistence",
+    async (_name, metadata) => {
+      const token = sessionCommandHookToken("session-1");
+      getHookByTokenMock.mockResolvedValue(sessionHook("session-1", token, metadata));
+
+      await expect(resumeSessionInbox(token, { kind: "cancel", tasks: true })).rejects.toThrow(
+        /Cannot encode session-owned task cancellation for wire version/,
+      );
+
+      expect(getHookByTokenMock).toHaveBeenCalledWith(token);
+      expect(resumeHookMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("encodes continuation delivery for the resolved consumer and resumes that hook", async () => {
     const hook = sessionHook("session-1", "continuation-1", { sessionInboxWireVersion: 1 });
     getHookByTokenMock.mockResolvedValue(hook);

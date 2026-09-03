@@ -141,6 +141,12 @@ export class EvalSessionDriver implements EveEvalSession {
     return await this.#session.cancel();
   }
 
+  /** @internal */
+  async cleanup(signal: AbortSignal): Promise<void> {
+    if (this.#session === undefined) return;
+    await this.#session.reset({ reason: "Eval timed out", signal });
+  }
+
   requireInputRequest(filter: EveEvalInputRequestMatchOptions = {}): InputRequest {
     if (this.#pendingInputRequests.length === 0) {
       this.#failRequirement(
@@ -615,6 +621,20 @@ export class EvalSessionManager {
 
   hasActivity(): boolean {
     return this.#sessions.length > 0;
+  }
+
+  /** @internal */
+  async cleanup(signal: AbortSignal): Promise<readonly PromiseSettledResult<void>[]> {
+    const knownRoots = new Map<string, EvalSessionDriver>();
+    for (const session of this.#sessions) {
+      const sessionId = session.sessionId;
+      if (sessionId !== undefined && !knownRoots.has(sessionId)) {
+        knownRoots.set(sessionId, session);
+      }
+    }
+    return await Promise.allSettled(
+      [...knownRoots.values()].map(async (session) => await session.cleanup(signal)),
+    );
   }
 
   #createSession(primary: boolean): EvalSessionDriver {

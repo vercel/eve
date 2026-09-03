@@ -44,8 +44,12 @@ export interface Session {
     inputResponses: StrictInputResponses<TResponses>,
     options: SessionRespondOptions,
   ): Promise<SessionSendCommandResult>;
-  /** Requests cancellation of this exact session's active turn or one owned task. */
-  cancel(options?: { taskId?: string; turnId?: string }): Promise<CancelTurnResult>;
+  /** Requests cancellation of this exact session's active turn and optionally its owned tasks. */
+  cancel(options?: {
+    taskId?: string;
+    tasks?: boolean;
+    turnId?: string;
+  }): Promise<CancelTurnResult>;
   /** Queues compaction on this exact session ID. */
   compact(): Promise<CompactSessionResult>;
   /** Queues a context clear on this exact session ID. */
@@ -143,9 +147,14 @@ export function createSession(
         sessionId: id,
       });
     },
-    async cancel(options?: { taskId?: string; turnId?: string }) {
+    async cancel(options?: { taskId?: string; tasks?: boolean; turnId?: string }) {
       return await runtime.dispatchSession({
-        command: { kind: "cancel", taskId: options?.taskId, turnId: options?.turnId },
+        command: {
+          kind: "cancel",
+          taskId: options?.taskId,
+          tasks: options?.tasks,
+          turnId: options?.turnId,
+        },
         sessionId: id,
       });
     },

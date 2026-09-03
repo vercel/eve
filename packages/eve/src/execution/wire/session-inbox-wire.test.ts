@@ -11,6 +11,15 @@ describe("session inbox wire policy", () => {
     ).toThrowError(SessionInboxWireError);
   });
 
+  it("migrates version 5 cancel commands without enabling owned-task cancellation", () => {
+    expect(sessionInboxWire.decode({ kind: "cancel", version: 5 })).toEqual({
+      kind: "cancel",
+      taskId: undefined,
+      tasks: undefined,
+      turnId: undefined,
+    });
+  });
+
   it("normalizes cross-realm records before running pure migrations", () => {
     const wire = runInNewContext(`({
       caller: undefined,
