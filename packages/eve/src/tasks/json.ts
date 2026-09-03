@@ -1,6 +1,6 @@
 import type { z } from "#compiled/zod/index.js";
 
-import type { JsonValue } from "#shared/json.js";
+import { parseJsonObject, type JsonValue } from "#shared/json.js";
 import { TASK_VIEW_JSON_SCHEMA } from "#tools/framework/task-contract.js";
 import type { TaskView } from "#tasks/types.js";
 
@@ -16,9 +16,9 @@ type TaskViewJson = z.infer<typeof TASK_VIEW_JSON_SCHEMA>;
 
 /** Projects a task view into the JSON value carried by tool results. */
 export function taskViewToJson(view: TaskView): TaskViewJson {
-  // `satisfies` couples the schema to `TaskView` at compile time; the runtime
-  // parse strips the private fields structural typing would let through.
-  return TASK_VIEW_JSON_SCHEMA.parse(view);
+  // Normalize absent optional fields before schema projection: zod preserves
+  // explicit `undefined`, which downstream JSON consumers cannot traverse.
+  return TASK_VIEW_JSON_SCHEMA.parse(parseJsonObject(view));
 }
 
 /** Projects many views into one `{ tasks }` tool output. */
