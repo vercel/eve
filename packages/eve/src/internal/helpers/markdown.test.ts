@@ -111,6 +111,24 @@ When the user asks about weather, call the weather tool before answering.`),
     );
   });
 
+  it("treats metadata outside eve's flat string map as a no-op", () => {
+    expect(
+      lowerSkillMarkdown(`---
+description: Use the Lark CLI before answering document questions.
+metadata:
+  requires:
+    bins: [lark-cli]
+  enabled: true
+---
+Use lark-cli to answer the question.`),
+    ).toEqual(
+      defineSkill({
+        description: "Use the Lark CLI before answering document questions.",
+        markdown: "Use lark-cli to answer the question.",
+      }),
+    );
+  });
+
   it("derives flat skill metadata from plain markdown when no frontmatter is present", () => {
     expect(
       lowerSkillMarkdown("Use the weather tool before answering forecast questions.", {
