@@ -38,7 +38,7 @@ export interface EveVercelBuildTarget {
 }
 
 export interface EveVercelServiceContribution {
-  readonly homeRouteSrc?: string;
+  readonly homeRouteSrc: string | undefined;
   readonly rootDirectory: string;
   readonly routeSrc: string;
   readonly service: GeneratedVercelServiceConfig;
@@ -149,7 +149,7 @@ export function compileEveVercelService(input: {
   });
 
   return {
-    ...(homeRouteSrc === undefined ? {} : { homeRouteSrc }),
+    homeRouteSrc,
     rootDirectory: build.rootDirectory,
     routeSrc,
     service: {
