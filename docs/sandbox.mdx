@@ -25,12 +25,12 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 export default defineTool({
-  description: "Run a Python analysis script and return its output.",
+  description: "Run a Node analysis script and return its output.",
   inputSchema: z.object({ script: z.string() }),
   async execute({ script }, ctx) {
     const sandbox = await ctx.getSandbox();
-    await sandbox.writeTextFile({ path: "analysis/run.py", content: script });
-    const result = await sandbox.run({ command: "python analysis/run.py" });
+    await sandbox.writeTextFile({ path: "analysis/run.mjs", content: script });
+    const result = await sandbox.run({ command: "node analysis/run.mjs" });
     return { stdout: result.stdout };
   },
 });
@@ -57,7 +57,10 @@ Since `run` blocks until the command exits, use `spawn` when the process should 
 
 ```ts
 const sandbox = await ctx.getSandbox();
-const server = await sandbox.spawn({ command: "python -m http.server 8000" });
+const server = await sandbox.spawn({
+  command:
+    "node -e \"require('node:http').createServer((_, response) => response.end('ok')).listen(8000)\"",
+});
 // ...do other work against the server...
 await server.kill();
 ```
@@ -176,11 +179,51 @@ export default defineSandbox({
 
 ### Docker
 
-`docker()` drives the Docker CLI directly. By default, it uses the `ghcr.io/vercel/eve` image tag matching the installed eve version. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Configure it through `docker({ image, env, pullPolicy, networkPolicy })`, and install authored runtime tools in sandbox bootstrap or provide them through a custom image. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
+`docker()` drives the Docker CLI directly. By default, it uses the `ghcr.io/vercel/eve` image tag matching the installed eve version. eve creates `/workspace` and verifies Bash during framework setup, before authored bootstrap code runs. Templates are committed as local Docker images and reused across sessions when the sandbox source, seed files, `revalidationKey`, and Docker backend options still match. Sessions run as long-lived containers whose filesystems persist `/workspace` changes across turns for the same durable session. `eve dev` prunes stale template images in the background.
 
 ### microsandbox
 
-`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. By default, it uses the `ghcr.io/vercel/eve` image tag matching the installed eve version. During framework setup, before authored bootstrap code runs, eve verifies Bash and creates `/workspace` and the sandbox user. Install authored runtime tools in sandbox bootstrap or provide them through a custom image. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
+`microsandbox()` runs each sandbox in a lightweight local VM with snapshot-backed templates, a `vercel-sandbox` user, and a firewall capable of domain-level network policies and credential brokering. It is the closest local match to hosted Vercel Sandbox. By default, it uses the `ghcr.io/vercel/eve` image tag matching the installed eve version. Supported hosts are macOS on Apple Silicon, or Linux (glibc) with KVM. The `microsandbox` npm package and its VM runtime are not bundled with eve, so `eve dev` installs both automatically when missing (disable with `setup: { autoInstall: false }`); production processes fail with actionable install errors instead.
+
+### Add runtimes with a custom image
+
+The default image includes Node, npm, pnpm, Git, curl, and ripgrep. It does not include Python or other language runtimes. Build an OCI image from the eve image when your local sandbox needs additional system packages:
+
+```dockerfile title="Dockerfile"
+FROM ghcr.io/vercel/eve:your_eve_version
+
+USER root
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends python3 python3-pip \
+  && rm -rf /var/lib/apt/lists/*
+USER vercel-sandbox
+```
+
+Pass the resulting image to `docker()` or `microsandbox()`:
+
+```ts title="agent/sandbox.ts"
+import { defineSandbox } from "eve/sandbox";
+import { docker } from "eve/sandbox/docker";
+
+export default defineSandbox({
+  backend: docker({ image: "ghcr.io/acme/my-eve-python:1.0.0" }),
+});
+```
+
+To use the same image when either local OCI backend is available, configure both through `defaultBackend()`:
+
+```ts title="agent/sandbox.ts"
+import { defaultBackend, defineSandbox } from "eve/sandbox";
+
+export default defineSandbox({
+  backend: defaultBackend({
+    docker: { image: "ghcr.io/acme/my-eve-python:1.0.0" },
+    microsandbox: { image: "ghcr.io/acme/my-eve-python:1.0.0" },
+  }),
+});
+```
+
+`vercel()` always uses eve's version-matched Vercel Sandbox image, so its `image` cannot be overridden. Install additional runtimes in `bootstrap` when you deploy on Vercel, or supply a Vercel Sandbox `source` snapshot, Git revision, or tarball as the template base layer.
 
 ### just-bash
 

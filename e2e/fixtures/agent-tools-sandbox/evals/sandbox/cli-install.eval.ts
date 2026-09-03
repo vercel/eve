@@ -2,10 +2,9 @@ import { defineEval } from "eve/evals";
 
 import { SANDBOX_CLI_NAME, SANDBOX_CLI_TOKEN } from "./shared";
 
-// `bootstrap` installed a custom Python CLI onto the PATH. Invoking it by
-// name (no path) through the `bash` tool proves the bootstrap-provisioned
-// tooling is both on the PATH and executable in later sessions, and that the
-// base image's Python runtime ran the bootstrap-authored script.
+// `bootstrap` installed a custom Node CLI onto the PATH. Invoking it by name
+// through the `bash` tool proves bootstrap-provisioned tooling is on the PATH
+// and executable in later sessions.
 export default defineEval({
   tags: ["real-model"],
   description: "Sandbox: a custom CLI installed in `bootstrap` is on the PATH for later sessions.",
