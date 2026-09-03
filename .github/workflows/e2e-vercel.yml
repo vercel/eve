@@ -170,6 +170,24 @@ jobs:
             --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
             "${token_args[@]}" | tail -n 1)"
 
+          wait_for_target() {
+            local target="$1"
+            local attempt status
+            for attempt in $(seq 1 60); do
+              status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+                --max-time 10 "$target/eve/v1/health" || true)"
+              if [ "$status" = "200" ]; then
+                echo "Eval target ready: $target (attempt $attempt)"
+                return 0
+              fi
+              echo "Eval target not ready: $target (attempt $attempt/60, health status ${status:-transport-error})"
+              sleep 2
+            done
+            echo "Timed out waiting for eval target health: $target (last health status ${status:-transport-error})" >&2
+            return 1
+          }
+
+          wait_for_target "$DEPLOYMENT_URL"
           npx eve eval --strict --verbose --exclude-tag real-model \
             --url "$DEPLOYMENT_URL" \
             --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
@@ -184,6 +202,7 @@ jobs:
             # vc alias does not infer the team from the project link the way
             # link/deploy do, so pass the scope explicitly.
             pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
+            wait_for_target "https://$ALIAS"
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
               npx eve eval --tag redeploy --strict --verbose --exclude-tag real-model \
               --url "https://$ALIAS" \

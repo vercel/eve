@@ -227,12 +227,21 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 /** Waits until the alias exposes the marker from the expected deployment. */
 async function waitForAliasToServe(t: EveEvalContext, marker: string): Promise<void> {
   const deadline = Date.now() + 120_000;
+  let lastStatus = "transport error";
+  let lastMarkerMatch = false;
   while (Date.now() < deadline) {
-    const response = await t.target.fetch("/eve/v1/info");
-    if (response.ok && JSON.stringify(await response.json()).includes(marker)) {
-      return;
+    try {
+      const response = await t.target.fetch("/eve/v1/info", { cache: "no-store" });
+      lastStatus = String(response.status);
+      lastMarkerMatch = response.ok && JSON.stringify(await response.json()).includes(marker);
+      if (lastMarkerMatch) return;
+    } catch {
+      // The alias may briefly be unavailable while its deployment propagates.
     }
     await t.sleep(1_000);
   }
-  throw new Error(`Timed out waiting for the alias to serve a deployment containing ${marker}.`);
+  throw new Error(
+    `Timed out waiting for alias ${new URL(t.target.url).host} to serve marker ${marker}; ` +
+      `last status=${lastStatus}, marker matched=${lastMarkerMatch}.`,
+  );
 }
