@@ -39,24 +39,27 @@ session":
 | `cancel { taskId }` (internal) | cancelled; deliveries from `taskId` discarded | that one task's _deliveries_ dropped; the task itself is not cancelled² | continues |
 | `reset`                        | cancelled                                     | all cancelled, then children terminated                                 | **ends**  |
 
-¹ `cancelDescendantTurnsStep` cancels handles in phase `running`; task-mode
-children are recorded as `addressed`, so it never sees them. `rollback` on turn
-cancellation deliberately retains already-admitted tasks
-(`execution/tasks/parent/tool-execution.ts:75-79,170-175`).
+¹ `cancelDescendantTurnsStep` cancels `running` handles and `claimed` handles
+whose owner is a blocking workflow-tool run. Task-owned children are `claimed`
+by a task id (`subagents/handles/store.ts`, `TaskOwnedAgentHandle`), so the
+filter excludes them. `rollback` on turn cancellation deliberately retains
+already-admitted tasks ("that would kill already-running tasks",
+`execution/tasks/parent/tool-execution.ts`).
 
 ² `taskId` on the cancel body is parsed by the eve channel
-(`public/channels/eve.ts:957-970`) but exists for parent→child propagation in
-`propagateSubagentExecutorCancel` (`execution/tasks/parent/dispatch.ts:195-250`),
-where the _child_ session is told which task's wake deliveries to drop. It is
-not documented and does not cancel a task record.
+(`eve-channel/request.ts`, `parseCancelTurnBody`) but exists for parent→child
+propagation in `propagateSubagentExecutorCancel`
+(`execution/tasks/parent/dispatch.ts`), where the _child_ session is told which
+task's wake deliveries to drop. It is not documented and does not cancel a
+task record.
 
 The consequence, observed in the #2868 repro on `main` `4464e4d37`: a root
 parked at `session.waiting` with one `working` task; `cancel` returns
-`accepted` and is consumed as a no-op (documented at
-`docs/concepts/sessions-runs-and-streaming.md:183`); the task runs to
+`accepted` and is consumed as a no-op (documented under "Cancel the in-flight
+turn" in `docs/concepts/sessions-runs-and-streaming.md`); the task runs to
 completion 15 s after the client gave up.
 
-Only `terminateChildSessionsStep` (`execution/terminate-child-sessions-step.ts:41-68`)
+Only `terminateChildSessionsStep` (`execution/terminate-child-sessions-step.ts`)
 cancels indexed tasks, and only `reset` and terminal finalization call it.
 
 ## Goals
@@ -154,8 +157,8 @@ Invariants:
   commit produces no wake and no receipt update.
 - **The session continues.** After the response, the session is at
   `session.waiting` (or reaches it once `T` settles) and accepts the next
-  message. Child sessions remain `addressed`; the model may `task_send` to
-  them later and they start fresh work.
+  message. Child handles drop to `available` once their task releases them;
+  the model may `task_send` to them later and they start fresh work.
 - **Idempotent.** A second `tasks: "owned"` returns `tasks: { cancelled: [] }`.
 - **No turn required.** On a parked session the turn half is a no-op
   (`no_active_turn` or the documented parked `accepted`), and the task half
@@ -199,7 +202,7 @@ client ── POST cancel {tasks:"owned"} ──▶ eve channel route
 Touched surfaces:
 
 - `protocol/cancel-turn.ts` — option and response field.
-- `public/channels/eve.ts` `parseCancelTurnBody` — accept `tasks`.
+- `eve-channel/request.ts` `parseCancelTurnBody` — accept `tasks`.
 - `channel/types.ts` `SessionCommand` `cancel` — carry `tasks`.
 - `execution/turn-control-receiver.ts`, `execution/parked-delivery-wait.ts` —
   handle the option in both the active-turn and parked receivers.
