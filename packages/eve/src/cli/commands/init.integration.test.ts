@@ -171,7 +171,10 @@ describe("runInitCommand", () => {
   it("adds only agent files to an existing workspace", async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-init-workspace-agent-"));
     await mkdir(join(workspaceRoot, "agents", "support", "agent"), { recursive: true });
-    await writeFile(join(workspaceRoot, "package.json"), '{"name":"workspace"}\n');
+    await writeFile(
+      join(workspaceRoot, "package.json"),
+      '{"name":"workspace","dependencies":{"eve":"*"}}\n',
+    );
     const beforePackageJson = await readFile(join(workspaceRoot, "package.json"), "utf8");
     const output = logger();
     const deps = dependencies();

@@ -157,6 +157,7 @@ jobs:
 
           pnpm exec vc link --yes --project "$VERCEL_PROJECT_ID" "${team_args[@]}" "${token_args[@]}"
           pnpm exec vc env pull --yes --environment=preview "${token_args[@]}"
+          VERCEL_OIDC_TOKEN="$(node --env-file=.env.local -p 'process.env.VERCEL_OIDC_TOKEN ?? ""')"
           # Sandbox templates key on VERCEL_PROJECT_ID (present at build and
           # runtime). Do not add VERCEL_TEAM_ID: it does not exist at runtime,
           # so the deployed function could not resolve a team-scoped template.
@@ -170,6 +171,26 @@ jobs:
             --env "EVE_SANDBOX_IMAGE_TAG=$EVE_SANDBOX_IMAGE_TAG" \
             "${token_args[@]}" | tail -n 1)"
 
+          wait_for_target() {
+            local target="$1"
+            local attempt status
+            for attempt in $(seq 1 15); do
+              status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+                --header "Authorization: Bearer $VERCEL_OIDC_TOKEN" \
+                --header "x-vercel-trusted-oidc-idp-token: $VERCEL_OIDC_TOKEN" \
+                --max-time 3 "$target/eve/v1/health" || true)"
+              if [ "$status" = "200" ]; then
+                echo "Eval target ready: $target (attempt $attempt)"
+                return 0
+              fi
+              echo "Eval target not ready: $target (attempt $attempt/15, health status ${status:-transport-error})"
+              sleep 1
+            done
+            echo "Timed out waiting for eval target health: $target (last health status ${status:-transport-error})" >&2
+            return 1
+          }
+
+          wait_for_target "$DEPLOYMENT_URL"
           npx eve eval --strict --verbose --exclude-tag real-model \
             --url "$DEPLOYMENT_URL" \
             --junit "$EVE_EVAL_JUNIT_DIR/${{ matrix.name }}.xml"
@@ -184,6 +205,7 @@ jobs:
             # vc alias does not infer the team from the project link the way
             # link/deploy do, so pass the scope explicitly.
             pnpm exec vc alias set "$DEPLOYMENT_URL" "$ALIAS" "${token_args[@]}" "${scope_args[@]}"
+            wait_for_target "https://$ALIAS"
             EVE_E2E_REDEPLOY_ALIAS="$ALIAS" \
               npx eve eval --tag redeploy --strict --verbose --exclude-tag real-model \
               --url "https://$ALIAS" \

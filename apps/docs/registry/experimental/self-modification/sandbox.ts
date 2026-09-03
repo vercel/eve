@@ -1,1 +1,1 @@
-export { default } from "@eve/self-modification/sandbox";
+export { default } from "eve/self-modification/sandbox";

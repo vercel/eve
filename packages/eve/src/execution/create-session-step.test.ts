@@ -155,6 +155,25 @@ describe("createSessionStep", () => {
     expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(2_000_000);
   });
 
+  it("caps a configured child token-cost limit at the inherited budget", async () => {
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      resolvedAgent: {
+        config: { limits: { maxTokenCostUsdPerSession: 2 } },
+      },
+      turnAgent: TestTurnAgent,
+    } as never);
+
+    const { state } = await createSessionStep({
+      compiledArtifactsSource: { kind: "bundled" },
+      continuationToken: "subagent:test",
+      inheritedLimits: { maxTokenCostUsdPerSession: 0.75 },
+      rootSessionId: "sess-root",
+      sessionId: "sess-child",
+    });
+
+    expect(state.snapshot?.session.limits?.maxTokenCostUsdPerSession).toBe(0.75);
+  });
+
   it("keeps tighter configured child token limits under inherited token budget", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
@@ -204,6 +223,7 @@ describe("createSessionStep", () => {
           limits: {
             maxInputTokensPerSession: 200_000,
             maxOutputTokensPerSession: 20_000,
+            maxTokenCostUsdPerSession: 1.5,
           },
         },
       },
@@ -219,6 +239,7 @@ describe("createSessionStep", () => {
     expect(state.snapshot?.session.limits).toMatchObject({
       maxInputTokensPerSession: 200_000,
       maxOutputTokensPerSession: 20_000,
+      maxTokenCostUsdPerSession: 1.5,
     });
   });
 

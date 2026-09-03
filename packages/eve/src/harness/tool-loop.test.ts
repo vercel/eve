@@ -74,7 +74,7 @@ import { stashToolInterrupt } from "#harness/tool-interrupts.js";
 import { appendMissingToolResultMessages, createToolLoopHarness } from "#harness/tool-loop.js";
 import { isSessionLimitDecline, TurnCancelledError } from "#harness/turn-cancellation.js";
 import {
-  getSessionTokenLimitViolation,
+  getSessionUsageLimitViolation,
   getSessionTokenUsage,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
@@ -1914,9 +1914,10 @@ describe("createToolLoopHarness", () => {
     expect(vi.mocked(ToolLoopAgent).mock.calls[0]?.[0]).toMatchObject({ reasoning: "high" });
   });
 
-  it("accumulates provider-reported token usage across the session", async () => {
+  it("accumulates provider-reported token usage and cost across the session", async () => {
     setupMockAgent({
       finishReason: "stop",
+      providerMetadata: { gateway: { cost: "0.0123" } },
       response: { messages: [{ content: "Hello!", role: "assistant" }] },
       text: "Hello!",
       toolCalls: [],
@@ -1934,10 +1935,10 @@ describe("createToolLoopHarness", () => {
     expect(getSessionTokenUsage(result.session)).toEqual({
       cacheReadTokens: 2,
       cacheWriteTokens: 1,
-      costUsd: 0,
+      costUsd: 0.0123,
       inputTokens: 7,
       outputTokens: 3,
-      sawCost: false,
+      sawCost: true,
     });
   });
 
@@ -1962,6 +1963,7 @@ describe("createToolLoopHarness", () => {
         outputTokens: 3,
         sawCost: false,
       },
+      errorCode: "SESSION_TOKEN_LIMIT_REACHED",
       tokenKind: "input",
     },
     {
@@ -1984,10 +1986,33 @@ describe("createToolLoopHarness", () => {
         outputTokens: 3,
         sawCost: false,
       },
+      errorCode: "SESSION_TOKEN_LIMIT_REACHED",
       tokenKind: "output",
     },
+    {
+      details: {
+        costUsd: 1.51,
+        kind: "token-cost",
+        limitUsd: 1.5,
+        usedCostUsd: 1.51,
+      },
+      message: "The session reached its configured model token-cost limit.",
+      limits: {
+        maxTokenCostUsdPerSession: 1.5,
+      },
+      usage: {
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+        costUsd: 1.51,
+        inputTokens: 7,
+        outputTokens: 3,
+        sawCost: true,
+      },
+      errorCode: "SESSION_TOKEN_COST_LIMIT_REACHED",
+      tokenKind: "model token-cost",
+    },
   ])(
-    "fails fast after the $tokenKind token limit when the session cannot request input",
+    "fails fast after the $tokenKind limit when the session cannot request input",
     async (testCase) => {
       const { emit, events } = createEventCollector();
       const runStep = createToolLoopHarness(createTestConfig("task", emit));
@@ -2011,7 +2036,7 @@ describe("createToolLoopHarness", () => {
         "session.failed",
       ]);
       expect(events.find((event) => event.type === "step.failed")?.data).toMatchObject({
-        code: "SESSION_TOKEN_LIMIT_REACHED",
+        code: testCase.errorCode,
         details: testCase.details,
         message: testCase.message,
       });
@@ -2080,6 +2105,50 @@ describe("createToolLoopHarness", () => {
     });
   });
 
+  it("parks and grants a fresh model token-cost budget", async () => {
+    const usage = {
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: 1.51,
+      inputTokens: 12,
+      outputTokens: 3,
+      sawCost: true,
+    };
+    const reached = setTurnUsageState(
+      createTestSession({ limits: { maxTokenCostUsdPerSession: 1.5 } }),
+      { turnId: "turn_previous", ...usage, session: usage },
+    );
+    const { emit, events } = createEventCollector();
+    const runStep = createToolLoopHarness(createTestConfig("conversation", emit));
+
+    const parked = await runStep(reached, { message: "Hi again" });
+    expect(events.find((event) => event.type === "input.requested")?.data).toMatchObject({
+      requests: [
+        {
+          action: {
+            input: { kind: "token-cost", limitUsd: 1.5, usedCostUsd: 1.51 },
+          },
+          prompt: expect.stringContaining("$1.5 model token-cost limit"),
+          requestId: "test-session:limit:token-cost:1.51",
+        },
+      ],
+    });
+
+    setupMockAgent({
+      finishReason: "stop",
+      response: { messages: [{ content: "Hello!", role: "assistant" }] },
+      text: "Hello!",
+      toolCalls: [],
+      toolResults: [],
+    });
+    const resumed = await runStep(parked.session, {
+      inputResponses: [{ optionId: "continue", requestId: "test-session:limit:token-cost:1.51" }],
+    });
+
+    expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
+    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
+  });
+
   it("grants a fresh token budget when the user continues past the limit prompt", async () => {
     setupMockAgent({
       finishReason: "stop",
@@ -2101,7 +2170,7 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
     expect(resumed.next).toBeNull();
-    expect(getSessionTokenLimitViolation(resumed.session)).toBeNull();
+    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
     // The parked user message survives into model history for the resumed call.
     expect(resumed.session.history).toContainEqual({ content: "Hi again", role: "user" });
     const resolutionIndex = events.findIndex((event) => event.type === "input.resolved");
@@ -2144,7 +2213,7 @@ describe("createToolLoopHarness", () => {
 
     expect(vi.mocked(ToolLoopAgent)).toHaveBeenCalledTimes(1);
     expect(resumed.next).toBeNull();
-    expect(getSessionTokenLimitViolation(resumed.session)).toBeNull();
+    expect(getSessionUsageLimitViolation(resumed.session)).toBeNull();
   });
 
   it("cancels the turn when the user declines the limit continuation prompt", async () => {

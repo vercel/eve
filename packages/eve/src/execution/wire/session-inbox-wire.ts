@@ -18,6 +18,7 @@ import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.
 import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.v2.migration.js";
 import { sessionInboxWireV2Migration } from "#execution/wire/session-inbox-wire.v3.migration.js";
 import { sessionInboxWireV3Migration } from "#execution/wire/session-inbox-wire.v4.migration.js";
+import { sessionInboxWireV4Migration } from "#execution/wire/session-inbox-wire.v5.migration.js";
 import { isObject } from "#shared/guards.js";
 
 /**
@@ -48,6 +49,7 @@ const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV1Migration,
   sessionInboxWireV2Migration,
   sessionInboxWireV3Migration,
+  sessionInboxWireV4Migration,
 ];
 
 /**

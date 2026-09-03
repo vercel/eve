@@ -8,11 +8,11 @@ import type {
   SubagentInputRequestHookPayload,
 } from "#channel/types.js";
 import type { RuntimeSubagentChildResult } from "#shared/action-types.js";
-import { agentTurnOutcomeSchema } from "#shared/agent-turn-outcome.js";
+import { agentTurnOutcomeWithCostSchema } from "#shared/agent-turn-outcome.js";
 import { jsonValueSchema } from "#shared/json-schemas.js";
 import type { JsonValue } from "#shared/json.js";
 import { isInputRequest } from "#shared/input.js";
-import { tokenUsageSchema, type TokenUsage } from "#shared/token-usage.js";
+import { tokenUsageWithCostSchema, type TokenUsage } from "#shared/token-usage.js";
 import type { TaskInboundUpdate } from "#tasks/types.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 
@@ -147,7 +147,7 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
   z.object({
     callId: z.string().min(1),
     kind: z.literal("turn.completed"),
-    outcome: agentTurnOutcomeSchema,
+    outcome: agentTurnOutcomeWithCostSchema,
     output: jsonValueSchema.optional(),
     subagentName: z.string().min(1),
   }),
@@ -155,7 +155,7 @@ const sessionResultCallbackSchema = z.discriminatedUnion("kind", [
     callId: z.string().min(1),
     error: jsonValueSchema,
     kind: z.literal("turn.failed"),
-    outcome: agentTurnOutcomeSchema,
+    outcome: agentTurnOutcomeWithCostSchema,
     subagentName: z.string().min(1),
   }),
 ]);
@@ -413,6 +413,6 @@ function parseCallbackUsage(value: unknown): TokenUsage | undefined {
   if (value === undefined) {
     return undefined;
   }
-  const parsed = tokenUsageSchema.safeParse(value);
+  const parsed = tokenUsageWithCostSchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }
