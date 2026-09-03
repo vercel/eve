@@ -2,7 +2,7 @@ import { e2eAgentConfig } from "@eve-e2e/config";
 import { defineAgent } from "eve";
 import type { MockModelRequest, MockModelResponse } from "eve/evals";
 
-const RECOVERY_TOKEN = "CANCELLED-SUBAGENT-RECOVERED";
+const RECOVERY_REQUEST = "RESUME-CANCELLED-SLEEPER";
 
 function respond(request: MockModelRequest): MockModelResponse | string {
   const message = request.lastUserMessage ?? "";
@@ -30,7 +30,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
       "No agents listed."
     );
   }
-  if (message.includes(RECOVERY_TOKEN)) {
+  if (message.includes(RECOVERY_REQUEST)) {
     const result = request.toolResults.find((entry) => entry.id === "resume-sleeper");
     if (result !== undefined) {
       return typeof result.output === "string" ? result.output : JSON.stringify(result.output);
@@ -42,7 +42,7 @@ function respond(request: MockModelRequest): MockModelResponse | string {
         {
           id: "resume-sleeper",
           input: {
-            js: `return await tools["sleeper"]({ agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_TOKEN)} });`,
+            js: `return await tools["sleeper"]({ agentId: ${agentId}, message: ${JSON.stringify(RECOVERY_REQUEST)} });`,
           },
           name: "Workflow",
         },
