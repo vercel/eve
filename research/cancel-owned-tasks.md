@@ -16,10 +16,10 @@ session. This proposal adds one option to the existing cancel command:
 
 ```http
 POST /eve/v1/session/:sessionId/cancel
-{ "turnId": "...", "tasks": "owned" }
+{ "turnId": "...", "tasks": true }
 ```
 
-`tasks: "owned"` cancels every nonterminal task in the session's task index in
+`tasks: true` cancels every nonterminal task in the session's task index in
 addition to the active turn, and works when no turn is active. The session
 survives and accepts the next message. Nothing else about `cancel` changes:
 the default remains turn-only, and admitted tasks continue to outlive the turn
@@ -90,11 +90,10 @@ cancels indexed tasks, and only `reset` and terminal finalization call it.
 POST /eve/v1/session/:sessionId/cancel
 Content-Type: application/json
 
-{ "turnId": "<optional>", "tasks": "owned" }
+{ "turnId": "<optional>", "tasks": true }
 ```
 
-`tasks` is optional. The only accepted value is `"owned"`; any other value is
-`400`. `turnId` keeps its current meaning and scopes only the turn half.
+`tasks` is optional and defaults to `false`. A non-boolean value is `400`. `turnId` keeps its current meaning and scopes only the turn half.
 
 Response:
 
@@ -105,7 +104,7 @@ type CancelTurnResult =
 ```
 
 `tasks.cancelled` is present when and only when the request carried
-`tasks: "owned"`, and lists the task ids whose `cancelled` state committed as a
+`tasks: true`, and lists the task ids whose `cancelled` state committed as a
 result of this request. Already-terminal tasks are not listed. A session with
 no task index returns `tasks: { cancelled: [] }`.
 
@@ -115,7 +114,7 @@ remain success.
 ### TypeScript client
 
 ```ts
-await session.cancel({ turnId, tasks: "owned" });
+await session.cancel({ turnId, tasks: true });
 // -> { status, sessionId?, tasks?: { cancelled: string[] } }
 ```
 
@@ -125,7 +124,7 @@ extended; it is bound to one turn and stays turn-only.
 
 ### Eval runner
 
-On per-case timeout, `executeTask` calls `cancel({ tasks: "owned" })` on every
+On per-case timeout, `executeTask` calls `cancel({ tasks: true })` on every
 root session the case created or attached, under a fresh bounded deadline
 (the case's own signal is already aborted), using the same request headers the
 case used. The case still fails with the timeout error. A cleanup failure is
@@ -137,7 +136,7 @@ Let `IDX` be the session's task index (`tasks/session-index.ts`), `T` the
 active turn if any.
 
 ```
-cancel { tasks: "owned" }
+cancel { tasks: true }
   for each entry in IDX with nonterminal cached status:
     cancelOwnedTask(entry)           // send `cancel` on the task inbox
                                      // poll until `cancelled` commits
@@ -159,7 +158,7 @@ Invariants:
   `session.waiting` (or reaches it once `T` settles) and accepts the next
   message. Child handles drop to `available` once their task releases them;
   the model may `task_send` to them later and they start fresh work.
-- **Idempotent.** A second `tasks: "owned"` returns `tasks: { cancelled: [] }`.
+- **Idempotent.** A second `tasks: true` returns `tasks: { cancelled: [] }`.
 - **No turn required.** On a parked session the turn half is a no-op
   (`no_active_turn` or the documented parked `accepted`), and the task half
   still runs.
@@ -187,7 +186,7 @@ reusable step (`cancelOwnedTasksStep`) that both the cancel handler and
 beyond the request option and response field.
 
 ```
-client ── POST cancel {tasks:"owned"} ──▶ eve channel route
+client ── POST cancel {tasks:true} ──────▶ eve channel route
                                             │ parse + auth (existing)
                                             ▼
                                        Session.cancel(opts)
@@ -227,27 +226,27 @@ in #2541 (task lifecycle: "how to stop owned tasks from a client").
 fixture-tasks evals, deterministic under `EVE_E2E_MODEL=mock`, following the
 `task-transition.ts` naming:
 
-- `task.lifecycle.cancel.owned.accepted-parked-parent` — root parked with one
-  `working` task; `POST cancel {tasks:"owned"}` via `t.target.fetch`; response
+- `task.lifecycle.cancel.tasks.accepted-parked-parent` — root parked with one
+  `working` task; `POST cancel {tasks:true}` via `t.target.fetch`; response
   lists the task; a follow-up turn's `task_status` reports `cancelled`; the
   child stream shows its cancellation boundary; the session accepts the
   follow-up normally.
-- `task.lifecycle.cancel.owned.accepted-active-parent` — root turn active and
+- `task.lifecycle.cancel.tasks.accepted-active-parent` — root turn active and
   two tasks `working`; response lists both; stream shows `turn.cancelled` then
   `session.waiting`; both tasks `cancelled`.
-- `task.lifecycle.cancel.owned.noop-all-terminal` — all tasks already
+- `task.lifecycle.cancel.tasks.noop-all-terminal` — all tasks already
   terminal; response `tasks: { cancelled: [] }`; task views unchanged.
 - `task.lifecycle.cancel.default-preserves-tasks` — plain `cancel` on an
   active root with a `working` task; task stays `working` and later completes
   with a wake. Pins the preserved default.
 
-Unit: `parseCancelTurnBody` rejects `tasks` values other than `"owned"`;
+Unit: `parseCancelTurnBody` rejects non-boolean `tasks` values;
 `cancelOwnedTasksStep` skips terminal entries and reports only newly
 committed ids.
 
 Runner: an `execute-task.test.ts` case where the test body never resolves and
 the manager holds one root; on timeout the runner issues exactly one cancel
-with `tasks: "owned"` to that root, the result carries the timeout error, and a
+with `tasks: true` to that root, the result carries the timeout error, and a
 rejected cleanup is reflected in the error string.
 
 ## Open questions
