@@ -1,11 +1,8 @@
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
-import {
-  resolveAgentWorkspace,
-  type AgentWorkspace,
-  type AgentWorkspaceMember,
-} from "#internal/agent-workspace.js";
+import { resolveAgentWorkspace, type AgentWorkspace } from "#internal/agent-workspace.js";
+import { findEveProjectRoot } from "#internal/eve-project-root.js";
 
 export type EveProjectContext =
   | {
@@ -17,7 +14,7 @@ export type EveProjectContext =
       readonly workspace: AgentWorkspace;
       readonly environmentRoot: string;
       readonly kind: "workspace-member";
-      readonly member: AgentWorkspaceMember;
+      readonly member: AgentWorkspace["members"][number];
     }
   | {
       readonly appRoot: string;
@@ -25,47 +22,48 @@ export type EveProjectContext =
       readonly kind: "standalone";
     };
 
-function standalone(appRoot: string): Extract<EveProjectContext, { kind: "standalone" }> {
-  return { appRoot, environmentRoot: appRoot, kind: "standalone" };
+function containsPath(parent: string, child: string): boolean {
+  const path = relative(parent, child);
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
-/** Classify an app root included by the nearest declared agent workspace. */
-export async function resolveNamedAgentProjectContext(
-  appRoot: string,
-  options: { readonly source?: ProjectSource } = {},
-): Promise<Extract<EveProjectContext, { kind: "workspace-member" | "standalone" }> | undefined> {
-  const resolvedAppRoot = resolve(appRoot);
-  const source = options.source ?? createDiskProjectSource();
-  const agentsRoot = dirname(resolvedAppRoot);
-  if (basename(agentsRoot) !== "agents") return undefined;
-
-  const workspaceRoot = dirname(agentsRoot);
-  if ((await source.stat(join(workspaceRoot, "agent"))) === "directory") return undefined;
-
-  const workspace = await resolveAgentWorkspace(workspaceRoot, { source });
-  const member = workspace?.members.find((candidate) => candidate.appRoot === resolvedAppRoot);
-  if (workspace === undefined || member === undefined) return undefined;
-
-  return {
-    workspace,
-    environmentRoot: workspace.root,
-    kind: "workspace-member",
-    member,
-  };
-}
-
-/** Classify the current filesystem scope before command-specific policy runs. */
+/** Resolve the owning eve package, validate its shape, and classify the input path within it. */
 export async function resolveEveProjectContext(
-  appRoot: string,
+  startPath: string,
   options: { readonly source?: ProjectSource } = {},
-): Promise<EveProjectContext> {
-  const resolvedAppRoot = resolve(appRoot);
+): Promise<EveProjectContext | undefined> {
   const source = options.source ?? createDiskProjectSource();
-  const namedAgent = await resolveNamedAgentProjectContext(resolvedAppRoot, { source });
-  if (namedAgent !== undefined) return namedAgent;
+  const resolvedStartPath = resolve(startPath);
+  const searchDirectory =
+    (await source.stat(resolvedStartPath)) === "directory"
+      ? resolvedStartPath
+      : dirname(resolvedStartPath);
+  const projectRoot = await findEveProjectRoot(searchDirectory, { source });
+  if (projectRoot === undefined) return undefined;
 
-  const workspace = await resolveAgentWorkspace(resolvedAppRoot, { source });
-  return workspace === undefined
-    ? standalone(resolvedAppRoot)
-    : { workspace, environmentRoot: workspace.root, kind: "workspace" };
+  const hasAgent = (await source.stat(join(projectRoot, "agent"))) === "directory";
+  const hasAgents = (await source.stat(join(projectRoot, "agents"))) === "directory";
+  if (hasAgent === hasAgents) {
+    const detail = hasAgent ? "both agent/ and agents/" : "neither agent/ nor agents/";
+    throw new Error(`Invalid eve project at ${projectRoot}: found ${detail}.`);
+  }
+
+  if (hasAgent) {
+    return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
+  }
+
+  const workspace = await resolveAgentWorkspace(projectRoot, { source });
+  const member = workspace.members.find((candidate) =>
+    containsPath(candidate.appRoot, searchDirectory),
+  );
+  if (member !== undefined) {
+    return {
+      workspace,
+      environmentRoot: workspace.root,
+      kind: "workspace-member",
+      member,
+    };
+  }
+
+  return { workspace, environmentRoot: workspace.root, kind: "workspace" };
 }

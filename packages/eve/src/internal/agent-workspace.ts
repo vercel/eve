@@ -13,15 +13,17 @@ export interface AgentWorkspace {
   readonly root: string;
 }
 
-/** Discover the direct children of a conventional `agents/` workspace. */
+/** Load and validate a root already known to have an `agents/` workspace shape. */
 export async function resolveAgentWorkspace(
   root: string,
   options: { readonly source?: ProjectSource } = {},
-): Promise<AgentWorkspace | undefined> {
+): Promise<AgentWorkspace> {
   const source = options.source ?? createDiskProjectSource();
   const workspaceRoot = resolve(root);
   const agentsRoot = join(workspaceRoot, "agents");
-  if ((await source.stat(agentsRoot)) !== "directory") return undefined;
+  if ((await source.stat(agentsRoot)) !== "directory") {
+    throw new Error("An eve agent workspace requires an agents/ directory.");
+  }
 
   if ((await source.stat(join(workspaceRoot, "agent"))) === "directory") {
     throw new Error(
@@ -56,13 +58,4 @@ export async function resolveAgentWorkspace(
   }
 
   return { members, root: workspaceRoot };
-}
-
-/** Load a workspace that the caller has already identified as workspace-shaped. */
-export async function loadAgentWorkspace(root: string): Promise<AgentWorkspace> {
-  const workspace = await resolveAgentWorkspace(root);
-  if (workspace === undefined) {
-    throw new Error("An eve agent workspace requires an agents/ directory.");
-  }
-  return workspace;
 }

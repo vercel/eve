@@ -35,7 +35,7 @@ export function registerBuildCommand(input: {
     .command("build")
     .hook("preAction", async () => {
       const context = await resolveEveProjectContext(input.applicationContext.root);
-      if (context.kind !== "workspace") await input.applicationContext.resolve();
+      if (context?.kind !== "workspace") await input.applicationContext.resolve();
     })
     .description("Build the current eve application.")
     .option("--profile <path>", "Write best-effort timing and output-size profile JSON to a file")
@@ -49,7 +49,7 @@ export function registerBuildCommand(input: {
       await loadDevelopmentEnvironmentFiles(input.applicationContext.root);
 
       const projectContext = await resolveEveProjectContext(input.applicationContext.root);
-      if (projectContext.kind === "workspace") {
+      if (projectContext?.kind === "workspace") {
         if (options.profile !== undefined || options.skipSandboxPrewarm === true) {
           throw new Error(
             "Workspace builds do not support --profile or --skip-sandbox-prewarm. Run those options from an individual agent directory.",

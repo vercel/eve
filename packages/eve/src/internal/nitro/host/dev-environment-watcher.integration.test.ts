@@ -78,6 +78,10 @@ describe("development environment reload transactions", () => {
     const appRoot = join(workspaceRoot, "agents", "support");
     await mkdir(join(appRoot, "agent"), { recursive: true });
     await writeFile(
+      join(workspaceRoot, "package.json"),
+      JSON.stringify({ dependencies: { eve: "*" } }),
+    );
+    await writeFile(
       join(workspaceRoot, ".env.local"),
       "EVE_WATCH_ENV_ROOT_ONLY=from-root\nEVE_WATCH_ENV_SHARED=from-root\n",
     );

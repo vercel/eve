@@ -23,14 +23,15 @@ export async function validateWorkspaceProjectCommand(input: {
   ) => string;
 }): Promise<boolean> {
   const projectContext = await resolveEveProjectContext(input.appRoot);
-  if (projectContext.kind === "workspace-member") {
+  if (projectContext?.kind === "workspace-member") {
     input.logger.error(input.workspaceMemberMessage(projectContext.workspace));
     process.exitCode = 1;
     return false;
   }
   if (
-    projectContext.kind === "standalone" &&
-    !(await (input.isEveProject ?? isEveProject)(input.appRoot))
+    projectContext === undefined ||
+    (projectContext.kind === "standalone" &&
+      !(await (input.isEveProject ?? isEveProject)(input.appRoot)))
   ) {
     input.logger.error(NOT_AN_AGENT_MESSAGE);
     process.exitCode = 1;

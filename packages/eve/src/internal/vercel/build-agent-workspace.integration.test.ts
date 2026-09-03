@@ -8,14 +8,18 @@ vi.mock("#shared/resolve-eve-binary.js", () => ({
   resolveEveBinaryPath: (root: string) => join(root, "node_modules", "eve", "bin", "eve.js"),
 }));
 
-import { loadAgentWorkspace } from "#internal/agent-workspace.js";
+import { resolveAgentWorkspace } from "#internal/agent-workspace.js";
 import { buildAgentWorkspace } from "#internal/vercel/build-agent-workspace.js";
 
 async function createWorkspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "eve-workspace-build-"));
   await writeFile(
     join(root, "package.json"),
-    JSON.stringify({ packageManager: "pnpm@10.0.0", private: true }),
+    JSON.stringify({
+      dependencies: { eve: "*" },
+      packageManager: "pnpm@10.0.0",
+      private: true,
+    }),
   );
   await Promise.all([
     mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
@@ -27,7 +31,7 @@ async function createWorkspace(): Promise<string> {
 describe("buildAgentWorkspace", () => {
   it("emits peer services and canonical public routes", async () => {
     const root = await createWorkspace();
-    const workspace = await loadAgentWorkspace(root);
+    const workspace = await resolveAgentWorkspace(root);
     expect(workspace).toBeDefined();
 
     const output = await buildAgentWorkspace(workspace);
@@ -65,7 +69,7 @@ describe("buildAgentWorkspace", () => {
   it("keeps digit-bearing public names while encoding the generated service name", async () => {
     const root = await createWorkspace();
     await mkdir(join(root, "agents", "support2", "agent"), { recursive: true });
-    const workspace = await loadAgentWorkspace(root);
+    const workspace = await resolveAgentWorkspace(root);
     const output = await buildAgentWorkspace(workspace);
     const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
     const supportServiceName = Object.keys(config.services).find((name) =>
@@ -82,7 +86,7 @@ describe("buildAgentWorkspace", () => {
   it("refuses to assemble an authored graph", async () => {
     const root = await createWorkspace();
     await writeFile(join(root, "vercel.json"), JSON.stringify({ services: {} }));
-    const workspace = await loadAgentWorkspace(root);
+    const workspace = await resolveAgentWorkspace(root);
     await expect(buildAgentWorkspace(workspace)).rejects.toThrow(/Run `vercel build`/);
   });
 });

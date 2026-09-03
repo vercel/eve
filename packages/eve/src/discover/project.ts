@@ -12,7 +12,7 @@ import {
   isProjectMarkerEntry,
 } from "#discover/filesystem.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
-import { resolveNamedAgentProjectContext } from "#internal/project-context.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 
 /**
  * Supported project layouts for filesystem-based agents.
@@ -159,7 +159,8 @@ async function tryResolveNestedProjectFromAppRoot(
 
 async function isNestedProjectRoot(source: ProjectSource, directoryPath: string): Promise<boolean> {
   if (await hasProjectMarkers(source, directoryPath)) return true;
-  return (await resolveNamedAgentProjectContext(directoryPath, { source })) !== undefined;
+  const context = await resolveEveProjectContext(directoryPath, { source });
+  return context?.kind === "workspace-member" && context.member.appRoot === directoryPath;
 }
 
 async function isFlatAgentRoot(source: ProjectSource, directoryPath: string): Promise<boolean> {

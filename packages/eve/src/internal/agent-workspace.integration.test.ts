@@ -14,6 +14,7 @@ async function createWorkspace(): Promise<string> {
   await Promise.all([
     mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
     mkdir(join(root, "agents", "research", "agent"), { recursive: true }),
+    writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } })),
   ]);
   return root;
 }
@@ -30,14 +31,32 @@ describe("resolveAgentWorkspace", () => {
     });
   });
 
-  it("does not read package.json metadata to discover a workspace", async () => {
-    const root = await mkdtemp(join(tmpdir(), "eve-workspace-metadata-"));
-    await writeFile(
-      join(root, "package.json"),
-      JSON.stringify({ eve: { agents: ["products/*"] }, private: true }),
-    );
-    await mkdir(join(root, "products", "support", "agent"), { recursive: true });
-    await expect(resolveAgentWorkspace(root)).resolves.toBeUndefined();
+  it("requires the root package to declare eve as a runtime dependency", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-workspace-no-dependency-"));
+    await Promise.all([
+      mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
+      writeFile(join(root, "package.json"), JSON.stringify({ devDependencies: { eve: "*" } })),
+    ]);
+    await expect(resolveEveProjectContext(root)).resolves.toBeUndefined();
+  });
+
+  it("treats agents in a monorepo that only develops with eve as standalone projects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-agent-monorepo-"));
+    const appRoot = join(root, "agents", "support");
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await Promise.all([
+      writeFile(join(root, "package.json"), JSON.stringify({ devDependencies: { eve: "*" } })),
+      writeFile(
+        join(appRoot, "package.json"),
+        JSON.stringify({ dependencies: { eve: "*" }, name: "support" }),
+      ),
+    ]);
+
+    await expect(resolveEveProjectContext(join(appRoot, "agent"))).resolves.toEqual({
+      appRoot,
+      environmentRoot: appRoot,
+      kind: "standalone",
+    });
   });
 
   it("rejects agent/ and agents/ at the same root", async () => {
@@ -48,7 +67,10 @@ describe("resolveAgentWorkspace", () => {
 
   it("rejects empty workspaces", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-workspace-empty-"));
-    await mkdir(join(root, "agents"));
+    await Promise.all([
+      mkdir(join(root, "agents")),
+      writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } })),
+    ]);
     await expect(resolveAgentWorkspace(root)).rejects.toThrow(/at least one directory/);
   });
 
@@ -63,7 +85,10 @@ describe("resolveAgentWorkspace", () => {
   it("rejects flat members with a migration hint", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-workspace-flat-"));
     await mkdir(join(root, "agents", "support"), { recursive: true });
-    await writeFile(join(root, "agents", "support", "agent.ts"), "export default {};\n");
+    await Promise.all([
+      writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } })),
+      writeFile(join(root, "agents", "support", "agent.ts"), "export default {};\n"),
+    ]);
     await expect(resolveAgentWorkspace(root)).rejects.toThrow(/Move flat authored files/);
   });
 
@@ -82,6 +107,7 @@ describe("resolveAgentWorkspace", () => {
     const supportRoot = join(root, "agents", "support");
     const source = createMemoryProjectSource({
       files: {
+        [join(root, "package.json")]: JSON.stringify({ dependencies: { eve: "*" } }),
         [join(supportRoot, "agent", "instructions.md")]: "Support users.",
       },
     });
@@ -93,10 +119,13 @@ describe("resolveAgentWorkspace", () => {
     });
   });
 
-  it("resolves a workspace member from its application root", async () => {
+  it("resolves a workspace member from any file in its tree", async () => {
     const root = await createWorkspace();
     const supportRoot = join(root, "agents", "support");
-    await expect(resolveEveProjectContext(supportRoot)).resolves.toMatchObject({
+    const toolPath = join(supportRoot, "agent", "tools", "search.ts");
+    await mkdir(join(supportRoot, "agent", "tools"), { recursive: true });
+    await writeFile(toolPath, "export default {};\n");
+    await expect(resolveEveProjectContext(toolPath)).resolves.toMatchObject({
       workspace: { root },
       environmentRoot: root,
       kind: "workspace-member",
@@ -107,10 +136,9 @@ describe("resolveAgentWorkspace", () => {
   it("ignores unrelated agents directories above a standalone project", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-standalone-unrelated-agents-"));
     const appRoot = join(root, "eve", "apps", "fixtures", "weather-agent");
-    await Promise.all([
-      mkdir(join(appRoot, "agent"), { recursive: true }),
-      mkdir(join(root, "agents", "apps"), { recursive: true }),
-    ]);
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await mkdir(join(root, "agents", "apps"), { recursive: true });
+    await writeFile(join(appRoot, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
 
     await expect(resolveEveProjectContext(appRoot)).resolves.toEqual({
       appRoot,
@@ -122,15 +150,43 @@ describe("resolveAgentWorkspace", () => {
   it("preserves a standalone project boundary above an agents directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "eve-standalone-boundary-"));
     const appRoot = join(root, "agents", "support");
-    await Promise.all([
-      mkdir(join(root, "agent"), { recursive: true }),
-      mkdir(join(appRoot, "agent"), { recursive: true }),
-    ]);
+    await mkdir(join(root, "agent"), { recursive: true });
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
+    await writeFile(join(appRoot, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
 
     await expect(resolveEveProjectContext(appRoot)).resolves.toEqual({
       appRoot,
       environmentRoot: appRoot,
       kind: "standalone",
     });
+  });
+
+  it("resolves workspace-owned paths outside any member to the workspace", async () => {
+    const root = await createWorkspace();
+    const sourceRoot = join(root, "src");
+    await mkdir(sourceRoot);
+
+    await expect(resolveEveProjectContext(sourceRoot)).resolves.toMatchObject({
+      workspace: { root },
+      environmentRoot: root,
+      kind: "workspace",
+    });
+  });
+
+  it("stops at the nearest non-eve package boundary", async () => {
+    const root = await createWorkspace();
+    const packageRoot = join(root, "packages", "unrelated");
+    await mkdir(packageRoot, { recursive: true });
+    await writeFile(join(packageRoot, "package.json"), JSON.stringify({ dependencies: {} }));
+
+    await expect(resolveEveProjectContext(packageRoot)).resolves.toBeUndefined();
+  });
+
+  it("rejects an eve package with neither project directory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "eve-invalid-shape-"));
+    await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
+
+    await expect(resolveEveProjectContext(root)).rejects.toThrow(/neither agent\/ nor agents\//);
   });
 });

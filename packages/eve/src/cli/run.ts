@@ -658,7 +658,7 @@ export async function runCli(
     const appRoot = await findApplicationRoot(applicationContext.root);
     if (appRoot === undefined) {
       const projectContext = await resolveEveProjectContext(applicationContext.root);
-      input = projectContext.kind === "workspace" ? ["dev"] : ["init"];
+      input = projectContext?.kind === "workspace" ? ["dev"] : ["init"];
     } else {
       applicationContext.root = appRoot;
       input = ["dev"];

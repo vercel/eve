@@ -6,7 +6,7 @@ export interface CliApplicationContext {
   root: string;
   project?: ResolvedDiscoveryProject;
   resolve(): Promise<void>;
-  resolveAgent(): Promise<EveProjectContext>;
+  resolveAgent(): Promise<EveProjectContext | undefined>;
 }
 
 export type CliApplicationRootRequirement = (command: Command) => boolean;
