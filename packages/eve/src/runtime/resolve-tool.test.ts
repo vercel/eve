@@ -46,7 +46,7 @@ describe("resolveToolDefinition", () => {
       { kind: "application" },
     );
 
-    expect(resolved.activityLabel?.({ environment: "production" })).toBe("Deploy to production");
+    expect(resolved.activity?.start?.({ environment: "production" })).toBe("Deploy to production");
   });
 });
 

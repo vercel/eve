@@ -216,7 +216,7 @@ function createNoopRuntime(): Runtime {
 describe("createNodeHarnessTools", () => {
   it("adds the framework label start callback to provider-managed web search", async () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["web_search"] });
-    const label = createNodeHarnessTools({ node }).get("web_search")?.activityLabel;
+    const label = createNodeHarnessTools({ node }).get("web_search")?.activity?.start;
 
     expect(label?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
   });
@@ -227,7 +227,7 @@ describe("createNodeHarnessTools", () => {
       owner: { kind: "application" },
     });
 
-    expect(createNodeHarnessTools({ node }).get("web_search")?.activityLabel).toBeUndefined();
+    expect(createNodeHarnessTools({ node }).get("web_search")?.activity?.start).toBeUndefined();
   });
 
   it("keeps the compiled framework question tool client-side", async () => {

@@ -439,11 +439,11 @@ export function createRuntimeActionRequestFromToolCall(input: {
           kind: "tool-call",
           toolName: input.toolCall.toolName,
         };
-  return { action, activityLabel: resolveActivityLabel(definition?.activityLabel, toolInput) };
+  return { action, activityLabel: resolveActivityLabel(definition?.activity?.start, toolInput) };
 }
 
 function resolveActivityLabel(
-  label: HarnessToolDefinition["activityLabel"],
+  label: NonNullable<HarnessToolDefinition["activity"]>["start"],
   input: JsonObject,
 ): string | undefined {
   if (label === undefined) return undefined;

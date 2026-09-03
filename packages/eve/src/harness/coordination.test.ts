@@ -81,8 +81,10 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         [
           "deploy",
           {
-            activityLabel: (input) =>
-              `Deploy to ${String((input as { environment: unknown }).environment)}`,
+            activity: {
+              start: (input) =>
+                `Deploy to ${String((input as { environment: unknown }).environment)}`,
+            },
             description: "Deploy.",
             inputSchema: jsonSchema({ type: "object" }),
             name: "deploy",
@@ -114,11 +116,13 @@ describe("createRuntimeActionRequestFromToolCall", () => {
         [
           "mutate",
           {
-            activityLabel: (input) => {
-              const mutable = input as { nested: { value: string }; self?: unknown };
-              mutable.nested.value = "changed";
-              mutable.self = mutable;
-              throw new Error("presentation failed");
+            activity: {
+              start: (input) => {
+                const mutable = input as { nested: { value: string }; self?: unknown };
+                mutable.nested.value = "changed";
+                mutable.self = mutable;
+                throw new Error("presentation failed");
+              },
             },
             description: "Mutate.",
             inputSchema: jsonSchema({ type: "object" }),
@@ -151,8 +155,10 @@ describe("createRuntimeActionRequestFromToolCall", () => {
           [
             "deploy",
             {
-              activityLabel: () => {
-                throw new Error("presentation failed");
+              activity: {
+                start: () => {
+                  throw new Error("presentation failed");
+                },
               },
               description: "Deploy.",
               inputSchema: jsonSchema({ type: "object" }),

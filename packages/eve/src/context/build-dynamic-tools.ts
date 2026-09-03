@@ -24,6 +24,7 @@ import {
   callDurableDynamicCallback,
   lookupDurableDynamicCallback,
   type DurableDynamicCallbackPhase,
+  type DurableDynamicCallbackReference,
   type DynamicToolCallbackOwner,
 } from "#tools/durable-callbacks.js";
 import { toInputSchema, toOutputSchema } from "#tools/schema.js";
@@ -102,18 +103,19 @@ export function replayDynamicTools(
       approvalKeyReference === undefined
         ? undefined
         : lookupDurableDynamicCallback(owner, "approvalKey");
-    const executeReference = entry.callbacks.execute;
     const execute = lookupDurableDynamicCallback(owner, "execute");
-    const labelStartReference = entry.callbacks.activityLabel;
-    const activityLabel =
-      labelStartReference === undefined
-        ? undefined
-        : lookupDurableDynamicCallback(owner, "activityLabel");
-    const toModelOutputReference = entry.callbacks.toModelOutput;
-    const toModelOutput =
-      toModelOutputReference === undefined
-        ? undefined
-        : lookupDurableDynamicCallback(owner, "toModelOutput");
+    const activityStart = bindDynamicCallback(
+      entry,
+      owner,
+      "activityStart",
+      entry.callbacks.activity?.start,
+    );
+    const toModelOutput = bindDynamicCallback(
+      entry,
+      owner,
+      "toModelOutput",
+      entry.callbacks.toModelOutput,
+    );
 
     const replayed: {
       -readonly [K in keyof HarnessToolDefinition]: HarnessToolDefinition[K];
@@ -177,24 +179,26 @@ export function replayDynamicTools(
           }),
       outputSchema: toOutputSchema(entry.outputSchema),
     };
-    if (labelStartReference !== undefined) {
-      replayed.activityLabel = (input: unknown) => {
-        if (activityLabel === undefined) throw missingCallbackError(entry, "activityLabel");
-        return callDurableDynamicCallback(
-          activityLabel,
-          labelStartReference.closure,
-          input,
-        ) as string;
-      };
+    if (activityStart !== undefined) {
+      replayed.activity = { start: (input: unknown) => activityStart(input) as string };
     }
-    if (toModelOutputReference !== undefined) {
-      replayed.toModelOutput = (output: unknown) => {
-        if (toModelOutput === undefined) throw missingCallbackError(entry, "toModelOutput");
-        return callDurableDynamicCallback(toModelOutput, toModelOutputReference.closure, output);
-      };
-    }
+    if (toModelOutput !== undefined) replayed.toModelOutput = toModelOutput;
     return replayed;
   });
+}
+
+function bindDynamicCallback(
+  entry: CurrentDynamicToolMetadata,
+  owner: DynamicToolCallbackOwner,
+  phase: DurableDynamicCallbackPhase,
+  reference: DurableDynamicCallbackReference | undefined,
+): ((...args: unknown[]) => unknown) | undefined {
+  if (reference === undefined) return undefined;
+  const callback = lookupDurableDynamicCallback(owner, phase);
+  return (...args) => {
+    if (callback === undefined) throw missingCallbackError(entry, phase);
+    return callDurableDynamicCallback(callback, reference.closure, ...args);
+  };
 }
 
 function requireCurrentDynamicToolMetadata(

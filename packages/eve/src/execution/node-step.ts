@@ -278,10 +278,10 @@ function createRegisteredHarnessToolDefinition(input: {
     def.owner.kind === "framework" && def.name === ASK_QUESTION_TOOL_NAME;
 
   const definition: HarnessToolDefinition = {
-    activityLabel:
-      def.activityLabel ??
+    activity:
+      def.activity ??
       (def.owner.kind === "framework" && def.name === WEB_SEARCH_TOOL_NAME
-        ? resolveWebSearchActivityLabel
+        ? { start: resolveWebSearchActivityLabel }
         : undefined),
     approvalKey: def.approvalKey,
     behavior: input.behavior,
