@@ -56,16 +56,14 @@ export interface ToolLabelDefinition<TInput = unknown, TOutput = unknown> {
  * Authored public definitions (see {@link PublicToolDefinition}) do not
  * carry `name`; identity comes from the file path.
  */
-export interface InternalToolLabelDefinition {
+export interface InternalToolActivityDefinition {
   readonly complete?: (input: unknown, output: unknown) => string;
   readonly delta?: (input: unknown, partial: unknown) => string;
   readonly start?: (input: unknown) => string;
 }
 
 export interface InternalToolDefinition extends ToolDefinitionBase {
-  activityLabel?: (input: unknown) => string;
-  activityResult?: (input: unknown, output: unknown) => string;
-  activityUpdate?: (input: unknown, partial: unknown) => string;
+  activity?: InternalToolActivityDefinition;
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
@@ -398,7 +396,7 @@ export function stampToolDefinition<
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
-      label: definition.label,
+      activity: definition.label,
       approval: definition.approval,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,

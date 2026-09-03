@@ -285,6 +285,7 @@ function createRegisteredHarnessToolDefinition(input: {
         : undefined),
     activityResult: def.activityResult,
     activityUpdate: def.activityUpdate,
+    behavior: input.tool.behavior,
     approvalKey: def.approvalKey,
     behavior: input.behavior,
     description: def.description,

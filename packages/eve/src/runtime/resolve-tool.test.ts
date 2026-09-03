@@ -47,11 +47,11 @@ describe("resolveToolDefinition", () => {
       { kind: "application" },
     );
 
-    expect(resolved.activityLabel?.({ environment: "production" })).toBe("Deploy to production");
+    expect(resolved.activity?.start?.({ environment: "production" })).toBe("Deploy to production");
     expect(
-      resolved.activityResult?.({ environment: "production" }, { url: "https://example.com" }),
+      resolved.activity?.complete?.({ environment: "production" }, { url: "https://example.com" }),
     ).toBe("Deployed to https://example.com");
-    expect(resolved.activityUpdate?.({ environment: "production" }, { phase: "Uploading" })).toBe(
+    expect(resolved.activity?.delta?.({ environment: "production" }, { phase: "Uploading" })).toBe(
       "Uploading",
     );
   });

@@ -111,9 +111,7 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [
-    K in "activityLabel" | "activityResult" | "activityUpdate" | "approval" | "toModelOutput"
-  ]?: ResolvedToolDefinition[K];
+  -readonly [K in "activity" | "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -132,22 +130,26 @@ function extractOptionalHooks(
       record.label,
       describe(definition, "to provide a valid label definition"),
     );
-    optional.activityLabel = expectFunction(
-      label.start,
-      describe(definition, "to provide an label start callback function"),
-    ) as ResolvedToolDefinition["activityLabel"];
-    if (label.complete !== undefined) {
-      optional.activityResult = expectFunction(
-        label.complete,
-        describe(definition, "to provide an activity result function"),
-      ) as ResolvedToolDefinition["activityResult"];
-    }
-    if (label.delta !== undefined) {
-      optional.activityUpdate = expectFunction(
-        label.delta,
-        describe(definition, "to provide an activity update function"),
-      ) as ResolvedToolDefinition["activityUpdate"];
-    }
+    optional.activity = {
+      complete:
+        label.complete === undefined
+          ? undefined
+          : (expectFunction(
+              label.complete,
+              describe(definition, "to provide an activity complete function"),
+            ) as NonNullable<ResolvedToolDefinition["activity"]>["complete"]),
+      delta:
+        label.delta === undefined
+          ? undefined
+          : (expectFunction(
+              label.delta,
+              describe(definition, "to provide an activity delta function"),
+            ) as NonNullable<ResolvedToolDefinition["activity"]>["delta"]),
+      start: expectFunction(
+        label.start,
+        describe(definition, "to provide a label start callback function"),
+      ) as NonNullable<ResolvedToolDefinition["activity"]>["start"],
+    };
   }
 
   if (record.approval !== undefined) {
