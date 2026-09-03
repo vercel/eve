@@ -155,7 +155,14 @@ describe("buildVercelConnectRequirements", () => {
     expect(Object.fromEntries(manifests)).toEqual({
       "channels/support.slack-app-manifest.json": {
         display_information: { name: "support" },
-        features: { bot_user: { display_name: "support", always_online: false } },
+        features: {
+          app_home: {
+            home_tab_enabled: false,
+            messages_tab_enabled: true,
+            messages_tab_read_only_enabled: false,
+          },
+          bot_user: { display_name: "support", always_online: false },
+        },
         oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
         settings: {
           event_subscriptions: { bot_events: ["app_mention"] },
