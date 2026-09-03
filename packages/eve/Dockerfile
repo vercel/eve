@@ -46,7 +46,7 @@ RUN set -eux; \
   test -n "${node_file}"; \
   curl -fsSLO "${base_url}/${node_file}"; \
   grep " ${node_file}$" "${shasums}" | sha256sum -c -; \
-  tar -xJf "${node_file}" -C /usr/local --strip-components=1; \
+  tar -xJf "${node_file}" -C /usr/local --strip-components=1 --no-same-owner; \
   rm "${node_file}" "${shasums}"; \
   rm -rf /usr/local/include/node /usr/local/share/doc /usr/local/share/man; \
   npm install -g "pnpm@${PNPM_VERSION}"; \
@@ -77,6 +77,7 @@ RUN set -eux; \
   # them into another image layer. A small user-owned prefix retains global installs.
   install -d --owner=vercel-sandbox --group=vercel-sandbox \
     /home/vercel-sandbox/.local \
+    /home/vercel-sandbox/.local/bin \
     /home/vercel-sandbox/.local/share/pnpm; \
   mkdir -p /workspace; \
   chown vercel-sandbox:vercel-sandbox /workspace; \

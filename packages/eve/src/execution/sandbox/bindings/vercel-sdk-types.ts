@@ -9,6 +9,8 @@ export type VercelModule = typeof Vercel;
 
 export type VercelSandbox = Vercel.Sandbox;
 
+export type VercelSandboxUser = ReturnType<VercelSandbox["asUser"]>;
+
 export type VercelDeleteGetOptions = Parameters<typeof VercelDelete.Sandbox.get>[0];
 
 export type VercelDeleteModule = typeof VercelDelete;

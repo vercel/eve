@@ -16,7 +16,7 @@ import {
   createRuntimeSandboxTemplateKey,
 } from "#runtime/sandbox/keys.js";
 
-const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
+const RUNTIME_SANDBOX_CONTRACT_VERSION = 8;
 
 const CONTENT_HASH = "a".repeat(64);
 
@@ -47,14 +47,14 @@ function expectedTemplateKey(input: { scopeSource: string; version: string }): s
   const scope = sha256(input.scopeSource).slice(0, 16);
   const versionHash = sha256(`workspace-content:${CONTENT_HASH}:__root__:eve:default-sandbox`);
   const templateHash = sha256(
-    `${input.version}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${versionHash}`,
+    `${input.version}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${versionHash}:default`,
   ).slice(0, 20);
   return `eve-sbx-tpl-local-${scope}-${templateHash}`;
 }
 
-async function deriveTemplateKey(): Promise<string | null> {
+async function deriveTemplateKey(backendName = "local"): Promise<string | null> {
   return await createRuntimeSandboxTemplateKey({
-    backendName: "local",
+    backendName,
     compiledArtifactsSource: createBundledRuntimeCompiledArtifactsSource(),
     nodeId: "__root__",
     sourceId: "eve:default-sandbox",
@@ -177,6 +177,29 @@ describe("createRuntimeSandboxKeys", () => {
     );
 
     expect(first).not.toBe(second);
+  });
+
+  it("rotates template and session keys when the default image tag override changes", async () => {
+    vi.stubEnv("EVE_SANDBOX_IMAGE_TAG", "candidate-a");
+    const firstTemplate = await deriveTemplateKey("docker");
+    const firstSession = await deriveSessionKey({ backendName: "docker" });
+
+    vi.stubEnv("EVE_SANDBOX_IMAGE_TAG", "candidate-b");
+    const secondTemplate = await deriveTemplateKey("docker");
+    const secondSession = await deriveSessionKey({ backendName: "docker" });
+
+    expect(firstTemplate).not.toBe(secondTemplate);
+    expect(firstSession).not.toBe(secondSession);
+  });
+
+  it("does not let the default image tag override perturb custom backends", async () => {
+    vi.stubEnv("EVE_SANDBOX_IMAGE_TAG", "candidate-a");
+    const first = await deriveSessionKey({ backendName: "custom" });
+
+    vi.stubEnv("EVE_SANDBOX_IMAGE_TAG", "candidate-b");
+    const second = await deriveSessionKey({ backendName: "custom" });
+
+    expect(first).toBe(second);
   });
 });
 

@@ -6,15 +6,6 @@ import {
 } from "#execution/sandbox/bindings/vercel-base-runtime.js";
 import type { SandboxBootstrapContext } from "#public/definitions/sandbox.js";
 import type {
-  InternalSandboxSession,
-  SandboxProcess,
-  SandboxReadFileOptions,
-  SandboxRemovePathOptions,
-  SandboxSession,
-  SandboxSpawnOptions,
-  SandboxWriteFileOptions,
-} from "#shared/sandbox-session.js";
-import type {
   SandboxBackend,
   SandboxBackendCreateInput,
   SandboxBackendHandle,
@@ -30,11 +21,8 @@ import type {
   VercelSandboxSessionCreateOptions,
   VercelSandboxSessionUseOptions,
 } from "#public/sandbox/vercel-sandbox.js";
-import { WORKSPACE_ROOT } from "#runtime/workspace/types.js";
 import { createLoggingSandboxSession } from "#execution/sandbox/logging-session.js";
-import { adaptMultiplexedCommandToSandboxProcess } from "#execution/sandbox/multiplexed-command.js";
 import { buildSandboxSession } from "#execution/sandbox/session.js";
-import { streamToBuffer } from "#execution/sandbox/stream-utils.js";
 import {
   createVercelEveImageSandbox,
   type CreateVercelSandbox,
@@ -49,8 +37,10 @@ import {
   deleteVercelSandbox,
   stopVercelSandbox,
 } from "#execution/sandbox/bindings/vercel-lifecycle.js";
-import { normalizeVercelReadStream } from "#execution/sandbox/bindings/vercel-read-stream.js";
-import { resolveSandboxModelPath } from "#shared/skill-paths.js";
+import {
+  createVercelInternalSandboxSession,
+  writeVercelSandboxSeedFiles,
+} from "#execution/sandbox/bindings/vercel-user-session.js";
 import type {
   VercelCreateOptions,
   VercelDeleteModule,
@@ -505,73 +495,6 @@ function createHandle(input: {
       }
     },
   };
-}
-
-function createVercelInternalSandboxSession(
-  sandbox: VercelSandbox,
-  id: string,
-): InternalSandboxSession {
-  return {
-    id,
-    resolvePath: resolveVercelSandboxPath,
-    async spawn(options: SandboxSpawnOptions): Promise<SandboxProcess> {
-      const command = await sandbox.runCommand({
-        args: ["-lc", options.command],
-        cmd: "bash",
-        cwd: options.workingDirectory ?? WORKSPACE_ROOT,
-        detached: true,
-        env: options.env,
-        signal: options.abortSignal,
-      });
-      return adaptMultiplexedCommandToSandboxProcess({
-        command,
-        getOutput: (log) => log.stream,
-      });
-    },
-    async readFile(options: SandboxReadFileOptions) {
-      return normalizeVercelReadStream(await sandbox.readFile({ path: options.path }));
-    },
-    async writeFile(options: SandboxWriteFileOptions) {
-      const bytes = await streamToBuffer(options.content);
-      await sandbox.writeFiles([{ content: bytes, path: options.path }]);
-    },
-    async removePath(options: SandboxRemovePathOptions) {
-      await sandbox.fs.rm(options.path, {
-        force: options.force,
-        recursive: options.recursive,
-        signal: options.abortSignal,
-      });
-    },
-  };
-}
-
-async function writeVercelSandboxSeedFiles(input: {
-  readonly sandbox: VercelSandbox;
-  readonly seedFiles: ReadonlyArray<SandboxSeedFile>;
-  readonly session: SandboxSession;
-}): Promise<void> {
-  if (input.seedFiles.length === 0) {
-    return;
-  }
-
-  const files = await Promise.all(
-    input.seedFiles.map(async (file) => ({
-      content: typeof file.content === "string" ? Buffer.from(file.content) : file.content,
-      path: await resolveSandboxModelPath({
-        path: file.path,
-        sandbox: input.session,
-      }),
-    })),
-  );
-
-  await input.sandbox.writeFiles(files);
-}
-
-function resolveVercelSandboxPath(path: string): string {
-  if (path.startsWith("/")) {
-    return path;
-  }
-  return `${WORKSPACE_ROOT}/${path}`;
 }
 
 function isUnprovisionedTerminalTemplateSandbox(

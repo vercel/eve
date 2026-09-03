@@ -13,10 +13,10 @@ import type { RuntimeSandboxTemplatePlan } from "#runtime/sandbox/template-plan.
 
 /*
  * Template keys include this version for sandbox runtime contract changes
- * that are not captured by source or resource hashes. Version 7 writes static
- * skill seed files to the sandbox user's $HOME/.agents/skills directory.
+ * that are not captured by source or resource hashes. Version 8 guarantees
+ * that authored Vercel sandbox operations run as the `vercel-sandbox` user.
  */
-const RUNTIME_SANDBOX_CONTRACT_VERSION = 7;
+const RUNTIME_SANDBOX_CONTRACT_VERSION = 8;
 
 /**
  * Input for deriving the stable runtime keys used for one sandbox definition.
@@ -110,7 +110,7 @@ function buildRuntimeSandboxTemplateKey(
   }
 
   const templateHash = createStableHash(
-    `${resolvePackageVersionForTemplateKey(parts.metadata)}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash}`,
+    `${resolvePackageVersionForTemplateKey(parts.metadata)}:${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash}:${resolveSandboxImageTagKey(input.backendName)}`,
   ).slice(0, 20);
 
   return sanitizeRuntimeSandboxKey(
@@ -127,6 +127,8 @@ function buildRuntimeSandboxTemplateKey(
  * definition's version hash, so changing the sandbox itself (bootstrap
  * source, `revalidationKey`, or workspace seed content) rotates the
  * session sandbox onto the new template — unrelated source changes do not.
+ * An explicit default-image tag override also rotates the session so a
+ * changed image selection cannot reattach to a sandbox from another image.
  * The eve package version deliberately does not participate: upgrading
  * eve must not discard session sandbox state.
  */
@@ -135,13 +137,22 @@ function buildRuntimeSandboxSessionKey(
   parts: RuntimeSandboxKeyParts,
 ): string {
   const version = createStableHash(
-    `${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash ?? "none"}`,
+    `${RUNTIME_SANDBOX_CONTRACT_VERSION}:${parts.versionHash ?? "none"}:${resolveSandboxImageTagKey(input.backendName)}`,
   ).slice(0, 12);
   const nodeScope = sanitizeRuntimeSandboxKey(input.nodeId);
 
   return sanitizeRuntimeSandboxKey(
     `eve-sbx-ses-${input.backendName}-${parts.scope}-${version}-${input.sessionId}-${nodeScope}`,
   );
+}
+
+function resolveSandboxImageTagKey(backendName: string): string {
+  if (backendName !== "docker" && backendName !== "microsandbox" && backendName !== "vercel") {
+    return "default";
+  }
+
+  const override = process.env.EVE_SANDBOX_IMAGE_TAG?.trim();
+  return override === undefined || override.length === 0 ? "default" : override;
 }
 
 /**
