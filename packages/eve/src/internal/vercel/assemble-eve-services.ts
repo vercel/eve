@@ -33,7 +33,7 @@ export function assembleEveVercelServices(input: {
   const existingServices = input.services ?? {};
   const services: Record<string, VercelServiceConfig> = { ...existingServices };
   const rootDirectories: string[] = [];
-  const eveRoutes: { routeSrc: string; serviceName: string }[] = [];
+  const eveRoutes: { requestPath?: string; routeSrc: string; serviceName: string }[] = [];
 
   for (const { agent, target } of input.agents) {
     const contribution = compileEveVercelService({ agent, target });
@@ -52,6 +52,13 @@ export function assembleEveVercelServices(input: {
             ),
           };
     eveRoutes.push({ routeSrc: contribution.routeSrc, serviceName });
+    for (const route of agent.publicRoutes ?? []) {
+      eveRoutes.push({
+        requestPath: route.requestPath,
+        routeSrc: route.routeSrc,
+        serviceName,
+      });
+    }
   }
 
   return {

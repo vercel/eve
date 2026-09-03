@@ -32,9 +32,15 @@ export function createNextEveProxyDescriptor(
 export default defineAgent({ model: "openai/gpt-5.4" });
 `,
       "agent/instructions.md": "You are a test agent.\n",
+      "agent/channels/custom.mjs": `import { defineChannel, GET } from "eve/channels";
+
+export default defineChannel({
+  routes: [GET("/.well-known/ucp", async () => Response.json({ ucp: true }))],
+});
+`,
       "next.config.mjs": `import { withEve } from "eve/next";
 
-export default withEve({});
+export default withEve({}, { publicRoutes: ["/.well-known/ucp"] });
 `,
       "pnpm-workspace.yaml": "minimumReleaseAge: 0\n",
       "src/app/layout.js": `export default function RootLayout({ children }) {

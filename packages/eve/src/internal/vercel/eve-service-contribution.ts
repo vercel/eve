@@ -28,6 +28,12 @@ export interface EveVercelAgentTarget {
   readonly buildCommand: string;
   readonly name?: string;
   readonly publicRoutePrefix: string;
+  readonly publicRoutes?: readonly EveVercelPublicRoute[];
+}
+
+export interface EveVercelPublicRoute {
+  readonly requestPath?: string;
+  readonly routeSrc: string;
 }
 
 export interface EveVercelBuildTarget {

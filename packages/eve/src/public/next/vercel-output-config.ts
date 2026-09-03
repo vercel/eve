@@ -17,6 +17,11 @@ import {
   findClosestLinkedVercelDirectory,
   findClosestVercelOutputDirectory,
 } from "#shared/vercel-output-directory.js";
+import {
+  createVercelRequestPath,
+  createVercelRouteSource,
+  type EvePublicRouteMount,
+} from "./public-route-mounts.js";
 
 const VERCEL_JSON_FILE_NAME = "vercel.json";
 const VERCEL_OUTPUT_CONFIG_FILE_NAME = ".vercel/output/config.json";
@@ -34,6 +39,7 @@ export interface EnsureVercelOutputConfigAgentInput {
   readonly appRoot: string;
   readonly buildCommand: string;
   readonly name?: string;
+  readonly publicRouteMounts?: readonly EvePublicRouteMount[];
   readonly publicRoutePrefix: string;
   readonly servicePrefix: string;
 }
@@ -164,7 +170,16 @@ export async function ensureEveVercelOutputConfig(input: {
 
   const assembled = assembleEveVercelServices({
     agents: input.agents.map((agent) => ({
-      agent,
+      agent: {
+        ...agent,
+        publicRoutes: agent.publicRouteMounts?.map((mount) => ({
+          requestPath:
+            mount.publicPath === mount.routePath
+              ? undefined
+              : createVercelRequestPath(mount.routePath),
+          routeSrc: createVercelRouteSource(mount.publicPath),
+        })),
+      },
       target: {
         hostOutputDirectory: dirname(outputConfigPath),
         projectRoot: input.nextRoot,

@@ -119,17 +119,31 @@ describe("withEve", () => {
     expect(beforeFiles.every((rewrite) => rewrite.source.startsWith("/eve/v1/"))).toBe(true);
   });
 
-  it("rewrites authored channel routes under the eve protocol prefix", async () => {
+  it("rewrites explicitly registered public routes", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("EVE_NEXT_PRODUCTION_ORIGIN", "https://agent.example.com");
 
-    const config = await resolveConfig(withEve<TestConfig>({}));
+    const config = await resolveConfig(
+      withEve<TestConfig>({}, { publicRoutes: ["/.well-known/ucp"] }),
+    );
     const rewrites = await config.rewrites?.();
 
     expect(getBeforeFiles(rewrites)).toContainEqual({
-      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/eve/v1/:path+`,
-      source: "/eve/v1/:path+",
+      destination: `https://agent.example.com${EVE_NEXT_SERVICE_PREFIX}/.well-known/ucp`,
+      source: "/.well-known/ucp",
     });
+  });
+
+  it("rejects invalid or protocol-owned public routes", () => {
+    expect(() => withEve<TestConfig>({}, { publicRoutes: ["/"] })).toThrow(
+      "must identify a non-root route",
+    );
+    expect(() => withEve<TestConfig>({}, { publicRoutes: ["eve/ucp"] })).toThrow(
+      'must start with "/"',
+    );
+    expect(() => withEve<TestConfig>({}, { publicRoutes: ["/eve/v1/info"] })).toThrow(
+      "already covered by the eve protocol mount",
+    );
   });
 
   it("uses EVE_BASE_URL in development instead of starting a server", async () => {
@@ -323,6 +337,7 @@ describe("withEve", () => {
             billing: {
               buildCommand: "pnpm build:billing-agent",
               root: "./agents/billing",
+              publicRoutes: ["/.well-known/ucp"],
               servicePrefix: "/_eve_internal/billing",
             },
             support: "./agents/support",
@@ -342,6 +357,10 @@ describe("withEve", () => {
           destination: "https://agent.example.com/_eve_internal/billing/eve/v1/:path+",
           source: "/eve/agents/billing/eve/v1/:path+",
         },
+        {
+          destination: "https://agent.example.com/_eve_internal/billing/.well-known/ucp",
+          source: "/eve/agents/billing/.well-known/ucp",
+        },
       ]),
     );
     expect(ensureEveVercelOutputConfig).toHaveBeenCalledWith({
@@ -349,6 +368,12 @@ describe("withEve", () => {
         {
           appRoot: expect.stringContaining("/agents/billing"),
           buildCommand: "pnpm build:billing-agent",
+          publicRouteMounts: [
+            {
+              publicPath: "/eve/agents/billing/.well-known/ucp",
+              routePath: "/.well-known/ucp",
+            },
+          ],
           name: "billing",
           publicRoutePrefix: "/eve/agents/billing",
           servicePrefix: "/_eve_internal/billing",
@@ -356,6 +381,7 @@ describe("withEve", () => {
         {
           appRoot: expect.stringContaining("/agents/support"),
           buildCommand: "node 'node_modules/eve/bin/eve.js' build",
+          publicRouteMounts: [],
           name: "support",
           publicRoutePrefix: "/eve/agents/support",
           servicePrefix: `${EVE_NEXT_SERVICE_PREFIX}/support`,
@@ -409,6 +435,18 @@ describe("withEve", () => {
         ]),
       }),
     );
+  });
+
+  it("rejects top-level public routes when named agents are configured", () => {
+    expect(() =>
+      withEve<TestConfig>(
+        {},
+        {
+          agents: { support: "./agents/support" },
+          publicRoutes: ["/.well-known/ucp"],
+        },
+      ),
+    ).toThrow("Register routes on each named agent");
   });
 
   it("rejects eveRoot when named agents are configured", () => {

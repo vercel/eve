@@ -107,6 +107,24 @@ describe("withEve Vercel config", () => {
     expect(rewrites).toBeUndefined();
   });
 
+  it("reconciles large public route sets idempotently", async () => {
+    const appRoot = await createTempAppRoot();
+    process.chdir(appRoot);
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VERCEL", "1");
+
+    const publicRoutes = Array.from({ length: 10_000 }, (_, index) => `/public/${String(index)}`);
+    const config = withEve<TestConfig>({}, { publicRoutes });
+
+    await resolveConfig(config);
+    await resolveConfig(config);
+
+    const outputConfig = (await readJsonFile(
+      join(appRoot, ".vercel", "output", "config.json"),
+    )) as { routes: unknown[] };
+    expect(outputConfig.routes).toHaveLength(publicRoutes.length + 1);
+  });
+
   it("isolates a colocated generated eve service from the Next.js Build Output", async () => {
     const appRoot = await createTempAppRoot();
     process.chdir(appRoot);
