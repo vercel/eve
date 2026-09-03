@@ -6,14 +6,15 @@ import {
   type RoutedDeliverResult,
 } from "#execution/proxied-deliver-step.js";
 import {
-  emitRecordedTaskAuthorizationEventStep,
   emitRecordedTaskInputRequestStep,
-} from "#execution/subagent-event-proxy-step.js";
+  runProxySubagentEventStep,
+} from "#subagents/event-proxy-step.js";
 import {
-  acceptTaskAuthorizationEventStep,
   recordTerminalTaskViewsStep,
   recordTaskInputRequestStep,
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
+import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
+import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -35,47 +36,59 @@ export async function routeDeliverToChildren(input: {
   let serializedContext = input.serializedContext;
   let sessionState = input.sessionState;
 
+  for (const request of payload.task?.inputRequests ?? []) {
+    const recorded = await recordTaskInputRequestStep({
+      request,
+      sessionState,
+    });
+    sessionState = recorded.sessionState;
+    if (!recorded.accepted) continue;
+    const emitted = await emitRecordedTaskInputRequestStep({
+      parentWritable: input.parentWritable,
+      request: recorded.request,
+      serializedContext,
+      sessionState,
+    });
+    serializedContext = emitted.serializedContext;
+    sessionState = emitted.sessionState;
+  }
+
+  for (const request of payload.task?.agentRequests ?? []) {
+    const applied = await applyTaskAgentRequest(
+      { ...request, ownerId: request.taskId },
+      {
+        parentWritable: input.parentWritable,
+        serializedContext,
+        sessionState,
+      },
+    );
+    serializedContext = applied.serializedContext;
+    sessionState = applied.sessionState;
+  }
+
+  // Authorization is display-only: the callback completes against the child,
+  // so the parent re-emits the event without recording a proxy input request.
+  for (const delivery of payload.task?.authorizationEvents ?? []) {
+    const accepted = await acceptTaskAuthorizationEventStep({ delivery, sessionState });
+    if (!accepted) continue;
+    const emitted = await runProxySubagentEventStep({
+      hookPayload: delivery.hookPayload,
+      parentWritable: input.parentWritable,
+      serializedContext,
+      sessionState,
+    });
+    serializedContext = emitted.serializedContext;
+    sessionState = emitted.sessionState;
+  }
+
+  // Child settlement carries the authoritative parked/terminal handle verdict
+  // and is enqueued before the task's terminal view. Preserve that ordering
+  // when several task deliveries are coalesced into one parent turn.
   if ((payload.task?.views?.length ?? 0) > 0) {
     sessionState = await recordTerminalTaskViewsStep({
       sessionState,
       views: payload.task?.views ?? [],
     });
-  }
-
-  for (const request of payload.task?.inputRequests ?? []) {
-    const recorded = await recordTaskInputRequestStep({
-      hookPayload: request.hookPayload,
-      serializedContext,
-      sessionState,
-      taskId: request.taskId,
-    });
-    sessionState = recorded.sessionState;
-    if (!recorded.accepted) continue;
-    const emitted = await emitRecordedTaskInputRequestStep({
-      hookPayload: recorded.hookPayload,
-      parentWritable: input.parentWritable,
-      serializedContext,
-      sessionState,
-    });
-    serializedContext = emitted.serializedContext;
-    sessionState = emitted.sessionState;
-  }
-
-  for (const request of payload.task?.authorizationEvents ?? []) {
-    const accepted = await acceptTaskAuthorizationEventStep({
-      hookPayload: request.hookPayload,
-      sessionState,
-      taskId: request.taskId,
-    });
-    if (!accepted) continue;
-    const emitted = await emitRecordedTaskAuthorizationEventStep({
-      hookPayload: request.hookPayload,
-      parentWritable: input.parentWritable,
-      serializedContext,
-      sessionState,
-    });
-    serializedContext = emitted.serializedContext;
-    sessionState = emitted.sessionState;
   }
 
   const ordinaryPayloads: DeliverPayload[] = [];

@@ -13,7 +13,7 @@ import type { RunSessionLimits } from "#channel/types.js";
 import type { JsonObject } from "#shared/json.js";
 import { resolveEffectiveAgentRuntimeFromConfig } from "#execution/effective-agent-config.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
-import { TASK_UPDATE_SESSION_INSTRUCTION } from "#execution/tasks/child/instructions.js";
+import { TASK_UPDATE_SESSION_INSTRUCTION } from "#tools/framework/task-update.js";
 
 /**
  * Result returned by {@link createSessionStep}.
@@ -40,8 +40,7 @@ export async function createSessionStep(input: {
   readonly nodeId?: string;
   readonly rootSessionId?: string;
   readonly sessionId: string;
-  readonly subagentDepth?: number;
-  readonly taskOwned?: boolean;
+  readonly taskId?: string;
 }): Promise<CreateSessionStepResult> {
   "use step";
 
@@ -54,8 +53,7 @@ export async function createSessionStep(input: {
     input.dynamicSubagentAgentConfig,
   );
   const taskUpdatesEnabled =
-    input.taskOwned === true &&
-    bundle.resolvedAgent.config?.experimental?.tasks === true &&
+    input.taskId !== undefined &&
     effectiveAgent.turnAgent.tools.some(
       (tool) =>
         tool.kind === "authored-tool" &&
@@ -87,8 +85,8 @@ export async function createSessionStep(input: {
     outputSchema: input.outputSchema,
     rootSessionId: input.rootSessionId,
     sessionId: input.sessionId,
-    subagentDepth: input.subagentDepth,
     systemPromptAdditions: taskUpdatesEnabled ? [TASK_UPDATE_SESSION_INSTRUCTION] : undefined,
+    taskId: input.taskId,
     turnAgent: effectiveAgent.turnAgent,
     workflowMaxSubagents: bundle.resolvedAgent.workflowTool?.maxSubagents,
   });

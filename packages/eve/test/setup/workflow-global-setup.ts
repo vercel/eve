@@ -56,6 +56,10 @@ async function discoverWorkflowEntries(): Promise<WorkflowBundleDiscoveredEntrie
   const inputFiles = [
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/execution"))),
     ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/internal/testing"))),
+    ...(await collectWorkflowInputFiles(
+      resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+    )),
+    ...(await collectWorkflowInputFiles(resolvePackageSourceDirectoryPath("src/subagents"))),
     resolvePackageSourceFilePath("test/setup/compiled-artifacts-bootstrap.mjs"),
   ];
   const discovered: WorkflowBundleDiscoveredEntries = {

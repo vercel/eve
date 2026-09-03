@@ -205,7 +205,10 @@ export function takeSessionUsageDelta(session: HarnessSession): {
 }
 
 /** Writes per-turn token state onto a new copy of the session. */
-export function setTurnUsageState(session: HarnessSession, next: TurnUsageState): HarnessSession {
+export function setTurnUsageState<T extends { readonly state?: SessionStateMap }>(
+  session: T,
+  next: TurnUsageState,
+): T {
   return {
     ...session,
     state: {

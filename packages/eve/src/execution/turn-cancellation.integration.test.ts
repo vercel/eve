@@ -25,6 +25,7 @@ import { eveChannel } from "#public/channels/eve.js";
 import type { ToolContext } from "#tools/definition.js";
 import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { toInputSchema } from "#tools/schema.js";
+import { experimental_workflow } from "#tools/workflow.js";
 
 /**
  * Turn cancellation settles as `turn.cancelled` → `session.waiting` with
@@ -106,7 +107,16 @@ async function createWaitToolRuntime(agentName: string): Promise<WaitToolFixture
       aborts += 1;
     },
   );
-  const runtime = await createTestRuntime({ agent: { name: agentName }, tools: [waitTool] });
+  const runtime = await createTestRuntime({
+    agent: { name: agentName },
+    modules: [
+      {
+        loadNamespace: async () => ({ default: experimental_workflow() }),
+        logicalPath: "tools/workflow.ts",
+      },
+    ],
+    tools: [waitTool],
+  });
   const manifestTool = runtime.manifest.tools.find((tool) => tool.name === WAIT_TOOL_NAME);
   if (manifestTool === undefined) {
     throw new Error(`Expected ${WAIT_TOOL_NAME} to be present in the test manifest.`);
@@ -580,7 +590,9 @@ describe("turn cancellation integration", () => {
     await fixture.runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
-          input: { message: `Delegate to a subagent: use the ${WAIT_TOOL_NAME} tool.` },
+          input: {
+            message: `Delegate through Workflow to a subagent: use the ${WAIT_TOOL_NAME} tool.`,
+          },
           serializedContext: buildSerializedContext({
             channelKind: "http",
             continuationToken,
@@ -640,13 +652,24 @@ describe("turn cancellation integration", () => {
   }, 60_000);
 
   it("cancels a turn parked on a child HITL request without corrupting the stream", async () => {
-    const runtime = await createTestRuntime({ agent: { name: "turn-cancel-hitl" } });
+    const runtime = await createTestRuntime({
+      agent: { name: "turn-cancel-hitl" },
+      modules: [
+        {
+          loadNamespace: async () => ({ default: experimental_workflow() }),
+          logicalPath: "tools/workflow.ts",
+        },
+      ],
+    });
     const continuationToken = "http:turn-cancel-hitl";
 
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
-          input: { message: "Delegate to a subagent: Use the ask_question tool exactly once." },
+          input: {
+            message:
+              "Delegate through Workflow to a subagent: Use the ask_question tool exactly once.",
+          },
           serializedContext: {
             ...buildSerializedContext({
               channelKind: "http",

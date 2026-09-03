@@ -204,6 +204,38 @@ describe("defaultMessageReducer", () => {
     expect(data).toBe(settled);
   });
 
+  it("projects workflow tool requests as named tool parts", () => {
+    const reducer = defaultMessageReducer();
+    const data = reduceServerEvents(reducer, reducer.initial(), [
+      createActionsRequestedEvent({
+        actions: [
+          {
+            callId: "call_publish",
+            input: { report: "weekly" },
+            kind: "workflow-tool-call",
+            toolName: "publish",
+            workflowId: "publish-workflow",
+          },
+        ],
+        sequence: 1,
+        stepIndex: 0,
+        turnId: "turn_1",
+      }),
+    ]);
+
+    expect(data.messages[0]?.parts).toContainEqual({
+      input: { report: "weekly" },
+      state: "input-available",
+      stepIndex: 0,
+      toolCallId: "call_publish",
+      toolMetadata: {
+        eve: { inputRequest: undefined, kind: "tool-call", name: "publish" },
+      },
+      toolName: "publish",
+      type: "dynamic-tool",
+    });
+  });
+
   it("removes an unfinished streamed tool input when the turn is cancelled", () => {
     const reducer = defaultMessageReducer();
     const data = reduceServerEvents(reducer, reducer.initial(), [

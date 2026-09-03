@@ -72,7 +72,7 @@ import {
   ACTIVITY_COLLECTOR_WORKFLOW_NAME,
   SESSION_TIMEOUT_WORKFLOW_NAME,
   TASK_RUN_WORKFLOW_NAME,
-  TOOL_RUN_WORKFLOW_NAME,
+  WORKFLOW_TOOL_RUN_WORKFLOW_NAME,
   TURN_WORKFLOW_NAME,
   WORKFLOW_ENTRY_NAME,
 } from "#execution/stable-workflow-names.js";
@@ -123,9 +123,9 @@ export const activityCollectorWorkflowReference = {
   workflowId: `workflow//${STABLE_ID_BASE}//${ACTIVITY_COLLECTOR_WORKFLOW_NAME}`,
 };
 
-/** Stable workflow reference for workflow-backed tool runs. */
-export const toolRunWorkflowReference = {
-  workflowId: `workflow//${STABLE_ID_BASE}//${TOOL_RUN_WORKFLOW_NAME}`,
+/** Stable workflow reference for authored workflow tool runs. */
+export const workflowToolRunWorkflowReference = {
+  workflowId: `workflow//${STABLE_ID_BASE}//${WORKFLOW_TOOL_RUN_WORKFLOW_NAME}`,
 };
 
 /**
@@ -206,6 +206,8 @@ export function createWorkflowRuntime(config: {
         limits: input.limits,
         serializedContext,
       };
+      const taskId = input.taskId ?? input.callback?.taskId;
+      if (taskId !== undefined) workflowInput.taskId = taskId;
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
       }

@@ -7,6 +7,7 @@ import {
   ParentTraceContextKey,
   SessionTraceSeedKey,
 } from "#context/keys.js";
+import { setChannelContext } from "#execution/channel-context.js";
 import type { InstrumentationHooks } from "#instrumentation/lifecycle.js";
 import {
   bindInstrumentationRuntime,
@@ -591,6 +592,29 @@ describe("bindInstrumentationRuntime", () => {
       recordInputs: false,
       recordOutputs: false,
     });
+  });
+
+  it("retains content after a local subagent adapter refresh", async () => {
+    const ctx = createContext("public");
+    ctx.set(SessionTraceSeedKey, {
+      decision: { action: "record", recordInputs: true, recordOutputs: true },
+      spanId: "1".repeat(16),
+      traceFlags: 1,
+      traceId: "2".repeat(32),
+    });
+
+    setChannelContext(ctx, { kind: "subagent", state: { persisted: true } });
+
+    expect(ctx.get(ChannelInstrumentationKey)?.metadata.audience).toBe("public");
+    expect(
+      await readTelemetry(
+        bindInstrumentationRuntime(
+          createRuntime({ capturesContent: true, publish: vi.fn() }),
+          ctx,
+          boundSession,
+        ),
+      ),
+    ).toMatchObject({ recordInputs: true, recordOutputs: true });
   });
 
   it("derives a legacy seed decision from trace flags", async () => {

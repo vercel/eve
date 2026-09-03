@@ -3,19 +3,18 @@ import { createHook } from "#compiled/@workflow/core/index.js";
 import { resumeHook } from "#internal/workflow/runtime.js";
 
 import type { HookPayload } from "#channel/types.js";
-import { ChannelRequestIdKey, SubagentDepthKey } from "#context/keys.js";
+import { ChannelRequestIdKey } from "#context/keys.js";
 import { createSessionStep } from "#execution/create-session-step.js";
 import {
   bindTurnCallerContextStep,
   notifyCancelledTaskCallerStep,
   notifyDelegatedParentStep,
-  notifyTaskTurnStartedStep,
   notifyTurnCallerStep,
   resolveInitialTurnCallerStep,
-} from "#execution/delegated-parent-notification.js";
+} from "#subagents/parent-notification.js";
 import type { DurableSessionState } from "#execution/durable-session-store.js";
 import { dispatchTurnStep } from "#execution/dispatch-turn-step.js";
-import { fireSessionCallbackStep } from "#execution/session-callback-step.js";
+import { fireSessionCallbackStep } from "#subagents/callback-step.js";
 import { emitTerminalSessionCompletionStep } from "#execution/terminal-session-completion-step.js";
 import {
   createSessionTimeoutControl,
@@ -81,13 +80,12 @@ vi.mock("./route-child-delivery.js", () => ({
     })),
 }));
 
-vi.mock("./delegated-parent-notification.js", () => ({
+vi.mock("../subagents/parent-notification.js", () => ({
   bindTurnCallerContextStep: vi
     .fn()
     .mockImplementation(async ({ serializedContext }) => serializedContext),
   notifyCancelledTaskCallerStep: vi.fn().mockResolvedValue(undefined),
   notifyDelegatedParentStep: vi.fn().mockResolvedValue(undefined),
-  notifyTaskTurnStartedStep: vi.fn().mockResolvedValue(undefined),
   notifyTurnCallerStep: vi.fn().mockResolvedValue(undefined),
   resolveInitialTurnCallerStep: vi.fn().mockResolvedValue(undefined),
 }));
@@ -140,7 +138,7 @@ function createSessionStepResultForMock(state: DurableSessionState) {
   };
 }
 
-vi.mock("./session-callback-step.js", () => ({
+vi.mock("../subagents/callback-step.js", () => ({
   fireSessionCallbackStep: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -203,7 +201,7 @@ describe("workflowEntry", () => {
         continuationToken: "http:test",
         nodeId: undefined,
         sessionId: "wrun_test_123",
-        taskOwned: false,
+        taskId: undefined,
       }),
     );
     expect(dispatchTurnStep).toHaveBeenCalledWith(
@@ -323,11 +321,6 @@ describe("workflowEntry", () => {
     );
 
     expect(resolveInitialTurnCallerStep).toHaveBeenCalledExactlyOnceWith({ serializedContext });
-    expect(notifyTaskTurnStartedStep).toHaveBeenCalledExactlyOnceWith({
-      caller,
-      childSessionId: "wrun_test_123",
-      childTurnId: "turn_0",
-    });
     expect(bindTurnCallerContextStep).toHaveBeenCalledExactlyOnceWith({
       caller,
       serializedContext: expect.objectContaining({ "eve.sessionCallback": expect.any(Object) }),
@@ -534,15 +527,12 @@ describe("workflowEntry", () => {
     await workflowEntry({
       input: { message: "hello there" },
       limits: { maxInputTokensPerSession: 4 },
-      serializedContext: createSerializedContext({
-        [SubagentDepthKey.name]: 3,
-      }),
+      serializedContext: createSerializedContext({}),
     });
 
     expect(createSessionStep).toHaveBeenCalledWith(
       expect.objectContaining({
         inheritedLimits: { maxInputTokensPerSession: 4 },
-        subagentDepth: 3,
       }),
     );
   });
@@ -1379,7 +1369,7 @@ describe("workflowEntry", () => {
       expect.objectContaining({
         error: expect.objectContaining({ message: "caller notification failed" }),
         serializedContext: settledContext,
-        turnId: undefined,
+        turnId: "turn_0",
       }),
     );
   });

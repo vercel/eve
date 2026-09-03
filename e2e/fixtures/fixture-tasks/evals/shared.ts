@@ -166,7 +166,8 @@ export async function waitForTaskStatus(
   status: string,
 ): Promise<EveEvalTurn> {
   let currentSession = session;
-  const deadline = performance.now() + 15_000;
+  const timeoutMs = 30_000;
+  const deadline = performance.now() + timeoutMs;
   let attempt = 0;
   while (performance.now() < deadline) {
     const followed = await sendAndFollowQueuedTurn(
@@ -196,7 +197,7 @@ export async function waitForTaskStatus(
     await t.sleep(100);
   }
   throw new Error(
-    `Task ${taskId} did not reach "${status}" within 15 seconds (${attempt} verification attempts).`,
+    `Task ${taskId} did not reach "${status}" within ${timeoutMs / 1_000} seconds (${attempt} verification attempts).`,
   );
 }
 

@@ -74,6 +74,15 @@ describe("describeActionRequest", () => {
     expect(
       describeActionRequest({ callId: "c1", input: { skill: "arena" }, kind: "load-skill" }),
     ).toBe("load_skill arena");
+    expect(
+      describeActionRequest({
+        callId: "c1",
+        input: { path: "agent/agent.ts" },
+        kind: "workflow-tool-call",
+        toolName: "publish",
+        workflowId: "publish-workflow",
+      }),
+    ).toBe("publish agent/agent.ts");
   });
 });
 

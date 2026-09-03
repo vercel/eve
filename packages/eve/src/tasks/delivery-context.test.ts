@@ -72,8 +72,8 @@ describe("resolveInitiatingTaskContext", () => {
     expect(
       resolveInitiatingTaskContext({
         state: taskState([
-          taskEntry("task_1", "turn_1", undefined, { data: {}, kind: "subagent" }),
-          taskEntry("task_2", "turn_2", undefined, { data: {}, kind: "subagent" }),
+          taskEntry("task_1", "turn_1", undefined, { data: {}, kind: "workflow-tool" }),
+          taskEntry("task_2", "turn_2", undefined, { data: {}, kind: "workflow-tool" }),
         ]),
         turnId: "turn_1",
       }),
@@ -174,5 +174,5 @@ function taskEntry(
 }
 
 function taskState(tasks: readonly ReturnType<typeof taskEntry>[]): SessionStateMap {
-  return { [SESSION_TASKS_STATE_KEY]: { tasks } } as SessionStateMap;
+  return { [SESSION_TASKS_STATE_KEY]: { tasks, version: 2 } } as SessionStateMap;
 }

@@ -80,6 +80,7 @@ export const BOOTSTRAP_RUNTIME_SYSTEM_PROMPT =
  */
 export function createResolvedRuntimeTurnAgent(input: {
   readonly agent: ResolvedAgent;
+  readonly dynamicSubagentsAvailable?: boolean;
   readonly id?: string;
   readonly nodeId?: string;
   readonly tools: readonly PreparedRuntimeTool[];
@@ -110,8 +111,10 @@ export function createResolvedRuntimeTurnAgent(input: {
     instructions: composeRuntimeBasePrompt({
       connections: agent.connections,
       instructions: agent.instructions,
-      subagentsAvailable: subagentDeclaredTool || subagentFrameworkRootTool,
-      tasksEnabled: config?.experimental?.tasks === true,
+      subagentsAvailable:
+        input.dynamicSubagentsAvailable === true ||
+        subagentDeclaredTool ||
+        subagentFrameworkRootTool,
       toolsAvailable: input.tools.length > 0,
       workspaceSpec: agent.workspaceSpec,
     }),

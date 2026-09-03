@@ -1,4 +1,4 @@
-import { defineEval, type EveEvalTurn } from "eve/evals";
+import { defineEval, type EveEvalContext, type EveEvalSession } from "eve/evals";
 
 const ALICE_PRIVATE_DATA = "ALICE_PRIVATE_DM_7K4M";
 const BOB_PRIVATE_DATA = "BOB_PRIVATE_DM_9P2R";
@@ -20,19 +20,6 @@ const CONTINUE_CHILD_MESSAGE = [
   "Reply with only the child's output.",
 ].join(" ");
 
-function requireRemoteChild(parentTurn: EveEvalTurn, expectedSessionId?: string): string {
-  const call = parentTurn.events.find(
-    (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
-  );
-  if (call?.type !== "subagent.called") {
-    throw new Error("The parent turn did not call remote-loopback.");
-  }
-  if (expectedSessionId !== undefined && call.data.childSessionId !== expectedSessionId) {
-    throw new Error("The parent turn did not continue the existing remote child.");
-  }
-  return call.data.childSessionId;
-}
-
 /** Three users resume one remote child; each tool call resolves only its current caller's grant. */
 export default defineEval({
   tags: ["principal-forwarding", "real-model"],
@@ -40,16 +27,17 @@ export default defineEval({
     "A persistent remote child switches between two user grants and denies a third caller with none.",
   async test(t) {
     // Alice creates the child and reads with her own grant.
-    const aliceParent = await t.send(CREATE_CHILD_MESSAGE);
-    const childSessionId = requireRemoteChild(aliceParent);
+    await t.send(CREATE_CHILD_MESSAGE);
+    const aliceParent = await waitForRemoteChild(t, t);
+    const childSessionId = aliceParent.childSessionId;
     const aliceChild = await t.target.watchTurn(childSessionId).result();
     let childEventCount = aliceChild.events.length;
 
     // Bob continues the same child and must resolve Bob's grant, not Alice's.
-    const bobParent = await t.send(CONTINUE_CHILD_MESSAGE, {
+    await aliceParent.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: BOB_AUTHORIZATION },
     });
-    requireRemoteChild(bobParent, childSessionId);
+    const bobParent = await waitForRemoteChild(t, aliceParent.session, childSessionId);
     const bobChild = await t.target
       .watchTurn(childSessionId, { startIndex: childEventCount })
       .result();
@@ -57,10 +45,10 @@ export default defineEval({
 
     // A grantless observer continues it once more. Reusing either prior bearer
     // would complete this call; correct per-turn scoping makes it fail.
-    const observerParent = await t.send(CONTINUE_CHILD_MESSAGE, {
+    await bobParent.session.send(CONTINUE_CHILD_MESSAGE, {
       headers: { authorization: OBSERVER_AUTHORIZATION },
     });
-    requireRemoteChild(observerParent, childSessionId);
+    await waitForRemoteChild(t, bobParent.session, childSessionId);
     const observerChild = await t.target
       .watchTurn(childSessionId, { startIndex: childEventCount })
       .result();
@@ -90,3 +78,32 @@ export default defineEval({
     t.succeeded();
   },
 });
+
+type SessionCursor = Pick<EveEvalSession, "send" | "sessionId" | "state">;
+
+async function waitForRemoteChild(
+  t: EveEvalContext,
+  initial: SessionCursor,
+  expectedSessionId?: string,
+): Promise<{ readonly childSessionId: string; readonly session: SessionCursor }> {
+  let session = initial;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (session.sessionId === undefined || session.state === undefined) {
+      throw new Error("Remote child wait has no parent session cursor.");
+    }
+    const live = t.target.watchTurn(session.sessionId, { startIndex: session.state.streamIndex });
+    const turn = await live.result();
+    const call = turn.events.find(
+      (event) => event.type === "subagent.called" && event.data.name === "remote-loopback",
+    );
+    if (call?.type === "subagent.called") {
+      if (expectedSessionId !== undefined && call.data.childSessionId !== expectedSessionId) {
+        throw new Error("The parent turn did not continue the existing remote child.");
+      }
+      return { childSessionId: call.data.childSessionId, session: live.session };
+    }
+    turn.noFailedActions();
+    session = live.session;
+  }
+  throw new Error("The parent did not call remote-loopback after five turns.");
+}

@@ -1,15 +1,19 @@
-import { isInboxSubagentResultFromRunningHandle } from "#harness/handles/query.js";
-import { isInboxToolResultFromRecordedRun } from "#harness/tool-runs.js";
+import {
+  findRunningAgentHandle,
+  isInboxSubagentResultFromRunningHandle,
+} from "#subagents/handles/query.js";
+import {
+  isInboxSubagentResultFromRecordedWorkflowToolRun,
+  isInboxToolResultFromRecordedWorkflowToolRun,
+} from "#harness/workflow-tool-runs.js";
 import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.js";
 
 import type { DeliverHookPayload } from "#channel/types.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
-import { dispatchRuntimeActionsStep } from "#execution/dispatch-runtime-actions-step.js";
+import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
-import { dispatchTaskStep } from "#execution/tasks/parent/dispatch-task-step.js";
-import { dispatchWorkflowRuntimeActionsStep } from "#execution/dispatch-workflow-runtime-actions-step.js";
 import {
   migrateTurnWorkflowInput,
   type TurnStepInput,
@@ -18,22 +22,18 @@ import {
 import { claimHookOwnership, disposeHook, isHookConflictError } from "#execution/hook-ownership.js";
 import type { NextDriverAction } from "#execution/next-driver-action.js";
 import { routeDeliverToChildren } from "#execution/route-child-delivery.js";
-import { runProxySubagentEventStep } from "#execution/subagent-event-proxy-step.js";
-import { emitRunReportStep } from "#execution/tool-run/emit-run-report-step.js";
+import { runProxySubagentEventStep } from "#subagents/event-proxy-step.js";
+import { emitWorkflowToolRunReportStep } from "#execution/tools/workflow/emit-workflow-tool-run-report-step.js";
 import {
   type ChannelReader,
   createChannelReader,
   raceChannelReads,
-} from "#execution/tool-run/owner-channels.js";
+} from "#execution/tools/workflow/owner-channels.js";
 import {
-  openRunOwnerChannels,
-  type RunOwnerChannels,
-  type RunOwnerReaders,
-} from "#execution/tool-run/owner.js";
-import {
-  runOutcomeToToolResult,
-  runRequestToInputRequestPayload,
-} from "#execution/tool-run/owner-inbox.js";
+  openWorkflowToolRunOwnerChannels,
+  type WorkflowToolRunOwnerChannels,
+  type WorkflowToolRunOwnerReaders,
+} from "#execution/tools/workflow/owner.js";
 import {
   createTurnCancellationControl,
   type TurnCancellationControl,
@@ -43,9 +43,12 @@ import { resolveWorkflowCallbackBaseUrl } from "#execution/workflow-callback-url
 import { normalizeSerializableError } from "#execution/workflow-errors.js";
 import { turnStep } from "#execution/workflow-steps.js";
 import { activeTurnId } from "#harness/active-turn-id.js";
-import { getRuntimeActionResultKey } from "#runtime/actions/keys.js";
-import { resolveRuntimeActionResultsForKeys } from "#runtime/actions/results.js";
+import { resolveRuntimeActionResultsForCallIds } from "#runtime/actions/results.js";
 import type { RuntimeActionResult } from "#shared/action-types.js";
+import {
+  handleWorkflowToolRunOutcome,
+  handleWorkflowToolRunRequest,
+} from "#execution/turn-workflow-tool-run.js";
 
 const TASK_MODE_WAIT_ERROR_MESSAGE = "Task mode cannot wait for follow-up input (`next: null`).";
 
@@ -94,7 +97,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
   const bufferedDeliveries: DeliverHookPayload[] = [];
   let nextStepInput = input.stepInput.input;
   let ownsInbox = false;
-  let runChannels: RunOwnerChannels | undefined;
+  let workflowToolRunChannels: WorkflowToolRunOwnerChannels | undefined;
   let cancellation: TurnCancellationControl | undefined;
 
   try {
@@ -105,6 +108,11 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
       if (isHookConflictError(error)) return;
       throw error;
     }
+
+    // Opened after the inbox claim so a losing duplicate never contends for
+    // them; the turn starts no run before this point.
+    workflowToolRunChannels = openWorkflowToolRunOwnerChannels(inbox.token);
+    const readers: TurnReaders = [...workflowToolRunChannels.readers, inboxReader];
 
     // Claimed after the inbox claim so a losing duplicate run never
     // contends for the session cancel token.
@@ -125,10 +133,12 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         initialStep?.result ??
         (await turnStep(cursor.createStepInput(nextStepInput, cancellation?.signal)));
       initialStep = undefined;
-      const pendingActionKeys =
-        result.action === "dispatch-workflow-runtime-actions" || result.action === "park"
-          ? result.pendingRuntimeActionKeys
-          : undefined;
+      const pendingCallIds =
+        result.action === "dispatch-workflow-tasks"
+          ? result.pendingTaskCallIds
+          : result.action === "park"
+            ? result.pendingCoordinationCallIds
+            : undefined;
       const hasBackgroundTasks = (result.backgroundTasks?.length ?? 0) > 0;
 
       if (hasBackgroundTasks) {
@@ -160,7 +170,7 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
 
       if (
         cancellation?.signal.aborted === true &&
-        (pendingActionKeys === undefined || hasBackgroundTasks)
+        (pendingCallIds === undefined || hasBackgroundTasks)
       ) {
         // Some worlds cannot interrupt a running step, so it can complete
         // normally after the workflow observes cancellation. Roll that result
@@ -197,28 +207,16 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
         return;
       }
 
-      // A pending runtime-action batch (model-driven `park` or dynamic-workflow
-      // interrupt) is resolved in-line so the turn stays alive across the wait;
-      // the arms differ only in their dispatch path: the workflow adapter for
-      // interrupt-sourced batches, and the task-mode sibling when the agent
-      // runs `experimental.tasks`.
-      if (pendingActionKeys !== undefined) {
+      // Both sources converge on coordination dispatch. Model-driven `park`
+      // already carries a coordination batch; a dynamic Workflow interrupt is
+      // normalized into that shape inside the dispatch step.
+      if (
+        pendingCallIds !== undefined &&
+        (result.action === "park" || result.action === "dispatch-workflow-tasks")
+      ) {
         await cursor.adopt(result);
-        // Opened before the dispatch step suspends, so the hooks exist when
-        // the first run reports; a turn that starts no run never pays for them.
-        if (result.action === "park" && result.startsWorkflowToolRuns === true) {
-          runChannels ??= openRunOwnerChannels(inbox.token);
-        }
-        const hasPendingTasks = result.action === "park" && result.tasksEnabled;
-        let dispatch;
-        if (result.action === "dispatch-workflow-runtime-actions") {
-          dispatch = dispatchWorkflowRuntimeActionsStep;
-        } else if (hasPendingTasks) {
-          dispatch = dispatchTaskStep;
-        } else {
-          dispatch = dispatchRuntimeActionsStep;
-        }
-        const dispatchResult = await dispatch({
+        const dispatchResult = await dispatchCoordinationStep({
+          action: result.action,
           callbackBaseUrl: resolveWorkflowCallbackBaseUrl(getWorkflowMetadata().url),
           parentContinuationToken: inbox.token,
           parentWritable: cursor.parentWritable,
@@ -237,9 +235,8 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
           initialAcceptedAtMs,
           initialResults: dispatchResult.results,
           nextDeliveryRequestId,
-          readers:
-            runChannels === undefined ? [inboxReader] : [...runChannels.readers, inboxReader],
-          pendingActionKeys,
+          readers,
+          pendingCallIds,
         });
         if (results === "cancelled") {
           // The next turnStep observes the aborted signal and settles
@@ -290,14 +287,15 @@ async function runTurnOwnedWorkflow(input: TurnWorkflowInput): Promise<void> {
     // terminal result publishes so the next turn's claim never races this
     // run's teardown; this backstop covers the error path.
     if (cancellation !== undefined) await cancellation.dispose();
-    if (runChannels !== undefined) await runChannels.dispose();
+    if (workflowToolRunChannels !== undefined) await workflowToolRunChannels.dispose();
     if (ownsInbox) await disposeHook(inbox);
   }
 }
 
-type TurnReaders =
-  | readonly [...RunOwnerReaders, ChannelReader<"inbox", TurnInboxPayload>]
-  | readonly [ChannelReader<"inbox", TurnInboxPayload>];
+type TurnReaders = readonly [
+  ...WorkflowToolRunOwnerReaders,
+  ChannelReader<"inbox", TurnInboxPayload>,
+];
 
 async function finishCancelledTurn(input: {
   readonly bufferedDeliveries: readonly DeliverHookPayload[];
@@ -332,21 +330,21 @@ async function waitForRuntimeActionResults(input: {
   readonly initialAcceptedAtMs: number | undefined;
   readonly initialResults: readonly RuntimeActionResult[];
   readonly nextDeliveryRequestId: () => string;
-  readonly pendingActionKeys: readonly string[];
+  readonly pendingCallIds: readonly string[];
   readonly readers: TurnReaders;
 }): Promise<AcceptedRuntimeActionBatch | "cancelled" | "cancel-turn"> {
   let pendingDeliveryRequest: string | undefined;
   const results: RuntimeActionResult[] = [...input.initialResults];
-  const acceptedAtMsByKey = new Map<string, number>();
+  const acceptedAtMsByCallId = new Map<string, number>();
   if (input.initialAcceptedAtMs !== undefined) {
     for (const result of input.initialResults) {
-      acceptedAtMsByKey.set(getRuntimeActionResultKey(result), input.initialAcceptedAtMs);
+      acceptedAtMsByCallId.set(result.callId, input.initialAcceptedAtMs);
     }
   }
 
   while (true) {
-    const ready = resolveRuntimeActionResultsForKeys({
-      pendingKeys: input.pendingActionKeys,
+    const ready = resolveRuntimeActionResultsForCallIds({
+      pendingCallIds: input.pendingCallIds,
       results,
     });
     if (ready !== undefined) {
@@ -360,10 +358,7 @@ async function waitForRuntimeActionResults(input: {
       }
       return {
         acceptedAtMsByCallId: Object.fromEntries(
-          ready.map((result) => [
-            result.callId,
-            acceptedAtMsByKey.get(getRuntimeActionResultKey(result))!,
-          ]),
+          ready.map((result) => [result.callId, acceptedAtMsByCallId.get(result.callId)!]),
         ),
         results: ready,
       };
@@ -396,28 +391,27 @@ async function waitForRuntimeActionResults(input: {
     if (read.next.done) throw new Error("Turn inbox closed before runtime actions completed.");
 
     if (read.channel === "outcome") {
-      const result = runOutcomeToToolResult(read.next.value);
-      const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
-      if (isInboxToolResultFromRecordedRun(sessionSnapshotState, result)) {
-        const acceptedAtMs = Date.now();
+      const result = await handleWorkflowToolRunOutcome({
+        callbackMetadataUrl: getWorkflowMetadata().url,
+        cursor: input.cursor,
+        message: read.next.value,
+      });
+      if (result !== undefined) {
         results.push(result);
-        acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
+        acceptedAtMsByCallId.set(result.callId, Date.now());
       }
       continue;
     }
     if (read.channel === "request") {
-      const proxyResult = await runProxySubagentEventStep({
-        answerHook: { runId: read.next.value.from.runId },
-        hookPayload: runRequestToInputRequestPayload(read.next.value),
-        parentWritable: input.cursor.parentWritable,
-        serializedContext: input.cursor.serializedContext,
-        sessionState: input.cursor.sessionState,
+      await handleWorkflowToolRunRequest({
+        callbackMetadataUrl: getWorkflowMetadata().url,
+        cursor: input.cursor,
+        message: read.next.value,
       });
-      await input.cursor.adopt(proxyResult);
       continue;
     }
     if (read.channel === "report") {
-      await emitRunReportStep({
+      await emitWorkflowToolRunReportStep({
         from: read.next.value.from,
         parentWritable: input.cursor.parentWritable,
         update: read.next.value.update,
@@ -430,27 +424,38 @@ async function waitForRuntimeActionResults(input: {
       // The inbox token is shared by every callee in the batch, so an inbox
       // result must bind to the adopted session snapshot: a subagent result
       // to a running agent handle carrying its callId, a tool result to the
-      // tool run recorded for its callId. Anything else — a callee settling a
+      // workflow tool run recorded for its callId. Anything else — a callee settling a
       // sibling's call, or a result for a callId whose dispatch failed — is
       // dropped; the genuine result (or the dispatch error already in
       // `results`) still resolves the wait.
       const sessionSnapshotState = input.cursor.sessionState.snapshot?.session.state;
       const accepted = value.results.filter((result) =>
         result.kind === "tool-result"
-          ? isInboxToolResultFromRecordedRun(sessionSnapshotState, result)
-          : isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result),
+          ? isInboxToolResultFromRecordedWorkflowToolRun(sessionSnapshotState, result)
+          : (result.origin === "child" &&
+              isInboxSubagentResultFromRunningHandle(sessionSnapshotState, result)) ||
+            isInboxSubagentResultFromRecordedWorkflowToolRun(sessionSnapshotState, result),
       );
       if (accepted.length > 0) {
         const acceptedAtMs = Date.now();
         results.push(...accepted);
         for (const result of accepted) {
-          acceptedAtMsByKey.set(getRuntimeActionResultKey(result), acceptedAtMs);
+          acceptedAtMsByCallId.set(result.callId, acceptedAtMs);
         }
       }
       continue;
     }
 
     if (value.kind === "subagent-input-request" || value.kind === "subagent-authorization-event") {
+      const handle = findRunningAgentHandle(input.cursor.sessionState.snapshot?.session.state, {
+        callId: value.callId,
+      });
+      if (
+        handle?.identity.name !== value.subagentName ||
+        handle.address.sessionId !== value.childSessionId
+      ) {
+        continue;
+      }
       const proxyResult = await runProxySubagentEventStep({
         hookPayload: value,
         parentWritable: input.cursor.parentWritable,
@@ -515,13 +520,13 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
         return;
       }
 
-      if (result.action === "dispatch-workflow-runtime-actions") {
+      if (result.action === "dispatch-workflow-tasks") {
         await sendTurnControlStep({
           controlToken: input.completionToken,
           payload: {
             action: {
-              kind: "dispatch-workflow-runtime-actions",
-              pendingActionKeys: result.pendingRuntimeActionKeys,
+              kind: "dispatch-workflow-tasks",
+              pendingCallIds: result.pendingTaskCallIds,
               serializedContext: result.serializedContext,
               sessionState: result.sessionState,
             },
@@ -532,9 +537,9 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
       }
 
       if (result.action === "park") {
-        const pendingActionKeys = result.pendingRuntimeActionKeys;
+        const pendingCallIds = result.pendingCoordinationCallIds;
         const canPark =
-          pendingActionKeys !== undefined ||
+          pendingCallIds !== undefined ||
           result.hasPendingAuthorization ||
           (result.hasPendingInputBatch && input.capabilities?.requestInput === true) ||
           input.mode === "conversation";
@@ -542,10 +547,10 @@ async function runLegacyTurnWorkflow(input: TurnWorkflowInput): Promise<void> {
         if (!canPark) throw new Error(TASK_MODE_WAIT_ERROR_MESSAGE);
 
         const action: NextDriverAction =
-          pendingActionKeys !== undefined
+          pendingCallIds !== undefined
             ? {
-                kind: "dispatch-runtime-actions",
-                pendingActionKeys,
+                kind: "dispatch-coordination",
+                pendingCallIds,
                 serializedContext: result.serializedContext,
                 sessionState: result.sessionState,
               }

@@ -22,7 +22,7 @@ describe("createSessionStep", () => {
   it("adds task_update guidance to a task-owned session system prompt", async () => {
     vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
       resolvedAgent: {
-        config: { experimental: { tasks: true } },
+        config: {},
       },
       turnAgent: {
         ...TestTurnAgent,
@@ -48,11 +48,12 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       sessionId: "sess-child",
-      taskOwned: true,
+      taskId: "task-1",
     });
 
     expect(state.snapshot?.session.agent.system).toContain("Background task updates");
     expect(state.snapshot?.session.agent.system).toContain("what you are currently doing");
+    expect(state.snapshot?.session.taskId).toBe("task-1");
     expect(state.snapshot?.session.state).toBeUndefined();
   });
 
@@ -68,7 +69,7 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       sessionId: "sess-child",
-      taskOwned: true,
+      taskId: "task-1",
     });
 
     expect(state.snapshot?.session.agent.system).not.toContain("Background task updates");
@@ -105,8 +106,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 3_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits).toEqual({
@@ -126,8 +127,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: false, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits).toEqual({});
@@ -147,8 +148,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 2_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(2_000_000);
@@ -168,8 +169,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 2_000_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(1_000_000);
@@ -189,8 +190,8 @@ describe("createSessionStep", () => {
       compiledArtifactsSource: { kind: "bundled" },
       continuationToken: "subagent:test",
       inheritedLimits: { maxInputTokensPerSession: 500_000, maxOutputTokensPerSession: false },
+      rootSessionId: "sess-root",
       sessionId: "sess-child",
-      subagentDepth: 1,
     });
 
     expect(state.snapshot?.session.limits?.maxInputTokensPerSession).toBe(500_000);

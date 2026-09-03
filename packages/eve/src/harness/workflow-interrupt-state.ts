@@ -1,7 +1,7 @@
 import type { ModelMessage } from "ai";
 
 import type { HarnessSession, SessionStateMap } from "#harness/types.js";
-import { WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND } from "#harness/workflow-runtime-action-state.js";
+import { WORKFLOW_TASK_INTERRUPT_KIND } from "#harness/workflow-task-state.js";
 import type { WorkflowSandboxInterrupt } from "#shared/workflow-sandbox.js";
 
 const PENDING_KEY = "eve.harness.pendingWorkflowInterrupt";
@@ -79,7 +79,7 @@ function isWorkflowInterruptShape(value: unknown): value is WorkflowSandboxInter
     typeof value.interruptId === "string" &&
     typeof value.outerToolCallId === "string" &&
     isRecord(value.payload) &&
-    value.payload.kind === WORKFLOW_RUNTIME_ACTION_INTERRUPT_KIND &&
+    value.payload.kind === WORKFLOW_TASK_INTERRUPT_KIND &&
     isRecord(value.continuation) &&
     value.continuation.version === 2 &&
     typeof value.continuation.outerToolCallId === "string" &&

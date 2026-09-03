@@ -5,6 +5,7 @@ import type { CancelTurnResult as ProtocolCancelTurnResult } from "#protocol/can
 import type { RunMode } from "#shared/run-mode.js";
 import type {
   RuntimeSubagentChildResult,
+  RuntimeSubagentDispatchFailure,
   RuntimeToolResultActionResult,
 } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
@@ -13,7 +14,12 @@ import type { AgentLimitsDefinition } from "#shared/agent-definition.js";
 import type { JsonObject } from "#shared/json.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
 import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
-import type { TaskView } from "#tasks/types.js";
+import type {
+  TaskAgentRequestDelivery,
+  TaskAuthorizationEventDelivery,
+  TaskInputRequestDelivery,
+  TaskView,
+} from "#tasks/types.js";
 
 export type { ContextAccessor } from "#context/key.js";
 export type { ChannelInstrumentationProjection } from "#channel/instrumentation.js";
@@ -174,15 +180,11 @@ export interface DeliverPayload {
   /** Framework-only task envelopes consumed before adapter/model delivery. */
   readonly task?: {
     /** Task HITL input-request batches for the parent's pre-model router. */
-    readonly inputRequests?: readonly {
-      readonly hookPayload: SubagentInputRequestHookPayload;
-      readonly taskId: string;
-    }[];
-    /** Task authorization events projected through the parent channel. */
-    readonly authorizationEvents?: readonly {
-      readonly hookPayload: SubagentAuthorizationEventHookPayload;
-      readonly taskId: string;
-    }[];
+    readonly inputRequests?: readonly TaskInputRequestDelivery[];
+    /** Agent spawn/settlement requests a task-owned workflow run needs the parent to apply. */
+    readonly agentRequests?: readonly TaskAgentRequestDelivery[];
+    /** Task child authorization events re-emitted through the parent channel. */
+    readonly authorizationEvents?: readonly TaskAuthorizationEventDelivery[];
     /** Terminal views cached before task-run retention expires. */
     readonly views?: readonly TaskView[];
   };
@@ -294,12 +296,17 @@ export interface ClearSessionHookPayload {
 
 /**
  * Results resumed back into a parked parent workflow by the work it
- * dispatched: child-produced subagent results and workflow tool
- * results. Parent-produced dispatch results never travel through this hook.
+ * dispatched: child-produced subagent results and authored workflow tool
+ * results. Workflow-owner dispatch failures use the same private reply hook so
+ * `agent()` can settle instead of waiting forever.
  */
 export interface RuntimeActionResultHookPayload {
   readonly kind: "runtime-action-result";
-  readonly results: readonly (RuntimeSubagentChildResult | RuntimeToolResultActionResult)[];
+  readonly results: readonly (
+    | RuntimeSubagentChildResult
+    | RuntimeSubagentDispatchFailure
+    | RuntimeToolResultActionResult
+  )[];
 }
 
 /**
@@ -438,6 +445,8 @@ export interface SessionCapabilities {
  */
 export interface RunInput {
   readonly adapter: ChannelAdapter<any>;
+  /** Framework task that owns this run, when the run is a task executor. */
+  readonly taskId?: string;
   /**
    * Registered channel name for root sessions started from an authored
    * channel route. Framework runs omit this and use their framework
@@ -517,12 +526,6 @@ export interface RunInput {
    * for that axis.
    */
   readonly limits?: RunSessionLimits;
-  /**
-   * Framework-owned depth of delegated local subagent sessions. Root sessions
-   * omit this and are treated as depth 0; each local child receives
-   * parent depth + 1.
-   */
-  readonly subagentDepth?: number;
   /** Framework-owned metadata for a protocol-neutral external invocation. */
   readonly externalInvocation?: {
     readonly continuationToken: string;

@@ -1,5 +1,6 @@
 import { InvalidArgumentError, type Command } from "#compiled/commander/index.js";
-import { applicationCommand, type CliApplicationContext } from "#cli/application-command.js";
+import type { CliApplicationContext } from "#cli/application-command.js";
+import { agentCommand } from "#cli/agent-command.js";
 import type { ConnectPrincipalType } from "#setup/connection-connector.js";
 
 import { parseSetupAnswer } from "./setup-answers.js";
@@ -24,7 +25,7 @@ export function registerIntegrationCommands(input: {
 
   const integration = program.command("integration").description("Set up an eve integration");
 
-  applicationCommand(integration.command("setup <kind>"), applicationContext)
+  agentCommand(integration.command("setup <kind>"), applicationContext)
     .description("Run a built-in integration setup flow")
     .option("-y, --yes")
     .option("--force", "Overwrite files created by setup.")
@@ -58,7 +59,7 @@ export function registerIntegrationCommands(input: {
       },
     );
 
-  applicationCommand(
+  agentCommand(
     integration.command("connect <slug> <service> [canonical-name]", { hidden: true }),
     applicationContext,
   )

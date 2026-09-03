@@ -6,11 +6,11 @@ import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
-} from "#execution/remote-agent-dispatch.js";
-import { cancelToolRun } from "#execution/tool-run/cancel.js";
+} from "#subagents/remote-dispatch.js";
+import { cancelWorkflowToolRun } from "#execution/tools/workflow/cancel.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { getToolRuns, type ToolRunRecord } from "#harness/tool-runs.js";
-import { getAgentHandleStore, type AgentHandle } from "#harness/handles/store.js";
+import { getWorkflowToolRuns, type WorkflowToolRunRecord } from "#harness/workflow-tool-runs.js";
+import { getAgentHandleStore, type AgentHandle } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentRegistry } from "#runtime/subagents/registry.js";
 import { getDynamicSubagentSelection } from "#context/dynamic-subagent-lifecycle.js";
@@ -24,7 +24,7 @@ const CANCEL_RETRY_INITIAL_DELAY_MS = 250;
 const CANCEL_RETRY_MAX_DELAY_MS = 1_500;
 const log = createLogger("execution.cancel-descendant-turns");
 
-type RunningAgentHandle = Extract<AgentHandle, { phase: "running" }>;
+type RunningAgentHandle = Extract<AgentHandle, { phase: "claimed" | "running" }>;
 
 /**
  * Cancels every running delegated child recorded in the agent handle store
@@ -37,13 +37,16 @@ export async function cancelDescendantTurnsStep(input: {
   "use step";
 
   let running: readonly RunningAgentHandle[];
-  let toolRuns: readonly ToolRunRecord[];
+  let workflowToolRuns: readonly WorkflowToolRunRecord[];
   try {
     const session = await readDurableSession(input.sessionState);
+    workflowToolRuns = getWorkflowToolRuns(session.state);
+    const workflowOwnerIds = new Set(workflowToolRuns.map((run) => run.runId));
     running = (getAgentHandleStore(session.state)?.handles ?? []).filter(
-      (handle): handle is RunningAgentHandle => handle.phase === "running",
+      (handle): handle is RunningAgentHandle =>
+        handle.phase === "running" ||
+        (handle.phase === "claimed" && workflowOwnerIds.has(handle.ownerId)),
     );
-    toolRuns = getToolRuns(session.state);
   } catch (error) {
     logError(log, "failed to read pending descendants during cancellation", error, {
       sessionId: input.sessionState.sessionId,
@@ -52,7 +55,9 @@ export async function cancelDescendantTurnsStep(input: {
   }
 
   await Promise.all(
-    toolRuns.map((record) => cancelToolRun(record, "The turn that called the tool was cancelled.")),
+    workflowToolRuns.map((record) =>
+      cancelWorkflowToolRun(record, "The turn that called the tool was cancelled."),
+    ),
   );
   if (running.length === 0) return;
 
@@ -88,7 +93,7 @@ async function cancelLocalDescendant(input: {
     });
     if (final.status !== "accepted") {
       log.warn("descendant cancel was never accepted; the child may run to completion", {
-        callId: handle.operation.callId,
+        callId: readHandleCallId(handle),
         childSessionId: handle.address.sessionId,
         finalStatus: final.status,
         subagentName: handle.identity.name,
@@ -96,7 +101,7 @@ async function cancelLocalDescendant(input: {
     }
   } catch (error) {
     logError(log, "failed to cancel local descendant turn", error, {
-      callId: handle.operation.callId,
+      callId: readHandleCallId(handle),
       childSessionId: handle.address.sessionId,
       subagentName: handle.identity.name,
     });
@@ -135,7 +140,7 @@ async function cancelRemoteDescendant(input: {
     });
     if (final.status !== "accepted") {
       log.warn("remote descendant cancel was never accepted; the child may run to completion", {
-        callId: handle.operation.callId,
+        callId: readHandleCallId(handle),
         childSessionId: handle.address.sessionId,
         finalStatus: final.status,
         remoteAgentName: handle.identity.name,
@@ -143,11 +148,15 @@ async function cancelRemoteDescendant(input: {
     }
   } catch (error) {
     logError(log, "failed to cancel remote descendant turn", error, {
-      callId: handle.operation.callId,
+      callId: readHandleCallId(handle),
       childSessionId: handle.address.sessionId,
       remoteAgentName: handle.identity.name,
     });
   }
+}
+
+function readHandleCallId(handle: RunningAgentHandle): string | undefined {
+  return handle.phase === "running" ? handle.operation.callId : handle.callId;
 }
 
 async function requestCancellationWithRetry(input: {

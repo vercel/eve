@@ -252,6 +252,13 @@ describe("createInstrumentationHandleEvent", () => {
           remoteAgentName: "analyst",
         },
         { callId: "add-1", input: { a: 1, b: 2 }, kind: "tool-call", toolName: "add" },
+        {
+          callId: "workflow-1",
+          input: { report: "weekly" },
+          kind: "workflow-tool-call",
+          toolName: "publish",
+          workflowId: "publish-workflow",
+        },
       ],
       sequence: 0,
       stepIndex: 0,
@@ -337,7 +344,7 @@ describe("createInstrumentationHandleEvent", () => {
       );
     });
 
-    expect(events.slice(0, 4)).toEqual([
+    expect(events.slice(0, 5)).toEqual([
       {
         callId: "delegate-1",
         idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
@@ -374,15 +381,24 @@ describe("createInstrumentationHandleEvent", () => {
         scope,
         type: "action.started",
       },
+      {
+        callId: "workflow-1",
+        idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "workflow-1"),
+        input: { report: "weekly" },
+        kind: "tool-call",
+        name: "publish",
+        scope,
+        type: "action.started",
+      },
     ]);
-    expect(events[4]).toMatchObject({
+    expect(events[5]).toMatchObject({
       errorCode: "ACTION_RESULT_FAILED",
       idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "delegate-1"),
       outcome: "failed",
       scope,
       type: "action.failed",
     });
-    expect(events[5]).toEqual({
+    expect(events[6]).toEqual({
       acceptedAtMs: 1_234,
       idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "remote-1"),
       outcome: "completed",
@@ -395,7 +411,7 @@ describe("createInstrumentationHandleEvent", () => {
         outputTokens: 5,
       },
     });
-    expect(events[6]).toEqual({
+    expect(events[7]).toEqual({
       acceptedAtMs: undefined,
       idempotencyKey: actionIdempotencyKey("session-1", "turn-1", "add-1"),
       outcome: "completed",
@@ -404,7 +420,7 @@ describe("createInstrumentationHandleEvent", () => {
       type: "action.completed",
       usage: undefined,
     });
-    expect(events).toHaveLength(7);
+    expect(events).toHaveLength(8);
     expect(events.every(Object.isFrozen)).toBe(true);
   });
 

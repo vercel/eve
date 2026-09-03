@@ -165,22 +165,8 @@ async function hasPackageDependency(
 }
 
 /**
- * Whether the project already carries a Next.js app: `package.json` declares a
- * `next` dependency in the same dependency fields Vercel framework detection
- * checks. This is the exact predicate the
- * web scaffold skips on (`skipReason: "nextjs-project"`), so pickers can mark
- * Web Chat as already present precisely when scaffolding would be a no-op.
- * A missing `package.json` reads as "no app".
- */
-export async function isNextJsProject(projectRoot: string): Promise<boolean> {
-  return hasPackageDependency(join(projectRoot, "package.json"), NEXT_PACKAGE_NAME);
-}
-
-/**
  * Host-framework dependency → the Vercel Framework Preset slug it must deploy
  * under (so the framework owns the top-level build and eve runs as a sibling).
- * Single source of truth for which dependencies mark a host framework;
- * {@link hasVercelHostFramework} derives from it.
  */
 const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
   "@sveltejs/kit": "sveltekit",
@@ -191,10 +177,7 @@ const VERCEL_HOST_FRAMEWORK_PRESETS: Readonly<Record<string, string>> = {
   "nuxt-nightly": "nuxtjs",
 };
 
-/**
- * The Vercel Framework Preset slug for the host framework a project declares, or
- * `undefined` when it declares none (a missing `package.json` reads as none).
- */
+/** The Vercel Framework Preset slug for the host framework a project declares. */
 export async function resolveVercelHostFrameworkPreset(
   projectRoot: string,
 ): Promise<string | undefined> {
@@ -207,14 +190,21 @@ export async function resolveVercelHostFrameworkPreset(
   return undefined;
 }
 
-/**
- * Whether the root app declares a Vercel framework that should own the
- * top-level deployment while eve runs as a sibling service. These match Eve's
- * current framework integrations: Next.js, Nuxt, and SvelteKit. Derived from
- * {@link resolveVercelHostFrameworkPreset} so the two share one dependency list.
- */
+/** Whether the root app declares a Vercel framework that owns its top-level deployment. */
 export async function hasVercelHostFramework(projectRoot: string): Promise<boolean> {
   return (await resolveVercelHostFrameworkPreset(projectRoot)) !== undefined;
+}
+
+/**
+ * Whether the project already carries a Next.js app: `package.json` declares a
+ * `next` dependency in the same dependency fields Vercel framework detection
+ * checks. This is the exact predicate the
+ * web scaffold skips on (`skipReason: "nextjs-project"`), so pickers can mark
+ * Web Chat as already present precisely when scaffolding would be a no-op.
+ * A missing `package.json` reads as "no app".
+ */
+export async function isNextJsProject(projectRoot: string): Promise<boolean> {
+  return hasPackageDependency(join(projectRoot, "package.json"), NEXT_PACKAGE_NAME);
 }
 
 async function ensurePackageDependency(

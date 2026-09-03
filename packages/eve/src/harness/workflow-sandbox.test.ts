@@ -31,25 +31,41 @@ function orchestrationTools(): HarnessToolMap {
         description: "Delegate to the researcher subagent.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "researcher",
+        nodeId: "subagents/researcher",
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
       },
     ],
     [
       "remote_reviewer",
       {
-        behavior: {
-          availability: [],
-          handling: {
-            kind: "dispatch",
-            target: {
-              kind: "remote-agent-call",
-              nodeId: "subagents/remote-reviewer.ts",
-              remoteAgentName: "remote_reviewer",
-            },
-          },
-        },
         description: "Delegate to the remote reviewer.",
         inputSchema: jsonSchema({ type: "object" }),
         name: "remote_reviewer",
+        resultKind: "subagent",
+        workflowId: "workflow//./agent/subagents/researcher//execute",
+      },
+    ],
+    [
+      "agent",
+      {
+        behavior: {
+          availability: ["root-session"],
+          handling: {
+            kind: "dispatch",
+            target: {
+              kind: "self-agent-call",
+              nodeId: "__root__",
+              subagentName: "agent",
+            },
+          },
+        },
+        description: "Delegate to a root-agent copy.",
+        inputSchema: jsonSchema({ type: "object" }),
+        name: "agent",
+        nodeId: "__root__",
+        resultKind: "subagent",
+        workflowId: "workflow//eve//subagentToolExecuteWorkflow",
       },
     ],
     [
@@ -73,7 +89,7 @@ describe("applyWorkflowTool", () => {
     expect(resolveWorkflowSandboxBridgeRequestLimit(300)).toBe(301);
   });
 
-  it("adds only agent runtime actions to the sandbox", async () => {
+  it("adds only agent workflow tasks to the sandbox", async () => {
     const harnessTools = orchestrationTools();
     const flatTools = buildToolSet({ tools: harnessTools });
     const { hostTools, modelTools } = await applyWorkflowTool({
@@ -88,6 +104,7 @@ describe("applyWorkflowTool", () => {
     expect(modelTools.bash).toBeDefined();
     expect(hostTools.researcher?.execute).toBeDefined();
     expect(hostTools.remote_reviewer?.execute).toBeDefined();
+    expect(hostTools.agent?.execute).toBeDefined();
     expect(hostTools.bash).toBeUndefined();
   });
 
@@ -116,7 +133,7 @@ describe("applyWorkflowTool", () => {
     });
   });
 
-  it("does not add Workflow when no agent runtime actions exist", async () => {
+  it("does not add Workflow when no agent workflow tasks exist", async () => {
     const harnessTools: HarnessToolMap = new Map([
       [
         "bash",
@@ -145,6 +162,7 @@ describe("applyWorkflowTool", () => {
 
     expect(hostTools.researcher).toBeDefined();
     expect(hostTools.remote_reviewer).toBeDefined();
+    expect(hostTools.agent).toBeDefined();
     expect(hostTools.bash).toBeUndefined();
   });
 

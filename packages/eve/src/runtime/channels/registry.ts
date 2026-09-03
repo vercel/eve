@@ -6,7 +6,7 @@ import {
 } from "#channel/activity-renderer.js";
 import { HTTP_ADAPTER } from "#channel/http.js";
 import { SCHEDULE_ADAPTER } from "#channel/schedule.js";
-import { SUBAGENT_ADAPTER } from "#execution/subagent-adapter.js";
+import { SUBAGENT_ADAPTER } from "#subagents/adapter.js";
 import type { RuntimeRegistryEntryLocation } from "#internal/runtime-registry.js";
 import { RuntimeRegistryError } from "#internal/runtime-registry.js";
 import type { ResolvedChannelDefinition } from "#runtime/types.js";

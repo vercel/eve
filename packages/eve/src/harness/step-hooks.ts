@@ -10,7 +10,6 @@ import type {
   TypedToolCall,
   TypedToolResult,
 } from "ai";
-import type { SessionAuthContext } from "#channel/types.js";
 import {
   createActionResultEvent,
   createActionsRequestedEvent,
@@ -31,8 +30,7 @@ import {
   mergeGatewayAutoCaching,
   type PromptCachePath,
 } from "#harness/prompt-cache.js";
-import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
-import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
+import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
@@ -44,6 +42,8 @@ import {
 import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
+import { AuthKey } from "#context/keys.js";
+import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 
 // ---------------------------------------------------------------------------
 // Step result type
@@ -77,7 +77,7 @@ export type HarnessStepResult = Pick<
  * Input for {@link buildStepHooks}.
  */
 interface StepHooksInput {
-  readonly auth: SessionAuthContext | null;
+  readonly auth?: import("#channel/types.js").SessionAuthContext | null;
   readonly cachePath: PromptCachePath;
   readonly emit?: HarnessEmitFn;
   readonly emissionState: HarnessEmissionState;
@@ -186,7 +186,7 @@ export function buildStepHooks(input: StepHooksInput): StepHooks {
     const providerOptions = mergeProviderSafetyIdentifier(
       modelReference,
       modelReference.providerOptions,
-      input.auth,
+      input.auth ?? contextStorage.getStore()?.get(AuthKey) ?? null,
     );
     if (input.cachePath.kind === "gateway-auto") {
       stepResult.providerOptions = mergeGatewayAutoCaching(providerOptions) as NonNullable<

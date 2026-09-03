@@ -224,8 +224,8 @@ function spawnEveDev(
     cwd: appRoot,
     env: {
       ...process.env,
-      ...options.env,
       NODE_ENV: "test",
+      ...options.env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

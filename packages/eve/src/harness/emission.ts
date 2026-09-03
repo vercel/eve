@@ -43,7 +43,7 @@ import {
   createRuntimeToolResultFromToolError,
   createToolResultMessagePartFromToolError,
 } from "#harness/action-result-helpers.js";
-import { createRuntimeActionRequestFromToolCall } from "#harness/runtime-actions.js";
+import { createRuntimeActionRequestFromToolCall } from "#harness/coordination.js";
 import {
   createInvalidToolCallInputError,
   isInvalidToolCall,
@@ -215,14 +215,12 @@ export async function emitTurnEpilogue(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
   mode: RunMode,
-  messages?: readonly import("ai").ModelMessage[],
 ): Promise<HarnessEmissionState> {
   await emitFn(
     createTurnCompletedEvent({
       sequence: state.sequence,
       turnId: state.turnId,
     }),
-    messages,
   );
 
   if (mode === "conversation") {
@@ -285,7 +283,29 @@ interface StreamActionEmissionOptions {
   readonly tools: HarnessToolMap;
 }
 
-/** Consumes `fullStream` in source order, batching provider calls before their first result. */
+function readSubagentBackgroundTaskReceipt(
+  result: RuntimeToolResultActionResult,
+  tools: HarnessToolMap | undefined,
+): { readonly status: "working"; readonly taskId: string } | undefined {
+  if (result.isError === true || tools?.get(result.toolName)?.resultKind !== "subagent") {
+    return undefined;
+  }
+  if (typeof result.output !== "object" || result.output === null || Array.isArray(result.output)) {
+    return undefined;
+  }
+  const status = Reflect.get(result.output, "status");
+  const taskId = Reflect.get(result.output, "taskId");
+  return status === "working" && typeof taskId === "string" ? { status, taskId } : undefined;
+}
+
+/**
+ * Consumes the AI SDK `fullStream` and emits real-time text and reasoning
+ * events.
+ *
+ * Emits local tool events in source order. Provider calls that arrive in one
+ * stream batch into one request event before their first result. A result
+ * without a streamed call resumes a call from an earlier step.
+ */
 export async function emitStreamContent(
   emitFn: HarnessEmitFn,
   state: HarnessEmissionState,
@@ -424,6 +444,18 @@ async function consumeStreamContent(
       return;
     }
     emittedActionResultCallIds.add(result.callId);
+    const backgroundTask = readSubagentBackgroundTaskReceipt(result, options?.tools);
+    if (backgroundTask !== undefined) {
+      await emitFn({
+        data: {
+          backgroundTask,
+          callId: result.callId,
+          output: typeof result.output === "string" ? result.output : JSON.stringify(result.output),
+          subagentName: result.toolName,
+        },
+        type: "subagent.completed",
+      });
+    }
     await emitFn(
       createActionResultEvent({
         result,

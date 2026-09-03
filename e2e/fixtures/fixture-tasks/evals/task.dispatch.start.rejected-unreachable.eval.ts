@@ -1,12 +1,12 @@
 import { defineTaskEval } from "./task-transition.js";
-import { parseToolErrorOutput } from "./shared.js";
+import { requireBackgroundTaskId, requireTaskView, waitForTaskStatus } from "./shared.js";
 
 const CALL_ID = "task-a3-unstartable-worker";
 
-/** A failed remote start never admits its prepared task or child session. */
+/** A failed remote start is recorded as the admitted background task's terminal state. */
 export default defineTaskEval({
   description:
-    "An unreachable remote URL fails dispatch without exposing a receipt, task id, or child session.",
+    "An unreachable remote URL returns a task receipt, then fails that task without killing the parent.",
   transition: {
     primary: "task.dispatch.start.rejected-unreachable",
     dimensions: { transport: "remote", parentPhase: "active" },
@@ -15,47 +15,67 @@ export default defineTaskEval({
     const started = await t.send("TASK-A3-DISPATCH-START-FAILURE");
     started.expectOk();
     started.messageIncludes("TASK-A3-PARENT-SURVIVED");
-    started.calledTool("unstartable-worker", {
+    started.event("subagent.completed", {
       count: 1,
-      output: isStartFailureWithoutTaskId,
-      status: "failed",
-    });
-    started.eventsSatisfy(
-      "failed start exposes no task id, receipt, child session, or index admission",
-      (events) => {
-        const failed = events.flatMap((event) =>
-          event.type === "action.result" &&
-          event.data.result.kind === "tool-result" &&
-          event.data.result.callId === CALL_ID
-            ? [event]
-            : [],
-        );
-        const result = failed[0]?.data.result;
-        return (
-          failed.length === 1 &&
-          failed[0]?.data.status === "failed" &&
-          result?.kind === "tool-result" &&
-          result.isError === true &&
-          isStartFailureWithoutTaskId(result.output) &&
-          !events.some(
-            (event) =>
-              event.type === "subagent.completed" &&
-              event.data.callId === CALL_ID &&
-              event.data.backgroundTask !== undefined,
-          ) &&
-          !events.some((event) => event.type === "subagent.called" && event.data.callId === CALL_ID)
-        );
+      data: {
+        backgroundTask: { status: "working" },
+        callId: CALL_ID,
+        subagentName: "unstartable-worker",
       },
-    );
+    });
+    const taskId = requireBackgroundTaskId(started);
+    started.eventsSatisfy("unreachable start exposes one working task receipt", (events) => {
+      const completed = events.flatMap((event) =>
+        event.type === "action.result" &&
+        event.data.result.kind === "tool-result" &&
+        event.data.result.callId === CALL_ID
+          ? [event]
+          : [],
+      );
+      const result = completed[0]?.data.result;
+      const output = result?.output;
+      return (
+        completed.length === 1 &&
+        completed[0]?.data.status === "completed" &&
+        result?.kind === "tool-result" &&
+        output !== null &&
+        typeof output === "object" &&
+        Reflect.get(output, "status") === "working" &&
+        Reflect.get(output, "taskId") === taskId
+      );
+    });
+
+    const failed = await waitForTaskStatus(t, t, "TASK-A3-UNKNOWN-VERIFY", taskId, "failed");
+    failed.expectOk();
+    failed.messageIncludes("TASK-A3-UNKNOWN");
+    const view = requireTaskView(failed.requireToolCall("task_cancel").output, taskId);
+    if (
+      Reflect.get(view, "status") !== "failed" ||
+      !hasTaskMetadata(view, "unstartable-worker", "remote") ||
+      !hasErrorOutput(view)
+    ) {
+      throw new Error(`Task ${taskId} did not fail with remote unstartable-worker metadata.`);
+    }
   },
 });
 
-function isStartFailureWithoutTaskId(output: unknown): boolean {
-  output = parseToolErrorOutput(output);
+function hasTaskMetadata(task: Record<string, unknown>, name: string, mode: string): boolean {
+  const metadata = Reflect.get(task, "metadata");
   return (
-    output !== null &&
-    typeof output === "object" &&
-    Reflect.get(output, "code") === "REMOTE_AGENT_START_FAILED" &&
-    !Object.hasOwn(output, "taskId")
+    metadata !== null &&
+    typeof metadata === "object" &&
+    Reflect.get(metadata, "kind") === "subagent" &&
+    Reflect.get(metadata, "mode") === mode &&
+    Reflect.get(metadata, "name") === name &&
+    typeof Reflect.get(metadata, "agentId") === "string"
+  );
+}
+
+function hasErrorOutput(task: Record<string, unknown>): boolean {
+  const lastOutput = Reflect.get(task, "lastOutput");
+  return (
+    lastOutput !== null &&
+    typeof lastOutput === "object" &&
+    Reflect.get(lastOutput, "type") === "error"
   );
 }

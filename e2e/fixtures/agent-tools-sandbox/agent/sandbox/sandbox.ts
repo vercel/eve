@@ -34,12 +34,11 @@ export const SANDBOX_MARKER_PATH = "/workspace/smoke-marker.txt";
 export const SANDBOX_MARKER_TOKEN = "sandbox-bootstrap-ok-J3Q";
 
 /**
- * Custom CLI installed during bootstrap. `/usr/local/bin` is on the default
- * PATH in the base image and is writable by the sandbox user (it is the npm
- * global prefix bin, chowned to `vercel-sandbox`), so the same install works
- * whether bootstrap runs as root (Docker) or as `vercel-sandbox` (Vercel).
+ * Custom CLI installed during bootstrap. The base image puts the sandbox
+ * user's npm global prefix on PATH, so the same install works across backends.
  */
-export const SANDBOX_CLI_PATH = "/usr/local/bin/eve-greet";
+const SANDBOX_CLI_DIRECTORY_PATH = "/home/vercel-sandbox/.local/bin";
+export const SANDBOX_CLI_PATH = `${SANDBOX_CLI_DIRECTORY_PATH}/eve-greet`;
 export const SANDBOX_CLI_TOKEN = "eve-greet-cli-ok-R7M";
 
 /** Per-session marker written by `onSession` (live session, not the template). */
@@ -144,7 +143,7 @@ export default defineSandbox({
   backend,
   // Bump when the bootstrap output changes so the reusable template snapshot
   // is rebuilt rather than served stale.
-  revalidationKey: () => "agent-tools-sandbox-bootstrap-v2",
+  revalidationKey: () => "agent-tools-sandbox-bootstrap-v3",
   async bootstrap({ use }) {
     const sandbox = await use();
     await sandbox.writeTextFile({
@@ -153,6 +152,10 @@ export default defineSandbox({
     });
     // Install a custom CLI onto the PATH and make it executable. Later
     // sessions inherit it from the template without re-running bootstrap.
+    const mkdir = await sandbox.run({ command: `mkdir -p ${SANDBOX_CLI_DIRECTORY_PATH}` });
+    if (mkdir.exitCode !== 0) {
+      throw new Error(`bootstrap: failed to create CLI directory: ${mkdir.stderr}`);
+    }
     await sandbox.writeTextFile({ path: SANDBOX_CLI_PATH, content: CLI_SCRIPT });
     const chmod = await sandbox.run({ command: `chmod +x ${SANDBOX_CLI_PATH}` });
     if (chmod.exitCode !== 0) {

@@ -17,6 +17,8 @@ import { sessionInboxWireV0Migration } from "#execution/wire/session-inbox-wire.
 import { normalizeSessionInboxWireV2 } from "#execution/wire/session-inbox-wire.v2-migration.js";
 import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.v2.migration.js";
 import { sessionInboxWireV2Migration } from "#execution/wire/session-inbox-wire.v3.migration.js";
+import { sessionInboxWireV3Migration } from "#execution/wire/session-inbox-wire.v4.migration.js";
+import { isObject } from "#shared/guards.js";
 
 /**
  * The session inbox wire family: every payload persisted to a session's
@@ -38,21 +40,22 @@ export type DecodedSessionInbox =
 
 export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js";
 
-/** Prefixes chain and schema failures alike, so messages read as one voice. */
+/** Prefixes migration and contract failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
 
 const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
   sessionInboxWireV2Migration,
+  sessionInboxWireV3Migration,
 ];
 
 /**
  * Decodes a persisted inbox payload or throws {@link SessionInboxWireError}.
  *
- * Unknown newer versions and shape mismatches both throw: a lost delivery
- * with an operator-visible signal is the designed failure; a reinterpreted
- * delivery is the bug this module exists to prevent.
+ * Unknown newer versions and migration-bound shape mismatches both throw: a
+ * lost delivery with an operator-visible signal is the designed failure; a
+ * reinterpreted delivery is the bug this module exists to prevent.
  */
 function decode(value: unknown): DecodedSessionInbox {
   const declaredVersion =
@@ -64,6 +67,14 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(`${WIRE_LABEL}: value has no numeric "version" field.`);
   }
   const normalized = normalizeSessionInboxWireV2(value);
+  if (
+    (declaredVersion === 1 || declaredVersion === 2 || declaredVersion === 3) &&
+    containsCurrentTaskMessages(normalized)
+  ) {
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
+    );
+  }
   let migrated: unknown;
   try {
     migrated = runMigrationChain({
@@ -98,6 +109,22 @@ function decode(value: unknown): DecodedSessionInbox {
 
 /** Workflow-safe consumer facade. */
 export const sessionInboxWire = { decode } as const;
+
+function containsCurrentTaskMessages(value: unknown): boolean {
+  if (!isObject(value) || value.kind !== "deliver") return false;
+  const payloads = Array.isArray(value.payloads) ? value.payloads : [];
+  return payloads.some((payload) => {
+    if (!isObject(payload) || !isObject(payload.task)) return false;
+    if (Object.hasOwn(payload.task, "agentRequests")) return true;
+    const inputRequests = payload.task.inputRequests;
+    return (
+      Array.isArray(inputRequests) &&
+      inputRequests.some(
+        (request) => isObject(request) && ("request" in request || "requests" in request),
+      )
+    );
+  });
+}
 
 /** Strips wire-only fields (`version`, the deliver mirror) for consumption. */
 function normalizeWire(wire: SessionInboxWire): DecodedSessionInbox {

@@ -1,6 +1,6 @@
 ---
 title: "Remote Agents"
-description: "Call another eve deployment as a subagent with defineRemoteAgent: same tool call as a local subagent, outbound auth, durable callback dispatch."
+description: "Call another eve deployment as a subagent with defineRemoteAgent: the same tool call as a local subagent, with outbound auth and durable callbacks."
 ---
 
 `defineRemoteAgent` calls a separately deployed eve agent as if it were a local subagent. Reach for it when the specialist you delegate to is a separately owned agent behind its own URL rather than a directory in your repo.
@@ -33,7 +33,7 @@ export default defineRemoteAgent({
 ## Dynamic remote agents
 
 Wrap the file in `defineDynamic` when the target or its availability depends on
-the current session. Return `defineRemoteAgent(...)` to expose it and nil to
+the current session. Return `defineRemoteAgent(...)` to expose it and `null` to
 omit it:
 
 ```ts title="agent/subagents/weather.ts"
@@ -82,7 +82,7 @@ The function may be async and must return a non-empty string. `auth` and `header
 
 To the model, a remote agent is another subagent tool. You call it the same way you call a local subagent, with a `message` and an optional `outputSchema`. The message must carry the full task, including any context the remote agent needs, because it never receives the parent's conversation history.
 
-To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value becomes the tool result, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
+To require structured output, set an `outputSchema` on the agent definition for fresh delegations or on an individual call for that turn. The structured value arrives in the task's completion notification, and the remote child remains available for follow-up messages. See [Subagents](../subagents) for continuation behavior.
 
 ## Outbound auth
 
@@ -170,22 +170,21 @@ Missing, malformed, duplicate, unsampled, untrusted, and mixed-version assertion
 
 ## How remote dispatch and callbacks work
 
-A local subagent runs inline. A remote one runs in its own deployment, so dispatch is asynchronous:
+A remote subagent runs as a durable background task in its own deployment:
 
 1. The parent starts a persistent conversation session on the remote's `POST /eve/v1/session`, passing a framework callback URL.
-2. The parent turn parks (suspends durably without holding compute; see [Execution model & durability](../concepts/execution-model-and-durability)) until the remote posts a terminal callback.
-3. When the callback arrives, the parent resumes and surfaces the result.
+2. The call returns `{ status: "working", taskId, agentId }` after the remote accepts the child.
+3. The callback later settles the task and sends a task notification to the parent.
 
 The parent stream carries the same `subagent.called`, `action.result`, and `subagent.completed` events as local delegation. For a remote call, `subagent.called.data.remote.url` records the target.
 
-Cancelling the parent while a remote call is active sends an authenticated `POST /eve/v1/session/:childSessionId/cancel` to the remote and waits for that request to be accepted before the parent settles. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
+An admitted task survives cancellation of the turn that started it; background work that has not yet been admitted is rejected with the cancelled step. Use `task_cancel` to stop an admitted task. eve resolves the remote's `headers` and `auth` again for every cancellation attempt, so rotating credentials work the same way as they do for session creation. Cancellation always uses the standard eve cancel path on `url`, even when `path` customizes only the create-session endpoint. The remote child reports `turn.cancelled` → `session.waiting` on its own stream; an older or unreachable remote is logged but cannot turn the parent's cancellation into a failure.
 
 When the parent session ends, eve sends an authenticated `POST /eve/v1/session/:childSessionId/reset` for each remote child. Reset retires the parked remote session and recursively cleans up its descendants. The request uses freshly resolved `headers` and `auth`; failures are logged so an unreachable remote cannot block parent finalization.
 
-Both failure paths surface to the parent as a failed tool result, so the caller can explain or recover within the same session. A failed _start_ returns the error inline. A remote that starts and then fails posts a terminal failure callback, which the parent receives as an errored subagent result carrying the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
+A failed _start_ rejects admission before a task receipt is returned. After a remote starts, a terminal failure callback fails the task and notifies the parent with the remote's error (or `REMOTE_AGENT_FAILED` when none is supplied). Terminal callback delivery runs as a durable step on the underlying workflow engine (see [Execution model & durability](../concepts/execution-model-and-durability)). A failed callback POST is rethrown rather than marking the task complete, so the engine retries it.
 
 ## What to read next
 
 - Local delegation and the isolation boundary → [Subagents](../subagents)
-- Have the model orchestrate remote agents programmatically → [Workflow tool](../concepts/built-in-tools#workflow-tool)
 - Securing the receiving deployment → [Auth & route protection](./auth-and-route-protection)

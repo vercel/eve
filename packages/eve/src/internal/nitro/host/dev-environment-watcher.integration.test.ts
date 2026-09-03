@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  getDevelopmentEnvironmentFilePaths,
   loadDevelopmentEnvironmentFiles,
   readDevelopmentEnvironmentHostValues,
   stageDevelopmentEnvironmentFiles,
@@ -12,6 +13,7 @@ import {
 const ENV_KEYS = [
   "EVE_WATCH_ENV_FILE_ONLY",
   "EVE_WATCH_ENV_NEW",
+  "EVE_WATCH_ENV_ROOT_ONLY",
   "EVE_WATCH_ENV_SHARED",
   "EVE_WATCH_ENV_SHELL",
   "AI_GATEWAY_API_KEY",
@@ -34,7 +36,7 @@ describe("development environment reload transactions", () => {
     const appRoot = await createEnvironmentApp();
     process.env.EVE_WATCH_ENV_SHELL = "from-parent";
 
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
 
     expect(process.env.EVE_WATCH_ENV_FILE_ONLY).toBe("from-env");
     expect(process.env.EVE_WATCH_ENV_SHARED).toBe("from-local");
@@ -47,11 +49,11 @@ describe("development environment reload transactions", () => {
     await mkdir(join(appRoot, ".eve"));
     await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-project"}\n');
 
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     expect(process.env.AI_GATEWAY_API_KEY).toBeUndefined();
 
     await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-key"}\n');
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     expect(process.env.AI_GATEWAY_API_KEY).toBe("from-file");
   });
 
@@ -59,21 +61,48 @@ describe("development environment reload transactions", () => {
     const appRoot = await createEnvironmentApp();
     process.env.AI_GATEWAY_API_KEY = "from-parent";
 
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     expect(readDevelopmentEnvironmentHostValues(appRoot).AI_GATEWAY_API_KEY).toBe("from-parent");
 
     await mkdir(join(appRoot, ".eve"));
     await writeFile(join(appRoot, ".eve", "provider.json"), '{"selected":"ai-gateway-project"}\n');
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
 
     expect(process.env.AI_GATEWAY_API_KEY).toBeUndefined();
     expect(readDevelopmentEnvironmentHostValues(appRoot).AI_GATEWAY_API_KEY).toBeNull();
   });
 
+  it("loads, watches, fingerprints, and reloads workspace-root env", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-workspace-"));
+    temporaryDirectories.push(workspaceRoot);
+    const appRoot = join(workspaceRoot, "agents", "support");
+    await mkdir(join(appRoot, "agent"), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, ".env.local"),
+      "EVE_WATCH_ENV_ROOT_ONLY=from-root\nEVE_WATCH_ENV_SHARED=from-root\n",
+    );
+    await writeFile(join(appRoot, ".env.local"), "EVE_WATCH_ENV_SHARED=from-child\n");
+
+    await loadDevelopmentEnvironmentFiles(appRoot);
+
+    expect(process.env.EVE_WATCH_ENV_ROOT_ONLY).toBe("from-root");
+    expect(process.env.EVE_WATCH_ENV_SHARED).toBe("from-root");
+    expect(getDevelopmentEnvironmentFilePaths(appRoot)).toEqual(environmentPaths(workspaceRoot));
+    expect(readDevelopmentEnvironmentHostValues(appRoot)).toMatchObject({
+      EVE_WATCH_ENV_ROOT_ONLY: "from-root",
+      EVE_WATCH_ENV_SHARED: "from-root",
+    });
+
+    await writeFile(join(workspaceRoot, ".env.local"), "EVE_WATCH_ENV_ROOT_ONLY=updated\n");
+    stageDevelopmentEnvironmentFiles(appRoot).commit();
+    expect(process.env.EVE_WATCH_ENV_ROOT_ONLY).toBe("updated");
+    expect(process.env.EVE_WATCH_ENV_SHARED).toBeUndefined();
+  });
+
   it("restores the complete prior environment when a candidate is rejected", async () => {
     const appRoot = await createEnvironmentApp();
     const envLocalPath = join(appRoot, ".env.local");
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     await writeFile(
       envLocalPath,
       "EVE_WATCH_ENV_NEW=from-candidate\nEVE_WATCH_ENV_SHARED=from-candidate\n",
@@ -93,7 +122,7 @@ describe("development environment reload transactions", () => {
 
   it("retains the candidate environment after commit", async () => {
     const appRoot = await createEnvironmentApp();
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     await writeFile(join(appRoot, ".env.local"), "EVE_WATCH_ENV_SHARED=committed\n");
 
     const reload = stageDevelopmentEnvironmentFiles(appRoot);
@@ -105,7 +134,7 @@ describe("development environment reload transactions", () => {
 
   it("reapplies a rolled-back environment edit when a later rebuild stages again", async () => {
     const appRoot = await createEnvironmentApp();
-    loadDevelopmentEnvironmentFiles(appRoot);
+    await loadDevelopmentEnvironmentFiles(appRoot);
     await writeFile(join(appRoot, ".env.local"), "EVE_WATCH_ENV_SHARED=after-fix\n");
 
     stageDevelopmentEnvironmentFiles(appRoot).rollback();
@@ -119,6 +148,12 @@ describe("development environment reload transactions", () => {
     expect(process.env.EVE_WATCH_ENV_SHARED).toBe("after-fix");
   });
 });
+
+function environmentPaths(root: string): string[] {
+  return [".env.development.local", ".env.local", ".env.development", ".env"].map((name) =>
+    join(root, name),
+  );
+}
 
 async function createEnvironmentApp(): Promise<string> {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-transaction-"));

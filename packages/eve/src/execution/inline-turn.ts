@@ -104,8 +104,8 @@ export async function runInlineTurn(input: {
     }
 
     if (
-      result.action === "dispatch-workflow-runtime-actions" ||
-      (result.action === "park" && result.pendingRuntimeActionKeys !== undefined)
+      result.action === "dispatch-workflow-tasks" ||
+      (result.action === "park" && result.pendingCoordinationCallIds !== undefined)
     ) {
       return childOutcome(control, initialStep);
     }

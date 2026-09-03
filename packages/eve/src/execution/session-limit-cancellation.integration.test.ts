@@ -9,6 +9,7 @@ import {
 } from "#internal/testing/events.js";
 import { createBundledRuntimeCompiledArtifactsSource } from "#runtime/compiled-artifacts-source.js";
 import { workflowEntry } from "#execution/workflow-entry.js";
+import { experimental_workflow } from "#tools/workflow.js";
 import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 /**
@@ -145,13 +146,19 @@ describe("session-limit continuation decline integration", () => {
   it("fails a zero-quota delegation fast and declines the root's own prompt", async () => {
     const runtime = await createTestRuntime({
       agent: { limits: { maxInputTokensPerSession: 1 }, name: "limit-decline-child" },
+      modules: [
+        {
+          loadNamespace: async () => ({ default: experimental_workflow() }),
+          logicalPath: "tools/workflow.ts",
+        },
+      ],
     });
     const continuationToken = "http:limit-decline-child";
 
     await runtime.run(async () => {
       const run = await start(workflowEntry, [
         {
-          input: { message: "Delegate to a subagent: summarize the weather." },
+          input: { message: "Delegate through Workflow to a subagent: summarize the weather." },
           serializedContext: {
             ...buildSerializedContext({
               channelKind: "http",

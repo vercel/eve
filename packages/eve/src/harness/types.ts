@@ -94,11 +94,8 @@ export interface HarnessSession {
   readonly sessionId: string;
   readonly sandboxState?: SandboxState;
   readonly state?: SessionStateMap;
-  /**
-   * Number of local delegated subagent hops from the root session to this
-   * session. Root sessions are depth 0.
-   */
-  readonly subagentDepth?: number;
+  /** Framework task that owns this durable session, when present. */
+  readonly taskId?: string;
   /**
    * Effective maximum subagent calls one `Workflow` invocation may dispatch
    * for this session, configured by `experimental_workflow({ maxSubagents })`.
@@ -329,8 +326,8 @@ export interface ToolLoopHarnessConfig {
    * compacted history.
    */
   readonly onCompaction?: () => readonly ModelMessage[];
-  /** Prepares persisted step-scoped tools before an approved call is resumed. */
-  readonly prepareStepDynamicTools?: (input: {
+  /** Resolves persisted step-scoped tools before an approval policy reads them. */
+  readonly resolveStepDynamicTools?: (input: {
     readonly ctx: AlsContext;
     readonly event: StepStartedStreamEvent;
     readonly messages: readonly ModelMessage[];

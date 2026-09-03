@@ -73,6 +73,63 @@ describe("createMockAuthoredRuntimeModel", () => {
     ]);
   });
 
+  it("delegates through Workflow when the directive requests blocking orchestration", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content: "Delegate through Workflow to a subagent: use the wait_for_cancel tool.",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: {
+            additionalProperties: false,
+            properties: { js: { type: "string" } },
+            required: ["js"],
+            type: "object",
+          },
+          name: "Workflow",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      {
+        input: JSON.stringify({
+          js: 'return await tools.agent({ message: "use the wait_for_cancel tool." });',
+        }),
+        toolCallId: "call_workflow",
+        toolName: "Workflow",
+        type: "tool-call",
+      },
+    ]);
+  });
+
+  it("reports a task notification instead of re-calling the named tool", async () => {
+    const result = await generateWithPrompt(
+      [
+        {
+          content:
+            "Background task task_abc123 (conditional-marker) is completed.\n\nResult:\nDYNAMIC_SUBAGENT_ENABLED",
+          role: "user",
+        },
+      ],
+      [
+        {
+          inputSchema: { properties: { message: { type: "string" } }, type: "object" },
+          name: "conditional-marker",
+          type: "function",
+        },
+      ],
+    );
+
+    expect(result.content).toEqual([
+      expect.objectContaining({ text: expect.stringContaining("DYNAMIC_SUBAGENT_ENABLED") }),
+    ]);
+  });
+
   it("activates a matching skill when the available skill line includes a skill path", async () => {
     const result = await generateWithPrompt([
       {

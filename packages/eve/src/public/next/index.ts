@@ -1,7 +1,9 @@
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import type { NextConfig } from "next";
 
+import { assertValidPublicAgentName } from "#internal/agent-name.js";
+import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { EVE_ROUTE_PREFIX } from "#protocol/routes.js";
 import { resolveEveBinaryPath } from "#shared/resolve-eve-binary.js";
 import { resolveEveDestinationPrefix } from "./server.js";
@@ -17,7 +19,6 @@ const EVE_NEXT_PRODUCTION_ORIGIN_ENV = "EVE_NEXT_PRODUCTION_ORIGIN";
 const EVE_NEXT_PRODUCTION_PORT_ENV = "EVE_NEXT_PRODUCTION_PORT";
 const DEFAULT_EVE_NEXT_PRODUCTION_PORT = 4274;
 const EVE_NAMED_AGENT_ROUTE_PREFIX = "/eve/agents";
-const AGENT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 
 type ArrayElement<T> = T extends readonly (infer TElement)[] ? TElement : never;
 type NextRewrites = Awaited<ReturnType<NonNullable<NextConfig["rewrites"]>>>;
@@ -309,40 +310,21 @@ async function resolveNextConfig<TConfig extends EveNextConfig>(
 }
 
 function assertValidAgentName(name: string): void {
-  if (!AGENT_NAME_PATTERN.test(name)) {
-    throw new Error(
-      `eve Next.js agent name ${JSON.stringify(
-        name,
-      )} is invalid. Use lowercase letters, numbers, underscores, or hyphens, starting with a letter or number.`,
-    );
-  }
+  assertValidPublicAgentName(name, "eve Next.js agent name");
 }
 
-function quoteShellArg(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-function toPosixPath(path: string): string {
-  return path.replaceAll("\\", "/");
-}
-
-function createDefaultBuildCommand(input: {
-  readonly agentRoot: string;
-  readonly nextRoot: string;
-}): string {
-  const eveBinaryPath = toPosixPath(
-    relative(input.agentRoot, resolveEveBinaryPath(input.nextRoot)),
+function createDefaultBuildCommand(input: { readonly agentRoot: string }): string {
+  const eveBinaryPath = toVercelRelativePath(
+    input.agentRoot,
+    resolveEveBinaryPath(input.agentRoot),
   );
-  return `node ${quoteShellArg(eveBinaryPath)} build`;
+  return `node ${quoteVercelShellArgument(eveBinaryPath)} build`;
 }
 
-function normalizeAgentsConfig(
-  options: WithEveOptions,
-  nextRoot: string,
-): readonly ResolvedEveNextAgent[] {
+function normalizeAgentsConfig(options: WithEveOptions): readonly ResolvedEveNextAgent[] {
   const servicePrefixBase = normalizeRoutePrefix(options.servicePrefix ?? EVE_NEXT_SERVICE_PREFIX);
   const resolveBuildCommand = (agentRoot: string, buildCommand: string | undefined) =>
-    buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot, nextRoot });
+    buildCommand ?? options.eveBuildCommand ?? createDefaultBuildCommand({ agentRoot });
 
   if (options.agents === undefined) {
     const appRoot = resolveApplicationRoot(options.eveRoot);
@@ -403,7 +385,7 @@ export function withEve<TConfig extends EveNextConfig>(
 ): EveNextConfigFunction<TConfig> {
   const nextRoot = process.cwd();
   const devServerTimeoutMs = resolveDevServerTimeout(options.devServerTimeoutMs);
-  const agents = normalizeAgentsConfig(options, nextRoot);
+  const agents = normalizeAgentsConfig(options);
 
   return async function eveNextConfig(phase, context) {
     const nextConfig = await resolveNextConfig(configOrFunction, phase, context);

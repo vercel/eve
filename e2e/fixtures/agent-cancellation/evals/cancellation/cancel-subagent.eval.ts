@@ -1,20 +1,24 @@
 import { defineEval } from "eve/evals";
 import { satisfies } from "eve/evals/expect";
 
+const RECOVERY_TOKEN = "CANCELLED-SUBAGENT-RECOVERED";
+
 export default defineEval({
-  tags: ["real-model"],
-  description: "Cancel a parent turn and cascade cancellation to its local sleeper subagent.",
+  description:
+    "Cancel a parent turn, cascade cancellation to its local sleeper subagent, then resume that child.",
   timeoutMs: 240_000,
 
   async test(t) {
     // Explicit directive phrasing keeps the delegation deterministic so a
     // scripted mock responder can drive this eval in the world suites.
     const parent = await t.start(
-      "Use the sleeper subagent exactly once with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.'",
+      "Use the Workflow tool exactly once to call the sleeper subagent with message 'Call the wait-for-cancellation tool exactly once and wait until this delegated turn is cancelled.' Return the sleeper result.",
     );
     const called = await parent.waitForEvent("subagent.called", {
       data: { name: "sleeper" },
     });
+    const agentId = called.data.agentId;
+    if (agentId === undefined) throw new Error("Cancelled sleeper call has no agent id.");
 
     const child = t.target.watchTurn(called.data.childSessionId);
     await child.waitForEvent("actions.requested", {
@@ -64,6 +68,25 @@ export default defineEval({
     listing.messageIncludes(/sleeper/i);
     listing.messageIncludes(/\(cancelled\)/);
 
+    const resumed = await t.send(
+      [
+        "Use the Workflow tool exactly once.",
+        `In its JavaScript, call sleeper with agentId ${JSON.stringify(agentId)} and message ${JSON.stringify(RECOVERY_TOKEN)}.`,
+        "Return the inline result and reply with it verbatim. Do not call sleeper outside Workflow.",
+      ].join(" "),
+    );
+    resumed.expectOk();
+    resumed.messageIncludes(RECOVERY_TOKEN);
+    resumed.event("subagent.called", {
+      count: 1,
+      data: {
+        agentId,
+        childSessionId: called.data.childSessionId,
+        name: "sleeper",
+      },
+    });
+
     t.event("turn.cancelled", { count: 2 });
+    t.event("subagent.called", { count: 2, data: { name: "sleeper" } });
   },
 });

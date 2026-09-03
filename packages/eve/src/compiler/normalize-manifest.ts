@@ -138,16 +138,6 @@ export async function compileAgentManifest(
     owner: { kind: "application" },
   });
 
-  const allNodeManifests = [root.manifest, ...root.descendants.map((node) => node.agent)];
-  const backgroundTool = allNodeManifests
-    .flatMap((node) => node.tools)
-    .find((tool) => tool.execution === "background");
-  if (backgroundTool !== undefined && root.manifest.config.experimental?.tasks !== true) {
-    throw new Error(
-      `Background tool "${backgroundTool.name}" requires experimental.tasks: true in the root agent config.`,
-    );
-  }
-
   const diagnosticsSummary = summarizeCompilerDiagnostics(diagnostics);
   const subagents: CompiledSubagentNode[] = root.descendants.map((subagent) =>
     subagent.configResolver === undefined

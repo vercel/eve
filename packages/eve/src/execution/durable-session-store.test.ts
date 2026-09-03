@@ -54,8 +54,8 @@ describe("durable-session-store cross-version contract", () => {
     // Closed contract: pending-batch flags live on `NextDriverAction`
     // arms, not on the driver-visible state.
     expect(state).not.toHaveProperty("hasPendingInputBatch");
-    expect(state).not.toHaveProperty("hasPendingRuntimeActionBatch");
-    expect(state).not.toHaveProperty("pendingRuntimeActionKeys");
+    expect(state).not.toHaveProperty("hasPendingCoordinationBatch");
+    expect(state).not.toHaveProperty("pendingCoordinationCallIds");
     expect(state).not.toHaveProperty("snapshot");
   });
 
@@ -127,8 +127,14 @@ describe("durable-session-store cross-version contract", () => {
       { kind: "done", output: "ok", serializedContext: ctx, sessionState: baseState },
       { kind: "park", serializedContext: ctx, sessionState: baseState },
       {
-        kind: "dispatch-runtime-actions",
-        pendingActionKeys: ["subagent-call:foo:call-1"],
+        kind: "dispatch-coordination",
+        pendingCallIds: ["call-1"],
+        serializedContext: ctx,
+        sessionState: baseState,
+      },
+      {
+        kind: "dispatch-workflow-tasks",
+        pendingCallIds: ["call-2"],
         serializedContext: ctx,
         sessionState: baseState,
       },
@@ -136,7 +142,7 @@ describe("durable-session-store cross-version contract", () => {
 
     // Lock the closed-contract kind set. Adding a new arm is breaking.
     expect(new Set(arms.map((a) => a.kind))).toEqual(
-      new Set(["done", "park", "dispatch-runtime-actions"]),
+      new Set(["done", "park", "dispatch-coordination", "dispatch-workflow-tasks"]),
     );
   });
 

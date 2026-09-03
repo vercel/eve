@@ -41,15 +41,12 @@ export type DurableStepResult = (
       readonly authorizationNames?: readonly string[];
       readonly hasPendingAuthorization: boolean;
       readonly hasPendingInputBatch: boolean;
-      readonly pendingRuntimeActionKeys?: readonly string[];
-      /** The batch starts workflow tool runs, which report to the turn's run channels. */
-      readonly startsWorkflowToolRuns?: boolean;
-      readonly tasksEnabled?: boolean;
+      readonly pendingCoordinationCallIds?: readonly string[];
       readonly settled?: SettledTurn;
     }
   | {
-      readonly action: "dispatch-workflow-runtime-actions";
-      readonly pendingRuntimeActionKeys: readonly string[];
+      readonly action: "dispatch-workflow-tasks";
+      readonly pendingTaskCallIds: readonly string[];
     }
 ) &
   DurableStepResultFields;
@@ -91,14 +88,14 @@ export type NextDriverAction =
       readonly settled?: SettledTurn;
     }
   | {
-      readonly kind: "dispatch-runtime-actions";
-      readonly pendingActionKeys: readonly string[];
+      readonly kind: "dispatch-coordination";
+      readonly pendingCallIds: readonly string[];
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;
     }
   | {
-      readonly kind: "dispatch-workflow-runtime-actions";
-      readonly pendingActionKeys: readonly string[];
+      readonly kind: "dispatch-workflow-tasks";
+      readonly pendingCallIds: readonly string[];
       readonly sessionState: DurableSessionState;
       readonly serializedContext: Record<string, unknown>;
     };

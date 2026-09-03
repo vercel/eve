@@ -7,9 +7,9 @@ import {
   cancelRemoteAgentTurn,
   isRetryableRemoteAgentCancelError,
   resolveRemoteAgentForAction,
-} from "#execution/remote-agent-dispatch.js";
+} from "#subagents/remote-dispatch.js";
 import { requestWorkflowTurnCancellation } from "#execution/workflow-runtime.js";
-import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#harness/handles/store.js";
+import { AGENT_HANDLES_STATE_KEY, type AgentHandle } from "#subagents/handles/store.js";
 import type { HarnessSession } from "#harness/types.js";
 
 vi.mock("#context/serialize.js", () => ({
@@ -20,7 +20,7 @@ vi.mock("./workflow-runtime.js", () => ({
   requestWorkflowTurnCancellation: vi.fn(),
 }));
 
-vi.mock("./remote-agent-dispatch.js", () => ({
+vi.mock("../subagents/remote-dispatch.js", () => ({
   cancelRemoteAgentTurn: vi.fn(),
   isRetryableRemoteAgentCancelError: vi.fn(),
   resolveRemoteAgentForAction: vi.fn(),

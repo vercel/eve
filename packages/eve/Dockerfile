@@ -46,7 +46,7 @@ RUN set -eux; \
   test -n "${node_file}"; \
   curl -fsSLO "${base_url}/${node_file}"; \
   grep " ${node_file}$" "${shasums}" | sha256sum -c -; \
-  tar -xJf "${node_file}" -C /usr/local --strip-components=1; \
+  tar -xJf "${node_file}" -C /usr/local --strip-components=1 --no-same-owner; \
   rm "${node_file}" "${shasums}"; \
   rm -rf /usr/local/include/node /usr/local/share/doc /usr/local/share/man; \
   npm install -g "pnpm@${PNPM_VERSION}"; \
@@ -73,15 +73,26 @@ RUN set -eux; \
   if ! id -u vercel-sandbox >/dev/null 2>&1; then \
     useradd --create-home --shell /bin/bash vercel-sandbox; \
   fi; \
+  # Ubuntu's skel .bash_logout runs `clear_console` when a login shell exits at
+  # SHLVL=1. Backends run every command through `bash -lc` with no TTY, so it
+  # prints "TERM environment variable not set." and, under `set -e`, turns a
+  # successful `exit 0` into exit 1.
+  rm -f /home/vercel-sandbox/.bash_logout; \
   # Keep Node and pnpm root-owned: recursively changing their ownership copies
   # them into another image layer. A small user-owned prefix retains global installs.
   install -d --owner=vercel-sandbox --group=vercel-sandbox \
     /home/vercel-sandbox/.local \
+    /home/vercel-sandbox/.local/bin \
     /home/vercel-sandbox/.local/share/pnpm; \
   mkdir -p /workspace; \
   chown vercel-sandbox:vercel-sandbox /workspace; \
-  printf 'vercel-sandbox ALL=(ALL) NOPASSWD:ALL\n' >/etc/sudoers.d/vercel-sandbox; \
-  chmod 0440 /etc/sudoers.d/vercel-sandbox
+  # !fqdn: sandbox hostnames are not resolvable, so sudo would otherwise warn on stderr.
+  printf '%s\n' \
+    'Defaults !fqdn' \
+    'vercel-sandbox ALL=(ALL) NOPASSWD:ALL' \
+    >/etc/sudoers.d/vercel-sandbox; \
+  chmod 0440 /etc/sudoers.d/vercel-sandbox; \
+  visudo -cf /etc/sudoers.d/vercel-sandbox
 
 ENV NPM_CONFIG_PREFIX=/home/vercel-sandbox/.local
 ENV PNPM_HOME=/home/vercel-sandbox/.local/share/pnpm

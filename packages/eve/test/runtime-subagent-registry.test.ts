@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { RuntimeRegistryError } from "../src/internal/runtime-registry.js";
-import { createRuntimeSubagentRegistry } from "../src/runtime/subagents/registry.js";
+import {
+  createPreparedRuntimeSubagentTool,
+  createRuntimeSubagentRegistry,
+} from "../src/runtime/subagents/registry.js";
 import { SUBAGENT_TOOL_INPUT_SCHEMA as subagentToolInputSchema } from "../src/tools/framework/agent-contract.js";
 import type { ResolvedRuntimeSubagentNode } from "../src/runtime/types.js";
 
@@ -55,7 +58,9 @@ describe("createRuntimeSubagentRegistry", () => {
 
     expect(registry.preparedTools).toMatchObject([
       {
-        description: "Investigate one task in depth.",
+        description:
+          "Investigate one task in depth.\n\nThis call starts a background task and returns a task receipt immediately.",
+        execution: "background",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/researcher",
@@ -64,7 +69,9 @@ describe("createRuntimeSubagentRegistry", () => {
         sourceId: "subagents/researcher",
       },
       {
-        description: "Review one draft for clarity.",
+        description:
+          "Review one draft for clarity.\n\nThis call starts a background task and returns a task receipt immediately.",
+        execution: "background",
         inputSchema: SUBAGENT_TOOL_INPUT_SCHEMA,
         kind: "subagent",
         logicalPath: "subagents/reviewer",
@@ -90,6 +97,25 @@ describe("createRuntimeSubagentRegistry", () => {
         ],
       }),
     ).toThrowError(RuntimeRegistryError);
+  });
+
+  it("always prepares subagent tools for background execution", () => {
+    const definition = createResolvedRuntimeSubagentNode({
+      description: "Investigate one task in depth.",
+      logicalPath: "subagents/researcher",
+      name: "researcher",
+      nodeId: "subagents/researcher",
+      sourceId: "subagents/researcher",
+    });
+
+    const prepared = createPreparedRuntimeSubagentTool(definition);
+
+    expect(prepared.execution).toBe("background");
+    expect(prepared.task).toEqual({
+      nodeId: definition.nodeId,
+      resultKind: "subagent",
+      workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
+    });
   });
 });
 

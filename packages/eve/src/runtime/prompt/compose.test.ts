@@ -12,10 +12,9 @@ describe("composeRuntimeBasePrompt", () => {
     expect(prompt).toContainEqual(expect.stringContaining("<agents>"));
   });
 
-  it("instructs task-mode parents to rely on notifications instead of polling", () => {
+  it("instructs parents to rely on notifications instead of polling", () => {
     const prompt = composeRuntimeBasePrompt({
       subagentsAvailable: true,
-      tasksEnabled: true,
     });
 
     expect(prompt).toContainEqual(

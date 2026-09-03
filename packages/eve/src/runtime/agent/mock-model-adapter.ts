@@ -207,7 +207,8 @@ function createSkillLoadResult(
 }
 
 const SUBAGENT_TOOL_NAME = "agent";
-const SUBAGENT_DELEGATION_DIRECTIVE = /\bdelegate\s+to\s+a\s+subagent\s*:\s*(.+)$/iu;
+const SUBAGENT_DELEGATION_DIRECTIVE =
+  /\bdelegate\s+(?:(through\s+workflow)\s+)?to\s+a\s+subagent\s*:\s*(.+)$/iu;
 const PARALLEL_AUTHORED_TOOLS_DIRECTIVE = /^call tools in parallel:\s*(.+)$/imu;
 
 function createParallelAuthoredToolCallsResult(
@@ -258,7 +259,7 @@ function createParallelAuthoredToolCallsResult(
 /**
  * Emits one built-in `agent` tool call when the current user message uses
  * the explicit directive `Delegate to a subagent: <message>`, letting
- * tests exercise a real runtime-action wait. Fires only before the
+ * tests exercise a real coordination wait. Fires only before the
  * delegated call resolves; then the reply path takes over.
  */
 function createSubagentDelegationResult(
@@ -273,26 +274,30 @@ function createSubagentDelegationResult(
 
   const directive = SUBAGENT_DELEGATION_DIRECTIVE.exec(lastUserMessage);
 
-  if (directive?.[1] === undefined) {
+  if (directive?.[2] === undefined) {
     return null;
   }
 
-  const tool = getAvailableTools(options).find((entry) => entry.name === SUBAGENT_TOOL_NAME);
+  const toolName = directive[1] === undefined ? SUBAGENT_TOOL_NAME : "Workflow";
+  const tool = getAvailableTools(options).find((entry) => entry.name === toolName);
 
   if (tool === undefined) {
     return null;
   }
 
-  const message = directive[1].trim();
-  const toolInput = { message };
+  const message = directive[2].trim();
+  const toolInput =
+    toolName === "Workflow"
+      ? { js: `return await tools.agent({ message: ${JSON.stringify(message)} });` }
+      : { message };
 
   return createToolCallGenerateResult({
     input: toolInput,
     inputTokens: estimateTokenCount(getPromptText(options.prompt)),
     modelId,
-    outputTokens: estimateTokenCount(toolInput.message),
-    toolCallId: createToolCallId(SUBAGENT_TOOL_NAME),
-    toolName: SUBAGENT_TOOL_NAME,
+    outputTokens: estimateTokenCount(message),
+    toolCallId: createToolCallId(toolName),
+    toolName,
   });
 }
 
@@ -302,7 +307,7 @@ function createAuthoredToolCallResult(
 ): BootstrapGenerateResult | null {
   const lastUserMessage = getLastUserPromptText(options.prompt);
 
-  if (lastUserMessage === null) {
+  if (lastUserMessage === null || /^Background task task_[a-z0-9]+\b/iu.test(lastUserMessage)) {
     return null;
   }
 

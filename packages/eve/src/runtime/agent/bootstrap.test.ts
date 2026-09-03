@@ -22,6 +22,7 @@ function createFrameworkAgentTool(): PreparedRuntimeTool {
       },
     },
     description: "Message a persistent agent.",
+    execution: "background",
     inputSchema: null,
     kind: "authored-tool",
     logicalPath: `tools/${AGENT_TOOL_NAME}.ts`,
@@ -87,25 +88,20 @@ describe("createResolvedRuntimeTurnAgent agent-messaging gating", () => {
     );
   });
 
-  it("includes the messaging instruction for the root framework agent tool", () => {
+  it("includes background messaging instructions for the root framework agent tool", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
       agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [createFrameworkAgentTool()],
     });
 
-    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Pass `agentId`"));
+    expect(turnAgent.instructions).toContainEqual(expect.stringContaining("task receipt"));
     expect(turnAgent.instructions).toContainEqual(expect.stringContaining("Tool execution"));
   });
 
   it("explains task-derived busy agents in task mode", () => {
     const turnAgent = createResolvedRuntimeTurnAgent({
-      agent: createResolvedAgentForTest({
-        config: {
-          experimental: { tasks: true },
-          name: "test-agent",
-        } as ResolvedAgent["config"],
-      }),
+      agent: createResolvedAgentForTest(),
       nodeId: ROOT_RUNTIME_AGENT_NODE_ID,
       tools: [createFrameworkAgentTool()],
     });

@@ -12,6 +12,7 @@ import {
   isProjectMarkerEntry,
 } from "#discover/filesystem.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
+import { resolveNamedAgentProjectContext } from "#internal/project-context.js";
 
 /**
  * Supported project layouts for filesystem-based agents.
@@ -55,6 +56,7 @@ export async function resolveDiscoveryProject(
 ): Promise<ResolvedDiscoveryProject> {
   const source = options.source ?? createDiskProjectSource();
   const startDirectory = await resolveSearchDirectory(source, startPath);
+
   let currentDirectory = startDirectory;
 
   while (true) {
@@ -123,7 +125,7 @@ async function tryResolveNestedProjectFromAgentDirectory(
 
   const parentDirectory = dirname(directoryPath);
 
-  if (!(await hasProjectMarkers(source, parentDirectory))) {
+  if (!(await isNestedProjectRoot(source, parentDirectory))) {
     return null;
   }
 
@@ -138,7 +140,7 @@ async function tryResolveNestedProjectFromAppRoot(
   source: ProjectSource,
   directoryPath: string,
 ): Promise<ResolvedDiscoveryProject | null> {
-  if (!(await hasProjectMarkers(source, directoryPath))) {
+  if (!(await isNestedProjectRoot(source, directoryPath))) {
     return null;
   }
 
@@ -153,6 +155,11 @@ async function tryResolveNestedProjectFromAppRoot(
     appRoot: directoryPath,
     layout: "nested",
   };
+}
+
+async function isNestedProjectRoot(source: ProjectSource, directoryPath: string): Promise<boolean> {
+  if (await hasProjectMarkers(source, directoryPath)) return true;
+  return (await resolveNamedAgentProjectContext(directoryPath, { source })) !== undefined;
 }
 
 async function isFlatAgentRoot(source: ProjectSource, directoryPath: string): Promise<boolean> {

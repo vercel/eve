@@ -60,9 +60,9 @@ export default defineTaskEval({
       satisfies(
         (task: Record<string, unknown>) =>
           Reflect.get(task, "status") === "completed" &&
-          hasRemoteMetadata(task) &&
+          hasRemoteSubagentMetadata(task) &&
           hasRemotePrincipalOutput(task),
-        "completed remote task retains remote mode and the HTTP child principal",
+        "completed remote task retains subagent identity and the HTTP child principal",
       ),
     );
 
@@ -75,7 +75,7 @@ export default defineTaskEval({
   },
 });
 
-function hasRemoteMetadata(task: Record<string, unknown>): boolean {
+function hasRemoteSubagentMetadata(task: Record<string, unknown>): boolean {
   const metadata = Reflect.get(task, "metadata");
   return (
     metadata !== null &&

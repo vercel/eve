@@ -17,7 +17,10 @@ const ALLOWED_DYNAMIC_SUBAGENT_EVENTS = new Set<DynamicToolEventName>([
 ]);
 
 export type NormalizedSubagentConfig =
-  | { readonly kind: "local"; readonly definition: unknown }
+  | {
+      readonly kind: "local";
+      readonly definition: unknown;
+    }
   | {
       readonly build?: { readonly externalDependencies?: readonly string[] };
       readonly eventNames: readonly DynamicToolEventName[];

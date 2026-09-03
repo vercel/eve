@@ -335,6 +335,7 @@ export interface ActionPartialStreamEvent {
  */
 export interface SubagentCalledStreamEvent {
   data: {
+    agentId?: string;
     callId: string;
     childSessionId: string;
     childStreamPath: string;
@@ -1309,6 +1310,7 @@ export function createActionPartialEvent(input: {
  * Creates the `subagent.called` event for one started child workflow session.
  */
 export function createSubagentCalledEvent(input: {
+  readonly agentId?: string;
   readonly callId: string;
   readonly childSessionId: string;
   readonly sessionId: string;
@@ -1324,6 +1326,7 @@ export function createSubagentCalledEvent(input: {
 }): SubagentCalledStreamEvent {
   return {
     data: {
+      agentId: input.agentId,
       callId: input.callId,
       childSessionId: input.childSessionId,
       childStreamPath:

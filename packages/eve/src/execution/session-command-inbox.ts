@@ -11,13 +11,11 @@ import {
   SESSION_INBOX_WIRE_VERSION,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
 } from "#execution/wire/session-inbox-contract.js";
-
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
  *
- * This union is the hook's transport typing only; consumers interpret every
- * payload through `sessionInboxWire.decode` in `execution/wire/session-inbox-wire.ts`,
- * which owns the versioned wire schema and its legacy-shape fallbacks.
+ * This union is the hook's transport typing only. The driver routes payloads
+ * after the inbox surfaces them; the inbox owns no command semantics.
  */
 export type SessionInboxPayload =
   | DeliverHookPayload

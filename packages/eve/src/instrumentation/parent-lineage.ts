@@ -1,5 +1,5 @@
 import type { SessionParent } from "#channel/types.js";
-import { isSubagentAdapterState } from "#execution/subagent-adapter-state.js";
+import { isSubagentAdapterState } from "#subagents/adapter-state.js";
 import type { InstrumentationParentLineage } from "#instrumentation/lifecycle.js";
 
 /**

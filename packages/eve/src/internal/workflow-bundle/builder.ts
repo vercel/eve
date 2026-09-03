@@ -60,7 +60,11 @@ export class WorkflowBundleBuilder {
   protected readonly config: WorkflowBundleBuilderConfig;
 
   constructor(options: WorkflowBundleBuilderOptions) {
-    const dirs = [resolvePackageSourceDirectoryPath("src/execution")];
+    const dirs = [
+      resolvePackageSourceDirectoryPath("src/execution"),
+      resolvePackageSourceDirectoryPath("src/runtime/subagents"),
+      resolvePackageSourceDirectoryPath("src/subagents"),
+    ];
     if (options.includeTestFixtures === true) {
       dirs.push(resolvePackageSourceDirectoryPath("src/internal/testing"));
     }
@@ -95,7 +99,7 @@ export class WorkflowBundleBuilder {
 
     if (frameworkInputFiles.length === 0) {
       throw new Error(
-        `Expected the execution workflow source file under "${resolvePackageSourceDirectoryPath("src/execution")}".`,
+        `Expected framework workflow source files under eve's execution, runtime/subagents, or subagents source directories.`,
       );
     }
 

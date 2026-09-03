@@ -8,9 +8,10 @@ import {
   resetRemoteAgentSession,
   resolveRemoteAgentForAction,
   resolveRemoteAgentStreamHeaders,
-} from "#execution/remote-agent-dispatch.js";
+} from "#subagents/remote-dispatch.js";
 import { cancelOwnedTask } from "#execution/tasks/parent/dispatch.js";
-import { getAgentHandleStore } from "#harness/handles/store.js";
+import { cancelBackgroundAgentTask } from "#execution/tools/subagent/task-cancel.js";
+import { getAgentHandleStore } from "#subagents/handles/store.js";
 import { createLogger, logError } from "#internal/logging.js";
 import { cancelRun, getWorld } from "#internal/workflow/runtime.js";
 import { getSessionTaskIndex } from "#tasks/session-index.js";
@@ -52,7 +53,7 @@ export async function terminateChildSessionsStep(input: {
   const taskEntries = readSessionTaskIndex(session.state, session.sessionId);
   const handles = getAgentHandleStore(session.state)?.handles ?? [];
   const hasRemoteHandle = handles.some(
-    (handle) => handle.phase !== "starting" && handle.address.kind === "agent/remote",
+    (handle) => "address" in handle && handle.address.kind === "agent/remote",
   );
   let runtimeContext:
     | {
@@ -77,7 +78,7 @@ export async function terminateChildSessionsStep(input: {
     for (const entry of taskEntries) {
       try {
         await cancelOwnedTask({
-          bundle,
+          cancelOwnedWork: cancelBackgroundAgentTask,
           entry,
           serializedContext: input.serializedContext,
           session: runtimeSession,
@@ -96,10 +97,9 @@ export async function terminateChildSessionsStep(input: {
   }
 
   for (const handle of handles) {
-    if (handle.phase === "starting") {
-      log.debug("skipping starting child without a session id", {
+    if (!("address" in handle)) {
+      log.debug("skipping unaddressed child", {
         agentId: handle.identity.id,
-        kind: handle.target.kind,
         parentSessionId: session.sessionId,
       });
       continue;

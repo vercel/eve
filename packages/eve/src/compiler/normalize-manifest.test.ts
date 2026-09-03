@@ -161,11 +161,7 @@ describe("compileAgentManifest source graph", () => {
     const graph = await resolveRuntimeAgentGraph({ manifest: serialized, moduleMap });
 
     expect(serialized.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      behavior: {
-        availability: ["root-session"],
-        handling: { action: "self-agent", kind: "dispatch" },
-      },
-      hasExecute: false,
+      hasExecute: true,
     });
     expect(serialized.tools.find((tool) => tool.name === "ask_question")).toMatchObject({
       behavior: {
@@ -182,11 +178,11 @@ describe("compileAgentManifest source graph", () => {
       hasExecute: false,
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "agent")).toMatchObject({
-      behavior: {
-        handling: {
-          kind: "dispatch",
-          target: { kind: "self-agent-call", nodeId: "__root__", subagentName: "agent" },
-        },
+      rootOnly: true,
+      task: {
+        nodeId: "__root__",
+        resultKind: "subagent",
+        workflowId: expect.stringContaining("subagentToolExecuteWorkflow"),
       },
     });
     expect(graph.root.turnAgent.tools.find((tool) => tool.name === "web_search")).toMatchObject({
