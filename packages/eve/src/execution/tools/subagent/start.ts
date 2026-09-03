@@ -18,6 +18,7 @@ import { startLocalSubagent } from "#subagents/start-local.js";
 import { startRemoteSubagent } from "#subagents/start-remote.js";
 import { buildSubagentRunInput, type SubagentInputSource } from "#subagents/tool.js";
 import { readActionTraceContext } from "#tracing/agent-trace-context-store.js";
+import { allocateChildSessionTraceSeed } from "#tracing/agent-child-trace-seed.js";
 
 export type SubagentStartTarget =
   | {
@@ -77,6 +78,15 @@ export async function startSubagent(input: {
             forwardedTracePolicy,
           ),
         };
+  const traceSeed =
+    input.target.kind === "local"
+      ? allocateChildSessionTraceSeed({
+          callId: input.target.action.callId,
+          parentTraceContext,
+          sessionId: input.session.sessionId,
+          turnId: input.batchEvent.turnId,
+        })
+      : undefined;
 
   switch (input.target.kind) {
     case "local":
@@ -94,6 +104,7 @@ export async function startSubagent(input: {
         localDevRequest: input.localDevRequest,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
+        traceSeed,
         activityObserver: input.activityObserver,
         sandboxSessionId: input.sandboxSessionId,
         session: input.session,

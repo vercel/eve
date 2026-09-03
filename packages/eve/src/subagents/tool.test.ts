@@ -300,6 +300,31 @@ describe("buildSubagentRunInput", () => {
     expect(untraced.runInput.parentTraceContext).toBeUndefined();
   });
 
+  it("carries a preallocated child trace separately from the parent context", () => {
+    const parentTraceContext = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    const traceSeed = {
+      spanId: "4".repeat(16),
+      traceFlags: 0,
+      traceId: "3".repeat(32),
+    };
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      parentTraceContext,
+      session: makeSession(),
+      traceSeed,
+    });
+
+    expect(runInput.parentTraceContext).toEqual(parentTraceContext);
+    expect(runInput.traceSeed).toEqual(traceSeed);
+  });
+
   it("passes a resolved local subagent description into the child message", () => {
     const { runInput } = buildSubagentRunInput({
       action: {

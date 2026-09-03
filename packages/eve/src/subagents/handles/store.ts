@@ -78,11 +78,13 @@ export type AgentAddress =
       readonly kind: "agent/local";
       readonly sessionId: string;
       readonly continuationToken: string;
+      readonly traceId?: string;
     }
   | {
       readonly kind: "agent/self";
       readonly sessionId: string;
       readonly continuationToken: string;
+      readonly traceId?: string;
     }
   | {
       readonly kind: "agent/remote";
@@ -245,11 +247,19 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
     continuationToken: nonEmptyString,
     kind: z.literal("agent/local"),
     sessionId: nonEmptyString,
+    traceId: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
   }),
   z.strictObject({
     continuationToken: nonEmptyString,
     kind: z.literal("agent/self"),
     sessionId: nonEmptyString,
+    traceId: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
   }),
   z.strictObject({
     callbackBaseUrl: z.url(),

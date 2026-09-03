@@ -3,7 +3,6 @@ import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/
 import type {
   ActivityObserverConfig,
   ChannelInstrumentationProjection,
-  RunInput,
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
@@ -14,6 +13,7 @@ import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
+import type { InternalRunInput } from "#execution/internal-run-input.js";
 
 /**
  * Pending task batch event metadata needed for child run lineage.
@@ -43,7 +43,7 @@ export type SubagentInputSource =
  */
 export interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
-  readonly runInput: RunInput;
+  readonly runInput: InternalRunInput;
 }
 
 /**
@@ -96,6 +96,7 @@ export function buildSubagentRunInput(input: {
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
   readonly parentTraceContext?: SessionTraceContext;
+  readonly traceSeed?: SessionTraceContext;
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
@@ -147,7 +148,7 @@ export function buildSubagentRunInput(input: {
   }
 
   const runInput: {
-    -readonly [K in keyof RunInput]: RunInput[K];
+    -readonly [K in keyof InternalRunInput]: InternalRunInput[K];
   } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,
@@ -177,6 +178,7 @@ export function buildSubagentRunInput(input: {
       },
     },
     parentTraceContext: input.parentTraceContext,
+    traceSeed: input.traceSeed,
     activityObserver: input.activityObserver,
   };
   if (input.taskId !== undefined) runInput.taskId = input.taskId;

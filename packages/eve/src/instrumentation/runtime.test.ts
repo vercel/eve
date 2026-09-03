@@ -799,4 +799,39 @@ describe("initializeSessionInstrumentation", () => {
     expect(first?.traceId).not.toBe(parentTraceContext.traceId);
     expect(sibling?.traceId).not.toBe(first?.traceId);
   });
+
+  it("evaluates a preallocated child trace with the child policy and sampler", () => {
+    const tracePolicy = vi.fn(() => ({
+      emit: true,
+      recordInputs: false,
+      recordOutputs: true,
+    }));
+    const samplesTrace = vi.fn(() => true);
+    registerSeedRuntime({ samplesTrace, tracePolicy });
+    const ctx = createContext();
+    const traceSeed = {
+      spanId: "4".repeat(16),
+      traceFlags: 0,
+      traceId: "3".repeat(32),
+    };
+
+    initializeSessionInstrumentation({
+      agentName: "child-agent",
+      ctx,
+      traceSeed,
+    });
+
+    expect(ctx.get(SessionTraceSeedKey)).toEqual({
+      ...traceSeed,
+      decision: {
+        action: "record",
+        recordInputs: false,
+        recordOutputs: true,
+      },
+      forwardedTracePolicy: undefined,
+      traceFlags: 1,
+    });
+    expect(tracePolicy).toHaveBeenCalledOnce();
+    expect(samplesTrace).toHaveBeenCalledExactlyOnceWith(traceSeed.traceId);
+  });
 });

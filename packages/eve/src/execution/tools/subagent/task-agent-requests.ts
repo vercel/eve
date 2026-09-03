@@ -61,7 +61,7 @@ export async function applyTaskAgentRequest(
           const emitted = await emitTaskSubagentCalledStep({
             event: dispatched.event,
             parentWritable: ctx.parentWritable,
-            serializedContext: ctx.serializedContext,
+            serializedContext: dispatched.serializedContext,
           });
           return {
             serializedContext: emitted.serializedContext,
@@ -74,7 +74,7 @@ export async function applyTaskAgentRequest(
             results: [dispatched.result],
           });
           return {
-            serializedContext: ctx.serializedContext,
+            serializedContext: dispatched.serializedContext,
             sessionState: dispatched.sessionState,
           };
         case "not-admitted":

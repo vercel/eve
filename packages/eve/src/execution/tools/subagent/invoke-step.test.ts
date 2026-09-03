@@ -236,6 +236,72 @@ describe("owner agent invocation dispatch", () => {
       expect.arrayContaining([expect.objectContaining({ ownerId: "task-1", phase: "claimed" })]),
     );
   });
+
+  it("records only the child trace confirmed by the returned address", async () => {
+    const childTraceId = "4".repeat(32);
+    const serializedContext = {
+      "eve.harness.agentTrace": {
+        actions: {
+          action: {
+            attemptIndex: 0,
+            callId: "call-1",
+            kind: "subagent-call",
+            name: "research",
+            parent: {
+              spanId: "2".repeat(16),
+              traceFlags: 1,
+              traceId: "1".repeat(32),
+            },
+            rootSessionId: "parent",
+            sessionId: "parent",
+            spanId: "3".repeat(16),
+            startTimeMs: 1,
+            stepIndex: 2,
+            turnId: "turn-1",
+          },
+        },
+        sessions: {},
+        turns: {},
+      },
+    };
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      plan: [
+        {
+          kind: "start",
+          target: { action, kind: "local", source: { type: "runtime" } },
+        },
+      ],
+      serializedContext,
+    } as never);
+    vi.mocked(startSubagent).mockResolvedValue({
+      ...called,
+      address: { ...called.address, traceId: childTraceId },
+    });
+
+    const dispatched = await dispatch();
+
+    expect(dispatched.kind).toBe("dispatched");
+    if (dispatched.kind !== "dispatched") throw new Error("Expected dispatch.");
+    expect(
+      (
+        dispatched.serializedContext["eve.harness.agentTrace"] as {
+          actions: Record<string, { childTraceId?: string }>;
+        }
+      ).actions.action,
+    ).toMatchObject({ childTraceId });
+    expect(
+      getAgentHandleStore(dispatched.sessionState.snapshot?.session.state)?.handles.find(
+        (handle) =>
+          "address" in handle &&
+          "traceId" in handle.address &&
+          handle.address.traceId === childTraceId,
+      ),
+    ).toMatchObject({
+      address: { traceId: childTraceId },
+      phase: "claimed",
+    });
+  });
 });
 
 describe("task-owned agent settlement", () => {

@@ -50,17 +50,20 @@ import {
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
+import { recordActionChildTraceId } from "#tracing/agent-trace-context-store.js";
 
 export type AgentInvocationDispatchResult =
   | {
       readonly kind: "dispatched";
       readonly agentId: string;
       readonly event: SubagentCalledStreamEvent;
+      readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
   | {
       readonly kind: "failed";
       readonly result: RuntimeSubagentResult;
+      readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     };
 
@@ -106,7 +109,12 @@ export async function dispatchAgentInvocation(input: {
     return applied.result;
   };
   if (entry.kind === "reject") {
-    return { kind: "failed", result: entry.result, sessionState: sessionState() };
+    return {
+      kind: "failed",
+      result: entry.result,
+      serializedContext: prepared.serializedContext,
+      sessionState: sessionState(),
+    };
   }
 
   let outcome: DispatchOutcome;
@@ -148,6 +156,7 @@ export async function dispatchAgentInvocation(input: {
         return {
           kind: "failed",
           result: createTaskClaimError(entry.action, entry.agentId, claim),
+          serializedContext: prepared.serializedContext,
           sessionState: sessionState(),
         };
       }
@@ -246,8 +255,23 @@ export async function dispatchAgentInvocation(input: {
   }
 
   if (outcome.kind === "error") {
-    return { kind: "failed", result: outcome.result, sessionState: sessionState() };
+    return {
+      kind: "failed",
+      result: outcome.result,
+      serializedContext: prepared.serializedContext,
+      sessionState: sessionState(),
+    };
   }
+  const serializedContext =
+    "traceId" in outcome.address && outcome.address.traceId
+      ? recordActionChildTraceId(
+          prepared.serializedContext,
+          prepared.session.sessionId,
+          prepared.batch.event.turnId,
+          outcome.callId,
+          outcome.address.traceId,
+        )
+      : prepared.serializedContext;
 
   const action = entry.kind === "resume" ? entry.action : entry.target.action;
   const dynamicRemoteAgent =
@@ -280,7 +304,13 @@ export async function dispatchAgentInvocation(input: {
   if (input.emit !== undefined) {
     await input.emit(event);
   }
-  return { kind: "dispatched", agentId, event, sessionState: sessionState() };
+  return {
+    kind: "dispatched",
+    agentId,
+    event,
+    serializedContext,
+    sessionState: sessionState(),
+  };
 }
 
 /**

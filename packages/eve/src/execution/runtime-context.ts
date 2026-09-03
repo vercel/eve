@@ -1,4 +1,4 @@
-import type { RunInput, SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
@@ -16,9 +16,11 @@ import {
   ActivityObserverKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  SessionTraceSeedKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import type { InternalRunInput } from "#execution/internal-run-input.js";
 
 /**
  * Builds the bootstrap {@link ContextContainer} for one run.
@@ -26,7 +28,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 export function buildRunContext(input: {
   readonly bundle: CompiledBundle;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
-  readonly run: RunInput;
+  readonly run: InternalRunInput;
 }): ContextContainer {
   const { bundle, run } = input;
   const ctx = new ContextContainer();
@@ -85,6 +87,9 @@ export function buildRunContext(input: {
 
   if (run.parentTraceContext !== undefined) {
     ctx.set(ParentTraceContextKey, run.parentTraceContext);
+  }
+  if (run.traceSeed !== undefined) {
+    ctx.set(SessionTraceSeedKey, run.traceSeed);
   }
 
   // `run.limits` deliberately never enters the context: inherited limits ride

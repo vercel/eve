@@ -21,6 +21,8 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
+import { readInternalTraceSeed, type InternalRunInput } from "#execution/internal-run-input.js";
+import { attachAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { ActivityObserverKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -139,6 +141,7 @@ export function createWorkflowRuntime(config: {
 }): Runtime {
   return {
     async createSession(input: RunInput): Promise<RunHandle> {
+      const internalInput = input as InternalRunInput;
       const bundle = await getCompiledRuntimeAgentBundle({
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
@@ -146,13 +149,14 @@ export function createWorkflowRuntime(config: {
       const ctx = buildRunContext({
         bundle,
         dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
-        run: input,
+        run: internalInput,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
         ctx,
         parentTraceContext: input.parentTraceContext,
+        traceSeed: readInternalTraceSeed(input),
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       let collectorRunId: string | undefined;
@@ -261,12 +265,15 @@ export function createWorkflowRuntime(config: {
         return events;
       };
 
-      return {
-        get events() {
-          return getEvents();
+      return attachAcceptedTraceCoordinates(
+        {
+          get events() {
+            return getEvents();
+          },
+          sessionId: run.runId,
         },
-        sessionId: run.runId,
-      };
+        internalInput.traceSeed,
+      );
     },
 
     async dispatchContinuation<TCommand extends SessionCommand>(
