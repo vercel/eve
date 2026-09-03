@@ -7,6 +7,8 @@ description: "Trace an agent with OpenTelemetry in instrumentation.ts, read the 
 
 If you intend to export telemetry, review the exporter destination, data categories, and required legal approvals before enabling telemetry.
 
+**The instrumentation provider API is experimental and off by default.** Enable `experimental.instrumentationProviders` to use its one-file-per-provider layout, directional content capture, and per-destination redaction. See [Instrumentation Providers](./instrumentation-providers) for setup and current limitations.
+
 ## Three observability surfaces
 
 eve observes an agent through three distinct surfaces. They do not all live in this file, and they write to different places:
