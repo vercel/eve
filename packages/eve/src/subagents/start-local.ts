@@ -8,6 +8,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { toErrorMessage } from "#shared/errors.js";
+import type { AgentChildTraceDispatch } from "#tracing/agent-invocation-coordinator.js";
 
 const log = createLogger("execution.subagent-start-local");
 
@@ -29,13 +30,12 @@ export async function startLocalSubagent(input: {
   readonly initiatorAuth: Parameters<typeof buildSubagentRunInput>[0]["initiatorAuth"];
   readonly localDevRequest?: LocalDevRequestProvenance;
   readonly parentContinuationToken: string | undefined;
-  readonly parentTraceContext: Parameters<typeof buildSubagentRunInput>[0]["parentTraceContext"];
-  readonly traceSeed: Parameters<typeof buildSubagentRunInput>[0]["traceSeed"];
   readonly activityObserver?: Parameters<typeof buildSubagentRunInput>[0]["activityObserver"];
   readonly sandboxSessionId: string;
   readonly session: RuntimeSession;
   readonly source: SubagentInputSource;
   readonly taskId?: string;
+  readonly traceDispatch: AgentChildTraceDispatch;
 }): Promise<DispatchOutcome> {
   const { action, source } = input;
   const childRuntime = createWorkflowRuntime({
@@ -53,8 +53,8 @@ export async function startLocalSubagent(input: {
     initiatorAuth: input.initiatorAuth,
     graph: input.bundle.graph,
     parentContinuationToken: input.parentContinuationToken,
-    parentTraceContext: input.parentTraceContext,
-    traceSeed: input.traceSeed,
+    parentTraceContext: input.traceDispatch.parentTraceContext,
+    traceSeed: input.traceDispatch.traceSeed,
     activityObserver: input.activityObserver,
     sandboxSessionId: input.sandboxSessionId,
     session: input.session,

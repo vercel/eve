@@ -19,6 +19,7 @@ import { sessionInboxWireV1Migration } from "#execution/wire/session-inbox-wire.
 import { sessionInboxWireV2Migration } from "#execution/wire/session-inbox-wire.v3.migration.js";
 import { sessionInboxWireV3Migration } from "#execution/wire/session-inbox-wire.v4.migration.js";
 import { sessionInboxWireV4Migration } from "#execution/wire/session-inbox-wire.v5.migration.js";
+import { sessionInboxWireV6Migration } from "#execution/wire/session-inbox-wire.v7.migration.js";
 import { isObject } from "#shared/guards.js";
 
 /**
@@ -60,6 +61,7 @@ const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV3Migration,
   sessionInboxWireV4Migration,
   sessionInboxWireV5Migration,
+  sessionInboxWireV6Migration,
 ];
 
 /**
@@ -82,6 +84,14 @@ function decode(value: unknown): DecodedSessionInbox {
   if (
     (declaredVersion === 1 || declaredVersion === 2 || declaredVersion === 3) &&
     containsCurrentTaskMessages(normalized)
+  ) {
+    throw new SessionInboxWireError(
+      `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
+    );
+  }
+  if (
+    (declaredVersion === 4 || declaredVersion === 5 || declaredVersion === 6) &&
+    containsV7ActionIdentity(normalized)
   ) {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
@@ -117,6 +127,24 @@ function decode(value: unknown): DecodedSessionInbox {
     );
   }
   return normalizeWire(wire as SessionInboxWire);
+}
+
+function containsV7ActionIdentity(value: unknown): boolean {
+  if (!isObject(value) || value.kind !== "deliver") return false;
+  const payloads = Array.isArray(value.payloads) ? value.payloads : [];
+  return payloads.some((payload) => {
+    if (!isObject(payload) || !isObject(payload.task)) return false;
+    const requests = payload.task.agentRequests;
+    return (
+      Array.isArray(requests) &&
+      requests.some(
+        (request) =>
+          isObject(request) &&
+          isObject(request.request) &&
+          Object.hasOwn(request.request, "parentActionCallId"),
+      )
+    );
+  });
 }
 
 /** Workflow-safe consumer facade. */

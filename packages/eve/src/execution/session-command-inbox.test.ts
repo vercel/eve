@@ -4,6 +4,7 @@ import {
   createSessionCommandInbox,
   type SessionInboxPayload,
 } from "#execution/session-command-inbox.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
 
 const createHookMock = vi.fn();
 
@@ -123,7 +124,7 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionInboxWireVersion: 6 },
+      metadata: { sessionInboxWireVersion: SESSION_INBOX_WIRE_VERSION },
       token: "stable",
     });
     await inbox.dispose();

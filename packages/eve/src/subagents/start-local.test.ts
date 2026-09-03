@@ -52,11 +52,13 @@ describe("startLocalSubagent", () => {
       fanoutSize: 1,
       initiatorAuth: null,
       parentContinuationToken: "parent-token",
-      parentTraceContext: undefined,
       sandboxSessionId: "parent-session",
       session: {} as never,
       source: { description: "Research", type: "local" },
-      traceSeed: trace,
+      traceDispatch: {
+        originAudience: "private",
+        traceSeed: trace,
+      },
     });
 
     expect(createWorkflowRuntime).toHaveBeenCalledOnce();

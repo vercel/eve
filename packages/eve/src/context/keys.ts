@@ -109,6 +109,8 @@ export const ChannelInstrumentationKey = new ContextKey<ChannelInstrumentationPr
 /** Trace ceiling and immutable origin accepted from a trusted forwarding deployment. */
 export const ModeKey = new ContextKey<RunMode>("eve.mode");
 export const ParentSessionKey = new ContextKey<SessionParent>("eve.parentSession");
+/** Dispatch call responsible for the current child turn, including continuations. */
+export const ParentCallIdKey = new ContextKey<string>("eve.parentCallId");
 /** Separate from {@link ParentSessionKey} so it stays out of what extensions read. */
 export const ParentTraceContextKey = new ContextKey<SessionTraceContext>("eve.parentTraceContext");
 

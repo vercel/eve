@@ -11,6 +11,7 @@ import {
   DynamicSubagentAgentConfigKey,
   InitiatorAuthKey,
   ModeKey,
+  ParentCallIdKey,
   ParentSessionKey,
   ParentTraceContextKey,
   ActivityObserverKey,
@@ -82,6 +83,7 @@ export function buildRunContext(input: {
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
+    ctx.set(ParentCallIdKey, run.parent.callId);
   }
 
   if (run.parentTraceContext !== undefined) {

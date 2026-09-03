@@ -1,5 +1,6 @@
 import type {
   DeliverHookPayload,
+  DeliverPayload,
   SessionCommand,
   SessionTimeoutHookPayload,
 } from "#channel/types.js";
@@ -34,11 +35,16 @@ import {
   encodeSessionCommandV6,
   type SessionInboxWireV6,
 } from "#execution/wire/session-inbox-wire.v6.js";
+import {
+  encodeSessionCommandV7,
+  type SessionInboxWireV7,
+} from "#execution/wire/session-inbox-wire.v7.js";
+import { withoutAgentInvocationParent } from "#tracing/agent-invocation-request.js";
 
 type SessionInboxCommand = DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload;
 
 /** Current wire type consumed after migration. */
-export type SessionInboxWire = SessionInboxWireV6;
+export type SessionInboxWire = SessionInboxWireV7;
 
 type LegacySessionInboxWireTarget = Extract<SessionInboxWireTarget, { readonly version: 0 }>;
 type VersionedSessionInboxEncoder = (command: SessionInboxCommand) => unknown;
@@ -51,10 +57,12 @@ const versionedEncoders = {
   3: (command: SessionInboxCommand) =>
     encodeSessionCommandV3(withoutOwnedTaskCancellation(command)),
   4: (command: SessionInboxCommand) =>
-    encodeSessionCommandV4(withoutOwnedTaskCancellation(command)),
+    encodeSessionCommandV4(withoutWorkflowActionIdentity(withoutOwnedTaskCancellation(command))),
   5: (command: SessionInboxCommand) =>
-    encodeSessionCommandV5(withoutOwnedTaskCancellation(command)),
-  6: encodeSessionCommandV6,
+    encodeSessionCommandV5(withoutWorkflowActionIdentity(withoutOwnedTaskCancellation(command))),
+  6: (command: SessionInboxCommand) =>
+    encodeSessionCommandV6(withoutWorkflowActionIdentity(command)),
+  7: encodeSessionCommandV7,
 } satisfies Record<SessionInboxWireVersion, VersionedSessionInboxEncoder>;
 
 /** Encodes a command for the selected session-inbox consumer. */
@@ -64,6 +72,7 @@ function encode(command: SessionInboxCommand, target: { readonly version: 3 }): 
 function encode(command: SessionInboxCommand, target: { readonly version: 4 }): SessionInboxWireV4;
 function encode(command: SessionInboxCommand, target: { readonly version: 5 }): SessionInboxWireV5;
 function encode(command: SessionInboxCommand, target: { readonly version: 6 }): SessionInboxWireV6;
+function encode(command: SessionInboxCommand, target: { readonly version: 7 }): SessionInboxWireV7;
 function encode(
   command: SessionInboxCommand,
   target: { readonly version: SessionInboxWireVersion },
@@ -82,6 +91,7 @@ function encode(
   | SessionInboxWireV4
   | SessionInboxWireV5
   | SessionInboxWireV6
+  | SessionInboxWireV7
   | Record<string, unknown>;
 function encode(
   command: SessionInboxCommand,
@@ -93,6 +103,7 @@ function encode(
   | SessionInboxWireV4
   | SessionInboxWireV5
   | SessionInboxWireV6
+  | SessionInboxWireV7
   | Record<string, unknown> {
   if (command.kind === "cancel" && command.tasks === true && target.version < 6) {
     throw new SessionInboxWireError(
@@ -102,7 +113,7 @@ function encode(
   if (target.version === 0) {
     const currentTaskWire =
       target.variant === "send" && command.kind === "send" && command.payload.task !== undefined
-        ? encodeSessionCommandV5(command)
+        ? encodeSessionCommandV7(command)
         : undefined;
     let legacy = encodeSessionCommandV0(
       encodeSessionCommandV1(
@@ -139,7 +150,8 @@ function encode(
       | SessionInboxWireV3
       | SessionInboxWireV4
       | SessionInboxWireV5
-      | SessionInboxWireV6;
+      | SessionInboxWireV6
+      | SessionInboxWireV7;
   }
   throw new SessionInboxWireError(
     `Cannot encode session inbox payload for unknown wire version ${JSON.stringify((target as { version?: unknown }).version)}.`,
@@ -160,6 +172,31 @@ function withoutCurrentTaskMessages(command: SessionInboxCommand): SessionInboxC
     ...task
   } = command.payload.task;
   return { ...command, payload: { ...command.payload, task } };
+}
+
+function withoutWorkflowActionIdentity(command: SessionInboxCommand): SessionInboxCommand {
+  if (command.kind === "send") {
+    return { ...command, payload: stripWorkflowActionIdentity(command.payload) };
+  }
+  if (command.kind === "deliver") {
+    return { ...command, payloads: command.payloads.map(stripWorkflowActionIdentity) };
+  }
+  return command;
+}
+
+function stripWorkflowActionIdentity(payload: DeliverPayload): DeliverPayload {
+  const requests = payload.task?.agentRequests;
+  if (requests === undefined) return payload;
+  return {
+    ...payload,
+    task: {
+      ...payload.task,
+      agentRequests: requests.map((delivery) => {
+        if (delivery.request.kind !== "agent-invoke") return delivery;
+        return { ...delivery, request: withoutAgentInvocationParent(delivery.request) };
+      }),
+    },
+  };
 }
 
 function withoutAcceptedDeployment(command: SessionInboxCommand): SessionInboxCommand {

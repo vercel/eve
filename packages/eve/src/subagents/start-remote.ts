@@ -9,8 +9,8 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 import { buildAgentInvocationParent } from "#protocol/agent-invocation-trace.js";
+import type { AgentChildTraceDispatch } from "#tracing/agent-invocation-coordinator.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
@@ -21,18 +21,16 @@ export async function startRemoteSubagent(input: {
   readonly batchEvent: { readonly sequence: number; readonly turnId: string };
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
-  readonly originAudience: ChannelAudience;
   readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: NonNullable<
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
   >;
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
-  readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
-  readonly traceSeed: Parameters<typeof startRemoteAgentSession>[0]["traceSeed"];
   readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
   readonly taskId?: string;
+  readonly traceDispatch: AgentChildTraceDispatch;
 }): Promise<DispatchOutcome> {
   const { action } = input;
   const activityObserver = deriveChildActivityObserverConfig({
@@ -91,7 +89,7 @@ export async function startRemoteSubagent(input: {
       auth: input.auth,
       callbackBaseUrl,
       callbackToken: input.parentContinuationToken,
-      originAudience: input.originAudience,
+      originAudience: input.traceDispatch.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parent: buildAgentInvocationParent({
@@ -101,12 +99,12 @@ export async function startRemoteSubagent(input: {
         turnId: input.batchEvent.turnId,
         turnSequence: input.batchEvent.sequence,
       }),
-      parentTraceContext: input.parentTraceContext,
+      parentTraceContext: input.traceDispatch.parentTraceContext,
       activityObserver,
       remote: resolvedRemote,
       session: input.session,
       taskId: input.taskId,
-      traceSeed: input.traceSeed,
+      traceSeed: input.traceDispatch.traceSeed,
     });
     const address: {
       callbackBaseUrl: string;
