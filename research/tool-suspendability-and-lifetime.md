@@ -19,7 +19,7 @@ unrelated flags and re-derives with `if` chains at every consumer:
 This document makes the pair explicit in the compiled tool shape and gives
 each of the four cells one `execute` contract. The authoring surface keeps
 `execution: "background"` and the third `task` argument, but `task` loses
-`delegated`, `send`, and `binding`. In their place a background body has one
+`delegated`, `send`, `binding`, and the non-serializable `batch`. In their place a background body has one
 one-way channel to its task (`yield`) and two round-trip primitives that
 already exist for waiting workflow tools: `ask` for the human, and
 `ctx.getToken`/`ctx.requireAuth` inside a step for the provider. The latter is
@@ -54,7 +54,6 @@ tagged JSON and do no I/O, so they are replay-safe in a workflow body.
 ```ts
 interface TaskExec {
   readonly taskId: string;
-  readonly batch: readonly BackgroundToolCall[];
   setState(state: JsonObject): TaskSetState;
   postMessage(message: string): TaskMessage;
 }
