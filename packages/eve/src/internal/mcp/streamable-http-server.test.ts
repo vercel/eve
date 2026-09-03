@@ -7,6 +7,7 @@ import {
   defineMcpTool,
   MCP_LEGACY_PROTOCOL_VERSION,
   MCP_PROTOCOL_VERSION,
+  McpToolOperationError,
 } from "#internal/mcp/streamable-http-server.js";
 
 const MCP_PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
@@ -269,6 +270,95 @@ describe("stateless MCP Streamable HTTP server", () => {
       },
     });
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it("returns structured operation errors for expected tool failures", async () => {
+    const handle = createMcpStreamableHttpServer({
+      authenticate: async () => auth,
+      name: "eve-test",
+      tools: [
+        defineMcpTool({
+          call: async () => {
+            throw new McpToolOperationError("conflict", "Invocation is not waiting for input.");
+          },
+          definition: { inputSchema: z.strictObject({}), name: "conflicting" },
+        }),
+      ],
+      version: "0.0.0",
+    });
+
+    for (const request_ of [
+      modernRequest({
+        id: "modern",
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "conflicting" },
+      }),
+      request({
+        id: "legacy",
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "conflicting" },
+      }),
+    ]) {
+      await expect(jsonRpcResponse(await handle(request_))).resolves.toMatchObject({
+        result: {
+          content: [{ text: "Invocation is not waiting for input.", type: "text" }],
+          isError: true,
+          structuredContent: {
+            error: {
+              code: "conflict",
+              message: "Invocation is not waiting for input.",
+              retryable: true,
+            },
+          },
+        },
+      });
+    }
+  });
+
+  it("sanitizes unexpected tool failures behind an error id", async () => {
+    const handle = createMcpStreamableHttpServer({
+      authenticate: async () => auth,
+      name: "eve-test",
+      tools: [
+        defineMcpTool({
+          call: async () => {
+            throw new Error("ECONNREFUSED 10.0.0.7:5432 while reading secret=abc");
+          },
+          definition: { inputSchema: z.strictObject({}), name: "exploding" },
+        }),
+      ],
+      version: "0.0.0",
+    });
+
+    const body = (await jsonRpcResponse(
+      await handle(
+        modernRequest({
+          id: "boom",
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: {}, name: "exploding" },
+        }),
+      ),
+    )) as {
+      result: {
+        content: Array<{ text: string }>;
+        isError: boolean;
+        structuredContent: { error: Record<string, unknown> };
+      };
+    };
+    expect(body.result.isError).toBe(true);
+    expect(body.result.structuredContent.error).toMatchObject({
+      code: "internal",
+      errorId: expect.any(String),
+      retryable: false,
+    });
+    expect(JSON.stringify(body.result)).not.toContain("ECONNREFUSED");
+    expect(JSON.stringify(body.result)).not.toContain("secret=");
+    expect(body.result.content[0]?.text).toContain(
+      String(body.result.structuredContent.error.errorId),
+    );
   });
 
   it("returns JSON-RPC errors and acknowledges notifications", async () => {

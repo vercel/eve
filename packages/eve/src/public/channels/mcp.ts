@@ -20,6 +20,7 @@ import { validateMcpHttpRequest, validateMcpMetadataRequest } from "#internal/mc
 import {
   createMcpStreamableHttpServer,
   defineMcpTool,
+  McpToolOperationError,
   type McpCallToolResult,
   type McpServerTool,
 } from "#internal/mcp/streamable-http-server.js";
@@ -523,8 +524,15 @@ function createInvocationTools(
   return tools;
 }
 
+// Unknown, expired, and foreign-principal invocations all read as not found
+// so the response never confirms that another caller's invocation exists.
+const INVOCATION_NOT_FOUND =
+  "Invocation not found. It may have expired or belong to another caller.";
+
 function requiredInvocation(invocation: AgentInvocation | undefined): AgentInvocation {
-  if (invocation === undefined) throw new Error("Invocation not found.");
+  if (invocation === undefined) {
+    throw new McpToolOperationError("not_found", INVOCATION_NOT_FOUND);
+  }
   return invocation;
 }
 
@@ -533,9 +541,12 @@ function requiredMutation(result: AgentInvocationMutationResult): AgentInvocatio
     case "success":
       return result.invocation;
     case "conflict":
-      throw new Error(result.message);
+      throw new McpToolOperationError(
+        "conflict",
+        `${result.message} Call agent_get to read the current state before answering again.`,
+      );
     case "not_found":
-      throw new Error("Invocation not found.");
+      throw new McpToolOperationError("not_found", INVOCATION_NOT_FOUND);
   }
 }
 
@@ -549,9 +560,16 @@ function invocationResult(invocation: AgentInvocation): McpCallToolResult {
 
 function asJsonObject(value: unknown): JsonObject | undefined {
   if (value === undefined) return undefined;
-  const schema = parseJsonObject(value);
-  validateOutputSchemaComplexity(schema);
-  return schema;
+  try {
+    const schema = parseJsonObject(value);
+    validateOutputSchemaComplexity(schema);
+    return schema;
+  } catch (error) {
+    throw new McpToolOperationError(
+      "invalid_input",
+      error instanceof Error ? error.message : "outputSchema must be a JSON object.",
+    );
+  }
 }
 
 const AUTHORIZATION_CHALLENGE_SCHEMA = z.strictObject({

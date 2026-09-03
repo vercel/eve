@@ -191,10 +191,14 @@ The invocation response is discriminated by `status`:
 - `failed`: inspect the structured `error`.
 - `cancelled`: cancellation reached a terminal state.
 
-A tool result with `isError: true` means the call itself was rejected (unknown invocation, no input
-pending, incomplete response batch, invalid output schema). A `failed` status means the call
-succeeded and the task itself failed. Handle them differently: correct the call in the first case,
-report the task failure in the second.
+A tool result with `isError: true` means the call itself was rejected. A `failed` status means the call succeeded and the task itself failed. Handle them differently: correct the call in the first case, report the task failure in the second. Rejected calls carry `structuredContent.error` with a stable `code`, a short `message`, and `retryable`:
+
+| `code`          | Meaning                                                                        | `retryable` |
+| --------------- | ------------------------------------------------------------------------------ | ----------- |
+| `invalid_input` | An argument was rejected, for example an oversized or external `outputSchema`. | `false`     |
+| `not_found`     | The invocation does not exist, has expired, or belongs to another caller.      | `false`     |
+| `conflict`      | The invocation is not in the expected state; read it with `agent_get` first.   | `true`      |
+| `internal`      | eve failed; `errorId` correlates with server logs. No details are exposed.     | `false`     |
 
 Cancellation is cooperative, so call `agent_get` after `agent_cancel` until the state becomes terminal.
 

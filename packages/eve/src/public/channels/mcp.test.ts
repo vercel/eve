@@ -244,6 +244,13 @@ describe("mcpChannel", () => {
           },
         ],
         isError: true,
+        structuredContent: {
+          error: {
+            code: "invalid_input",
+            message: "outputSchema external $ref values are not supported.",
+            retryable: false,
+          },
+        },
       },
     });
     expect(createSession).not.toHaveBeenCalled();

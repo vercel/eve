@@ -6,6 +6,9 @@ import {
 } from "#compiled/@modelcontextprotocol/server/index.js";
 
 import type { SessionAuthContext } from "#channel/types.js";
+import { createLogger, logError } from "#internal/logging.js";
+
+const log = createLogger("mcp.server");
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 export const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
@@ -26,12 +29,45 @@ export interface McpCallToolResult<
 > {
   readonly content: readonly McpContent[];
   readonly isError?: boolean;
-  readonly structuredContent?: TStructured;
+  readonly structuredContent?: TStructured | McpToolOperationErrorEnvelope;
+}
+
+export interface McpToolOperationErrorEnvelope {
+  readonly error: McpToolOperationErrorData;
 }
 
 export type McpContent =
   | { readonly type: "text"; readonly text: string }
   | { readonly type: "resource_link"; readonly name: string; readonly uri: string };
+
+/**
+ * Stable, client-actionable reason a tool call was rejected before it could
+ * return a result. `invalid_input` and `conflict` mean the caller should
+ * change or re-read something; `not_found` means stop; `internal` means the
+ * server failed and `errorId` correlates with its logs.
+ */
+export type McpToolOperationErrorCode = "invalid_input" | "not_found" | "conflict" | "internal";
+
+export interface McpToolOperationErrorData {
+  readonly code: McpToolOperationErrorCode;
+  readonly errorId?: string;
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
+/** Thrown by tool handlers to produce a structured `isError` result. */
+export class McpToolOperationError extends Error {
+  readonly code: McpToolOperationErrorCode;
+
+  constructor(code: McpToolOperationErrorCode, message: string) {
+    super(message);
+    this.name = "McpToolOperationError";
+    this.code = code;
+  }
+}
+
+/** Only `conflict` is retryable: the caller re-reads state and tries again. */
+const RETRYABLE_CODES: ReadonlySet<McpToolOperationErrorCode> = new Set(["conflict"]);
 
 export interface McpServerTool {
   readonly name: string;
@@ -327,15 +363,35 @@ async function callTool<TInput, TStructured extends Readonly<Record<string, unkn
   try {
     return await call(input, { auth, signal });
   } catch (error) {
-    return toolError(error instanceof Error ? error.message : "Tool call failed.");
+    if (error instanceof McpToolOperationError) {
+      return toolError({
+        code: error.code,
+        message: error.message,
+        retryable: RETRYABLE_CODES.has(error.code),
+      });
+    }
+    // Unexpected failures never forward their message: it may carry provider
+    // responses, hostnames, or workflow payloads. The errorId is the handle.
+    const errorId = logError(log, "MCP tool call failed", error);
+    return toolError({
+      code: "internal",
+      errorId,
+      message: "The server could not complete this tool call.",
+      retryable: false,
+    });
   }
 }
 
 function toolError<TStructured extends Readonly<Record<string, unknown>>>(
-  message: string,
+  error: McpToolOperationErrorData,
 ): McpCallToolResult<TStructured> {
+  const text =
+    error.errorId === undefined ? error.message : `${error.message} (errorId: ${error.errorId})`;
+  // The SDK skips outputSchema validation when isError is set, so this shape
+  // does not need to appear in each tool's declared output schema.
   return {
-    content: [{ type: "text", text: message }],
+    content: [{ type: "text", text }],
     isError: true,
+    structuredContent: { error },
   };
 }
