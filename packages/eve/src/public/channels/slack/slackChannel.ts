@@ -405,8 +405,18 @@ export interface SlackInboundMessageContext extends SlackContext, SlackSessionOp
   isBotMentioned(): boolean;
 }
 
-/** Interaction-scoped context handed to `slackChannel({ onInteraction })`. */
-export interface SlackInteractionContext extends SlackContext, SlackSessionOperations {}
+/** Message-scoped capabilities available on message-backed Slack interactions. */
+export interface SlackMessageInteractionContext extends SlackContext, SlackSessionOperations {}
+
+/** Context handed to `slackChannel({ onInteraction })`. */
+export interface SlackInteractionContext {
+  /** Workspace-scoped Slack identity and raw Web API access. */
+  readonly slack: SlackWorkspaceHandle;
+  /** Message and thread operations, present only for message-backed callbacks. */
+  readonly message?: SlackMessageInteractionContext;
+  /** Keeps work alive after the handler returns its acknowledgement. */
+  readonly waitUntil: (task: Promise<unknown>) => void;
+}
 
 /** Workspace-scoped context handed to `slackChannel({ onShortcut })`. */
 export interface SlackShortcutContext {
@@ -414,8 +424,8 @@ export interface SlackShortcutContext {
   readonly slack: SlackWorkspaceHandle;
 }
 
-/** A decoded Slack interactive callback that no more specific handler claimed. */
-export interface SlackRawInteraction {
+/** A decoded Slack interactive callback. */
+export interface SlackInteraction {
   /** Slack's interaction payload type, such as `block_actions` or `view_submission`. */
   readonly type: string;
   /** The complete decoded payload, preserving Slack's field names and nesting. */
@@ -424,18 +434,10 @@ export interface SlackRawInteraction {
   readonly user?: SlackInteractionUser;
   /** Workspace associated with the actor or interaction. */
   readonly teamId?: string;
-  /** Workspace whose app installation supplies credentials for {@link SlackRawInteractionContext.slack}. */
+  /** Workspace whose app installation supplies credentials for {@link SlackInteractionContext.slack}. */
   readonly installationTeamId?: string;
   /** Enterprise Grid organization when Slack supplies one. */
   readonly enterpriseId?: string;
-}
-
-/** Workspace-scoped context handed to `slackChannel({ onRawInteraction })`. */
-export interface SlackRawInteractionContext {
-  /** Slack workspace identity and raw Web API escape hatch. */
-  readonly slack: SlackWorkspaceHandle;
-  /** Keeps work alive after the handler returns its acknowledgement. */
-  readonly waitUntil: (task: Promise<unknown>) => void;
 }
 
 /** Workspace-scoped context handed to `slackChannel({ onSlashCommand })`. */
@@ -725,27 +727,21 @@ export interface SlackChannelConfig {
   onEvent?(ctx: SlackInboundEventContext, event: SlackEvent): void | Promise<void>;
 
   /**
-   * Handler for Slack `block_actions` interactive callbacks (button
-   * clicks, select changes, etc.) **not** consumed by the framework's
-   * HITL pipeline. Slack POSTs interactive payloads to the same webhook
-   * route as mentions; the framework decodes them, routes any action whose
-   * `action_id` starts with `eve_input:` to the runtime as an HITL
-   * response (resuming a paused session), and forwards everything else
-   * here, one invocation per non-HITL action.
+   * Handles signed Slack interactive callbacks not consumed by eve's HITL
+   * pipeline or the more specific `onShortcut` hook. The input preserves
+   * Slack's complete decoded payload and adds normalized actor and workspace
+   * identity.
    *
-   * Runs on the inbound webhook side via `waitUntil()`, so the channel
-   * returns `200 OK` immediately. Errors are caught and logged; they do
-   * not affect the webhook response or sibling invocations.
-   *
-   * The `SlackContext` here is rebuilt from the interaction payload
-   * (channel id, thread ts, team id), **not** the persisted thread state
-   * used by event handlers. Use `ctx.slack.request(...)` for arbitrary
-   * Slack Web API calls and `action.messageTs` to target `chat.update`.
+   * This hook runs inline because its returned {@link Response} may acknowledge
+   * a `view_submission` with validation errors or answer a `block_suggestion`.
+   * Returning `void` sends an empty `200 OK`. Use `ctx.waitUntil(...)` for work
+   * that does not affect the acknowledgement. Message-backed callbacks also
+   * expose thread and session operations through `ctx.message`.
    */
   onInteraction?(
-    action: SlackInteractionAction,
+    interaction: SlackInteraction,
     ctx: SlackInteractionContext,
-  ): void | Promise<void>;
+  ): void | Response | Promise<void | Response>;
 
   /**
    * Handles Slack message shortcuts (`message_action`) and global shortcuts
@@ -755,26 +751,6 @@ export interface SlackChannelConfig {
    * `waitUntil()`. Errors are caught and logged.
    */
   onShortcut?(shortcut: SlackShortcut, ctx: SlackShortcutContext): void | Promise<void>;
-
-  /**
-   * Fallback for signed Slack interactive callbacks not claimed by eve's HITL
-   * handling or a more specific authored hook. The input contains Slack's
-   * complete decoded payload plus normalized actor and workspace identity.
-   * Use `interaction.type` to narrow the raw payload against Slack's docs.
-   *
-   * This hook runs inline because its returned {@link Response} may acknowledge
-   * a `view_submission` with validation errors or answer a `block_suggestion`.
-   * Returning `void` sends an empty `200 OK`. Use `ctx.waitUntil(...)` for work
-   * that does not affect the acknowledgement.
-   *
-   * Handler precedence matches `onEvent`: `onInteraction` claims eligible
-   * message-backed `block_actions`, and `onShortcut` claims shortcuts. Returning
-   * from either specific hook does not fall through to this hook.
-   */
-  onRawInteraction?(
-    interaction: SlackRawInteraction,
-    ctx: SlackRawInteractionContext,
-  ): void | Response | Promise<void | Response>;
 
   /**
    * Handles Slack slash commands configured with this channel's webhook route.

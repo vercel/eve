@@ -43,7 +43,7 @@ import type {
   SlackChannelState,
   SlackInputResponseSubmission,
   SlackInteractionAction,
-  SlackInteractionContext,
+  SlackMessageInteractionContext,
   SlackShortcut,
   SlackShortcutContext,
 } from "#public/channels/slack/slackChannel.js";
@@ -51,7 +51,7 @@ import type { ChannelFrom, ChannelResolveSession } from "#channel/channel-operat
 import { bindSlackSessionOperations } from "#public/channels/slack/session-operations.js";
 import { dispatchSlashCommand } from "#public/channels/slack/slash-command.js";
 import { parseInputResponse } from "#shared/input.js";
-import { handleRawInteraction } from "#public/channels/slack/raw-interaction.js";
+import { handleAuthoredInteraction } from "#public/channels/slack/interaction-handler.js";
 import {
   isObjectRecord,
   readOptionalString,
@@ -237,13 +237,17 @@ export async function handleInteractionPost(
     return ack;
   }
 
-  const rawFallback = (raw: unknown, type: string, fallbackResponse: Response = ack) =>
-    handleRawInteraction(raw, type, ctx.waitUntil, deps.config, fallbackResponse);
+  const authoredInteraction = (
+    raw: unknown,
+    type: string,
+    fallbackResponse: Response = ack,
+    message?: SlackMessageInteractionContext,
+  ) => handleAuthoredInteraction(raw, type, ctx.waitUntil, deps.config, fallbackResponse, message);
 
   if (payload.kind === "view_submission") {
     return payload.callbackId === HITL_FREEFORM_MODAL_CALLBACK_ID
       ? handleViewSubmission(payload, ctx, deps)
-      : rawFallback(payload.raw, payload.kind, new Response(null, { status: 200 }));
+      : authoredInteraction(payload.raw, payload.kind, new Response(null, { status: 200 }));
   }
 
   if (payload.kind === "slash_command") {
@@ -257,15 +261,15 @@ export async function handleInteractionPost(
       dispatchShortcut(shortcut, readSlackInstallationTeamId(payload.raw), ctx, deps);
       return new Response(null, { status: 200 });
     }
-    return rawFallback(payload.raw, payload.type);
+    return authoredInteraction(payload.raw, payload.type);
   }
 
   if (payload.kind !== "block_actions") {
-    return rawFallback(payload.raw, payload.kind);
+    return authoredInteraction(payload.raw, payload.kind);
   }
 
   const interaction = parseBlockActionsPayload(payload);
-  if (!interaction) return rawFallback(payload.raw, payload.kind);
+  if (!interaction) return authoredInteraction(payload.raw, payload.kind);
 
   const freeformAction = interaction.actions.find((a) => isFreeformAction(a.actionId));
   if (freeformAction) {
@@ -297,63 +301,44 @@ export async function handleInteractionPost(
     );
   }
 
-  const customActions = interaction.actions.filter((a) => !isHitlAction(a.actionId));
-  const onInteraction = deps.config.onInteraction;
-  if (onInteraction) {
-    if (customActions.length > 0) {
-      const actionUser = customActions[0]!.user;
-      const { thread, slack } = buildSlackBinding({
-        botToken: deps.config.credentials?.botToken,
-        channelId: interaction.channelId,
-        threadTs: interaction.threadTs,
-        installationTeamId: interaction.installationTeamId,
-        teamId: interaction.teamId,
-      });
-      const slackCtx: SlackInteractionContext = {
-        ...bindSlackSessionOperations({
-          address: continuationToken,
-          defaultAuth: buildSlackAuthContext({
-            channelId: interaction.channelId,
-            teamId: interaction.teamId,
-            threadTs: interaction.threadTs,
-            userId: actionUser.id,
-            userName: actionUser.username ?? actionUser.name,
-          }),
-          from: ctx.from,
-          resolveSession: ctx.resolveSession,
-          state: {
-            channelId: interaction.channelId,
-            installationTeamId: interaction.installationTeamId ?? null,
-            teamId: interaction.teamId ?? null,
-            threadTs: interaction.threadTs,
-            triggeringUserId: actionUser.id,
-          },
-        }),
-        thread,
-        slack,
-      };
-      for (const action of customActions) {
-        ctx.waitUntil(
-          Promise.resolve(onInteraction(action, slackCtx)).catch((error: unknown) => {
-            log.error("custom interaction handler failed", { error });
-          }),
-        );
-      }
-    }
-  } else if (rawHandlerClaimsBlockActions({ customActions, hitlActions })) {
-    return rawFallback(payload.raw, payload.kind);
-  }
-
-  return ack;
-}
-
-function rawHandlerClaimsBlockActions(input: {
-  readonly customActions: readonly SlackInteractionAction[];
-  readonly hitlActions: readonly unknown[];
-}): boolean {
   // A callback containing any eve-owned action stays reserved even when it
-  // also contains custom actions, since the raw payload exposes both.
-  return input.customActions.length > 0 && input.hitlActions.length === 0;
+  // also contains custom actions, since onInteraction receives the raw payload.
+  if (hitlActions.length > 0) return ack;
+
+  const customAction = interaction.actions.find((action) => !isHitlAction(action.actionId));
+  if (customAction === undefined) return ack;
+
+  const { thread, slack } = buildSlackBinding({
+    botToken: deps.config.credentials?.botToken,
+    channelId: interaction.channelId,
+    threadTs: interaction.threadTs,
+    installationTeamId: interaction.installationTeamId,
+    teamId: interaction.teamId,
+  });
+  const message: SlackMessageInteractionContext = {
+    ...bindSlackSessionOperations({
+      address: continuationToken,
+      defaultAuth: buildSlackAuthContext({
+        channelId: interaction.channelId,
+        teamId: interaction.teamId,
+        threadTs: interaction.threadTs,
+        userId: customAction.user.id,
+        userName: customAction.user.username ?? customAction.user.name,
+      }),
+      from: ctx.from,
+      resolveSession: ctx.resolveSession,
+      state: {
+        channelId: interaction.channelId,
+        installationTeamId: interaction.installationTeamId ?? null,
+        teamId: interaction.teamId ?? null,
+        threadTs: interaction.threadTs,
+        triggeringUserId: customAction.user.id,
+      },
+    }),
+    thread,
+    slack,
+  };
+  return authoredInteraction(payload.raw, payload.kind, ack, message);
 }
 
 /** Normalizes Slack's two shortcut payload variants. */

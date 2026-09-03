@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { handleRawInteraction } from "#public/channels/slack/raw-interaction.js";
+import { handleAuthoredInteraction } from "#public/channels/slack/interaction-handler.js";
 
 const fallback = () => new Response("ok", { status: 200 });
 
@@ -18,16 +18,16 @@ function rawPayload(overrides: Record<string, unknown> = {}): Record<string, unk
   };
 }
 
-describe("handleRawInteraction", () => {
+describe("handleAuthoredInteraction", () => {
   it("passes through the payload with normalized interaction identity", async () => {
     const payload = rawPayload();
     const handler = vi.fn(() => Response.json({ response_action: "clear" }));
 
-    const response = await handleRawInteraction(
+    const response = await handleAuthoredInteraction(
       payload,
       "unsupported",
       vi.fn(),
-      { onRawInteraction: handler },
+      { onInteraction: handler },
       fallback(),
     );
 
@@ -52,7 +52,7 @@ describe("handleRawInteraction", () => {
       vi.fn(() => Promise.resolve(Response.json({ ok: true }))),
     );
 
-    await handleRawInteraction(
+    await handleAuthoredInteraction(
       rawPayload({
         app_installed_team_id: "T_TOP_LEVEL",
         enterprise_id: "E_TOP_LEVEL",
@@ -62,7 +62,7 @@ describe("handleRawInteraction", () => {
       vi.fn(),
       {
         credentials: { botToken },
-        async onRawInteraction(interaction, ctx) {
+        async onInteraction(interaction, ctx) {
           expect(interaction).toMatchObject({
             installationTeamId: "T_VIEW",
             enterpriseId: "E_NESTED",
@@ -79,11 +79,11 @@ describe("handleRawInteraction", () => {
   it("reads top-level enterprise identity when the nested field is absent", async () => {
     const handler = vi.fn();
 
-    await handleRawInteraction(
+    await handleAuthoredInteraction(
       rawPayload({ enterprise: undefined, enterprise_id: "E_TOP_LEVEL" }),
       "view_submission",
       vi.fn(),
-      { onRawInteraction: handler },
+      { onInteraction: handler },
       fallback(),
     );
 
@@ -96,11 +96,11 @@ describe("handleRawInteraction", () => {
   it("preserves absent optional identity fields", async () => {
     const handler = vi.fn();
 
-    await handleRawInteraction(
+    await handleAuthoredInteraction(
       { type: "view_closed", view: {} },
       "view_closed",
       vi.fn(),
-      { onRawInteraction: handler },
+      { onInteraction: handler },
       fallback(),
     );
 
@@ -118,11 +118,11 @@ describe("handleRawInteraction", () => {
   });
 
   it("returns an empty acknowledgement when the handler returns void", async () => {
-    const response = await handleRawInteraction(
+    const response = await handleAuthoredInteraction(
       rawPayload(),
       "view_submission",
       vi.fn(),
-      { onRawInteraction: vi.fn() },
+      { onInteraction: vi.fn() },
       fallback(),
     );
 
@@ -131,12 +131,12 @@ describe("handleRawInteraction", () => {
   });
 
   it("returns the fallback acknowledgement when the handler throws", async () => {
-    const response = await handleRawInteraction(
+    const response = await handleAuthoredInteraction(
       rawPayload(),
       "view_submission",
       vi.fn(),
       {
-        onRawInteraction() {
+        onInteraction() {
           throw new Error("failed");
         },
       },
@@ -150,11 +150,11 @@ describe("handleRawInteraction", () => {
   it("does not invoke the handler for a non-object payload", async () => {
     const handler = vi.fn();
 
-    const response = await handleRawInteraction(
+    const response = await handleAuthoredInteraction(
       "invalid",
       "unsupported",
       vi.fn(),
-      { onRawInteraction: handler },
+      { onInteraction: handler },
       fallback(),
     );
 

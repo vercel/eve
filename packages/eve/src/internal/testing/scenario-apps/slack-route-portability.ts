@@ -6,7 +6,7 @@ export const SLACK_ROUTE_PORTABILITY_DESCRIPTOR: ScenarioAppDescriptor = {
 
 export default slackChannel({
   botName: "testbot",
-  onRawInteraction(interaction, ctx) {
+  onInteraction(interaction, ctx) {
     const payload: Readonly<Record<string, unknown>> = interaction.payload;
     const type: string = interaction.type;
     const userId: string | undefined = interaction.user?.id;
