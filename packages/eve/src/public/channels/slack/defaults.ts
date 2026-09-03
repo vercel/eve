@@ -15,6 +15,11 @@ import {
   renderInputRequestPostParts,
   type SlackInputRequestPostPart,
 } from "#public/channels/slack/hitl.js";
+import {
+  buildChildSessionLimitGroupPost,
+  childSessionLimitGroupFitsSlack,
+  CHILD_SESSION_LIMIT_GROUP_MAX_SIZE,
+} from "#public/channels/slack/child-session-limits.js";
 import type { SlackMessage } from "#public/channels/slack/inbound.js";
 import {
   SLACK_MAX_BLOCKS_PER_MESSAGE,
@@ -26,6 +31,7 @@ import type {
   SlackChannelInternalEvents,
   SlackChannelState,
   SlackContext,
+  SlackEventContext,
   SlackMentionResult,
 } from "#public/channels/slack/slackChannel.js";
 import type { InputRequest } from "#shared/input.js";
@@ -207,7 +213,19 @@ function firstNonEmptyLine(text: string): string | undefined {
  */
 export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["input.requested"]> {
   return async (data, channel, _ctx) => {
-    for (const post of buildInputRequestPosts(data.requests)) {
+    const ordinaryRequests: InputRequest[] = [];
+    for (const request of data.requests) {
+      const grouped =
+        data.origin?.kind === "subagent" &&
+        request.kind === "session-limit" &&
+        (await upsertChildSessionLimitGroup({
+          channel,
+          groupId: data.origin.parentTurnId,
+          request,
+        }));
+      if (!grouped) ordinaryRequests.push(request);
+    }
+    for (const post of buildInputRequestPosts(ordinaryRequests)) {
       const message = await channel.thread.post({ blocks: post.blocks, text: post.text });
       if (!message.id) continue;
       const cards = { ...channel.state.pendingApprovalCards };
@@ -222,6 +240,69 @@ export function defaultInputRequestedHandler(): NonNullable<SlackChannelEvents["
       channel.state.pendingApprovalCards = cards;
     }
   };
+}
+
+async function upsertChildSessionLimitGroup(input: {
+  readonly channel: SlackEventContext;
+  readonly groupId: string;
+  readonly request: InputRequest;
+}): Promise<boolean> {
+  const groups = input.channel.state.pendingChildSessionLimitGroups ?? {};
+  const existing = groups[input.groupId];
+  const submittedRevision =
+    input.channel.state.submittedChildSessionLimitGroupRevisions?.[input.groupId] ?? 0;
+  if (existing?.requestIds.includes(input.request.requestId) === true) return true;
+
+  const combinedRequestIds = [...(existing?.requestIds ?? []), input.request.requestId];
+  const canUpdate =
+    existing !== undefined &&
+    existing.revision > submittedRevision &&
+    combinedRequestIds.length <= CHILD_SESSION_LIMIT_GROUP_MAX_SIZE &&
+    childSessionLimitGroupFitsSlack({
+      groupId: input.groupId,
+      requestIds: combinedRequestIds,
+      revision: existing.revision + 1,
+    });
+  if (existing !== undefined && existing.revision > submittedRevision && !canUpdate) return false;
+
+  const requestIds = canUpdate ? combinedRequestIds : [input.request.requestId];
+  const revision = Math.max(existing?.revision ?? 0, submittedRevision) + 1;
+  if (!childSessionLimitGroupFitsSlack({ groupId: input.groupId, requestIds, revision })) {
+    return false;
+  }
+  const post = buildChildSessionLimitGroupPost({
+    groupId: input.groupId,
+    requestIds,
+    revision,
+  });
+
+  let messageTs: string | undefined;
+  if (canUpdate) {
+    messageTs = existing.messageTs;
+    const response = await input.channel.slack.request("chat.update", {
+      blocks: post.blocks,
+      channel: input.channel.slack.channelId,
+      text: post.text,
+      ts: messageTs,
+    });
+    if (!response.ok) return false;
+  } else {
+    messageTs = (await input.channel.thread.post(post)).id;
+  }
+  if (!messageTs) return false;
+
+  input.channel.state.pendingChildSessionLimitGroups = trimPendingChildLimitGroups({
+    ...groups,
+    [input.groupId]: { messageTs, requestIds, revision },
+  });
+  return true;
+}
+
+function trimPendingChildLimitGroups(
+  groups: NonNullable<SlackChannelState["pendingChildSessionLimitGroups"]>,
+): NonNullable<SlackChannelState["pendingChildSessionLimitGroups"]> {
+  const entries = Object.entries(groups);
+  return entries.length <= 100 ? groups : Object.fromEntries(entries.slice(-100));
 }
 
 /**

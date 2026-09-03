@@ -224,6 +224,7 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
       emit,
       hookPayload,
       mode: "conversation",
+      parentTurnId: "parent-turn-1",
       session: buildEmptySession("parent-token", "sess-parent"),
     });
     // Simulate the workflow step's post-step
@@ -258,6 +259,17 @@ describe("subagent HITL proxy → Slack-style text-approve regression (Finding #
     // draining and prompt for the HITL response.
     const emittedTypes = events.map((event) => event.type);
     expect(emittedTypes).toEqual(["input.requested", "turn.completed", "session.waiting"]);
+    expect(events[0]).toMatchObject({
+      data: {
+        origin: {
+          childSessionId: "sess-child",
+          kind: "subagent",
+          parentTurnId: "parent-turn-1",
+          subagentName: "linear",
+        },
+      },
+      type: "input.requested",
+    });
 
     // The returned session carries the advanced emission state so
     // the next harness step starts a fresh logical turn.

@@ -48,6 +48,7 @@ interface ProxySubagentEventResult {
 export async function runProxySubagentEventStep(input: {
   readonly answerHook?: AnswerHookRoute;
   readonly hookPayload: SubagentEventHookPayload;
+  readonly parentTurnId?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
@@ -62,12 +63,14 @@ export async function runProxySubagentEventStep(input: {
     ctx,
     durableSession,
     hookPayload: input.hookPayload,
+    parentTurnId: input.parentTurnId,
     parentWritable: input.parentWritable,
   });
 }
 
 /** Emits a task request whose proxy routes were committed by a prior step. */
 export async function emitRecordedTaskInputRequestStep(input: {
+  readonly parentTurnId?: string;
   readonly request: TaskInputRequestDelivery;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly serializedContext: Record<string, unknown>;
@@ -93,6 +96,7 @@ export async function emitRecordedTaskInputRequestStep(input: {
       kind: "subagent-input-request",
       subagentName: input.request.taskId,
     },
+    parentTurnId: input.parentTurnId,
     parentWritable: input.parentWritable,
     recordProxyInputRequests: false,
   });
@@ -104,6 +108,7 @@ export async function emitProxiedSubagentEvent(input: {
   readonly ctx: ContextContainer;
   readonly durableSession: DurableSession;
   readonly hookPayload: SubagentEventHookPayload;
+  readonly parentTurnId?: string;
   readonly parentWritable: WritableStream<Uint8Array>;
   readonly recordProxyInputRequests?: boolean;
 }): Promise<ProxySubagentEventResult> {
@@ -149,6 +154,7 @@ export async function emitProxiedSubagentEvent(input: {
         emit,
         hookPayload: input.hookPayload,
         mode: ctx.require(ModeKey),
+        parentTurnId: input.parentTurnId,
         session: enrichedSession,
       });
       return { result: proxyResult.entries, session: proxyResult.session };

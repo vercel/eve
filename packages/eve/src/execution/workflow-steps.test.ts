@@ -26,7 +26,7 @@ import {
   TurnTaskStateKey,
 } from "#context/keys.js";
 import { BundleKey, ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
-import { serializeContext } from "#context/serialize.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
 import { getPendingCoordinationBatch, setPendingCoordinationBatch } from "#harness/coordination.js";
 import { requestTurnSleep } from "#harness/turn-sleep.js";
 import { TurnCancelledError } from "#harness/turn-cancellation.js";
@@ -209,12 +209,13 @@ function createStubSession(overrides: Partial<HarnessSession> = {}): HarnessSess
 
 function createSerializedContext(
   mode: "conversation" | "task" = "conversation",
+  adapter: ChannelAdapter = threadContextAdapter,
 ): Record<string, unknown> {
   const ctx = new ContextContainer();
   ctx.set(AuthKey, null);
   ctx.set(BundleKey, {
     adapterRegistry: {
-      adaptersByKind: new Map([[threadContextAdapter.kind, threadContextAdapter]]),
+      adaptersByKind: new Map([[adapter.kind, adapter]]),
     },
     compiledArtifactsSource: {} as never,
     graph: {
@@ -230,7 +231,7 @@ function createSerializedContext(
     toolRegistry: {},
     turnAgent: TestTurnAgent,
   } as never);
-  ctx.set(ChannelKey, threadContextAdapter);
+  ctx.set(ChannelKey, adapter);
   ctx.set(ContinuationTokenKey, "http:thread-context");
   ctx.set(ModeKey, mode);
   ctx.set(SessionIdKey, "session-1");
@@ -253,6 +254,32 @@ afterEach(() => {
 });
 
 describe("routeProxiedDeliverStep", () => {
+  it("applies parent channel state before returning from proxied delivery", async () => {
+    const statefulAdapter: ChannelAdapter = {
+      deliver(payload, ctx) {
+        Object.assign(ctx.state, payload.state);
+      },
+      kind: "stateful-test",
+      state: { generation: 1 },
+    };
+    vi.mocked(getCompiledRuntimeAgentBundle).mockResolvedValue({
+      adapterRegistry: { adaptersByKind: new Map([[statefulAdapter.kind, statefulAdapter]]) },
+      compiledArtifactsSource: {} as never,
+    } as never);
+
+    installSessionStoreMocks([createStubSession()]);
+    const result = await routeProxiedDeliverStep({
+      parentWritable: createTestWritable(),
+      payload: { state: { generation: 2 } },
+      serializedContext: createSerializedContext("conversation", statefulAdapter),
+      sessionState: createStubSessionState({ hasProxyInputRequests: true }),
+    });
+
+    expect(result).toMatchObject({ kind: "continue", remainder: undefined });
+    const ctx = await deserializeContext(result.serializedContext);
+    expect(ctx.require(ChannelKey).state).toMatchObject({ generation: 2 });
+  });
+
   it("forwards descendant input responses as session send commands", async () => {
     const auth = {
       attributes: {},

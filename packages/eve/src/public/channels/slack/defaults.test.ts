@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionContext } from "#public/definitions/callback-context.js";
-import { defaultEvents } from "#public/channels/slack/defaults.js";
+import { defaultEvents, defaultInputRequestedHandler } from "#public/channels/slack/defaults.js";
 import type { SlackChannelState, SlackEventContext } from "#public/channels/slack/slackChannel.js";
+import type { InputRequest } from "#shared/input.js";
 
 function sessionContext(
   current: SessionContext["session"]["auth"]["current"] = null,
@@ -50,6 +51,230 @@ function authRequiredEvent(
     turnId: "turn_0",
   };
 }
+
+function sessionLimitRequest(requestId: string): InputRequest {
+  return {
+    action: {
+      callId: `call-${requestId}`,
+      input: {},
+      kind: "tool-call",
+      toolName: "session_limit_continuation",
+    },
+    allowFreeform: false,
+    display: "confirmation",
+    kind: "session-limit",
+    options: [
+      { id: "continue", label: "Approve", style: "primary" },
+      { id: "stop", label: "Stop", style: "danger" },
+    ],
+    prompt: "This session has hit the input-token limit (1.3M) per session.",
+    requestId,
+  };
+}
+
+describe("defaultEvents input.requested", () => {
+  it("updates one grouped card when sibling child session limits arrive separately", async () => {
+    const { channel, post, request } = buildChannelStub();
+    const handler = defaultInputRequestedHandler();
+
+    for (const [index, subagentName] of ["metric-a", "metric-b"].entries()) {
+      await handler(
+        {
+          origin: {
+            childSessionId: `child-${index + 1}`,
+            kind: "subagent",
+            parentTurnId: "parent-turn-1",
+            subagentName,
+          },
+          requests: [sessionLimitRequest(`limit-${index + 1}`)],
+          sequence: index,
+          stepIndex: index,
+          turnId: `child-turn-${index + 1}`,
+        },
+        channel,
+        sessionCtx,
+      );
+    }
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith(
+      "chat.update",
+      expect.objectContaining({
+        channel: "C123",
+        text: "2 child sessions need more tokens",
+        ts: "ts1",
+      }),
+    );
+    expect(channel.state.pendingChildSessionLimitGroups?.["parent-turn-1"]).toEqual({
+      messageTs: "ts1",
+      requestIds: ["limit-1", "limit-2"],
+      revision: 2,
+    });
+  });
+
+  it("falls back to an ordinary card when Slack rejects a grouped-card update", async () => {
+    const { channel, post, request } = buildChannelStub();
+    const handler = defaultInputRequestedHandler();
+    request.mockResolvedValue({ error: "message_not_found", ok: false });
+    const event = (requestId: string, childSessionId: string) => ({
+      origin: {
+        childSessionId,
+        kind: "subagent" as const,
+        parentTurnId: "parent-turn-1",
+        subagentName: "metric",
+      },
+      requests: [sessionLimitRequest(requestId)],
+      sequence: 0,
+      stepIndex: 0,
+      turnId: `${childSessionId}-turn`,
+    });
+
+    await handler(event("limit-1", "child-1"), channel, sessionCtx);
+    await handler(event("limit-2", "child-2"), channel, sessionCtx);
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(channel.state.pendingChildSessionLimitGroups?.["parent-turn-1"]).toEqual({
+      messageTs: "ts1",
+      requestIds: ["limit-1"],
+      revision: 1,
+    });
+  });
+
+  it("leaves root-owned session limits on the ordinary HITL path", async () => {
+    const { channel, post, request } = buildChannelStub();
+
+    await defaultInputRequestedHandler()(
+      {
+        requests: [sessionLimitRequest("root-limit")],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "root-turn",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(request).not.toHaveBeenCalled();
+    expect(channel.state.pendingChildSessionLimitGroups).toBeUndefined();
+  });
+
+  it("starts a new grouped card when a child arrives after the prior card was submitted", async () => {
+    const { channel, post, request } = buildChannelStub();
+    const handler = defaultInputRequestedHandler();
+    const event = (requestId: string, childSessionId: string) => ({
+      origin: {
+        childSessionId,
+        kind: "subagent" as const,
+        parentTurnId: "parent-turn-1",
+        subagentName: "metric",
+      },
+      requests: [sessionLimitRequest(requestId)],
+      sequence: 0,
+      stepIndex: 0,
+      turnId: `${childSessionId}-turn`,
+    });
+
+    await handler(event("limit-1", "child-1"), channel, sessionCtx);
+    channel.state.submittedChildSessionLimitGroupRevisions = { "parent-turn-1": 1 };
+    await handler(event("limit-2", "child-2"), channel, sessionCtx);
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(request).not.toHaveBeenCalled();
+    expect(channel.state.pendingChildSessionLimitGroups?.["parent-turn-1"]).toEqual({
+      messageTs: "ts1",
+      requestIds: ["limit-2"],
+      revision: 2,
+    });
+  });
+
+  it("does not combine child limits from different parent turns", async () => {
+    const { channel, post, request } = buildChannelStub();
+    const handler = defaultInputRequestedHandler();
+
+    for (const [index, parentTurnId] of ["parent-turn-1", "parent-turn-2"].entries()) {
+      await handler(
+        {
+          origin: {
+            childSessionId: `child-${index + 1}`,
+            kind: "subagent",
+            parentTurnId,
+            subagentName: "metric",
+          },
+          requests: [sessionLimitRequest(`limit-${index + 1}`)],
+          sequence: index,
+          stepIndex: index,
+          turnId: `child-turn-${index + 1}`,
+        },
+        channel,
+        sessionCtx,
+      );
+    }
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("keeps non-limit requests on the ordinary path in a mixed child event", async () => {
+    const { channel, post } = buildChannelStub();
+    const approval: InputRequest = {
+      ...sessionLimitRequest("approval-1"),
+      kind: "tool-approval",
+      prompt: "Approve the child tool call?",
+    };
+
+    await defaultInputRequestedHandler()(
+      {
+        origin: {
+          childSessionId: "child-1",
+          kind: "subagent",
+          parentTurnId: "parent-turn-1",
+          subagentName: "metric",
+        },
+        requests: [sessionLimitRequest("limit-1"), approval],
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child-turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(channel.state.pendingChildSessionLimitGroups?.["parent-turn-1"]?.requestIds).toEqual([
+      "limit-1",
+    ]);
+  });
+
+  it("falls back without dropping requests when a child group reaches its size limit", async () => {
+    const { channel, post, request } = buildChannelStub();
+
+    await defaultInputRequestedHandler()(
+      {
+        origin: {
+          childSessionId: "child-1",
+          kind: "subagent",
+          parentTurnId: "parent-turn-1",
+          subagentName: "metric",
+        },
+        requests: Array.from({ length: 26 }, (_, index) =>
+          sessionLimitRequest(`limit-${String(index + 1)}`),
+        ),
+        sequence: 0,
+        stepIndex: 0,
+        turnId: "child-turn-1",
+      },
+      channel,
+      sessionCtx,
+    );
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledTimes(24);
+    expect(
+      channel.state.pendingChildSessionLimitGroups?.["parent-turn-1"]?.requestIds,
+    ).toHaveLength(25);
+  });
+});
 
 describe("defaultEvents approval lifecycle", () => {
   it("sends candidate progress privately", async () => {

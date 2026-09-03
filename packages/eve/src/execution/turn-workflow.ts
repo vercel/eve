@@ -479,6 +479,7 @@ async function waitForRuntimeActionResults(input: {
       }
       const proxyResult = await runProxySubagentEventStep({
         hookPayload: value,
+        parentTurnId: handle.operation.parentTurnId,
         parentWritable: input.cursor.parentWritable,
         serializedContext: input.cursor.serializedContext,
         sessionState: input.cursor.sessionState,

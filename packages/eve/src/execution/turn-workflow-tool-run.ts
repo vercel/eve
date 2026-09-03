@@ -145,6 +145,7 @@ export async function handleWorkflowToolRunRequest(
     await cursor.adopt(
       await runProxySubagentEventStep({
         hookPayload: message.request.event,
+        parentTurnId: message.from.turnId,
         parentWritable: cursor.parentWritable,
         serializedContext: cursor.serializedContext,
         sessionState: cursor.sessionState,
@@ -158,6 +159,7 @@ export async function handleWorkflowToolRunRequest(
         ? { answerHook: { runId: message.from.runId } }
         : {}),
       hookPayload: workflowToolRunRequestToInputRequestPayload(message),
+      parentTurnId: message.from.turnId,
       parentWritable: cursor.parentWritable,
       serializedContext: cursor.serializedContext,
       sessionState: cursor.sessionState,

@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseSlackWebhookBody } from "#compiled/@chat-adapter/slack/webhook.js";
 import {
+  handleInteractionPost,
   parseBlockActionsPayload,
   parseShortcutPayload,
 } from "#public/channels/slack/interactions.js";
+import {
+  buildChildSessionLimitGroupPost,
+  CHILD_SESSION_LIMIT_APPROVE_ALL_ACTION_ID,
+} from "#public/channels/slack/child-session-limits.js";
+
+afterEach(() => vi.unstubAllGlobals());
 
 function makePayload(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -78,6 +85,81 @@ describe("parseShortcutPayload", () => {
   it("rejects malformed and unrelated interaction payloads", () => {
     expect(parseShortcutPayload({ type: "block_actions" })).toBeNull();
     expect(parseShortcutPayload({ type: "shortcut", callback_id: "missing-fields" })).toBeNull();
+  });
+});
+
+describe("handleInteractionPost child session-limit groups", () => {
+  it("submits every snapshotted child response and closes that group revision", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    const post = buildChildSessionLimitGroupPost({
+      groupId: "parent-turn-1",
+      requestIds: ["limit-1", "limit-2"],
+      revision: 2,
+    });
+    const card = post.blocks[0] as { actions: Array<{ value: string }> };
+    const respond = vi.fn().mockResolvedValue(undefined);
+    const pending: Promise<unknown>[] = [];
+    const rawBody = new URLSearchParams({
+      payload: JSON.stringify(
+        makePayload({
+          actions: [
+            {
+              action_id: CHILD_SESSION_LIMIT_APPROVE_ALL_ACTION_ID,
+              text: { type: "plain_text", text: "Approve all" },
+              type: "button",
+              value: card.actions[0]!.value,
+            },
+          ],
+          message: {
+            blocks: post.blocks,
+            thread_ts: "1700000000.000000",
+            ts: "1700000000.000001",
+          },
+          type: "block_actions",
+        }),
+      ),
+    }).toString();
+
+    await handleInteractionPost(
+      rawBody,
+      {
+        from: vi.fn().mockReturnValue({ respond }),
+        resolveSession: vi.fn(),
+        waitUntil: (task: Promise<unknown>) => pending.push(task),
+      } as never,
+      {
+        config: { credentials: { botToken: "xoxb-test" } },
+        onInputResponse: vi.fn().mockResolvedValue({ auth: null }),
+      } as never,
+    );
+    await Promise.all(pending);
+
+    expect(respond).toHaveBeenCalledWith(
+      [
+        { optionId: "continue", requestId: "limit-1" },
+        { optionId: "continue", requestId: "limit-2" },
+      ],
+      {
+        auth: null,
+        state: {
+          childSessionLimitGroupSubmissions: {
+            "parent-turn-1": {
+              messageTs: "1700000000.000001",
+              optionId: "continue",
+              revision: 2,
+            },
+          },
+          submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 2 },
+        },
+      },
+    );
   });
 });
 

@@ -29,6 +29,7 @@ import {
   isHitlAction,
   type HitlFreeformModalMetadata,
 } from "#public/channels/slack/hitl.js";
+import { deriveChildSessionLimitGroupResponse } from "#public/channels/slack/child-session-limits.js";
 import { readSlackTextObject } from "#public/channels/slack/inbound-content.js";
 import {
   updateAnsweredFreeformCard,
@@ -301,8 +302,12 @@ export async function handleInteractionPost(
 
   const continuationToken = slackContinuationToken(interaction.channelId, interaction.threadTs);
   const hitlActions = interaction.actions.flatMap((action) => {
+    const childGroup = deriveChildSessionLimitGroupResponse(action);
+    if (childGroup !== null) {
+      return [{ action, responses: childGroup.responses }];
+    }
     const derived = deriveHitlResponse(action);
-    return derived === null ? [] : [{ action, derived }];
+    return derived === null ? [] : [{ action, responses: [derived.response] }];
   });
 
   if (hitlActions.length > 0) {
@@ -315,7 +320,7 @@ export async function handleInteractionPost(
         submission: {
           type: "block_actions",
           actions: hitlActions.map(({ action }) => action),
-          inputResponses: hitlActions.map(({ derived }) => derived.response),
+          inputResponses: hitlActions.flatMap(({ responses }) => responses),
           messageTs: hitlActions[0]!.action.messageTs,
           user,
         },
@@ -507,7 +512,11 @@ async function dispatchBlockInputResponses(input: {
   }
 
   if (
-    input.submission.actions.some((action) => deriveHitlResponse(action)?.kind === "tool-approval")
+    input.submission.actions.some(
+      (action) =>
+        deriveHitlResponse(action)?.kind === "tool-approval" ||
+        deriveChildSessionLimitGroupResponse(action) !== null,
+    )
   ) {
     return;
   }

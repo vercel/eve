@@ -3257,6 +3257,128 @@ describe("slackChannel() HITL interaction pipeline", () => {
     );
   });
 
+  it("keeps the newest submitted child session-limit group revision", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const adapter = withState(getAdapter(channel), {
+      ...THREAD_STATE,
+      submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 2 },
+    });
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await adapter.deliver!(
+      { state: { submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 1 } } },
+      ctx,
+    );
+    await adapter.deliver!(
+      { state: { submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 3 } } },
+      ctx,
+    );
+
+    expect(ctx.state.submittedChildSessionLimitGroupRevisions).toEqual({
+      "parent-turn-1": 3,
+    });
+  });
+
+  it("settles only the matching child session-limit card revision", async () => {
+    const channel = slackChannel({ credentials: { botToken: "xoxb-test" } });
+    const adapter = withState(getAdapter(channel), {
+      ...THREAD_STATE,
+      pendingChildSessionLimitGroups: {
+        "parent-turn-1": {
+          messageTs: "1700000001.000001",
+          requestIds: ["limit-1", "limit-2"],
+          revision: 2,
+        },
+      },
+    });
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await adapter.deliver!(
+      {
+        state: {
+          childSessionLimitGroupSubmissions: {
+            "parent-turn-1": {
+              messageTs: "1700000001.000001",
+              optionId: "continue",
+              revision: 1,
+            },
+          },
+          submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 1 },
+        },
+      },
+      ctx,
+    );
+    expect(ctx.state.pendingChildSessionLimitGroups).toHaveProperty("parent-turn-1");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await adapter.deliver!(
+      {
+        state: {
+          childSessionLimitGroupSubmissions: {
+            "parent-turn-1": {
+              messageTs: "1700000001.000001",
+              optionId: "continue",
+              revision: 2,
+            },
+          },
+          submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 2 },
+        },
+      },
+      ctx,
+    );
+
+    expect(ctx.state.pendingChildSessionLimitGroups).toEqual({});
+    expect(ctx.state.submittedChildSessionLimitGroupRevisions).toEqual({
+      "parent-turn-1": 2,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(parseSlackRequestBody(fetchMock.mock.calls[0]![1] as RequestInit)).toMatchObject({
+      channel: "C01",
+      text: "Approved 2 child sessions",
+      ts: "1700000001.000001",
+    });
+  });
+
+  it("keeps a matching child session-limit card pending when Slack rejects settlement", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "message_not_found", ok: false }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const adapter = withState(
+      getAdapter(slackChannel({ credentials: { botToken: "xoxb-test" } })),
+      {
+        ...THREAD_STATE,
+        pendingChildSessionLimitGroups: {
+          "parent-turn-1": {
+            messageTs: "1700000001.000001",
+            requestIds: ["limit-1"],
+            revision: 1,
+          },
+        },
+      },
+    );
+    const ctx = buildAdapterContext(adapter, stubAccessor());
+
+    await adapter.deliver!(
+      {
+        state: {
+          childSessionLimitGroupSubmissions: {
+            "parent-turn-1": {
+              messageTs: "1700000001.000001",
+              optionId: "continue",
+              revision: 1,
+            },
+          },
+          submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 1 },
+        },
+      },
+      ctx,
+    );
+
+    expect(ctx.state.pendingChildSessionLimitGroups).toHaveProperty("parent-turn-1");
+  });
+
   it("keeps HITL pending when the input-response hook rejects or throws", async () => {
     const handlers = [
       vi.fn(() => null),

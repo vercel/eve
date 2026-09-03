@@ -60,6 +60,10 @@ import {
 } from "#public/channels/slack/thread.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
+import {
+  buildSettledChildSessionLimitGroupPost,
+  type ChildSessionLimitGroupSubmission,
+} from "#public/channels/slack/child-session-limits.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
   bindSlackSessionOperations,
@@ -193,6 +197,12 @@ export interface SlackPendingApprovalCard {
   readonly messageTs: string;
 }
 
+export interface SlackPendingChildSessionLimitGroup {
+  readonly messageTs: string;
+  readonly requestIds: readonly string[];
+  readonly revision: number;
+}
+
 export interface SlackChannelState {
   /** Audience classification captured before the session is dispatched. */
   audience?: ChannelAudience;
@@ -235,8 +245,23 @@ export interface SlackChannelState {
    */
   pendingAuthMessageTs?: Record<string, string>;
   pendingApprovalCards?: Record<string, SlackPendingApprovalCard>;
+  /** Latest open grouped child limit card for each parent turn. */
+  pendingChildSessionLimitGroups?: Record<string, SlackPendingChildSessionLimitGroup>;
+  /** Latest grouped-card revision submitted by a Slack user for each parent turn. */
+  submittedChildSessionLimitGroupRevisions?: Record<string, number>;
+  /** Delivery-only claims used to settle the matching current card generation. */
+  childSessionLimitGroupSubmissions?: Record<string, ChildSessionLimitGroupSubmission>;
   pendingApprovalCandidateUsers?: Record<string, string>;
   approvalResponderUsers?: Record<string, string>;
+}
+
+const SLACK_SESSION_STATE_RECORD_LIMIT = 100;
+
+function trimStateRecord<T>(record: Record<string, T>): Record<string, T> {
+  const entries = Object.entries(record);
+  return entries.length <= SLACK_SESSION_STATE_RECORD_LIMIT
+    ? record
+    : Object.fromEntries(entries.slice(-SLACK_SESSION_STATE_RECORD_LIMIT));
 }
 
 /**
@@ -907,6 +932,8 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       lastReasoningTypingStatus: null,
       pendingAuthMessageTs: {},
       pendingApprovalCards: {},
+      pendingChildSessionLimitGroups: {},
+      submittedChildSessionLimitGroupRevisions: {},
       pendingApprovalCandidateUsers: {},
       approvalResponderUsers: {},
     },
@@ -925,7 +952,7 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
       return rebuildSlackContext(state, session, config.credentials);
     },
 
-    deliver(payload, channel) {
+    async deliver(payload, channel) {
       const cards = payload.pendingApprovalCards;
       if (typeof cards === "object" && cards !== null) {
         channel.state.pendingApprovalCards = { ...channel.state.pendingApprovalCards, ...cards };
@@ -937,6 +964,44 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
           ...channel.state.approvalResponderUsers,
           ...responders,
         };
+      }
+      const submittedGroups = (payload.state as Partial<SlackChannelState> | undefined)
+        ?.submittedChildSessionLimitGroupRevisions;
+      if (typeof submittedGroups === "object" && submittedGroups !== null) {
+        const merged = { ...channel.state.submittedChildSessionLimitGroupRevisions };
+        for (const [groupId, revision] of Object.entries(submittedGroups)) {
+          if (typeof revision !== "number") continue;
+          merged[groupId] = Math.max(merged[groupId] ?? 0, revision);
+        }
+        channel.state.submittedChildSessionLimitGroupRevisions = trimStateRecord(merged);
+      }
+      const groupSubmissions = (payload.state as Partial<SlackChannelState> | undefined)
+        ?.childSessionLimitGroupSubmissions;
+      if (typeof groupSubmissions === "object" && groupSubmissions !== null) {
+        const pendingGroups = { ...channel.state.pendingChildSessionLimitGroups };
+        for (const [groupId, submission] of Object.entries(groupSubmissions)) {
+          const pending = pendingGroups[groupId];
+          if (
+            pending === undefined ||
+            pending.revision !== submission.revision ||
+            (submission.messageTs !== undefined && pending.messageTs !== submission.messageTs)
+          ) {
+            continue;
+          }
+          const settled = buildSettledChildSessionLimitGroupPost({
+            count: pending.requestIds.length,
+            optionId: submission.optionId,
+          });
+          const response = await channel.slack.request("chat.update", {
+            blocks: settled.blocks,
+            channel: channel.slack.channelId,
+            text: settled.text,
+            ts: pending.messageTs,
+          });
+          if (!response.ok) continue;
+          delete pendingGroups[groupId];
+        }
+        channel.state.pendingChildSessionLimitGroups = pendingGroups;
       }
       return defaultDeliverResult(payload);
     },

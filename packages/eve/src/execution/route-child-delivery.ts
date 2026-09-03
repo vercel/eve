@@ -15,6 +15,7 @@ import {
 } from "#execution/tasks/parent/hitl-proxy-steps.js";
 import { acceptTaskAuthorizationEventStep } from "#execution/tools/subagent/accept-event-step.js";
 import { applyTaskAgentRequest } from "#execution/tools/subagent/task-agent-requests.js";
+import { findSessionTaskEntry } from "#tasks/session-index.js";
 
 /**
  * Coalesces inbound deliver payloads and routes any descendant-bound input
@@ -43,7 +44,12 @@ export async function routeDeliverToChildren(input: {
     });
     sessionState = recorded.sessionState;
     if (!recorded.accepted) continue;
+    const task = findSessionTaskEntry(
+      sessionState.snapshot?.session.state,
+      recorded.request.taskId,
+    );
     const emitted = await emitRecordedTaskInputRequestStep({
+      parentTurnId: task?.createdByTurnId,
       parentWritable: input.parentWritable,
       request: recorded.request,
       serializedContext,
