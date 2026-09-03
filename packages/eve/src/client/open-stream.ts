@@ -274,9 +274,16 @@ export async function openStreamBody(
       if (!response.body) {
         throw new ClientError(response.status, "Response body is null.", response.headers);
       }
+      const body = response.body;
+      let closed = false;
       return {
-        body: response.body,
-        close: () => connectionController.abort(),
+        body,
+        close: () => {
+          if (closed) return;
+          closed = true;
+          connectionController.abort();
+          void body.cancel().catch(() => {});
+        },
         streamVersion: readMessageStreamVersion(response.headers),
         tailIndex: parseTailIndexHeader(response.headers),
       };
