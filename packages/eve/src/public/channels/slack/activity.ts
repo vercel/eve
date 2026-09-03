@@ -88,7 +88,7 @@ export function experimental_slackActivityPlan(): SlackActivityRenderer {
 export function experimental_slackActivityRenderer<State>(
   renderer: ExperimentalSlackActivityRenderer<State>,
 ): SlackActivityRenderer {
-  assertCustomSlackActivityRenderer(renderer);
+  validateCustomSlackActivityRenderer(renderer);
   return {
     [SLACK_ACTIVITY_RENDERER]: true,
     id: renderer.id,
@@ -130,6 +130,12 @@ export function buildSlackActivityRenderers(input: {
 }
 
 function assertCustomSlackActivityRenderer(
+  renderer: SlackActivityRenderer,
+): asserts renderer is SlackActivityRenderer & ExperimentalSlackActivityRenderer {
+  validateCustomSlackActivityRenderer(renderer);
+}
+
+function validateCustomSlackActivityRenderer(
   renderer: unknown,
 ): asserts renderer is ExperimentalSlackActivityRenderer {
   if (
