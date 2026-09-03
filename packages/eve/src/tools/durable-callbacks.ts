@@ -3,7 +3,7 @@ import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type DurableDynamicCallbackPhase =
-  | "activityStart"
+  | "labelStart"
   | "approvalKey"
   | "approvalRequest"
   | "approvalResponse"
@@ -25,7 +25,7 @@ export interface DurableDynamicCallbackReference {
 
 export interface DurableDynamicToolCallbacks {
   readonly execute: DurableDynamicCallbackReference;
-  readonly activity?: {
+  readonly label?: {
     readonly start?: DurableDynamicCallbackReference;
   };
   readonly approvalKey?: DurableDynamicCallbackReference;
@@ -42,7 +42,7 @@ export interface StampedDurableDynamicCallback {
 
 export type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
-  activity: {
+  label: {
     readonly start?: StampedDurableDynamicCallback;
   };
   approvalKey: StampedDurableDynamicCallback;
@@ -186,7 +186,7 @@ export function stampDurableDynamicToolCallbacks(
 }
 
 export function collectDurableDynamicToolCallbacks(input: {
-  readonly activity?: {
+  readonly label?: {
     readonly start?: (...args: never[]) => unknown;
   };
   readonly approval?: Approval<never>;
@@ -194,7 +194,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
-  const activityStart = readDurableDynamicCallback(input.activity?.start);
+  const labelStart = readDurableDynamicCallback(input.label?.start);
   const approvalRequest =
     input.approval === undefined
       ? undefined
@@ -209,7 +209,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
   if (execute !== undefined) callbacks.execute = execute;
-  if (activityStart !== undefined) callbacks.activity = { start: activityStart };
+  if (labelStart !== undefined) callbacks.label = { start: labelStart };
   if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;

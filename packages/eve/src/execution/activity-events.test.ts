@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { projectActivityEvents } from "#execution/activity-events.js";
 import { deriveChildActivityWorkId } from "#execution/activity-work-id.js";
-import { MAX_ACTIVITY_TEXT_LENGTH } from "#shared/activity-text.js";
+import { MAX_ACTIVITY_TEXT_LENGTH } from "#shared/presentation-text.js";
 
 const lineage = {
   id: "work:root:turn",

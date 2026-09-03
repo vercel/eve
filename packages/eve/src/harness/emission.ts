@@ -50,10 +50,10 @@ import {
 } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
-  collectActionActivityLabels,
+  collectActionPresentation,
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
-} from "#harness/action-activity.js";
+} from "#harness/action-presentation.js";
 import { createProviderStreamActionBatch } from "#harness/stream-actions.js";
 import { normalizeModelStreamError } from "#harness/model-call-error.js";
 import { createOrderedStreamEmitter } from "#harness/ordered-stream-emitter.js";
@@ -383,7 +383,7 @@ async function consumeStreamContent(
     await emitFn(
       createActionsRequestedEvent({
         actions: [action],
-        presentation: collectActionActivityLabels([projection]),
+        presentation: collectActionPresentation([projection]),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,

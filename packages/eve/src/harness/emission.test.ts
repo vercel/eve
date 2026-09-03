@@ -435,7 +435,7 @@ describe("emitStreamContent action requests", () => {
     }
   });
 
-  it("emits activity labels for provider-executed calls", async () => {
+  it("emits tool labels for provider-executed calls", async () => {
     const emitted: Parameters<HarnessEmitFn>[0][] = [];
     const emit: HarnessEmitFn = async (event) => {
       emitted.push(event);
@@ -460,7 +460,7 @@ describe("emitStreamContent action requests", () => {
           [
             "web_search",
             {
-              activity: { start: resolveWebSearchActivityLabel },
+              label: { start: resolveWebSearchActivityLabel },
               description: "Search the web.",
               inputSchema: jsonSchema({ type: "object" }),
               name: "web_search",

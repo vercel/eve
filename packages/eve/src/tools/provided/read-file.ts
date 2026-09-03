@@ -1,7 +1,7 @@
 import { z } from "#compiled/zod/index.js";
 
 import { type ReadFileInput, executeReadFileOnSandbox } from "#execution/sandbox/read-file.js";
-import { activityLabel } from "#tools/activity-label.js";
+import { toolLabel } from "#tools/tool-label.js";
 import { defineTool, type ToolDefinition } from "#tools/definition.js";
 
 /**
@@ -43,7 +43,7 @@ export type ReadFileToolOutput = z.infer<typeof READ_FILE_OUTPUT_SCHEMA>;
  * Framework-owned executor that delegates to the default sandbox.
  */
 export const readFile: ToolDefinition<ReadFileToolInput, ReadFileToolOutput> = defineTool({
-  label: { start: (input) => activityLabel("Read", input.filePath) },
+  label: { start: (input) => toolLabel("Read", input.filePath) },
   description: [
     "Read a file from the local filesystem. If the path does not exist, an error is returned.",
     "",

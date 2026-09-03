@@ -3,7 +3,7 @@ import type { ToolSet, TypedToolCall, TypedToolError } from "ai";
 import {
   createPresentedRuntimeActionRequestFromToolCall,
   type RuntimeActionRequestProjection,
-} from "#harness/action-activity.js";
+} from "#harness/action-presentation.js";
 import { resolveToolCallInputObject } from "#harness/coordination.js";
 import type { HarnessToolMap } from "#harness/types.js";
 

@@ -1,5 +1,5 @@
 import type { JsonObject } from "#shared/json.js";
-import { activityLabel } from "#tools/activity-label.js";
+import { toolLabel } from "#tools/tool-label.js";
 
 export const WEB_SEARCH_TOOL_NAME = "web_search";
 
@@ -13,7 +13,7 @@ export function resolveWebSearchActivityLabel(input: unknown): string {
   const providerDetail = Array.isArray(queries)
     ? queries.find((query) => typeof query === "string")
     : (providerAction?.query ?? providerAction?.url ?? providerAction?.pattern);
-  return activityLabel(
+  return toolLabel(
     "Search",
     record.query ?? record.objective ?? record.search_query ?? record.searchQuery ?? providerDetail,
   );

@@ -33,9 +33,9 @@ import {
 } from "#harness/prompt-cache.js";
 import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 import {
-  collectActionActivityLabels,
+  collectActionPresentation,
   createPresentedRuntimeActionRequestFromToolCall,
-} from "#harness/action-activity.js";
+} from "#harness/action-presentation.js";
 import { isInvalidToolCall } from "#harness/tool-call-input-errors.js";
 import type { RuntimeToolResultActionResult } from "#shared/action-types.js";
 import {
@@ -284,7 +284,7 @@ export async function emitStepActions(
     await emitFn(
       createActionsRequestedEvent({
         actions: actions.map(({ action }) => action),
-        presentation: collectActionActivityLabels(actions),
+        presentation: collectActionPresentation(actions),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,

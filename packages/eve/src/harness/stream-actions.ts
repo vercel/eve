@@ -1,8 +1,8 @@
 import { createActionsRequestedEvent } from "#protocol/message.js";
 import {
-  collectActionActivityLabels,
+  collectActionPresentation,
   type RuntimeActionRequestProjection,
-} from "#harness/action-activity.js";
+} from "#harness/action-presentation.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 
 interface ActionEventCoordinates {
@@ -41,7 +41,7 @@ export function createProviderStreamActionBatch(input: {
     await input.emitFn(
       createActionsRequestedEvent({
         actions: projections.map(({ action }) => action),
-        presentation: collectActionActivityLabels(projections),
+        presentation: collectActionPresentation(projections),
         sequence: input.state.sequence,
         stepIndex: input.state.stepIndex,
         turnId: input.state.turnId,

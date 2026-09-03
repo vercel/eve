@@ -3,7 +3,7 @@ import {
   SKILL_INPUT_SCHEMA,
   SKILL_OUTPUT_SCHEMA,
 } from "#execution/tools/load-skill.js";
-import { activityLabel } from "#tools/activity-label.js";
+import { toolLabel } from "#tools/tool-label.js";
 import { defineTool } from "#tools/definition.js";
 import { attachToolBehavior } from "#tools/behavior.js";
 
@@ -11,7 +11,7 @@ export const loadSkill = attachToolBehavior(
   defineTool({
     label: {
       start: (input) =>
-        activityLabel(
+        toolLabel(
           "Load",
           typeof input === "object" && input !== null ? Reflect.get(input, "skill") : undefined,
         ),
