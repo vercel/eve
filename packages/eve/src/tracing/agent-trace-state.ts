@@ -4,6 +4,7 @@ import type {
   InstrumentationActionKind,
   InstrumentationActionOutcome,
   InstrumentationParentLineage,
+  InstrumentationPrincipalSummary,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
@@ -24,6 +25,8 @@ export interface AgentSessionTraceState {
 
 export interface AgentTurnTraceState {
   readonly context: SpanContext;
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
   readonly parentIsRemote?: boolean;
