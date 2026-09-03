@@ -66,10 +66,14 @@ export function createEveServiceName(name: string | undefined): string {
   return serviceName;
 }
 
+function escapeVercelRouteLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function createEveServiceRouteSrc(publicRoutePrefix: string): string {
   if (publicRoutePrefix.length === 0) return `^${EVE_ROUTE_PREFIX}/(.*)$`;
   const prefix = publicRoutePrefix.startsWith("/") ? publicRoutePrefix : `/${publicRoutePrefix}`;
-  return `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${EVE_ROUTE_PREFIX}/(.*)$`;
+  return `^${escapeVercelRouteLiteral(prefix)}${EVE_ROUTE_PREFIX}/(.*)$`;
 }
 
 export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {
@@ -82,7 +86,7 @@ export function createEveRequestPathRoute(routeSrc: string): VercelRouteConfig {
 export function createEveHomeRouteSrc(publicRoutePrefix: string): string | undefined {
   if (publicRoutePrefix.length === 0) return undefined;
   const prefix = publicRoutePrefix.startsWith("/") ? publicRoutePrefix : `/${publicRoutePrefix}`;
-  return `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/?$`;
+  return `^${escapeVercelRouteLiteral(prefix)}/?$`;
 }
 
 /** Route a member's public base path to its package-owned home channel. */
