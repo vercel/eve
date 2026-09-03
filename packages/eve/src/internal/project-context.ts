@@ -1,6 +1,6 @@
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-import { classifyAgentRootEntry, getDirectoryEntryType } from "#discover/filesystem.js";
+import { getDirectoryEntryType, isDiscoverableAgentRootEntry } from "#discover/filesystem.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
 import { findEveProjectRoot } from "#internal/eve-project-root.js";
@@ -40,15 +40,9 @@ function containsPath(parent: string, child: string): boolean {
 
 async function hasFlatAgentRoot(root: string, source: ProjectSource): Promise<boolean> {
   const entries = await source.readDirectory(root);
-  return entries.some((entry) => {
-    const kind = classifyAgentRootEntry(entry.name, getDirectoryEntryType(entry));
-    return (
-      kind !== "unknown" &&
-      kind !== "ignored-directory" &&
-      kind !== "lib-directory" &&
-      kind !== "memory-directory"
-    );
-  });
+  return entries.some((entry) =>
+    isDiscoverableAgentRootEntry(entry.name, getDirectoryEntryType(entry)),
+  );
 }
 
 async function resolveWorkspace(root: string, source: ProjectSource): Promise<AgentWorkspace> {
