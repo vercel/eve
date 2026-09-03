@@ -13,9 +13,11 @@ changesets. When updating a PR, read its current body first.
 Fill in `.github/pull_request_template.md`. Write for a reviewer, not a
 changelog:
 
-- Keep the Summary short—under five sentences for most PRs.
+- Keep the Summary to one short paragraph: usually 2–4 sentences and about
+  100 words or fewer.
 - Lead with the concrete problem, user need, or decision behind the change;
-  follow with the solution and meaningful behavior.
+  follow with the solution and meaningful behavior. Prefer short sentences;
+  split independent points rather than combining them into a long sentence.
 - Do not list files or narrate commits. Include implementation detail only when
   it is necessary to assess behavior or risk.
 - Mention breaking changes, preserved behavior, tradeoffs, scope boundaries,
