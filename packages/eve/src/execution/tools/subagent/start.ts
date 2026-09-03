@@ -11,6 +11,7 @@ import type {
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import {
   applyLiveDeliveryAudienceCeiling,
+  decisionToTraceContentCeiling,
   readForwardedTraceAssertion,
 } from "#shared/forwarded-trace-policy.js";
 import type { DispatchOutcome, RuntimeSession } from "#subagents/handle-dispatch.js";
@@ -78,15 +79,30 @@ export async function startSubagent(input: {
             forwardedTracePolicy,
           ),
         };
-  const traceSeed =
-    input.target.kind === "local"
-      ? allocateChildSessionTraceSeed({
-          callId: input.target.action.callId,
-          parentTraceContext,
-          sessionId: input.session.sessionId,
-          turnId: input.batchEvent.turnId,
-        })
-      : undefined;
+  const decisionCeiling = decisionToTraceContentCeiling(parentTraceContext?.decision);
+  const ceiling =
+    decisionCeiling === undefined
+      ? forwardedTracePolicy?.ceiling
+      : forwardedTracePolicy === undefined
+        ? decisionCeiling
+        : {
+            recordInputs: decisionCeiling.recordInputs && forwardedTracePolicy.ceiling.recordInputs,
+            recordOutputs:
+              decisionCeiling.recordOutputs && forwardedTracePolicy.ceiling.recordOutputs,
+          };
+  const traceSeed = allocateChildSessionTraceSeed({
+    callId: input.target.action.callId,
+    forwardedTracePolicy:
+      ceiling === undefined
+        ? undefined
+        : {
+            ceiling,
+            originAudience: forwardedTracePolicy?.originAudience ?? liveAudience,
+          },
+    parentTraceContext,
+    sessionId: input.session.sessionId,
+    turnId: input.batchEvent.turnId,
+  });
 
   switch (input.target.kind) {
     case "local":
@@ -124,6 +140,7 @@ export async function startSubagent(input: {
         initiatorAuth: input.initiatorAuth,
         parentContinuationToken: input.parentContinuationToken,
         parentTraceContext,
+        traceSeed,
         activityObserver: input.activityObserver,
         session: input.session,
         taskId: input.taskId,

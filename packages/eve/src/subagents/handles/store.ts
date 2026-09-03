@@ -89,6 +89,7 @@ export type AgentAddress =
   | {
       readonly kind: "agent/remote";
       readonly sessionId: string;
+      readonly traceId?: string;
       readonly url: string;
       readonly callbackBaseUrl: string;
       /** Auth/header resolver selected when this child was created; `{}` means none. */
@@ -266,6 +267,10 @@ const addressSchema: z.ZodType<AgentAddress> = z.discriminatedUnion("kind", [
     credentialResolver: z.strictObject({ resolverId: nonEmptyString.optional() }).optional(),
     kind: z.literal("agent/remote"),
     sessionId: nonEmptyString,
+    traceId: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
     url: z.url(),
   }),
 ]);

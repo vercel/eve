@@ -129,6 +129,36 @@ describe("createSessionCommandInbox", () => {
     await inbox.dispose();
   });
 
+  it("publishes accepted trace coordinates only on the continuation alias", async () => {
+    const stable = createMockHook({ token: "stable" });
+    const continuation = createMockHook({ token: "channel" });
+    installHooks(stable, continuation);
+    const trace = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    const inbox = createSessionCommandInbox({
+      acceptedTraceCoordinates: trace,
+    });
+
+    await inbox.claimStable("stable");
+    await inbox.rekeyContinuation("channel");
+
+    expect(createHookMock).toHaveBeenNthCalledWith(1, {
+      metadata: { sessionInboxWireVersion: 4 },
+      token: "stable",
+    });
+    expect(createHookMock).toHaveBeenNthCalledWith(2, {
+      metadata: {
+        eveAcceptedTraceCoordinates: trace,
+        sessionInboxWireVersion: 4,
+      },
+      token: "channel",
+    });
+    await inbox.dispose();
+  });
+
   it("disposes active hooks without closing pending iterators", async () => {
     const stable = createMockHook({ token: "stable" });
     const alias = createMockHook({ token: "channel" });

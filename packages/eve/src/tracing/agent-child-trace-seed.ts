@@ -2,9 +2,11 @@ import type { SessionTraceContext } from "#channel/types.js";
 import type { SessionTraceSeed } from "#context/keys.js";
 import { childSessionTraceKey } from "#instrumentation/lifecycle.js";
 import { getInstrumentationRuntime } from "#instrumentation/runtime.js";
+import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
 export function allocateChildSessionTraceSeed(input: {
   readonly callId: string;
+  readonly forwardedTracePolicy?: ForwardedTraceAssertion;
   readonly parentTraceContext?: SessionTraceContext;
   readonly sessionId: string;
   readonly turnId: string;
@@ -19,11 +21,14 @@ export function allocateChildSessionTraceSeed(input: {
     input.parentTraceContext === undefined
       ? derivedTraceId
       : distinctChildTraceId(derivedTraceId, input.parentTraceContext.traceId);
-  return {
+  const seed: SessionTraceSeed = {
     spanId: runtime.idGenerator.deriveSpanId(`${key}:root`),
     traceFlags: 0,
     traceId,
   };
+  return input.forwardedTracePolicy === undefined
+    ? seed
+    : { ...seed, forwardedTracePolicy: input.forwardedTracePolicy };
 }
 
 function distinctChildTraceId(traceId: string, parentTraceId: string): string {

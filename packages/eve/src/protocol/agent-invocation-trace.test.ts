@@ -49,6 +49,20 @@ describe("agent invocation trace protocol", () => {
     });
   });
 
+  it("accepts a bounded forwarded policy without serializing decisions", () => {
+    const forwardedTracePolicy = {
+      ceiling: { recordInputs: false, recordOutputs: true },
+      originAudience: "private" as const,
+    };
+
+    expect(buildAgentInvocationTrace({ forwardedTracePolicy, parent, seed })).toEqual({
+      forwardedTracePolicy,
+      parent,
+      seed,
+      version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
+    });
+  });
+
   it("rejects policy fields and invalid identifiers", () => {
     expect(
       agentInvocationTraceSchema.safeParse({

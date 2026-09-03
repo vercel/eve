@@ -34,7 +34,38 @@ export const traceCoordinatesSchema = z.strictObject({
   traceId: traceIdSchema,
 });
 
+const instrumentationDecisionSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("drop") }),
+  z.strictObject({
+    action: z.literal("record"),
+    recordInputs: z.boolean(),
+    recordOutputs: z.boolean(),
+  }),
+]);
+export const forwardedTracePolicySchema = z.strictObject({
+  ceiling: z.strictObject({
+    recordInputs: z.boolean(),
+    recordOutputs: z.boolean(),
+  }),
+  originAudience: z.enum(["private", "public", "unknown"]),
+});
+export const sessionTraceContextSchema: z.ZodType<SessionTraceContext> = z.strictObject({
+  decision: instrumentationDecisionSchema.optional(),
+  forwardedTracePolicy: forwardedTracePolicySchema.optional(),
+  ...traceCoordinatesSchema.shape,
+});
+export const sessionParentSchema: z.ZodType<SessionParent> = z.strictObject({
+  callId: z.string().min(1),
+  rootSessionId: z.string().min(1),
+  sessionId: z.string().min(1),
+  turn: z.strictObject({
+    id: z.string().min(1),
+    sequence: z.number().int().min(0),
+  }),
+});
+
 export const agentInvocationTraceSchema = z.strictObject({
+  forwardedTracePolicy: forwardedTracePolicySchema.optional(),
   parent: traceCoordinatesSchema.optional(),
   seed: traceCoordinatesSchema,
   version: z.literal(AGENT_INVOCATION_TRACE_WIRE_VERSION),
@@ -42,6 +73,13 @@ export const agentInvocationTraceSchema = z.strictObject({
 
 export type AgentInvocationTrace = z.infer<typeof agentInvocationTraceSchema>;
 export type TraceCoordinates = z.infer<typeof traceCoordinatesSchema>;
+
+export const createSessionAcceptedResponseSchema = z.object({
+  ok: z.literal(true),
+  sessionId: z.string().min(1),
+  status: z.literal("accepted"),
+  trace: traceCoordinatesSchema.optional(),
+});
 
 export function buildAgentInvocationParent(input: {
   readonly callId: string;
@@ -59,6 +97,7 @@ export function buildAgentInvocationParent(input: {
 }
 
 export function buildAgentInvocationTrace(input: {
+  readonly forwardedTracePolicy?: AgentInvocationTrace["forwardedTracePolicy"];
   readonly parent?: SessionTraceContext;
   readonly seed: SessionTraceContext;
 }): AgentInvocationTrace {
@@ -66,6 +105,9 @@ export function buildAgentInvocationTrace(input: {
     seed: traceCoordinates(input.seed),
     version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
   };
+  if (input.forwardedTracePolicy !== undefined) {
+    trace.forwardedTracePolicy = input.forwardedTracePolicy;
+  }
   if (input.parent !== undefined) {
     trace.parent = traceCoordinates(input.parent);
   }

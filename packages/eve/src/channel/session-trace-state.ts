@@ -13,3 +13,7 @@ export function attachAcceptedTraceCoordinates<T extends object>(
 export function readAcceptedTraceCoordinates(target: object): TraceCoordinates | undefined {
   return acceptedTraceCoordinates.get(target);
 }
+
+export function copyAcceptedTraceCoordinates<T extends object>(source: object, target: T): T {
+  return attachAcceptedTraceCoordinates(target, acceptedTraceCoordinates.get(source));
+}

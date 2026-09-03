@@ -10,6 +10,7 @@ import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
+import { buildAgentInvocationParent } from "#protocol/agent-invocation-trace.js";
 
 const log = createLogger("execution.subagent-start-remote");
 
@@ -28,6 +29,7 @@ export async function startRemoteSubagent(input: {
   readonly initiatorAuth: Parameters<typeof startRemoteAgentSession>[0]["initiatorAuth"];
   readonly parentContinuationToken: string | undefined;
   readonly parentTraceContext: Parameters<typeof startRemoteAgentSession>[0]["parentTraceContext"];
+  readonly traceSeed: Parameters<typeof startRemoteAgentSession>[0]["traceSeed"];
   readonly activityObserver?: Parameters<typeof startRemoteAgentSession>[0]["activityObserver"];
   readonly session: RuntimeSession;
   readonly taskId?: string;
@@ -92,19 +94,35 @@ export async function startRemoteSubagent(input: {
       originAudience: input.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
+      parent: buildAgentInvocationParent({
+        callId: action.callId,
+        rootSessionId: input.session.rootSessionId ?? input.session.sessionId,
+        sessionId: input.session.sessionId,
+        turnId: input.batchEvent.turnId,
+        turnSequence: input.batchEvent.sequence,
+      }),
       parentTraceContext: input.parentTraceContext,
       activityObserver,
       remote: resolvedRemote,
       session: input.session,
       taskId: input.taskId,
+      traceSeed: input.traceSeed,
     });
-    const address = {
+    const address: {
+      callbackBaseUrl: string;
+      credentialResolver: typeof credentialResolver;
+      kind: "agent/remote";
+      sessionId: string;
+      traceId?: string;
+      url: string;
+    } = {
       callbackBaseUrl,
       credentialResolver,
       kind: "agent/remote",
       sessionId: child.sessionId,
       url: resolvedRemote.url,
-    } as const;
+    };
+    if (child.traceId !== undefined) address.traceId = child.traceId;
     return {
       address,
       callId: action.callId,

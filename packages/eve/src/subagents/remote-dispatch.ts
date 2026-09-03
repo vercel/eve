@@ -1,4 +1,3 @@
-import { z } from "#compiled/zod/index.js";
 import { CancelTurnResponseSchema } from "#protocol/cancel-turn.js";
 import { ResetResponseSchema, type ResetResponse } from "#protocol/reset-session.js";
 import { AgentHandleError } from "#protocol/agent-handle-error.js";
@@ -12,6 +11,7 @@ import type {
   ActivityObserverConfig,
   CancelTurnResult,
   SessionAuthContext,
+  SessionParent,
   SessionTraceContext,
 } from "#channel/types.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -32,15 +32,15 @@ import type { JsonObject } from "#shared/json.js";
 import { readTaskIdFromInboxToken } from "#tasks/task-inbox-token.js";
 import { writeForwardedAudienceBaggage } from "#protocol/baggage.js";
 import { decisionToTraceContentCeiling } from "#shared/forwarded-trace-policy.js";
-
-const CreateSessionResponseSchema = z.object({
-  ok: z.literal(true),
-  sessionId: z.string().min(1),
-  status: z.literal("accepted"),
-});
+import {
+  buildAgentInvocationTrace,
+  type AgentInvocationTrace,
+} from "#protocol/agent-invocation-trace.js";
+import { sendRemoteAgentCreateRequest } from "#execution/remote-agent-create-request.js";
 
 type RemoteAgentSessionCoordinates = {
   readonly sessionId: string;
+  readonly traceId?: string;
 };
 
 class RemoteAgentCancelRequestError extends Error {
@@ -69,10 +69,12 @@ export async function startRemoteAgentSession(input: {
    * created instead of starting a second one.
    */
   readonly operationId?: string;
+  readonly parent?: SessionParent;
   readonly parentTraceContext?: SessionTraceContext;
   readonly remote: ResolvedRuntimeRemoteAgentNode;
   readonly session: HarnessSession;
   readonly taskId?: string;
+  readonly traceSeed?: SessionTraceContext;
 }): Promise<RemoteAgentSessionCoordinates> {
   const callbackToken = input.callbackToken ?? input.session.continuationToken;
   if (!callbackToken) {
@@ -98,6 +100,8 @@ export async function startRemoteAgentSession(input: {
     mode: "conversation" | "task";
     operationId?: string;
     outputSchema?: object;
+    invocation?: SessionParent;
+    trace?: AgentInvocationTrace;
   } = {
     capabilities: {},
     callback: {
@@ -125,12 +129,19 @@ export async function startRemoteAgentSession(input: {
   if (input.operationId !== undefined) {
     requestBody.operationId = input.operationId;
   }
+  if (input.parent !== undefined) requestBody.invocation = input.parent;
+  if (input.traceSeed !== undefined) {
+    requestBody.trace = buildAgentInvocationTrace({
+      forwardedTracePolicy: input.traceSeed.forwardedTracePolicy,
+      parent: input.parentTraceContext,
+      seed: input.traceSeed,
+    });
+  }
 
   const headers = await resolveRemoteAgentRequestHeaders(input.remote);
-  const traceparent = formatTraceparent(input.parentTraceContext);
-  if (traceparent !== undefined) {
-    setHeader(headers, "traceparent", traceparent);
-  }
+  const traceparent =
+    requestBody.trace === undefined ? formatTraceparent(input.parentTraceContext) : undefined;
+  setHeader(headers, "traceparent", traceparent);
   const baggage = writeForwardedAudienceBaggage(
     readHeader(headers, "baggage"),
     buildForwardedTraceAssertion({
@@ -141,38 +152,12 @@ export async function startRemoteAgentSession(input: {
     }),
   );
   setHeader(headers, "baggage", baggage);
-  const response = await fetch(createRemoteAgentSessionUrl(input.remote), {
-    body: JSON.stringify(requestBody),
-    headers: {
-      "content-type": "application/json",
-      ...headers,
-    },
-    method: "POST",
+  return await sendRemoteAgentCreateRequest({
+    body: requestBody,
+    headers,
+    remoteAgentName: input.action.remoteAgentName,
+    url: createRemoteAgentSessionUrl(input.remote),
   });
-
-  if (!response.ok) {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session request failed with HTTP ${response.status}.`,
-    );
-  }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response was not valid JSON.`,
-    );
-  }
-
-  const parsed = CreateSessionResponseSchema.safeParse(body);
-  if (!parsed.success) {
-    throw new Error(
-      `Remote agent "${input.action.remoteAgentName}" create-session response was invalid.`,
-    );
-  }
-
-  return { sessionId: parsed.data.sessionId };
 }
 
 function buildForwardedTraceAssertion(input: {

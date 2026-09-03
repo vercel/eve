@@ -201,6 +201,133 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("sends distinct child coordinates and records only an exact acknowledgement", async () => {
+    const parentTraceContext = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    const traceSeed = {
+      spanId: "4".repeat(16),
+      traceFlags: 0,
+      traceId: "3".repeat(32),
+    };
+    const parent = {
+      callId: "call-remote",
+      rootSessionId: "root-session",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 2 },
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "accepted-child",
+            status: "accepted",
+            trace: traceSeed,
+          },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "mismatched-child",
+            status: "accepted",
+            trace: { ...traceSeed, spanId: "5".repeat(16) },
+          },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      parent,
+      parentTraceContext,
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+      traceSeed,
+    };
+
+    await expect(startRemoteAgentSession(input)).resolves.toEqual({
+      sessionId: "accepted-child",
+      traceId: traceSeed.traceId,
+    });
+    await expect(startRemoteAgentSession(input)).resolves.toEqual({
+      sessionId: "mismatched-child",
+    });
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request.headers).not.toHaveProperty("traceparent");
+    expect(JSON.parse(request.body as string)).toMatchObject({
+      invocation: parent,
+      trace: { parent: parentTraceContext, seed: traceSeed, version: 1 },
+    });
+  });
+
+  it("retries an older receiver without joining the parent trace", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 400 }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        callbackBaseUrl: "https://caller.example.com",
+        parent: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        parentTraceContext: {
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+        remote: createRemoteAgent(),
+        session: {
+          agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+          compaction: { recentWindowSize: 10, threshold: 100000 },
+          continuationToken: "eve:parent-token",
+          history: [],
+          sessionId: "parent-session",
+          state: {},
+        },
+        traceSeed: {
+          spanId: "4".repeat(16),
+          traceFlags: 1,
+          traceId: "3".repeat(32),
+        },
+      }),
+    ).resolves.toEqual({ sessionId: "remote-session" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toHaveProperty("trace");
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty("trace");
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty(
+      "invocation",
+    );
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).not.toHaveProperty("traceparent");
+  });
+
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
