@@ -30,7 +30,7 @@ async function createWorkspace(): Promise<string> {
 
 async function resolveWorkspace(root: string) {
   const context = await resolveEveProjectContext(root);
-  if (context?.kind !== "workspace") throw new Error("Expected a workspace context.");
+  if (context.kind !== "workspace") throw new Error("Expected a workspace context.");
   return context.workspace;
 }
 

@@ -162,6 +162,8 @@ function environmentPaths(root: string): string[] {
 async function createEnvironmentApp(): Promise<string> {
   const appRoot = await mkdtemp(join(tmpdir(), "eve-dev-env-transaction-"));
   temporaryDirectories.push(appRoot);
+  await mkdir(join(appRoot, "agent"));
+  await writeFile(join(appRoot, "package.json"), JSON.stringify({ dependencies: { eve: "*" } }));
   await writeFile(
     join(appRoot, ".env"),
     "EVE_WATCH_ENV_FILE_ONLY=from-env\nEVE_WATCH_ENV_SHARED=from-env\nEVE_WATCH_ENV_SHELL=from-env\n",

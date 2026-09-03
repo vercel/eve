@@ -24,7 +24,7 @@ export type EveProjectContext =
       readonly workspace: AgentWorkspace;
       readonly environmentRoot: string;
       readonly kind: "workspace-member";
-      readonly member: AgentWorkspace["members"][number];
+      readonly member: AgentWorkspaceMember;
     }
   | {
       readonly appRoot: string;
@@ -49,8 +49,8 @@ async function resolveWorkspace(root: string, source: ProjectSource): Promise<Ag
   return { members, root };
 }
 
-/** Resolve the owning eve package, validate its shape, and classify the input path within it. */
-export async function resolveEveProjectContext(
+/** Try to resolve the owning eve package and classify the input path within it. */
+export async function findEveProjectContext(
   startPath: string,
   options: { readonly source?: ProjectSource } = {},
 ): Promise<EveProjectContext | undefined> {
@@ -88,4 +88,16 @@ export async function resolveEveProjectContext(
   }
 
   return { workspace, environmentRoot: workspace.root, kind: "workspace" };
+}
+
+/** Resolve the owning eve project, throwing when the path has no eve package owner. */
+export async function resolveEveProjectContext(
+  startPath: string,
+  options: { readonly source?: ProjectSource } = {},
+): Promise<EveProjectContext> {
+  const context = await findEveProjectContext(startPath, options);
+  if (context === undefined) {
+    throw new Error(`No eve project contains ${resolve(startPath)}.`);
+  }
+  return context;
 }

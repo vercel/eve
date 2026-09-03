@@ -4,7 +4,7 @@ import { join } from "node:path";
 import pc from "#compiled/picocolors/index.js";
 
 import { assertValidPublicAgentName } from "#internal/agent-name.js";
-import { resolveEveProjectContext } from "#internal/project-context.js";
+import { findEveProjectContext } from "#internal/project-context.js";
 import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { validateModelSlug } from "#setup/flows/model-source-change.js";
@@ -79,7 +79,7 @@ export async function addAgentsToWorkspace(
   options: InitCommandOptions,
   validateModel: typeof validateModelSlug = validateModelSlug,
 ): Promise<boolean> {
-  const context = await resolveEveProjectContext(workspaceRoot);
+  const context = await findEveProjectContext(workspaceRoot);
   if (context?.kind !== "workspace") return false;
   if (options.channelWebNextjs === true) {
     throw new Error("--channel-web-nextjs is not supported when adding a workspace agent.");

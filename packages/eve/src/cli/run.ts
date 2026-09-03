@@ -47,7 +47,7 @@ import {
   parseStatsMode,
 } from "#cli/option-parsers.js";
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
-import { resolveEveProjectContext } from "#internal/project-context.js";
+import { findEveProjectContext, resolveEveProjectContext } from "#internal/project-context.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
@@ -648,11 +648,7 @@ export async function runCli(
       applicationContext.root = project.appRoot;
     },
     async resolveAgent() {
-      const context = await resolveEveProjectContext(applicationContext.root);
-      if (context === undefined) {
-        throw new Error("No eve project contains the current directory.");
-      }
-      return context;
+      return resolveEveProjectContext(applicationContext.root);
     },
   };
   const program = createCliProgram(logger, runtime, applicationContext);
@@ -661,7 +657,7 @@ export async function runCli(
     const findApplicationRoot = runtime.findApplicationRoot ?? findCliApplicationRoot;
     const appRoot = await findApplicationRoot(applicationContext.root);
     if (appRoot === undefined) {
-      const projectContext = await resolveEveProjectContext(applicationContext.root);
+      const projectContext = await findEveProjectContext(applicationContext.root);
       input = projectContext?.kind === "workspace" ? ["dev"] : ["init"];
     } else {
       applicationContext.root = appRoot;

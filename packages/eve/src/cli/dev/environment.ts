@@ -56,7 +56,7 @@ export function getDevelopmentEnvironmentFilePaths(appRoot: string): string[] {
 export async function loadDevelopmentEnvironmentFiles(appRoot: string): Promise<void> {
   const resolvedAppRoot = resolve(appRoot);
   const context = await resolveEveProjectContext(resolvedAppRoot);
-  getDevelopmentEnvironmentLoader(resolvedAppRoot, context?.environmentRoot).reload();
+  getDevelopmentEnvironmentLoader(resolvedAppRoot, context.environmentRoot).reload();
 }
 
 export function stageDevelopmentEnvironmentFiles(appRoot: string): DevelopmentEnvironmentReload {

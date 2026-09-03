@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { createMemoryProjectSource } from "#discover/project-source.js";
 import { resolveDiscoveryProject } from "#discover/project.js";
-import { resolveEveProjectContext } from "#internal/project-context.js";
+import { findEveProjectContext, resolveEveProjectContext } from "#internal/project-context.js";
 
 async function createWorkspace(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "eve-workspace-"));
@@ -40,7 +40,7 @@ describe("resolveEveProjectContext", () => {
       mkdir(join(root, "agents", "support", "agent"), { recursive: true }),
       writeFile(join(root, "package.json"), JSON.stringify({ devDependencies: { eve: "*" } })),
     ]);
-    await expect(resolveEveProjectContext(root)).resolves.toBeUndefined();
+    await expect(findEveProjectContext(root)).resolves.toBeUndefined();
   });
 
   it("treats agents in a monorepo that only develops with eve as standalone projects", async () => {
@@ -156,7 +156,7 @@ describe("resolveEveProjectContext", () => {
     await mkdir(packageRoot, { recursive: true });
     await writeFile(join(packageRoot, "package.json"), JSON.stringify({ dependencies: {} }));
 
-    await expect(resolveEveProjectContext(packageRoot)).resolves.toBeUndefined();
+    await expect(findEveProjectContext(packageRoot)).resolves.toBeUndefined();
   });
 
   it("rejects an eve package with neither project directory", async () => {
