@@ -507,15 +507,19 @@ describe("ClientSession", () => {
     expect(session.state).toEqual(state);
   });
 
-  it("serializes clientContext with a fixed-session message", async () => {
+  it("serializes durable and ephemeral context with a fixed-session message", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession();
 
-    await session.send("What word is selected?", { clientContext: { selectedWord: "jazz" } });
+    await session.send("What word is selected?", {
+      context: ["The workspace is Acme."],
+      clientContext: { selectedWord: "jazz" },
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({
+      context: ["The workspace is Acme."],
       clientContext: { selectedWord: "jazz" },
       message: "What word is selected?",
     });
@@ -534,7 +538,7 @@ describe("ClientSession", () => {
     });
   });
 
-  it("serializes clientContext when continuing a session", async () => {
+  it("serializes durable and ephemeral context with a HITL response", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(createAcceptedResponse());
     const session = createSession({
       sessionId: "session_1",
@@ -542,12 +546,14 @@ describe("ClientSession", () => {
     });
 
     await session.respond([{ requestId: "approval_1", optionId: "approve" }], {
+      context: ["The approval applies to deployment dep_1."],
       clientContext: "approve button visible",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({
+      context: ["The approval applies to deployment dep_1."],
       clientContext: "approve button visible",
       inputResponses: [{ requestId: "approval_1", optionId: "approve" }],
     });
