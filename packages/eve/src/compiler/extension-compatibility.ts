@@ -24,17 +24,21 @@ const EXTENSION_CAPABILITY_CONTRACTS = {
   tool: {
     current: 27,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 27,
     ],
-    dropped: { 15: "TaskExec replaces stageEffect with send" },
+    dropped: {
+      15: "TaskExec replaces stageEffect with send",
+      26: "Background tools now use task yield descriptors",
+    },
   },
   dynamicTool: {
     current: 27,
     supported: [
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25, 27,
     ],
     dropped: {
       21: "Message and reasoning append events now expose deltas instead of cumulative snapshots.",
+      26: "Background tools now use task yield descriptors",
     },
   },
   channel: {

@@ -79,16 +79,16 @@ export interface TaskExec {
   /** Returns a descriptor which sends one message to the parent when yielded. */
   postMessage(message: string): TaskMessage;
   /** @deprecated Use yields from a workflow-backed background tool. */
-  readonly binding?: TaskBinding;
+  readonly binding: TaskBinding;
   /** @deprecated Use yields from a workflow-backed background tool. */
-  delegated?<TData extends JsonObject>(input: {
+  delegated<TData extends JsonObject>(input: {
     readonly executor: TaskExecutorBinding;
     readonly receipt: TData;
   }): TaskDelegated<TData>;
   /** @deprecated Use yields from a workflow-backed background tool. */
-  readonly send?: (command: TaskSendCommand) => Promise<void>;
+  readonly send: (command: TaskSendCommand) => Promise<void>;
   /** @deprecated Use ctx.session. */
-  readonly session?: HarnessSession;
+  readonly session: HarnessSession;
   /** @deprecated Framework-owned task internals are not part of the authoring API. */
-  readonly task?: BackgroundTask;
+  readonly task: BackgroundTask;
 }

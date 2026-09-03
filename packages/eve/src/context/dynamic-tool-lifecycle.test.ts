@@ -1097,8 +1097,13 @@ describe("dispatchDynamicToolEvent", () => {
     const [tool] = buildDynamicTools(restored);
     expect(tool?.execution).toBe("background");
     const task: TaskExec = {
+      binding: { taskId: "task-1", token: "token-1" },
+      delegated: vi.fn(),
       postMessage: (message) => ({ kind: "eve:task-message", message }),
+      send: vi.fn(),
+      session: {} as TaskExec["session"],
       setState: (state) => ({ kind: "eve:task-set-state", state }),
+      task: {} as TaskExec["task"],
       taskId: "task-1",
     };
     const output = tool!.execute!({}, executeOptions, task) as AsyncIterable<unknown>;
