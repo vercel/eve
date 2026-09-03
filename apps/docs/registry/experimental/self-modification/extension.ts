@@ -1,1 +1,1 @@
-export { default } from "@eve/self-modification";
+export { default } from "eve/self-modification";

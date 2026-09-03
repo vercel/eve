@@ -59,7 +59,6 @@
     "@chat-adapter/state-memory": "4.34.0",
     "@chat-adapter/whatsapp": "4.34.0",
     "@chat-adapter/x": "4.34.0",
-    "@eve/self-modification": "workspace:*",
     "@getdial/chat-sdk-adapter": "0.2.0",
     "@github-tools/eve-extension": "^0.1.0",
     "@jetty/eve": "^0.3.0",

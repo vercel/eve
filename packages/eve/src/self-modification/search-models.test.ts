@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import searchModels, {
   parseGatewayModels,
   searchGatewayModels,
-} from "../extension/tools/search_models.js";
+} from "./extension/tools/search_models.js";
 
 const CATALOG = {
   data: [
@@ -71,7 +71,8 @@ describe("selfmod__search_models", () => {
     const result = await searchModels.execute({ query: "sol" }, {
       abortSignal: new AbortController().signal,
     } as never);
-    if (Symbol.asyncIterator in result) throw new TypeError("search_models must not stream.");
+    if (Symbol.asyncIterator in result)
+      throw new TypeError("selfmod__search_models must not stream.");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://ai-gateway.vercel.sh/v1/models",

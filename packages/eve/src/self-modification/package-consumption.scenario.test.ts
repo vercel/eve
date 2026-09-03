@@ -8,8 +8,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, it } from "vitest";
 
 const runFile = promisify(execFile);
-const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const evePackageRoot = resolve(packageRoot, "../eve");
+const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const temporaryRoots: string[] = [];
 
 async function run(command: string, args: string[], cwd: string): Promise<void> {
@@ -71,9 +70,9 @@ describe("packed package consumption", () => {
   });
 
   it("builds a fresh app using only installed tarball contents", async () => {
-    await access(join(packageRoot, "dist/index.mjs"));
-    await access(join(packageRoot, "scaffold/agent.js"));
-    await access(join(evePackageRoot, "dist/src/index.js"));
+    await access(join(packageRoot, "dist/src/index.js"));
+    await access(join(packageRoot, "dist/src/self-modification/agent.js"));
+    await access(join(packageRoot, "dist/src/self-modification/extension/extension.js"));
 
     const root = await mkdtemp(join(tmpdir(), "eve-self-modification-package-"));
     temporaryRoots.push(root);
@@ -82,8 +81,7 @@ describe("packed package consumption", () => {
     await mkdir(tarballsRoot, { recursive: true });
     await mkdir(appRoot, { recursive: true });
 
-    const eveTarball = await pack(evePackageRoot, tarballsRoot, "eve");
-    const selfModificationTarball = await pack(packageRoot, tarballsRoot, "eve-self-modification");
+    const eveTarball = await pack(packageRoot, tarballsRoot, "eve");
     await writeAppFile(
       appRoot,
       "package.json",
@@ -94,8 +92,8 @@ describe("packed package consumption", () => {
           type: "module",
           scripts: { build: "eve build" },
           dependencies: {
-            "@eve/self-modification": `file:${selfModificationTarball}`,
             eve: `file:${eveTarball}`,
+            "just-bash": "3.1.0",
           },
         },
         null,
@@ -116,17 +114,17 @@ describe("packed package consumption", () => {
     await writeAppFile(
       appRoot,
       "agent/subagents/self-modification/agent.ts",
-      'import { defineSelfModificationAgent } from "@eve/self-modification/agent";\n\nexport default defineSelfModificationAgent();\n',
+      'import { defineSelfModificationAgent } from "eve/self-modification/agent";\n\nexport default defineSelfModificationAgent();\n',
     );
     await writeAppFile(
       appRoot,
       "agent/subagents/self-modification/sandbox.ts",
-      'export { default } from "@eve/self-modification/sandbox";\n',
+      'export { default } from "eve/self-modification/sandbox";\n',
     );
     await writeAppFile(
       appRoot,
       "agent/subagents/self-modification/extensions/selfmod.ts",
-      'export { default } from "@eve/self-modification";\n',
+      'export { default } from "eve/self-modification";\n',
     );
 
     await run(
@@ -140,7 +138,7 @@ describe("packed package consumption", () => {
       ],
       appRoot,
     );
-    await access(join(appRoot, "node_modules/@eve/self-modification/src/agent.ts"));
+    await access(join(appRoot, "node_modules/eve/dist/src/self-modification/agent.js"));
     await run("pnpm", ["build"], appRoot);
   }, 120_000);
 });

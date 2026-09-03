@@ -1,4 +1,4 @@
-import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "eve";
+import { defineAgent, defineDynamic, type AgentStaticModelDefinition } from "#public/index.js";
 
 /** Default model used by the self-modification subagent. */
 export const DEFAULT_SELF_MODIFICATION_MODEL = "anthropic/claude-sonnet-5";

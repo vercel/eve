@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { LocalDevCapability } from "eve/local-dev";
+import type { LocalDevCapability } from "#public/local-dev.js";
 
 const { findPackageJSON, readFile } = vi.hoisted(() => ({
   findPackageJSON: vi.fn(),
@@ -13,9 +13,9 @@ const { findPackageJSON, readFile } = vi.hoisted(() => ({
 vi.mock("node:module", () => ({ findPackageJSON }));
 vi.mock("node:fs/promises", () => ({ readFile }));
 
-import { readTerminalHeadlessEvent, runEveAdd } from "../extension/eve-add.js";
-import { addRegistryItem, handoffMessage, unsetEnvVars } from "../extension/tools/registry_add.js";
-import { clearRegistryIndexCache } from "../extension/tools/search_registry.js";
+import { readTerminalHeadlessEvent, runEveAdd } from "./extension/eve-add.js";
+import { addRegistryItem, handoffMessage, unsetEnvVars } from "./extension/tools/registry_add.js";
+import { clearRegistryIndexCache } from "./extension/tools/search_registry.js";
 
 const APP_ROOT = "/workspace/agent";
 
