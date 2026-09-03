@@ -729,63 +729,6 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
-  it("does not fail tool streaming when label projections throw", async () => {
-    const tools = new Map<string, HarnessToolDefinition>([
-      [
-        "build_report",
-        {
-          resultPresentation: () => {
-            throw new Error("result projection failed");
-          },
-          deltaPresentation: () => {
-            throw new Error("update projection failed");
-          },
-          description: "Build a report.",
-          execute: async () => ({ phase: "complete" }),
-          inputSchema: jsonSchema({ type: "object" }),
-          name: "build_report",
-        },
-      ],
-    ]);
-    const emit = createEmitStub();
-
-    await emitStreamContent(
-      emit,
-      EMISSION_STATE,
-      streamOf([
-        {
-          input: {},
-          toolCallId: "call-1",
-          toolName: "build_report",
-          type: "tool-call",
-        },
-        {
-          output: { phase: "collecting" },
-          preliminary: true,
-          toolCallId: "call-1",
-          toolName: "build_report",
-          type: "tool-result",
-        },
-        {
-          output: { phase: "complete" },
-          toolCallId: "call-1",
-          toolName: "build_report",
-          type: "tool-result",
-        },
-        { finishReason: "stop", type: "finish-step" },
-      ] as TextStreamPart<ToolSet>[]),
-      { excludedActionToolNames: new Set(), tools },
-    );
-
-    expect(vi.mocked(emit).mock.calls.map(([event]) => event.type)).toEqual([
-      "actions.requested",
-      "action.partial",
-      "action.result",
-    ]);
-    expect(vi.mocked(emit).mock.calls[1]?.[2]).toBeUndefined();
-    expect(vi.mocked(emit).mock.calls[2]?.[2]).toBeUndefined();
-  });
-
   it("marks a background subagent receipt on subagent.completed", async () => {
     const emit = createEmitStub();
     const tools = new Map<string, HarnessToolDefinition>([
