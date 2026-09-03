@@ -50,17 +50,20 @@ import {
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
+import { recordActionChildTraceId } from "#tracing/agent-trace-context-store.js";
 
 export type AgentInvocationDispatchResult =
   | {
       readonly kind: "dispatched";
       readonly agentId: string;
       readonly event: SubagentCalledStreamEvent;
+      readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
   | {
       readonly kind: "failed";
       readonly result: RuntimeSubagentResult;
+      readonly serializedContext?: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     };
 
@@ -72,6 +75,7 @@ export type TaskAgentInvocationDispatchResult =
 export async function dispatchAgentInvocation(input: {
   readonly callbackBaseUrl: string;
   readonly emit?: HandleEventFn;
+  readonly instrumentationCallId?: string;
   readonly replyTo: string;
   readonly request: AgentInvocationRequest;
   readonly serializedContext: Record<string, unknown>;
@@ -93,6 +97,7 @@ export async function dispatchAgentInvocation(input: {
     throw new Error("Agent invocation produced no executable plan entry.");
   }
   let session = prepared.session;
+  let serializedContext = prepared.serializedContext;
   const currentAgentHandles = (): readonly AgentHandle[] =>
     getAgentHandleStore(session.state)?.handles ?? [];
   const sessionState = (): DurableSessionState =>
@@ -106,7 +111,12 @@ export async function dispatchAgentInvocation(input: {
     return applied.result;
   };
   if (entry.kind === "reject") {
-    return { kind: "failed", result: entry.result, sessionState: sessionState() };
+    return {
+      kind: "failed",
+      result: entry.result,
+      serializedContext,
+      sessionState: sessionState(),
+    };
   }
 
   let outcome: DispatchOutcome;
@@ -148,6 +158,7 @@ export async function dispatchAgentInvocation(input: {
         return {
           kind: "failed",
           result: createTaskClaimError(entry.action, entry.agentId, claim),
+          serializedContext,
           sessionState: sessionState(),
         };
       }
@@ -217,6 +228,7 @@ export async function dispatchAgentInvocation(input: {
       channelMetadata: prepared.channelMetadata,
       currentSession: session,
       fanoutSize: prepared.fanoutSize,
+      instrumentationCallId: input.instrumentationCallId,
       initiatorAuth: prepared.initiatorAuth,
       localDevRequest: prepared.localDevRequest,
       parentContinuationToken: input.replyTo,
@@ -246,7 +258,30 @@ export async function dispatchAgentInvocation(input: {
   }
 
   if (outcome.kind === "error") {
-    return { kind: "failed", result: outcome.result, sessionState: sessionState() };
+    if (outcome.childTraceId !== undefined) {
+      serializedContext = recordActionChildTraceId(
+        serializedContext,
+        prepared.session.sessionId,
+        prepared.batch.event.turnId,
+        entry.kind === "resume" ? entry.action.callId : entry.target.action.callId,
+        outcome.childTraceId,
+      );
+    }
+    return {
+      kind: "failed",
+      result: outcome.result,
+      serializedContext,
+      sessionState: sessionState(),
+    };
+  }
+  if (outcome.address.traceId !== undefined) {
+    serializedContext = recordActionChildTraceId(
+      serializedContext,
+      prepared.session.sessionId,
+      prepared.batch.event.turnId,
+      entry.kind === "resume" ? entry.action.callId : entry.target.action.callId,
+      outcome.address.traceId,
+    );
   }
 
   const action = entry.kind === "resume" ? entry.action : entry.target.action;
@@ -280,7 +315,13 @@ export async function dispatchAgentInvocation(input: {
   if (input.emit !== undefined) {
     await input.emit(event);
   }
-  return { kind: "dispatched", agentId, event, sessionState: sessionState() };
+  return {
+    kind: "dispatched",
+    agentId,
+    event,
+    serializedContext,
+    sessionState: sessionState(),
+  };
 }
 
 /**

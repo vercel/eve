@@ -308,6 +308,7 @@ async function publishTurnStarted(input: {
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
   readonly sessionId: string;
+  readonly traceSeed?: InstrumentationTraceContext;
   readonly turnId: string;
   readonly turnSequence: number;
 }): Promise<void> {
@@ -317,9 +318,11 @@ async function publishTurnStarted(input: {
     channelAudience: input.channelAudience ?? "public",
     channelKind: "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
+    parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
     sessionId: input.sessionId,
+    traceSeed: input.traceSeed,
     type: "session.started",
   });
   await input.hooks.publish({
@@ -427,6 +430,67 @@ describe("createAgentOtelInstrumentation", () => {
     const session = byName(spans, "agent.session")[0]!;
     expect(session.spanContext().traceId).toBe(seed.traceId);
     expect(session.spanContext().spanId).toBe(seed.spanId);
+  });
+
+  it("roots a delegated session in its own trace and links the parent caller", async () => {
+    const runtime = createRuntime();
+    const parent = {
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
+    };
+    const seed = {
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+    const parentLineage = {
+      callId: "call-child",
+      sessionId: "parent-session",
+      subagentName: "researcher",
+      turnId: "parent-turn",
+    };
+
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentLineage,
+      parentTraceContext: parent,
+      rootSessionId: "root-session",
+      sessionId: "child-session",
+      traceSeed: seed,
+      turnId: "child-turn",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, "child-session", "child-turn");
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const session = byName(spans, "agent.session")[0]!;
+    const invocation = byName(spans, "invoke_agent weather")[0]!;
+    expect(session.spanContext()).toMatchObject(seed);
+    expect(session.parentSpanContext).toBeUndefined();
+    expect(session.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "agent.dispatch" },
+        context: expect.objectContaining(parent),
+      }),
+    ]);
+    expect(session.attributes).toMatchObject({
+      "agent.session.kind": "delegated",
+      "agent.trace.schema.version": 4,
+    });
+    expect(invocation.spanContext().traceId).toBe(seed.traceId);
+    expect(invocation.parentSpanContext?.spanId).toBe(seed.spanId);
+    expect(invocation.attributes).toMatchObject({
+      "agent.invocation.role": "execution",
+      "agent.parent_call.id": "call-child",
+      "agent.parent_run.id": "parent-session",
+      "agent.root_run.id": "root-session",
+      "agent.session.kind": "delegated",
+      "agent.trace.schema.version": 4,
+      "gen_ai.conversation.id": "child-session",
+      "gen_ai.operation.name": "invoke_agent",
+    });
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {
@@ -783,7 +847,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(session.attributes).toMatchObject({
       "agent.channel.audience": "public",
       "agent.session.id": "session-1",
-      "agent.trace.schema.version": 3,
+      "agent.trace.schema.version": 4,
     });
     expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
@@ -1713,7 +1777,9 @@ describe("createAgentOtelInstrumentation", () => {
     });
     await runtime.provider.forceFlush();
 
-    const action = runtime.exporter.getFinishedSpans().find((span) => span.name === "agent.action");
+    const action = runtime.exporter
+      .getFinishedSpans()
+      .find((span) => span.name === "invoke_agent weather");
     expect(action?.attributes).toMatchObject({
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",

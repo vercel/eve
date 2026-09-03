@@ -1,5 +1,6 @@
 import {
   ROOT_CONTEXT,
+  SpanKind,
   SpanStatusCode,
   type Context,
   type Span,
@@ -15,6 +16,10 @@ import type {
   InstrumentationProviderDefinition,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import {
+  AGENT_INVOCATION_ROLES,
+  AGENT_TRACE_ATTRIBUTES,
+} from "#protocol/agent-invocation-trace.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
@@ -40,6 +45,7 @@ export interface AgentActionInstrumentation {
 
 export interface AgentActionContext {
   readonly context: Context;
+  readonly kind: InstrumentationActionStartedEvent["kind"];
   readonly spanContext: SpanContext;
 }
 
@@ -118,9 +124,10 @@ export function createAgentActionInstrumentation(input: {
   };
 
   const startSpan = (state: AgentActionTraceState): Span => {
+    const invocation = state.kind === "subagent-call" || state.kind === "remote-agent-call";
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        "agent.action",
+        invocation ? `invoke_agent ${state.name}` : "agent.action",
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -132,7 +139,16 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
+            ...(invocation
+              ? {
+                  "gen_ai.agent.name": state.name,
+                  "gen_ai.conversation.id": state.sessionId,
+                  "gen_ai.operation.name": "invoke_agent",
+                  [AGENT_TRACE_ATTRIBUTES.invocationRole]: AGENT_INVOCATION_ROLES.caller,
+                }
+              : undefined),
           },
+          kind: state.kind === "remote-agent-call" ? SpanKind.CLIENT : SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         contextFromActionState(state),
@@ -140,6 +156,9 @@ export function createAgentActionInstrumentation(input: {
     );
     if (state.inputAttribute !== undefined) {
       span.setAttribute("gen_ai.tool.call.arguments", state.inputAttribute);
+    }
+    if (state.childTraceId !== undefined) {
+      span.setAttribute(AGENT_TRACE_ATTRIBUTES.childTraceId, state.childTraceId);
     }
     return span;
   };
@@ -194,6 +213,7 @@ function actionContext(state: AgentActionTraceState): AgentActionContext {
       trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
       state.channelAudience,
     ),
+    kind: state.kind,
     spanContext,
   };
 }

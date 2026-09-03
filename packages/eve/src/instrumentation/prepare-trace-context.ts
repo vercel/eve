@@ -49,6 +49,7 @@ export async function prepareTurnTraceContext(
         channelAudience: input.channelAudience,
         channelType: input.channelType,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
+        parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,
         sessionId: input.sessionId,

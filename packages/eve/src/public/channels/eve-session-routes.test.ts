@@ -2,13 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { Session } from "#channel/session.js";
+import { attachAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
 import { mockChannelContext } from "#internal/testing/mocks/mock-channel-operations.js";
 import { none } from "#public/channels/auth.js";
 import { eveChannel } from "#public/channels/eve.js";
+import { AGENT_INVOCATION_TRACE_WIRE_VERSION } from "#protocol/agent-invocation-trace.js";
 
-function route(method: "GET" | "POST", path: string) {
-  const found = eveChannel({ auth: none() }).routes.find(
+function route(
+  method: "GET" | "POST",
+  path: string,
+  input: Parameters<typeof eveChannel>[0] = { auth: none() },
+) {
+  const found = eveChannel(input).routes.find(
     (candidate) => candidate.method === method && candidate.path === path,
   );
   if (found === undefined || !("handler" in found)) throw new Error(`Missing ${method} ${path}`);
@@ -127,6 +133,164 @@ describe("eve ID-addressed session routes", () => {
         },
       }),
     );
+  });
+
+  it("accepts a distinct delegated trace and acknowledges its coordinates", async () => {
+    const seed = { spanId: "4".repeat(16), traceFlags: 1, traceId: "3".repeat(32) };
+    const createSession = vi
+      .fn()
+      .mockImplementation(async (input) =>
+        attachAcceptedTraceCoordinates(
+          { events: new ReadableStream(), sessionId: "wrun_A" },
+          input.acceptedTraceCoordinates,
+        ),
+      );
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+    const invocation = {
+      callId: "call-1",
+      rootSessionId: "root-session",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 1 },
+    };
+
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          invocation,
+          message: "hello",
+          trace: {
+            parent: {
+              spanId: "2".repeat(16),
+              traceFlags: 1,
+              traceId: "1".repeat(32),
+            },
+            seed,
+            version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ sessionId: "wrun_A", trace: seed });
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: invocation,
+        parentTraceContext: {
+          isRemote: true,
+          spanId: "2".repeat(16),
+          traceFlags: 1,
+          traceId: "1".repeat(32),
+        },
+        traceSeed: seed,
+      }),
+    );
+  });
+
+  it("re-acknowledges only an exact replay of accepted trace coordinates", async () => {
+    const seed = { spanId: "4".repeat(16), traceFlags: 1, traceId: "3".repeat(32) };
+    const owner = attachAcceptedTraceCoordinates(createFixedSession({ id: "wrun_A" }), seed);
+    const createSession = vi.fn();
+    const args = attachRouteSessionCreator(
+      {
+        ...createArgs(),
+        resolveSession: vi.fn().mockResolvedValue(owner),
+      },
+      createSession,
+    );
+    const handler = route("POST", "/eve/v1/session", {
+      auth: () => ({
+        attributes: {},
+        authenticator: "test",
+        principalId: "service-1",
+        principalType: "service",
+      }),
+    });
+    const request = (traceSeed: typeof seed) =>
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          invocation: {
+            callId: "call-1",
+            rootSessionId: "root-session",
+            sessionId: "parent-session",
+            turn: { id: "parent-turn", sequence: 1 },
+          },
+          message: "hello",
+          operationId: "operation-1",
+          trace: {
+            seed: traceSeed,
+            version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+
+    await expect((await handler(request(seed), args)).json()).resolves.toMatchObject({
+      trace: seed,
+    });
+    await expect(
+      (
+        await handler(
+          request({ spanId: "6".repeat(16), traceFlags: 1, traceId: "5".repeat(32) }),
+          args,
+        )
+      ).json(),
+    ).resolves.toEqual({ ok: true, sessionId: "wrun_A", status: "accepted" });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects mismatched invocation lineage before creating a session", async () => {
+    const createSession = vi.fn();
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+    const response = await route("POST", "/eve/v1/session")(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "callback-call",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          invocation: {
+            callId: "lineage-call",
+            rootSessionId: "root-session",
+            sessionId: "parent-session",
+            turn: { id: "parent-turn", sequence: 1 },
+          },
+          message: "hello",
+          trace: {
+            seed: {
+              spanId: "4".repeat(16),
+              traceFlags: 1,
+              traceId: "3".repeat(32),
+            },
+            version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(400);
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it("rejects input responses on session creation", async () => {

@@ -18,6 +18,11 @@ import {
 } from "#tracing/sampled-trace.js";
 import type { AgentSessionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
 import { readInstrumentationDecision } from "#shared/instrumentation-decision.js";
+import {
+  AGENT_SESSION_KINDS,
+  AGENT_TRACE_ATTRIBUTES,
+  AGENT_TRACE_SCHEMA_VERSION,
+} from "#protocol/agent-invocation-trace.js";
 
 interface AgentOtelSessionContextInput {
   readonly frameworkVersion: string;
@@ -46,6 +51,8 @@ export function createAgentOtelSessionContext(
     readonly agentName?: string;
     readonly channelAudience: ChannelAudience;
     readonly channelType?: string;
+    readonly parentLineage?: InstrumentationSessionStartedEvent["parentLineage"];
+    readonly parentTraceContext?: InstrumentationTraceContext;
     readonly rootSessionId: string;
     readonly sessionId: string;
     readonly traceDecision: ReturnType<typeof resolveTracePolicy>;
@@ -68,8 +75,21 @@ export function createAgentOtelSessionContext(
             "agent.channel.audience": session.channelAudience,
             "agent.name": session.agentName,
             "agent.session.id": session.sessionId,
-            "agent.trace.schema.version": 3,
+            [AGENT_TRACE_ATTRIBUTES.sessionKind]:
+              session.parentLineage === undefined
+                ? AGENT_SESSION_KINDS.root
+                : AGENT_SESSION_KINDS.delegated,
+            [AGENT_TRACE_ATTRIBUTES.schemaVersion]: AGENT_TRACE_SCHEMA_VERSION,
           },
+          links:
+            session.parentTraceContext === undefined
+              ? undefined
+              : [
+                  {
+                    attributes: { "eve.link.type": "agent.dispatch" },
+                    context: adoptedSpanContext(session.parentTraceContext),
+                  },
+                ],
           root: true,
         });
       const span = input.idGenerator.withSpanId(session.traceSeed.spanId, () =>
@@ -95,8 +115,21 @@ export function createAgentOtelSessionContext(
         "agent.channel.audience": session.channelAudience,
         "agent.name": session.agentName,
         "agent.session.id": session.sessionId,
-        "agent.trace.schema.version": 3,
+        [AGENT_TRACE_ATTRIBUTES.sessionKind]:
+          session.parentLineage === undefined
+            ? AGENT_SESSION_KINDS.root
+            : AGENT_SESSION_KINDS.delegated,
+        [AGENT_TRACE_ATTRIBUTES.schemaVersion]: AGENT_TRACE_SCHEMA_VERSION,
       },
+      links:
+        session.parentTraceContext === undefined
+          ? undefined
+          : [
+              {
+                attributes: { "eve.link.type": "agent.dispatch" },
+                context: adoptedSpanContext(session.parentTraceContext),
+              },
+            ],
       root: true,
     });
     span.addEvent("session.started");
@@ -117,11 +150,15 @@ export function createAgentOtelSessionContext(
         channelKind: event.channelKind,
         decision,
         context:
-          event.parentTraceContext === undefined
+          event.parentTraceContext === undefined ||
+          (event.traceSeed !== undefined &&
+            event.traceSeed.traceId !== event.parentTraceContext.traceId)
             ? openSessionTrace({
                 agentName: event.agentName,
                 channelAudience,
                 channelType: event.channelType,
+                parentLineage: event.parentLineage,
+                parentTraceContext: event.parentTraceContext,
                 rootSessionId: event.rootSessionId,
                 sessionId: event.sessionId,
                 traceDecision: decision,
@@ -129,6 +166,7 @@ export function createAgentOtelSessionContext(
               })
             : adoptedSpanContext(event.parentTraceContext),
         rootSessionId: event.rootSessionId,
+        parentLineage: event.parentLineage,
       };
       await input.stateStore.setSession(event.sessionId, state);
     }
@@ -161,6 +199,7 @@ export function createAgentOtelSessionContext(
       channelAudience: "unknown",
       channelKind: undefined,
       idempotencyKey: sessionIdempotencyKey(event.sessionId),
+      parentLineage: event.parentLineage,
       parentTraceContext: event.parentTraceContext,
       rootSessionId: event.rootSessionId,
       sessionId: event.sessionId,
@@ -178,11 +217,12 @@ export function createAgentOtelSessionContext(
     await input.stateStore.setTurn(event.sessionId, event.turnId, {
       context: turnContext,
       parentIsRemote: session.context.isRemote,
+      parentLineage: event.parentLineage ?? session.parentLineage,
       parentSpanId: session.context.spanId,
       rootSessionId: event.rootSessionId,
       sequence: event.sequence,
       startTimeMs: Date.now(),
-      subagentName: event.parentLineage?.subagentName,
+      subagentName: (event.parentLineage ?? session.parentLineage)?.subagentName,
     });
     return portableSpanContext(session.context, session.decision);
   };

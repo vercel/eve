@@ -304,7 +304,7 @@ Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need
 
 Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `execute_tool` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
-A local subagent keeps its own session id but records into the parent trace. Its `invoke_agent` span is parented to the `agent.action` span that dispatched it, so the span tree carries the relationship without duplicate lineage attributes; `agent.subagent.name` remains on the child invocation as a standalone label. Either session id resolves to that trace. Remote agents propagate the parent trace context over `traceparent`.
+A delegated local or remote agent session records into its own trace. The parent `invoke_agent` caller span records `agent.child.trace.id` only after the child acknowledges the exact trace coordinates, and the child `agent.session` root links back to that caller span. Follow-up turns reuse the child session's trace.
 
 A durable session keeps one persisted trace context across turns and worker resumptions. Independently replayed attempts can still produce another trace; passing the session id shows every trace it produced, oldest first.
 

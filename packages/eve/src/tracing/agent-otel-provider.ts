@@ -61,6 +61,7 @@ import type {
   InstrumentationTurnTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import { agentExecutionAttributes } from "#tracing/agent-invocation-attributes.js";
 
 interface SpanState {
   readonly context: Context;
@@ -292,7 +293,8 @@ export function createAgentOtelInstrumentation(
       }));
     }
     if (event.turnId !== undefined) {
-      const turn = await input.stateStore.getTurn(event.sessionId, event.turnId);
+      const turnId = event.turnId;
+      const turn = await input.stateStore.getTurn(event.sessionId, turnId);
       if (turn !== undefined) {
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
@@ -301,18 +303,13 @@ export function createAgentOtelInstrumentation(
             input.tracer.startSpan(
               agentSpanName(agentName),
               {
-                attributes: {
-                  "agent.framework.name": "eve",
-                  "agent.framework.version": input.frameworkVersion,
-                  "agent.name": agentName,
-                  "agent.session.id": event.sessionId,
-                  "agent.subagent.name": turn.subagentName,
-                  "agent.turn.id": event.turnId,
-                  "agent.turn.sequence": turn.sequence,
-                  "gen_ai.agent.name": agentName,
-                  "gen_ai.conversation.id": event.sessionId,
-                  "gen_ai.operation.name": "invoke_agent",
-                },
+                attributes: agentExecutionAttributes({
+                  agentName,
+                  frameworkVersion: input.frameworkVersion,
+                  sessionId: event.sessionId,
+                  turn,
+                  turnId,
+                }),
                 kind: SpanKind.INTERNAL,
                 startTime: turn.startTimeMs,
               },
@@ -337,7 +334,7 @@ export function createAgentOtelInstrumentation(
           }
           span.end();
         }
-        await input.stateStore.deleteTurn(event.sessionId, event.turnId);
+        await input.stateStore.deleteTurn(event.sessionId, turnId);
       }
     }
     // `session.waiting` is not terminal — the session may resume with a new
