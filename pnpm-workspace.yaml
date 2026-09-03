@@ -61,6 +61,7 @@ catalog:
 minimumReleaseAge: 2880 # 2 days
 
 minimumReleaseAgeExclude:
+  - "@kybernesis/arcana"
   - "@vercel/*"
   - "@workflow/*"
   - nitro
