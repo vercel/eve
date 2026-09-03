@@ -17,20 +17,13 @@ import {
 } from "#tools/durable-callbacks.js";
 import { TOOL_BRAND } from "#tools/dynamic.js";
 import type { ToolModelOutput } from "#tools/model-output.js";
-import type { TaskDelegated, TaskExec, TaskReceipt } from "#tools/task.js";
+import type { TaskExec } from "#tools/task.js";
 
 type ApprovalContextInput<TInput> = unknown extends TInput ? Record<string, unknown> : TInput;
 
 export type { ToolAuthDefinition, ToolAuthOptions, ToolAuthProvider } from "#tools/auth.js";
 export type { ToolModelOutput, ToolModelOutputPart } from "#tools/model-output.js";
-export type {
-  TaskBinding,
-  TaskDelegated,
-  TaskExec,
-  TaskExecutorBinding,
-  TaskReceipt,
-  TaskSendCommand,
-} from "#tools/task.js";
+export type { TaskExec, TaskExecutorBinding, TaskReceipt } from "#tools/task.js";
 
 export type ToolExecuteOptions = Omit<ToolExecutionOptions<unknown>, "context">;
 
@@ -216,7 +209,7 @@ export interface BackgroundToolDefinition<
     input: TInput,
     ctx: ToolContext,
     task: TaskExec,
-  ): Promise<TaskDelegated | TOutput> | TaskDelegated | TOutput | AsyncIterable<TOutput>;
+  ): Promise<TOutput> | TOutput | AsyncIterable<TOutput>;
   approval?: Approval<ApprovalContextInput<TInput>>;
   toModelOutput?: (output: TOutput) => ToolModelOutput | Promise<ToolModelOutput>;
 }
@@ -228,12 +221,7 @@ type ToolOutputFromExecuteReturn<TReturn> =
       ? TOutput
       : TReturn;
 
-type BackgroundToolOutputFromExecuteReturn<TReturn> =
-  ToolOutputFromExecuteReturn<TReturn> extends infer TOutput
-    ? TOutput extends TaskDelegated<infer TData>
-      ? TaskReceipt<TData>
-      : TOutput
-    : never;
+type BackgroundToolOutputFromExecuteReturn<TReturn> = ToolOutputFromExecuteReturn<TReturn>;
 
 type ToolDefinitionWithExecuteReturn<TInput, TOutput, TReturn> = ToolDefinition<TInput, TOutput> & {
   execute(input: TInput, ctx: ToolContext): TReturn;

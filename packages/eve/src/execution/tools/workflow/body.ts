@@ -135,17 +135,8 @@ function createWorkflowTaskExec(input: WorkflowBodyInput): TaskExec {
   }
   return {
     batch: [],
-    binding: { taskId: input.owner.admission, token: input.owner.admission },
-    delegated: () => {
-      throw new Error("A workflow body is already the task executor and cannot delegate.");
-    },
     postMessage: createTaskMessage,
-    send: async () => {
-      throw new Error("A workflow body reports with yield, return, and throw.");
-    },
-    session: undefined as never,
     setState: createTaskSetState,
-    task: undefined as never,
     taskId: input.taskId,
   };
 }

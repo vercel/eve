@@ -1059,19 +1059,24 @@ describe("dispatchDynamicToolEvent", () => {
 
   it("persists background execution and forwards TaskExec when replaying", async () => {
     const ctx = createCtx();
-    const stepFn = vi.fn((_closure: unknown, _input: unknown, _toolCtx: unknown, task: TaskExec) =>
-      task.delegated({
-        executor: { data: {}, kind: "test" },
-        receipt: {},
-      }),
-    );
+    const stepFn = vi.fn(async function* (
+      _closure: unknown,
+      _input: unknown,
+      _toolCtx: unknown,
+      task: TaskExec,
+    ) {
+      yield task.setState({ replayed: true });
+      return { done: true };
+    });
     const resolver = createResolver("background", ["session.started"], () => {
       const entry = defineTool({
         description: "delegate background work",
         execution: "background",
         inputSchema: z.strictObject({}),
-        execute: (_input, _toolCtx, task) =>
-          task.delegated({ executor: { data: {}, kind: "test" }, receipt: {} }),
+        async *execute(_input, _toolCtx, task) {
+          yield task.setState({ replayed: true });
+          return { done: true };
+        },
       });
       stampDurableDynamicToolCallbacks(entry, {
         execute: { callback: stepFn as never, closure: {} },
@@ -1091,26 +1096,16 @@ describe("dispatchDynamicToolEvent", () => {
 
     const [tool] = buildDynamicTools(restored);
     expect(tool?.execution).toBe("background");
-    const binding = { taskId: "task-1", token: "token-1" };
     const task: TaskExec = {
       batch: [],
-      binding,
-      delegated: ({ executor, receipt }) => ({
-        executor,
-        kind: "eve:task-delegated",
-        receipt: { ...receipt, status: "working", taskId: binding.taskId },
-      }),
       postMessage: (message) => ({ kind: "eve:task-message", message }),
-      send: vi.fn(),
-      session: {} as TaskExec["session"],
       setState: (state) => ({ kind: "eve:task-set-state", state }),
-      task: {} as TaskExec["task"],
       taskId: "task-1",
     };
-    await expect(tool!.execute!({}, executeOptions, task)).resolves.toMatchObject({
-      kind: "eve:task-delegated",
-      receipt: { status: "working", taskId: "task-1" },
-    });
+    const output = tool!.execute!({}, executeOptions, task) as AsyncIterable<unknown>;
+    const updates = [];
+    for await (const update of output) updates.push(update);
+    expect(updates).toEqual([{ kind: "eve:task-set-state", state: { replayed: true } }]);
     expect(stepFn).toHaveBeenCalledWith({}, {}, expect.anything(), task);
   });
 
