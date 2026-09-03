@@ -659,6 +659,45 @@ describe("WorkflowBundleBuilder", () => {
     }
   });
 
+  it("keeps the sleep tool schemas out of the workflow driver", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-sleep-tool-"));
+    const outDir = join(tempRoot, "workflow-build");
+    const compiledArtifactsBootstrapPath = join(tempRoot, "compiled-artifacts-bootstrap.mjs");
+    const sleepWorkflowPath = resolvePackageSourceFilePath("src/execution/tools/sleep-workflow.ts");
+
+    try {
+      await writeFile(compiledArtifactsBootstrapPath, "export {};\n");
+
+      const builder = new FixtureWorkflowBundleBuilder(
+        {
+          agentName: "test-agent",
+          appRoot: tempRoot,
+          compiledArtifactsBootstrapPath,
+          outDir,
+          rootDir: resolvePackageRoot(),
+          watch: false,
+        },
+        [sleepWorkflowPath],
+      );
+
+      await builder.build();
+
+      const workflowsSource = await readFile(join(outDir, "workflows.mjs"), "utf8");
+      const encodedChunksMatch = workflowsSource.match(
+        /Buffer\.from\((\[[\s\S]*?\])\.join\(""\), "base64"\)\.toString\("utf8"\)/,
+      );
+      expect(encodedChunksMatch).not.toBeNull();
+
+      const encodedChunks = JSON.parse(encodedChunksMatch?.[1] ?? "[]") as string[];
+      const decodedWorkflowCode = Buffer.from(encodedChunks.join(""), "base64").toString("utf8");
+
+      expect(decodedWorkflowCode).toContain("executeSleepTool");
+      expect(decodedWorkflowCode).not.toContain("compiled/zod");
+    } finally {
+      await rm(tempRoot, { force: true, recursive: true });
+    }
+  });
+
   it("allows a node builtin used only inside a use step body", async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "eve-workflow-bundle-node-step-ok-"));
     const outDir = join(tempRoot, "workflow-build");

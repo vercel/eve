@@ -1,5 +1,6 @@
-import { sleep } from "#compiled/@workflow/core/index.js";
 import { z } from "#compiled/zod/index.js";
+
+export { executeSleepTool } from "#execution/tools/sleep-workflow.js";
 
 const MAX_SLEEP_SECONDS = Math.floor(Number.MAX_SAFE_INTEGER / 1_000);
 
@@ -16,11 +17,3 @@ export const SLEEP_OUTPUT_SCHEMA = z.strictObject({
 
 export type SleepToolInput = z.infer<typeof SLEEP_INPUT_SCHEMA>;
 export type SleepToolOutput = z.infer<typeof SLEEP_OUTPUT_SCHEMA>;
-
-/** Waits durably in a workflow dedicated to this tool call. */
-export async function executeSleepTool(input: SleepToolInput): Promise<SleepToolOutput> {
-  "use workflow";
-
-  await sleep(Math.ceil(input.seconds * 1_000));
-  return { waitedSeconds: input.seconds };
-}
