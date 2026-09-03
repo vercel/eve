@@ -94,7 +94,7 @@ export async function verifyTeamsJwt(
 
   const result = await jwtVerify(
     token,
-    async (protectedHeader) => {
+    async (protectedHeader: Record<string, unknown>) => {
       const key = selectJwk(jwks, protectedHeader);
       const alg = typeof protectedHeader.alg === "string" ? protectedHeader.alg : undefined;
       return importJWK(key, alg);

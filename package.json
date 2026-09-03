@@ -19,31 +19,31 @@
     "guard:invariants": "node ./scripts/guard-invariants.mjs",
     "lint": "oxlint --fix",
     "prepare": "node ./scripts/install-git-hooks.mjs",
+    "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
     "test": "pnpm test:unit && pnpm test:integration",
     "test:e2e": "turbo run test:e2e --concurrency=1",
     "test:integration": "turbo run test:integration",
     "test:scenario": "turbo run test:scenario",
+    "test:tui": "pnpm --filter eve run test:tui",
     "test:unit": "turbo run test:unit",
     "typecheck": "turbo run typecheck",
-    "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs",
-    "release": "pnpm build && node ./scripts/assert-changeset-publish-packages.mjs && changeset publish",
-    "test:tui": "pnpm --filter eve run test:tui",
-    "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs"
+    "update:extension-contracts": "node ./scripts/extension-capability-contracts.mjs",
+    "version-packages": "changeset version && node ./scripts/materialize-registry-release-requirements.mjs"
   },
   "devDependencies": {
-    "@changesets/cli": "2.31.0",
-    "@microsoft/api-extractor": "7.58.10",
+    "@changesets/cli": "3.0.1",
+    "@microsoft/api-extractor": "7.59.0",
     "@types/node": "catalog:",
     "gray-matter": "4.0.3",
-    "oxfmt": "0.63.0",
-    "oxlint": "1.78.0",
-    "syncpack": "15.3.2",
-    "turbo": "2.9.18",
+    "oxfmt": "0.66.0",
+    "oxlint": "1.81.0",
+    "syncpack": "15.3.3",
+    "turbo": "2.10.12",
     "typescript": "catalog:",
-    "vercel": "59.5.0"
+    "vercel": "59.11.0"
   },
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@11.21.0"
+  "packageManager": "pnpm@11.25.0"
 }

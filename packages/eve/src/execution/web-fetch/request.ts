@@ -104,7 +104,9 @@ async function requestOnce(
 function fetchWithDispatcher(url: URL, options: DispatcherRequestInit): Promise<Response> {
   // Node's fetch types describe its bundled undici version, while the wrapper
   // adapts the installed undici dispatcher to that runtime protocol.
-  return fetch(url, options as RequestInit);
+  const fetchWithUndici = fetch as typeof fetch &
+    ((input: URL, init: DispatcherRequestInit) => Promise<Response>);
+  return fetchWithUndici(url, options);
 }
 
 function assertPublicHostname(hostname: string): void {
