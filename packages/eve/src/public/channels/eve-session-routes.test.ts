@@ -153,7 +153,10 @@ describe("eve ID-addressed session routes", () => {
       turn: { id: "parent-turn", sequence: 1 },
     };
 
-    const response = await route("POST", "/eve/v1/session")(
+    const response = await route("POST", "/eve/v1/session", {
+      auth: none(),
+      trustedForwarders: () => true,
+    })(
       new Request("https://eve.test/eve/v1/session", {
         body: JSON.stringify({
           callback: {
@@ -214,6 +217,7 @@ describe("eve ID-addressed session routes", () => {
         principalId: "service-1",
         principalType: "service",
       }),
+      trustedForwarders: () => true,
     });
     const request = (traceSeed: typeof seed) =>
       new Request("https://eve.test/eve/v1/session", {
@@ -252,6 +256,103 @@ describe("eve ID-addressed session routes", () => {
         )
       ).json(),
     ).resolves.toEqual({ ok: true, sessionId: "wrun_A", status: "accepted" });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects delegated lineage from an untrusted caller before session lookup", async () => {
+    const createSession = vi.fn();
+    const resolveSession = vi.fn();
+    const args = attachRouteSessionCreator({ ...createArgs(), resolveSession }, createSession);
+    const response = await route("POST", "/eve/v1/session", {
+      auth: () => ({
+        attributes: {},
+        authenticator: "test",
+        principalId: "service-1",
+        principalType: "service",
+      }),
+    })(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          invocation: {
+            callId: "call-1",
+            rootSessionId: "forged-root",
+            sessionId: "forged-parent",
+            turn: { id: "forged-turn", sequence: 0 },
+          },
+          message: "hello",
+          operationId: "operation-1",
+          trace: {
+            seed: {
+              spanId: "4".repeat(16),
+              traceFlags: 1,
+              traceId: "3".repeat(32),
+            },
+            version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      code: "UNTRUSTED_AGENT_INVOCATION",
+      error: "This deployment does not accept delegated agent lineage.",
+      ok: false,
+    });
+    expect(resolveSession).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects delegated lineage when trustedForwarders refuses the caller", async () => {
+    const createSession = vi.fn();
+    const trustedForwarders = vi.fn(() => false);
+    const args = attachRouteSessionCreator(createArgs(), createSession);
+    const response = await route("POST", "/eve/v1/session", {
+      auth: () => ({
+        attributes: {},
+        authenticator: "test",
+        principalId: "service-1",
+        principalType: "service",
+      }),
+      trustedForwarders,
+    })(
+      new Request("https://eve.test/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "research",
+            token: "tok123",
+            url: "https://caller.example.com/eve/v1/callback/tok123",
+          },
+          invocation: {
+            callId: "call-1",
+            rootSessionId: "forged-root",
+            sessionId: "forged-parent",
+            turn: { id: "forged-turn", sequence: 0 },
+          },
+          message: "hello",
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+      args,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "UNTRUSTED_AGENT_INVOCATION",
+      ok: false,
+    });
+    expect(trustedForwarders).toHaveBeenCalledOnce();
     expect(createSession).not.toHaveBeenCalled();
   });
 

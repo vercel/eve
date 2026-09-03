@@ -1,4 +1,7 @@
-import type { ForwardedPrincipal } from "#channel/forwarded-principal.js";
+import {
+  UNTRUSTED_AGENT_INVOCATION,
+  type ForwardedPrincipal,
+} from "#channel/forwarded-principal.js";
 import type { SessionParent } from "#channel/types.js";
 import {
   createSessionAcceptedResponseSchema,
@@ -32,7 +35,11 @@ export async function sendRemoteAgentCreateRequest(input: {
     input.body.forwardedPrincipal === undefined ||
     (input.body.forwardedPrincipal.initiator !== undefined &&
       input.body.forwardedPrincipal.initiator !== null);
-  if (response.status === 400 && sentExtension && preservesInitiatorSemantics) {
+  const retriesWithoutExtension =
+    response.status === 400 ||
+    (response.status === 403 &&
+      (await readRemoteAgentErrorCode(response.clone())) === UNTRUSTED_AGENT_INVOCATION);
+  if (retriesWithoutExtension && sentExtension && preservesInitiatorSemantics) {
     const legacyBody = { ...input.body };
     delete legacyBody.invocation;
     delete legacyBody.trace;
@@ -68,4 +75,16 @@ export async function sendRemoteAgentCreateRequest(input: {
   return acceptedTraceId === undefined
     ? { sessionId: parsed.data.sessionId }
     : { sessionId: parsed.data.sessionId, traceId: acceptedTraceId };
+}
+
+async function readRemoteAgentErrorCode(response: Response): Promise<string | undefined> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return undefined;
+  }
+  if (body === null || typeof body !== "object") return undefined;
+  const code = Reflect.get(body, "code");
+  return typeof code === "string" ? code : undefined;
 }

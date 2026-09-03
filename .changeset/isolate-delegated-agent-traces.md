@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Give each delegated local or remote agent session its own replay-stable OpenTelemetry trace. Parent caller spans record acknowledged child trace IDs, and child session roots link back to the exact parent dispatch span.
+Give each delegated local or remote agent session its own replay-stable OpenTelemetry trace. Receivers accept parent lineage only from configured trusted forwarders; otherwise compatible senders retry as capped root sessions without linked trace metadata.

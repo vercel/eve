@@ -1,7 +1,10 @@
 import type { SessionAuthContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
 import { readAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
-import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
+import {
+  authorizeTrustedForwarder,
+  resolveForwardedPrincipal,
+} from "#channel/forwarded-principal.js";
 import {
   handleConnectionCallbackRequest,
   handleLegacyConnectionCallbackRequest,
@@ -195,6 +198,14 @@ export function eveChannel(input: EveChannelInput): EveChannel {
             { error: "Invocation trace context does not match traceparent.", ok: false },
             { status: 400 },
           );
+        }
+        if (!forwarded.accepted && (body.invocation !== undefined || body.trace !== undefined)) {
+          const authorized = await authorizeTrustedForwarder({
+            assertion: "agent-invocation",
+            forwarder: authResult,
+            trustedForwarders: input.trustedForwarders,
+          });
+          if (authorized instanceof Response) return authorized;
         }
         const parsedParentTraceContext =
           body.trace?.parent === undefined
