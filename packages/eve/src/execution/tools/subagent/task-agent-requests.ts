@@ -9,7 +9,6 @@ import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
 export interface AgentRequestDelivery {
   readonly accumulateUsage?: boolean;
-  readonly actionCallId?: string;
   readonly ownerId: string;
   readonly replyTo: TaskAgentRequestDelivery["replyTo"];
   readonly request: TaskAgentRequestDelivery["request"];
@@ -43,14 +42,14 @@ export async function applyTaskAgentRequest(
         accumulateUsage: delivery.accumulateUsage,
         ownerId: delivery.ownerId,
         result: request.result,
+        serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
-      return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
+      return settled;
     }
     case "agent-invoke": {
       const dispatched = await dispatchTaskAgentInvocationStep({
-        instrumentationCallId: delivery.actionCallId,
         ownerId: delivery.ownerId,
         replyTo: delivery.replyTo,
         request,

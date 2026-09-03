@@ -253,6 +253,7 @@ describe("wakeTaskAgentRequestParentStep", () => {
                 input: { message: "Find it", target: "research" },
                 invocationId: "call-1:research",
                 kind: "agent-invoke",
+                parentActionCallId: "call-1",
               },
               taskId: "task-1",
             },

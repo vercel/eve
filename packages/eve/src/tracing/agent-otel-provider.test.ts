@@ -852,6 +852,7 @@ describe("createAgentOtelInstrumentation", () => {
       }),
     ]);
     expect(model.parentSpanContext?.spanId).toBe(step.spanContext().spanId);
+    expect(model.kind).toBe(SpanKind.CLIENT);
     expect(
       executionParents.some(
         (parent) =>
@@ -877,11 +878,11 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.kind).toBe(SpanKind.INTERNAL);
     expect(turn.attributes).toMatchObject({
       "agent.name": "weather",
+      "agent.usage.input_tokens": 10,
+      "agent.usage.output_tokens": 5,
       "gen_ai.agent.name": "weather",
       "gen_ai.conversation.id": "session-1",
       "gen_ai.operation.name": "invoke_agent",
-      "gen_ai.usage.input_tokens": 10,
-      "gen_ai.usage.output_tokens": 5,
     });
     expect(nanos(turn.startTime)).toBeLessThanOrEqual(nanos(step.startTime));
     expect(nanos(turn.endTime)).toBeGreaterThanOrEqual(nanos(step.endTime) - 1_000_000n);
@@ -889,10 +890,17 @@ describe("createAgentOtelInstrumentation", () => {
       "agent.framework.name": "eve",
       "agent.model.id": "claude-test",
       "agent.model.provider": "anthropic",
+      "agent.usage.cache_read_tokens": 4,
+      "agent.usage.cache_write_tokens": 2,
       "agent.usage.input_tokens": 10,
       "agent.usage.output_tokens": 5,
+    });
+    expect(model.attributes).toMatchObject({
+      "gen_ai.response.id": "response-1",
       "gen_ai.usage.cache_creation.input_tokens": 2,
       "gen_ai.usage.cache_read.input_tokens": 4,
+      "gen_ai.usage.input_tokens": 10,
+      "gen_ai.usage.output_tokens": 5,
     });
     expect(action.attributes).toMatchObject({
       "agent.action.kind": "tool-call",
@@ -907,6 +915,115 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.tool.type": "function",
     });
     expect(tool.attributes).not.toHaveProperty("gen_ai.agent.name");
+  });
+
+  it("keeps a workflow tool intact while emitting independent nested callers", async () => {
+    const stateStore = new InMemoryAgentTraceStateStore();
+    const runtime = createRuntime(stateStore);
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-nested:turn-1:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "session-nested",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    const actionKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow");
+    const toolKey = `tool:${scope.attemptId}:workflow:0`;
+
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: scope.sessionId,
+      turnId: scope.turnId,
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    await runtime.hooks.publish({
+      callId: "workflow",
+      idempotencyKey: actionKey,
+      input: {},
+      isWorkflowTool: true,
+      kind: "tool-call",
+      name: "coordinate",
+      scope,
+      type: "action.started",
+    });
+    await runtime.hooks.publish({
+      callId: "workflow",
+      idempotencyKey: toolKey,
+      input: {},
+      scope,
+      toolName: "coordinate",
+      type: "tool.call.started",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: toolKey,
+      output: { output: "done", type: "result" },
+      scope,
+      type: "tool.call.completed",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: actionKey,
+      outcome: "completed",
+      output: { output: "done", type: "result" },
+      scope,
+      type: "action.completed",
+    });
+
+    const anchor = stateStore.findActionAnchor(scope.sessionId, scope.turnId, "workflow")!;
+    stateStore.setInvocation(
+      actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow:first"),
+      {
+        ...anchor,
+        callId: "workflow:first",
+        childTraceId: "a".repeat(32),
+        kind: "subagent-call",
+        name: "research",
+        parent: { ...anchor.parent, spanId: anchor.spanId },
+        parentActionCallId: "workflow",
+        spanId: "b".repeat(16),
+        terminal: { outcome: "completed" },
+      },
+    );
+    stateStore.setInvocation(
+      actionIdempotencyKey(scope.sessionId, scope.turnId, "workflow:second"),
+      {
+        ...anchor,
+        callId: "workflow:second",
+        childTraceId: "c".repeat(32),
+        kind: "remote-agent-call",
+        name: "review",
+        parent: { ...anchor.parent, spanId: anchor.spanId },
+        parentActionCallId: "workflow",
+        spanId: "d".repeat(16),
+        terminal: { error: new Error("review failed"), outcome: "failed" },
+      },
+    );
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      scope,
+      type: "step.attempt.completed",
+    });
+    await completeTurn(runtime.hooks, scope.sessionId, scope.turnId);
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const outer = byName(spans, "agent.action")[0]!;
+    const tool = byName(spans, "execute_tool coordinate")[0]!;
+    const first = byName(spans, "invoke_agent research")[0]!;
+    const second = byName(spans, "invoke_agent review")[0]!;
+    expect(byName(spans, "agent.action")).toHaveLength(1);
+    expect(tool.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
+    expect(first.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
+    expect(second.parentSpanContext?.spanId).toBe(outer.spanContext().spanId);
+    expect(first.attributes["agent.child.trace.id"]).toBe("a".repeat(32));
+    expect(second.attributes["agent.child.trace.id"]).toBe("c".repeat(32));
+    expect(second.status.code).toBe(SpanStatusCode.ERROR);
   });
 
   it.each(["private", "unknown"] as const)(
@@ -1744,7 +1861,7 @@ describe("createAgentOtelInstrumentation", () => {
     for (const name of ["chat claude-test", "agent.action", "execute_tool weather"]) {
       const span = byName(spans, name)[0]!;
       expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
-      if (name !== "agent.action") expect(span.attributes["error.type"]).toBe("Error");
+      expect(span.attributes["error.type"]).toBe("Error");
       expect(span.events).toContainEqual(
         expect.objectContaining({
           attributes: expect.objectContaining({ "exception.message": error.message }),
@@ -1772,7 +1889,7 @@ describe("createAgentOtelInstrumentation", () => {
     await runtime.provider.forceFlush();
 
     const spans = runtime.exporter.getFinishedSpans();
-    const action = byName(spans, "agent.action")[0];
+    const action = byName(spans, "invoke_agent weather")[0];
     expect(action?.attributes).toMatchObject({
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",
@@ -1785,6 +1902,8 @@ describe("createAgentOtelInstrumentation", () => {
     expect(
       Object.keys(action?.attributes ?? {}).some((key) => key.startsWith("gen_ai.usage.")),
     ).toBe(false);
+    expect(action?.attributes).not.toHaveProperty("gen_ai.tool.call.arguments");
+    expect(action?.attributes).not.toHaveProperty("gen_ai.tool.call.result");
     expect(byName(spans, "execute_tool weather")).toHaveLength(1);
   });
 

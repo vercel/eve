@@ -418,6 +418,7 @@ export interface InstrumentationModelCallCompletedEvent {
   readonly content?: readonly InstrumentationContentPart[];
   readonly finishReason: string;
   readonly idempotencyKey: string;
+  readonly responseId?: string;
   readonly scope: InstrumentationAttemptScope;
   readonly usage: InstrumentationUsage;
 }
@@ -475,6 +476,8 @@ export interface InstrumentationActionStartedEvent {
   readonly idempotencyKey: string;
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: unknown;
+  /** Whether this action owns a workflow body that may invoke nested agents. */
+  readonly isWorkflowTool?: boolean;
   readonly kind: InstrumentationActionKind;
   readonly name: string;
   readonly scope: InstrumentationAttemptScope;
