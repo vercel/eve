@@ -51,7 +51,7 @@ export function agentCommand(
     }
 
     const initialSelection = await applicationContext.resolveAgent();
-    if (initialSelection?.kind === "workspace") {
+    if (initialSelection.kind === "workspace") {
       applicationContext.root = await selectWorkspaceAgent(
         initialSelection.workspace,
         requestedName,
@@ -64,7 +64,7 @@ export function agentCommand(
     const resolvedSelection = await applicationContext.resolveAgent();
     if (requestedName !== undefined) {
       if (
-        resolvedSelection?.kind !== "workspace-member" ||
+        resolvedSelection.kind !== "workspace-member" ||
         resolvedSelection.member.name !== requestedName
       ) {
         throw new Error("--agent can only select a member of the enclosing agents/ workspace.");

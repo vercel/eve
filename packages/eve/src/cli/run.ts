@@ -648,7 +648,11 @@ export async function runCli(
       applicationContext.root = project.appRoot;
     },
     async resolveAgent() {
-      return resolveEveProjectContext(applicationContext.root);
+      const context = await resolveEveProjectContext(applicationContext.root);
+      if (context === undefined) {
+        throw new Error("No eve project contains the current directory.");
+      }
+      return context;
     },
   };
   const program = createCliProgram(logger, runtime, applicationContext);

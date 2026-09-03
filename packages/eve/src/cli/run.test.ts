@@ -22,6 +22,13 @@ vi.mock("#cli/application-root.js", () => ({
 }));
 vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
 vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
+vi.mock("#internal/project-context.js", () => ({
+  resolveEveProjectContext: vi.fn(async (appRoot: string) => ({
+    appRoot,
+    environmentRoot: appRoot,
+    kind: "standalone",
+  })),
+}));
 
 async function withInteractiveTerminal<T>(fn: () => Promise<T>): Promise<T> {
   const stdinDescriptor = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
