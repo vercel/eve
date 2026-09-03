@@ -27,6 +27,7 @@ import type { ResolvedToolDefinition } from "#runtime/types.js";
 import { preserveFrameworkStateOnCompaction } from "#execution/compaction.js";
 import { createToolExecuteWithAuth } from "#execution/tool-auth.js";
 import { ASK_QUESTION_TOOL_NAME } from "#harness/request-input-tool.js";
+import { CODE_MODE_TOOL_NAME } from "#harness/code-mode.js";
 import {
   createPreparedWorkflowToolHarnessDefinition,
   createWorkflowToolHarnessDefinition,
@@ -102,6 +103,10 @@ export function createExecutionNodeStep(input: CreateExecutionNodeStepInput): St
     capabilities: input.capabilities,
     clearOnly: input.clearOnly,
     compactOnly: input.compactOnly,
+    codeMode:
+      input.node.agent.config?.experimental?.codeMode === false
+        ? undefined
+        : input.node.agent.config?.experimental?.codeMode,
     workflow: input.node.agent.workflowTool !== undefined,
     workflowMaxSubagents: input.workflowMaxSubagents,
     handleEvent: input.handleEvent,
@@ -212,6 +217,14 @@ function resolveHarnessToolDefinition(input: {
   readonly tool: PreparedRuntimeTool;
 }): HarnessToolDefinition | null {
   const registeredTool = findRegisteredRuntimeTool(input.node.toolRegistry, input.tool.name);
+
+  if (
+    input.tool.name === CODE_MODE_TOOL_NAME &&
+    (input.node.agent.config?.experimental?.codeMode === undefined ||
+      input.node.agent.config.experimental.codeMode === false)
+  ) {
+    return null;
+  }
 
   if (isPreparedRuntimeWorkflowTool(input.tool)) {
     if (registeredTool === null) {

@@ -43,6 +43,7 @@ export async function computeDevelopmentHostFingerprint(
     channels: computeChannelRouteRegistrations(host),
     environment: readDevelopmentEnvironmentHostValues(host.appRoot),
     instrumentation: await readInstrumentationSource(host),
+    codeMode: manifest.config.experimental?.codeMode ?? false,
     workflow: {
       // Authored workflow bodies and step registrations are bundled into the
       // host, so their sources are structural, not runtime, state.

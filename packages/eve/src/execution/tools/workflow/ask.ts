@@ -5,6 +5,7 @@ import type {
   WorkflowToolRunRef,
 } from "#execution/tools/workflow/messages.js";
 import { resumeHookStep } from "#execution/tools/workflow/resume-hook-step.js";
+import type { WorkflowToolRunCodeModeContext } from "#execution/tools/workflow/types.js";
 import type { ToolContext, ToolInputRequest, ToolInputResponse } from "#tools/definition.js";
 import { workflowToolContextErrorMessage } from "#shared/workflow-tool-context.js";
 
@@ -17,6 +18,7 @@ interface WorkflowToolRunContext {
   readonly admission?: Promise<
     { readonly status: "accepted" } | { readonly status: "rejected"; readonly reason: string }
   >;
+  readonly codeMode?: WorkflowToolRunCodeModeContext;
   readonly from: WorkflowToolRunRef;
   readonly owner: WorkflowToolRunOwner;
 }
@@ -52,6 +54,14 @@ export function readWorkflowToolRunRef(ctx: ToolContext): WorkflowToolRunRef {
 
 export function readWorkflowToolRunOwner(ctx: ToolContext): WorkflowToolRunOwner {
   return readWorkflowToolRunContext(ctx, "agent").owner;
+}
+
+export function readCodeModeRunContext(ctx: ToolContext): WorkflowToolRunCodeModeContext {
+  const codeMode = readWorkflowToolRunContext(ctx, "agent").codeMode;
+  if (codeMode === undefined) {
+    throw new Error("code_mode was started without its turn context.");
+  }
+  return codeMode;
 }
 
 export function readWorkflowToolRunAdmission(

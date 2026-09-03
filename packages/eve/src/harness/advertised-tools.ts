@@ -5,6 +5,7 @@ import {
   getWorkflowContinuationSecurity,
 } from "#harness/workflow-continuation-security.js";
 import { applyWorkflowTool } from "#harness/workflow-sandbox.js";
+import { applyCodeModeTool, type CodeModeMode } from "#harness/code-mode.js";
 import type { HarnessSession, HarnessToolMap } from "#harness/types.js";
 
 type AdvertisedToolSession = Pick<HarnessSession, "rootSessionId" | "taskId">;
@@ -20,6 +21,7 @@ type AdvertisedToolDefinitionsInput = {
 };
 
 type AdvertisedModelToolsInput = {
+  readonly codeMode?: { readonly mode: CodeModeMode };
   readonly modelTools: ToolSet;
   readonly session: HarnessSession;
   readonly tools: HarnessToolMap;
@@ -63,36 +65,37 @@ async function getAdvertisedModelTools(
   input: AdvertisedModelToolsInput,
 ): Promise<AdvertisedModelTools> {
   const tools = filterUnavailableToolMap(input.tools, input.session);
-  if (input.workflow === undefined) {
-    return {
-      harnessTools: tools,
-      modelTools: input.modelTools,
-      session: input.session,
-    };
+  let harnessTools = tools;
+  let modelTools = input.modelTools;
+  let session = input.session;
+
+  if (input.workflow !== undefined) {
+    const workflowHostTools = filterWorkflowHostToolsForRootSession(tools, session);
+    if (workflowHostTools.size > 0) {
+      session = ensureWorkflowContinuationSecurity(session);
+      const applied = await applyWorkflowTool({
+        continuationSecurity: getWorkflowContinuationSecurity(session),
+        harnessTools: workflowHostTools,
+        maxSubagents: input.workflow.maxSubagents,
+        tools: modelTools,
+      });
+      modelTools = applied.modelTools;
+    }
   }
 
-  const workflowHostTools = filterWorkflowHostToolsForRootSession(tools, input.session);
-  if (workflowHostTools.size === 0) {
-    return {
-      harnessTools: tools,
-      modelTools: input.modelTools,
-      session: input.session,
-    };
+  if (input.codeMode !== undefined) {
+    session = ensureWorkflowContinuationSecurity(session);
+    const applied = await applyCodeModeTool({
+      continuationSecurity: getWorkflowContinuationSecurity(session),
+      harnessTools,
+      mode: input.codeMode.mode,
+      tools: modelTools,
+    });
+    harnessTools = applied.harnessTools;
+    modelTools = applied.modelTools;
   }
 
-  const session = ensureWorkflowContinuationSecurity(input.session);
-  const { modelTools } = await applyWorkflowTool({
-    continuationSecurity: getWorkflowContinuationSecurity(session),
-    harnessTools: workflowHostTools,
-    maxSubagents: input.workflow.maxSubagents,
-    tools: input.modelTools,
-  });
-
-  return {
-    harnessTools: tools,
-    modelTools,
-    session,
-  };
+  return { harnessTools, modelTools, session };
 }
 
 function filterUnavailableToolDefinitions(

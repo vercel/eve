@@ -251,6 +251,18 @@ installed package must stay external in hosted output, list it in
 
 `defineAgent` takes a few more fields, all optional. For the exported types, see the [TypeScript API Reference](./reference/typescript-api).
 
+Set `experimental.codeMode` to `"eager"` or `"lazy"` to replace eligible
+direct tools with one framework-managed `code_mode` tool. The model writes a
+JavaScript program that calls `tools.<name>(input)`; `code_mode` runs it as a
+durable workflow in which every nested call is its own step, so a crash
+mid-program resumes at the pending call instead of re-running earlier ones.
+Tools with an approval policy other than `never()`, authored workflow tools,
+and framework task controls stay direct. Subagent tools enter the program and
+return their result when called, the same way an authored workflow tool's
+`agent()` does. `"eager"` inlines every claimed signature in the tool
+description; `"lazy"` lists names and lets the program discover schemas with
+`tools.search_tools` and `tools.describe_tools`.
+
 | Field          | Type                                    | Default          | Description                                                                                                                                                                                                   |
 | -------------- | --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reasoning`    | `AgentReasoningDefinition`              | provider default | Provider-agnostic reasoning effort forwarded to the agent's turn model calls.                                                                                                                                 |

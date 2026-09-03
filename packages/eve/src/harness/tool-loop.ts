@@ -1353,6 +1353,7 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         config.workflow === true ? { maxSubagents: config.workflowMaxSubagents } : undefined;
 
       const advertisedModelTools = await getAdvertisedTools({
+        codeMode: config.codeMode === undefined ? undefined : { mode: config.codeMode },
         modelTools: flatTools,
         session,
         tools: advertisedHarnessTools,

@@ -45,7 +45,14 @@ export type PreparedDispatchTarget =
     }
   | { readonly kind: "task-cancel" }
   | { readonly kind: "task-update" }
-  | { readonly kind: "workflow-tool-call"; readonly workflowId: string };
+  | {
+      readonly codeMode?: {
+        readonly mode: "eager" | "lazy";
+        readonly toolNames: readonly string[];
+      };
+      readonly kind: "workflow-tool-call";
+      readonly workflowId: string;
+    };
 
 /** Runtime-prepared handling consumed by the harness and execution boundary. */
 export type PreparedToolHandling =

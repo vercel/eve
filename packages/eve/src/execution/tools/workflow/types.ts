@@ -1,4 +1,5 @@
 import type { SessionContext } from "#context/session-context.js";
+import type { DurableSessionState } from "#execution/durable-session-store.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
@@ -28,8 +29,19 @@ export function readWorkflowToolExecutorAddress(
     : undefined;
 }
 
+/**
+ * Turn state the framework `code_mode` body needs to rebuild the tool catalog
+ * in its own steps. Only that body receives it; authored workflow tools stay
+ * limited to `ToolContext`.
+ */
+export interface WorkflowToolRunCodeModeContext {
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}
+
 export interface WorkflowToolRunInput {
   readonly callId: string;
+  readonly codeMode?: WorkflowToolRunCodeModeContext;
   readonly execution?: "background" | "blocking";
   readonly executeInput?: JsonValue;
   readonly hookToken: string;

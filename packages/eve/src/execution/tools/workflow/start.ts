@@ -10,9 +10,11 @@ import type {
 import { toError } from "#shared/errors.js";
 import type {
   WorkflowToolRunAddress,
+  WorkflowToolRunCodeModeContext,
   WorkflowToolRunInput,
 } from "#execution/tools/workflow/types.js";
 import type { WorkflowToolRunOwner } from "#execution/tools/workflow/messages.js";
+import { codeModeWorkflowReference } from "#execution/code-mode/workflow-reference.js";
 import {
   startWorkflowOnCurrentDeployment,
   workflowToolRunWorkflowReference,
@@ -39,6 +41,8 @@ export async function startWorkflowTask(input: {
     readonly stepIndex: number;
     readonly turnId: string;
   };
+  /** Turn state handed only to the framework `code_mode` body. */
+  readonly codeMode?: WorkflowToolRunCodeModeContext;
   readonly initiatorAuth: SessionAuth["initiator"];
   readonly owner: WorkflowToolRunOwner;
   readonly parentSession: SessionParent | undefined;
@@ -49,6 +53,8 @@ export async function startWorkflowTask(input: {
   try {
     const started = await startWorkflowToolRun({
       callId: task.callId,
+      codeMode:
+        task.workflowId === codeModeWorkflowReference.workflowId ? input.codeMode : undefined,
       executeInput: task.executeInput,
       input: task.input,
       owner: input.owner,

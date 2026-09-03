@@ -16,9 +16,11 @@ import { readRegisteredWorkflow } from "#execution/workflow-registry.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
 import type { ToolContext } from "#tools/definition.js";
 import { createTaskMessage, type TaskExec } from "#tools/task.js";
+import type { WorkflowToolRunCodeModeContext } from "#execution/tools/workflow/types.js";
 
 export interface WorkflowBodyDefinition {
   readonly callId: string;
+  readonly codeMode?: WorkflowToolRunCodeModeContext;
   readonly executeInput?: JsonValue;
   readonly input: JsonObject;
   readonly resultKind?: "subagent" | "tool";
@@ -54,8 +56,8 @@ export async function executeWorkflowBody(
 ): Promise<WorkflowBodyResult> {
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
-  attachWorkflowToolRunContext(ctx, { from, owner: input.owner });
   let reportCount = 0;
+  attachWorkflowToolRunContext(ctx, { codeMode: input.codeMode, from, owner: input.owner });
 
   try {
     const execute = resolveWorkflowToolExecute(input);

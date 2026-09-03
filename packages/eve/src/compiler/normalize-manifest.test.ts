@@ -54,6 +54,33 @@ function registry(modules: readonly ProgrammaticAgentModule[]) {
 }
 
 describe("compileAgentManifest source graph", () => {
+  it("compiles code_mode as an executable framework workflow tool", async () => {
+    const compiled = await compileAgentManifest(manifest(), {
+      sourceRegistries: [
+        registry([
+          {
+            logicalPath: "agent.ts",
+            loadNamespace: async () => ({
+              default: defineAgent({
+                experimental: { codeMode: "eager" },
+                model: "openai/gpt-5.4",
+              }),
+            }),
+          },
+        ]),
+      ],
+    });
+
+    expect(compiled.tools.find((tool) => tool.name === "code_mode")).toMatchObject({
+      behavior: {
+        availability: ["root-session"],
+        handling: { kind: "workflow-tool", workflowId: "workflow//eve//codeModeWorkflow" },
+      },
+      hasExecute: true,
+      name: "code_mode",
+    });
+  });
+
   it("freezes source metadata behind an immutable registry map", () => {
     const sourceRegistry = registry([]);
 
