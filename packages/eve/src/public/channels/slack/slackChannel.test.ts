@@ -392,6 +392,24 @@ describe("slackChannel()", () => {
     expect(slackChannel({ credentials })).toMatchObject({ vercelConnect });
   });
 
+  it("preserves Slack app manifest options for compilation", () => {
+    expect(
+      slackChannel({
+        botName: "Support agent",
+        appManifest: {
+          botEvents: ["message.channels"],
+          botScopes: ["channels:history"],
+        },
+      }),
+    ).toMatchObject({
+      slackAppManifest: {
+        botEvents: ["message.channels"],
+        botScopes: ["channels:history"],
+        displayName: "Support agent",
+      },
+    });
+  });
+
   it("projects the durable audience into instrumentation metadata", () => {
     const adapter = withState(getAdapter(slackChannel()), { audience: "private" });
 

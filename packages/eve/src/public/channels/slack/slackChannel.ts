@@ -59,6 +59,7 @@ import {
   type LoadThreadContextMessagesOptions,
 } from "#public/channels/slack/thread.js";
 import { buildSlackAuthContext, slackUserIdFromAuthContext } from "#public/channels/slack/auth.js";
+import type { SlackAppManifestOptions } from "#public/channels/slack/app-manifest.js";
 import { SLACK_CHANNEL_DEFAULT_ROUTE } from "#public/channels/slack/constants.js";
 import { handleInteractionPost } from "#public/channels/slack/interactions.js";
 import {
@@ -605,7 +606,10 @@ export interface SlackChannelInternalEvents extends Omit<
 
 export interface SlackChannelConfig {
   readonly credentials?: SlackChannelCredentials;
+  /** Display name used for the generated Slack app and bot. */
   readonly botName?: string;
+  /** Additional OAuth scopes and Events API subscriptions for the generated Slack app manifest. */
+  readonly appManifest?: SlackAppManifestOptions;
 
   /** Optional presentation-only activity rendered without starting parent turns. */
   readonly activity?: {
@@ -991,8 +995,15 @@ export function slackChannel(config: SlackChannelConfig = {}): SlackChannel {
     renderers: activityRenderers,
   });
   const credentials = config.credentials as { readonly vercelConnect?: unknown } | undefined;
+  const slackAppManifest: {
+    botEvents?: readonly string[];
+    botScopes?: readonly string[];
+    displayName?: string;
+  } = { ...config.appManifest };
+  if (config.botName !== undefined) slackAppManifest.displayName = config.botName;
   return Object.assign(channel, {
     vercelConnect: credentials?.vercelConnect,
+    slackAppManifest,
   });
 }
 

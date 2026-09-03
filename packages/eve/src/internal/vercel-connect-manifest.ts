@@ -153,14 +153,14 @@ export function buildSlackAppManifests(manifest: {
   readonly channelRoutes: {
     readonly effective: readonly Pick<
       CompiledAgentManifest["channelRoutes"]["effective"][number],
-      "adapterKind" | "logicalPath" | "name"
+      "adapterKind" | "logicalPath" | "name" | "slackAppManifest"
     >[];
   };
 }): ReadonlyMap<string, SlackAppManifest> {
   const manifests = new Map<string, SlackAppManifest>();
   for (const channel of manifest.channelRoutes.effective) {
     if (channel.adapterKind !== "slack") continue;
-    const name = channel.name.slice(0, 35);
+    const name = (channel.slackAppManifest?.displayName ?? channel.name).slice(0, 35);
     manifests.set(slackAppManifestPath(channel.logicalPath), {
       display_information: { name },
       features: {
@@ -171,9 +171,15 @@ export function buildSlackAppManifests(manifest: {
         },
         bot_user: { display_name: name, always_online: false },
       },
-      oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+      oauth_config: {
+        scopes: {
+          bot: unique(["app_mentions:read", "chat:write"], channel.slackAppManifest?.botScopes),
+        },
+      },
       settings: {
-        event_subscriptions: { bot_events: ["app_mention"] },
+        event_subscriptions: {
+          bot_events: unique(["app_mention"], channel.slackAppManifest?.botEvents),
+        },
         interactivity: { is_enabled: true },
         org_deploy_enabled: false,
         socket_mode_enabled: false,
@@ -186,6 +192,13 @@ export function buildSlackAppManifests(manifest: {
 
 export function slackAppManifestPath(logicalPath: string): string {
   return `${logicalPath.replace(/\.[^/.]+$/, "")}.slack-app-manifest.json`;
+}
+
+function unique(
+  baseline: readonly string[],
+  additional: readonly string[] = [],
+): readonly string[] {
+  return [...new Set([...baseline, ...additional])];
 }
 
 export function createVercelConnectManifest(input: {

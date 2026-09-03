@@ -16,6 +16,7 @@ import { createProgrammaticCompiledModuleMap } from "#compiler/module-map.js";
 import { validateCompiledModuleMap } from "#compiler/validate-artifact.js";
 import { frameworkAgentSourceRegistry } from "#framework/sources/registry.js";
 import { defineAgent } from "#public/definitions/agent.js";
+import { slackChannel } from "#public/channels/slack/slackChannel.js";
 import { defineChannel, GET, POST } from "#public/definitions/channel.js";
 import { defineMcpClientConnection } from "#public/definitions/connections/mcp.js";
 import { defineHook } from "#public/definitions/hook.js";
@@ -616,6 +617,34 @@ describe("compileAgentManifest source graph", () => {
       expect.objectContaining({ code: "compile/channel-route-shadowed", severity: "warning" }),
     );
     expect(compiled.diagnosticsSummary.warnings).toBe(1);
+  });
+
+  it("preserves Slack app manifest options on compiled channel routes", async () => {
+    const sourceRegistry = registry([
+      {
+        logicalPath: "channels/support.ts",
+        loadNamespace: async () => ({
+          default: slackChannel({
+            botName: "Support agent",
+            appManifest: {
+              botEvents: ["message.channels"],
+              botScopes: ["channels:history"],
+            },
+          }),
+        }),
+      },
+    ]);
+
+    const compiled = await compileAgentManifest(manifest(), { sourceRegistries: [sourceRegistry] });
+
+    const support = compiled.channelRoutes.effective.find(
+      (channel) => channel.logicalPath === "channels/support.ts",
+    );
+    expect(support?.slackAppManifest).toEqual({
+      botEvents: ["message.channels"],
+      botScopes: ["channels:history"],
+      displayName: "Support agent",
+    });
   });
 
   it("rejects duplicate routes emitted by one selected channel", async () => {
