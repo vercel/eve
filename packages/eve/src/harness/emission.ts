@@ -447,13 +447,12 @@ async function consumeStreamContent(
           );
     await emitFn(
       createActionResultEvent({
+        presentation: activityResult,
         result,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
-      undefined,
-      activityResult,
     );
   };
 
@@ -466,13 +465,12 @@ async function consumeStreamContent(
     );
     await emitFn(
       createActionPartialEvent({
+        presentation: activityUpdate,
         result,
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
-      undefined,
-      activityUpdate,
     );
   };
 

@@ -118,10 +118,10 @@ describe("projectActivityEvents", () => {
   it("projects safe tool updates from partial events", () => {
     expect(
       projectActivityEvents({
-        activityLabels: { "tool-1": "Collecting sources" },
         at: "2026-01-01T00:00:01Z",
         event: {
           data: {
+            presentation: { "tool-1": { label: "Collecting sources" } },
             result: {
               callId: "tool-1",
               kind: "tool-result",
@@ -150,10 +150,10 @@ describe("projectActivityEvents", () => {
   it("projects successful result text before tool settlement", () => {
     expect(
       projectActivityEvents({
-        activityLabels: { "tool-1": "Report ready" },
         at: "2026-01-01T00:00:02Z",
         event: {
           data: {
+            presentation: { "tool-1": { label: "Report ready" } },
             result: {
               callId: "tool-1",
               kind: "tool-result",

@@ -47,7 +47,7 @@ export function projectActivityEvents(input: {
   }
   if (event.type === "action.partial") {
     const id = actionId(lineage.id, event.data.result.callId);
-    const label = activityLabel(input.activityLabels?.[event.data.result.callId]);
+    const label = activityLabel(event.data.presentation?.[event.data.result.callId]?.label);
     return label === undefined
       ? []
       : [
@@ -87,7 +87,7 @@ export function projectActivityEvents(input: {
       ];
     }
     const id = actionId(lineage.id, result.callId);
-    const label = activityLabel(input.activityLabels?.[result.callId]);
+    const label = activityLabel(event.data.presentation?.[result.callId]?.label);
     return [
       ...(label === undefined
         ? []
