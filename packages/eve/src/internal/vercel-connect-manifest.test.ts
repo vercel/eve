@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildSlackAppManifests,
   buildVercelConnectRequirements,
   createVercelConnectManifest,
+  slackAppManifestPath,
   type VercelConnectRequirement,
 } from "#internal/vercel-connect-manifest.js";
 
@@ -103,10 +105,68 @@ describe("buildVercelConnectRequirements", () => {
         target: { mode: "direct", locator: "slack/my-agent" },
         connector: { type: "slack" },
         access: { principalTypes: ["app"] },
+        providerConfiguration: {
+          format: "slack-app-manifest",
+          path: "channels/slack.slack-app-manifest.json",
+        },
         triggers: [{ method: "POST", path: "/eve/v1/slack" }],
         uses: [{ kind: "channel", name: "slack", logicalPath: "channels/slack.ts" }],
       },
     ]);
+  });
+
+  it("derives separate Slack manifest paths from channel source paths", () => {
+    expect(slackAppManifestPath("channels/slack.ts")).toBe(
+      "channels/slack.slack-app-manifest.json",
+    );
+    expect(slackAppManifestPath("channels/support/slack.tsx")).toBe(
+      "channels/support/slack.slack-app-manifest.json",
+    );
+  });
+
+  it("builds a Slack-native app manifest for each Slack channel", () => {
+    const manifests = buildSlackAppManifests({
+      channelRoutes: {
+        effective: [
+          {
+            adapterKind: "slack",
+            name: "support",
+            logicalPath: "channels/support.ts",
+            vercelConnect: {
+              connector: "slack/support",
+              connectorType: "slack",
+              principalTypes: ["app"],
+            },
+          },
+          {
+            adapterKind: "slack",
+            name: "sales",
+            logicalPath: "channels/sales.ts",
+            vercelConnect: {
+              connector: "slack/sales",
+              connectorType: "slack",
+              principalTypes: ["app"],
+            },
+          },
+        ],
+      },
+    } as const);
+
+    expect(Object.fromEntries(manifests)).toEqual({
+      "channels/support.slack-app-manifest.json": {
+        display_information: { name: "support" },
+        features: { bot_user: { display_name: "support", always_online: false } },
+        oauth_config: { scopes: { bot: ["app_mentions:read", "chat:write"] } },
+        settings: {
+          event_subscriptions: { bot_events: ["app_mention"] },
+          interactivity: { is_enabled: true },
+          org_deploy_enabled: false,
+          socket_mode_enabled: false,
+          token_rotation_enabled: false,
+        },
+      },
+      "channels/sales.slack-app-manifest.json": expect.any(Object),
+    });
   });
 
   it("ignores connections without Connect metadata", () => {

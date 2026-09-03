@@ -2,4 +2,4 @@
 "eve": patch
 ---
 
-Emit a private Vercel Connect manifest for direct Connect-backed Slack channels and MCP or OpenAPI connections.
+Emit private Vercel Connect requirements for direct Connect-backed channels and connections. Slack requirements reference a separately emitted Slack app manifest derived from each channel's source path.
