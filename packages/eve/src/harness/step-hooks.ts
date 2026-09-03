@@ -282,12 +282,11 @@ export async function emitStepActions(
     await emitFn(
       createActionsRequestedEvent({
         actions: actions.map(({ action }) => action),
+        presentation: collectActionActivityLabels(actions),
         sequence: state.sequence,
         stepIndex: state.stepIndex,
         turnId: state.turnId,
       }),
-      undefined,
-      collectActionActivityLabels(actions),
     );
   }
 

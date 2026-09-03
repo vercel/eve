@@ -4,7 +4,6 @@ import type {
   MessageAppendedStreamEvent,
   ReasoningAppendedStreamEvent,
 } from "#protocol/message.js";
-import type { ActionActivityLabels } from "#harness/action-activity.js";
 import type { HarnessEmitFn } from "#harness/types.js";
 
 type AppendStreamEvent =
@@ -16,7 +15,6 @@ const MAX_PENDING_EVENTS = 64;
 const MAX_PENDING_DELTA_CHARACTERS = 64 * 1024;
 
 interface PendingEmission {
-  activityLabels?: ActionActivityLabels;
   deltaCharacters: number;
   deltaParts?: string[];
   event: UnstampedMessageStreamEvent;
@@ -88,7 +86,7 @@ export function createOrderedStreamEmitter(
       settleCapacityWaiters();
 
       try {
-        await emitFn(materializeEvent(next), next.messages, next.activityLabels);
+        await emitFn(materializeEvent(next), next.messages);
       } catch (error) {
         if (!failed) {
           failure = error;
@@ -133,7 +131,7 @@ export function createOrderedStreamEmitter(
       void pump();
       await waitForIdle();
     },
-    async emit(event, messages, activityLabels) {
+    async emit(event, messages) {
       throwIfFailed();
       if (closeRequested) {
         throw new TypeError("Cannot emit after the ordered stream emitter has closed.");
@@ -142,9 +140,8 @@ export function createOrderedStreamEmitter(
       const lastIndex = pending.length - 1;
       const last = pending[lastIndex];
       const delta = appendDelta(event);
-      if (last === undefined || !mergeAdjacentEmissions(last, event, messages, activityLabels)) {
+      if (last === undefined || !mergeAdjacentEmissions(last, event, messages)) {
         pending.push({
-          activityLabels,
           deltaCharacters: delta?.length ?? 0,
           event,
           messages,
@@ -175,7 +172,6 @@ function mergeAdjacentEmissions(
   left: PendingEmission,
   right: UnstampedMessageStreamEvent,
   messages: readonly import("ai").ModelMessage[] | undefined,
-  activityLabels: ActionActivityLabels | undefined,
 ): boolean {
   const leftAppendKey = appendKey(left.event);
   const rightAppendKey = appendKey(right);
@@ -201,7 +197,6 @@ function mergeAdjacentEmissions(
             },
           }
         : right;
-    left.activityLabels = activityLabels;
     left.messages = messages;
     return true;
   }
@@ -209,7 +204,6 @@ function mergeAdjacentEmissions(
   if (left.event.type === "action.partial" && right.type === "action.partial") {
     if (left.event.data.result.callId !== right.data.result.callId) return false;
     left.event = right;
-    left.activityLabels = activityLabels;
     left.messages = messages;
     return true;
   }

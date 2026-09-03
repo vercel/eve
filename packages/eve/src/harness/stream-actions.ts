@@ -41,12 +41,11 @@ export function createProviderStreamActionBatch(input: {
     await input.emitFn(
       createActionsRequestedEvent({
         actions: projections.map(({ action }) => action),
+        presentation: collectActionActivityLabels(projections),
         sequence: input.state.sequence,
         stepIndex: input.state.stepIndex,
         turnId: input.state.turnId,
       }),
-      undefined,
-      collectActionActivityLabels(projections),
     );
   };
 

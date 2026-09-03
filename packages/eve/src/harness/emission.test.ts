@@ -436,12 +436,9 @@ describe("emitStreamContent action requests", () => {
   });
 
   it("emits activity labels for provider-executed calls", async () => {
-    const emitted: Array<{
-      event: Parameters<HarnessEmitFn>[0];
-      labels: Parameters<HarnessEmitFn>[2];
-    }> = [];
-    const emit: HarnessEmitFn = async (event, _messages, labels) => {
-      emitted.push({ event, labels });
+    const emitted: Parameters<HarnessEmitFn>[0][] = [];
+    const emit: HarnessEmitFn = async (event) => {
+      emitted.push(event);
     };
 
     await emitStreamContent(
@@ -473,8 +470,8 @@ describe("emitStreamContent action requests", () => {
       },
     );
 
-    expect(emitted.find(({ event }) => event.type === "actions.requested")?.labels).toEqual({
-      "search-1": "Search eve framework",
+    expect(emitted.find((event) => event.type === "actions.requested")?.data.presentation).toEqual({
+      "search-1": { label: "Search eve framework" },
     });
   });
 
