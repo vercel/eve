@@ -1,12 +1,12 @@
 import { defineEval, type EveEvalContext, type EveEvalSession } from "eve/evals";
 
-const ALICE_PRIVATE_DATA = "ALICE_PRIVATE_DM_7K4M";
-const BOB_PRIVATE_DATA = "BOB_PRIVATE_DM_9P2R";
+const ALICE_RECORD = "ALICE_SCOPED_RECORD_7K4M";
+const BOB_RECORD = "BOB_SCOPED_RECORD_9P2R";
 const BOB_AUTHORIZATION = "Bearer e2e-principal-forwarding-bob";
 const OBSERVER_AUTHORIZATION = "Bearer e2e-principal-forwarding-observer";
 const CHILD_MESSAGE = [
-  "[forward-auth:child] Call read-private-data exactly once.",
-  "If it succeeds, reply with only its privateData value.",
+  "[forward-auth:child] Call read-scoped-record exactly once.",
+  "If it succeeds, reply with only its record value.",
   "If it fails, reply with only ACCESS_DENIED.",
 ].join(" ");
 const CREATE_CHILD_MESSAGE = [
@@ -53,23 +53,23 @@ export default defineEval({
       .watchTurn(childSessionId, { startIndex: childEventCount })
       .result();
 
-    aliceChild.calledTool("read-private-data", {
+    aliceChild.calledTool("read-scoped-record", {
       count: 1,
-      output: { privateData: ALICE_PRIVATE_DATA },
+      output: { record: ALICE_RECORD },
       status: "completed",
     });
-    bobChild.calledTool("read-private-data", {
+    bobChild.calledTool("read-scoped-record", {
       count: 1,
-      output: { privateData: BOB_PRIVATE_DATA },
+      output: { record: BOB_RECORD },
       status: "completed",
     });
-    observerChild.calledTool("read-private-data", { count: 1, status: "failed" });
-    observerChild.calledTool("read-private-data", { count: 0, status: "completed" });
+    observerChild.calledTool("read-scoped-record", { count: 1, status: "failed" });
+    observerChild.calledTool("read-scoped-record", { count: 0, status: "completed" });
     observerChild.event("action.result", {
       count: 1,
       data: {
-        error: { message: /No OAuth grant exists for e2e-observer/ },
-        result: { kind: "tool-result", toolName: "read-private-data" },
+        error: { message: /No scoped record grant exists for e2e-observer/ },
+        result: { kind: "tool-result", toolName: "read-scoped-record" },
         status: "failed",
       },
     });

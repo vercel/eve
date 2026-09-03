@@ -1,6 +1,8 @@
 import { defineEvalConfig } from "eve/evals";
 
 export default defineEvalConfig({
-  maxConcurrency: 4,
-  timeoutMs: 180_000,
+  // Each eval launches three background tasks. Serializing cases keeps their
+  // wake streams independent of eval-runner contention.
+  maxConcurrency: 1,
+  timeoutMs: 240_000,
 });

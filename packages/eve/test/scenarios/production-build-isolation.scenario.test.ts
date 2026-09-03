@@ -203,14 +203,27 @@ async function startEveDev(appRoot: string): Promise<RunningDevServer> {
 }
 
 async function expectHealthy(server: RunningDevServer): Promise<void> {
-  const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url), {
-    signal: AbortSignal.timeout(5_000),
-  });
-  const body = await response.text();
+  let status: number | undefined;
+  let body = "";
+  let failure: unknown;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      const response = await fetch(new URL(EVE_HEALTH_ROUTE_PATH, server.url), {
+        signal: AbortSignal.timeout(5_000),
+      });
+      status = response.status;
+      body = await response.text();
+      if (response.status === 200) return;
+    } catch (error) {
+      failure = error;
+    }
+    await new Promise<void>((resolvePromise) => setTimeout(resolvePromise, 100));
+  }
   expect(
-    response.status,
+    status,
     [
       `Expected ${EVE_HEALTH_ROUTE_PATH} to remain healthy.`,
+      `last error:\n${String(failure)}`,
       `response:\n${body}`,
       `stdout:\n${server.stdout()}`,
       `stderr:\n${server.stderr()}`,

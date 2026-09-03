@@ -1,10 +1,20 @@
-import { defineOpenAPIConnection } from "eve/connections";
+import { defineDynamic, defineOpenAPIConnection } from "eve/connections";
 import { always } from "eve/tools/approval";
 
-export default defineOpenAPIConnection({
-  approval: always(),
-  baseUrl: "https://petstore.swagger.io/v2",
-  spec: "https://petstore.swagger.io/v2/swagger.json",
-  description: "Approval-gated Swagger Petstore API from its public Swagger 2.0 document.",
-  operations: { allow: ["getInventory"] },
+import { resolvePetstoreBaseUrl, resolvePetstoreHeaders, PETSTORE_SPEC } from "../lib/petstore.js";
+
+export default defineDynamic({
+  events: {
+    "session.started": () => ({
+      "petstore-approval": defineOpenAPIConnection({
+        approval: always(),
+        baseUrl: resolvePetstoreBaseUrl(),
+        description: "Approval-gated local Swagger Petstore API fixture.",
+        headers: resolvePetstoreHeaders,
+        instanceKey: "agent-openapi-swagger:petstore-approval",
+        operations: { allow: ["getInventory"] },
+        spec: PETSTORE_SPEC,
+      }),
+    }),
+  },
 });

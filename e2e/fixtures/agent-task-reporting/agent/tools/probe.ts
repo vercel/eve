@@ -2,9 +2,9 @@ import { defineTool } from "eve/tools";
 import { z } from "zod";
 
 const PROBES = {
-  first: { delayMs: 10_000, result: "WAKE-MECHANISM" },
-  second: { delayMs: 40_000, result: "CHANNEL-DELIVERY" },
-  third: { delayMs: 70_000, result: "REPORTING-POLICY" },
+  first: { delayMs: 100, result: "WAKE-MECHANISM" },
+  second: { delayMs: 200, result: "CHANNEL-DELIVERY" },
+  third: { delayMs: 300, result: "REPORTING-POLICY" },
 } as const;
 
 export default defineTool({

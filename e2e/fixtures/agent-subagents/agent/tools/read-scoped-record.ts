@@ -2,14 +2,14 @@ import type { NonInteractiveAuthorizationDefinition } from "eve/connections";
 import { defineTool } from "eve/tools";
 import { z } from "zod";
 
-const privateDataByGrant: Readonly<Record<string, string>> = {
-  "grant:alice": "ALICE_PRIVATE_DM_7K4M",
-  "grant:bob": "BOB_PRIVATE_DM_9P2R",
+const recordByGrant: Readonly<Record<string, string>> = {
+  "scope:alice": "ALICE_SCOPED_RECORD_7K4M",
+  "scope:bob": "BOB_SCOPED_RECORD_9P2R",
 };
 
 const grantByPrincipal: Readonly<Record<string, string>> = {
-  "e2e-user": "grant:alice",
-  "e2e-user-2": "grant:bob",
+  "e2e-user": "scope:alice",
+  "e2e-user-2": "scope:bob",
 };
 
 // Models a provider-side grant store: eve selects the principal, while the
@@ -19,19 +19,19 @@ const userGrant: NonInteractiveAuthorizationDefinition = {
   async getToken({ principal }) {
     if (principal.type !== "user") throw new Error("A user grant is required.");
     const token = grantByPrincipal[principal.id];
-    if (token === undefined) throw new Error(`No OAuth grant exists for ${principal.id}.`);
+    if (token === undefined) throw new Error(`No scoped record grant exists for ${principal.id}.`);
     return { token };
   },
 };
 
 export default defineTool({
   description:
-    "Reads private data using the current caller's user-scoped grant. Call only when explicitly requested.",
+    "Reads the current caller's synthetic scoped record using its user-scoped test grant. Call only when explicitly requested.",
   inputSchema: z.object({}),
   async execute(_input, ctx) {
-    const grant = await ctx.getToken(userGrant, { authKey: "private-data" });
-    const privateData = privateDataByGrant[grant.token];
-    if (privateData === undefined) throw new Error("No private data exists for this grant.");
-    return { privateData };
+    const grant = await ctx.getToken(userGrant, { authKey: "scoped-record" });
+    const record = recordByGrant[grant.token];
+    if (record === undefined) throw new Error("No scoped record exists for this grant.");
+    return { record };
   },
 });

@@ -4,9 +4,8 @@ const SEARCH_TOOL = "connection_search";
 const PETSTORE_APPROVAL_INVENTORY_TOOL = "petstore-approval__getInventory";
 
 export default defineEval({
-  tags: ["real-model"],
   description:
-    "OpenAPI connection HITL: an approval-gated Swagger Petstore operation parks before execution.",
+    "OpenAPI connection HITL: an approval-gated local Swagger operation parks before execution.",
 
   async test(t) {
     const parked = await t.send(
