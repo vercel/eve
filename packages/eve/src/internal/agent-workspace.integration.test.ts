@@ -81,7 +81,7 @@ describe("resolveEveProjectContext", () => {
     await mkdir(join(root, "agents", "incomplete"));
 
     await expect(resolveEveProjectContext(root)).rejects.toThrow(
-      /agents\/incomplete: expected an agent\/ directory/,
+      /incomplete: expected an agent\/ directory/,
     );
   });
 

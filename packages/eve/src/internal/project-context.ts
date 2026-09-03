@@ -45,6 +45,20 @@ async function hasFlatAgentRoot(root: string, source: ProjectSource): Promise<bo
   );
 }
 
+async function hasNestedWorkspaceMember(root: string, source: ProjectSource): Promise<boolean> {
+  const entries = await source.readDirectory(join(root, "agents"));
+  for (const entry of entries) {
+    if (
+      entry.isDirectory() &&
+      !entry.name.startsWith(".") &&
+      (await source.stat(join(root, "agents", entry.name, "agent"))) === "directory"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function resolveWorkspace(root: string, source: ProjectSource): Promise<AgentWorkspace> {
   const agentsRoot = join(root, "agents");
   const entries = (await source.readDirectory(agentsRoot))
@@ -82,15 +96,19 @@ export async function findEveProjectContext(
 
   const hasAgent = (await source.stat(join(projectRoot, "agent"))) === "directory";
   const hasAgents = (await source.stat(join(projectRoot, "agents"))) === "directory";
-  if (hasAgent && hasAgents) {
+  const hasWorkspace = hasAgents && (await hasNestedWorkspaceMember(projectRoot, source));
+  if (hasAgent && hasWorkspace) {
     throw new Error(`Invalid eve project at ${projectRoot}: found both agent/ and agents/.`);
   }
 
-  if (hasAgent || (!hasAgents && (await hasFlatAgentRoot(projectRoot, source)))) {
+  if (hasAgent) {
     return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
   }
 
   if (!hasAgents) {
+    if (await hasFlatAgentRoot(projectRoot, source)) {
+      return { appRoot: projectRoot, environmentRoot: projectRoot, kind: "standalone" };
+    }
     throw new Error(`Invalid eve project at ${projectRoot}: found no agent files.`);
   }
 
