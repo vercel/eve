@@ -132,21 +132,11 @@ describe("buildVercelConnectRequirements", () => {
             adapterKind: "slack",
             name: "support",
             logicalPath: "channels/support.ts",
-            vercelConnect: {
-              connector: "slack/support",
-              connectorType: "slack",
-              principalTypes: ["app"],
-            },
           },
           {
             adapterKind: "slack",
-            name: "sales",
-            logicalPath: "channels/sales.ts",
-            vercelConnect: {
-              connector: "slack/sales",
-              connectorType: "slack",
-              principalTypes: ["app"],
-            },
+            name: "portable",
+            logicalPath: "channels/portable.ts",
           },
         ],
       },
@@ -172,7 +162,7 @@ describe("buildVercelConnectRequirements", () => {
           token_rotation_enabled: false,
         },
       },
-      "channels/sales.slack-app-manifest.json": expect.any(Object),
+      "channels/portable.slack-app-manifest.json": expect.any(Object),
     });
   });
 
