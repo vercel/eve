@@ -5,6 +5,7 @@ import { parseCodeModeWorkflowInput } from "#execution/code-mode/schema.js";
 import {
   executeCodeModeToolStep,
   runCodeModeProgramStep,
+  type CodeModePendingCall,
   type CodeModeProgramOutcome,
 } from "#execution/code-mode/program-step.js";
 import type { JsonObject, JsonValue } from "#shared/json.js";
@@ -23,47 +24,56 @@ export async function codeModeWorkflow(rawInput: unknown, ctx: ToolContext): Pro
 
   const program = parseCodeModeWorkflowInput(rawInput);
   const run = readCodeModeRunContext(ctx);
-  let outcome: CodeModeProgramOutcome = await runCodeModeProgramStep({
+  const base = {
     callId: ctx.callId,
     program,
     serializedContext: run.serializedContext,
     sessionState: run.sessionState,
-  });
+  };
+  let outcome: CodeModeProgramOutcome = await runCodeModeProgramStep(base);
   let nested = 0;
   while (outcome.status === "interrupted") {
     if (ctx.abortSignal.aborted) {
       throw ctx.abortSignal.reason ?? new Error("code_mode was cancelled.");
     }
-    const { call, interrupt, toolCallId } = outcome;
-    const invocationId = `${ctx.callId}:${String(nested++)}`;
-    let resolution: unknown;
-    if (call.target === "agent") {
-      const agentInput = readAgentInput(call.toolInput);
-      resolution = await invokeAgent(
-        ctx,
-        { ...agentInput, target: call.toolName },
-        { invocationId },
-      );
-    } else {
-      const result = await executeCodeModeToolStep({
-        callId: ctx.callId,
-        serializedContext: run.serializedContext,
-        sessionState: run.sessionState,
-        toolCallId,
-        toolInput: call.toolInput,
-        toolName: call.toolName,
-      });
-      resolution = result.isError ? { error: result.output } : result.output;
-    }
-    outcome = await runCodeModeProgramStep({
-      callId: ctx.callId,
-      program,
-      resume: { interrupt, resolution },
-      serializedContext: run.serializedContext,
-      sessionState: run.sessionState,
+    // Calls parked together were issued together (Promise.all); settle them
+    // together. Ids are assigned before the await so replay hands each call
+    // the same id regardless of completion order.
+    const settling = outcome.pending.map((pending) => {
+      const invocationId = `${ctx.callId}:${String(nested++)}`;
+      return settleNestedCall(ctx, run, pending, invocationId);
     });
+    const resolutions = await Promise.all(settling);
+    outcome = await runCodeModeProgramStep({ ...base, resume: resolutions });
   }
   return outcome.output;
+}
+
+async function settleNestedCall(
+  ctx: ToolContext,
+  run: ReturnType<typeof readCodeModeRunContext>,
+  pending: CodeModePendingCall,
+  invocationId: string,
+): Promise<{ readonly interrupt: CodeModePendingCall["interrupt"]; readonly resolution: unknown }> {
+  const { call, interrupt, toolCallId } = pending;
+  if (call.target === "agent") {
+    const agentInput = readAgentInput(call.toolInput);
+    const resolution = await invokeAgent(
+      ctx,
+      { ...agentInput, target: call.toolName },
+      { invocationId },
+    );
+    return { interrupt, resolution };
+  }
+  const result = await executeCodeModeToolStep({
+    callId: ctx.callId,
+    serializedContext: run.serializedContext,
+    sessionState: run.sessionState,
+    toolCallId,
+    toolInput: call.toolInput,
+    toolName: call.toolName,
+  });
+  return { interrupt, resolution: result.isError ? { error: result.output } : result.output };
 }
 
 interface CodeModeAgentInput {

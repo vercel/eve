@@ -26,6 +26,7 @@ import {
   continueWorkflowSandboxInterrupt,
   createWorkflowSandboxTool,
   getWorkflowSandboxPendingInterrupts,
+  readWorkflowSandboxResolution,
   requestWorkflowSandboxInterrupt,
   unwrapWorkflowSandboxResult,
   type WorkflowSandboxInterrupt,
@@ -42,14 +43,16 @@ export interface CodeModeCallInterrupt {
   readonly toolName: string;
 }
 
+/** One parked nested call, in the order the sandbox recorded it. */
+export interface CodeModePendingCall {
+  readonly call: CodeModeCallInterrupt;
+  readonly interrupt: WorkflowSandboxInterrupt;
+  readonly toolCallId: string;
+}
+
 export type CodeModeProgramOutcome =
   | { readonly status: "completed"; readonly output: JsonValue }
-  | {
-      readonly status: "interrupted";
-      readonly call: CodeModeCallInterrupt;
-      readonly interrupt: WorkflowSandboxInterrupt;
-      readonly toolCallId: string;
-    };
+  | { readonly status: "interrupted"; readonly pending: readonly CodeModePendingCall[] };
 
 interface CodeModeProgramInput {
   readonly callId: string;
@@ -59,19 +62,24 @@ interface CodeModeProgramInput {
 }
 
 /**
- * Starts the generated program, or resumes it after one nested call settled.
+ * Starts the generated program, or resumes it once every parked call settled.
  *
  * Every claimed tool is a stub that raises an interrupt, so this step never
  * performs a side effect itself: the sandbox parks at the first unresolved
- * call and returns a signed continuation. Replaying this step after a crash
- * therefore re-parks at the same call rather than re-firing anything.
+ * batch of calls and returns a signed continuation. Replaying this step after
+ * a crash therefore re-parks at the same calls rather than re-firing anything.
+ *
+ * A `Promise.all` in the program parks several calls in one continuation. The
+ * body settles them concurrently and hands the results back together; the
+ * sandbox only resumes once the last one lands, and the intermediate
+ * `continue` calls are pure bookkeeping on the continuation.
  */
 export async function runCodeModeProgramStep(
   input: CodeModeProgramInput & {
-    readonly resume?: {
+    readonly resume?: readonly {
       readonly interrupt: WorkflowSandboxInterrupt;
       readonly resolution: unknown;
-    };
+    }[];
   },
 ): Promise<CodeModeProgramOutcome> {
   "use step";
@@ -92,30 +100,51 @@ export async function runCodeModeProgramStep(
       } as never,
     );
   } else {
+    const [first, ...rest] = input.resume;
+    if (first === undefined) {
+      throw new Error("code_mode resume requires at least one resolution.");
+    }
+    // Each `continue` returns a fresh interrupt whose signed ledger includes
+    // the resolution just applied; the next one must be fed that interrupt,
+    // not the original park. The program only runs on the final resolution.
+    let current = first.interrupt;
     raw = await continueWorkflowSandboxInterrupt({
       bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
       continuationSecurity: security,
-      interrupt: input.resume.interrupt,
-      resolution: input.resume.resolution,
+      interrupt: current,
+      resolution: first.resolution,
       tools: hostTools,
     });
+    for (const { resolution } of rest) {
+      const advanced = await unwrapWorkflowSandboxResult(raw, security);
+      if (advanced.status !== "interrupted") {
+        throw new Error("code_mode resumed before every parked call was resolved.");
+      }
+      current = getWorkflowSandboxPendingInterrupts(advanced.interrupt)[0] ?? advanced.interrupt;
+      raw = await continueWorkflowSandboxInterrupt({
+        bridgeRequestLimit: CODE_MODE_BRIDGE_REQUEST_LIMIT,
+        continuationSecurity: security,
+        interrupt: current,
+        resolution,
+        tools: hostTools,
+      });
+    }
   }
   const unwrapped = await unwrapWorkflowSandboxResult(raw, security);
   if (unwrapped.status === "completed") {
     return { output: parseJsonValue(unwrapped.output ?? null), status: "completed" };
   }
-  // Promise.all may park several calls at once; settle them one at a time in
-  // ledger order so each nested call keeps its own replay boundary.
-  const pending = getWorkflowSandboxPendingInterrupts(unwrapped.interrupt)[0];
-  if (pending === undefined) {
+  const pending = getWorkflowSandboxPendingInterrupts(unwrapped.interrupt).map(
+    (interrupt): CodeModePendingCall => ({
+      call: readCallInterrupt(interrupt),
+      interrupt,
+      toolCallId: interrupt.toolCallId,
+    }),
+  );
+  if (pending.length === 0) {
     throw new Error("code_mode continuation contains no pending call.");
   }
-  return {
-    call: readCallInterrupt(pending),
-    interrupt: pending,
-    status: "interrupted",
-    toolCallId: pending.toolCallId,
-  };
+  return { pending, status: "interrupted" };
 }
 
 /**
@@ -179,13 +208,19 @@ async function buildProgramHost(input: CodeModeProgramInput): Promise<{
     const target = isCodeModeAgentTool(definition) ? "agent" : "tool";
     hostTools[name] = {
       ...describeClaimedTool(definition),
-      execute: async (toolInput: unknown) =>
-        requestWorkflowSandboxInterrupt({
+      // On resume the sandbox replays the program and re-invokes this stub
+      // with the settled value attached; returning it is what lets the
+      // program advance past the park point.
+      execute: async (toolInput: unknown, options: unknown) => {
+        const resolution = readWorkflowSandboxResolution(options);
+        if (resolution !== undefined) return resolution;
+        return requestWorkflowSandboxInterrupt({
           kind: CODE_MODE_CALL_INTERRUPT_KIND,
           target,
           toolInput,
           toolName: name,
-        } satisfies CodeModeCallInterrupt),
+        } satisfies CodeModeCallInterrupt);
+      },
     } as ToolSet[string];
   }
   if (input.program.mode === "lazy") {
