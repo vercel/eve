@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import type { RuntimeToolCallActionRequest } from "#shared/action-types.js";
 import type { InputRequest, InputResponse } from "#shared/input.js";
 import { resolveTextToResponses } from "#channel/resolve-text.js";
+import { hasTailApprovalResponse } from "#harness/current-messages.js";
 import {
   getApprovedTools,
   hasAnsweredApprovalBatch,
@@ -182,13 +183,6 @@ function canonicalizeInputResponses(responses: readonly InputResponse[]): readon
   const byRequestId = new Map<string, InputResponse>();
   for (const response of responses) byRequestId.set(response.requestId, response);
   return [...byRequestId.values()];
-}
-
-function hasTailApprovalResponse(messages: readonly ModelMessage[]): boolean {
-  const tail = messages.at(-1);
-  return (
-    tail?.role === "tool" && tail.content.some((part) => part.type === "tool-approval-response")
-  );
 }
 
 function resolveTextMessageInput(

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Client } from "#client/client.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -21,6 +22,9 @@ describe("Client.sessions", () => {
         requests.push({ url: String(request) });
         return new Response(
           `${JSON.stringify({ data: { reason: "completed" }, type: "session.completed" })}\n`,
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         );
       });
     const client = new Client({ host: "https://eve.test" });

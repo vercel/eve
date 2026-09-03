@@ -18,6 +18,7 @@
  */
 export function parseNdjsonStream<T>(
   createByteStream: () => ReadableStream<Uint8Array>,
+  parse: (value: unknown) => T = (value) => value as T,
 ): ReadableStream<T> {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -44,7 +45,7 @@ export function parseNdjsonStream<T>(
             buffer = buffer.slice(newlineIndex + 1);
 
             if (line.length > 0) {
-              controller.enqueue(JSON.parse(line) as T);
+              controller.enqueue(parse(JSON.parse(line)));
             }
           }
         }
@@ -56,7 +57,7 @@ export function parseNdjsonStream<T>(
         buffer += decoder.decode();
         const trailing = buffer.trim();
         if (trailing.length > 0) {
-          controller.enqueue(JSON.parse(trailing) as T);
+          controller.enqueue(parse(JSON.parse(trailing)));
         }
         controller.close();
       } catch (error) {

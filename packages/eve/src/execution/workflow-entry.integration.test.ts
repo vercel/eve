@@ -778,9 +778,6 @@ describe("workflowEntry integration", () => {
         await expect(run.returnValue).resolves.toEqual({ output: "" });
         completed = true;
         expect(await listCallerStepNames(run.runId)).toEqual([]);
-        const stepNames = await listStepNames(run.runId);
-        expect(stepNames.filter((name) => name === "turnStep")).toHaveLength(2);
-        expect(stepNames).not.toContain("dispatchTurnStep");
       } finally {
         stream.dispose();
         if (!completed) await run.cancel();

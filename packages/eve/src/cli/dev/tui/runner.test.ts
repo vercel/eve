@@ -12,7 +12,11 @@ import { getApplicationInfo } from "#internal/application/paths.js";
 import { stampTestEvent } from "#internal/testing/events.js";
 import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.js";
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
-import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
+import {
+  EVE_MESSAGE_STREAM_VERSION,
+  EVE_STREAM_VERSION_HEADER,
+  type UnstampedMessageStreamEvent,
+} from "#protocol/message.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
 import type { VercelDeploymentResolution } from "#setup/vercel-deployment.js";
 
@@ -461,6 +465,9 @@ function messageStreamResponseOf(events: readonly MessageStreamEvent[]): Respons
         controller.close();
       },
     }),
+    {
+      headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+    },
   );
 }
 
@@ -930,7 +937,6 @@ describe("EveTUIRunner idle session follow", () => {
         type: "message.appended",
         data: {
           messageDelta: "Background research finished.",
-          messageSoFar: "Background research finished.",
           sequence: 1,
           stepIndex: 1,
           turnId: "wake-turn",
@@ -974,7 +980,6 @@ describe("EveTUIRunner idle session follow", () => {
           type: "message.appended",
           data: {
             messageDelta: "Follow-up answer.",
-            messageSoFar: "Follow-up answer.",
             sequence: 2,
             stepIndex: 0,
             turnId: "follow-up-turn",
@@ -1320,6 +1325,9 @@ describe("EveTUIRunner development session continuity", () => {
               controller.close();
             },
           }),
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         );
       }),
     );
@@ -2172,7 +2180,6 @@ describe("EveTUIRunner reused step indexes", () => {
         type: "message.appended",
         data: {
           messageDelta: "I'll call the subagent.",
-          messageSoFar: "I'll call the subagent.",
           sequence: 0,
           stepIndex: 0,
           turnId: "t0",
@@ -2194,7 +2201,6 @@ describe("EveTUIRunner reused step indexes", () => {
         type: "message.appended",
         data: {
           messageDelta: "The subagent returned TOKEN-123.",
-          messageSoFar: "The subagent returned TOKEN-123.",
           sequence: 0,
           stepIndex: 0,
           turnId: "t0",
@@ -2249,7 +2255,6 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: "Sunny.",
-          messageSoFar: "Sunny.",
           sequence: 0,
           stepIndex: 0,
           turnId: "turn_0",
@@ -2295,7 +2300,7 @@ describe("EveTUIRunner replay guards", () => {
     expect(deltas).toEqual([{ type: "assistant-delta", id: "text:turn_0:0", delta: "Sunny." }]);
   });
 
-  it("deduplicates repeated call IDs and divergent text attempts in one turn", async () => {
+  it("deduplicates repeated call IDs and replaces retried text with the completed text", async () => {
     const prompts: Array<string | undefined> = ["weather", undefined];
     const emitted: AgentTUIStreamEvent[] = [];
     const session = sessionYielding([
@@ -2379,7 +2384,6 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: "Using",
-          messageSoFar: "Using",
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
@@ -2389,7 +2393,6 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: " the first",
-          messageSoFar: "Using the first",
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
@@ -2399,7 +2402,15 @@ describe("EveTUIRunner replay guards", () => {
         type: "message.appended",
         data: {
           messageDelta: " the retry",
-          messageSoFar: "Using the retry",
+          sequence: 0,
+          stepIndex: 1,
+          turnId: "turn_0",
+        },
+      },
+      {
+        type: "message.appended",
+        data: {
+          messageDelta: " collision",
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
@@ -2410,16 +2421,6 @@ describe("EveTUIRunner replay guards", () => {
         data: {
           finishReason: "stop",
           message: "Using the first answer.",
-          sequence: 0,
-          stepIndex: 1,
-          turnId: "turn_0",
-        },
-      },
-      {
-        type: "message.appended",
-        data: {
-          messageDelta: " answer.",
-          messageSoFar: "Using the retry answer.",
           sequence: 0,
           stepIndex: 1,
           turnId: "turn_0",
@@ -2473,15 +2474,22 @@ describe("EveTUIRunner replay guards", () => {
 
     const toolCalls = emitted.filter((event) => event.type === "tool-call");
     const toolResults = emitted.filter((event) => event.type === "tool-result");
-    const assistantText = emitted
+    const streamedText = emitted
       .filter((event) => event.type === "assistant-delta")
       .map((event) => event.delta)
       .join("");
+    const assistantCompletes = emitted.filter((event) => event.type === "assistant-complete");
 
     expect(toolCalls.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
     expect(toolResults.map((event) => event.toolCallId)).toEqual(["call-original", "call-replay"]);
-    expect(assistantText).toBe("Using the first answer.");
-    expect(assistantText).not.toContain("retry");
+    expect(streamedText).toContain("the retry collision");
+    expect(assistantCompletes).toEqual([
+      {
+        type: "assistant-complete",
+        id: "text:turn_0:1",
+        text: "Using the first answer.",
+      },
+    ]);
     expect(emitted.filter((event) => event.type === "finish")).toHaveLength(1);
   });
 
@@ -3193,6 +3201,9 @@ describe("EveTUIRunner renderer teardown", () => {
             signal.addEventListener("abort", () => controller.close(), { once: true });
           },
         }),
+        {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        },
       );
     });
 
@@ -4221,6 +4232,9 @@ describe("EveTUIRunner cancelled-turn subagent settling", () => {
               init?.signal?.addEventListener("abort", () => controller.close(), { once: true });
             },
           }),
+          {
+            headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+          },
         ),
     );
 

@@ -1,7 +1,7 @@
 ---
 issue: https://github.com/vercel/eve/issues/1510
 status: proposed
-last_updated: "2026-08-26"
+last_updated: "2026-09-01"
 ---
 
 # First-class memory
@@ -1050,17 +1050,49 @@ interface MemoryDocumentBackend {
 Every backend implements the same optimistic read/replace contract. The default
 backend fails closed and resolves lazily on first storage access:
 
-| Environment                                                       | Default backend                         |
-| ----------------------------------------------------------------- | --------------------------------------- |
-| Vercel with Blob credentials (token, or attached store with OIDC) | Private Vercel Blob                     |
-| Vercel without Blob configuration                                 | Error: attach a store or pass a backend |
-| eve development environment (`eve dev`)                           | Shared process-local in-memory backend  |
-| Every other environment, including unset or unknown `NODE_ENV`    | Error: explicit backend required        |
+| Environment                                                       | Default backend                                               |
+| ----------------------------------------------------------------- | ------------------------------------------------------------- |
+| Vercel with Blob credentials (token, or attached store with OIDC) | Private Vercel Blob                                           |
+| Vercel without Blob configuration                                 | Error: add file memory, run setup directly, or pass a backend |
+| eve development environment (`eve dev`)                           | Shared process-local in-memory backend                        |
+| Every other environment, including unset or unknown `NODE_ENV`    | Error: explicit backend required                              |
+
+The default Vercel backend prefers the file-memory namespace before generic
+application bindings: `EVE_MEMORY_BLOB_READ_WRITE_TOKEN`, then
+`EVE_MEMORY_BLOB_STORE_ID` with Vercel OIDC from the environment or request
+context, then the corresponding generic `BLOB_*` credentials. Direct
+`vercelBlob()` options retain their existing behavior.
 
 Vercel detection takes precedence over development flags, a Blob token outside
 Vercel never silently selects Blob, and `NODE_ENV` alone never proves a
 development environment. An explicit `fileMemory({ backend })` is used in every
 environment. Tests pass `inMemory()` explicitly.
+
+### Vercel provisioning
+
+The official `memory/file` registry item writes `agent/memory/file.ts` and
+declares the trusted `eve integration setup file-memory` flow. After the
+registry review authorizes setup, the shared setup runner owns Vercel CLI
+installation, login, project creation or linking, cancellation, environment
+pulling, and optional deployment. File memory adds no dashboard automation or
+runtime provisioning dependency.
+
+Preparation resolves the first region from the linked root's
+`vercel.json.regions`, the project's `resourceConfig.functionDefaultRegions`,
+the project's `defaultResourceConfig.functionDefaultRegions`, or `iad1`, in
+that order. Apply shows the resolved project, deterministic store name, region,
+target environments, and usage-charge warning before mutation. It creates a
+private Blob store when needed and connects production, preview, and
+development with the `EVE_MEMORY_` prefix.
+
+Reconciliation owns exactly one eve file-memory store per Vercel project. It
+reuses one valid namespaced private connection, repairs the deterministic
+unconnected private store left by a partial run, and otherwise creates a new
+store. It never adopts arbitrary application stores, changes a generic
+`BLOB_*` connection, or deletes or replaces a store. Ambiguous, public, and
+incompatible eve-prefixed resources fail with recovery guidance. Region drift
+on an already connected store warns and preserves the store so setup cannot
+cause memory loss.
 
 The same lifecycle also supports a hosted semantic provider:
 
@@ -1145,7 +1177,7 @@ Still out of scope:
 - Preventing faulty or malicious provider code from ignoring the supplied
   scope.
 - Standardizing provider credentials, migrations, inspection tools, or
-  deployment operations.
+  deployment operations beyond the built-in file-memory setup.
 
 ## Implementation boundary
 
@@ -1162,7 +1194,7 @@ memory uses the compile-time wrapper described above. The kernel-effects
 follow-up to #2516 is not a prerequisite because provider tools have ordinary
 executors rather than native kernel effects.
 
-Implementation proceeds in two pull requests:
+Implementation proceeds in three pull requests:
 
 1. The first-class memory core is implemented in
    [#2534](https://github.com/vercel/eve/pull/2534), rebased directly onto
@@ -1177,6 +1209,11 @@ Implementation proceeds in two pull requests:
    #2534. It retains only provider storage, document, backend, and concurrency
    work and includes final file-provider e2e coverage. The separate e2e tail in
    [#2145](https://github.com/vercel/eve/pull/2145) is superseded.
+3. The official `memory/file` registry item and
+   `eve integration setup file-memory` flow provision and reconcile a dedicated
+   private Vercel Blob store through the existing registry-owned setup runner.
+   Runtime selection prefers the namespaced binding and retains generic Blob
+   credentials as the manual-attachment fallback.
 
 #2534 implements the core boundary through one selected source and binding
 authority for every memory definition and provider-tool wrapper, one

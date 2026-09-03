@@ -8,6 +8,7 @@ import { createTestAgentInfoResult } from "#internal/testing/agent-info-fixture.
 import { resolveTestVercelTarget } from "#internal/testing/verified-vercel-target.js";
 import { resolveRemoteDevelopmentClientOptions } from "#services/dev-client/client-options.js";
 import { createDevelopmentCredentialGate } from "#services/dev-client/credential-gate.js";
+import { EVE_MESSAGE_STREAM_VERSION, EVE_STREAM_VERSION_HEADER } from "#protocol/message.js";
 
 const AGENT_INFO = createTestAgentInfoResult({
   agentRoot: "/tmp/weather-agent/agent",
@@ -58,7 +59,9 @@ describe("Client request policy", () => {
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
       .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
       );
     const client = new Client({
       host: "https://eve.test?x-vercel-protection-bypass=secret",
@@ -87,7 +90,9 @@ describe("Client request policy", () => {
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
       .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
       );
     const client = new Client({ host: "https://eve.test", redirect: "manual" });
 
@@ -125,7 +130,9 @@ describe("Client request policy", () => {
         Response.json({ sessionId: "session_1", status: "accepted" }, { status: 202 }),
       )
       .mockResolvedValueOnce(
-        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`),
+        new Response(`${JSON.stringify({ data: {}, type: "session.completed" })}\n`, {
+          headers: { [EVE_STREAM_VERSION_HEADER]: EVE_MESSAGE_STREAM_VERSION },
+        }),
       );
     const client = new Client({
       host: "https://eve.test",

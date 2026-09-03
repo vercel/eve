@@ -1,8 +1,10 @@
 import type { MessageStreamEvent } from "#protocol/message.js";
 import { EVE_STREAM_TAIL_INDEX_HEADER } from "#protocol/message.js";
+import type { MessageStreamVersion } from "#protocol/message-version.js";
 import { createEveSessionStreamRoutePath } from "#protocol/routes.js";
 import { ClientError } from "#client/client-error.js";
 import { isStreamDisconnectError, readNdjsonStream } from "#client/ndjson.js";
+import { readMessageStreamVersion } from "#client/stream-version.js";
 import type {
   ClientRedirectPolicy,
   ResolvedStreamReconnectPolicy as StreamReconnectPolicyOptions,
@@ -163,6 +165,7 @@ export async function* followStreamIterable(
     try {
       for await (const event of readNdjsonStream(connection.body, {
         idleTimeoutMs: input.streamReadIdleTimeoutMs ?? DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS,
+        streamVersion: connection.streamVersion,
       })) {
         startIndex += 1;
         deliveredEvent = true;
@@ -206,6 +209,7 @@ export async function* followStreamIterable(
 interface OpenedStream {
   readonly body: ReadableStream<Uint8Array>;
   close(): void;
+  readonly streamVersion: MessageStreamVersion;
   readonly tailIndex: number | undefined;
 }
 
@@ -273,6 +277,7 @@ export async function openStreamBody(
       return {
         body: response.body,
         close: () => connectionController.abort(),
+        streamVersion: readMessageStreamVersion(response.headers),
         tailIndex: parseTailIndexHeader(response.headers),
       };
     }

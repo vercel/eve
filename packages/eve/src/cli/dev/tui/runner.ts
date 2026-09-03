@@ -2174,7 +2174,6 @@ async function* eveEventsToTUIStream(
         const appended = event as MessageAppendedStreamEvent;
         const base = textPartId(appended.data.turnId, appended.data.stepIndex);
         const state = partStateFor(textParts, base);
-        const next = appended.data.messageSoFar;
 
         if (state.completed) {
           // No intervening `step.started`: a retry of the same model call.
@@ -2187,12 +2186,9 @@ async function* eveEventsToTUIStream(
           state.completed = false;
         }
 
-        if (!next.startsWith(state.text) || next.length <= state.text.length) {
-          break;
-        }
-
-        const delta = next.slice(state.text.length);
-        state.text = next;
+        const delta = appended.data.messageDelta;
+        if (delta.length === 0) break;
+        state.text += delta;
         yield { type: "assistant-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2234,6 +2230,11 @@ async function* eveEventsToTUIStream(
             state.completed = true;
             state.completedEpoch = stepEpoch;
             yield { type: "assistant-complete", id };
+          } else {
+            state.text = message;
+            state.completed = true;
+            state.completedEpoch = stepEpoch;
+            yield { type: "assistant-complete", id, text: message };
           }
         } else if (state.text.length > 0) {
           state.completed = true;
@@ -2247,7 +2248,6 @@ async function* eveEventsToTUIStream(
         const appended = event as ReasoningAppendedStreamEvent;
         const base = reasoningPartId(appended.data.turnId, appended.data.stepIndex);
         const state = partStateFor(reasoningParts, base);
-        const next = appended.data.reasoningSoFar;
 
         if (state.completed) {
           if (stepEpoch <= state.completedEpoch) break;
@@ -2256,12 +2256,9 @@ async function* eveEventsToTUIStream(
           state.completed = false;
         }
 
-        if (!next.startsWith(state.text) || next.length <= state.text.length) {
-          break;
-        }
-
-        const delta = next.slice(state.text.length);
-        state.text = next;
+        const delta = appended.data.reasoningDelta;
+        if (delta.length === 0) break;
+        state.text += delta;
         yield { type: "reasoning-delta", id: partGenerationId(base, state.generation), delta };
         break;
       }
@@ -2288,6 +2285,14 @@ async function* eveEventsToTUIStream(
           state.text = next;
           yield { type: "reasoning-delta", id, delta: next };
         } else if (next.length > 0 && !next.startsWith(state.text)) {
+          yield { type: "reasoning-complete", id };
+          state.generation += 1;
+          state.text = next;
+          state.completed = true;
+          state.completedEpoch = stepEpoch;
+          const replacementId = partGenerationId(base, state.generation);
+          yield { type: "reasoning-delta", id: replacementId, delta: next };
+          yield { type: "reasoning-complete", id: replacementId };
           break;
         }
 
@@ -2580,7 +2585,12 @@ type StreamPartState = {
 function partStateFor(parts: Map<string, StreamPartState>, base: string): StreamPartState {
   let state = parts.get(base);
   if (state === undefined) {
-    state = { generation: 0, text: "", completed: false, completedEpoch: 0 };
+    state = {
+      generation: 0,
+      text: "",
+      completed: false,
+      completedEpoch: 0,
+    };
     parts.set(base, state);
   }
   return state;

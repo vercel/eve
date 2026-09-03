@@ -155,17 +155,30 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 
   const tokenArgs =
     process.env.VERCEL_TOKEN === undefined ? [] : ["--token", process.env.VERCEL_TOKEN];
-  const modelArgs =
-    process.env.EVE_E2E_MODEL === undefined
+  const deploymentEnvArgs = [
+    ...(process.env.EVE_E2E_MODEL === undefined
       ? []
-      : ["--env", `EVE_E2E_MODEL=${process.env.EVE_E2E_MODEL}`];
+      : ["--env", `EVE_E2E_MODEL=${process.env.EVE_E2E_MODEL}`]),
+    ...(process.env.EVE_SANDBOX_IMAGE_TAG === undefined
+      ? []
+      : ["--env", `EVE_SANDBOX_IMAGE_TAG=${process.env.EVE_SANDBOX_IMAGE_TAG}`]),
+  ];
   // vc alias does not infer the team from the project link the way deploy
   // does, so pass the scope explicitly.
   const scopeArgs =
     process.env.VERCEL_ORG_ID === undefined ? [] : ["--scope", process.env.VERCEL_ORG_ID];
   const deploy = await execFileAsync(
     "pnpm",
-    ["exec", "vc", "deploy", "--prebuilt", "--yes", "--target=preview", ...modelArgs, ...tokenArgs],
+    [
+      "exec",
+      "vc",
+      "deploy",
+      "--prebuilt",
+      "--yes",
+      "--target=preview",
+      ...deploymentEnvArgs,
+      ...tokenArgs,
+    ],
     EXEC_OPTIONS,
   );
   const deploymentUrl = deploy.stdout.trim().split("\n").at(-1)?.trim();
