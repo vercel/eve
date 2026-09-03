@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import searchModels, {
   parseGatewayModels,
   searchGatewayModels,
-} from "./extension/tools/search_models.js";
+} from "../extension/tools/search_models.js";
 
 const CATALOG = {
   data: [
