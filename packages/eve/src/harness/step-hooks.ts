@@ -48,7 +48,6 @@ import { contextStorage } from "#context/container.js";
 import { isAuthorizationSignal, isPendingAuthorizationToolOutput } from "#harness/authorization.js";
 import { readToolInterrupt } from "#harness/tool-interrupts.js";
 import { AuthKey } from "#context/keys.js";
-import { mergeProviderSafetyIdentifier } from "#harness/provider-safety.js";
 
 // ---------------------------------------------------------------------------
 // Step result type
