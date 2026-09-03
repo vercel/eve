@@ -127,8 +127,12 @@ export class ClientSession {
     return this.#messageResponse<TOutput>(response, input, initialStreamIndex);
   }
 
-  /** Requests cooperative cancellation of this session's active turn. */
-  async cancel(options?: { readonly turnId?: string }): Promise<CancelSessionResult> {
+  /** Requests cooperative cancellation of this session's active turn and optionally its tasks. */
+  async cancel(options?: {
+    readonly signal?: AbortSignal;
+    readonly tasks?: boolean;
+    readonly turnId?: string;
+  }): Promise<CancelSessionResult> {
     return await cancelClientSession({
       context: this.#context,
       options,
@@ -147,7 +151,10 @@ export class ClientSession {
   }
 
   /** Terminally retires this exact session ID. The handle remains pinned to it. */
-  async reset(options?: { readonly reason?: string }): Promise<ResetResult> {
+  async reset(options?: {
+    readonly reason?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<ResetResult> {
     return await resetClientSession({
       context: this.#context,
       options,

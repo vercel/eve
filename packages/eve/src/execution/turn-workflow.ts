@@ -11,6 +11,7 @@ import { createHook, getWorkflowMetadata } from "#compiled/@workflow/core/index.
 import type { DeliverHookPayload } from "#channel/types.js";
 import { preserveSerializedSessionDynamicModelSelection } from "#context/serialized-dynamic-model-selection.js";
 import { cancelDescendantTurnsStep } from "#execution/cancel-descendant-turns-step.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import { sendTurnControlStep, type TurnInboxPayload } from "#execution/turn-control-protocol.js";
 import { dispatchCoordinationStep } from "#execution/coordination-dispatch-step.js";
 import { acknowledgeDelegatedTasksStep } from "#execution/tasks/parent/delegate.js";
@@ -302,6 +303,14 @@ async function finishCancelledTurn(input: {
   readonly cancellation: TurnCancellationControl | undefined;
   readonly cursor: TurnExecutionCursor;
 }): Promise<void> {
+  const cancellation =
+    input.cancellation?.signal.aborted === true ? await input.cancellation.payload : undefined;
+  if (cancellation?.tasks === true) {
+    await cancelAllIndexedSessionTasksStep({
+      serializedContext: input.cursor.serializedContext,
+      sessionState: input.cursor.sessionState,
+    });
+  }
   await cancelDescendantTurnsStep({
     serializedContext: input.cursor.serializedContext,
     sessionState: input.cursor.sessionState,

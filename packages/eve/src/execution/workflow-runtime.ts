@@ -391,10 +391,11 @@ function inactiveCommandResult<TCommand extends SessionCommand>(
 export async function requestWorkflowTurnCancellation(
   input: CancelTurnInput,
 ): Promise<CancelTurnResult> {
-  const command: { kind: "cancel"; taskId?: string; turnId?: string } = {
+  const command: { kind: "cancel"; taskId?: string; tasks?: boolean; turnId?: string } = {
     kind: "cancel",
   };
   if (input.taskId !== undefined) command.taskId = input.taskId;
+  if (input.tasks !== undefined) command.tasks = input.tasks;
   if (input.turnId !== undefined) command.turnId = input.turnId;
   return await dispatchWorkflowCommand(sessionCommandHookToken(input.sessionId), command);
 }

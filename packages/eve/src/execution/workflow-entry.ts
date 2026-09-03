@@ -508,6 +508,7 @@ async function runDriverLoop(input: {
       serializedContext,
       seenTaskDeliveries,
       sessionState: stateCursor.sessionState,
+      stateCursor,
     });
     await disposeSettledTurnControl?.();
     disposeSettledTurnControl = turn.dispose;

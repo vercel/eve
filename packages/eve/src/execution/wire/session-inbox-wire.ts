@@ -44,12 +44,22 @@ export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js
 /** Prefixes migration and contract failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
 
+const sessionInboxWireV5Migration: VersionMigration = {
+  from: 5,
+  migrate(prior) {
+    if (!isObject(prior)) throw new Error("session inbox wire v5 value is not an object.");
+    return { ...prior, version: 6 };
+  },
+  to: 6,
+};
+
 const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
   sessionInboxWireV2Migration,
   sessionInboxWireV3Migration,
   sessionInboxWireV4Migration,
+  sessionInboxWireV5Migration,
 ];
 
 /**
@@ -151,7 +161,7 @@ function normalizeWire(wire: SessionInboxWire): DecodedSessionInbox {
     case "reset":
       return { kind: "reset", reason: wire.reason };
     case "cancel":
-      return { kind: "cancel", taskId: wire.taskId, turnId: wire.turnId };
+      return { kind: "cancel", taskId: wire.taskId, tasks: wire.tasks, turnId: wire.turnId };
     default:
       throw new SessionInboxWireError(
         `${WIRE_LABEL} has an unrecognized kind ${JSON.stringify((wire as { kind?: unknown }).kind)}.`,

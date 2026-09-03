@@ -112,6 +112,28 @@ export const TASK_TRANSITIONS = {
       sideEffects: { executed: ["task-view-append", "parent-wake", "child-abort"] },
     },
   }),
+  "task.lifecycle.cancel.owned-session-accepted-nonterminal": transition({
+    preState: { lifecycle: ["working", "input_required"] },
+    input: "cancel",
+    guards: ["task-is-nonterminal", "parent-session-owns-task"],
+    expected: {
+      outcome: "accepted",
+      postState: { lifecycle: "cancelled", outstandingInput: "none" },
+      events: { emitted: ["task-ready-notification"] },
+      sideEffects: { executed: ["task-view-append", "parent-wake", "child-abort"] },
+    },
+  }),
+  "task.lifecycle.cancel.default-preserves-nonterminal": transition({
+    preState: { lifecycle: "input_required" },
+    input: "cancel",
+    guards: ["session-cancel-omits-task-scope"],
+    expected: {
+      outcome: "noop",
+      postState: { lifecycle: "input_required" },
+      events: { suppressed: ["task-ready-notification"] },
+      sideEffects: { suppressed: ["task-view-append", "child-abort"] },
+    },
+  }),
   "task.lifecycle.cancel.noop-already-cancelled": transition({
     preState: { lifecycle: "cancelled" },
     input: "cancel",

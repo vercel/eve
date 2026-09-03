@@ -8,6 +8,7 @@ import type {
 } from "#execution/durable-session-migrations/turn-workflow.js";
 import { runInlineTurn } from "#execution/inline-turn.js";
 import type { SessionCommandInbox } from "#execution/session-command-inbox.js";
+import { SessionStateCursor } from "#execution/session-state-cursor.js";
 import type { TurnCancelPayload } from "#execution/turn-cancellation-token.js";
 import type { TurnDriverAction } from "#execution/turn-control-receiver.js";
 import type { RunMode } from "#shared/run-mode.js";
@@ -41,16 +42,24 @@ interface TurnDispatchInput {
   readonly serializedContext: Record<string, unknown>;
   readonly seenTaskDeliveries?: Set<string>;
   readonly sessionState: DurableSessionState;
+  readonly stateCursor?: SessionStateCursor;
 }
 
 export async function dispatchAndAwaitTurn(input: TurnDispatchInput): Promise<DispatchedTurn> {
-  const inline = await runInlineTurn(input);
+  const stateCursor =
+    input.stateCursor ??
+    new SessionStateCursor({
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    });
+  const inline = await runInlineTurn({ ...input, stateCursor });
   if (inline.kind === "result") {
     return { action: inline.action, async dispose() {} };
   }
   return await dispatchAndAwaitChildTurn({
     ...input,
     initialCancellation: inline.initialCancellation,
+    stateCursor,
     initialStep: inline.initialStep,
   });
 }
@@ -68,6 +77,7 @@ async function dispatchAndAwaitChildTurn(
     commandInbox: input.commandInbox,
     expectedTurnId: activeTurnId(input.sessionState.emissionState),
     seenTaskDeliveries: input.seenTaskDeliveries ?? new Set(),
+    stateCursor: input.stateCursor!,
     token: input.controlToken,
   });
 

@@ -11,7 +11,8 @@ function resolvedProject(appRoot: string) {
   return { agentRoot: `${appRoot}/agent`, appRoot, layout: "nested" as const };
 }
 
-const { runInitCommand, runSetCommand } = vi.hoisted(() => ({
+const { runDeployCommand, runInitCommand, runSetCommand } = vi.hoisted(() => ({
+  runDeployCommand: vi.fn(async () => {}),
   runInitCommand: vi.fn(async () => {}),
   runSetCommand: vi.fn(async () => {}),
 }));
@@ -20,6 +21,7 @@ vi.mock("#cli/application-root.js", () => ({
   findCliApplicationRoot: vi.fn(async () => undefined),
   resolveCliApplicationProject: vi.fn(async (cwd: string) => resolvedProject(cwd)),
 }));
+vi.mock("#cli/commands/deploy.js", () => ({ runDeployCommand }));
 vi.mock("#cli/commands/init.js", () => ({ runInitCommand }));
 vi.mock("#cli/commands/set.js", () => ({ runSetCommand }));
 vi.mock("#internal/project-context.js", () => ({
@@ -90,6 +92,24 @@ describe("CLI command registration", () => {
     expect(runSetCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), {
       model: "openai/gpt-5.6-sol",
       reasoning: "high",
+    });
+  });
+
+  it("runs deploy from a workspace root without application discovery", async () => {
+    const logger = { error: vi.fn(), log: vi.fn() };
+    const resolveProject = vi.fn(async () => {
+      throw new Error("application discovery must not run for a workspace root");
+    });
+    runDeployCommand.mockClear();
+
+    await runCli(["deploy"], logger, { resolveApplicationProject: resolveProject });
+
+    expect(resolveProject).not.toHaveBeenCalled();
+    expect(runDeployCommand).toHaveBeenCalledWith(logger, resolve(process.cwd()), undefined, {
+      nonInteractive: undefined,
+      project: undefined,
+      team: undefined,
+      yes: undefined,
     });
   });
 

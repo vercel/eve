@@ -1,5 +1,6 @@
 import type { DeliverHookPayload, HookPayload, SessionCapabilities } from "#channel/types.js";
 import { readAcceptedDeploymentId } from "#execution/accepted-delivery-deployment.js";
+import { cancelAllIndexedSessionTasksStep } from "#execution/cancel-indexed-session-tasks-step.js";
 import type {
   InitialTurnStep,
   TurnStepPayload,
@@ -41,10 +42,17 @@ export async function runInlineTurn(input: {
   readonly seenTaskDeliveries?: Set<string>;
   readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
+  readonly stateCursor?: SessionStateCursor;
 }): Promise<InlineTurnOutcome> {
   const acceptedDeploymentId = readAcceptedDeploymentId(input.delivery);
   if (acceptedDeploymentId === undefined) return { kind: "child" };
 
+  const cursor =
+    input.stateCursor ??
+    new SessionStateCursor({
+      serializedContext: input.serializedContext,
+      sessionState: input.sessionState,
+    });
   const control = new InlineTurnControl({
     bufferedDeliveries: input.bufferedDeliveries,
     bufferedSessionControls: input.bufferedSessionControls,
@@ -52,10 +60,7 @@ export async function runInlineTurn(input: {
     commandInbox: input.commandInbox,
     expectedTurnId: activeTurnId(input.sessionState.emissionState),
     seenTaskDeliveries: input.seenTaskDeliveries,
-  });
-  const cursor = new SessionStateCursor({
-    serializedContext: input.serializedContext,
-    sessionState: input.sessionState,
+    stateCursor: cursor,
   });
   let nextStepInput: TurnStepPayload | undefined = input.delivery;
 
@@ -160,6 +165,7 @@ class InlineTurnControl {
   private readonly controller = new AbortController();
   private readonly expectedTurnId: string;
   private readonly seenTaskDeliveries: Set<string>;
+  private readonly stateCursor: SessionStateCursor;
   private cancellation: TurnCancelPayload | undefined;
 
   constructor(input: {
@@ -169,6 +175,7 @@ class InlineTurnControl {
     readonly commandInbox: SessionCommandInbox;
     readonly expectedTurnId: string;
     readonly seenTaskDeliveries?: Set<string>;
+    readonly stateCursor: SessionStateCursor;
   }) {
     this.bufferedDeliveries = input.bufferedDeliveries;
     this.bufferedSessionControls = input.bufferedSessionControls;
@@ -176,6 +183,7 @@ class InlineTurnControl {
     this.commandInbox = input.commandInbox;
     this.expectedTurnId = input.expectedTurnId;
     this.seenTaskDeliveries = input.seenTaskDeliveries ?? new Set();
+    this.stateCursor = input.stateCursor;
   }
 
   get initialCancellation(): TurnCancelPayload | undefined {
@@ -248,6 +256,12 @@ class InlineTurnControl {
       return;
     }
     if (command.kind === "cancel") {
+      if ("tasks" in command && command.tasks === true) {
+        await cancelAllIndexedSessionTasksStep({
+          serializedContext: this.stateCursor.serializedContext,
+          sessionState: this.stateCursor.sessionState,
+        });
+      }
       if (command.taskId !== undefined) this.discardTaskDeliveries(command.taskId);
       const turnId =
         command.taskId !== undefined &&
@@ -256,7 +270,9 @@ class InlineTurnControl {
           ? undefined
           : command.turnId;
       if (turnId === undefined || turnId === this.expectedTurnId) {
-        this.abort(turnId === undefined ? {} : { turnId });
+        const payload =
+          turnId === undefined ? { tasks: command.tasks } : { tasks: command.tasks, turnId };
+        this.abort(payload);
       }
     }
   }

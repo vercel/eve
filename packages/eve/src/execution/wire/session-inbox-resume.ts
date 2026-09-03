@@ -43,6 +43,7 @@ function isStableInboxFastPathCompatible(
   command: DeliverHookPayload | SessionCommand | SessionTimeoutHookPayload,
 ): boolean {
   if (!isSessionCommandHookToken(token)) return false;
+  if (command.kind === "cancel" && command.tasks === true) return false;
   return !("caller" in command && command.caller?.activityObserver !== undefined);
 }
 

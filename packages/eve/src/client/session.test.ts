@@ -134,6 +134,25 @@ describe("ClientSession", () => {
     expect(requests[1]!.headers.get("authorization")).toBe("Bearer token-2");
   });
 
+  it("sends tasks in the cancel body and uses signal only for fetch", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        Response.json({ ok: true, sessionId: "session_1", status: "accepted" }, { status: 202 }),
+      );
+    const session = createSession();
+
+    await expect(
+      session.cancel({ signal: controller.signal, tasks: true, turnId: "turn_1" }),
+    ).resolves.toEqual({ sessionId: "session_1", status: "accepted" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.signal).toBe(controller.signal);
+    expect(JSON.parse(String(init?.body))).toEqual({ tasks: true, turnId: "turn_1" });
+  });
+
   it("snapshots the session from the start through one pinned durable tail", async () => {
     const requests: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
@@ -452,7 +471,13 @@ describe("ClientSession", () => {
 
   it("resets the exact session while keeping the handle pinned to its ID", async () => {
     let headerResolution = 0;
-    const requests: Array<{ headers: Headers; method: string; url: string; body?: string }> = [];
+    const requests: Array<{
+      body?: string;
+      headers: Headers;
+      method: string;
+      signal?: AbortSignal | null;
+      url: string;
+    }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (request, init) => {
       const url =
         typeof request === "string" ? request : request instanceof URL ? request.href : request.url;
@@ -460,6 +485,7 @@ describe("ClientSession", () => {
         body: typeof init?.body === "string" ? init.body : undefined,
         headers: new Headers(init?.headers),
         method: init?.method ?? "GET",
+        signal: init?.signal,
         url,
       });
       return Response.json({
@@ -479,7 +505,8 @@ describe("ClientSession", () => {
       },
     );
 
-    await expect(session.reset()).resolves.toEqual({
+    const signal = AbortSignal.timeout(1_000);
+    await expect(session.reset({ signal })).resolves.toEqual({
       previousSessionId: "session_1",
       status: "reset",
     });
@@ -489,6 +516,7 @@ describe("ClientSession", () => {
     expect(new URL(requests[0]!.url).pathname).toBe("/eve/v1/session/session_1/reset");
     expect(requests[0]!.method).toBe("POST");
     expect(requests[0]!.headers.get("authorization")).toBe("Bearer token-1");
+    expect(requests[0]!.signal).toBe(signal);
     expect(JSON.parse(requests[0]!.body ?? "{}")).toEqual({});
   });
 
