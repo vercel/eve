@@ -139,7 +139,7 @@ describe("framework-next build", () => {
     const app = await scenarioApp(NEXT_EVE_MIDDLEWARE_DESCRIPTOR);
 
     await runPnpmCommand({
-      args: ["exec", "vercel", "build", "--yes"],
+      args: ["exec", "./node_modules/.bin/vercel", "build", "--yes"],
       cwd: app.appRoot,
     });
 
@@ -172,7 +172,7 @@ describe("framework-next build", () => {
     const app = await scenarioApp(NEXT_EVE_NAMED_SCHEDULES_DESCRIPTOR);
 
     await runPnpmCommand({
-      args: ["exec", "vercel", "build", "--yes"],
+      args: ["exec", "./node_modules/.bin/vercel", "build", "--yes"],
       cwd: app.appRoot,
     });
 

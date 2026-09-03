@@ -38,6 +38,7 @@ import workflowWorld from "./@workflow/world.mjs";
 import workflowWorldLocal from "./@workflow/world-local.mjs";
 import workflowWorldVercel from "./@workflow/world-vercel.mjs";
 
+import clackCore from "./@clack/core.mjs";
 import chat from "./chat.mjs";
 import chokidar from "./chokidar.mjs";
 import commander from "./commander.mjs";
@@ -63,6 +64,7 @@ export const MODULES = [
   chatAdapterSlack,
   chatAdapterStateMemory,
   chatAdapterTwilio,
+  clackCore,
   chokidar,
   commander,
   eventsourceParserStream,

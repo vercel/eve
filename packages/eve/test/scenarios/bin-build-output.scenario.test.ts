@@ -324,7 +324,7 @@ describe("eve build process output", () => {
     expect(result.code).toBe(1);
     expect(result.signal).toBeNull();
     expect(result.stdout).toBe("");
-    expect(result.stderr).toContain("Unexpected token");
+    expect(result.stderr).toContain("Expected `}` but found `EOF`");
     expect(result.stderr).toContain("Build failed with 1 error:");
     expect(result.stderr).toContain("agent/tools/bad.ts");
     expect(result.stderr).not.toContain("Diagnostics artifact:");
