@@ -52,7 +52,7 @@ export default defineTool({
 });
 ```
 
-The label is presentation only. It does not replace the path-derived tool name, enter model input, change execution, or persist in the public action event. Built-in channel activity can show `Deploy storefront to production` instead of `deploy`. eve normalizes and bounds the returned string; if the callback throws or returns an empty label, activity falls back to the tool name.
+The label is presentation only. It does not replace the path-derived tool name, enter model input, or change execution. eve records the bounded label on the corresponding public action event so activity renderers and other authorized stream consumers can use it without interpreting raw tool data. Built-in channel activity can show `Deploy storefront to production` instead of `deploy`; if the callback throws or returns an empty label, activity falls back to the tool name.
 
 Provided tools define labels for `bash`, `glob`, `grep`, `load_skill`, `read_file`, `web_fetch`, `web_search`, and `write_file`.
 
