@@ -390,14 +390,14 @@ function parseStructuredState(value: unknown): ActivityStructuredStateV1 | undef
       "sourceToolName",
       "value",
     ]) ||
-    !isStateKey(value.key) ||
+    !isPresentationStateKey(value.key) ||
     !isIdentity(value.parentWorkId) ||
     !isBoundedString(value.replacedAt) ||
     !isIdentity(value.rootTurnId) ||
     !isIdentity(value.sourceActionId) ||
     !isIdentity(value.sourceEventId) ||
     !isBoundedString(value.sourceToolName) ||
-    !isBoundedJsonValue(value.value)
+    !isPresentationStateValue(value.value)
   )
     return undefined;
   return {
