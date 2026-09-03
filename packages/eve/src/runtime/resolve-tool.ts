@@ -111,7 +111,7 @@ export async function resolveToolDefinition(
  * result without clobbering required fields with `undefined`.
  */
 type OptionalResolvedFields = {
-  -readonly [K in "activityLabel" | "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
+  -readonly [K in "activity" | "approval" | "toModelOutput"]?: ResolvedToolDefinition[K];
 };
 
 /**
@@ -130,10 +130,12 @@ function extractOptionalHooks(
       record.label,
       describe(definition, "to provide a valid label definition"),
     );
-    optional.activityLabel = expectFunction(
-      label.start,
-      describe(definition, "to provide an label start callback function"),
-    ) as ResolvedToolDefinition["activityLabel"];
+    optional.activity = {
+      start: expectFunction(
+        label.start,
+        describe(definition, "to provide a label start callback function"),
+      ) as NonNullable<ResolvedToolDefinition["activity"]>["start"],
+    };
   }
 
   if (record.approval !== undefined) {

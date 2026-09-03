@@ -1476,18 +1476,18 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
-  it("replays an label start callback callback", () => {
+  it("replays a label start callback", () => {
     const ctx = createCtx();
     registerTestCallback("deploy", "execute", () => ({ ok: true }));
     registerTestCallback(
       "deploy",
-      "activityLabel",
+      "activityStart",
       (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
     );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
         callbacks: {
-          activityLabel: { closure: {} },
+          activity: { start: { closure: {} } },
           execute: { closure: {} },
         },
         description: "Deploy.",
@@ -1498,7 +1498,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
       },
     ]);
 
-    expect(buildDynamicTools(ctx)[0]?.activityLabel?.({ environment: "preview" })).toBe(
+    expect(buildDynamicTools(ctx)[0]?.activity?.start?.({ environment: "preview" })).toBe(
       "Deploy to preview",
     );
     getDynamicCallbackRegistry().delete("deploy");

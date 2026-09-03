@@ -172,8 +172,8 @@ export type ResolvedToolDefinition = Readonly<
      * rehydrated before entering this runtime-owned definition.
      */
     readonly inputSchema: ToolSchema | null;
-    /** Human-readable action label derived from validated tool input. */
-    readonly activityLabel?: (input: unknown) => string;
+    /** Presentation projected from tool lifecycle values. */
+    readonly activity?: import("#tools/definition.js").InternalToolActivityDefinition;
     /**
      * Optional validated runtime output schema.
      */

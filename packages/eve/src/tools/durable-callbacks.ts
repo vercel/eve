@@ -3,7 +3,7 @@ import { resolveApprovalPolicy } from "#approval/definition.js";
 import type { JsonObject } from "#shared/json.js";
 
 export type DurableDynamicCallbackPhase =
-  | "activityLabel"
+  | "activityStart"
   | "approvalRequest"
   | "approvalResponse"
   | "execute"
@@ -23,7 +23,9 @@ export interface DurableDynamicCallbackReference {
 
 export interface DurableDynamicToolCallbacks {
   readonly execute: DurableDynamicCallbackReference;
-  readonly activityLabel?: DurableDynamicCallbackReference;
+  readonly activity?: {
+    readonly start?: DurableDynamicCallbackReference;
+  };
   readonly approvalRequest?: DurableDynamicCallbackReference;
   readonly approvalResponse?: DurableDynamicCallbackReference;
   readonly toModelOutput?: DurableDynamicCallbackReference;
@@ -37,7 +39,9 @@ export interface StampedDurableDynamicCallback {
 
 export type LiveDurableDynamicToolCallbacks = Partial<{
   execute: StampedDurableDynamicCallback;
-  activityLabel: StampedDurableDynamicCallback;
+  activity: {
+    readonly start?: StampedDurableDynamicCallback;
+  };
   approvalRequest: StampedDurableDynamicCallback;
   approvalResponse: StampedDurableDynamicCallback;
   toModelOutput: StampedDurableDynamicCallback;
@@ -136,12 +140,14 @@ export function stampDurableDynamicToolCallbacks(
 }
 
 export function collectDurableDynamicToolCallbacks(input: {
-  readonly activityLabel?: (...args: never[]) => unknown;
+  readonly activity?: {
+    readonly start?: (...args: never[]) => unknown;
+  };
   readonly approval?: Approval<never>;
   readonly execute: (...args: never[]) => unknown;
   readonly toModelOutput?: (...args: never[]) => unknown;
 }): LiveDurableDynamicToolCallbacks {
-  const activityLabel = readDurableDynamicCallback(input.activityLabel);
+  const activityStart = readDurableDynamicCallback(input.activity?.start);
   const approvalRequest =
     input.approval === undefined
       ? undefined
@@ -155,7 +161,7 @@ export function collectDurableDynamicToolCallbacks(input: {
   const toModelOutput = readDurableDynamicCallback(input.toModelOutput);
   const callbacks: LiveDurableDynamicToolCallbacks = {};
   if (execute !== undefined) callbacks.execute = execute;
-  if (activityLabel !== undefined) callbacks.activityLabel = activityLabel;
+  if (activityStart !== undefined) callbacks.activity = { start: activityStart };
   if (approvalRequest !== undefined) callbacks.approvalRequest = approvalRequest;
   if (approvalResponse !== undefined) callbacks.approvalResponse = approvalResponse;
   if (toModelOutput !== undefined) callbacks.toModelOutput = toModelOutput;

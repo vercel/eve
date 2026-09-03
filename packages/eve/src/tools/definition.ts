@@ -45,6 +45,10 @@ export interface ToolLabelDefinition<TInput = unknown> {
   start(input: Readonly<TInput>): string;
 }
 
+export interface InternalToolActivityDefinition {
+  readonly start?: (input: unknown) => string;
+}
+
 /**
  * Internal/compiled tool definition shape. Carries `name` because the
  * compiler stamps a path-derived identifier onto every tool entry.
@@ -53,6 +57,7 @@ export interface ToolLabelDefinition<TInput = unknown> {
  * carry `name`; identity comes from the file path.
  */
 export interface InternalToolDefinition extends ToolDefinitionBase {
+  activity?: InternalToolActivityDefinition;
   name: string;
   inputSchema: JsonObject | null;
   outputSchema?: JsonObject;
@@ -372,7 +377,7 @@ export function stampToolDefinition<
   stampDurableDynamicToolCallbacks(
     definition,
     collectDurableDynamicToolCallbacks({
-      activityLabel: definition.label?.start,
+      activity: definition.label,
       approval: definition.approval,
       execute: definition.execute,
       toModelOutput: definition.toModelOutput,
