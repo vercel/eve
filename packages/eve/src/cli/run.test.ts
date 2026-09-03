@@ -71,7 +71,11 @@ describe("CLI command registration", () => {
     const program = createCliProgram(
       { error: () => {}, log: () => {} },
       {},
-      { resolve: async () => {}, root: process.cwd() },
+      {
+        resolve: async () => {},
+        resolveAgent: async () => undefined as never,
+        root: process.cwd(),
+      },
       { trackDevContext: () => {} },
     );
     const paths: string[] = [];

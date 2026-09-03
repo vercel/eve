@@ -5,7 +5,6 @@ import {
   Option,
 } from "#compiled/commander/index.js";
 import { registerBuildCommand, type BuildHost } from "#cli/commands/build.js";
-import type { DevBootProgressReporter } from "#internal/dev-boot-progress.js";
 import { resolveApplicationRoot } from "#internal/application/paths.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import { isCodingAgentLaunch } from "#cli/agent-detection.js";
@@ -49,6 +48,7 @@ import {
 import type { AgentReasoningDefinition } from "#shared/agent-definition.js";
 import { findEveProjectContext, resolveEveProjectContext } from "#internal/project-context.js";
 import { parseDevelopmentServerUrl } from "#cli/dev/url.js";
+import { createDevBootProgressReporter } from "#cli/dev/boot-progress.js";
 import { startCliLiveRow } from "#cli/ui/live-row.js";
 import { createCliTheme, renderCliTaggedLine } from "#cli/ui/output.js";
 import { registerEveTelemetryCommands } from "#cli/telemetry/command.js";
@@ -57,7 +57,6 @@ import {
   createEveCliTelemetry,
   type EveCliTelemetry,
 } from "#cli/telemetry/index.js";
-import { createLogger } from "#internal/logging.js";
 import type {
   DevelopmentServer,
   DevelopmentServerOptions,
@@ -106,31 +105,6 @@ interface CliRuntimeDependencies {
 }
 
 type CliRuntimeOverrides = Partial<CliRuntimeDependencies>;
-
-const devBootLog = createLogger("dev.boot");
-
-function createDevBootProgressReporter(
-  row: ReturnType<typeof startCliLiveRow> | undefined,
-): DevBootProgressReporter {
-  return (event) => {
-    switch (event.type) {
-      case "phase-started":
-        row?.update("Building your agent", event.phase);
-        devBootLog.debug(event.phase);
-        return;
-      case "phase-finished":
-        devBootLog.debug(`${event.phase} finished`, { ms: event.elapsedMs });
-        return;
-      case "before-first-paint":
-        row?.stop();
-        return;
-      default: {
-        const exhaustive: never = event;
-        return exhaustive;
-      }
-    }
-  };
-}
 
 async function loadPrintApplicationInfo(): Promise<CliRuntimeDependencies["printApplicationInfo"]> {
   return (await import("#cli/commands/info.js")).printApplicationInfo;
