@@ -1,4 +1,6 @@
-import type { JsonObject } from "#shared/json.js";
+import type { BackgroundTask } from "#execution/tasks/parent/delegate.js";
+import type { HarnessSession } from "#harness/types.js";
+import type { JsonObject, JsonValue } from "#shared/json.js";
 
 const TASK_SET_STATE_KIND = "eve:task-set-state" as const;
 const TASK_MESSAGE_KIND = "eve:task-message" as const;
@@ -42,6 +44,26 @@ export interface TaskExecutorBinding {
   readonly data: JsonObject;
 }
 
+/** @deprecated Use workflow-backed background tools with yield descriptors. */
+export interface TaskBinding {
+  readonly taskId: string;
+  readonly token: string;
+  readonly url?: string;
+}
+
+/** @deprecated Use workflow-backed background tools with yield descriptors. */
+export type TaskSendCommand =
+  | { readonly kind: "update"; readonly message: string }
+  | { readonly kind: "complete"; readonly data: JsonValue }
+  | { readonly kind: "fail"; readonly data: JsonValue }
+  | { readonly kind: "cancel" };
+
+/** @deprecated Use workflow-backed background tools with yield descriptors. */
+export interface TaskDelegated<TData extends JsonObject = JsonObject> {
+  readonly kind: "eve:task-delegated";
+  readonly executor: TaskExecutorBinding;
+  readonly receipt: TData & TaskReceipt;
+}
 /** Fixed acknowledgement returned when a background task is admitted. */
 export interface TaskReceipt {
   readonly status: "working";
@@ -56,4 +78,17 @@ export interface TaskExec {
   setState(state: JsonObject): TaskSetState;
   /** Returns a descriptor which sends one message to the parent when yielded. */
   postMessage(message: string): TaskMessage;
+  /** @deprecated Use yields from a workflow-backed background tool. */
+  readonly binding?: TaskBinding;
+  /** @deprecated Use yields from a workflow-backed background tool. */
+  delegated?<TData extends JsonObject>(input: {
+    readonly executor: TaskExecutorBinding;
+    readonly receipt: TData;
+  }): TaskDelegated<TData>;
+  /** @deprecated Use yields from a workflow-backed background tool. */
+  readonly send?: (command: TaskSendCommand) => Promise<void>;
+  /** @deprecated Use ctx.session. */
+  readonly session?: HarnessSession;
+  /** @deprecated Framework-owned task internals are not part of the authoring API. */
+  readonly task?: BackgroundTask;
 }
