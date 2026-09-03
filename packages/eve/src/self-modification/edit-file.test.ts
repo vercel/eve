@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import editFile, { applyExactEdits } from "../extension/tools/edit_file.js";
+import editFile, { applyExactEdits } from "./extension/tools/edit_file.js";
 
 describe("applyExactEdits", () => {
   it("replaces one exact match", () => {

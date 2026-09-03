@@ -73,7 +73,9 @@ export class WorkflowAgentInvocationExecution {
     if (run === undefined) return undefined;
 
     if (isTerminalRunStatus(run.status)) {
-      return await terminalInvocation(run);
+      const events =
+        run.status === "failed" ? await readRecentPersistedEvents(input.invocationId) : [];
+      return await terminalInvocation(run, events);
     }
     const events = await readRecentPersistedEvents(input.invocationId);
     return projectNonterminal(
@@ -289,13 +291,16 @@ function projectNonterminal(
   return { ...base, pollAfterMs: 1_000, status: "working" };
 }
 
-async function terminalInvocation(run: {
-  readonly createdAt: Date;
-  readonly error?: unknown;
-  readonly expiredAt?: Date;
-  readonly runId: string;
-  readonly status: string;
-}): Promise<AgentInvocation> {
+async function terminalInvocation(
+  run: {
+    readonly createdAt: Date;
+    readonly error?: unknown;
+    readonly expiredAt?: Date;
+    readonly runId: string;
+    readonly status: string;
+  },
+  events: readonly HandleMessageStreamEvent[],
+): Promise<AgentInvocation> {
   const base = {
     createdAt: run.createdAt.toISOString(),
     expiresAt: run.expiredAt?.toISOString(),
@@ -305,7 +310,7 @@ async function terminalInvocation(run: {
   if (run.status === "failed") {
     return {
       ...base,
-      error: { code: -32603, data: safeJson(run.error), message: errorMessage(run.error) },
+      error: publicInvocationFailure(run.runId, events),
       status: "failed",
     };
   }
@@ -329,8 +334,99 @@ function safeJson(value: unknown): JsonValue {
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Session failed.";
+function publicInvocationFailure(
+  runId: string,
+  events: readonly HandleMessageStreamEvent[],
+): Extract<AgentInvocation, { readonly status: "failed" }>["error"] {
+  const event = [...events].reverse().find((candidate) => candidate.type === "session.failed");
+  const data: Record<string, string> = { runId };
+  if (event !== undefined) data.eveCode = event.data.code;
+
+  const deploymentId = vercelDeploymentId();
+  if (deploymentId !== undefined) data.vercelDeploymentId = deploymentId;
+  if (typeof event?.data.details?.errorId === "string") data.errorId = event.data.details.errorId;
+
+  const semantic = event === undefined ? null : semanticFailure(event.data);
+  if (semantic === null) {
+    const fallback = event === undefined ? null : fallbackFailure(event.data);
+    if (fallback === null) return { code: -32603, data, message: "Invocation failed." };
+    if (fallback.name !== undefined) data.name = fallback.name;
+    return { code: -32603, data, message: fallback.message };
+  }
+
+  data.semanticErrorId = semantic.id;
+  data.name = semantic.name;
+  if (semantic.hint !== undefined) data.hint = semantic.hint;
+  return { code: -32603, data, message: semantic.message };
+}
+
+function semanticFailure(
+  event: Extract<HandleMessageStreamEvent, { type: "session.failed" }>["data"],
+): {
+  readonly hint?: string;
+  readonly id: string;
+  readonly message: string;
+  readonly name: string;
+} | null {
+  const details = event.details;
+  if (
+    typeof details?.semanticErrorId !== "string" ||
+    details.semanticErrorId.trim().length === 0 ||
+    typeof details.name !== "string" ||
+    details.name.trim().length === 0
+  ) {
+    return null;
+  }
+
+  const message =
+    typeof details.message === "string" && details.message.trim().length > 0
+      ? details.message.trim()
+      : event.message.trim();
+  if (message.length === 0) return null;
+
+  const hint =
+    typeof details.hint === "string" && details.hint.trim().length > 0
+      ? details.hint.trim()
+      : undefined;
+  const summary: {
+    hint?: string;
+    id: string;
+    message: string;
+    name: string;
+  } = {
+    id: details.semanticErrorId,
+    message,
+    name: details.name,
+  };
+  if (hint !== undefined) summary.hint = hint;
+  return summary;
+}
+
+function fallbackFailure(
+  event: Extract<HandleMessageStreamEvent, { type: "session.failed" }>["data"],
+): {
+  readonly message: string;
+  readonly name?: string;
+} | null {
+  const message = event.message.trim();
+  const name = typeof event.details?.name === "string" ? event.details.name.trim() : "";
+  if (message.length === 0 && name.length === 0) return null;
+  const fallback: { message: string; name?: string } = {
+    message: message.length === 0 ? name : truncateForDisplay(message),
+  };
+  if (name.length > 0) fallback.name = name;
+  return fallback;
+}
+
+function truncateForDisplay(value: string, maxChars = 160): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function vercelDeploymentId(): string | undefined {
+  if (process.env.VERCEL !== "1") return undefined;
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID?.trim();
+  return deploymentId && deploymentId.length > 0 ? deploymentId : undefined;
 }
 
 function conflict(message: string): AgentInvocationMutationResult {

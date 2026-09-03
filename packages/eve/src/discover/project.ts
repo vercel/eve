@@ -6,13 +6,13 @@ import {
   type DiscoverDiagnostic,
 } from "#discover/diagnostics.js";
 import {
-  classifyAgentRootEntry,
   type DirectoryEntryType,
   getDirectoryEntryType,
+  isDiscoverableAgentRootEntry,
   isProjectMarkerEntry,
 } from "#discover/filesystem.js";
 import { createDiskProjectSource, type ProjectSource } from "#discover/project-source.js";
-import { resolveNamedAgentProjectContext } from "#internal/project-context.js";
+import { findEveProjectContext } from "#internal/project-context.js";
 
 /**
  * Supported project layouts for filesystem-based agents.
@@ -159,21 +159,16 @@ async function tryResolveNestedProjectFromAppRoot(
 
 async function isNestedProjectRoot(source: ProjectSource, directoryPath: string): Promise<boolean> {
   if (await hasProjectMarkers(source, directoryPath)) return true;
-  return (await resolveNamedAgentProjectContext(directoryPath, { source })) !== undefined;
+  const context = await findEveProjectContext(directoryPath, { source });
+  return context?.kind === "workspace-member" && context.member.appRoot === directoryPath;
 }
 
 async function isFlatAgentRoot(source: ProjectSource, directoryPath: string): Promise<boolean> {
   const entries = await readDirectoryEntryTypes(source, directoryPath);
 
-  return Array.from(entries.entries()).some(([name, entryType]) => {
-    const entryKind = classifyAgentRootEntry(name, entryType);
-    return (
-      entryKind !== "unknown" &&
-      entryKind !== "ignored-directory" &&
-      entryKind !== "lib-directory" &&
-      entryKind !== "memory-directory"
-    );
-  });
+  return Array.from(entries.entries()).some(([name, entryType]) =>
+    isDiscoverableAgentRootEntry(name, entryType),
+  );
 }
 
 async function hasProjectMarkers(source: ProjectSource, directoryPath: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SessionAuthContext } from "#channel/types.js";
 import { INTERNAL_CHANNEL_DELIVER } from "#channel/channel-operations.js";
@@ -41,6 +41,10 @@ const deliver = vi.fn();
 const from = vi.fn(() => ({ [INTERNAL_CHANNEL_DELIVER]: deliver }) as never);
 
 describe("WorkflowAgentInvocationExecution", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     getReadable.mockReturnValue(eventStream([]));
@@ -421,6 +425,134 @@ describe("WorkflowAgentInvocationExecution", () => {
     expect(getReadable).not.toHaveBeenCalled();
   });
 
+  it("projects the workflow run reference without private error data", async () => {
+    const privateError = Object.assign(new Error("private provider detail"), {
+      apiKey: "secret",
+    });
+    runsGet.mockResolvedValue(run({ error: privateError, status: "failed" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "session.failed",
+          data: {
+            code: "MODEL_CALL_FAILED",
+            details: {
+              errorId: "err_123",
+              hint: "Try again shortly.",
+              message: "AI Gateway rate-limited the request.",
+              name: "AI Gateway rate limit exceeded",
+              semanticErrorId: "gateway-rate-limited",
+              upstreamMessage: "private provider detail",
+            },
+            message: "AI Gateway rate-limited the request.",
+            sessionId: "wrun_invocation",
+          },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+        } as HandleMessageStreamEvent,
+      ]),
+    );
+
+    await expect(execution().read({ auth, invocationId: "wrun_invocation" })).resolves.toEqual({
+      createdAt: "2026-07-20T00:00:00.000Z",
+      error: {
+        code: -32603,
+        data: {
+          errorId: "err_123",
+          eveCode: "MODEL_CALL_FAILED",
+          hint: "Try again shortly.",
+          name: "AI Gateway rate limit exceeded",
+          runId: "wrun_invocation",
+          semanticErrorId: "gateway-rate-limited",
+        },
+        message: "AI Gateway rate-limited the request.",
+      },
+      invocationId: "wrun_invocation",
+      status: "failed",
+    });
+  });
+
+  it("projects a bounded unknown failure message and correlation id", async () => {
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "session.failed",
+          data: {
+            code: "MODEL_CALL_FAILED",
+            details: { errorId: "err_unknown", upstreamMessage: "private provider detail" },
+            message: "private provider detail",
+            sessionId: "wrun_invocation",
+          },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+        } as HandleMessageStreamEvent,
+      ]),
+    );
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      error: {
+        data: {
+          errorId: "err_unknown",
+          eveCode: "MODEL_CALL_FAILED",
+          runId: "wrun_invocation",
+        },
+        message: "private provider detail",
+      },
+      status: "failed",
+    });
+  });
+
+  it("truncates an unknown failure message to Slack's display bound", async () => {
+    const message = "x".repeat(200);
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+    getReadable.mockReturnValue(
+      eventStream([
+        {
+          type: "session.failed",
+          data: { code: "MODEL_CALL_FAILED", message, sessionId: "wrun_invocation" },
+          meta: { at: "2026-07-20T00:00:00.000Z", id: "event_1" },
+        } as HandleMessageStreamEvent,
+      ]),
+    );
+
+    const invocation = await execution().read({ auth, invocationId: "wrun_invocation" });
+    expect(invocation?.status === "failed" ? invocation.error.message : undefined).toBe(
+      `${"x".repeat(159)}…`,
+    );
+  });
+
+  it("includes the Vercel deployment reference only on Vercel", async () => {
+    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_DEPLOYMENT_ID", "dpl_123");
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      error: {
+        data: { runId: "wrun_invocation", vercelDeploymentId: "dpl_123" },
+        message: "Invocation failed.",
+      },
+      status: "failed",
+    });
+  });
+
+  it("keeps terminal failures generic when no failure event was persisted", async () => {
+    runsGet.mockResolvedValue(run({ status: "failed" }));
+
+    await expect(
+      execution().read({ auth, invocationId: "wrun_invocation" }),
+    ).resolves.toMatchObject({
+      error: {
+        code: -32603,
+        data: { runId: "wrun_invocation" },
+        message: "Invocation failed.",
+      },
+      status: "failed",
+    });
+  });
+
   it("terminally cancels the workflow run", async () => {
     runsGet
       .mockResolvedValueOnce(run({ status: "running" }))
@@ -438,7 +570,7 @@ function execution(): WorkflowAgentInvocationExecution {
   return new WorkflowAgentInvocationExecution({ createSession, from });
 }
 
-function run(input: { ownerKey?: string; status: string }) {
+function run(input: { error?: unknown; ownerKey?: string; status: string }) {
   const attributes: Record<string, string> = {
     "$eve.invocation_owner": input.ownerKey ?? invocationOwnerKey(auth),
     "$eve.invocation_token": "invocation:token",
@@ -446,6 +578,7 @@ function run(input: { ownerKey?: string; status: string }) {
   return {
     attributes,
     createdAt: new Date("2026-07-20T00:00:00.000Z"),
+    error: input.error,
     input: [{ serializedContext: { "eve.initiatorAuth": auth } }],
     runId: "wrun_invocation",
     status: input.status,

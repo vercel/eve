@@ -202,17 +202,28 @@ async function deployToAlias(t: EveEvalContext, alias: string, phase: string): P
 async function waitForAliasToServe(t: EveEvalContext, marker: string): Promise<void> {
   const deadline = Date.now() + 120_000;
   let consecutiveMatches = 0;
+  let lastStatus = "transport error";
+  let lastMarkerMatch = false;
   while (Date.now() < deadline) {
-    const response = await t.target.fetch("/eve/v1/info", { cache: "no-store" });
-    if (response.ok && JSON.stringify(await response.json()).includes(marker)) {
-      consecutiveMatches += 1;
-      if (consecutiveMatches >= ALIAS_SETTLE_MATCHES) {
-        return;
+    try {
+      const response = await t.target.fetch("/eve/v1/info", { cache: "no-store" });
+      lastStatus = String(response.status);
+      lastMarkerMatch = response.ok && JSON.stringify(await response.json()).includes(marker);
+      if (lastMarkerMatch) {
+        consecutiveMatches += 1;
+        if (consecutiveMatches >= ALIAS_SETTLE_MATCHES) {
+          return;
+        }
+      } else {
+        consecutiveMatches = 0;
       }
-    } else {
+    } catch {
       consecutiveMatches = 0;
     }
     await t.sleep(1_000);
   }
-  throw new Error(`Timed out waiting for the alias to serve a deployment containing ${marker}.`);
+  throw new Error(
+    `Timed out waiting for alias ${new URL(t.target.url).host} to serve marker ${marker}; ` +
+      `last status=${lastStatus}, marker matched=${lastMarkerMatch}, consecutive matches=${consecutiveMatches}.`,
+  );
 }
