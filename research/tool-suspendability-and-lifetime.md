@@ -8,243 +8,124 @@ last_updated: 2026-09-03
 
 ## 1. Summary
 
-An authored tool has two independent properties that eve currently encodes as
-two unrelated flags and re-derives with `if` chains at every consumer:
+An authored tool has two independent properties that eve encodes as two
+unrelated flags and re-derives with `if` chains at every consumer:
 
-- **Suspendability** — can the body park without holding compute? Today this
-  is implied by the `"use workflow"` directive and surfaces as
-  `handling.kind === "workflow-tool"` on `CompiledToolBehavior`.
-- **Lifetime** — does the call end with the harness step, or does it outlive
-  it as a durable task? Today this is `execution: "background"`.
+- **Suspendability** — can the body park without holding compute? Implied by
+  the `"use workflow"` directive; surfaces as `handling.kind === "workflow-tool"`.
+- **Lifetime** — does the call end with the harness step, or outlive it as a
+  durable task? Declared by `execution: "background"`.
 
-This document makes both axes explicit in the compiled tool shape, gives each
-of the four resulting cells a distinct `execute` contract, and replaces the
-task-side authoring API. `execution: "background"` stays as the way to declare
-a task lifetime. The third `task` argument stays, but `task.delegated`,
-`task.send`, and `task.binding` are removed from it; in their place, a
-background body communicates with its task only through `yield`, in three
-forms:
-
-```ts
-yield { progress: 0.4 }; // progress: transient, never persisted
-yield task.setState({ devboxTaskId, taskUrl }); // durable state; silent
-yield task.postMessage("Devbox needs input"); // one message; wakes the parent with it
-```
-
-Author-supplied task data becomes durable, model-visible state on the task
-view (`view.state`) rather than a one-shot tool result, and the first set
-value is the receipt the launching turn returns.
-
-`yield` is one-way. Anything that needs a reply is a separate primitive that
-already exists for waiting workflow tools and is made to work for background
-bodies: `ask` from `eve/workflow` for human input, and `ctx.getToken` /
-`ctx.requireAuth` inside a `"use step"` for provider authorization under the
-requester's identity. The latter is a blocker today and is in scope.
+This document makes the pair explicit in the compiled tool shape and gives
+each of the four cells one `execute` contract. The authoring surface keeps
+`execution: "background"` and the third `task` argument, but `task` loses
+`delegated`, `send`, and `binding`. In their place a background body has one
+one-way channel to its task (`yield`) and two round-trip primitives that
+already exist for waiting workflow tools: `ask` for the human, and
+`ctx.getToken`/`ctx.requireAuth` inside a step for the provider. The latter is
+a blocker today for any Connect-backed workflow tool and is in scope.
 
 Motivating case: [vercel/internal-agents#2173](https://github.com/vercel/internal-agents/pull/2173)
 runs Devbox as a background tool and had to build a relay workflow, a webhook
 route, and a `session.completed` adapter because a background `execute()`
-cannot park on an external webhook, and a background workflow tool cannot put
-author data in its receipt.
+cannot park on an external webhook, cannot resolve the requester's token, and
+cannot put author data in its receipt.
 
 ## 2. The four cells
 
-|                       | `lifetime: "step"`                                                                | `lifetime: "task"`                                                                                                              |
-| --------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `suspend: "none"`     | Ordinary tool. Runs inside the step; generator yields stream as `action.partial`. | Task tool. Task created; body runs inside the step and must return; `yield task.setState()` annotates before returning.         |
-| `suspend: "workflow"` | Waiting durable tool. Turn parks on the run; return value is the tool result.     | Background durable tool. Model gets a receipt; run outlives the step; `yield` sets state, posts a message, or reports progress. |
+|                       | `lifetime: "step"`                                                              | `lifetime: "task"`                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `suspend: "none"`     | `execute(input, ctx)`. Runs in the step; generator yields are `action.partial`. | `execute(input, ctx, task)`. Runs in the step; `yield task.setState()` then `return` completes. No `postMessage`, no `ask`. |
+| `suspend: "workflow"` | `execute(input, ctx)` with `"use workflow"`. Turn parks on the run.             | `execute(input, ctx, task)` with `"use workflow"`. Receipt to the model; run outlives the step; all of §3.                  |
 
-Every cell exists today. What changes is that the pair is data the compiler
-writes once and consumers switch on, and that `yield` is the only channel from
-a body to its task in both task cells, instead of `delegated()`/`send` in one
-and nothing in the other.
-
-```
-                suspend: none                suspend: workflow
-              ┌──────────────────────┐    ┌──────────────────────────┐
-lifetime:step │ execute() in step    │    │ run; turn parks on it    │
-              └──────────────────────┘    └──────────────────────────┘
-              ┌──────────────────────┐    ┌──────────────────────────┐
-lifetime:task │ execute() in step,   │    │ run; receipt to model;   │
-              │ setState then return │    │ setState / post / yield  │
-              └──────────────────────┘    └──────────────────────────┘
-```
+Every cell exists today. What changes: the pair is data the compiler writes
+once (§5), the same `task` capability means the same thing in both task cells,
+and a background workflow body receives `task` at all — today it is silently
+absent. `execution: "background"` selects the task row; the directive selects
+the workflow column; there is no combined enum.
 
 ## 3. Authoring API
 
-### 3.1 Declaring the axes
-
-`execution: "background"` selects `lifetime: "task"`; its absence selects
-`lifetime: "step"`. Suspendability is not declared: the compiler reads the
-`"use workflow"` directive from the body, as it does today. The two never
-collapse into one enum (`"background-workflow"` is rejected).
-
-```ts
-export default defineTool({
-  execution: "background",
-  inputSchema,
-  async *execute(input, ctx, task) {
-    "use workflow";
-    // …
-  },
-});
-```
-
-A background tool whose body is a workflow now receives the third `task`
-argument too. Today it is silently absent there.
-
-### 3.2 The `task` argument
+### 3.1 The `task` argument and `yield`
 
 `TaskExec` shrinks to identity plus two descriptor constructors. Both return
-plain tagged JSON and perform no I/O, so they are replay-safe inside a workflow
-body.
+tagged JSON and do no I/O, so they are replay-safe in a workflow body.
 
 ```ts
 interface TaskExec {
   readonly taskId: string;
   readonly batch: readonly BackgroundToolCall[];
   setState(state: JsonObject): TaskSetState;
-  postMessage(message: string | JsonObject): TaskMessage;
+  postMessage(message: string): TaskMessage;
 }
 ```
 
-`setState` writes a durable snapshot the parent can read on any later turn.
-`postMessage` delivers one message to the parent as input for a new turn, like
-`postMessage` between windows: it is not stored on the task, and it does not
-change `view.state`. The two are independent; a body that wants both sets state
-and then posts.
-
-Removed: `delegated()`, `send()`, `binding`, `session`. `delegated` and the
-executor binding survive as the internal seam subagent dispatch and the
-tool-run return through; they are no longer exported.
-
-### 3.3 Four directions of communication
-
-A background body talks to four parties. Each has one primitive; none overlap.
-
-| direction                   | primitive                                    | shape                                 | durable                                          |
-| --------------------------- | -------------------------------------------- | ------------------------------------- | ------------------------------------------------ |
-| body → parent, one-way      | `yield` (progress / setState / postMessage)  | JSON snapshot, or a message           | setState yes; postMessage and progress no        |
-| body ↔ human, round trip    | `ask(ctx, request)` from `eve/workflow`      | structured request → structured reply | yes: run-owned, answerable after the turn ends   |
-| body ↔ provider, round trip | `ctx.getToken` / `ctx.requireAuth` in a step | token, or an authorization park       | yes: same `authorization.required` wire as today |
-| body → parent, terminal     | `return` / `throw`                           | tool output / error                   | yes                                              |
-
-The parent reaches the body only through `ctx.abortSignal`.
-
-`yield` is fire-and-forget state. It never carries a question. Anything that
-needs a reply from a human is `ask`; anything that needs a reply from an
-identity provider is `requireAuth`. Both are suspension points with typed
-replies and already exist for waiting workflow tools; §3.5 and §3.6 make them
-available to background bodies.
-
-### 3.4 The three `yield` forms
-
-A background body may `yield` three kinds of value. They differ in whether the
-value is persisted as task state and whether the parent is woken.
+A background body may `yield` three kinds of value:
 
 | form                          | `view.state`          | parent                               | use                                         |
 | ----------------------------- | --------------------- | ------------------------------------ | ------------------------------------------- |
-| `yield value` (untagged)      | untouched             | note, under pending-cohort policy    | transient progress                          |
+| `yield value` (untagged)      | untouched             | progress note (today's behaviour)    | transient progress                          |
 | `yield task.setState(state)`  | replaced with `state` | not woken                            | receipt, identifiers, state for later turns |
 | `yield task.postMessage(msg)` | untouched             | woken with `msg` as the turn's input | something the parent should act on now      |
 
-- **Progress** is today's generator semantics, unchanged: `action.partial`
-  for a waiting tool, the existing `Background task … update: <json>` note for
-  a background one. It is never persisted.
-- **setState** is the only way to write `view.state`. Replace, not merge.
-  Silent: no parent turn is started.
-- **postMessage** wakes the parent with the message as input, attributed to
-  the task. The message is not stored; if the parent needs to recall it later
-  it reads `view.state`, which the body sets separately. Runs under the
-  pending-cohort delivery policy like any other task-triggered turn.
+`setState` is the only writer of `view.state` (§4.1): replace, not merge,
+silent. `postMessage` is one delivery to the parent, like `postMessage`
+between windows: not stored, attributed to the task, run under the existing
+task-delivery policy. A body that wants both sets state and then posts.
 
-The first `setState` observed by the launching turn is the receipt:
+The first `setState` observed by the launching turn is the receipt,
 `{ status: "working", taskId, ...view.state }`. Progress and messages yielded
-before it are buffered and delivered after the receipt.
+before it are delivered after it.
 
-### 3.5 Human input: `ask`
+### 3.2 Replies: `ask` and provider authorization
 
-Unchanged from the waiting-tool contract in `docs/tools/workflows.mdx`. The
-request travels over the run's `request` channel; the owning task moves to
-`input_required`; the channel renders it the way it renders `ask_question`;
-the answer resumes the hook and the task returns to `working`. The reply is the
-existing static shape `{ optionId?, text? }`. Richer response schemas are out
-of scope here.
+`yield` never asks. Anything that needs a reply is a suspension point with a
+typed reply, disjoint from `yield`:
 
-What this document adds is only the statement that `ask` is the HITL channel
-for background bodies too, and that it is disjoint from `yield`: a
-`postMessage` tells the parent agent something; an `ask` asks the human
-something. A body that needs the user's input does not post a message to the
-parent and have it relay a question.
+| direction                | primitive                                    | reply                         |
+| ------------------------ | -------------------------------------------- | ----------------------------- |
+| body ↔ human             | `ask(ctx, request)` from `eve/workflow`      | `{ optionId?, text? }`        |
+| body ↔ identity provider | `ctx.getToken` / `ctx.requireAuth` in a step | a token, or a park on sign-in |
 
-### 3.6 Provider authorization in a workflow body
+The parent reaches the body only through `ctx.abortSignal`.
 
-Today `ctx.getToken` and `ctx.requireAuth` throw inside a workflow body
-(`tool-run/workflow.ts`), and a `"use step"` only sees `process.env`. A tool
-that must act under the requester's grant — every Connect-backed tool — cannot
-be written as a workflow. This is the blocker for Devbox and has to be fixed
-here, not deferred.
+**`ask`** is unchanged from the waiting-tool contract in
+`docs/tools/workflows.mdx`: the request travels over the run's `request`
+channel, the task moves to `input_required`, the channel renders it like
+`ask_question`, the answer resumes the hook. Richer response schemas are
+deferred. `postMessage` tells the agent something; `ask` asks the human
+something. A body never posts a question for the parent to relay.
 
-Contract:
+**Provider authorization** is the change. Today `getToken`/`requireAuth`
+throw in a workflow body and a step sees only `process.env`, so no
+Connect-backed tool can be a workflow. Contract:
 
-- `ctx.getToken(provider)` and `ctx.requireAuth(provider)` are callable inside
-  a `"use step"` function that received `ctx`. They resolve against the
-  session identity carried in the run's serialized context, through the same
+- Both are callable inside a `"use step"` that received `ctx`. They resolve
+  under the session identity in the run's serialized context, through the
   scoped-authorization path a step tool uses (`execution/tool-auth.ts`).
-- A resolved token is returned to the step and never enters the workflow
-  body's replay log. Steps that hold a token are ordinary steps: retried on
-  failure, not journaled.
-- When the provider requires interactive authorization, the step does not
-  return an `AuthorizationSignal` to the model. Instead the run parks the way
-  `ask` parks: the challenge travels over the run's `request` channel, the
-  owning task moves to `input_required` with an authorization request, the
-  parent channel renders the sign-in the way it renders a subagent's
-  `authorization.required` today (`tasks/child/steps.ts`), and the callback
-  resumes the hook. The step then re-resolves and continues. To the body this
-  is one `await`.
+- A token is returned to the step and never enters the body's replay log.
+- Interactive authorization does not return an `AuthorizationSignal` to the
+  model. The run parks the way `ask` parks: the challenge is a `RunRequestMessage`
+  with a new `authorization` variant next to `question`; the task moves to
+  `input_required`; the parent channel renders it like a subagent's
+  `authorization.required` today (`tasks/child/steps.ts`); the callback resumes
+  the step's hook and it re-resolves. To the body this is one `await`.
 - The loop guard is unchanged: a token rejected immediately after
-  authorization fails the run with `ConnectionAuthorizationFailedError`.
-- In the body itself (outside a step) both methods keep throwing with the
-  current message. Credentials never touch deterministic code.
+  authorization fails the run.
+- In the body itself both methods keep throwing.
 
-This reuses two existing wires — the scoped-authorization resolver and the
-task-owned authorization event — and adds one mapping: a step-raised
-authorization requirement becomes a run request, alongside `ask`.
+### 3.3 Example: Devbox as a background durable tool
 
-### 3.7 Per-cell `execute` contract
+Against the api-devbox contract the v PR already codes to: one webhook URL at
+`createTask`; `taskStateChange` posts with
+`state ∈ { pending, running, attention-required, complete, errored }`; a
+`prompt` endpoint for follow-ups; a result `{ summary, exitStatus, error?, prs? }`
+from `getTask`. `Hook` is an `AsyncIterable`, so one webhook receives every
+state change for the task's lifetime.
 
-- **`step` / `none`** — `execute(input, ctx)`. Unchanged.
-- **`step` / `workflow`** — `execute(input, ctx)` with `"use workflow"`.
-  Unchanged. `yield` remains `action.partial`; no `task` argument.
-- **`task` / `workflow`** — `execute(input, ctx, task)` with
-  `"use workflow"`. All three `yield` forms, `ask`, and step-scoped auth.
-  `return` completes the task with the return value; `throw` fails it;
-  `ctx.abortSignal` is the cancel path.
-- **`task` / `none`** — `execute(input, ctx, task)`. `yield task.setState()` and
-  progress before `return`; `return` completes. `task.postMessage()` and `ask`
-  are unavailable: the body cannot outlive the step, so there is no later turn
-  to message and no gap for anyone to answer into. Auth is today's step-tool
-  path (an `AuthorizationSignal` parks the turn). A body that must outlive the
-  step is a workflow.
-
-`defineTool` overloads keep the wrong capability unreachable: `task` is absent
-on a `lifetime: "step"` call; `postMessage` is absent from the `TaskExec` a
-non-workflow body receives.
-
-### 3.8 Example: Devbox as a background durable tool
-
-Written against the api-devbox contract the v PR already codes to: one
-webhook URL registered at `createTask`, `taskStateChange` posts with
-`state ∈ { pending, running, attention-required, complete, errored }`, a
-`prompt` endpoint for follow-ups, and a result of
-`{ summary, exitStatus, error?, prs? }` read from `getTask`. `Hook` is an
-`AsyncIterable`, so one webhook receives every state change for the task's
-lifetime.
-
-One run owns the whole api-devbox task. The user's follow-ups — an answer to
-an attention-required prompt, or "now fix the review findings" after a
-completed review — all go through `ask`, so there is no continuation
-argument, no "one active binding" constraint, and no second tool.
+One run owns the whole api-devbox task. Every follow-up — an
+attention-required answer, or "now fix the review findings" — goes through
+`ask`, so there is no continuation argument and no second tool.
 
 ```ts
 export default defineTool({
@@ -255,13 +136,13 @@ export default defineTool({
     "use workflow";
 
     const events = createWebhook(); // registered before the task exists
-    const devbox = await createDevboxTask(input, events.url, ctx); // step: requester's Connect token
+    const devbox = await createDevboxTask(input, events.url, ctx); // step
     yield task.setState({ devboxTaskId: devbox.taskId, taskUrl: devbox.taskUrl, state: "pending" });
 
     try {
       for await (const request of events) {
-        const change = parseTaskStateChange(await request.json()); // { taskId, state } or null
-        if (change === null || change.taskId !== devbox.taskId) continue; // unrelated or malformed post
+        const change = parseTaskStateChange(await request.json());
+        if (change === null || change.taskId !== devbox.taskId) continue;
         yield task.setState({
           devboxTaskId: devbox.taskId,
           taskUrl: devbox.taskUrl,
@@ -289,7 +170,6 @@ export default defineTool({
           case "complete": {
             const result = await readDevboxTask(devbox.taskId, ctx); // step: authoritative
             if (input.pr === false) {
-              // A review has no PR; the requester may want the findings acted on.
               const next = await ask(ctx, {
                 prompt: `Review finished:\n\n${result.summary}\n\nApply these findings?`,
                 display: "confirmation",
@@ -300,7 +180,7 @@ export default defineTool({
               });
               if (next.optionId === "apply") {
                 await promptDevbox(devbox.taskId, "Apply the review findings and open a PR.", ctx);
-                continue; // back to waiting on the same webhook
+                continue;
               }
             }
             return { summary: result.summary, prs: result.prs ?? [], taskUrl: devbox.taskUrl };
@@ -323,7 +203,11 @@ export default defineTool({
 
 async function createDevboxTask(input: DevboxInput, webhookUrl: string, ctx: ToolContext) {
   "use step";
-  const client = await devboxClient(ctx);
+  const { token } = await ctx.getToken(devboxUserAuth); // parks the run on sign-in (§3.2)
+  const client = createDevboxClient({
+    token,
+    onUnauthorized: () => ctx.requireAuth(devboxUserAuth),
+  });
   const snapshot = await selectSnapshot(client, input.repos);
   const set = await client.createTaskSet(input.title ?? deriveTitle(input.prompt));
   const created = await client.createTask({
@@ -341,148 +225,73 @@ async function createDevboxTask(input: DevboxInput, webhookUrl: string, ctx: Too
     taskUrl: devboxTaskUrl(created.task_id),
   };
 }
-
-async function devboxClient(ctx: ToolContext) {
-  "use step";
-  const { token } = await ctx.getToken(devboxUserAuth); // parks the run on sign-in (§3.6)
-  return createDevboxClient({ token, onUnauthorized: () => ctx.requireAuth(devboxUserAuth) });
-}
 ```
 
-`promptDevbox`, `readDevboxTask`, and `stopDevbox` are one-call steps over
-the same client. Snapshot selection, title derivation, and the deliverable
-prompt are the PR's existing helpers, unchanged.
+`promptDevbox`, `readDevboxTask`, and `stopDevbox` are one-call steps over the
+same client; snapshot selection and prompt construction are the PR's helpers.
 
-How each constraint from the integration doc is met:
+What this buys over the bridge:
 
-- **v owns every user-facing message.** The `ask` prompts are rendered on v's
-  channel as v's questions; the model never sees a Devbox turn. Devbox is not
-  a subagent.
-- **attention-required is not terminal.** The run parks on `ask`; the task is
-  `input_required` until the requester answers, then `working` again. The
-  answer is posted to api-devbox from the same run. api-devbox does not put
-  the question text in the webhook, so the prompt links the task page rather
-  than pretending to know what was asked.
-- **Only the requester answers.** `ask` already enforces this on Slack: another
-  user's click is rejected without resolving the request.
-- **Sign-in is not a state the tool returns.** `getToken` in a step parks the
-  run on `authorization.required` under the requester's identity; a later
-  401 is `requireAuth` on the same path.
-- **The callback is a signal.** Terminal states re-read the task; the webhook
-  body is never reported as the result.
-- **A review can be followed by a fix without a second launch.** The
-  `complete` branch of a `pr: false` task offers to apply the findings, which
-  is another prompt to the same api-devbox task on the same webhook.
-- **Cancellation reaches the sandbox.** `finally` stops the Devbox when
-  `ctx.abortSignal` fired (§7). `stop_devbox_task` goes away.
-- **Duplicate and out-of-order webhooks are harmless.** State posts for other
-  tasks are skipped; a repeated `attention-required` re-asks, which is the
-  right behaviour when the sandbox asked again; a repeated terminal state
-  after `return` is a post to a hook the run no longer reads.
+- attention-required is not terminal. The run parks on `ask`, the requester
+  answers on v's channel (only the requester — `ask` already enforces that on
+  Slack), and the answer is posted from the same run.
+- A review can be followed by a fix without a second launch.
+- Sign-in is not a state the tool returns; `getToken` parks the run under the
+  requester's identity.
+- Cancellation stops the sandbox from `finally` (§7).
+- Duplicate or out-of-order webhooks are harmless: other tasks' posts are
+  skipped, a repeated `attention-required` re-asks, and a post after `return`
+  hits a hook nobody reads.
 
-Deleted from the PR: the relay workflow, the relay route, the
-`session.completed`/`subagentName` adapter, the launch and follow-up
-fingerprint guards (step replay is the idempotency mechanism), the `task`
-continuation argument, `stop_devbox_task`, and `get_devbox_task` except as an
-ad hoc status tool.
-
-What the model sees, in order: the receipt
-`{ status: "working", taskId, devboxTaskId, taskUrl, state: "pending" }`; a
-`[Task state]` entry whose `state` tracks api-devbox; an `input.requested` on
-the channel whenever the body asks; and one terminal result. Nothing in
-between requires v to act.
+Deleted: the relay workflow and route, the `session.completed`/`subagentName`
+adapter, the launch and follow-up fingerprint guards (replay is the idempotency
+mechanism), the `task` continuation argument, and `stop_devbox_task`.
 
 ## 4. Task state and messages
 
-### 4.1 Task view
+### 4.1 `view.state`
 
-`TaskView` gains an author-owned, model-visible field:
-
-```ts
-readonly state?: JsonObject;
-```
-
-`state` is distinct from the existing `status`. `status` is the framework's
-lifecycle verdict (`working`, `input_required`, `completed`, …) and is written
-only by lifecycle commands. `state` is whatever the body last set, opaque to
-the framework, and is written only by `setState`.
-
-It is present on `working` and `input_required` views and retained unchanged
-on terminal views. It is included in model-visible task JSON, in the
-`[Task state]` cohort projection, and in `task_status`/TUI rendering. It never
-carries routing credentials; those stay on the private `executor` binding.
+`TaskView` gains an author-owned, model-visible `state?: JsonObject`. It is
+distinct from `status`, the framework's lifecycle verdict: `state` is whatever
+the body last set, opaque to the framework. Present on `working` and
+`input_required` views, retained on terminal ones, included in model-visible
+task JSON and the `[Task state]` projection. Never carries credentials; those
+stay on the private `executor` binding.
 
 ### 4.2 The `set-state` command
 
-The task run accepts one new command through its existing single-writer inbox:
-
-```ts
-{
-  kind: "set-state";
-  state: JsonObject;
-}
-```
-
-- Accepted only while the view is `working` or `input_required`; rejected
-  (not failed) on a terminal view.
-- `state` **replaces** `view.state`. Last-write-wins. No merge.
-- Silent: no parent turn is started.
-- Idempotency comes from the existing hook cursor plus the run's
-  `(epoch, index, callId)` delivery id. Replayed reports are no-ops.
+One new task command through the existing single-writer inbox:
+`{ kind: "set-state", state: JsonObject }`. Accepted while `working` or
+`input_required`, rejected on a terminal view. Replaces `view.state`. Starts no
+turn. Idempotent under the existing hook cursor and the run's
+`(epoch, index, callId)` delivery id.
 
 ### 4.3 Messages
 
-`postMessage` is not a task command. It does not pass through the task run's
-transition function and does not touch the view. It is a delivery to the
-parent session, the same kind of `send` command the child workflow already
-issues for updates (`wakeTaskUpdateParentStep`), with two differences:
-
-- The payload is the author's message, attributed to the task
-  (`taskId`, tool name), rather than the framework's
-  `Background task … update:` prose. A string is delivered as text; an object
-  is delivered as JSON.
-- Delivery is deduplicated by the run's `(epoch, index, callId)` id, so a
-  replayed yield does not start a second turn.
-
-The receiving turn runs under the existing task-delivery policy: while the
-cohort is pending the model is told to act only if the message requires it and
-otherwise stay silent. `postMessage` is how a body tells the agent to act; it
-is not a way to talk to the user.
-
-Progress yields keep today's report path unchanged.
+`postMessage` is not a task command and does not touch the view. It is the
+parent-session `send` the child workflow already issues for updates
+(`wakeTaskUpdateParentStep`), carrying the author's message attributed to the
+task instead of the framework's `Background task … update:` prose, deduplicated
+by the same delivery id. The receiving turn runs under the existing
+task-delivery policy.
 
 ### 4.4 Wiring
 
-- **Workflow run → task.** `runBody` already sends each yield as a
-  `RunReport` through `resumeHookStep(owner.report)`. The owner
-  (`runReportToTaskUpdate`) maps a `TaskSetState` to the `set-state` command,
-  a `TaskMessage` to a parent `send`, and an untagged value to today's progress
-  note.
-- **Receipt.** `createWorkflowToolBackgroundExecute` waits on the owner's
-  report channel for the first `setState`, raced against the run's outcome so
-  a body that returns or throws first still settles the call. The receipt is
-  `{ status: "working", taskId, ...view.state }`. A body that never sets state
-  keeps `{ status: "working", taskId }`.
-- **Step-lifetime task tool.** The `"Background tools cannot return
-AsyncIterable"` guard is removed; the executor iterates the body, sends each
-  `setState` as a `set-state`, and completes with the return value. All sets
-  precede completion by construction.
-- **Waiting workflow tool.** Unchanged: yields stream as `action.partial`.
-  `TaskSetState`/`TaskMessage` cannot be constructed there because there is no
-  `task` argument.
-- **Subagents and the tool-run.** Continue to bind an executor through the
-  internal `delegated` seam. Unchanged behaviour; no public surface.
-- **Step-scoped auth (§3.6).** `ToolRunWorkflowInput` carries the session
-  identity the scoped-authorization resolver needs (it already carries
-  `session`). `createWorkflowToolContext` builds `getToken`/`requireAuth` that
-  work when invoked from a step and throw when invoked from the body; the
-  distinction is the ambient step context the Workflow SDK exposes. A
-  step-raised authorization requirement is sent as a `RunRequestMessage` on the
-  existing `request` channel with a new `authorization` variant next to
-  `question`; `runRequestToInputRequestPayload` maps it to the
-  `authorization.required` task event the child workflow already forwards
-  (`wakeTaskAuthorizationParentStep`). The callback resumes the same
-  `answerToken` hook the step is parked on.
+- `runBody` already sends each yield as a `RunReport`. The owner maps
+  `TaskSetState` → `set-state`, `TaskMessage` → parent `send`, untagged →
+  today's progress note.
+- `createWorkflowToolBackgroundExecute` waits on the report channel for the
+  first `setState`, raced against the run's outcome, and merges it into the
+  receipt. No `setState` → `{ status: "working", taskId }`.
+- The `"Background tools cannot return AsyncIterable"` guard goes; the
+  step-lifetime executor iterates the body and sends each `setState` before
+  completing with the return value.
+- Step-scoped auth: `createWorkflowToolContext` builds `getToken`/`requireAuth`
+  that work under ambient step context and throw otherwise;
+  `runRequestToInputRequestPayload` maps the `authorization` request variant to
+  the `authorization.required` task event the child workflow already forwards.
+- Subagents and the tool-run keep binding executors through the internal
+  `delegated` seam. No public surface.
 
 ## 5. Compiled shape
 
@@ -496,111 +305,74 @@ readonly shape: {
 ```
 
 `handling.kind === "workflow-tool"` collapses into `suspend: "workflow"` plus
-its `workflowId`. Consumers that currently re-derive the combination switch on
-`shape` instead:
-
-- `prepareToolBehavior` (`runtime/tools/registry.ts`)
-- the background-call filter in `harness/tool-loop.ts`
-- `dispatchTaskStep`'s `entry.kind === "workflow-tool"` branch
-- `createWorkflowToolBackgroundExecute` / `BackgroundToolExecutionScope`
+its `workflowId`. `prepareToolBehavior`, the background-call filter in
+`tool-loop.ts`, `dispatchTaskStep`, and `createWorkflowToolBackgroundExecute`
+switch on `shape` instead of re-deriving it. `defineTool` overloads gate the
+capabilities by cell: no `task` on a step-lifetime call; no `postMessage` on a
+non-workflow `TaskExec`.
 
 ## 6. Removed
 
-From the public `TaskExec`:
+From the public `TaskExec`: `delegated()` and `TaskExecutorBinding` (a tool
+parks on the external system from a workflow body instead of handing off by
+sentinel; the seam stays internal), `send()` (not restart-safe by its own
+contract; dominated by `yield`), `binding` (the framework callback wire stops
+being reachable from authored code), and `session` (use `ctx.session`).
 
-- `delegated()` and `TaskExecutorBinding`. An authored tool no longer hands a
-  task to an external executor by returning a sentinel; it parks on the
-  external system from a workflow body. The seam remains internal for
-  subagent dispatch and the tool-run.
-- `send()`. Not restart-safe by its own contract; strictly dominated by
-  `yield` in a workflow body and by `yield task.setState()` before `return` in a
-  step body.
-- `binding`. The framework-owned callback wire (`session.completed` /
-  `session.failed`) stops being reachable from authored code.
-- `session`. Read session context through `ctx.session`, as every other tool
-  does.
-
-Pre-1.0: no compatibility shim. The only known external consumer of the
-removed surface is the internal-agents Devbox bridge, whose replacement is
-§3.8. The `agent-background-tools/export.ts` fixture is rewritten as a workflow
-body.
+Pre-1.0: no shim. The only known external consumer is the Devbox bridge; §3.3
+is its replacement. The `agent-background-tools/export.ts` fixture is rewritten
+as a workflow body.
 
 ## 7. Cancellation
 
-Unchanged in mechanism, but two behaviours become load-bearing once there is
-no executor binding for an authored tool to hang a cancel handler on:
+`task_cancel` aborts `ctx.abortSignal` in the run and waits the existing grace
+period — unchanged. What changes: a body parked on a hook, webhook, `ask`, or
+authorization does not observe the signal today and is abandoned after the
+grace period without running `finally`. The tool-run must race the parked
+await against its control inbox so `finally` runs before the run ends;
+otherwise external cleanup has no home and authors reach for a second tool.
 
-- `task_cancel` on a background workflow tool aborts `ctx.abortSignal` in the
-  run and waits the existing grace period.
-- A body parked on a hook, webhook, `ask`, or authorization does not observe
-  the signal today and is abandoned after the grace period without running
-  `finally`. The tool-run should race the parked await against its control
-  inbox so `finally` runs before the run ends. Without this, external cleanup
-  (`stopDevbox` above) has no home and authors reach for a second tool.
-
-Together with §3.6 these are the two `execution/` changes beyond wiring, and
-both are required for the Devbox migration to be complete.
+With §3.2's auth change, this is one of two `execution/` changes beyond wiring.
+Both are required for the Devbox migration.
 
 ## 8. Invariants
 
-- A tool's cell is fixed at compile time and visible in the manifest.
-- The `task` argument exists iff `execution === "background"`.
-- `yield` is the only one-way channel from a body to its task. There is no
-  post-return path.
-- `yield` never asks. Human input is `ask`; provider authorization is
-  `getToken`/`requireAuth` in a step. Neither is expressible as a yield.
-- `view.state` is written only by `setState`; progress yields never touch
-  it; it is never derived from the tool result or the executor binding.
-- `postMessage` and `ask` exist only for a workflow body.
-- A token never enters a workflow body's replay log. Credentials are resolved
-  and consumed inside steps.
-- The task run remains the single writer of task lifecycle and `state`.
-- A receipt is observed by the launching turn exactly once, from the first
-  `setState`; later sets arrive as task state and messages as input, never as a tool
-  result.
-- Subagent task behaviour is unchanged; it uses the internal seam.
+- A tool's cell is fixed at compile time and visible in the manifest; `task`
+  exists iff `execution === "background"`.
+- `yield` is the only one-way channel from a body to its task, and it never
+  asks. There is no post-return path.
+- `view.state` is written only by `setState`; never derived from the tool
+  result or the executor binding. The task run stays the single writer.
+- A receipt is observed exactly once, from the first `setState`.
+- A token never enters a workflow body's replay log.
+- Subagent task behaviour is unchanged.
 
 ## 9. Open decisions
 
-- Whether `setState`/`postMessage` should also be importable from `eve/tools` as
-  standalone descriptor constructors (matches `ask` from `eve/workflow`), or
-  stay on `task` for type gating only. Leaning `task` only.
-- Whether progress yields in a background body should keep waking the parent
-  with the framework's note (today's behaviour) or become stream-only now that
-  `postMessage` exists for deliberate wakes. Leaning stream-only: two ways to
-  wake the parent is one too many, and a body that wants a wake can say so.
-- Whether `postMessage` should accept only strings. An object is convenient
-  but blurs the line with `setState`; a body that wants the parent to read
-  structured data can set state and post a short pointer. Leaning string only.
+- Progress yields in a background body currently wake the parent with the
+  framework's note. With `postMessage` available, they should probably become
+  stream-only so there is one way to wake the parent. Leaning stream-only.
+- Whether `setState`/`postMessage` should also be importable from `eve/tools`
+  (matches `ask` from `eve/workflow`) or stay on `task` for type gating.
+  Leaning `task` only.
 - Whether `view.state` should be size-bounded, given it is projected into model
   context on every task-triggered turn.
-- Structured `ask` responses (a response schema instead of
-  `{ optionId?, text? }`). Deferred; the static shape is sufficient for the
-  cases in scope.
-- How a step detects it is running inside a step versus the body, for the
-  `getToken` gate in §3.6. The Workflow SDK exposes step context; whether eve
-  should also mark it explicitly is an implementation detail to settle in the
-  PR.
+- How a step detects ambient step context for the `getToken` gate. The Workflow
+  SDK exposes it; whether eve marks it explicitly is for the PR.
+- Structured `ask` responses. Deferred.
 
 ## 10. Testing
 
-- Unit: `applyTaskTransition` for `update` with and without `state` on each
-  status; descriptor construction and tagging; `defineTool` overload typing via
-  `expectTypeOf` (no `postMessage` on a non-workflow `TaskExec`, no `delegated`/`send`
-  anywhere).
-- Integration: `setState` → `update` → `view.state`, no parent delivery;
-  `postMessage` → parent `send` carrying the message, `view.state` untouched; untagged yield →
-  progress note, `view.state` untouched; receipt taken from the first
-  `setState` and the race against early return/throw; `getToken` in a step
-  of a background run resolves under the session identity; a step-raised
-  authorization requirement moves the task to `input_required`, renders on the
-  parent channel, and resumes the step on callback; `getToken` in the body
-  still throws.
-- Scenario: compile-time `shape` for each cell; `execution: "background"` step
-  body with `setState` before `return`.
-- E2E: rewrite `agent-background-tools/export.ts` as a workflow body that
-  sets a receipt, yields progress, parks on `createWebhook`, posts a message on the
-  callback, and completes; assert the receipt, the silent setState, the message, and
-  the terminal result. Add a second body that parks on `ask` from a background
-  run and resumes with the answer. Authorization parking from a step is
-  covered at integration tier; e2e cannot drive a real sign-in.
+- Unit: `applyTaskTransition` for `set-state` on each status; descriptor
+  tagging; `defineTool` overload typing via `expectTypeOf`.
+- Integration: `setState` → `view.state` with no parent delivery;
+  `postMessage` → parent `send` with `view.state` untouched; receipt from the
+  first `setState` and the race against early return/throw; `getToken` in a
+  step of a background run resolves under the session identity; a step-raised
+  authorization requirement parks the task `input_required` and resumes on
+  callback; `getToken` in the body still throws.
+- Scenario: compiled `shape` for each cell.
+- E2E: rewrite `agent-background-tools/export.ts` as a workflow body that sets
+  a receipt, parks on `createWebhook`, posts a message on callback, and
+  completes. Add a body that parks on `ask` from a background run. Sign-in
+  cannot be driven in e2e; it stays at integration tier.
