@@ -208,4 +208,45 @@ describe("routeDeliverPayload", () => {
     ]);
     expect(routed.parentAction).toEqual({ kind: "cancel-turn" });
   });
+
+  it("routes Approve all continuations to each paused child without cancelling the parent", () => {
+    let session = upsertProxyInputRequests({
+      entries: [["limit-a", { childContinuationToken: "child-a", kind: "session-limit" }]],
+      forChildContinuationToken: "child-a",
+      session: createSession(),
+    });
+    session = upsertProxyInputRequests({
+      entries: [["limit-b", { childContinuationToken: "child-b", kind: "session-limit" }]],
+      forChildContinuationToken: "child-b",
+      session,
+    });
+
+    const routed = routeDeliverPayload({
+      payload: {
+        inputResponses: [
+          { optionId: "continue", requestId: "limit-a" },
+          { optionId: "continue", requestId: "limit-b" },
+        ],
+        state: { submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 1 } },
+      },
+      state: session.state,
+    });
+
+    expect(routed.forChildren).toEqual([
+      {
+        childContinuationToken: "child-a",
+        payload: { inputResponses: [{ optionId: "continue", requestId: "limit-a" }] },
+        retireRequestIds: ["limit-a"],
+      },
+      {
+        childContinuationToken: "child-b",
+        payload: { inputResponses: [{ optionId: "continue", requestId: "limit-b" }] },
+        retireRequestIds: ["limit-b"],
+      },
+    ]);
+    expect(routed.forSelf).toEqual({
+      state: { submittedChildSessionLimitGroupRevisions: { "parent-turn-1": 1 } },
+    });
+    expect(routed.parentAction).toBeUndefined();
+  });
 });

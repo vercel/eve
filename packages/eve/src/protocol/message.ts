@@ -267,6 +267,13 @@ export interface ApprovalSettledStreamEvent {
  */
 export interface InputRequestedStreamEvent {
   data: {
+    /** Present when the request was proxied from a delegated child session. */
+    origin?: {
+      readonly childSessionId: string;
+      readonly kind: "subagent";
+      readonly parentTurnId: string;
+      readonly subagentName: string;
+    };
     requests: readonly InputRequest[];
     sequence: number;
     stepIndex: number;
@@ -1222,6 +1229,7 @@ export function createApprovalSettledEvent(
  * Creates the `input.requested` event for one pending HITL batch.
  */
 export function createInputRequestedEvent(input: {
+  readonly origin?: NonNullable<InputRequestedStreamEvent["data"]["origin"]>;
   readonly requests: readonly InputRequest[];
   readonly sequence: number;
   readonly stepIndex: number;
@@ -1229,6 +1237,7 @@ export function createInputRequestedEvent(input: {
 }): InputRequestedStreamEvent {
   return {
     data: {
+      ...(input.origin === undefined ? {} : { origin: input.origin }),
       requests: input.requests,
       sequence: input.sequence,
       stepIndex: input.stepIndex,

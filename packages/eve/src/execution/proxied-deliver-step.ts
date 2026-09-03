@@ -1,4 +1,8 @@
 import type { DeliverHookPayload, DeliverPayload, SessionAuthContext } from "#channel/types.js";
+import { buildAdapterContext } from "#channel/adapter-context.js";
+import { deserializeContext, serializeContext } from "#context/serialize.js";
+import { ChannelKey } from "#runtime/sessions/runtime-context-keys.js";
+import { setChannelContext } from "#execution/channel-context.js";
 import { coalesceDeliverPayloads } from "#execution/deliver-payloads.js";
 import {
   type DurableSessionState,
@@ -87,6 +91,7 @@ export async function routeProxiedDeliverStep(
   "use step";
 
   let durableSession = await readDurableSession(input.sessionState);
+  let serializedContext = input.serializedContext ?? {};
   const legacyInput = !("delivery" in input);
   const sourceDelivery: DeliverHookPayload =
     "delivery" in input
@@ -140,6 +145,8 @@ export async function routeProxiedDeliverStep(
       children.set(key, child);
     }
   }
+
+  serializedContext = await applyParentChannelStatePatches(parentPayloads, serializedContext);
 
   let retired = false;
   for (const child of children.values()) {
@@ -196,7 +203,7 @@ export async function routeProxiedDeliverStep(
   }
 
   const context = {
-    serializedContext: input.serializedContext ?? {},
+    serializedContext,
     sessionState: retired
       ? replaceDurableSessionSnapshot({ session: durableSession, state: input.sessionState })
       : input.sessionState,
@@ -219,6 +226,34 @@ export async function routeProxiedDeliverStep(
             payloads: orderedParentPayloads.map(([, payload]) => payload),
           };
   return { ...context, kind: "continue", remainder };
+}
+
+async function applyParentChannelStatePatches(
+  parentPayloads: Map<number, DeliverPayload>,
+  serializedContext: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const statePayloads: DeliverPayload[] = [];
+  for (const [sourcePayloadIndex, payload] of parentPayloads) {
+    if (payload.state === undefined) continue;
+    statePayloads.push({ state: payload.state });
+    const { state: _state, ...remainder } = payload;
+    if (Object.values(remainder).some((value) => value !== undefined)) {
+      parentPayloads.set(sourcePayloadIndex, remainder);
+    } else {
+      parentPayloads.delete(sourcePayloadIndex);
+    }
+  }
+  if (statePayloads.length === 0) return serializedContext;
+
+  const ctx = await deserializeContext(serializedContext);
+  const adapter = ctx.require(ChannelKey);
+  if (adapter.deliver === undefined) return serializedContext;
+  const adapterCtx = buildAdapterContext(adapter, ctx);
+  for (const payload of statePayloads) {
+    await adapter.deliver(payload, adapterCtx);
+  }
+  setChannelContext(ctx, { ...adapter, state: { ...adapterCtx.state } });
+  return serializeContext(ctx);
 }
 
 // Answers to a task that finished mid-flight rejoin the parent-local

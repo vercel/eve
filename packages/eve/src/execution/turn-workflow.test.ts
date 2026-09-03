@@ -916,7 +916,9 @@ describe("turnWorkflow", () => {
     });
     await turnWorkflow(input);
 
-    expect(runProxySubagentEventStep).toHaveBeenCalledOnce();
+    expect(runProxySubagentEventStep).toHaveBeenCalledWith(
+      expect.objectContaining({ parentTurnId: "turn_0" }),
+    );
     expect(resumeHookMock).toHaveBeenCalledWith("turn-token", {
       continuationToken: "http:test",
       inboxToken: "turn-token:inbox",
@@ -1034,6 +1036,7 @@ describe("turnWorkflow", () => {
         childSessionId: "run-1",
         kind: "subagent-input-request",
       }),
+      parentTurnId: "turn_0",
       parentWritable,
       serializedContext: { state: "pending" },
       sessionState: dispatchedState,
@@ -1408,6 +1411,7 @@ describe("turnWorkflow", () => {
       [
         {
           hookPayload: expect.objectContaining({ event: requiredEvent }),
+          parentTurnId: "turn_0",
           parentWritable,
           serializedContext: { state: "pending" },
           sessionState: dispatchedState,
@@ -1416,6 +1420,7 @@ describe("turnWorkflow", () => {
       [
         {
           hookPayload: expect.objectContaining({ event: completedEvent }),
+          parentTurnId: "turn_0",
           parentWritable,
           serializedContext: { state: "auth-required" },
           sessionState: requiredState,

@@ -28,6 +28,7 @@ export async function emitProxiedInputRequest(input: {
   readonly emit: HarnessEmitFn;
   readonly hookPayload: SubagentInputRequestHookPayload;
   readonly mode: RunMode;
+  readonly parentTurnId?: string;
   readonly session: HarnessSession;
 }): Promise<{
   readonly entries: readonly (readonly [requestId: string, route: ProxyInputRequest])[];
@@ -35,6 +36,16 @@ export async function emitProxiedInputRequest(input: {
 }> {
   await input.emit(
     createInputRequestedEvent({
+      ...(input.parentTurnId === undefined
+        ? {}
+        : {
+            origin: {
+              childSessionId: input.hookPayload.childSessionId,
+              kind: "subagent" as const,
+              parentTurnId: input.parentTurnId,
+              subagentName: input.hookPayload.subagentName,
+            },
+          }),
       requests: input.hookPayload.event.requests,
       sequence: input.hookPayload.event.sequence,
       stepIndex: input.hookPayload.event.stepIndex,

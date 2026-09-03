@@ -3,6 +3,7 @@ import { createLogger } from "#internal/logging.js";
 import { buildSlackBinding } from "#public/channels/slack/api.js";
 import { buildSlackAuthContext } from "#public/channels/slack/auth.js";
 import { deriveHitlResponse } from "#public/channels/slack/hitl.js";
+import { deriveChildSessionLimitGroupResponse } from "#public/channels/slack/child-session-limits.js";
 import type {
   SlackChannelConfig,
   SlackInputResponseContext,
@@ -17,13 +18,39 @@ export function approvalResponderStatePatch(
   submission: Extract<SlackInputResponseSubmission, { type: "block_actions" }>,
   auth: SessionAuthContext | null,
 ): Partial<SlackChannelState> | undefined {
-  if (
-    auth?.principalId === undefined ||
-    !submission.actions.some((action) => deriveHitlResponse(action)?.kind === "tool-approval")
-  ) {
+  const toolApproval = submission.actions.some(
+    (action) => deriveHitlResponse(action)?.kind === "tool-approval",
+  );
+  const submittedChildGroups: Record<string, number> = {};
+  const childGroupSubmissions: NonNullable<SlackChannelState["childSessionLimitGroupSubmissions"]> =
+    {};
+  for (const action of submission.actions) {
+    const childGroup = deriveChildSessionLimitGroupResponse(action);
+    if (childGroup !== null) {
+      submittedChildGroups[childGroup.groupId] = childGroup.revision;
+      childGroupSubmissions[childGroup.groupId] = {
+        ...(action.messageTs === undefined ? {} : { messageTs: action.messageTs }),
+        optionId: childGroup.optionId,
+        revision: childGroup.revision,
+      };
+    }
+  }
+  const recordsApprovalResponder = auth?.principalId !== undefined && toolApproval;
+  if (!recordsApprovalResponder && Object.keys(submittedChildGroups).length === 0) {
     return undefined;
   }
-  return { approvalResponderUsers: { [auth.principalId]: submission.user.id } };
+
+  return {
+    ...(recordsApprovalResponder
+      ? { approvalResponderUsers: { [auth.principalId]: submission.user.id } }
+      : {}),
+    ...(Object.keys(submittedChildGroups).length > 0
+      ? {
+          childSessionLimitGroupSubmissions: childGroupSubmissions,
+          submittedChildSessionLimitGroupRevisions: submittedChildGroups,
+        }
+      : {}),
+  };
 }
 
 export async function authorizeInputResponse(input: {

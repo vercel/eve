@@ -23,6 +23,9 @@ export const SLACK_TYPING_STATUS_MAX_LENGTH = 50;
  */
 export const SLACK_BLOCK_KIT_PLAIN_TEXT_MAX_LENGTH = 75;
 
+/** Block Kit interactive element `value` fields cap at 2,000 characters. */
+export const SLACK_BLOCK_KIT_ACTION_VALUE_MAX_LENGTH = 2000;
+
 /**
  * Block Kit `section` blocks cap `text.text` at 3000 chars. Anything
  * longer fails the whole post with `invalid_blocks`.
