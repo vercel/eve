@@ -9,6 +9,7 @@ import { createTestRuntime, type TestRuntime } from "#internal/testing/app-harne
 import { captureTurnEvents, filterEventsByType } from "#internal/testing/events.js";
 import {
   askThenRaceWorkflow,
+  backgroundDeployWorkflow,
   confirmDeployWorkflow,
   deployServiceWorkflow,
   failingDeployWorkflow,
@@ -377,7 +378,7 @@ describe("workflow tools", () => {
   it("runs a background workflow tool as its task's executor", async () => {
     const runtime = await createWorkflowToolRuntime({
       agentName: "workflow-tool-background",
-      execute: reportingDeployWorkflow,
+      execute: backgroundDeployWorkflow,
       toolName: "report_deploy",
     });
 
@@ -414,7 +415,8 @@ describe("workflow tools", () => {
           notifications.push(eventsText(filterEventsByType(woken, "message.received")));
         }
         const text = notifications.join("\n");
-        expect(text).toContain("update: planned api");
+        expect(text).toContain("Review plan:api");
+        expect(text).not.toContain("update: planned api");
         expect(text).toContain("is completed");
         expect(text).toContain("plan:api");
       } finally {

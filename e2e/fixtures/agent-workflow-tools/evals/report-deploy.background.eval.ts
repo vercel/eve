@@ -30,7 +30,7 @@ export default defineEval({
             (event) =>
               event.type === "message.received" &&
               messageText(event.data.message).includes(
-                `Background task ${taskId} (report_deploy) update: WORKFLOW-REPORT-PROGRESS deploy api`,
+                `Deploy ${taskId}: WORKFLOW-REPORT-PROGRESS deploy api`,
               ),
           ),
         "parent receives the run's progress note with task identity",

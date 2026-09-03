@@ -58,8 +58,9 @@ can retry a step and replay overlapping snapshots.
 
 ### Background execution
 
-`defineTool({ execution: "background" })` receives a third `task` argument and immediately returns
-`{ status: "working", taskId }` to the model. Return completes the durable task; throw fails it. An
+`defineTool({ execution: "background" })` receives a third `task` argument and returns
+`{ status: "working", taskId }` to the model. Add `"use workflow"` to let the body outlive the
+initiating step; without it, the step waits for the body to finish. Return completes the durable task; throw fails it. An
 async generator may additionally yield:
 
 ```ts
@@ -72,12 +73,6 @@ yield task.postMessage("The export needs review."); // one new parent turn; stat
 agent; use [`ask`](/docs/tools/workflows#ask-a-human-ask) when the body needs an answer from the human.
 Background tools are a normal execution mode and need no root-agent flag. Built-in, declared local,
 and remote subagents use this task lifecycle automatically.
-After delegating, an
-in-process executor reports
-progress with `task.send({ kind: "update", message })` and the terminal result with
-`task.send({ kind: "complete", data })` (or `fail` / `cancel`). `send` is not restart-safe — an
-in-memory callback dies with the process — so the cross-process executor wire remains
-framework-owned and is not yet a stable authored-tool API.
 
 After the initiating turn accepts background tasks, eve supplies runtime-authored state for that
 cohort and instructs the model to acknowledge that the work started without waiting for results.

@@ -221,48 +221,63 @@ describe("taskRunWorkflow", () => {
     expect(mocks.executeWorkflowBody).toHaveBeenCalledOnce();
   });
 
-  it("streams progress without waking the parent", async () => {
-    const update = {
-      callId: "call-1",
-      kind: "task-update" as const,
-      message: "progress",
-      updateEpoch: "task-1",
-      updateIndex: 0,
-    };
-    mocks.raceChannelReads
-      .mockResolvedValueOnce({ channel: "commands", next: { done: false, value: update } })
-      .mockResolvedValueOnce({
-        channel: "commands",
-        next: {
-          done: false,
-          value: {
-            command: { data: "done", kind: "complete" },
-            kind: "task-command",
+  it.each(["tool", "subagent"])(
+    "routes %s progress without changing subagent delivery",
+    async (kind) => {
+      const update = {
+        callId: "call-1",
+        kind: "task-update" as const,
+        message: "progress",
+        updateEpoch: "task-1",
+        updateIndex: 0,
+      };
+      mocks.raceChannelReads
+        .mockResolvedValueOnce({ channel: "commands", next: { done: false, value: update } })
+        .mockResolvedValueOnce({
+          channel: "commands",
+          next: {
+            done: false,
+            value: {
+              command: { data: "done", kind: "complete" },
+              kind: "task-command",
+            },
           },
-        },
-      })
-      .mockResolvedValueOnce({
-        channel: "commands",
-        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+        })
+        .mockResolvedValueOnce({
+          channel: "commands",
+          next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+        });
+
+      await taskRunWorkflow({
+        initialView: { ...initialView, metadata: { ...initialView.metadata, kind } },
+        parentContinuationToken: "parent-token",
+        taskInboxToken: "task-token",
       });
 
-    await taskRunWorkflow({
-      initialView,
-      parentContinuationToken: "parent-token",
-      taskInboxToken: "task-token",
-    });
-
-    expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
-      progress: {
-        callId: "call-1",
-        kind: "task-progress",
-        taskId: "task-1",
-        update: "progress",
-        updateIndex: 0,
-      },
-    });
-    expect(mocks.wakeTaskUpdateParentStep).not.toHaveBeenCalled();
-  });
+      if (kind === "subagent") {
+        expect(mocks.appendTaskProgressStep).not.toHaveBeenCalled();
+        expect(mocks.wakeTaskUpdateParentStep).toHaveBeenCalledWith({
+          token: "parent-token",
+          update,
+          view: expect.objectContaining({ status: "completed" }),
+        });
+        expect(mocks.wakeTaskUpdateParentStep.mock.invocationCallOrder[0]).toBeLessThan(
+          mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+        );
+        return;
+      }
+      expect(mocks.appendTaskProgressStep).toHaveBeenCalledWith({
+        progress: {
+          callId: "call-1",
+          kind: "task-progress",
+          taskId: "task-1",
+          update: "progress",
+          updateIndex: 0,
+        },
+      });
+      expect(mocks.wakeTaskUpdateParentStep).not.toHaveBeenCalled();
+    },
+  );
 
   it("publishes cancellation after the workflow body observes its abort", async () => {
     mocks.raceChannelReads

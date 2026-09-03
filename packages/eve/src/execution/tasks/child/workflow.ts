@@ -184,6 +184,15 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   }
 
   async function handleUpdate(update: TaskInboundUpdate): Promise<void> {
+    if (view.metadata.kind === "subagent") {
+      if (dispatchRejected) return;
+      if (dispatchAcknowledged && !isTerminalTaskStatus(view.status)) {
+        await wakeTaskUpdateParentStep({ token: input.parentContinuationToken, update, view });
+      } else {
+        pendingUpdates.push(update);
+      }
+      return;
+    }
     await appendTaskProgressStep({
       progress: {
         callId: update.callId,

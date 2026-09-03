@@ -308,7 +308,7 @@ class BackgroundToolExecutionScope implements BackgroundToolExecutor {
 
     await deliverTaskCommand(task, { data: parseJsonValue(settled), kind: "complete" });
     record.settled = true;
-    return settled;
+    return { status: "working", taskId: task.taskId };
   }
 
   private async startTask(input: {

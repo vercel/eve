@@ -10,6 +10,7 @@ import { createHook, sleep as workflowSleep } from "#compiled/@workflow/core/ind
 
 import { ask } from "#execution/tools/workflow/ask.js";
 import type { ToolContext } from "#tools/definition.js";
+import type { TaskExec, TaskMessage, TaskSetState } from "#tools/task.js";
 
 export interface DeployInput {
   readonly service: string;
@@ -77,6 +78,20 @@ export async function* reportingDeployWorkflow(
 
   const plan = await planDeployStep(input.service);
   yield `planned ${input.service}`;
+  return { plan };
+}
+
+export async function* backgroundDeployWorkflow(
+  input: DeployInput,
+  _ctx: ToolContext,
+  task: TaskExec,
+): AsyncGenerator<string | TaskMessage | TaskSetState, { readonly plan: string }> {
+  "use workflow";
+
+  const plan = await planDeployStep(input.service);
+  yield task.setState({ plan });
+  yield `planned ${input.service}`;
+  yield task.postMessage(`Review ${plan}`);
   return { plan };
 }
 
