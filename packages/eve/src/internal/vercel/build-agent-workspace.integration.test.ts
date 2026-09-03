@@ -49,10 +49,22 @@ describe("buildAgentWorkspace", () => {
         src: "^/research/eve/v1/(.*)$",
       },
       {
+        destination: { service: "eve-research", type: "service" },
+        src: "^/research/?$",
+      },
+      {
         destination: { service: "eve-support", type: "service" },
         src: "^/support/eve/v1/(.*)$",
       },
+      {
+        destination: { service: "eve-support", type: "service" },
+        src: "^/support/?$",
+      },
+      { handle: "filesystem" },
     ]);
+    await expect(readFile(join(output, "static", "index.html"), "utf8")).resolves.toContain(
+      '<a href="/research/">research</a>',
+    );
     await expect(
       access(join(root, ".eve", "vercel-services", "eve-support")),
     ).resolves.toBeUndefined();
@@ -64,6 +76,10 @@ describe("buildAgentWorkspace", () => {
       root: ".eve/vercel-services/eve-support",
       routePrefix: "/support",
       routes: [
+        {
+          src: "^/support/?$",
+          transforms: [{ args: "/", op: "set", type: "request.path" }],
+        },
         {
           src: "^/support/eve/v1/(.*)$",
           transforms: [{ args: "/eve/v1/$1", op: "set", type: "request.path" }],
