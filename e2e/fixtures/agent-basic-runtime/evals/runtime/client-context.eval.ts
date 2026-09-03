@@ -1,8 +1,8 @@
 import { defineEval } from "eve/evals";
-import { equals } from "eve/evals/expect";
-
+import { satisfies } from "eve/evals/expect";
 const FIRST_CLIENT_CONTEXT_TOKEN = "clientctx-first-W7R2";
 const SECOND_CLIENT_CONTEXT_TOKEN = "clientctx-second-P9K4";
+const CLIENT_CONTEXT_TOKEN_PATTERN = /\bclientctx-[A-Za-z0-9-]+\b/g;
 
 /**
  * Core session-route runtime behavior: per-turn client context delivery.
@@ -29,6 +29,21 @@ export default defineEval({
     );
 
     t.succeeded();
-    t.check(second.message?.trim(), equals(SECOND_CLIENT_CONTEXT_TOKEN));
+    const tokens = second.message?.match(CLIENT_CONTEXT_TOKEN_PATTERN) ?? [];
+    await t.require(
+      tokens,
+      satisfies(
+        (observed) =>
+          observed.filter((token) => token === SECOND_CLIENT_CONTEXT_TOKEN).length === 1,
+        "contains the fresh client context token exactly once",
+      ),
+    );
+    await t.require(
+      tokens,
+      satisfies(
+        (observed) => !observed.includes(FIRST_CLIENT_CONTEXT_TOKEN),
+        "does not contain the first turn's client context token",
+      ),
+    );
   },
 });
