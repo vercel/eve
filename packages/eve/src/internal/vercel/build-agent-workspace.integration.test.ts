@@ -42,6 +42,26 @@ describe("buildAgentWorkspace", () => {
 
     const output = await buildAgentWorkspace(workspace);
     const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
+    const multiAgentSummary = JSON.parse(
+      await readFile(join(root, ".eve", "multi-agent-summary.json"), "utf8"),
+    );
+
+    expect(multiAgentSummary).toMatchObject({
+      agents: [
+        {
+          name: "research",
+          routePrefix: "/research",
+          summaryPath: "agents/research/.eve/agent-summary.json",
+        },
+        {
+          name: "support",
+          routePrefix: "/support",
+          summaryPath: "agents/support/.eve/agent-summary.json",
+        },
+      ],
+      kind: "vercel-eve-multi-agent-summary",
+      schemaVersion: 1,
+    });
 
     expect(config.routes).toEqual([
       {
