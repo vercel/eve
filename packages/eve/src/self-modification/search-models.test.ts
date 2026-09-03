@@ -1,33 +1,36 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import searchModels, {
-  parseGatewayModels,
-  searchGatewayModels,
-} from "./extension/tools/search_models.js";
+import { parseGatewayModelCatalog } from "#shared/gateway-model-catalog.js";
+
+import searchModels, { searchGatewayModels } from "./extension/tools/search_models.js";
 
 const CATALOG = {
   data: [
     {
       id: "openai/gpt-5.6-sol",
       name: "GPT-5.6 Sol",
+      owned_by: "openai",
       tags: ["web-search"],
       type: "language",
     },
     {
       id: "openai/gpt-5.6-terra",
       name: "GPT-5.6 Terra",
+      owned_by: "openai",
       tags: ["web-search"],
       type: "language",
     },
     {
       id: "openai/gpt-5.6-luna-fast",
       name: "GPT-5.6 Luna Fast",
+      owned_by: "openai",
       tags: [],
       type: "language",
     },
     {
       id: "openai/gpt-image-1",
       name: "GPT Image",
+      owned_by: "openai",
       tags: ["web-search"],
       type: "image",
     },
@@ -38,24 +41,24 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("searchGatewayModels", () => {
   it("matches abbreviated model IDs from the /model catalog", () => {
-    expect(searchGatewayModels(parseGatewayModels(CATALOG), "sol")).toEqual([
+    expect(searchGatewayModels(parseGatewayModelCatalog(CATALOG), "sol")).toEqual([
       { id: "openai/gpt-5.6-sol", name: "GPT-5.6 Sol", provider: "openai" },
     ]);
   });
 
   it("uses the same language-model eligibility as /model", () => {
-    expect(searchGatewayModels(parseGatewayModels(CATALOG), "luna")).toEqual([
+    expect(searchGatewayModels(parseGatewayModelCatalog(CATALOG), "luna")).toEqual([
       {
         id: "openai/gpt-5.6-luna-fast",
         name: "GPT-5.6 Luna Fast",
         provider: "openai",
       },
     ]);
-    expect(searchGatewayModels(parseGatewayModels(CATALOG), "image")).toEqual([]);
+    expect(searchGatewayModels(parseGatewayModelCatalog(CATALOG), "image")).toEqual([]);
   });
 
   it("rejects a malformed catalog", () => {
-    expect(() => parseGatewayModels({ models: [] })).toThrow("invalid model catalog");
+    expect(() => parseGatewayModelCatalog({ models: [] })).toThrow("invalid model catalog");
   });
 });
 

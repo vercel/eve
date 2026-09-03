@@ -1,7 +1,11 @@
 import { defineTool } from "eve/tools";
 
-const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1/models";
-const DEFAULT_AGENT_MODEL_ID = "openai/gpt-5.6-luna-fast";
+import { AI_GATEWAY_MODELS_URL } from "#internal/gateway.js";
+import { DEFAULT_AGENT_MODEL_ID } from "#shared/default-agent-model.js";
+import {
+  parseGatewayModelCatalog,
+  type GatewayCatalogModel,
+} from "#shared/gateway-model-catalog.js";
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_RESULTS = 20;
 
@@ -40,35 +44,13 @@ const outputSchema = {
   required: ["models"],
 } as const;
 
-interface GatewayModel {
-  readonly id: string;
-  readonly name: string;
-  readonly tags: readonly string[];
-  readonly type: string;
-}
-
-export function parseGatewayModels(value: unknown): GatewayModel[] {
-  if (typeof value !== "object" || value === null || !("data" in value)) {
-    throw new Error("AI Gateway returned an invalid model catalog.");
-  }
-  const { data } = value;
-  if (!Array.isArray(data)) throw new Error("AI Gateway returned an invalid model catalog.");
-
-  return data.flatMap((entry) => {
-    if (typeof entry !== "object" || entry === null) return [];
-    const { id, name, tags, type } = entry;
-    if (typeof id !== "string" || typeof name !== "string" || typeof type !== "string") return [];
-    return [{ id, name, tags: Array.isArray(tags) ? tags.filter(isString) : [], type }];
-  });
-}
-
-export function searchGatewayModels(models: readonly GatewayModel[], query: string) {
+export function searchGatewayModels(models: readonly GatewayCatalogModel[], query: string) {
   const needle = query.trim().toLowerCase();
   return models
     .filter(
       (model) =>
         model.type === "language" &&
-        (model.id === DEFAULT_AGENT_MODEL_ID || model.tags.includes("web-search")) &&
+        (model.id === DEFAULT_AGENT_MODEL_ID || model.tags?.includes("web-search")) &&
         (model.id.toLowerCase().includes(needle) || model.name.toLowerCase().includes(needle)),
     )
     .slice(0, MAX_RESULTS)
@@ -95,14 +77,10 @@ export default defineTool({
         throw new Error(`AI Gateway model catalog request failed (${response.status}).`);
       }
       return {
-        models: searchGatewayModels(parseGatewayModels(await response.json()), input.query),
+        models: searchGatewayModels(parseGatewayModelCatalog(await response.json()), input.query),
       };
     } finally {
       clearTimeout(timeout);
     }
   },
 });
-
-function isString(value: unknown): value is string {
-  return typeof value === "string";
-}
