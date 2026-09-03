@@ -40,7 +40,10 @@ export function vercelBlob(options: VercelBlobBackendOptions = {}): MemoryDocume
     if (result.statusCode !== 200 || result.stream === null) {
       throw new Error(`Vercel Blob returned ${result.statusCode} without a memory document.`);
     }
-    return { content: await new Response(result.stream).text(), version: result.blob.etag };
+    return {
+      content: await new Response(result.stream).text(),
+      version: normalizeBlobEtag(result.blob.etag),
+    };
   };
 
   return {
@@ -80,6 +83,12 @@ function normalizePrefix(value: string): string {
   const prefix = value.replace(/^\/+|\/+$/g, "");
   if (prefix.length === 0) throw new TypeError("Vercel Blob memory prefix cannot be empty.");
   return prefix;
+}
+
+function normalizeBlobEtag(etag: string): string {
+  // The CDN weakens the same object ETag when it compresses a response, but
+  // Blob conditional writes require the underlying strong validator.
+  return etag.startsWith("W/") ? etag.slice(2) : etag;
 }
 
 function pathname(prefix: string, key: string): string {
