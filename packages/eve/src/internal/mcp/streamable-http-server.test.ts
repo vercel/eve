@@ -7,6 +7,7 @@ import {
   defineMcpTool,
   MCP_LEGACY_PROTOCOL_VERSION,
   MCP_PROTOCOL_VERSION,
+  MCP_REQUEST_BODY_MAX_BYTES,
   McpToolOperationError,
 } from "#internal/mcp/streamable-http-server.js";
 
@@ -440,18 +441,70 @@ describe("stateless MCP Streamable HTTP server", () => {
     expect(await jsonRpcResponse(response)).toMatchObject({ error: { code: -32000 } });
   });
 
-  it("bounds compatibility preflight parsing before the transport reads the body", async () => {
+  it("bounds every POST body before the transport reads it", async () => {
+    const { call, handle } = server();
+    const padding = "x".repeat(MCP_REQUEST_BODY_MAX_BYTES + 1);
+    const oversized = [
+      // Legacy-era request without a protocol version header.
+      request({ id: 1, jsonrpc: "2.0", method: "tools/list", params: { padding } }),
+      // Legacy-era request that declares the 2025 header.
+      request(
+        { id: 2, jsonrpc: "2.0", method: "tools/list", params: { padding } },
+        { "mcp-protocol-version": MCP_LEGACY_PROTOCOL_VERSION },
+      ),
+      // Modern-era request with a complete envelope and header.
+      modernRequest({
+        id: 3,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: { value: 1, padding }, name: "echo" },
+      }),
+    ];
+
+    for (const oversizedRequest of oversized) {
+      const response = await handle(oversizedRequest);
+      expect(response.status).toBe(413);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: -32_000, message: "Request body too large" },
+        id: null,
+        jsonrpc: "2.0",
+      });
+    }
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("fails fast on an oversized declared content length", async () => {
     const { handle } = server();
     const response = await handle(
-      request({ padding: "x".repeat(4 * 1024 * 1024), method: "tools/list" }),
+      new Request("https://agent.example/mcp", {
+        body: JSON.stringify({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-length": String(MCP_REQUEST_BODY_MAX_BYTES + 1),
+          "content-type": "application/json",
+          "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+        },
+        method: "POST",
+      }),
     );
-
     expect(response.status).toBe(413);
-    await expect(response.json()).resolves.toMatchObject({
-      error: { code: -32_000, message: "Request body too large" },
-      id: null,
-      jsonrpc: "2.0",
-    });
+  });
+
+  it("rejects malformed JSON on every POST path with a parse error", async () => {
+    const { handle } = server();
+    const response = await handle(
+      new Request("https://agent.example/mcp", {
+        body: "{not json",
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+        },
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: -32_700 } });
   });
 
   it("rejects duplicate tool names at construction", () => {

@@ -420,7 +420,7 @@ function createInvocationTools(
             ? startDescription
             : `${agentDescription} ${startDescription}`,
         inputSchema: z.strictObject({
-          message: z.string().min(1),
+          message: utf8Bounded(MAX_MESSAGE_BYTES).min(1),
           outputSchema: z.looseObject({}).optional(),
         }),
         name: "agent_start",
@@ -447,7 +447,7 @@ function createInvocationTools(
           "Reads complete durable invocation state. Wait at least pollAfterMs between calls. " +
           "Terminal statuses are completed, failed, and cancelled. input_required needs agent_update; " +
           `authorization_required needs the user to follow the returned authorization.${publicHandleDescription}`,
-        inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
+        inputSchema: z.strictObject({ invocationId: z.string().min(1).max(MAX_ID_CHARS) }),
         name: "agent_get",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -475,8 +475,8 @@ function createInvocationTools(
           "entry in inputRequests, each keyed by its requestId, in a single call; partial batches are rejected. " +
           "Returns the current invocation state; repeating the same accepted answers is safe.",
         inputSchema: z.strictObject({
-          invocationId: z.string().min(1),
-          responses: z.array(inputResponseSchema).min(1),
+          invocationId: z.string().min(1).max(MAX_ID_CHARS),
+          responses: z.array(MCP_INPUT_RESPONSE_SCHEMA).min(1).max(MAX_RESPONSES_PER_UPDATE),
         }),
         name: "agent_update",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
@@ -505,7 +505,7 @@ function createInvocationTools(
           "Requests cooperative cancellation of a non-terminal invocation. Cancellation is asynchronous and " +
           "can race with completion: poll agent_get until status is terminal (cancelled, completed, or failed). " +
           "Safe to call repeatedly.",
-        inputSchema: z.strictObject({ invocationId: z.string().min(1) }),
+        inputSchema: z.strictObject({ invocationId: z.string().min(1).max(MAX_ID_CHARS) }),
         name: "agent_cancel",
         outputSchema: AGENT_INVOCATION_OUTPUT_SCHEMA,
       },
@@ -585,6 +585,28 @@ const AUTHORIZATION_REQUEST_SCHEMA = z.strictObject({
   description: z.string(),
   name: z.string(),
   webhookUrl: z.url().optional(),
+});
+
+// Bounds on caller-supplied text. The transport already caps the whole body
+// at MCP_REQUEST_BODY_MAX_BYTES; these keep individual durable fields sane.
+// Text bounds are UTF-8 bytes, matching the transport cap and the docs;
+// string.length undercounts multibyte input by up to 3x.
+const MAX_MESSAGE_BYTES = 64 * 1_024;
+const MAX_RESPONSE_TEXT_BYTES = 16 * 1_024;
+const MAX_ID_CHARS = 256;
+const MAX_RESPONSES_PER_UPDATE = 64;
+
+function utf8Bounded(maxBytes: number) {
+  const encoder = new TextEncoder();
+  return z.string().refine((value) => encoder.encode(value).byteLength <= maxBytes, {
+    message: `must be at most ${String(maxBytes)} bytes when UTF-8 encoded`,
+  });
+}
+
+const MCP_INPUT_RESPONSE_SCHEMA = inputResponseSchema.safeExtend({
+  optionId: z.string().max(MAX_ID_CHARS).optional(),
+  requestId: z.string().min(1).max(MAX_ID_CHARS),
+  text: utf8Bounded(MAX_RESPONSE_TEXT_BYTES).optional(),
 });
 
 const MCP_INPUT_REQUEST_SCHEMA = inputRequestSchema.safeExtend({

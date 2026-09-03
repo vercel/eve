@@ -12,7 +12,11 @@ const log = createLogger("mcp.server");
 
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 export const MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25";
-const MCP_COMPATIBILITY_INSPECTION_MAX_BYTES = 4 * 1024 * 1024;
+/**
+ * Upper bound for any MCP POST body. Tool arguments are small JSON; the
+ * largest legitimate payload is an `outputSchema`, itself capped at 64 KiB.
+ */
+export const MCP_REQUEST_BODY_MAX_BYTES = 1024 * 1024;
 
 export interface McpToolDefinition<
   TInputSchema extends StandardSchemaWithJSON = StandardSchemaWithJSON,
@@ -142,22 +146,24 @@ export function createMcpStreamableHttpServer(
     const auth = await options.authenticate(request);
     if (auth instanceof Response) return auth;
 
-    const preflight = await preflightModernRequest(request);
-    if (preflight.response !== undefined) return preflight.response;
-
     const handler = createMcpHandler(() => createServer(options, tools, auth), {
       legacy: "stateless",
     });
-    return await handler.fetch(
-      request,
-      preflight.parsedBody === undefined ? undefined : { parsedBody: preflight.parsedBody },
-    );
-  };
-}
+    if (request.method.toUpperCase() !== "POST") return await handler.fetch(request);
 
-interface ModernRequestPreflight {
-  readonly parsedBody?: unknown;
-  readonly response?: Response;
+    // Every POST body is read here, bounded, before the SDK sees it. The
+    // parsed value is handed to the SDK so the body is never read twice.
+    const inspected = await inspectRequestBody(request);
+    if (inspected.tooLarge) return requestBodyTooLargeResponse();
+    if (inspected.invalidJson) return invalidJsonResponse();
+    const parsedBody = inspected.value;
+    if (parsedBody === undefined) return await handler.fetch(request);
+
+    const preflightFailure = await preflightModernRequest(request, parsedBody);
+    if (preflightFailure !== undefined) return preflightFailure;
+
+    return await handler.fetch(request, { parsedBody });
+  };
 }
 
 /**
@@ -166,30 +172,15 @@ interface ModernRequestPreflight {
  * missing-header case here until the upstream handler does:
  * modelcontextprotocol/typescript-sdk#2589.
  */
-async function preflightModernRequest(request: Request): Promise<ModernRequestPreflight> {
-  if (request.method.toUpperCase() !== "POST" || request.headers.has("mcp-protocol-version")) {
-    return {};
-  }
-
-  const inspected = await inspectRequestBody(request);
-  if (inspected.tooLarge) return { response: requestBodyTooLargeResponse() };
-  if (inspected.invalidJson) return { response: invalidJsonResponse() };
-  const parsedBody = inspected.value;
-  if (parsedBody === undefined) return {};
-
-  if (!claimsCurrentProtocolVersion(parsedBody)) {
-    return { parsedBody };
-  }
+async function preflightModernRequest(
+  request: Request,
+  parsedBody: unknown,
+): Promise<Response | undefined> {
+  if (request.headers.has("mcp-protocol-version")) return undefined;
+  if (!claimsCurrentProtocolVersion(parsedBody)) return undefined;
 
   const earlierFailure = await probeEarlierValidationFailure(request, parsedBody);
-  if (earlierFailure !== undefined) {
-    return { parsedBody, response: earlierFailure };
-  }
-
-  return {
-    parsedBody,
-    response: headerMismatchResponse(parsedBody),
-  };
+  return earlierFailure ?? headerMismatchResponse(parsedBody);
 }
 
 async function inspectRequestBody(request: Request): Promise<{
@@ -200,6 +191,13 @@ async function inspectRequestBody(request: Request): Promise<{
   const body = request.body;
   if (body === null) return { tooLarge: false };
 
+  // Trust a declared length only to fail fast; the streamed count is the guard.
+  const declaredLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MCP_REQUEST_BODY_MAX_BYTES) {
+    await body.cancel().catch(() => {});
+    return { tooLarge: true };
+  }
+
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -208,7 +206,7 @@ async function inspectRequestBody(request: Request): Promise<{
       const chunk = await reader.read();
       if (chunk.done) break;
       size += chunk.value.byteLength;
-      if (size > MCP_COMPATIBILITY_INSPECTION_MAX_BYTES) {
+      if (size > MCP_REQUEST_BODY_MAX_BYTES) {
         await reader.cancel();
         return { tooLarge: true };
       }
