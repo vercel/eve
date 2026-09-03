@@ -1,7 +1,7 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { AgentWorkspace } from "#internal/agent-workspace.js";
+import type { AgentWorkspace } from "#internal/project-context.js";
 import { assembleEveVercelServices } from "#internal/vercel/assemble-eve-services.js";
 import { quoteVercelShellArgument, toVercelRelativePath } from "#internal/vercel/build-command.js";
 import { readVercelJsonFile } from "#internal/vercel/vercel-services-config.js";

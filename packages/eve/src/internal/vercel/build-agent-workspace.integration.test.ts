@@ -8,7 +8,7 @@ vi.mock("#shared/resolve-eve-binary.js", () => ({
   resolveEveBinaryPath: (root: string) => join(root, "node_modules", "eve", "bin", "eve.js"),
 }));
 
-import { resolveAgentWorkspace } from "#internal/agent-workspace.js";
+import { resolveEveProjectContext } from "#internal/project-context.js";
 import { buildAgentWorkspace } from "#internal/vercel/build-agent-workspace.js";
 
 async function createWorkspace(): Promise<string> {
@@ -28,10 +28,16 @@ async function createWorkspace(): Promise<string> {
   return root;
 }
 
+async function resolveWorkspace(root: string) {
+  const context = await resolveEveProjectContext(root);
+  if (context?.kind !== "workspace") throw new Error("Expected a workspace context.");
+  return context.workspace;
+}
+
 describe("buildAgentWorkspace", () => {
   it("emits peer services and canonical public routes", async () => {
     const root = await createWorkspace();
-    const workspace = await resolveAgentWorkspace(root);
+    const workspace = await resolveWorkspace(root);
     expect(workspace).toBeDefined();
 
     const output = await buildAgentWorkspace(workspace);
@@ -69,7 +75,7 @@ describe("buildAgentWorkspace", () => {
   it("keeps digit-bearing public names while encoding the generated service name", async () => {
     const root = await createWorkspace();
     await mkdir(join(root, "agents", "support2", "agent"), { recursive: true });
-    const workspace = await resolveAgentWorkspace(root);
+    const workspace = await resolveWorkspace(root);
     const output = await buildAgentWorkspace(workspace);
     const config = JSON.parse(await readFile(join(output, "config.json"), "utf8"));
     const supportServiceName = Object.keys(config.services).find((name) =>
@@ -86,7 +92,7 @@ describe("buildAgentWorkspace", () => {
   it("refuses to assemble an authored graph", async () => {
     const root = await createWorkspace();
     await writeFile(join(root, "vercel.json"), JSON.stringify({ services: {} }));
-    const workspace = await resolveAgentWorkspace(root);
+    const workspace = await resolveWorkspace(root);
     await expect(buildAgentWorkspace(workspace)).rejects.toThrow(/Run `vercel build`/);
   });
 });
