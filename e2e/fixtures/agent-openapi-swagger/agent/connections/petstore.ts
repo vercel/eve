@@ -1,10 +1,17 @@
-import { defineOpenAPIConnection } from "eve/connections";
+import { defineDynamic, defineOpenAPIConnection } from "eve/connections";
 
-import { PETSTORE_BASE_URL, PETSTORE_SPEC } from "../lib/petstore.js";
+import { resolvePetstoreBaseUrl, PETSTORE_SPEC } from "../lib/petstore.js";
 
-export default defineOpenAPIConnection({
-  baseUrl: PETSTORE_BASE_URL,
-  spec: PETSTORE_SPEC,
-  description: "Local Swagger Petstore API fixture.",
-  operations: { allow: ["getInventory"] },
+export default defineDynamic({
+  events: {
+    "session.started": () => ({
+      petstore: defineOpenAPIConnection({
+        baseUrl: resolvePetstoreBaseUrl(),
+        description: "Local Swagger Petstore API fixture.",
+        instanceKey: "agent-openapi-swagger:petstore",
+        operations: { allow: ["getInventory"] },
+        spec: PETSTORE_SPEC,
+      }),
+    }),
+  },
 });

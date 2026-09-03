@@ -1,11 +1,17 @@
-const localBaseUrl =
-  process.env.WORKFLOW_LOCAL_BASE_URL ??
-  `http://127.0.0.1:${process.env.PORT === undefined || process.env.PORT === "" ? "3000" : process.env.PORT}`;
+export function resolvePetstoreBaseUrl(): string {
+  const localBaseUrl = process.env.WORKFLOW_LOCAL_BASE_URL?.trim();
+  if (localBaseUrl !== undefined && localBaseUrl.length > 0) {
+    return localBaseUrl;
+  }
 
-export const PETSTORE_BASE_URL =
-  process.env.VERCEL_URL === undefined || process.env.VERCEL_URL === ""
-    ? localBaseUrl
-    : `https://${process.env.VERCEL_URL}`;
+  const deploymentHost = process.env.VERCEL_URL?.trim();
+  if (deploymentHost !== undefined && deploymentHost.length > 0) {
+    return `https://${deploymentHost}`;
+  }
+
+  const localPort = process.env.PORT?.trim();
+  return `http://127.0.0.1:${localPort === undefined || localPort.length === 0 ? "3000" : localPort}`;
+}
 
 export const PETSTORE_SPEC = {
   basePath: "/petstore",
