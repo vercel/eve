@@ -91,6 +91,8 @@ export function createAgentOtelSessionContext(
     const turn: AgentTurnTraceState = {
       caller: caller === undefined ? undefined : adoptedSpanContext(caller),
       context: turnContext,
+      currentPrincipal: event.currentPrincipal,
+      initiatorPrincipal: event.initiatorPrincipal,
       parentLineage: event.parentLineage ?? session.parentLineage,
       rootSessionId: event.rootSessionId,
       sequence: event.sequence,

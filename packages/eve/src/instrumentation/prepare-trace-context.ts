@@ -22,6 +22,10 @@ export interface PrepareTurnTraceContextInput {
     ) => Promise<InstrumentationTraceSeed>;
   };
   readonly session: Omit<InstrumentationSessionStartedEvent, "idempotencyKey" | "type">;
+  readonly principals?: Pick<
+    InstrumentationTurnStartedEvent,
+    "currentPrincipal" | "initiatorPrincipal"
+  >;
   readonly sequence: number;
   readonly sessionStarted: boolean;
   readonly traceContext?: RuntimeTraceContext;
@@ -54,6 +58,7 @@ export async function prepareTurnTraceContext(
     try {
       prepared = await input.instrumentation.prepareTurnTrace({
         ...session,
+        ...input.principals,
         idempotencyKey: turnIdempotencyKey(session.sessionId, input.turnId),
         sequence: input.sequence,
         turnId: input.turnId,

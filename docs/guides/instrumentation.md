@@ -248,6 +248,13 @@ eve creates the `ai.eve.turn` parent span per turn and passes enriched telemetry
 
 This hierarchy applies when eve passes telemetry to the AI SDK. When the `otel()` provider layout is declared and eve owns the agent spans, eve names its invocation span `invoke_agent <agent>` and its model-attempt spans `agent.step`. Session, turn, step, and channel context is injected as the framework half of the runtime context (`eve.version`, `eve.session.id`, `eve.environment`, `eve.turn.id`, `eve.turn.sequence`, `eve.step.index`, `eve.channel.kind`) and rides onto the spans alongside any values your `events["step.started"]` callback returns under `runtimeContext`.
 
+Agent Runs turn metadata includes bounded identity summaries from the turn's execution span:
+
+- `agent.principal.current.type` and `agent.principal.current.id` describe the current caller.
+- `agent.principal.initiator.type` and `agent.principal.initiator.id` describe the authenticated principal that created the root session. The initiator remains fixed when later turns have a different caller.
+
+Types are limited to `user`, `service`, `runtime`, `app`, `anonymous`, `local-dev`, `none`, and `other`. Types are emitted for every audience. Principal IDs follow the existing trace-content audience policy: public turns include them, private and hosted-unknown turns omit them, and unknown turns under `eve dev` include them. A `none` principal has no ID. Claims, email addresses, issuers, subjects, and channel attributes are not added to trace state or span attributes.
+
 Set `traceChannelRequests: true` on `defineInstrumentation` to also wrap each inbound channel HTTP request in a single OpenTelemetry `SERVER` span named for the registered route. In the authored hierarchy above, this span parents the turn tree and any `hook.resume` or outgoing HTTP spans. In the provider layout, `invoke_agent` remains a separate trace root and links to the request span.
 
 ```text

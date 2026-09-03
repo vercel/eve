@@ -31,6 +31,8 @@ describe("ContextAgentTraceStateStore", () => {
           requestTraceContext: { ...spanContext("5", "6"), isRemote: true },
         },
         context: spanContext("1", "3"),
+        currentPrincipal: { id: "user-123", type: "user" },
+        initiatorPrincipal: { type: "none" },
         modelUsage: { inputTokens: 12, outputTokens: 4 },
         caller: { ...spanContext("4", "2"), isRemote: true },
         rootSessionId: "session-1",
@@ -56,11 +58,14 @@ describe("ContextAgentTraceStateStore", () => {
           requestId: "request-1",
           requestTraceContext: { ...spanContext("5", "6"), isRemote: true },
         },
+        currentPrincipal: { id: "user-123", type: "user" },
+        initiatorPrincipal: { type: "none" },
         modelUsage: { inputTokens: 12, outputTokens: 4 },
         caller: { ...spanContext("4", "2"), isRemote: true },
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
       });
+      expect(JSON.stringify(store.getTurn("session-1", "turn-1"))).not.toContain("attributes");
       const terminal = store.getTurn("session-1", "turn-1")?.terminal;
       expect(terminal?.type).toBe("turn.failed");
       expect(terminal?.type === "turn.failed" ? terminal.error : undefined).toMatchObject({

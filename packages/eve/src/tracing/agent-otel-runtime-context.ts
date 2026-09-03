@@ -17,6 +17,7 @@ export function agentActivationAttributes(input: {
     "agent.framework.name": "eve",
     "agent.framework.version": input.frameworkVersion,
     "agent.name": input.agentName,
+    ...agentPrincipalAttributes(input.turn),
     "agent.channel.delivery.id": input.turn.channelDelivery?.deliveryId,
     "agent.channel.delivery.input": input.turn.channelDelivery?.inputAttribute,
     "agent.channel.kind": input.turn.channelDelivery?.channelKind,
@@ -33,6 +34,15 @@ export function agentActivationAttributes(input: {
       sessionId: input.sessionId,
     }),
   };
+}
+
+export function agentPrincipalAttributes(turn: AgentTurnTraceState): Record<string, string> {
+  const attributes: Record<string, string> = {};
+  setOptionalAttribute(attributes, "agent.principal.current.id", turn.currentPrincipal?.id);
+  setOptionalAttribute(attributes, "agent.principal.current.type", turn.currentPrincipal?.type);
+  setOptionalAttribute(attributes, "agent.principal.initiator.id", turn.initiatorPrincipal?.id);
+  setOptionalAttribute(attributes, "agent.principal.initiator.type", turn.initiatorPrincipal?.type);
+  return attributes;
 }
 
 /** Flattens merged runtime context into AI SDK-compatible span attributes. */
