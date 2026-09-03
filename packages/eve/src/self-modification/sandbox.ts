@@ -1,5 +1,5 @@
-import { defineSandbox } from "eve/sandbox";
-import { justbash } from "eve/sandbox/just-bash";
+import { defineSandbox } from "#public/sandbox/index.js";
+import { justbash } from "#public/sandbox/just-bash.js";
 
 import { createSelfModificationFilesystem } from "./filesystem.js";
 

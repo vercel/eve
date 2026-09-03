@@ -7,7 +7,7 @@ import searchRegistry, {
   selectIntegrationPage,
   selectIntegrations,
   type CatalogEntry,
-} from "../extension/tools/search_registry.js";
+} from "./extension/tools/search_registry.js";
 
 const INDEX = {
   items: [
@@ -252,7 +252,7 @@ describe("selfmod__search_registry", () => {
   async function run(input: Record<string, unknown>, context: never) {
     const result = await searchRegistry.execute(input, context);
     if (Symbol.asyncIterator in result) {
-      throw new TypeError("search_registry must not stream its result.");
+      throw new TypeError("selfmod__search_registry must not stream its result.");
     }
     return result;
   }
