@@ -56,7 +56,7 @@ function subagent(name: string): HarnessToolDefinition {
 }
 
 describe("claimsForCodeMode", () => {
-  it("claims executable, ungated tools and blocking subagents only", () => {
+  it("claims executable, ungated tools and every subagent", () => {
     const tools: HarnessToolMap = new Map<string, HarnessToolDefinition>([
       ["add", tool("add")],
       ["gated", tool("gated", { approval: always() })],
@@ -70,7 +70,7 @@ describe("claimsForCodeMode", () => {
     ]);
 
     const claimed = [...tools.keys()].filter((name) => claimsForCodeMode(name, tools));
-    expect(claimed).toEqual(["add", "researcher"]);
+    expect(claimed).toEqual(["add", "researcher", "agent"]);
   });
 });
 

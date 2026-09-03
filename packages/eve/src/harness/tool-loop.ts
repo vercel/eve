@@ -1360,6 +1360,9 @@ export function createToolLoopHarness(config: ToolLoopHarnessConfig): StepFn {
         workflow: workflowConfig,
       });
       session = advertisedModelTools.session;
+      // code_mode rewrites the harness definition that coordination later
+      // turns into the workflow task (its `executeInput` pins the catalog).
+      modelCallCoordinationTools = advertisedModelTools.harnessTools;
       const modelTools = advertisedModelTools.modelTools;
 
       const effectiveTools = marker ? applyLastToolCacheBreakpoint(modelTools, marker) : modelTools;

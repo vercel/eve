@@ -114,9 +114,14 @@ export function claimsForCodeMode(name: string, tools: HarnessToolMap): boolean 
   return definition.approval === undefined || isNeverApproval(definition.approval);
 }
 
-/** A blocking subagent tool; background variants return receipts and stay direct. */
+/**
+ * Any subagent tool. Declared subagents are background tools on the direct
+ * surface (they return a receipt); inside a program the body invokes them
+ * through the owner's `agent-invoke` channel and waits for the result, so
+ * generated code can `await` them like any other call.
+ */
 export function isCodeModeAgentTool(definition: HarnessToolDefinition): boolean {
-  return definition.resultKind === "subagent" && definition.execution !== "background";
+  return definition.resultKind === "subagent";
 }
 
 /** Discovery helpers exposed to generated code in `"lazy"` mode. */
