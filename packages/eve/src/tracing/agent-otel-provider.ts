@@ -61,6 +61,12 @@ import type {
   InstrumentationTurnTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import {
+  AGENT_INVOCATION_ROLES,
+  AGENT_SESSION_KINDS,
+  AGENT_TRACE_ATTRIBUTES,
+  AGENT_TRACE_SCHEMA_VERSION,
+} from "#protocol/agent-invocation-trace.js";
 
 interface SpanState {
   readonly context: Context;
@@ -305,7 +311,16 @@ export function createAgentOtelInstrumentation(
                   "agent.framework.name": "eve",
                   "agent.framework.version": input.frameworkVersion,
                   "agent.name": agentName,
+                  "agent.parent_call.id": turn.parentLineage?.callId,
+                  "agent.parent_run.id": turn.parentLineage?.sessionId,
+                  "agent.root_run.id": turn.rootSessionId,
                   "agent.session.id": event.sessionId,
+                  [AGENT_TRACE_ATTRIBUTES.invocationRole]: AGENT_INVOCATION_ROLES.execution,
+                  [AGENT_TRACE_ATTRIBUTES.schemaVersion]: AGENT_TRACE_SCHEMA_VERSION,
+                  [AGENT_TRACE_ATTRIBUTES.sessionKind]:
+                    turn.parentLineage === undefined
+                      ? AGENT_SESSION_KINDS.root
+                      : AGENT_SESSION_KINDS.delegated,
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,

@@ -1,5 +1,6 @@
 import {
   ROOT_CONTEXT,
+  SpanKind,
   SpanStatusCode,
   type Context,
   type Span,
@@ -9,6 +10,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
+  InstrumentationActionKind,
   InstrumentationActionStartedEvent,
   InstrumentationActionTerminalEvent,
   InstrumentationAttemptScope,
@@ -22,6 +24,10 @@ import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
+import {
+  AGENT_INVOCATION_ROLES,
+  AGENT_TRACE_ATTRIBUTES,
+} from "#protocol/agent-invocation-trace.js";
 
 export interface AgentActionInstrumentation {
   readonly events: Pick<
@@ -40,6 +46,7 @@ export interface AgentActionInstrumentation {
 
 export interface AgentActionContext {
   readonly context: Context;
+  readonly kind: InstrumentationActionKind;
   readonly spanContext: SpanContext;
 }
 
@@ -92,6 +99,7 @@ export function createAgentActionInstrumentation(input: {
     if (state === undefined) return;
     try {
       const span = startSpan(state);
+      setChildTraceId(span, state);
       span.setAttribute("agent.action.outcome", event.outcome);
       if (event.type === "action.failed") {
         if (event.errorCode !== undefined) {
@@ -118,9 +126,10 @@ export function createAgentActionInstrumentation(input: {
   };
 
   const startSpan = (state: AgentActionTraceState): Span => {
+    const invocation = isAgentInvocation(state.kind);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        "agent.action",
+        invocation ? `invoke_agent ${state.name}` : "agent.action",
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -132,7 +141,15 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
+            ...(invocation
+              ? {
+                  "gen_ai.agent.name": state.name,
+                  "gen_ai.operation.name": "invoke_agent",
+                  [AGENT_TRACE_ATTRIBUTES.invocationRole]: AGENT_INVOCATION_ROLES.caller,
+                }
+              : undefined),
           },
+          kind: state.kind === "remote-agent-call" ? SpanKind.CLIENT : SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         contextFromActionState(state),
@@ -162,6 +179,7 @@ export function createAgentActionInstrumentation(input: {
         const state = await input.stateStore.getAction(key);
         if (state === undefined) continue;
         const span = startSpan(state);
+        setChildTraceId(span, state);
         recordError(span, error);
         span.end();
         await input.stateStore.deleteAction(key);
@@ -180,6 +198,12 @@ export function createAgentActionInstrumentation(input: {
       if (keys.size === 0) byAttempt.delete(attemptId);
     }
   }
+
+  function setChildTraceId(span: Span, state: AgentActionTraceState): void {
+    if (state.childTraceId !== undefined) {
+      span.setAttribute(AGENT_TRACE_ATTRIBUTES.childTraceId, state.childTraceId);
+    }
+  }
 }
 
 function actionContext(state: AgentActionTraceState): AgentActionContext {
@@ -194,8 +218,13 @@ function actionContext(state: AgentActionTraceState): AgentActionContext {
       trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
       state.channelAudience,
     ),
+    kind: state.kind,
     spanContext,
   };
+}
+
+function isAgentInvocation(kind: InstrumentationActionKind): boolean {
+  return kind === "subagent-call" || kind === "remote-agent-call";
 }
 
 function contextFromActionState(state: AgentActionTraceState): Context {

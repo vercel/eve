@@ -2,6 +2,7 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
   InstrumentationActionKind,
+  InstrumentationParentLineage,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
@@ -15,12 +16,14 @@ export interface AgentSessionTraceState {
   readonly channelKind?: string;
   readonly context: SpanContext;
   readonly decision?: InstrumentationDecision;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
 }
 
 export interface AgentTurnTraceState {
   readonly context: SpanContext;
   readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly parentIsRemote?: boolean;
   readonly parentSpanId: string;
   readonly rootSessionId: string;
@@ -36,6 +39,7 @@ export interface AgentActionTraceState {
   readonly attemptIndex: number;
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
+  readonly childTraceId?: string;
   readonly inputAttribute?: string;
   readonly kind: InstrumentationActionKind;
   readonly name: string;

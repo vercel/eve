@@ -6,6 +6,7 @@ import { deserializeContext, serializeContext } from "#context/serialize.js";
 import {
   ContextAgentTraceStateStore,
   preserveSerializedAgentTraceState,
+  recordActionChildTraceId,
   readActionTraceContext,
   readCurrentSessionTraceDecision,
   readSessionTraceContext,
@@ -125,6 +126,47 @@ describe("ContextAgentTraceStateStore", () => {
 
     expect(preserved.authored).toBe("original");
     expect(preserved["eve.harness.agentTrace"]).toBeDefined();
+  });
+
+  it("persists only valid confirmed child trace ids", async () => {
+    const context = new ContextContainer();
+    await contextStorage.run(context, () => {
+      new ContextAgentTraceStateStore().setAction("action-1", {
+        attemptIndex: 0,
+        callId: "call-1",
+        kind: "subagent-call",
+        name: "researcher",
+        parent: spanContext("1", "2"),
+        rootSessionId: "session-1",
+        sessionId: "session-1",
+        spanId: "3".repeat(16),
+        startTimeMs: 1,
+        stepIndex: 0,
+        turnId: "turn-1",
+      });
+    });
+    const serialized = await serializeContext(context);
+    const invalid = recordActionChildTraceId(
+      serialized,
+      "session-1",
+      "turn-1",
+      "call-1",
+      "0".repeat(32),
+    );
+    const confirmed = recordActionChildTraceId(
+      invalid,
+      "session-1",
+      "turn-1",
+      "call-1",
+      "4".repeat(32),
+    );
+    const restored = await deserializeContext(confirmed);
+
+    await contextStorage.run(restored, () => {
+      expect(new ContextAgentTraceStateStore().getAction("action-1")?.childTraceId).toBe(
+        "4".repeat(32),
+      );
+    });
   });
 });
 

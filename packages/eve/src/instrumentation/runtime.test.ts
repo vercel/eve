@@ -19,6 +19,7 @@ import {
   type InstrumentationStepScope,
 } from "#instrumentation/runtime.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
+import { allocateChildSessionTraceSeed } from "#tracing/agent-child-trace-seed.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { readForwardedAudienceBaggage, writeForwardedAudienceBaggage } from "#protocol/baggage.js";
@@ -770,5 +771,32 @@ describe("initializeSessionInstrumentation", () => {
 
     expect(ctx.get(SessionTraceSeedKey)?.traceFlags).toBe(0);
     expect(samplesTrace).not.toHaveBeenCalled();
+  });
+
+  it("preallocates distinct replay-stable child trace coordinates", () => {
+    registerSeedRuntime({});
+    const parentTraceContext = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    const input = {
+      callId: "call-1",
+      parentTraceContext,
+      sessionId: "parent-session",
+      turnId: "turn-1",
+    };
+
+    const first = allocateChildSessionTraceSeed(input);
+    const replay = allocateChildSessionTraceSeed(input);
+    const sibling = allocateChildSessionTraceSeed({
+      ...input,
+      callId: "call-2",
+    });
+
+    expect(first).toEqual(replay);
+    expect(first).toMatchObject({ traceFlags: 0 });
+    expect(first?.traceId).not.toBe(parentTraceContext.traceId);
+    expect(sibling?.traceId).not.toBe(first?.traceId);
   });
 });

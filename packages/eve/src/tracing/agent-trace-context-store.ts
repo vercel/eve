@@ -11,6 +11,7 @@ import type {
   AgentTraceStateStore,
   AgentTurnTraceState,
 } from "#tracing/agent-trace-state.js";
+import { traceIdSchema } from "#protocol/agent-invocation-trace.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import {
   type InstrumentationDecision,
@@ -101,6 +102,36 @@ export function readActionTraceContext(
     },
     state.sessions[action.sessionId]?.decision,
   );
+}
+
+export function recordActionChildTraceId(
+  serializedContext: Record<string, unknown>,
+  sessionId: string,
+  turnId: string,
+  callId: string,
+  childTraceId: string,
+): Record<string, unknown> {
+  const parsedTraceId = traceIdSchema.safeParse(childTraceId);
+  if (!parsedTraceId.success) return serializedContext;
+  const raw = serializedContext[AgentTraceContextKey.name];
+  if (raw === undefined) return serializedContext;
+  const state = deserializeState(raw);
+  const entry = Object.entries(state.actions).find(
+    ([, action]) =>
+      action.sessionId === sessionId && action.turnId === turnId && action.callId === callId,
+  );
+  if (entry === undefined) return serializedContext;
+  const [key, action] = entry;
+  return {
+    ...serializedContext,
+    [AgentTraceContextKey.name]: serializeState({
+      ...state,
+      actions: {
+        ...state.actions,
+        [key]: { ...action, childTraceId: parsedTraceId.data },
+      },
+    }),
+  };
 }
 
 function withTraceDecision(
@@ -273,6 +304,7 @@ function deserializeState(data: unknown): AgentTraceContextState {
       channelKind: typeof value.channelKind === "string" ? value.channelKind : undefined,
       context: value.context,
       decision: readInstrumentationDecision(value.decision),
+      parentLineage: deserializeParentLineage(value.parentLineage),
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
     } satisfies AgentSessionTraceState;
   });
@@ -284,6 +316,7 @@ function deserializeState(data: unknown): AgentTraceContextState {
     return {
       context: value.context,
       modelUsage: deserializeModelUsage(value.modelUsage),
+      parentLineage: deserializeParentLineage(value.parentLineage),
       parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
       parentSpanId: value.parentSpanId,
       rootSessionId: typeof value.rootSessionId === "string" ? value.rootSessionId : "",
@@ -294,6 +327,25 @@ function deserializeState(data: unknown): AgentTraceContextState {
     } satisfies AgentTurnTraceState;
   });
   return { actions, sessions, turns };
+}
+
+function deserializeParentLineage(
+  value: unknown,
+): AgentTurnTraceState["parentLineage"] | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.callId !== "string" ||
+    typeof value.sessionId !== "string" ||
+    typeof value.turnId !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    callId: value.callId,
+    sessionId: value.sessionId,
+    subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
+    turnId: value.turnId,
+  };
 }
 
 function deserializeModelUsage(
@@ -328,6 +380,10 @@ function deserializeAction(value: unknown): AgentActionTraceState | undefined {
     attemptIndex: value.attemptIndex,
     callId: value.callId,
     channelAudience: normalizeChannelAudience(value.channelAudience),
+    childTraceId:
+      typeof value.childTraceId === "string" && traceIdSchema.safeParse(value.childTraceId).success
+        ? value.childTraceId
+        : undefined,
     inputAttribute: typeof value.inputAttribute === "string" ? value.inputAttribute : undefined,
     kind: value.kind,
     name: value.name,

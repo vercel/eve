@@ -36,6 +36,7 @@ import {
   type InstrumentationHooks,
   type InstrumentationParentLineage,
   type InstrumentationTraceContext,
+  type InstrumentationTraceSeed,
   type InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -62,6 +63,7 @@ interface TestRuntime {
     ReturnType<typeof createAgentOtelInstrumentation>["hook"]["projectEvent"]
   >;
   readonly runInContext: InstrumentationContextRunner;
+  readonly stateStore: AgentTraceStateStore;
   readonly tracer: ReturnType<BasicTracerProvider["getTracer"]>;
 }
 
@@ -105,12 +107,14 @@ function createRuntime(
     projectEvent: agentOtel.hook.projectEvent!,
     provider,
     runInContext: agentOtel.runInContext,
+    stateStore,
     tracer,
   };
 }
 
 async function emitAttempt(input: {
   readonly actionUsage?: InstrumentationUsage;
+  readonly childTraceId?: string;
   readonly attemptIndex?: number;
   readonly attemptError?: Error;
   readonly channelAudience?: ChannelAudience;
@@ -122,6 +126,7 @@ async function emitAttempt(input: {
   readonly actionKind?: InstrumentationActionKind;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
+  readonly stateStore?: AgentTraceStateStore;
   readonly skipModelTerminal?: boolean;
   readonly skipToolTerminal?: boolean;
   readonly toolError?: Error;
@@ -219,6 +224,15 @@ async function emitAttempt(input: {
     scope,
     type: "action.started",
   });
+  if (input.childTraceId !== undefined && input.stateStore !== undefined) {
+    const action = await input.stateStore.getAction(actionKey);
+    if (action !== undefined) {
+      await input.stateStore.setAction(actionKey, {
+        ...action,
+        childTraceId: input.childTraceId,
+      });
+    }
+  }
   await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
     {
       callId: "call-1",
@@ -310,6 +324,7 @@ async function publishTurnStarted(input: {
   readonly sessionId: string;
   readonly turnId: string;
   readonly turnSequence: number;
+  readonly traceSeed?: InstrumentationTraceSeed;
 }): Promise<void> {
   const rootSessionId = input.rootSessionId ?? input.sessionId;
   await input.hooks.publish({
@@ -317,9 +332,11 @@ async function publishTurnStarted(input: {
     channelAudience: input.channelAudience ?? "public",
     channelKind: "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
+    parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
     sessionId: input.sessionId,
+    traceSeed: input.traceSeed,
     type: "session.started",
   });
   await input.hooks.publish({
@@ -427,6 +444,67 @@ describe("createAgentOtelInstrumentation", () => {
     const session = byName(spans, "agent.session")[0]!;
     expect(session.spanContext().traceId).toBe(seed.traceId);
     expect(session.spanContext().spanId).toBe(seed.spanId);
+  });
+
+  it("roots a delegated session in its child trace and links the parent", async () => {
+    const runtime = createRuntime();
+    const parent = {
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
+    };
+    const seed = {
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+    const parentLineage = {
+      callId: "call-child",
+      sessionId: "parent-session",
+      subagentName: "researcher",
+      turnId: "parent-turn",
+    };
+
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentLineage,
+      parentTraceContext: parent,
+      rootSessionId: "root-session",
+      sessionId: "child-session",
+      traceSeed: seed,
+      turnId: "child-turn",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, "child-session", "child-turn");
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const session = byName(spans, "agent.session")[0]!;
+    const execution = byName(spans, "invoke_agent weather")[0]!;
+    expect(session.spanContext()).toMatchObject(seed);
+    expect(session.parentSpanContext).toBeUndefined();
+    expect(session.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "agent.dispatch" },
+        context: expect.objectContaining(parent),
+      }),
+    ]);
+    expect(session.attributes).toMatchObject({
+      "agent.session.kind": "delegated",
+      "agent.trace.schema.version": 4,
+    });
+    expect(execution.spanContext().traceId).toBe(seed.traceId);
+    expect(execution.parentSpanContext?.spanId).toBe(seed.spanId);
+    expect(execution.attributes).toMatchObject({
+      "agent.invocation.role": "execution",
+      "agent.parent_call.id": "call-child",
+      "agent.parent_run.id": "parent-session",
+      "agent.root_run.id": "root-session",
+      "agent.session.kind": "delegated",
+      "agent.trace.schema.version": 4,
+      "gen_ai.conversation.id": "child-session",
+      "gen_ai.operation.name": "invoke_agent",
+    });
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {
@@ -783,7 +861,15 @@ describe("createAgentOtelInstrumentation", () => {
     expect(session.attributes).toMatchObject({
       "agent.channel.audience": "public",
       "agent.session.id": "session-1",
-      "agent.trace.schema.version": 3,
+      "agent.session.kind": "root",
+      "agent.trace.schema.version": 4,
+    });
+    expect(turn.attributes).toMatchObject({
+      "agent.invocation.role": "execution",
+      "agent.root_run.id": "session-1",
+      "agent.session.kind": "root",
+      "agent.trace.schema.version": 4,
+      "gen_ai.conversation.id": "session-1",
     });
     expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
@@ -1696,8 +1782,9 @@ describe("createAgentOtelInstrumentation", () => {
     }
   });
 
-  it("labels a subagent action by its kind, not as a plain tool", async () => {
+  it("emits a subagent action as a caller invocation", async () => {
     const runtime = createRuntime();
+    const childTraceId = "e".repeat(32);
     await emitAttempt({
       actionUsage: {
         inputTokenDetails: { cacheReadTokens: 3, cacheWriteTokens: 4 },
@@ -1706,23 +1793,32 @@ describe("createAgentOtelInstrumentation", () => {
       },
       hooks: runtime.hooks,
       actionKind: "subagent-call",
+      childTraceId,
       runInContext: runtime.runInContext,
       sessionId: "session-1",
+      stateStore: runtime.stateStore,
       turnId: "turn-1",
       turnSequence: 0,
     });
     await runtime.provider.forceFlush();
 
-    const action = runtime.exporter.getFinishedSpans().find((span) => span.name === "agent.action");
+    const spans = runtime.exporter.getFinishedSpans();
+    const action = byName(spans, "invoke_agent weather")[0];
     expect(action?.attributes).toMatchObject({
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",
       "agent.action.outcome": "completed",
+      "agent.child.trace.id": childTraceId,
+      "agent.invocation.role": "caller",
       "agent.usage.cache_read_tokens": 3,
       "agent.usage.cache_write_tokens": 4,
       "agent.usage.input_tokens": 10,
       "agent.usage.output_tokens": 5,
+      "gen_ai.agent.name": "weather",
+      "gen_ai.operation.name": "invoke_agent",
     });
+    expect(byName(spans, "agent.action")).toHaveLength(0);
+    expect(byName(spans, "execute_tool weather")).toHaveLength(0);
     expect(
       Object.keys(action?.attributes ?? {}).some((key) => key.startsWith("gen_ai.usage.")),
     ).toBe(false);
