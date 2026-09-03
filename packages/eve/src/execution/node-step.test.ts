@@ -221,7 +221,9 @@ describe("createNodeHarnessTools", () => {
     const node = await createNodeWithSourceOwnedTools({ names: ["web_search"] });
     const tool = createNodeHarnessTools({ node }).get("web_search");
 
-    expect(tool?.activityLabel?.({ query: "Slack plan blocks" })).toBe("Search Slack plan blocks");
+    expect(tool?.activity?.start?.({ query: "Slack plan blocks" })).toBe(
+      "Search Slack plan blocks",
+    );
   });
 
   it("does not add the framework label to an authored web_search override", async () => {
@@ -230,7 +232,7 @@ describe("createNodeHarnessTools", () => {
       owner: { kind: "application" },
     });
 
-    expect(createNodeHarnessTools({ node }).get("web_search")?.activityLabel).toBeUndefined();
+    expect(createNodeHarnessTools({ node }).get("web_search")?.activity).toBeUndefined();
   });
 
   it("keeps the compiled framework question tool client-side", async () => {
