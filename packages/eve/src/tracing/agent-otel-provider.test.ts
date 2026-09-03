@@ -35,6 +35,7 @@ import {
   type InstrumentationEvent,
   type InstrumentationHooks,
   type InstrumentationParentLineage,
+  type InstrumentationPrincipalSummary,
   type InstrumentationTraceContext,
   type InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
@@ -303,7 +304,9 @@ async function emitAttempt(input: {
 
 async function publishTurnStarted(input: {
   readonly channelAudience?: ChannelAudience;
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
   readonly hooks: InstrumentationHooks;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
@@ -326,7 +329,9 @@ async function publishTurnStarted(input: {
     type: "session.started",
   });
   await input.hooks.publish({
+    currentPrincipal: input.currentPrincipal,
     idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
+    initiatorPrincipal: input.initiatorPrincipal,
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
@@ -452,7 +457,9 @@ describe("createAgentOtelInstrumentation", () => {
     };
 
     await publishTurnStarted({
+      currentPrincipal: { id: "user-123", type: "user" },
       hooks: runtime.hooks,
+      initiatorPrincipal: { type: "none" },
       parentLineage,
       parentTraceContext: parent,
       rootSessionId: "root-session",
@@ -481,10 +488,14 @@ describe("createAgentOtelInstrumentation", () => {
     expect(invocation.attributes).toMatchObject({
       "agent.parent_call.id": "call-child",
       "agent.parent_run.id": "parent-session",
+      "agent.principal.current.id": "user-123",
+      "agent.principal.current.type": "user",
+      "agent.principal.initiator.type": "none",
       "agent.root_run.id": "root-session",
       "gen_ai.conversation.id": "child-session",
       "gen_ai.operation.name": "invoke_agent",
     });
+    expect(invocation.attributes).not.toHaveProperty("agent.principal.initiator.id");
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {

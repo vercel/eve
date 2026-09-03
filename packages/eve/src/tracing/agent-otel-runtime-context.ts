@@ -1,4 +1,5 @@
 import type { AgentTurnTraceState } from "#tracing/agent-trace-state.js";
+import { AGENT_TRACE_ATTRIBUTES } from "#tracing/agent-otel-attributes.js";
 
 type SpanAttributePrimitive = string | number | boolean;
 type SpanAttributeValue = SpanAttributePrimitive | SpanAttributePrimitive[];
@@ -9,6 +10,26 @@ export function agentLineageAttributes(
   const attributes: Record<string, SpanAttributeValue> = {
     "agent.root_run.id": turn.rootSessionId,
   };
+  setOptionalAttribute(
+    attributes,
+    AGENT_TRACE_ATTRIBUTES.principalCurrentId,
+    turn.currentPrincipal?.id,
+  );
+  setOptionalAttribute(
+    attributes,
+    AGENT_TRACE_ATTRIBUTES.principalCurrentType,
+    turn.currentPrincipal?.type,
+  );
+  setOptionalAttribute(
+    attributes,
+    AGENT_TRACE_ATTRIBUTES.principalInitiatorId,
+    turn.initiatorPrincipal?.id,
+  );
+  setOptionalAttribute(
+    attributes,
+    AGENT_TRACE_ATTRIBUTES.principalInitiatorType,
+    turn.initiatorPrincipal?.type,
+  );
   if (turn.parentLineage !== undefined) {
     attributes["agent.parent_run.id"] = turn.parentLineage.sessionId;
     attributes["agent.parent_call.id"] = turn.parentLineage.callId;
@@ -53,4 +74,12 @@ function flattenContextAttribute(
       flattenContextAttribute(attributes, `${key}.${nestedKey}`, nestedValue);
     }
   }
+}
+
+function setOptionalAttribute(
+  attributes: Record<string, SpanAttributeValue>,
+  key: string,
+  value: SpanAttributeValue | undefined,
+): void {
+  if (value !== undefined) attributes[key] = value;
 }

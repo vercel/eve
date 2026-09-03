@@ -23,6 +23,8 @@ describe("ContextAgentTraceStateStore", () => {
       });
       store.setTurn("session-1", "turn-1", {
         context: spanContext("1", "3"),
+        currentPrincipal: { id: "user-123", type: "user" },
+        initiatorPrincipal: { type: "none" },
         modelUsage: { inputTokens: 12, outputTokens: 4 },
         parentIsRemote: true,
         parentSpanId: "2".repeat(16),
@@ -41,12 +43,15 @@ describe("ContextAgentTraceStateStore", () => {
       expect(store.getSession("session-1")?.context).toEqual(spanContext("1", "2"));
       expect(store.getTurn("session-1", "turn-1")?.context).toEqual(spanContext("1", "3"));
       expect(store.getTurn("session-1", "turn-1")).toMatchObject({
+        currentPrincipal: { id: "user-123", type: "user" },
+        initiatorPrincipal: { type: "none" },
         modelUsage: { inputTokens: 12, outputTokens: 4 },
         parentIsRemote: true,
         parentSpanId: "2".repeat(16),
         startTimeMs: 1_700_000_000_000,
         subagentName: "researcher",
       });
+      expect(JSON.stringify(store.getTurn("session-1", "turn-1"))).not.toContain("attributes");
       const terminal = store.getTurn("session-1", "turn-1")?.terminal;
       expect(terminal?.type).toBe("turn.failed");
       expect(terminal?.type === "turn.failed" ? terminal.error : undefined).toMatchObject({

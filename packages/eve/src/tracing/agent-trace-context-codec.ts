@@ -98,6 +98,8 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
   }
   return {
     context: value.context,
+    currentPrincipal: deserializePrincipalSummary(value.currentPrincipal),
+    initiatorPrincipal: deserializePrincipalSummary(value.initiatorPrincipal),
     modelUsage: deserializeModelUsage(value.modelUsage),
     parentIsRemote: typeof value.parentIsRemote === "boolean" ? value.parentIsRemote : undefined,
     parentLineage: deserializeParentLineage(value.parentLineage),
@@ -107,6 +109,16 @@ function deserializeTurn(value: unknown): AgentTurnTraceState | undefined {
     startTimeMs: value.startTimeMs,
     subagentName: typeof value.subagentName === "string" ? value.subagentName : undefined,
     terminal: deserializeTurnTerminal(value.terminal),
+  };
+}
+
+function deserializePrincipalSummary(
+  value: unknown,
+): AgentTurnTraceState["currentPrincipal"] | undefined {
+  if (!isRecord(value) || !isPrincipalType(value.type)) return undefined;
+  return {
+    id: readPrincipalId(value.id),
+    type: value.type,
   };
 }
 
@@ -255,6 +267,10 @@ function deserializeError(value: unknown): Error | undefined {
   return error;
 }
 
+function readPrincipalId(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function isActionKind(value: unknown): value is AgentActionTraceState["kind"] {
   return (
     value === "load-skill" ||
@@ -271,6 +287,21 @@ function isActionOutcome(value: unknown): value is AgentActionTraceTerminalState
     value === "completed" ||
     value === "failed" ||
     value === "rejected"
+  );
+}
+
+function isPrincipalType(
+  value: unknown,
+): value is NonNullable<AgentTurnTraceState["currentPrincipal"]>["type"] {
+  return (
+    value === "anonymous" ||
+    value === "app" ||
+    value === "local-dev" ||
+    value === "none" ||
+    value === "other" ||
+    value === "runtime" ||
+    value === "service" ||
+    value === "user"
   );
 }
 

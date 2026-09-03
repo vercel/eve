@@ -203,6 +203,8 @@ export function createAgentOtelSessionContext(
     };
     await input.stateStore.setTurn(event.sessionId, event.turnId, {
       context: turnContext,
+      currentPrincipal: event.currentPrincipal,
+      initiatorPrincipal: event.initiatorPrincipal,
       parentIsRemote: session.context.isRemote,
       parentLineage: event.parentLineage ?? session.parentLineage,
       parentSpanId: session.context.spanId,
