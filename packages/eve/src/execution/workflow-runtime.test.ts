@@ -9,6 +9,7 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 import type { ChannelAdapter } from "#channel/adapter.js";
 import { attachChannelActivityPresentation } from "#channel/activity-renderer.js";
+import { readAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { ChannelRequestIdKey, ActivityObserverKey } from "#context/keys.js";
 import { resolveInstalledPackageInfo } from "#internal/application/package.js";
 import {
@@ -332,6 +333,24 @@ describe("createWorkflowRuntime#resolveContinuation", () => {
     expect(getHookByTokenMock).toHaveBeenCalledWith("test:token");
   });
 
+  it("recovers accepted coordinates from private hook metadata", async () => {
+    const traceCoordinates = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    getHookByTokenMock.mockResolvedValue({
+      metadata: { eveAcceptedTraceCoordinates: traceCoordinates },
+      runId: "owner-session",
+    });
+
+    const owner = await buildRuntime().resolveContinuation("test:token");
+
+    expect(owner).toEqual({ sessionId: "owner-session" });
+    expect(Reflect.ownKeys(owner!)).toEqual(["sessionId"]);
+    expect(readAcceptedTraceCoordinates(owner!)).toEqual(traceCoordinates);
+  });
+
   it("returns undefined for an unknown token", async () => {
     const { HookNotFoundError } = await import("#compiled/@workflow/errors/index.js");
     getHookByTokenMock.mockRejectedValue(new HookNotFoundError("test:token"));
@@ -498,6 +517,57 @@ describe("createWorkflowRuntime#createSession", () => {
     expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({
       continuationConflictCommand,
     });
+  });
+
+  it("passes accepted coordinates only through private workflow input", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "driver-run" });
+    const acceptedTraceCoordinates = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+
+    await buildRuntime(compiledArtifactsSource).createSession({
+      acceptedTraceCoordinates,
+      adapter,
+      auth: null,
+      input: { message: "hello" },
+      mode: "conversation",
+    } as never);
+
+    expect(startMock.mock.calls[0]?.[1][0]).toMatchObject({ acceptedTraceCoordinates });
+    expect(startMock.mock.calls[0]?.[2]?.attributes).not.toHaveProperty(
+      "eveAcceptedTraceCoordinates",
+    );
+  });
+
+  it("returns only coordinates acknowledged by the continuation owner", async () => {
+    const compiledArtifactsSource = {} as RuntimeCompiledArtifactsSource;
+    mockBundleAndRun(compiledArtifactsSource);
+    startMock.mockResolvedValue({ runId: "candidate-run" });
+    const acceptedTraceCoordinates = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    getHookByTokenMock.mockResolvedValue({
+      metadata: { eveAcceptedTraceCoordinates: acceptedTraceCoordinates },
+      runId: "owner-run",
+    });
+
+    const handle = await buildRuntime(compiledArtifactsSource).createSession({
+      acceptedTraceCoordinates,
+      adapter,
+      auth: null,
+      continuationToken: "operation-token",
+      input: { message: "hello" },
+      mode: "conversation",
+    } as never);
+
+    expect(handle.sessionId).toBe("owner-run");
+    expect(readAcceptedTraceCoordinates(handle)).toEqual(acceptedTraceCoordinates);
   });
 
   it("stores an explicit title alongside the trace-content policy", async () => {
@@ -1075,7 +1145,8 @@ describe("createWorkflowRuntime#createSession trace seed allocation", () => {
     const seed = serialized["eve.sessionTraceSeed"] as
       | { traceId: string; spanId: string; traceFlags: number }
       | undefined;
-    expect(seed).toEqual(parentTrace);
+    expect(seed).toBeUndefined();
+    expect(serialized["eve.parentTraceContext"]).toEqual(parentTrace);
     expect(serialized["eve.otelTraceEnabled"]).toBe(true);
     expect(startMock.mock.calls[0]?.[2].attributes["$eve.is_otel_trace_enabled"]).toBe("true");
     expect(tracePolicy).not.toHaveBeenCalled();

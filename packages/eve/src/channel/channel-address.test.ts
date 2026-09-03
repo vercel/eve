@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createChannelAddress } from "#channel/channel-address.js";
 import {
+  attachAcceptedTraceCoordinates,
+  readAcceptedTraceCoordinates,
+} from "#channel/session-trace-state.js";
+import {
   attachChannelActivityPresentation,
   getChannelActivityPresentation,
 } from "#channel/activity-renderer.js";
@@ -161,6 +165,97 @@ describe("createChannelAddress", () => {
     ]);
   });
 
+  it("records the authenticated creator as a new root session's initiator", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
+    vi.mocked(runtime.createSession).mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "sess_root",
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+    const auth = {
+      attributes: {},
+      authenticator: "slack",
+      principalId: "user-1",
+      principalType: "user",
+    };
+
+    await address.send("hello", { auth });
+
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ auth, initiatorAuth: auth }),
+    );
+  });
+
+  it("preserves an explicit null initiator on a new root session", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
+    vi.mocked(runtime.createSession).mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "sess_root",
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    await address.send("hello", {
+      auth: {
+        attributes: {},
+        authenticator: "slack",
+        principalId: "user-1",
+        principalType: "user",
+      },
+      initiatorAuth: null,
+    });
+
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ initiatorAuth: null }),
+    );
+  });
+
+  it("uses the transport creator for a legacy delegated session", async () => {
+    const runtime = createRuntime();
+    vi.mocked(runtime.dispatchContinuation).mockResolvedValue({ status: "session_not_active" });
+    vi.mocked(runtime.createSession).mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "sess_child",
+    });
+    const address = createChannelAddress({
+      adapter: { kind: "eve" },
+      channelName: "eve",
+      continuationToken: "child",
+      runtime,
+    });
+
+    const auth = {
+      attributes: {},
+      authenticator: "oidc",
+      principalId: "service-1",
+      principalType: "service",
+    };
+    await address.send("hello", {
+      auth,
+      callback: {
+        callId: "call-1",
+        subagentName: "research",
+        token: "parent",
+        url: "https://parent.example/eve/v1/callback/parent",
+      },
+    });
+
+    expect(runtime.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ auth, initiatorAuth: auth }),
+    );
+  });
+
   it("binds every control directly to the namespaced continuation token", async () => {
     const runtime = createRuntime();
     const address = createChannelAddress({
@@ -212,5 +307,28 @@ describe("createChannelAddress", () => {
       command: { kind: "clear" },
       sessionId: "sess_2",
     });
+  });
+
+  it("privately transfers accepted coordinates to the resolved session handle", async () => {
+    const runtime = createRuntime();
+    const traceCoordinates = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    vi.mocked(runtime.resolveContinuation).mockResolvedValue(
+      attachAcceptedTraceCoordinates({ sessionId: "sess_2" }, traceCoordinates),
+    );
+    const address = createChannelAddress({
+      adapter: { kind: "slack" },
+      channelName: "slack",
+      continuationToken: "C1:T1",
+      runtime,
+    });
+
+    const session = await address.resolveSession();
+
+    expect(Reflect.ownKeys(session!)).not.toContain("trace");
+    expect(readAcceptedTraceCoordinates(session!)).toEqual(traceCoordinates);
   });
 });

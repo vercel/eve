@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RouteHandlerArgs } from "#channel/routes.js";
 import type { RunInput, SessionAuthContext } from "#channel/types.js";
+import { attachAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { contextStorage } from "#context/container.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -29,6 +30,8 @@ import { principalKey, resolveConnectionPrincipal } from "#runtime/connections/p
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import { eveChannel, type EveChannelInput } from "#public/channels/eve.js";
 import { attachRouteSessionCreator } from "#internal/nitro/routes/channel-route-context.js";
+import type { InternalRunInput } from "#execution/internal-run-input.js";
+import { AGENT_INVOCATION_TRACE_WIRE_VERSION } from "#protocol/agent-invocation-trace.js";
 
 const ROUTER_CALLER: SessionAuthContext = {
   attributes: {},
@@ -81,10 +84,15 @@ function createEveCreateHandler(input: EveChannelInput) {
   );
   if (!createRoute) throw new Error("No create POST route found");
 
-  const createSession = vi.fn().mockResolvedValue({
-    events: new ReadableStream(),
-    sessionId: "receiver-session-id",
-  });
+  const createSession = vi.fn().mockImplementation(async (run: InternalRunInput) =>
+    attachAcceptedTraceCoordinates(
+      {
+        events: new ReadableStream(),
+        sessionId: "receiver-session-id",
+      },
+      run.acceptedTraceCoordinates,
+    ),
+  );
 
   return {
     createSession,
@@ -307,6 +315,99 @@ describe("eveChannel forwarded principal → runtime principal", () => {
     expect(handler.createSession.mock.calls[0]?.[0]?.parentTraceContext).not.toHaveProperty(
       "forwardedTracePolicy",
     );
+  });
+
+  it("accepts an extension ceiling from a trusted forwarder without a sampled parent", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+    const seed = { spanId: "4".repeat(16), traceFlags: 0, traceId: "3".repeat(32) };
+    const forwardedTracePolicy = {
+      ceiling: { recordInputs: false, recordOutputs: true },
+      originAudience: "private" as const,
+    };
+
+    const response = await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
+          forwardedPrincipal: { current: FORWARDED_CURRENT },
+          invocation: {
+            callId: "call-1",
+            rootSessionId: "root-session",
+            sessionId: "parent-session",
+            turn: { id: "parent-turn", sequence: 0 },
+          },
+          message: "check my dashboards",
+          trace: {
+            forwardedTracePolicy,
+            seed,
+            version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({ trace: seed });
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      InternalRunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
+    expect(options.parentTraceContext).toBeUndefined();
+    expect(options.traceSeed).toEqual({ ...seed, forwardedTracePolicy });
+  });
+
+  it("ignores an extension ceiling without an accepted forwarded principal", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+    const seed = { spanId: "4".repeat(16), traceFlags: 0, traceId: "3".repeat(32) };
+
+    await handler.fetch(
+      new Request("https://receiver.example.com/eve/v1/session", {
+        body: JSON.stringify({
+          callback: {
+            callId: "call-1",
+            subagentName: "site-ops",
+            token: "parent-token",
+            url: "https://caller.example.com/eve/v1/callback/parent-token",
+          },
+          invocation: {
+            callId: "call-1",
+            rootSessionId: "root-session",
+            sessionId: "parent-session",
+            turn: { id: "parent-turn", sequence: 0 },
+          },
+          message: "check my dashboards",
+          trace: {
+            forwardedTracePolicy: {
+              ceiling: { recordInputs: false, recordOutputs: false },
+              originAudience: "public",
+            },
+            seed,
+            version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
+          },
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    const options = handler.createSession.mock.calls[0]?.[0] as Omit<
+      InternalRunInput,
+      "adapter" | "channelName" | "requestId"
+    >;
+    expect(options.traceSeed).toEqual(seed);
   });
 
   it("ignores public audience baggage without an accepted forwarded principal", async () => {

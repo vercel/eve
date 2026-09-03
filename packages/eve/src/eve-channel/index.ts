@@ -1,5 +1,6 @@
-import type { SessionAuthContext, SessionTraceContext } from "#channel/types.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import type { Session } from "#channel/session.js";
+import { readAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { resolveForwardedPrincipal } from "#channel/forwarded-principal.js";
 import {
   handleConnectionCallbackRequest,
@@ -49,11 +50,11 @@ import type { ClearResponse } from "#protocol/clear-session.js";
 import type { CompactResponse } from "#protocol/compact-session.js";
 import type { ResetResponse } from "#protocol/reset-session.js";
 import { parseTraceparent } from "#protocol/traceparent.js";
-import { readForwardedAudienceBaggage } from "#protocol/baggage.js";
 import {
-  FAIL_CLOSED_FORWARDED_TRACE_ASSERTION,
-  formatTraceContentCeiling,
-} from "#shared/forwarded-trace-policy.js";
+  traceCoordinatesEqual,
+  type TraceCoordinates,
+  validateAgentInvocationBinding,
+} from "#protocol/agent-invocation-trace.js";
 import { routeAuth } from "#public/channels/auth.js";
 import { mergeUploadPolicy } from "#public/channels/upload-policy.js";
 import { defineChannel, DELETE, GET, HEAD, PATCH, POST, PUT } from "#public/definitions/channel.js";
@@ -80,10 +81,28 @@ import {
   resolveOnMessage,
 } from "#eve-channel/support.js";
 import type { EveChannel, EveChannelInput, EveEventContext } from "#eve-channel/types.js";
+import { resolveInboundForwardedTrace } from "#eve-channel/forwarded-trace.js";
 
 export * from "#eve-channel/types.js";
 
 const log = createLogger("eve.channel");
+
+function acceptedSessionResponse(sessionId: string, traceContext?: TraceCoordinates): Response {
+  const body: {
+    ok: true;
+    sessionId: string;
+    status: "accepted";
+    trace?: TraceCoordinates;
+  } = { ok: true, sessionId, status: "accepted" };
+  if (traceContext !== undefined) body.trace = traceContext;
+  return Response.json(body, {
+    headers: {
+      "cache-control": "no-store",
+      [EVE_SESSION_ID_HEADER]: sessionId,
+    },
+    status: 202,
+  });
+}
 
 /**
  * Builds the default eve HTTP channel: a {@link defineChannel} instance serving the
@@ -150,12 +169,41 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         const body = parseCreateBody(payload);
         if (body instanceof Response) return body;
-        // Top-level sessions own their trace. Callback sessions are delegated
-        // remote agents and intentionally continue the dispatching agent trace.
-        const parsedParentTraceContext =
+        const legacyParentTraceContext =
           body.callback === undefined
             ? undefined
             : parseTraceparent(req.headers.get("traceparent"));
+        const invocationBindingError = validateAgentInvocationBinding({
+          callbackCallId: body.callback?.callId,
+          invocation: body.invocation,
+          trace: body.trace,
+          traceparent: legacyParentTraceContext,
+        });
+        if (invocationBindingError === "call-id-mismatch") {
+          return Response.json(
+            { error: "Invocation callId does not match callback callId.", ok: false },
+            { status: 400 },
+          );
+        }
+        // Legacy senders carry parentage in the header. Modern senders carry a
+        // distinct child seed and any parent link in the body extension.
+        if (invocationBindingError === "trace-context-mismatch") {
+          return Response.json(
+            { error: "Invocation trace context does not match traceparent.", ok: false },
+            { status: 400 },
+          );
+        }
+        const parsedParentTraceContext =
+          body.trace?.parent === undefined
+            ? body.trace === undefined
+              ? legacyParentTraceContext
+              : undefined
+            : {
+                isRemote: true,
+                spanId: body.trace.parent.spanId,
+                traceFlags: body.trace.parent.traceFlags,
+                traceId: body.trace.parent.traceId,
+              };
 
         const policyRejection = checkUploadPolicy(body, uploadPolicy);
         if (policyRejection !== null) return policyRejection;
@@ -176,58 +224,25 @@ export function eveChannel(input: EveChannelInput): EveChannel {
         if (operationToken !== undefined) {
           const owner = await args.resolveSession(operationToken);
           if (owner !== undefined) {
-            return Response.json(
-              { ok: true, sessionId: owner.id, status: "accepted" },
-              {
-                headers: {
-                  "cache-control": "no-store",
-                  [EVE_SESSION_ID_HEADER]: owner.id,
-                },
-                status: 202,
-              },
-            );
+            const acceptedTraceCoordinates = readAcceptedTraceCoordinates(owner);
+            const replayedTraceCoordinates =
+              body.trace !== undefined &&
+              acceptedTraceCoordinates !== undefined &&
+              traceCoordinatesEqual(body.trace.seed, acceptedTraceCoordinates)
+                ? acceptedTraceCoordinates
+                : undefined;
+            return acceptedSessionResponse(owner.id, replayedTraceCoordinates);
           }
         }
 
-        const forwardedTraceAssertion =
-          parsedParentTraceContext === undefined
-            ? "absent"
-            : readForwardedAudienceBaggage(req.headers.get("baggage"));
-        const acceptsForwardedTracePolicy =
-          forwarded.accepted &&
-          parsedParentTraceContext !== undefined &&
-          (parsedParentTraceContext.traceFlags & 1) === 1;
-        const acceptedForwardedTracePolicy = !acceptsForwardedTracePolicy
-          ? undefined
-          : typeof forwardedTraceAssertion === "object"
-            ? forwardedTraceAssertion
-            : forwardedTraceAssertion === "malformed"
-              ? FAIL_CLOSED_FORWARDED_TRACE_ASSERTION
-              : undefined;
-        let parentTraceContext: SessionTraceContext | undefined = parsedParentTraceContext;
-        if (acceptedForwardedTracePolicy !== undefined && parsedParentTraceContext !== undefined) {
-          parentTraceContext = {
-            ...parsedParentTraceContext,
-            forwardedTracePolicy: acceptedForwardedTracePolicy,
-          };
-        }
-        if (forwardedTraceAssertion === "malformed") {
-          log.warn("using metadata-only policy for malformed forwarded audience baggage", {
-            forwarder: authResult.principalId,
+        const { acceptedPolicy: acceptedForwardedTracePolicy, parentTraceContext } =
+          resolveInboundForwardedTrace({
+            acceptedForwarder: forwarded.accepted,
+            baggage: req.headers.get("baggage"),
+            extensionPolicy: body.trace?.forwardedTracePolicy,
+            forwarderId: authResult.principalId,
+            parentTraceContext: parsedParentTraceContext,
           });
-        } else if (typeof forwardedTraceAssertion === "object") {
-          if (acceptedForwardedTracePolicy !== undefined) {
-            log.info("accepted forwarded trace policy", {
-              audience: forwardedTraceAssertion.originAudience,
-              ceiling: formatTraceContentCeiling(forwardedTraceAssertion.ceiling),
-              forwarder: authResult.principalId,
-            });
-          } else {
-            log.warn("ignoring forwarded trace policy without an accepted sampled principal", {
-              forwarder: authResult.principalId,
-            });
-          }
-        }
 
         const messageResult = await resolveOnMessage({
           auth: forwarded.auth,
@@ -246,14 +261,17 @@ export function eveChannel(input: EveChannelInput): EveChannel {
 
         let handle: Awaited<ReturnType<typeof createSession>>;
         try {
-          handle = await createSession({
+          const createInput: {
+            -readonly [K in keyof Parameters<typeof createSession>[0]]: Parameters<
+              typeof createSession
+            >[0][K];
+          } = {
             activityObserver: body.activityObserver,
             auth: messageResult.auth,
             capabilities:
               body.capabilities ?? (body.mode === "task" ? undefined : { requestInput: true }),
             callback: body.callback,
             continuationToken: operationToken,
-            initiatorAuth: forwarded.accepted ? forwarded.initiatorAuth : undefined,
             input: attachClientContext(
               {
                 message: body.message,
@@ -263,9 +281,25 @@ export function eveChannel(input: EveChannelInput): EveChannel {
               body.context,
             ),
             mode: body.mode ?? "conversation",
+            parent: body.invocation,
             parentTraceContext,
             title: messageResult.title,
-          });
+          };
+          createInput.initiatorAuth =
+            forwarded.accepted && forwarded.initiatorAuth !== undefined
+              ? forwarded.initiatorAuth
+              : messageResult.auth;
+          if (body.trace !== undefined) {
+            createInput.acceptedTraceCoordinates = body.trace.seed;
+            createInput.traceSeed =
+              acceptedForwardedTracePolicy === undefined
+                ? body.trace.seed
+                : {
+                    ...body.trace.seed,
+                    forwardedTracePolicy: acceptedForwardedTracePolicy,
+                  };
+          }
+          handle = await createSession(createInput);
         } catch (error) {
           const errorId = logError(log, "session-create request failed", error);
           return Response.json(
@@ -274,16 +308,7 @@ export function eveChannel(input: EveChannelInput): EveChannel {
           );
         }
 
-        return Response.json(
-          { ok: true, sessionId: handle.sessionId, status: "accepted" },
-          {
-            headers: {
-              "cache-control": "no-store",
-              [EVE_SESSION_ID_HEADER]: handle.sessionId,
-            },
-            status: 202,
-          },
-        );
+        return acceptedSessionResponse(handle.sessionId, readAcceptedTraceCoordinates(handle));
       }),
 
       POST(EVE_SESSION_ROUTE_PATTERN, async (req, { attachSession, params }) => {

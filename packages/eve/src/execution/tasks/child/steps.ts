@@ -115,6 +115,10 @@ export async function wakeTaskAgentRequestParentStep(input: {
     throw new Error("Cannot forward task input as an agent request.");
   }
   const delivery: TaskAgentRequestDelivery = {
+    actionCallId:
+      request.kind === "agent-invoke"
+        ? (request.instrumentationCallId ?? input.request.from.callId)
+        : input.request.from.callId,
     replyTo: input.request.replyTo,
     request,
     taskId: input.taskId,

@@ -236,6 +236,202 @@ describe("owner agent invocation dispatch", () => {
       expect.arrayContaining([expect.objectContaining({ ownerId: "task-1", phase: "claimed" })]),
     );
   });
+
+  it("records a distinct nested caller with only its acknowledged child trace", async () => {
+    const childTraceId = "4".repeat(32);
+    const nestedAction = { ...action, callId: "call-1:research" };
+    const serializedContext = {
+      "eve.harness.agentTrace": {
+        actions: {
+          action: {
+            attemptIndex: 0,
+            callId: "call-1",
+            kind: "tool-call",
+            name: "research_workflow",
+            parent: {
+              spanId: "2".repeat(16),
+              traceFlags: 1,
+              traceId: "1".repeat(32),
+            },
+            rootSessionId: "parent",
+            sessionId: "parent",
+            spanId: "3".repeat(16),
+            startTimeMs: 1,
+            stepIndex: 2,
+            turnId: "turn-1",
+          },
+        },
+        sessions: {},
+        turns: {},
+      },
+    };
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      plan: [
+        {
+          kind: "start",
+          target: { action: nestedAction, kind: "local", source: { type: "runtime" } },
+        },
+      ],
+      serializedContext,
+    } as never);
+    vi.mocked(startSubagent).mockResolvedValue({
+      ...called,
+      address: { ...called.address, traceId: childTraceId },
+      callId: nestedAction.callId,
+    });
+
+    const dispatched = await dispatchAgentInvocation({
+      actionCallId: "call-1",
+      callbackBaseUrl: "https://parent.example",
+      emit: vi.fn(),
+      ownerId: "task-1",
+      replyTo: "agent-reply",
+      request: {
+        input: { message: "Find it", target: "research" },
+        invocationId: nestedAction.callId,
+        kind: "agent-invoke",
+      },
+      serializedContext,
+      sessionState: {} as never,
+      taskId: "task-1",
+    });
+
+    expect(dispatched.kind).toBe("dispatched");
+    if (dispatched.kind !== "dispatched") throw new Error("Expected dispatch.");
+    const actions = (
+      dispatched.serializedContext["eve.harness.agentTrace"] as {
+        actions: Record<
+          string,
+          {
+            callId: string;
+            childTraceId?: string;
+            kind?: string;
+            name?: string;
+            parent?: { spanId: string };
+            parentActionCallId?: string;
+          }
+        >;
+      }
+    ).actions;
+    expect(actions.action).toMatchObject({
+      callId: "call-1",
+      kind: "tool-call",
+      name: "research_workflow",
+    });
+    expect(actions.action).not.toHaveProperty("childTraceId", childTraceId);
+    expect(
+      Object.values(actions).find((state) => state.callId === nestedAction.callId),
+    ).toMatchObject({
+      childTraceId,
+      kind: "subagent-call",
+      parent: { spanId: "3".repeat(16) },
+      parentActionCallId: "call-1",
+    });
+    expect(dispatched.event).not.toHaveProperty("childTraceId");
+    expect(startSubagent).toHaveBeenCalledWith(
+      expect.objectContaining({ instrumentationCallId: nestedAction.callId }),
+    );
+    expect(
+      Object.values(
+        (
+          dispatched.serializedContext["eve.harness.agentTrace"] as {
+            actions: Record<string, { callId: string }>;
+          }
+        ).actions,
+      ).map((state) => state.callId),
+    ).toEqual(["call-1", nestedAction.callId]);
+  });
+
+  it("keeps a confirmed child trace on the nested caller when resume delivery fails", async () => {
+    const childTraceId = "5".repeat(32);
+    const nestedAction = { ...action, callId: "call-1:research" };
+    const tracedRecord = {
+      ...availableRecord,
+      address: { ...availableRecord.address, traceId: childTraceId },
+    };
+    const tracedSession = {
+      ...session,
+      state: setAgentHandleStore(undefined, { handles: [tracedRecord] }),
+    };
+    const serializedContext = {
+      "eve.harness.agentTrace": {
+        actions: {
+          action: {
+            attemptIndex: 0,
+            callId: "call-1",
+            kind: "tool-call",
+            name: "research_workflow",
+            parent: {
+              spanId: "2".repeat(16),
+              traceFlags: 1,
+              traceId: "1".repeat(32),
+            },
+            rootSessionId: "parent",
+            sessionId: "parent",
+            spanId: "3".repeat(16),
+            startTimeMs: 1,
+            stepIndex: 2,
+            turnId: "turn-1",
+          },
+        },
+        sessions: {},
+        turns: {},
+      },
+    };
+    vi.mocked(readDurableSession).mockResolvedValue(tracedSession as never);
+    vi.mocked(prepareOwnerAgentInvocation).mockResolvedValue({
+      ...prepared,
+      plan: [{ action: nestedAction, agentId: "agent-1", kind: "resume" }],
+      serializedContext,
+      session: tracedSession,
+    } as never);
+    vi.mocked(dispatchToClaimedAgentAddress).mockResolvedValue({
+      childTraceId,
+      kind: "error",
+      result: {
+        callId: nestedAction.callId,
+        isError: true,
+        kind: "subagent-result",
+        origin: "dispatch",
+        output: { code: "AGENT_UNREACHABLE", message: "gone" },
+        subagentName: "research",
+      },
+      session: tracedSession as never,
+    });
+
+    const dispatched = await dispatchAgentInvocation({
+      actionCallId: "call-1",
+      callbackBaseUrl: "https://parent.example",
+      ownerId: "task-1",
+      replyTo: "agent-reply",
+      request: {
+        input: { agentId: "agent-1", message: "Find it", target: "research" },
+        instrumentationCallId: "call-1",
+        invocationId: nestedAction.callId,
+        kind: "agent-invoke",
+      },
+      serializedContext,
+      sessionState: {} as never,
+      taskId: "task-1",
+    });
+
+    expect(dispatched.kind).toBe("failed");
+    const actions = (
+      dispatched.serializedContext["eve.harness.agentTrace"] as {
+        actions: Record<
+          string,
+          { callId: string; childTraceId?: string; kind?: string; terminal?: { outcome: string } }
+        >;
+      }
+    ).actions;
+    expect(actions.action).toMatchObject({ callId: "call-1", kind: "tool-call" });
+    expect(actions.action).not.toHaveProperty("childTraceId", childTraceId);
+    expect(
+      Object.values(actions).find((state) => state.callId === nestedAction.callId),
+    ).toMatchObject({ childTraceId, kind: "subagent-call", terminal: { outcome: "failed" } });
+    expect(Object.keys(actions)).toHaveLength(2);
+  });
 });
 
 describe("task-owned agent settlement", () => {
@@ -270,6 +466,7 @@ describe("task-owned agent settlement", () => {
         subagentName: "research",
       },
       ownerId: "task-1",
+      serializedContext: {},
       sessionState: {} as never,
       taskId: "task-1",
     });
@@ -362,6 +559,7 @@ describe("task-owned agent settlement", () => {
         output: "cancelled",
         subagentName: "research",
       },
+      serializedContext: {},
       sessionState: {} as never,
     });
 

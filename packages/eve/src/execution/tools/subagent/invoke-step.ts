@@ -50,17 +50,26 @@ import {
   getTurnUsageState,
   setTurnUsageState,
 } from "#harness/turn-tag-state.js";
+import {
+  recordActionChildTraceId,
+  recordActionInvocationKind,
+  recordNestedAgentInvocation,
+  recordNestedAgentInvocationTerminal,
+} from "#tracing/agent-trace-context-store.js";
+import { deriveAgentActionSpanId } from "#tracing/agent-span-id-generator.js";
 
 export type AgentInvocationDispatchResult =
   | {
       readonly kind: "dispatched";
       readonly agentId: string;
       readonly event: SubagentCalledStreamEvent;
+      readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     }
   | {
       readonly kind: "failed";
       readonly result: RuntimeSubagentResult;
+      readonly serializedContext: Record<string, unknown>;
       readonly sessionState: DurableSessionState;
     };
 
@@ -70,6 +79,7 @@ export type TaskAgentInvocationDispatchResult =
 
 /** Dispatches one owner-scoped local or remote agent invocation. */
 export async function dispatchAgentInvocation(input: {
+  readonly actionCallId?: string;
   readonly callbackBaseUrl: string;
   readonly emit?: HandleEventFn;
   readonly replyTo: string;
@@ -92,6 +102,32 @@ export async function dispatchAgentInvocation(input: {
   if (entry === undefined) {
     throw new Error("Agent invocation produced no executable plan entry.");
   }
+  const invocationAction = entry.kind === "start" ? entry.target.action : entry.action;
+  const outerActionCallId = input.actionCallId ?? invocationAction.callId;
+  const nestedInvocation = outerActionCallId !== invocationAction.callId;
+  const actionCallId = nestedInvocation ? invocationAction.callId : outerActionCallId;
+  let serializedContext = nestedInvocation
+    ? recordNestedAgentInvocation({
+        callId: invocationAction.callId,
+        kind: invocationAction.kind,
+        name: invocationAction.name,
+        outerCallId: outerActionCallId,
+        serializedContext: prepared.serializedContext,
+        sessionId: prepared.session.sessionId,
+        spanId: deriveAgentActionSpanId(
+          prepared.session.sessionId,
+          prepared.batch.event.turnId,
+          invocationAction.callId,
+        ),
+        turnId: prepared.batch.event.turnId,
+      })
+    : recordActionInvocationKind(
+        prepared.serializedContext,
+        prepared.session.sessionId,
+        prepared.batch.event.turnId,
+        actionCallId,
+        invocationAction.kind,
+      );
   let session = prepared.session;
   const currentAgentHandles = (): readonly AgentHandle[] =>
     getAgentHandleStore(session.state)?.handles ?? [];
@@ -106,7 +142,19 @@ export async function dispatchAgentInvocation(input: {
     return applied.result;
   };
   if (entry.kind === "reject") {
-    return { kind: "failed", result: entry.result, sessionState: sessionState() };
+    serializedContext = recordInvocationFailure(
+      serializedContext,
+      prepared.session.sessionId,
+      prepared.batch.event.turnId,
+      invocationAction.callId,
+      entry.result,
+    );
+    return {
+      kind: "failed",
+      result: entry.result,
+      serializedContext,
+      sessionState: sessionState(),
+    };
   }
 
   let outcome: DispatchOutcome;
@@ -145,9 +193,18 @@ export async function dispatchAgentInvocation(input: {
       });
       claimed = readClaimedHandle(claim);
       if (claimed === undefined) {
+        const result = createTaskClaimError(entry.action, entry.agentId, claim);
+        serializedContext = recordInvocationFailure(
+          serializedContext,
+          prepared.session.sessionId,
+          prepared.batch.event.turnId,
+          invocationAction.callId,
+          result,
+        );
         return {
           kind: "failed",
-          result: createTaskClaimError(entry.action, entry.agentId, claim),
+          result,
+          serializedContext,
           sessionState: sessionState(),
         };
       }
@@ -209,6 +266,7 @@ export async function dispatchAgentInvocation(input: {
       }
     }
     outcome = await startSubagent({
+      instrumentationCallId: actionCallId,
       auth: prepared.auth,
       batchEvent: prepared.batch.event,
       bundle: prepared.bundle,
@@ -222,7 +280,7 @@ export async function dispatchAgentInvocation(input: {
       parentContinuationToken: input.replyTo,
       parentTraceContext: prepared.parentTraceContext,
       sandboxSessionId: prepared.sandboxSessionId,
-      serializedContext: prepared.serializedContext,
+      serializedContext,
       session,
       taskId: input.taskId,
       target: entry.target,
@@ -245,8 +303,32 @@ export async function dispatchAgentInvocation(input: {
     }
   }
 
+  const confirmedChildTraceId =
+    outcome.kind === "called" ? outcome.address.traceId : outcome.childTraceId;
+  if (confirmedChildTraceId !== undefined) {
+    serializedContext = recordActionChildTraceId(
+      serializedContext,
+      prepared.session.sessionId,
+      prepared.batch.event.turnId,
+      actionCallId,
+      confirmedChildTraceId,
+    );
+  }
+
   if (outcome.kind === "error") {
-    return { kind: "failed", result: outcome.result, sessionState: sessionState() };
+    serializedContext = recordInvocationFailure(
+      serializedContext,
+      prepared.session.sessionId,
+      prepared.batch.event.turnId,
+      invocationAction.callId,
+      outcome.result,
+    );
+    return {
+      kind: "failed",
+      result: outcome.result,
+      serializedContext,
+      sessionState: sessionState(),
+    };
   }
 
   const action = entry.kind === "resume" ? entry.action : entry.target.action;
@@ -280,7 +362,13 @@ export async function dispatchAgentInvocation(input: {
   if (input.emit !== undefined) {
     await input.emit(event);
   }
-  return { kind: "dispatched", agentId, event, sessionState: sessionState() };
+  return {
+    kind: "dispatched",
+    agentId,
+    event,
+    serializedContext,
+    sessionState: sessionState(),
+  };
 }
 
 /**
@@ -313,12 +401,22 @@ export async function settleTaskAgentInvocationStep(input: {
   readonly accumulateUsage?: boolean;
   readonly ownerId: string;
   readonly result: RuntimeSubagentChildResult;
+  readonly serializedContext: Record<string, unknown>;
   readonly sessionState: DurableSessionState;
   readonly taskId?: string | undefined;
-}): Promise<{ readonly sessionState: DurableSessionState }> {
+}): Promise<{
+  readonly serializedContext: Record<string, unknown>;
+  readonly sessionState: DurableSessionState;
+}> {
   "use step";
 
   const durable = await readDurableSession(input.sessionState);
+  const serializedContext = recordNestedAgentInvocationTerminal({
+    callId: input.result.callId,
+    serializedContext: input.serializedContext,
+    sessionId: durable.sessionId,
+    terminal: childInvocationTerminal(input.result),
+  });
   const handles = getAgentHandleStore(durable.state)?.handles ?? [];
   const candidates = handles.filter(
     (candidate) => candidate.phase === "claimed" && candidate.ownerId === input.ownerId,
@@ -327,7 +425,9 @@ export async function settleTaskAgentInvocationStep(input: {
     candidates.find(
       (candidate) => candidate.phase === "claimed" && candidate.callId === input.result.callId,
     ) ?? (candidates.length === 1 ? candidates[0] : undefined);
-  if (handle?.phase !== "claimed") return { sessionState: input.sessionState };
+  if (handle?.phase !== "claimed") {
+    return { serializedContext, sessionState: input.sessionState };
+  }
 
   const nextHandles =
     input.result.outcome.kind === "terminal"
@@ -370,6 +470,7 @@ export async function settleTaskAgentInvocationStep(input: {
     );
   }
   return {
+    serializedContext,
     sessionState: replaceDurableSessionSnapshot({ session, state: input.sessionState }),
   };
 }
@@ -404,6 +505,58 @@ function readClaimedHandle(
   return handle?.phase === "claimed" ? handle : undefined;
 }
 
+function recordInvocationFailure(
+  serializedContext: Record<string, unknown>,
+  sessionId: string,
+  turnId: string,
+  callId: string,
+  result: RuntimeSubagentResult,
+): Record<string, unknown> {
+  return recordNestedAgentInvocationTerminal({
+    callId,
+    serializedContext,
+    sessionId,
+    terminal: {
+      acceptedAtMs: Date.now(),
+      error: invocationError(result.output),
+      outcome: "failed",
+    },
+    turnId,
+  });
+}
+
+function childInvocationTerminal(
+  result: RuntimeSubagentChildResult,
+): Parameters<typeof recordNestedAgentInvocationTerminal>[0]["terminal"] {
+  const turnResult = result.outcome.result;
+  const usage = result.usage ?? result.outcome.usageDelta;
+  return {
+    acceptedAtMs: Date.now(),
+    error: turnResult.kind === "failed" ? invocationError(turnResult.error) : undefined,
+    outcome:
+      turnResult.kind === "succeeded"
+        ? "completed"
+        : turnResult.kind === "cancelled"
+          ? "cancelled"
+          : "failed",
+    usage: {
+      inputTokenDetails: {
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens,
+      },
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+    },
+  };
+}
+
+function invocationError(value: unknown): Error {
+  if (value instanceof Error) return value;
+  if (typeof value === "object" && value !== null && "message" in value) {
+    return new Error(String(value.message));
+  }
+  return new Error(typeof value === "string" ? value : "Agent invocation failed.");
+}
 function createTaskClaimError(
   action: Parameters<typeof createAgentErrorResult>[0]["action"],
   agentId: string,

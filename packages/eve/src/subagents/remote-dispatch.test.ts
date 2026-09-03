@@ -201,6 +201,208 @@ describe("startRemoteAgentSession", () => {
     });
   });
 
+  it("lets a permissive older receiver ignore the extension without joining the parent trace", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const parentTraceContext = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    const traceSeed = {
+      spanId: "4".repeat(16),
+      traceFlags: 1,
+      traceId: "3".repeat(32),
+    };
+    const parent = {
+      callId: "call-remote",
+      rootSessionId: "root-session",
+      sessionId: "parent-session",
+      turn: { id: "parent-turn", sequence: 2 },
+    };
+
+    const child = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      parent,
+      parentTraceContext,
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+      traceSeed,
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request.headers).not.toHaveProperty("traceparent");
+    expect(JSON.parse(request.body as string)).toMatchObject({
+      invocation: parent,
+      trace: { parent: parentTraceContext, seed: traceSeed },
+    });
+    expect(child).toEqual({ sessionId: "remote-session" });
+  });
+
+  it("returns a child trace id only when the receiver acknowledges the exact seed", async () => {
+    const traceSeed = {
+      spanId: "4".repeat(16),
+      traceFlags: 0,
+      traceId: "3".repeat(32),
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "accepted-child", status: "accepted", trace: traceSeed },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            ok: true,
+            sessionId: "mismatched-child",
+            status: "accepted",
+            trace: { ...traceSeed, spanId: "5".repeat(16) },
+          },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const input = {
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      parent: {
+        callId: "call-remote",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "parent-turn", sequence: 0 },
+      },
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+      },
+      traceSeed,
+    };
+
+    await expect(startRemoteAgentSession(input)).resolves.toEqual({
+      sessionId: "accepted-child",
+      traceId: traceSeed.traceId,
+    });
+    await expect(startRemoteAgentSession(input)).resolves.toEqual({
+      sessionId: "mismatched-child",
+    });
+  });
+
+  it("retries a strict older receiver without joining the parent trace", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 400 }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const parentTraceContext = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+
+    const child = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      parent: {
+        callId: "call-remote",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "parent-turn", sequence: 0 },
+      },
+      parentTraceContext,
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+      traceSeed: {
+        spanId: "4".repeat(16),
+        traceFlags: 1,
+        traceId: "3".repeat(32),
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toHaveProperty("trace");
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty("trace");
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty(
+      "invocation",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("traceparent");
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).not.toHaveProperty("traceparent");
+    expect(child).toEqual({ sessionId: "remote-session" });
+  });
+
+  it("retries a strict older receiver when only invocation metadata was sent", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 400 }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { ok: true, sessionId: "remote-session", status: "accepted" },
+          { status: 202 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const child = await startRemoteAgentSession({
+      action: createAction(),
+      callbackBaseUrl: "https://caller.example.com",
+      parent: {
+        callId: "call-remote",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "parent-turn", sequence: 0 },
+      },
+      remote: createRemoteAgent(),
+      session: {
+        agent: { modelReference: { id: "mock/test" }, system: "", tools: [] },
+        compaction: { recentWindowSize: 10, threshold: 100000 },
+        continuationToken: "eve:parent-token",
+        history: [],
+        sessionId: "parent-session",
+        state: {},
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toHaveProperty("invocation");
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).not.toHaveProperty(
+      "invocation",
+    );
+    expect(child).toEqual({ sessionId: "remote-session" });
+  });
+
   it("posts the formatted subagent message and callback metadata", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -698,7 +900,49 @@ describe("startRemoteAgentSession — forwarded principal", () => {
     );
   });
 
-  it("omits the initiator when the dispatching turn has none", async () => {
+  it("carries the parent content ceiling in the extension without a sampled parent link", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+    const traceSeed = {
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "private" as const,
+      },
+      spanId: "4".repeat(16),
+      traceFlags: 0,
+      traceId: "3".repeat(32),
+    };
+
+    await startRemoteAgentSession({
+      action: createAction(),
+      auth: CURRENT_AUTH,
+      callbackBaseUrl: "https://caller.example.com",
+      initiatorAuth: INITIATOR_AUTH,
+      parent: {
+        callId: "call-remote",
+        rootSessionId: "root-session",
+        sessionId: "parent-session",
+        turn: { id: "parent-turn", sequence: 0 },
+      },
+      remote: { ...createRemoteAgent(), forwardPrincipal: true },
+      session: createSession(),
+      traceSeed,
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request.headers).not.toHaveProperty("traceparent");
+    expect(JSON.parse(request.body as string).trace).toEqual({
+      forwardedTracePolicy: traceSeed.forwardedTracePolicy,
+      seed: {
+        spanId: traceSeed.spanId,
+        traceFlags: traceSeed.traceFlags,
+        traceId: traceSeed.traceId,
+      },
+      version: 1,
+    });
+  });
+
+  it("forwards an explicit null initiator", async () => {
     const fetchMock = vi.fn().mockResolvedValue(createSessionResponse());
     vi.stubGlobal("fetch", fetchMock);
 
@@ -713,6 +957,82 @@ describe("startRemoteAgentSession — forwarded principal", () => {
 
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).forwardedPrincipal).toEqual({
       current: CURRENT_AUTH,
+      initiator: null,
+    });
+  });
+
+  it("does not retry a 400 from an older receiver when the initiator is explicitly null", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false }, { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: null,
+        parent: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
+        session: createSession(),
+      }),
+    ).rejects.toThrow("HTTP 400");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry an older receiver when the forwarded initiator is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: false }, { status: 400 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        parent: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
+        session: createSession(),
+      }),
+    ).rejects.toThrow("HTTP 400");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("retries an older receiver when the forwarded initiator is explicit", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ ok: false }, { status: 400 }))
+      .mockResolvedValueOnce(createSessionResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      startRemoteAgentSession({
+        action: createAction(),
+        auth: CURRENT_AUTH,
+        callbackBaseUrl: "https://caller.example.com",
+        initiatorAuth: INITIATOR_AUTH,
+        parent: {
+          callId: "call-remote",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "parent-turn", sequence: 0 },
+        },
+        remote: { ...createRemoteAgent(), forwardPrincipal: true },
+        session: createSession(),
+      }),
+    ).resolves.toEqual({ sessionId: "remote-session" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string).forwardedPrincipal).toEqual({
+      current: CURRENT_AUTH,
+      initiator: INITIATOR_AUTH,
     });
   });
 

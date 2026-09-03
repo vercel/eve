@@ -9,6 +9,7 @@ import {
 import type { SendPayload } from "#channel/routes.js";
 import { normalizeSendInput, serializeUrlFilePartsInMessage } from "#channel/send-input.js";
 import { createSession, sessionCallbackToTurnCaller, type Session } from "#channel/session.js";
+import { copyAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import type {
   CancelTurnResult,
   ClearSessionResult,
@@ -138,7 +139,9 @@ export function createChannelAddress<TState = undefined>(input: {
       if (adapter !== input.adapter) copyChannelActivityPresentation(input.adapter, adapter);
       const capabilities: RunInput["capabilities"] =
         options.mode === "task" ? undefined : { requestInput: true };
-      const runInput: RunInput = {
+      const runInput: {
+        -readonly [K in keyof RunInput]: RunInput[K];
+      } = {
         adapter,
         auth: options.auth,
         capabilities,
@@ -147,7 +150,6 @@ export function createChannelAddress<TState = undefined>(input: {
         continuationConflictCommand: command,
         continuationToken: namespacedToken,
         delivery,
-        initiatorAuth: options.initiatorAuth,
         input: {
           context: payload.context,
           message: serializeUrlFilePartsInMessage(payload.message) ?? "",
@@ -157,6 +159,8 @@ export function createChannelAddress<TState = undefined>(input: {
         requestId: metadata.requestId,
         title: options.title,
       };
+      runInput.initiatorAuth =
+        options.initiatorAuth === undefined ? options.auth : options.initiatorAuth;
       const handle = await input.runtime.createSession(runInput);
       return createSession(handle.sessionId, input.runtime, {
         ...metadata,
@@ -198,12 +202,14 @@ export function createChannelAddress<TState = undefined>(input: {
     },
     async resolveSession() {
       const owner = await input.runtime.resolveContinuation(namespacedToken);
-      return owner === undefined
-        ? undefined
-        : createSession(owner.sessionId, input.runtime, {
-            ...metadata,
-            turnPolicy: input.turnPolicy,
-          });
+      if (owner === undefined) return undefined;
+      return copyAcceptedTraceCoordinates(
+        owner,
+        createSession(owner.sessionId, input.runtime, {
+          ...metadata,
+          turnPolicy: input.turnPolicy,
+        }),
+      );
     },
   };
 }

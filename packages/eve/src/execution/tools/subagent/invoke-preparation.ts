@@ -48,7 +48,11 @@ export type OwnerAgentDispatchPlanEntry =
       readonly agentId: string;
       readonly dynamicRemoteAgent?: DynamicRemoteAgentConfig;
     }
-  | { readonly kind: "reject"; readonly result: RuntimeSubagentDispatchFailure }
+  | {
+      readonly action: RuntimeAgentHandleAction;
+      readonly kind: "reject";
+      readonly result: RuntimeSubagentDispatchFailure;
+    }
   | { readonly kind: "start"; readonly target: SubagentStartTarget };
 
 /** Prepares one workflow-owner agent invocation from durable inputs. */
@@ -151,7 +155,7 @@ function classifyFreshStart(input: {
       nodeId: action.nodeId,
       subagentName: getSubagentName(action),
     });
-    return { kind: "reject", result: createUnavailableDynamicSubagentResult(action) };
+    return { action, kind: "reject", result: createUnavailableDynamicSubagentResult(action) };
   }
   if (isRecursiveAgentAction(action, registry) && input.session.rootSessionId !== undefined) {
     log.warn("recursive agent call blocked outside the root session", {
@@ -160,7 +164,7 @@ function classifyFreshStart(input: {
       rootSessionId: input.session.rootSessionId,
       subagentName: action.subagentName,
     });
-    return { kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
+    return { action, kind: "reject", result: createRecursiveAgentRootOnlyResult(action) };
   }
   if (action.kind === "remote-agent-call") {
     return {

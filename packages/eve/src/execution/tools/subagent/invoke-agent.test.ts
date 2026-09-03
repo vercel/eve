@@ -127,6 +127,7 @@ describe("background agent invocation routing", () => {
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", target: "research" },
+        instrumentationCallId: "call-1",
         invocationId: "call-1:research",
         kind: "agent-invoke",
       },
@@ -247,6 +248,7 @@ describe("background agent invocation routing", () => {
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", target: "research" },
+        instrumentationCallId: "call-1",
         invocationId: "call-1:research",
         kind: "agent-invoke",
       },

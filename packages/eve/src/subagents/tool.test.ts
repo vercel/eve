@@ -63,6 +63,18 @@ describe("buildSubagentRunInput", () => {
     });
 
     expect(runInput.capabilities).toEqual({ requestInput: true });
+    expect(runInput).toHaveProperty("initiatorAuth", null);
+  });
+
+  it("keeps a missing legacy initiator field absent", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      session: makeSession(),
+    });
+
+    expect(runInput).not.toHaveProperty("initiatorAuth");
   });
 
   it("leaves capabilities undefined when the parent has none", () => {
@@ -102,6 +114,21 @@ describe("buildSubagentRunInput", () => {
     expect(runInput.continuationToken).toBe(childContinuationToken);
     expect(childContinuationToken).toMatch(/^subagent:parent-session:call-1$/);
     expect(runInput.mode).toBe("conversation");
+  });
+
+  it("links a workflow agent child to the outer instrumentation action", () => {
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: { ...makeAction(), callId: "call-1:research" },
+      auth: null,
+      batchEvent: { sequence: 5, turnId: "turn-17" },
+      initiatorAuth: null,
+      parentCallId: "call-1",
+      session: makeSession(),
+    });
+
+    expect(runInput.adapter.state).toMatchObject({ callId: "call-1:research" });
+    expect(runInput.parent).toMatchObject({ callId: "call-1" });
+    expect(runInput.continuationToken).toBe("subagent:parent-session:call-1:research");
   });
 
   it("routes parent notifications to an active turn inbox when supplied", () => {
@@ -298,6 +325,31 @@ describe("buildSubagentRunInput", () => {
       session: makeSession(),
     });
     expect(untraced.runInput.parentTraceContext).toBeUndefined();
+  });
+
+  it("carries child trace coordinates privately for session acceptance", () => {
+    const traceSeed = {
+      decision: { action: "record", recordInputs: false, recordOutputs: true } as const,
+      spanId: "4".repeat(16),
+      traceFlags: 1,
+      traceId: "3".repeat(32),
+    };
+    const { runInput } = buildRuntimeSubagentRunInput({
+      action: makeAction(),
+      auth: null,
+      batchEvent: { sequence: 0, turnId: "turn-0" },
+      initiatorAuth: null,
+      session: makeSession(),
+      traceSeed,
+    });
+
+    expect(runInput.traceSeed).toBe(traceSeed);
+    expect(runInput.acceptedTraceCoordinates).toEqual({
+      spanId: traceSeed.spanId,
+      traceFlags: traceSeed.traceFlags,
+      traceId: traceSeed.traceId,
+    });
+    expect(runInput.adapter.state).toMatchObject({ traceId: traceSeed.traceId });
   });
 
   it("passes a resolved local subagent description into the child message", () => {

@@ -49,7 +49,7 @@ export interface BuildTelemetryRuntimeContextInput {
 export interface InstrumentationRuntimeContextSnapshot {
   readonly channel?: ChannelInstrumentationProjection;
   readonly currentAuth: SessionAuthContext | null;
-  readonly initiatorAuth: SessionAuthContext | null;
+  readonly initiatorAuth?: SessionAuthContext | null;
   readonly parent?: SessionParent;
 }
 
@@ -57,19 +57,22 @@ export function snapshotInstrumentationRuntimeContext(
   context: AlsContext | undefined,
 ): InstrumentationRuntimeContextSnapshot {
   const currentAuth = context?.get(AuthKey) ?? null;
-  return {
+  const snapshot = {
     channel: snapshotForInstrumentation(
       context?.get(ChannelInstrumentationKey),
       "channel.instrumentation",
     ),
     currentAuth: snapshotForInstrumentation(currentAuth, "session.auth.current") ?? null,
-    initiatorAuth:
-      snapshotForInstrumentation(
-        context?.get(InitiatorAuthKey) ?? currentAuth,
-        "session.auth.initiator",
-      ) ?? null,
     parent: snapshotForInstrumentation(context?.get(ParentSessionKey), "session.parent"),
   };
+  return context?.has(InitiatorAuthKey) !== true
+    ? snapshot
+    : {
+        ...snapshot,
+        initiatorAuth:
+          snapshotForInstrumentation(context.get(InitiatorAuthKey), "session.auth.initiator") ??
+          null,
+      };
 }
 
 /**
@@ -250,7 +253,7 @@ function projectSessionAuth(context: InstrumentationRuntimeContextSnapshot): {
 } {
   return {
     current: context.currentAuth,
-    initiator: context.initiatorAuth,
+    initiator: context.initiatorAuth ?? null,
   };
 }
 

@@ -71,7 +71,7 @@ export async function dispatchCoordinationStep(
       const started = await startWorkflowTask({
         auth: prepared.auth,
         batchEvent: batch.event,
-        initiatorAuth: prepared.initiatorAuth,
+        initiatorAuth: prepared.initiatorAuth ?? null,
         parentContinuationToken: input.parentContinuationToken ?? session.continuationToken,
         parentSession: prepared.parentSession,
         session: nextSession,

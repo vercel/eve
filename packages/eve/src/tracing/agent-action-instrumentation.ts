@@ -1,5 +1,6 @@
 import {
   ROOT_CONTEXT,
+  SpanKind,
   SpanStatusCode,
   type Context,
   type Span,
@@ -9,16 +10,25 @@ import {
 } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
+  InstrumentationActionKind,
   InstrumentationActionStartedEvent,
   InstrumentationActionTerminalEvent,
   InstrumentationAttemptScope,
   InstrumentationProviderDefinition,
 } from "#instrumentation/lifecycle.js";
 import { actionIdempotencyKey, attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import {
+  AGENT_INVOCATION_ROLES,
+  AGENT_TRACE_ATTRIBUTES,
+} from "#protocol/agent-invocation-trace.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
-import type { AgentActionTraceState, AgentTraceStateStore } from "#tracing/agent-trace-state.js";
+import type {
+  AgentActionTraceState,
+  AgentActionTraceTerminalState,
+  AgentTraceStateStore,
+} from "#tracing/agent-trace-state.js";
 import { normalizeChannelAudience } from "#shared/channel-audience.js";
 import { isSampledTrace } from "#tracing/sampled-trace.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
@@ -31,6 +41,10 @@ export interface AgentActionInstrumentation {
   deleteForSession(sessionId: string): void | PromiseLike<void>;
   deleteForTurn(sessionId: string, turnId: string): void | PromiseLike<void>;
   failForAttempt(scope: InstrumentationAttemptScope, error: unknown): Promise<void>;
+  flushForSession(
+    sessionId: string,
+    terminal?: { readonly error?: unknown; readonly outcome: "abandoned" | "failed" },
+  ): Promise<void>;
   contextFor(
     sessionId: string,
     turnId: string,
@@ -40,6 +54,7 @@ export interface AgentActionInstrumentation {
 
 export interface AgentActionContext {
   readonly context: Context;
+  readonly kind: InstrumentationActionKind;
   readonly spanContext: SpanContext;
 }
 
@@ -67,6 +82,7 @@ export function createAgentActionInstrumentation(input: {
       callId: event.callId,
       channelAudience: normalizeChannelAudience(event.scope.channelAudience),
       inputAttribute: input.recordInputs ? contentAttribute(event.input, false) : undefined,
+      isWorkflowTool: event.isWorkflowTool,
       kind: event.kind,
       name: event.name,
       parent: {
@@ -91,36 +107,33 @@ export function createAgentActionInstrumentation(input: {
     const state = await input.stateStore.getAction(event.idempotencyKey);
     if (state === undefined) return;
     try {
-      const span = startSpan(state);
-      span.setAttribute("agent.action.outcome", event.outcome);
-      if (event.type === "action.failed") {
-        if (event.errorCode !== undefined) {
-          span.setAttribute("agent.action.error.code", event.errorCode);
-          span.setAttribute("error.type", event.errorCode);
-        }
-        recordError(span, event.error);
-      } else if (event.output.type === "error") {
-        recordError(span, event.output.error);
-      } else {
-        if (event.usage !== undefined) {
-          setAgentUsage(span, event.usage, { includeGenAiDetails: false });
-        }
-        if (input.recordOutputs) {
-          const result = contentAttribute(event.output.output, false);
-          if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
-        }
+      const children = await input.stateStore.findChildActions(
+        state.sessionId,
+        state.turnId,
+        state.callId,
+      );
+      for (const child of children) {
+        finishNestedSpan(child, event);
+        await input.stateStore.deleteAction(
+          actionIdempotencyKey(child.sessionId, child.turnId, child.callId),
+        );
       }
-      span.end(event.acceptedAtMs);
+      if (state.emitted !== true) finishActionSpan(state, event);
     } finally {
-      await input.stateStore.deleteAction(event.idempotencyKey);
+      if (state.isWorkflowTool === true) {
+        await input.stateStore.setAction(event.idempotencyKey, { ...state, emitted: true });
+      } else {
+        await input.stateStore.deleteAction(event.idempotencyKey);
+      }
       forget(event.idempotencyKey);
     }
   };
 
   const startSpan = (state: AgentActionTraceState): Span => {
+    const invocation = isAgentInvocation(state.kind);
     const span = input.idGenerator.withSpanId(state.spanId, () =>
       input.tracer.startSpan(
-        "agent.action",
+        invocation ? `invoke_agent ${state.name}` : "agent.action",
         {
           attributes: {
             "agent.action.call_id": state.callId,
@@ -132,7 +145,15 @@ export function createAgentActionInstrumentation(input: {
             "agent.step.attempt": state.attemptIndex,
             "agent.step.index": state.stepIndex,
             "agent.turn.id": state.turnId,
+            ...(invocation
+              ? {
+                  "gen_ai.agent.name": state.name,
+                  "gen_ai.operation.name": "invoke_agent",
+                  [AGENT_TRACE_ATTRIBUTES.invocationRole]: AGENT_INVOCATION_ROLES.caller,
+                }
+              : undefined),
           },
+          kind: state.kind === "remote-agent-call" ? SpanKind.CLIENT : SpanKind.INTERNAL,
           startTime: state.startTimeMs,
         },
         contextFromActionState(state),
@@ -161,10 +182,39 @@ export function createAgentActionInstrumentation(input: {
       for (const key of keys) {
         const state = await input.stateStore.getAction(key);
         if (state === undefined) continue;
-        const span = startSpan(state);
-        recordError(span, error);
-        span.end();
+        const children = await input.stateStore.findChildActions(
+          state.sessionId,
+          state.turnId,
+          state.callId,
+        );
+        for (const child of children) {
+          finishNestedSpan(child, {
+            error,
+            outcome: "failed",
+            type: "action.failed",
+          });
+          await input.stateStore.deleteAction(
+            actionIdempotencyKey(child.sessionId, child.turnId, child.callId),
+          );
+        }
+        finishNestedSpan(state, { error, outcome: "failed", type: "action.failed" });
         await input.stateStore.deleteAction(key);
+      }
+    },
+    async flushForSession(sessionId, terminal) {
+      const states = await input.stateStore.findActions(sessionId);
+      for (const state of states) {
+        if (state.parentActionCallId === undefined) continue;
+        if (state.terminal === undefined && terminal === undefined) continue;
+        finishNestedSpan(
+          state,
+          terminal === undefined
+            ? { outcome: "abandoned", type: "action.completed" }
+            : { ...terminal, type: "action.failed" },
+        );
+        await input.stateStore.deleteAction(
+          actionIdempotencyKey(state.sessionId, state.turnId, state.callId),
+        );
       }
     },
     events: {
@@ -178,6 +228,59 @@ export function createAgentActionInstrumentation(input: {
     for (const [attemptId, keys] of byAttempt) {
       keys.delete(idempotencyKey);
       if (keys.size === 0) byAttempt.delete(attemptId);
+    }
+  }
+
+  function finishActionSpan(
+    state: AgentActionTraceState,
+    event: InstrumentationActionTerminalEvent,
+  ): void {
+    const span = startSpan(state);
+    setChildTraceId(span, state);
+    span.setAttribute("agent.action.outcome", event.outcome);
+    if (event.type === "action.failed") {
+      if (event.errorCode !== undefined) {
+        span.setAttribute("agent.action.error.code", event.errorCode);
+        span.setAttribute("error.type", event.errorCode);
+      }
+      recordError(span, event.error);
+    } else if (event.output.type === "error") {
+      recordError(span, event.output.error);
+    } else {
+      if (event.usage !== undefined) {
+        setAgentUsage(span, event.usage, { includeGenAiDetails: false });
+      }
+      if (input.recordOutputs) {
+        const result = contentAttribute(event.output.output, false);
+        if (result !== undefined) span.setAttribute("gen_ai.tool.call.result", result);
+      }
+    }
+    span.end(event.acceptedAtMs);
+  }
+
+  function finishNestedSpan(
+    state: AgentActionTraceState,
+    outer: Pick<InstrumentationActionTerminalEvent, "outcome" | "type"> & {
+      readonly error?: unknown;
+    },
+  ): void {
+    const terminal: AgentActionTraceTerminalState = state.terminal ?? {
+      error: outer.type === "action.failed" ? outer.error : undefined,
+      outcome: outer.type === "action.failed" ? outer.outcome : "abandoned",
+    };
+    const span = startSpan(state);
+    setChildTraceId(span, state);
+    span.setAttribute("agent.action.outcome", terminal.outcome);
+    if (terminal.usage !== undefined) {
+      setAgentUsage(span, terminal.usage, { includeGenAiDetails: false });
+    }
+    if (terminal.outcome !== "completed") recordError(span, terminal.error);
+    span.end(terminal.acceptedAtMs);
+  }
+
+  function setChildTraceId(span: Span, state: AgentActionTraceState): void {
+    if (state.childTraceId !== undefined) {
+      span.setAttribute(AGENT_TRACE_ATTRIBUTES.childTraceId, state.childTraceId);
     }
   }
 }
@@ -194,8 +297,13 @@ function actionContext(state: AgentActionTraceState): AgentActionContext {
       trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext)),
       state.channelAudience,
     ),
+    kind: state.kind,
     spanContext,
   };
+}
+
+function isAgentInvocation(kind: InstrumentationActionKind): boolean {
+  return kind === "subagent-call" || kind === "remote-agent-call";
 }
 
 function contextFromActionState(state: AgentActionTraceState): Context {

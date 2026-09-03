@@ -33,6 +33,7 @@ import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentat
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { runtimeContextAttributes } from "#tracing/agent-otel-runtime-context.js";
 import { setAgentUsage } from "#tracing/agent-otel-usage.js";
+import { readGatewayCost } from "#tracing/agent-otel-gateway-cost.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
 import { isSampledTrace, resolveTracePolicyDecision } from "#tracing/sampled-trace.js";
@@ -61,6 +62,12 @@ import type {
   InstrumentationTurnTerminalEvent,
 } from "#instrumentation/lifecycle.js";
 import { attemptIdempotencyKey } from "#instrumentation/lifecycle.js";
+import {
+  AGENT_INVOCATION_ROLES,
+  AGENT_SESSION_KINDS,
+  AGENT_TRACE_ATTRIBUTES,
+  AGENT_TRACE_SCHEMA_VERSION,
+} from "#protocol/agent-invocation-trace.js";
 
 interface SpanState {
   readonly context: Context;
@@ -285,6 +292,14 @@ export function createAgentOtelInstrumentation(
   const onSessionTransition = async (
     event: InstrumentationSessionTransitionEvent,
   ): Promise<void> => {
+    await actions.flushForSession(
+      event.sessionId,
+      event.type === "session.completed"
+        ? { outcome: "abandoned" }
+        : event.type === "session.failed"
+          ? { error: event.error, outcome: "failed" }
+          : undefined,
+    );
     if (event.type === "session.failed" && event.turnId !== undefined) {
       await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
         ...turn,
@@ -305,13 +320,28 @@ export function createAgentOtelInstrumentation(
                   "agent.framework.name": "eve",
                   "agent.framework.version": input.frameworkVersion,
                   "agent.name": agentName,
+                  "agent.root_run.id": turn.rootSessionId,
+                  "agent.parent_run.id": turn.parentLineage?.sessionId,
+                  "agent.parent_call.id": turn.parentLineage?.callId,
                   "agent.session.id": event.sessionId,
+                  [AGENT_TRACE_ATTRIBUTES.sessionKind]:
+                    turn.parentLineage === undefined
+                      ? AGENT_SESSION_KINDS.root
+                      : AGENT_SESSION_KINDS.delegated,
+                  [AGENT_TRACE_ATTRIBUTES.schemaVersion]: AGENT_TRACE_SCHEMA_VERSION,
+                  [AGENT_TRACE_ATTRIBUTES.invocationRole]: AGENT_INVOCATION_ROLES.execution,
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
                   "gen_ai.agent.name": agentName,
                   "gen_ai.conversation.id": event.sessionId,
                   "gen_ai.operation.name": "invoke_agent",
+                  [AGENT_TRACE_ATTRIBUTES.principalCurrentType]: turn.currentPrincipal?.type,
+                  [AGENT_TRACE_ATTRIBUTES.principalCurrentFingerprint]:
+                    turn.currentPrincipal?.fingerprint,
+                  [AGENT_TRACE_ATTRIBUTES.principalInitiatorType]: turn.initiatorPrincipal?.type,
+                  [AGENT_TRACE_ATTRIBUTES.principalInitiatorFingerprint]:
+                    turn.initiatorPrincipal?.fingerprint,
                 },
                 kind: SpanKind.INTERNAL,
                 startTime: turn.startTimeMs,
@@ -630,43 +660,6 @@ function takeSpanState<T>(
 
 function contextFromSpanContext(spanContext: SpanContext): Context {
   return trace.setSpan(ROOT_CONTEXT, trace.wrapSpanContext(spanContext));
-}
-
-/**
- * Extracts cost data from a step result's provider metadata. Only Vercel AI
- * Gateway reports it (`providerMetadata.gateway`): raw inference cost, the
- * gateway's surcharged total, the input/output split, and the generation id
- * for dashboard reconciliation. Values arrive as USD strings; anything
- * missing or non-numeric is skipped, so non-gateway providers get nothing.
- */
-function readGatewayCost(
-  providerMetadata: Readonly<Record<string, unknown>>,
-): Record<string, string | number> | undefined {
-  const gateway = providerMetadata.gateway;
-  if (!isRecord(gateway)) return undefined;
-  const attributes: Record<string, string | number> = {};
-  const cost = readUsd(gateway.cost);
-  if (cost !== undefined) attributes["gen_ai.usage.cost"] = cost;
-  const gatewayCost = readUsd(gateway.gatewayCost);
-  if (gatewayCost !== undefined) attributes["gen_ai.usage.gateway_cost"] = gatewayCost;
-  const inputCost = readUsd(gateway.inputInferenceCost);
-  if (inputCost !== undefined) attributes["gen_ai.usage.input_cost"] = inputCost;
-  const outputCost = readUsd(gateway.outputInferenceCost);
-  if (outputCost !== undefined) attributes["gen_ai.usage.output_cost"] = outputCost;
-  if (typeof gateway.generationId === "string" && gateway.generationId.length > 0) {
-    attributes["gen_ai.generation.id"] = gateway.generationId;
-  }
-  return Object.keys(attributes).length === 0 ? undefined : attributes;
-}
-
-function readUsd(value: unknown): number | undefined {
-  if (typeof value !== "string") return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function modelSpanName(modelId: string): string {

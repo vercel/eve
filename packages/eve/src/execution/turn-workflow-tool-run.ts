@@ -131,6 +131,10 @@ export async function handleWorkflowToolRunRequest(
     await cursor.adopt(
       await applyTaskAgentRequest(
         {
+          actionCallId:
+            message.request.kind === "agent-invoke"
+              ? (message.request.instrumentationCallId ?? message.from.callId)
+              : message.from.callId,
           accumulateUsage: message.from.resultKind !== "subagent",
           ownerId: message.from.runId,
           replyTo: message.replyTo,

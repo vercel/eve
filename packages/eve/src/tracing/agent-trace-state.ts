@@ -2,9 +2,13 @@ import type { SpanContext } from "#compiled/@opentelemetry/api/index.js";
 
 import type {
   InstrumentationActionKind,
+  InstrumentationActionOutcome,
+  InstrumentationParentLineage,
+  InstrumentationPrincipalSummary,
   InstrumentationTraceContext,
   InstrumentationTurnFailedEvent,
   InstrumentationTurnSettledEvent,
+  InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { InstrumentationDecision } from "#shared/instrumentation-decision.js";
@@ -15,11 +19,15 @@ export interface AgentSessionTraceState {
   readonly channelKind?: string;
   readonly context: SpanContext;
   readonly decision?: InstrumentationDecision;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly rootSessionId: string;
 }
 
 export interface AgentTurnTraceState {
   readonly context: SpanContext;
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly modelUsage?: { readonly inputTokens?: number; readonly outputTokens?: number };
   readonly parentIsRemote?: boolean;
   readonly parentSpanId: string;
@@ -36,16 +44,29 @@ export interface AgentActionTraceState {
   readonly attemptIndex: number;
   readonly callId: string;
   readonly channelAudience?: ChannelAudience;
+  readonly childTraceId?: string;
+  readonly emitted?: boolean;
   readonly inputAttribute?: string;
+  readonly isWorkflowTool?: boolean;
   readonly kind: InstrumentationActionKind;
   readonly name: string;
   readonly parent: InstrumentationTraceContext;
+  /** Outer workflow-tool action that owns this nested `agent()` dispatch. */
+  readonly parentActionCallId?: string;
   readonly rootSessionId: string;
   readonly sessionId: string;
   readonly spanId: string;
   readonly startTimeMs: number;
   readonly stepIndex: number;
+  readonly terminal?: AgentActionTraceTerminalState;
   readonly turnId: string;
+}
+
+export interface AgentActionTraceTerminalState {
+  readonly acceptedAtMs?: number;
+  readonly error?: unknown;
+  readonly outcome: InstrumentationActionOutcome;
+  readonly usage?: InstrumentationUsage;
 }
 
 /** Provider-owned serializable storage for durable agent trace state. */
@@ -58,6 +79,14 @@ export interface AgentTraceStateStore {
     sessionId: string,
     callId: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
+  findActions(
+    sessionId: string,
+  ): readonly AgentActionTraceState[] | PromiseLike<readonly AgentActionTraceState[]>;
+  findChildActions(
+    sessionId: string,
+    turnId: string,
+    parentActionCallId: string,
+  ): readonly AgentActionTraceState[] | PromiseLike<readonly AgentActionTraceState[]>;
   getAction(
     idempotencyKey: string,
   ): AgentActionTraceState | undefined | PromiseLike<AgentActionTraceState | undefined>;
@@ -108,6 +137,23 @@ export class InMemoryAgentTraceStateStore implements AgentTraceStateStore {
   findAction(sessionId: string, callId: string): AgentActionTraceState | undefined {
     return [...this.#actions.values()].find(
       (state) => state.sessionId === sessionId && state.callId === callId,
+    );
+  }
+
+  findActions(sessionId: string): readonly AgentActionTraceState[] {
+    return [...this.#actions.values()].filter((state) => state.sessionId === sessionId);
+  }
+
+  findChildActions(
+    sessionId: string,
+    turnId: string,
+    parentActionCallId: string,
+  ): readonly AgentActionTraceState[] {
+    return [...this.#actions.values()].filter(
+      (state) =>
+        state.sessionId === sessionId &&
+        state.turnId === turnId &&
+        state.parentActionCallId === parentActionCallId,
     );
   }
 

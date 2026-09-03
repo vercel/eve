@@ -11,6 +11,9 @@ import {
   SESSION_INBOX_WIRE_VERSION,
   SESSION_INBOX_WIRE_VERSION_METADATA_KEY,
 } from "#execution/wire/session-inbox-contract.js";
+import { ACCEPTED_TRACE_COORDINATES_METADATA_KEY } from "#execution/session-operation-metadata.js";
+import type { TraceCoordinates } from "#protocol/agent-invocation-trace.js";
+
 /**
  * Payloads accepted by a session driver's stable and channel aliases.
  *
@@ -85,7 +88,11 @@ export interface SessionCommandInboxHandle extends SessionCommandInbox {
  * only the channel alias. Reads already committed to a retired alias remain in
  * the multiplexed queue and are consumed exactly once.
  */
-export function createSessionCommandInbox(): SessionCommandInboxHandle {
+export function createSessionCommandInbox(
+  input: {
+    readonly acceptedTraceCoordinates?: TraceCoordinates;
+  } = {},
+): SessionCommandInboxHandle {
   let stable: SessionCommandHookState | undefined;
   let continuation: SessionCommandHookState | undefined;
   let authorization: SessionCommandHookState | undefined;
@@ -130,13 +137,18 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     if (state.resolved !== undefined) enqueue(state.resolved);
   };
 
-  const createState = (token: string): SessionCommandHookState => {
+  const createState = (token: string, includeAcceptedTrace: boolean): SessionCommandHookState => {
     // Stamp the consumer's wire capability so producers can select an encoder
     // pre-resume. Hooks created before this stamp carry no wire marker:
     // markerless means the consumer predates the capability and accepts a
     // legacy shape.
     const hook = createHook<SessionInboxPayload>({
       metadata: {
+        ...(!includeAcceptedTrace || input.acceptedTraceCoordinates === undefined
+          ? {}
+          : {
+              [ACCEPTED_TRACE_COORDINATES_METADATA_KEY]: input.acceptedTraceCoordinates,
+            }),
         [SESSION_INBOX_WIRE_VERSION_METADATA_KEY]: SESSION_INBOX_WIRE_VERSION,
       },
       token,
@@ -197,7 +209,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
         throw new Error("A session command inbox cannot change its authorization token.");
       }
 
-      const candidate = createState(token);
+      const candidate = createState(token, false);
       await claimHookOwnership(candidate.hook);
       // Stays disabled until the driver opens the authorization window;
       // resolved reads stash on the state and enqueue when it opens.
@@ -210,7 +222,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
         throw new Error("A session command inbox cannot change its stable token.");
       }
 
-      const candidate = createState(token);
+      const candidate = createState(token, false);
       await claimHookOwnership(candidate.hook);
       enable(candidate);
       stable = candidate;
@@ -296,7 +308,7 @@ export function createSessionCommandInbox(): SessionCommandInboxHandle {
     async rekeyContinuation(token: string): Promise<void> {
       if (!token || continuation?.hook.token === token) return;
 
-      const candidate = createState(token);
+      const candidate = createState(token, true);
       if (continuation === undefined) {
         await claimHookOwnership(candidate.hook);
         enable(candidate);

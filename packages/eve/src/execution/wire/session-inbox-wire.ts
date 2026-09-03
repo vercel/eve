@@ -43,11 +43,21 @@ export { SessionInboxWireError } from "#execution/wire/session-inbox-contract.js
 /** Prefixes migration and contract failures alike, so messages read as one voice. */
 const WIRE_LABEL = "session inbox payload";
 
+const sessionInboxWireV4Migration: VersionMigration = {
+  from: 4,
+  migrate(prior) {
+    if (!isObject(prior)) throw new Error("session inbox wire v4 value is not an object.");
+    return { ...prior, version: 5 };
+  },
+  to: 5,
+};
+
 const sessionInboxMigrations: readonly VersionMigration[] = [
   sessionInboxWireV0Migration,
   sessionInboxWireV1Migration,
   sessionInboxWireV2Migration,
   sessionInboxWireV3Migration,
+  sessionInboxWireV4Migration,
 ];
 
 /**
@@ -74,6 +84,9 @@ function decode(value: unknown): DecodedSessionInbox {
     throw new SessionInboxWireError(
       `${WIRE_LABEL} does not match wire version ${declaredVersion}.`,
     );
+  }
+  if (declaredVersion === 4 && containsV5ActionIdentity(normalized)) {
+    throw new SessionInboxWireError(`${WIRE_LABEL} does not match wire version 4.`);
   }
   let migrated: unknown;
   try {
@@ -105,6 +118,24 @@ function decode(value: unknown): DecodedSessionInbox {
     );
   }
   return normalizeWire(wire as SessionInboxWire);
+}
+
+function containsV5ActionIdentity(value: unknown): boolean {
+  if (!isObject(value) || value.kind !== "deliver") return false;
+  const payloads = Array.isArray(value.payloads) ? value.payloads : [];
+  return payloads.some((payload) => {
+    if (!isObject(payload) || !isObject(payload.task)) return false;
+    const requests = payload.task.agentRequests;
+    return (
+      Array.isArray(requests) &&
+      requests.some(
+        (request) =>
+          isObject(request) &&
+          (Object.hasOwn(request, "actionCallId") ||
+            (isObject(request.request) && Object.hasOwn(request.request, "instrumentationCallId"))),
+      )
+    );
+  });
 }
 
 /** Workflow-safe consumer facade. */

@@ -40,6 +40,8 @@ export interface AgentInput {
  */
 export interface AgentInvocationRequest {
   readonly input: InternalAgentInput;
+  /** Outer runtime action that owns instrumentation for this nested invocation. */
+  readonly instrumentationCallId?: string;
   readonly invocationId: string;
   readonly kind: "agent-invoke";
 }
@@ -112,7 +114,12 @@ export async function invokeAgent(
     await resumeHookStep(owner.request, {
       from: run,
       replyTo: replies.token,
-      request: { input, invocationId: options.invocationId, kind: "agent-invoke" },
+      request: {
+        input,
+        instrumentationCallId: ctx.callId,
+        invocationId: options.invocationId,
+        kind: "agent-invoke",
+      },
     });
 
     const iterator = replies[Symbol.asyncIterator]();

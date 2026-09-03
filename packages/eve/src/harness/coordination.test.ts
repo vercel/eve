@@ -24,6 +24,7 @@ import type { UnstampedMessageStreamEvent } from "#protocol/message.js";
 
 const CHILD_SESSION_ID = "local-child-123456789012";
 const CHILD_CONTINUATION_TOKEN = "subagent:private-token";
+const CHILD_TRACE_ID = "a".repeat(32);
 const ZERO_USAGE = {
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
@@ -216,7 +217,7 @@ describe("coordination batch identity", () => {
 });
 
 /** Parked session whose call-1 child is owned by a running agent handle. */
-function createSessionWithRunningChild(): HarnessSession {
+function createSessionWithRunningChild(traceId?: string): HarnessSession {
   const prepared = prepareAgentStart(createParkedSession(), {
     identity: {
       id: deriveAgentId("researcher", OPERATION_ID),
@@ -236,12 +237,43 @@ function createSessionWithRunningChild(): HarnessSession {
       continuationToken: CHILD_CONTINUATION_TOKEN,
       kind: "agent/local",
       sessionId: CHILD_SESSION_ID,
+      traceId,
     },
     operationId: OPERATION_ID,
   });
 }
 
 describe("resolvePendingCoordination", () => {
+  it("keeps child trace coordinates out of public action results", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    await resolvePendingCoordination({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session: createSessionWithRunningChild(CHILD_TRACE_ID),
+      stepInput: {
+        runtimeActionResults: [successfulChildResult("call-1", "first answer")],
+      },
+    });
+    const actionResult = events.find((event) => event.type === "action.result");
+    expect(actionResult?.data.result).not.toHaveProperty("childTraceId");
+  });
+
+  it("does not invent a child trace id for a legacy handle", async () => {
+    const events: UnstampedMessageStreamEvent[] = [];
+    await resolvePendingCoordination({
+      emit: async (event) => {
+        events.push(event);
+      },
+      session: createSessionWithRunningChild(),
+      stepInput: {
+        runtimeActionResults: [successfulChildResult("call-1", "answer")],
+      },
+    });
+
+    const actionResult = events.find((event) => event.type === "action.result");
+    expect(actionResult?.data.result).not.toHaveProperty("childTraceId");
+  });
   it("marks a working task receipt as backgrounded on subagent.completed", async () => {
     const events: UnstampedMessageStreamEvent[] = [];
     const taskId = "task_0123456789abcdef";
@@ -818,6 +850,21 @@ describe("resolvePendingCoordination", () => {
     });
   });
 });
+
+function successfulChildResult(callId: string, output: string) {
+  return {
+    callId,
+    kind: "subagent-result" as const,
+    origin: "child" as const,
+    outcome: {
+      kind: "parked" as const,
+      result: { kind: "succeeded" as const, output },
+      usageDelta: ZERO_USAGE,
+    },
+    output,
+    subagentName: "researcher",
+  };
+}
 
 describe("result-to-handle binding", () => {
   const boundResult = {

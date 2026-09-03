@@ -21,6 +21,8 @@ import type {
   SessionCommand,
   SessionCommandResult,
 } from "#channel/types.js";
+import { readInternalTraceSeed, type InternalRunInput } from "#execution/internal-run-input.js";
+import { attachAcceptedTraceCoordinates } from "#channel/session-trace-state.js";
 import { ActivityObserverKey } from "#context/keys.js";
 import { serializeContext } from "#context/serialize.js";
 import {
@@ -42,6 +44,7 @@ import {
   type WorkflowMetadata,
 } from "#internal/workflow/runtime.js";
 import type { MessageStreamEvent } from "#protocol/message.js";
+import { traceCoordinatesEqual, type TraceCoordinates } from "#protocol/agent-invocation-trace.js";
 import {
   normalizePersistedMessageStreamEvent,
   type MessageStreamEventForVersion,
@@ -66,6 +69,7 @@ import { buildInvocationAttributes } from "#internal/invocation/metadata.js";
 import { isAgentTraceContext } from "#tracing/agent-trace-context.js";
 import { sessionCommandHookToken } from "#execution/session-command-token.js";
 import { resumeSessionInbox } from "#execution/wire/session-inbox-resume.js";
+import { readAcceptedTraceCoordinatesMetadata } from "#execution/session-operation-metadata.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
 import { initializeSessionInstrumentation } from "#instrumentation/runtime.js";
 import {
@@ -85,6 +89,7 @@ const STABLE_ID_BASE = EVE_PACKAGE_INFO.name;
 const log = createLogger("execution.workflow-runtime");
 
 interface WorkflowHookRecord {
+  readonly acceptedTraceCoordinates?: TraceCoordinates;
   readonly runId: string;
 }
 
@@ -143,16 +148,18 @@ export function createWorkflowRuntime(config: {
         compiledArtifactsSource: config.compiledArtifactsSource,
         nodeId: config.nodeId,
       });
+      const internalInput = input as InternalRunInput;
       const ctx = buildRunContext({
         bundle,
         dynamicSubagentAgentConfig: config.dynamicSubagentAgentConfig,
-        run: input,
+        run: internalInput,
       });
       const effectiveAgent = resolveEffectiveAgentRuntime(bundle, ctx);
       initializeSessionInstrumentation({
         agentName: effectiveAgent.turnAgent.id,
         ctx,
         parentTraceContext: input.parentTraceContext,
+        traceSeed: readInternalTraceSeed(input),
       });
       const sessionTimeoutMs = effectiveAgent.limits?.sessionTimeoutMs;
       let collectorRunId: string | undefined;
@@ -208,6 +215,9 @@ export function createWorkflowRuntime(config: {
       };
       const taskId = input.taskId ?? input.callback?.taskId;
       if (taskId !== undefined) workflowInput.taskId = taskId;
+      if (internalInput.acceptedTraceCoordinates !== undefined) {
+        workflowInput.acceptedTraceCoordinates = internalInput.acceptedTraceCoordinates;
+      }
       if (collectorRunId !== undefined) {
         workflowInput.activityCollectorRunId = collectorRunId;
       }
@@ -252,21 +262,42 @@ export function createWorkflowRuntime(config: {
         throw error;
       }
 
+      let acceptedSessionId = run.runId;
+      let acceptedTraceCoordinates = internalInput.acceptedTraceCoordinates;
+      if (
+        internalInput.acceptedTraceCoordinates !== undefined &&
+        input.continuationToken !== undefined
+      ) {
+        const owner = await waitForCommandHookOwner(input.continuationToken);
+        acceptedSessionId = owner.runId;
+        acceptedTraceCoordinates =
+          owner.acceptedTraceCoordinates !== undefined &&
+          traceCoordinatesEqual(
+            internalInput.acceptedTraceCoordinates,
+            owner.acceptedTraceCoordinates,
+          )
+            ? owner.acceptedTraceCoordinates
+            : undefined;
+      }
+
       let events: ReadableStream<MessageStreamEvent> | undefined;
       const getEvents = () => {
         events ??= parseNdjsonStream<MessageStreamEvent>(
-          () => getRun(run.runId).getReadable(),
+          () => getRun(acceptedSessionId).getReadable(),
           normalizePersistedEvent,
         );
         return events;
       };
 
-      return {
-        get events() {
-          return getEvents();
+      return attachAcceptedTraceCoordinates(
+        {
+          get events() {
+            return getEvents();
+          },
+          sessionId: acceptedSessionId,
         },
-        sessionId: run.runId,
-      };
+        acceptedTraceCoordinates,
+      );
     },
 
     async dispatchContinuation<TCommand extends SessionCommand>(
@@ -306,7 +337,10 @@ export function createWorkflowRuntime(config: {
     ): Promise<{ sessionId: string } | undefined> {
       try {
         const hook = await getHookByToken(continuationToken);
-        return { sessionId: hook.runId };
+        return attachAcceptedTraceCoordinates(
+          { sessionId: hook.runId },
+          readAcceptedTraceCoordinatesMetadata(hook),
+        );
       } catch (error) {
         if (HookNotFoundError.is(error)) {
           return undefined;
@@ -517,6 +551,7 @@ function normalizeWorkflowHook(value: unknown): WorkflowHookRecord {
   }
 
   return {
+    acceptedTraceCoordinates: readAcceptedTraceCoordinatesMetadata(value),
     runId,
   };
 }

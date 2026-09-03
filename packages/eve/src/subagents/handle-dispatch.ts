@@ -64,6 +64,8 @@ export type DispatchOutcome =
       readonly toolName: string;
     }
   | {
+      /** Trace already acknowledged by the addressed child before delivery failed. */
+      readonly childTraceId?: string | undefined;
       readonly deliveryAmbiguous?: boolean;
       readonly deliveryPermanent?: boolean;
       readonly kind: "error";
@@ -116,6 +118,7 @@ async function dispatchToAgentAddress(input: {
       subagentName: handle.identity.name,
     });
     return {
+      childTraceId: handle.address.traceId,
       deliveryAmbiguous: delivery.error.deliveryAmbiguous,
       deliveryPermanent: permanent,
       kind: "error",

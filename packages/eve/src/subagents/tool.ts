@@ -3,7 +3,6 @@ import { formatSubagentInput, normalizeRequestedOutputSchema } from "#subagents/
 import type {
   ActivityObserverConfig,
   ChannelInstrumentationProjection,
-  RunInput,
   RunSessionLimits,
   SessionAuthContext,
   SessionCapabilities,
@@ -14,6 +13,8 @@ import type { RuntimeSubagentDispatchRequest } from "#shared/action-types.js";
 import { mintSubagentContinuationToken } from "#execution/session.js";
 import { resolveRemainingSessionTokenLimits } from "#subagents/token-budget.js";
 import type { JsonObject } from "#shared/json.js";
+import { buildAgentInvocationParent } from "#protocol/agent-invocation-trace.js";
+import type { InternalRunInput } from "#execution/internal-run-input.js";
 
 /**
  * Pending task batch event metadata needed for child run lineage.
@@ -43,7 +44,7 @@ export type SubagentInputSource =
  */
 export interface SubagentRunInputBuild {
   readonly childContinuationToken: string;
-  readonly runInput: RunInput;
+  readonly runInput: InternalRunInput;
 }
 
 /**
@@ -84,7 +85,7 @@ export function buildSubagentRunInput(input: {
    * under their own deployment's limits and are not counted.
    */
   readonly fanoutSize?: number;
-  readonly initiatorAuth: SessionAuthContext | null;
+  readonly initiatorAuth?: SessionAuthContext | null;
   /**
    * Runtime graph used to detect whether this declared child selected the
    * dispatching parent's sandbox. Absence means no inheritance.
@@ -95,23 +96,16 @@ export function buildSubagentRunInput(input: {
   readonly selfAgent: boolean;
   /** Hook token owned by the workflow currently waiting for this child. */
   readonly parentContinuationToken?: string;
+  readonly parentCallId?: string;
   readonly parentTraceContext?: SessionTraceContext;
+  readonly traceSeed?: SessionTraceContext;
   readonly activityObserver?: ActivityObserverConfig;
   readonly session: HarnessSession;
   readonly source: SubagentInputSource;
   /** Owning task when this child starts from a background workflow tool. */
   readonly taskId?: string;
 }): SubagentRunInputBuild {
-  const {
-    action,
-    auth,
-    batchEvent,
-    capabilities,
-    channelMetadata,
-    initiatorAuth,
-    session,
-    source,
-  } = input;
+  const { action, auth, batchEvent, capabilities, channelMetadata, session, source } = input;
 
   const childContinuationToken = mintSubagentContinuationToken(
     `${session.sessionId}:${action.callId}`,
@@ -136,6 +130,7 @@ export function buildSubagentRunInput(input: {
     subagentName: action.subagentName,
   };
   if (input.taskId !== undefined) adapterState.taskId = input.taskId;
+  if (input.traceSeed !== undefined) adapterState.traceId = input.traceSeed.traceId;
   const sharesSandbox =
     input.graph?.nodesByNodeId.get(action.nodeId)?.sandboxRegistry.sandbox?.definition
       .inheritsParent === true || input.selfAgent;
@@ -147,7 +142,7 @@ export function buildSubagentRunInput(input: {
   }
 
   const runInput: {
-    -readonly [K in keyof RunInput]: RunInput[K];
+    -readonly [K in keyof InternalRunInput]: InternalRunInput[K];
   } = {
     adapter: {
       kind: SUBAGENT_ADAPTER_KIND,
@@ -157,7 +152,6 @@ export function buildSubagentRunInput(input: {
     capabilities,
     channelMetadata,
     continuationToken: childContinuationToken,
-    initiatorAuth,
     input: {
       message: formatSubagentCallInputMessage({
         action,
@@ -167,19 +161,26 @@ export function buildSubagentRunInput(input: {
     },
     limits: inheritedLimits,
     mode: "conversation",
-    parent: {
-      callId: action.callId,
+    parent: buildAgentInvocationParent({
+      callId: input.parentCallId ?? action.callId,
       rootSessionId,
       sessionId: session.sessionId,
-      turn: {
-        id: batchEvent.turnId,
-        sequence: batchEvent.sequence,
-      },
-    },
+      turnId: batchEvent.turnId,
+      turnSequence: batchEvent.sequence,
+    }),
     parentTraceContext: input.parentTraceContext,
+    traceSeed: input.traceSeed,
     activityObserver: input.activityObserver,
   };
   if (input.taskId !== undefined) runInput.taskId = input.taskId;
+  if (input.initiatorAuth !== undefined) runInput.initiatorAuth = input.initiatorAuth;
+  if (input.traceSeed !== undefined) {
+    runInput.acceptedTraceCoordinates = {
+      spanId: input.traceSeed.spanId,
+      traceFlags: input.traceSeed.traceFlags,
+      traceId: input.traceSeed.traceId,
+    };
+  }
 
   return { childContinuationToken, runInput };
 }

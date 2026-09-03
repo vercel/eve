@@ -9,6 +9,7 @@ import type { TaskAgentRequestDelivery } from "#tasks/types.js";
 
 export interface AgentRequestDelivery {
   readonly accumulateUsage?: boolean;
+  readonly actionCallId?: string;
   readonly ownerId: string;
   readonly replyTo: TaskAgentRequestDelivery["replyTo"];
   readonly request: TaskAgentRequestDelivery["request"];
@@ -42,13 +43,15 @@ export async function applyTaskAgentRequest(
         accumulateUsage: delivery.accumulateUsage,
         ownerId: delivery.ownerId,
         result: request.result,
+        serializedContext: ctx.serializedContext,
         sessionState: ctx.sessionState,
         taskId: delivery.taskId,
       });
-      return { serializedContext: ctx.serializedContext, sessionState: settled.sessionState };
+      return settled;
     }
     case "agent-invoke": {
       const dispatched = await dispatchTaskAgentInvocationStep({
+        actionCallId: delivery.actionCallId,
         ownerId: delivery.ownerId,
         replyTo: delivery.replyTo,
         request,
@@ -61,7 +64,7 @@ export async function applyTaskAgentRequest(
           const emitted = await emitTaskSubagentCalledStep({
             event: dispatched.event,
             parentWritable: ctx.parentWritable,
-            serializedContext: ctx.serializedContext,
+            serializedContext: dispatched.serializedContext,
           });
           return {
             serializedContext: emitted.serializedContext,
@@ -74,7 +77,7 @@ export async function applyTaskAgentRequest(
             results: [dispatched.result],
           });
           return {
-            serializedContext: ctx.serializedContext,
+            serializedContext: dispatched.serializedContext,
             sessionState: dispatched.sessionState,
           };
         case "not-admitted":

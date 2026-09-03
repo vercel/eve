@@ -35,7 +35,9 @@ import {
   type InstrumentationEvent,
   type InstrumentationHooks,
   type InstrumentationParentLineage,
+  type InstrumentationPrincipalSummary,
   type InstrumentationTraceContext,
+  type InstrumentationTraceSeed,
   type InstrumentationUsage,
 } from "#instrumentation/lifecycle.js";
 import type { ChannelAudience } from "#shared/channel-audience.js";
@@ -62,6 +64,7 @@ interface TestRuntime {
     ReturnType<typeof createAgentOtelInstrumentation>["hook"]["projectEvent"]
   >;
   readonly runInContext: InstrumentationContextRunner;
+  readonly stateStore: AgentTraceStateStore;
   readonly tracer: ReturnType<BasicTracerProvider["getTracer"]>;
 }
 
@@ -105,12 +108,14 @@ function createRuntime(
     projectEvent: agentOtel.hook.projectEvent!,
     provider,
     runInContext: agentOtel.runInContext,
+    stateStore,
     tracer,
   };
 }
 
 async function emitAttempt(input: {
   readonly actionUsage?: InstrumentationUsage;
+  readonly childTraceId?: string;
   readonly attemptIndex?: number;
   readonly attemptError?: Error;
   readonly channelAudience?: ChannelAudience;
@@ -122,6 +127,7 @@ async function emitAttempt(input: {
   readonly actionKind?: InstrumentationActionKind;
   readonly runtimeContext?: Readonly<Record<string, unknown>>;
   readonly sessionId: string;
+  readonly stateStore?: AgentTraceStateStore;
   readonly skipModelTerminal?: boolean;
   readonly skipToolTerminal?: boolean;
   readonly toolError?: Error;
@@ -219,6 +225,12 @@ async function emitAttempt(input: {
     scope,
     type: "action.started",
   });
+  if (input.childTraceId !== undefined && input.stateStore !== undefined) {
+    const action = await input.stateStore.getAction(actionKey);
+    if (action !== undefined) {
+      await input.stateStore.setAction(actionKey, { ...action, childTraceId: input.childTraceId });
+    }
+  }
   await Reflect.apply(bridge.onToolExecutionStart!, bridge, [
     {
       callId: "call-1",
@@ -304,12 +316,15 @@ async function emitAttempt(input: {
 async function publishTurnStarted(input: {
   readonly channelAudience?: ChannelAudience;
   readonly hooks: InstrumentationHooks;
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId?: string;
   readonly sessionId: string;
   readonly turnId: string;
   readonly turnSequence: number;
+  readonly traceSeed?: InstrumentationTraceSeed;
 }): Promise<void> {
   const rootSessionId = input.rootSessionId ?? input.sessionId;
   await input.hooks.publish({
@@ -318,12 +333,16 @@ async function publishTurnStarted(input: {
     channelKind: "http",
     idempotencyKey: sessionIdempotencyKey(input.sessionId),
     parentTraceContext: input.parentTraceContext,
+    parentLineage: input.parentLineage,
     rootSessionId,
     sessionId: input.sessionId,
+    traceSeed: input.traceSeed,
     type: "session.started",
   });
   await input.hooks.publish({
     idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
+    currentPrincipal: input.currentPrincipal,
+    initiatorPrincipal: input.initiatorPrincipal,
     parentLineage: input.parentLineage,
     parentTraceContext: input.parentTraceContext,
     rootSessionId,
@@ -427,6 +446,150 @@ describe("createAgentOtelInstrumentation", () => {
     const session = byName(spans, "agent.session")[0]!;
     expect(session.spanContext().traceId).toBe(seed.traceId);
     expect(session.spanContext().spanId).toBe(seed.spanId);
+  });
+
+  it("roots a delegated session in its preallocated trace and links the parent dispatch", async () => {
+    const runtime = createRuntime();
+    const parent = {
+      spanId: "c".repeat(16),
+      traceFlags: 1,
+      traceId: "d".repeat(32),
+    };
+    const seed = {
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+    const parentLineage = {
+      callId: "call-child",
+      sessionId: "parent-session",
+      subagentName: "researcher",
+      turnId: "parent-turn",
+    };
+
+    await publishTurnStarted({
+      currentPrincipal: { fingerprint: "current-fingerprint", type: "user" },
+      hooks: runtime.hooks,
+      initiatorPrincipal: { type: "none" },
+      parentLineage,
+      parentTraceContext: parent,
+      rootSessionId: "root-session",
+      sessionId: "child-session",
+      traceSeed: seed,
+      turnId: "child-turn",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, "child-session", "child-turn");
+    await runtime.provider.forceFlush();
+
+    const session = byName(runtime.exporter.getFinishedSpans(), "agent.session")[0]!;
+    const invocation = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
+    expect(session.spanContext()).toMatchObject(seed);
+    expect(session.parentSpanContext).toBeUndefined();
+    expect(session.links).toEqual([
+      expect.objectContaining({
+        attributes: { "eve.link.type": "agent.dispatch" },
+        context: expect.objectContaining(parent),
+      }),
+    ]);
+    expect(session.attributes).toMatchObject({
+      "agent.session.kind": "delegated",
+      "agent.trace.schema.version": 4,
+    });
+    expect(invocation.spanContext().traceId).toBe(seed.traceId);
+    expect(invocation.parentSpanContext?.spanId).toBe(seed.spanId);
+    expect(invocation.attributes).toMatchObject({
+      "agent.invocation.role": "execution",
+      "agent.parent_call.id": "call-child",
+      "agent.parent_run.id": "parent-session",
+      "agent.principal.current.fingerprint": "current-fingerprint",
+      "agent.principal.current.type": "user",
+      "agent.principal.initiator.type": "none",
+      "agent.root_run.id": "root-session",
+      "agent.session.kind": "delegated",
+      "agent.trace.schema.version": 4,
+      "gen_ai.agent.name": "weather",
+      "gen_ai.conversation.id": "child-session",
+      "gen_ai.operation.name": "invoke_agent",
+    });
+    expect(invocation.attributes).not.toHaveProperty("agent.principal.initiator.fingerprint");
+  });
+
+  it("keeps explicit lineage but omits a dispatch link when no action span exists", async () => {
+    const runtime = createRuntime();
+    const seed = {
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentLineage: {
+        callId: "call-child",
+        sessionId: "parent-session",
+        subagentName: "researcher",
+        turnId: "parent-turn",
+      },
+      rootSessionId: "root-session",
+      sessionId: "child-session",
+      traceSeed: seed,
+      turnId: "child-turn",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, "child-session", "child-turn");
+    await runtime.provider.forceFlush();
+
+    const session = byName(runtime.exporter.getFinishedSpans(), "agent.session")[0]!;
+    const invocation = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
+    expect(session.links).toEqual([]);
+    expect(invocation.attributes).toMatchObject({
+      "agent.parent_call.id": "call-child",
+      "agent.parent_run.id": "parent-session",
+      "agent.root_run.id": "root-session",
+    });
+  });
+
+  it("keeps continuation turns in the existing session trace", async () => {
+    const runtime = createRuntime();
+    const seed = {
+      spanId: "a".repeat(16),
+      traceFlags: 1,
+      traceId: "b".repeat(32),
+    };
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: "continued-session",
+      traceSeed: seed,
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await completeTurn(runtime.hooks, "continued-session", "turn-1");
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      parentLineage: {
+        callId: "follow-up-call",
+        sessionId: "parent-session",
+        turnId: "parent-turn-2",
+      },
+      sessionId: "continued-session",
+      traceSeed: seed,
+      turnId: "turn-2",
+      turnSequence: 1,
+    });
+    await completeTurn(runtime.hooks, "continued-session", "turn-2");
+    await runtime.provider.forceFlush();
+
+    const sessions = byName(runtime.exporter.getFinishedSpans(), "agent.session");
+    const turns = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather");
+    expect(sessions).toHaveLength(1);
+    expect(turns).toHaveLength(2);
+    expect(new Set(turns.map((turn) => turn.spanContext().traceId))).toEqual(
+      new Set([seed.traceId]),
+    );
+    expect(turns[1]!.attributes["agent.parent_call.id"]).toBe("follow-up-call");
+    expect(turns[0]!.attributes["agent.session.kind"]).toBe("root");
+    expect(turns[1]!.attributes["agent.session.kind"]).toBe("delegated");
   });
 
   it("falls back to fresh ids when no trace seed is present", async () => {
@@ -783,7 +946,8 @@ describe("createAgentOtelInstrumentation", () => {
     expect(session.attributes).toMatchObject({
       "agent.channel.audience": "public",
       "agent.session.id": "session-1",
-      "agent.trace.schema.version": 3,
+      "agent.session.kind": "root",
+      "agent.trace.schema.version": 4,
     });
     expect(turn.parentSpanContext?.spanId).toBe(session.spanContext().spanId);
     expect(step.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
@@ -819,6 +983,9 @@ describe("createAgentOtelInstrumentation", () => {
     expect(turn.kind).toBe(SpanKind.INTERNAL);
     expect(turn.attributes).toMatchObject({
       "agent.name": "weather",
+      "agent.invocation.role": "execution",
+      "agent.session.kind": "root",
+      "agent.trace.schema.version": 4,
       "gen_ai.agent.name": "weather",
       "gen_ai.conversation.id": "session-1",
       "gen_ai.operation.name": "invoke_agent",
@@ -849,6 +1016,259 @@ describe("createAgentOtelInstrumentation", () => {
       "gen_ai.tool.type": "function",
     });
     expect(tool.attributes).not.toHaveProperty("gen_ai.agent.name");
+  });
+
+  it("records only the child trace id supplied by the settled child", async () => {
+    const runtime = createRuntime();
+    const childTraceId = "f".repeat(32);
+    await emitAttempt({
+      actionKind: "subagent-call",
+      childTraceId,
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      stateStore: runtime.stateStore,
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const action = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather").find(
+      (span) => span.attributes["agent.invocation.role"] === "caller",
+    )!;
+    expect(action.attributes["agent.child.trace.id"]).toBe(childTraceId);
+    expect(byName(runtime.exporter.getFinishedSpans(), "execute_tool weather")).toHaveLength(0);
+  });
+
+  it("preserves the confirmed child trace id when the caller action fails", async () => {
+    const runtime = createRuntime();
+    const childTraceId = "e".repeat(32);
+    await emitAttempt({
+      actionKind: "subagent-call",
+      childTraceId,
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-failed-child",
+      stateStore: runtime.stateStore,
+      toolError: new Error("child failed"),
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const action = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather").find(
+      (span) => span.attributes["agent.invocation.role"] === "caller",
+    )!;
+    expect(action.attributes["agent.child.trace.id"]).toBe(childTraceId);
+    expect(action.status.code).toBe(SpanStatusCode.ERROR);
+  });
+
+  it("preserves the confirmed child trace id when the attempt fails before action settlement", async () => {
+    const runtime = createRuntime();
+    const childTraceId = "d".repeat(32);
+    await emitAttempt({
+      actionKind: "subagent-call",
+      attemptError: new Error("attempt interrupted"),
+      childTraceId,
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-failed-attempt",
+      skipToolTerminal: true,
+      stateStore: runtime.stateStore,
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const action = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather").find(
+      (span) => span.attributes["agent.invocation.role"] === "caller",
+    )!;
+    expect(action.attributes["agent.child.trace.id"]).toBe(childTraceId);
+    expect(action.status.code).toBe(SpanStatusCode.ERROR);
+  });
+
+  it("emits independent nested callers beneath an ordinary workflow tool action", async () => {
+    const runtime = createRuntime();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-nested:turn-1:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "session-nested",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: scope.sessionId,
+      turnId: scope.turnId,
+      turnSequence: 0,
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: attemptIdempotencyKey(scope),
+      operation: { modelId: "model", operationId: "ai.streamText", provider: "test" },
+      scope,
+      type: "step.attempt.started",
+    });
+    const outerKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1");
+    await runtime.hooks.publish({
+      callId: "tool-1",
+      idempotencyKey: outerKey,
+      input: {},
+      kind: "tool-call",
+      name: "coordinate",
+      scope,
+      type: "action.started",
+    });
+    const outer = await runtime.stateStore.getAction(outerKey);
+    if (outer === undefined) throw new Error("Expected outer action trace state.");
+    await runtime.stateStore.setAction(
+      actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1:first"),
+      {
+        ...outer,
+        callId: "tool-1:first",
+        childTraceId: "a".repeat(32),
+        kind: "subagent-call",
+        name: "research",
+        parent: { ...outer.parent, spanId: outer.spanId },
+        parentActionCallId: outer.callId,
+        spanId: "b".repeat(16),
+        terminal: { outcome: "completed", usage: { inputTokens: 3, outputTokens: 2 } },
+      },
+    );
+    await runtime.stateStore.setAction(
+      actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1:second"),
+      {
+        ...outer,
+        callId: "tool-1:second",
+        childTraceId: "c".repeat(32),
+        kind: "remote-agent-call",
+        name: "review",
+        parent: { ...outer.parent, spanId: outer.spanId },
+        parentActionCallId: outer.callId,
+        spanId: "d".repeat(16),
+        terminal: { error: new Error("review failed"), outcome: "failed" },
+      },
+    );
+    await runtime.hooks.publish({
+      idempotencyKey: outerKey,
+      outcome: "completed",
+      output: { output: "done", type: "result" },
+      scope,
+      type: "action.completed",
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const outerSpan = byName(spans, "agent.action")[0]!;
+    const local = byName(spans, "invoke_agent research")[0]!;
+    const remote = byName(spans, "invoke_agent review")[0]!;
+    expect(outerSpan.attributes).toMatchObject({
+      "agent.action.call_id": "tool-1",
+      "agent.action.kind": "tool-call",
+      "agent.action.name": "coordinate",
+    });
+    expect(outerSpan.attributes).not.toHaveProperty("agent.child.trace.id");
+    expect(local.parentSpanContext?.spanId).toBe(outerSpan.spanContext().spanId);
+    expect(local.attributes).toMatchObject({
+      "agent.action.call_id": "tool-1:first",
+      "agent.child.trace.id": "a".repeat(32),
+      "agent.invocation.role": "caller",
+      "gen_ai.agent.name": "research",
+      "gen_ai.operation.name": "invoke_agent",
+      "agent.usage.input_tokens": 3,
+      "agent.usage.output_tokens": 2,
+    });
+    expect(remote.parentSpanContext?.spanId).toBe(outerSpan.spanContext().spanId);
+    expect(remote.kind).toBe(SpanKind.CLIENT);
+    expect(remote.attributes["agent.child.trace.id"]).toBe("c".repeat(32));
+    expect(remote.status.code).toBe(SpanStatusCode.ERROR);
+  });
+
+  it("retains a settled background workflow action until its nested caller settles", async () => {
+    const runtime = createRuntime();
+    const scope: InstrumentationAttemptScope = {
+      attemptId: "session-background:turn-1:0:0",
+      attemptIndex: 0,
+      functionId: "weather",
+      sessionId: "session-background",
+      stepIndex: 0,
+      turnId: "turn-1",
+    };
+    await publishTurnStarted({
+      hooks: runtime.hooks,
+      sessionId: scope.sessionId,
+      turnId: scope.turnId,
+      turnSequence: 0,
+    });
+    const outerKey = actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1");
+    await runtime.hooks.publish({
+      callId: "tool-1",
+      idempotencyKey: outerKey,
+      input: {},
+      isWorkflowTool: true,
+      kind: "tool-call",
+      name: "background_coordinate",
+      scope,
+      type: "action.started",
+    });
+    await runtime.hooks.publish({
+      idempotencyKey: outerKey,
+      outcome: "completed",
+      output: { output: { status: "working", taskId: "task-1" }, type: "result" },
+      scope,
+      type: "action.completed",
+    });
+    const outer = await runtime.stateStore.getAction(outerKey);
+    expect(outer?.emitted).toBe(true);
+    await runtime.stateStore.setAction(
+      actionIdempotencyKey(scope.sessionId, scope.turnId, "tool-1:research"),
+      {
+        ...outer!,
+        callId: "tool-1:research",
+        childTraceId: "e".repeat(32),
+        emitted: undefined,
+        isWorkflowTool: undefined,
+        kind: "subagent-call",
+        name: "research",
+        parent: { ...outer!.parent, spanId: outer!.spanId },
+        parentActionCallId: outer!.callId,
+        spanId: "f".repeat(16),
+        terminal: { outcome: "completed" },
+      },
+    );
+    await runtime.hooks.publish({
+      idempotencyKey: sessionIdempotencyKey(scope.sessionId),
+      sessionId: scope.sessionId,
+      turnId: scope.turnId,
+      type: "session.waiting",
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const outerSpans = byName(spans, "agent.action");
+    const caller = byName(spans, "invoke_agent research")[0]!;
+    expect(outerSpans).toHaveLength(1);
+    expect(caller.parentSpanContext?.spanId).toBe(outerSpans[0]!.spanContext().spanId);
+    expect(caller.attributes["agent.child.trace.id"]).toBe("e".repeat(32));
+    expect(await runtime.stateStore.getAction(outerKey)).toMatchObject({ emitted: true });
+  });
+
+  it("omits a child trace id when settlement has no persisted child coordinate", async () => {
+    const runtime = createRuntime();
+    await emitAttempt({
+      actionKind: "subagent-call",
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-legacy-child",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const action = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather").find(
+      (span) => span.attributes["agent.invocation.role"] === "caller",
+    )!;
+    expect(action.attributes).not.toHaveProperty("agent.child.trace.id");
   });
 
   it.each(["private", "unknown"] as const)(
@@ -1696,7 +2116,7 @@ describe("createAgentOtelInstrumentation", () => {
     }
   });
 
-  it("labels a subagent action by its kind, not as a plain tool", async () => {
+  it("emits a local subagent action as an internal caller invocation", async () => {
     const runtime = createRuntime();
     await emitAttempt({
       actionUsage: {
@@ -1713,19 +2133,97 @@ describe("createAgentOtelInstrumentation", () => {
     });
     await runtime.provider.forceFlush();
 
-    const action = runtime.exporter.getFinishedSpans().find((span) => span.name === "agent.action");
+    const spans = runtime.exporter.getFinishedSpans();
+    const action = spans.find(
+      (span) =>
+        span.name === "invoke_agent weather" &&
+        span.attributes["agent.invocation.role"] === "caller",
+    );
+    expect(action?.kind).toBe(SpanKind.INTERNAL);
     expect(action?.attributes).toMatchObject({
       "agent.action.kind": "subagent-call",
       "agent.action.name": "weather",
       "agent.action.outcome": "completed",
+      "agent.invocation.role": "caller",
       "agent.usage.cache_read_tokens": 3,
       "agent.usage.cache_write_tokens": 4,
       "agent.usage.input_tokens": 10,
       "agent.usage.output_tokens": 5,
+      "gen_ai.agent.name": "weather",
+      "gen_ai.operation.name": "invoke_agent",
     });
     expect(
       Object.keys(action?.attributes ?? {}).some((key) => key.startsWith("gen_ai.usage.")),
     ).toBe(false);
+    expect(byName(spans, "agent.action")).toHaveLength(0);
+    expect(byName(spans, "execute_tool weather")).toHaveLength(0);
+  });
+
+  it("emits a remote-agent action as a client caller invocation", async () => {
+    const runtime = createRuntime();
+    await emitAttempt({
+      actionKind: "remote-agent-call",
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const action = spans.find(
+      (span) =>
+        span.name === "invoke_agent weather" &&
+        span.attributes["agent.invocation.role"] === "caller",
+    );
+    expect(action?.kind).toBe(SpanKind.CLIENT);
+    expect(action?.attributes).toMatchObject({
+      "agent.action.kind": "remote-agent-call",
+      "agent.action.name": "weather",
+      "agent.action.outcome": "completed",
+      "agent.invocation.role": "caller",
+      "gen_ai.agent.name": "weather",
+      "gen_ai.operation.name": "invoke_agent",
+    });
+    expect(byName(spans, "execute_tool weather")).toHaveLength(0);
+  });
+
+  it("retains delegated action outcome and error details on the caller invocation", async () => {
+    const runtime = createRuntime();
+    const error = new Error("child failed");
+    await emitAttempt({
+      actionKind: "subagent-call",
+      hooks: runtime.hooks,
+      runInContext: runtime.runInContext,
+      sessionId: "session-1",
+      toolError: error,
+      turnId: "turn-1",
+      turnSequence: 0,
+    });
+    await runtime.provider.forceFlush();
+
+    const spans = runtime.exporter.getFinishedSpans();
+    const caller = spans.find(
+      (span) =>
+        span.name === "invoke_agent weather" &&
+        span.attributes["agent.invocation.role"] === "caller",
+    )!;
+    expect(caller.status).toEqual({ code: SpanStatusCode.ERROR, message: error.message });
+    expect(caller.attributes).toMatchObject({
+      "agent.action.error.code": "TOOL_CALL_FAILED",
+      "agent.action.kind": "subagent-call",
+      "agent.action.name": "weather",
+      "agent.action.outcome": "failed",
+      "error.type": "TOOL_CALL_FAILED",
+    });
+    expect(caller.events).toContainEqual(
+      expect.objectContaining({
+        attributes: expect.objectContaining({ "exception.message": error.message }),
+        name: "exception",
+      }),
+    );
+    expect(byName(spans, "execute_tool weather")).toHaveLength(0);
   });
 
   it("captures model and tool inputs/outputs on the operation spans", async () => {
@@ -2202,7 +2700,7 @@ describe("createAgentOtelInstrumentation", () => {
     expect(byName(spans, "agent.session")).toHaveLength(1);
   });
 
-  it("preserves a remote action as the parent of a remote child turn", async () => {
+  it("adopts legacy remote parentage without opening a session root", async () => {
     const runtime = createRuntime();
     const parentTraceContext: InstrumentationTraceContext & { readonly isRemote: true } = {
       isRemote: true,
@@ -2224,6 +2722,7 @@ describe("createAgentOtelInstrumentation", () => {
     const childTurn = byName(runtime.exporter.getFinishedSpans(), "invoke_agent weather")[0]!;
     expect(childTurn.spanContext().traceId).toBe(parentTraceContext.traceId);
     expect(childTurn.parentSpanContext).toMatchObject(parentTraceContext);
+    expect(byName(runtime.exporter.getFinishedSpans(), "agent.session")).toHaveLength(0);
   });
 
   it("opens its own root when a child session is handed no parent trace", async () => {

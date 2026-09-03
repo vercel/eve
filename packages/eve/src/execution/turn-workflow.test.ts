@@ -1100,7 +1100,8 @@ describe("turnWorkflow", () => {
         replyTo: "agent-reply",
         request: {
           input: { message: "Find it", target: "research" },
-          invocationId: "call-1",
+          instrumentationCallId: "call-1",
+          invocationId: "call-1:research",
           kind: "agent-invoke",
         },
       },
@@ -1171,8 +1172,14 @@ describe("turnWorkflow", () => {
 
     expect(vi.mocked(applyTaskAgentRequest).mock.calls.map(([delivery]) => delivery)).toEqual([
       expect.objectContaining({
+        actionCallId: "call-1",
         ownerId: "run-1",
-        request: { kind: "agent-invoke", invocationId: "call-1", input: expect.any(Object) },
+        request: {
+          kind: "agent-invoke",
+          instrumentationCallId: "call-1",
+          invocationId: "call-1:research",
+          input: expect.any(Object),
+        },
       }),
       expect.objectContaining({
         ownerId: "run-1",

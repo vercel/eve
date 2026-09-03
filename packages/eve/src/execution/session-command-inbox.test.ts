@@ -4,6 +4,8 @@ import {
   createSessionCommandInbox,
   type SessionInboxPayload,
 } from "#execution/session-command-inbox.js";
+import { SESSION_INBOX_WIRE_VERSION } from "#execution/wire/session-inbox-contract.js";
+import { ACCEPTED_TRACE_COORDINATES_METADATA_KEY } from "#execution/session-operation-metadata.js";
 
 const createHookMock = vi.fn();
 
@@ -123,8 +125,32 @@ describe("createSessionCommandInbox", () => {
     );
     expect(createHookMock).toHaveBeenCalledOnce();
     expect(createHookMock).toHaveBeenCalledWith({
-      metadata: { sessionInboxWireVersion: 4 },
+      metadata: { sessionInboxWireVersion: 5 },
       token: "stable",
+    });
+    await inbox.dispose();
+  });
+
+  it("stamps accepted trace coordinates onto durable session aliases", async () => {
+    const stable = createMockHook({ token: "stable" });
+    const alias = createMockHook({ token: "operation" });
+    installHooks(stable, alias);
+    const acceptedTraceCoordinates = {
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    const inbox = createSessionCommandInbox({ acceptedTraceCoordinates });
+
+    await inbox.claimStable("stable");
+    await inbox.rekeyContinuation("operation");
+
+    expect(createHookMock).toHaveBeenNthCalledWith(2, {
+      metadata: {
+        [ACCEPTED_TRACE_COORDINATES_METADATA_KEY]: acceptedTraceCoordinates,
+        sessionInboxWireVersion: SESSION_INBOX_WIRE_VERSION,
+      },
+      token: "operation",
     });
     await inbox.dispose();
   });

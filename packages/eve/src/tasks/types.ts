@@ -206,6 +206,8 @@ export function taskAuthorizationRequestId(event: SubagentAuthorizationEvent): s
  * apply, forwarded after task admission. `replyTo` is the run's reply hook.
  */
 export interface TaskAgentRequestDelivery {
+  /** Outer action whose workflow body issued this request. */
+  readonly actionCallId?: string;
   readonly replyTo: string;
   readonly request: WorkflowToolAgentRequest;
   readonly taskId: string;

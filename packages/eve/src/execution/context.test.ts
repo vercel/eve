@@ -90,7 +90,7 @@ describe("runStep with sessionProvider", () => {
 
     await runStep(ctx, createStubSession(), async () => {
       const session = loadContext().require(SessionKey);
-      expect(session.auth).toEqual({ current: auth, initiator: auth });
+      expect(session.auth).toEqual({ current: auth, initiator: null });
       expect(session.sessionId).toBe("sess-xyz");
       expect(session.turn.id).toBe("turn_0");
       expect(session.turn.sequence).toBe(0);
@@ -144,6 +144,25 @@ describe("runStep with sessionProvider", () => {
         },
       });
 
+      return { next: null, session: createStubSession() };
+    });
+  });
+
+  it("preserves an explicit null initiator instead of applying the legacy fallback", async () => {
+    const currentAuth: SessionAuthContext = {
+      attributes: {},
+      authenticator: "jwt-hmac",
+      principalId: "user-456",
+      principalType: "user",
+    };
+    const ctx = createSeedContext({ auth: currentAuth });
+    ctx.set(InitiatorAuthKey, null);
+
+    await runStep(ctx, createStubSession(), async () => {
+      expect(loadContext().require(SessionKey).auth).toEqual({
+        current: currentAuth,
+        initiator: null,
+      });
       return { next: null, session: createStubSession() };
     });
   });

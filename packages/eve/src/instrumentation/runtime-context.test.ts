@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContextContainer, contextStorage } from "#context/container.js";
-import { AuthKey, ChannelInstrumentationKey } from "#context/keys.js";
+import { AuthKey, ChannelInstrumentationKey, InitiatorAuthKey } from "#context/keys.js";
 import type { HarnessEmissionState } from "#harness/emission.js";
 import {
   buildTelemetryRuntimeContext,
@@ -238,6 +238,33 @@ describe("buildTelemetryRuntimeContext", () => {
       throw new Error("expected support channel");
     }
     expect(captured.channel.metadata).toMatchObject({ nested: { value: "original" } });
+  });
+
+  it("does not backfill a missing legacy initiator from the current caller", () => {
+    const current = {
+      attributes: {},
+      authenticator: "jwt",
+      principalId: "current-user",
+      principalType: "user",
+    };
+    const captured: Array<InstrumentationStepStartedEventInput["session"]["auth"]> = [];
+    const resolve = (input: InstrumentationStepStartedEventInput) => {
+      captured.push(input.session.auth);
+      return { runtimeContext: {} };
+    };
+    const legacy = new ContextContainer();
+    legacy.set(AuthKey, current);
+    const explicitNull = new ContextContainer();
+    explicitNull.set(AuthKey, current);
+    explicitNull.set(InitiatorAuthKey, null);
+
+    contextStorage.run(legacy, () => build({ stepStartedResolver: resolve }));
+    contextStorage.run(explicitNull, () => build({ stepStartedResolver: resolve }));
+
+    expect(captured).toEqual([
+      { current, initiator: null },
+      { current, initiator: null },
+    ]);
   });
 
   describe("provider runtimeContext resolvers", () => {

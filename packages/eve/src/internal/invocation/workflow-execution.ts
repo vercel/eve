@@ -50,6 +50,7 @@ export class WorkflowAgentInvocationExecution {
         continuationToken,
         ownerKey: invocationOwnerKey(input.auth),
       },
+      initiatorAuth: input.auth,
       input: { message: input.message, outputSchema: input.outputSchema },
       mode: "task",
     });

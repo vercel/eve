@@ -126,6 +126,7 @@ describe("blocking workflow agent continuation", () => {
           output: message,
           subagentName: identity.name,
         },
+        serializedContext: dispatched.serializedContext,
         sessionState: dispatched.sessionState,
       });
       sessionState = settled.sessionState;

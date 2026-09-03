@@ -119,6 +119,7 @@ export class ScheduleDispatcher {
     const handle = await this.runtime.createSession({
       adapter: SCHEDULE_ADAPTER,
       auth: SCHEDULE_APP_AUTH,
+      initiatorAuth: SCHEDULE_APP_AUTH,
       input: { message: markdown },
       mode: "task",
     });

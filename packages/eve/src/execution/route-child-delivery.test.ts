@@ -187,6 +187,7 @@ describe("task HITL delivery routing", () => {
     vi.mocked(dispatchTaskAgentInvocationStep).mockResolvedValue({
       kind: "failed",
       result,
+      serializedContext: {},
       sessionState: nextState,
     });
 

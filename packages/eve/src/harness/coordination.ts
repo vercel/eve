@@ -244,7 +244,6 @@ export async function resolvePendingCoordination(input: {
       session: input.session,
     };
   }
-
   if (input.emit !== undefined) {
     for (const result of readyResults) {
       if (result.kind === "subagent-result" && result.isError !== true) {

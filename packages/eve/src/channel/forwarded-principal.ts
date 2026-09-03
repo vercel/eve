@@ -21,7 +21,7 @@ export const FORWARDED_BY_ATTRIBUTE = "eve:forwarded-by";
  */
 export interface ForwardedPrincipal {
   readonly current: SessionAuthContext;
-  readonly initiator?: SessionAuthContext;
+  readonly initiator?: SessionAuthContext | null;
 }
 
 /**
@@ -56,7 +56,7 @@ export type ResolvedForwardedPrincipal =
   | {
       readonly accepted: true;
       readonly auth: SessionAuthContext;
-      readonly initiatorAuth: SessionAuthContext;
+      readonly initiatorAuth?: SessionAuthContext | null;
     };
 
 const attributeValueSchema = z.union([z.string(), z.array(z.string()).readonly()]);
@@ -80,7 +80,7 @@ const forwardedPrincipalContextSchema = z
 const forwardedPrincipalSchema = z
   .object({
     current: forwardedPrincipalContextSchema,
-    initiator: forwardedPrincipalContextSchema.optional(),
+    initiator: forwardedPrincipalContextSchema.nullable().optional(),
   })
   .strict();
 
@@ -133,11 +133,15 @@ export async function resolveForwardedPrincipal(input: {
   }
 
   const current = stampForwardedBy(parsed.forwardedPrincipal.current, input.forwarder.principalId);
-  const initiator =
-    parsed.forwardedPrincipal.initiator === undefined
-      ? current
-      : stampForwardedBy(parsed.forwardedPrincipal.initiator, input.forwarder.principalId);
-  return { accepted: true, auth: current, initiatorAuth: initiator };
+  if (!("initiator" in parsed.forwardedPrincipal)) return { accepted: true, auth: current };
+  const initiator = parsed.forwardedPrincipal.initiator;
+  if (initiator === undefined) return { accepted: true, auth: current };
+  return {
+    accepted: true,
+    auth: current,
+    initiatorAuth:
+      initiator === null ? null : stampForwardedBy(initiator, input.forwarder.principalId),
+  };
 }
 
 /**
@@ -153,7 +157,11 @@ export function parseForwardedPrincipal(value: unknown): ForwardedPrincipalParse
       forwardedPrincipal:
         parsed.data.initiator === undefined
           ? { current }
-          : { current, initiator: toSessionAuthContext(parsed.data.initiator) },
+          : {
+              current,
+              initiator:
+                parsed.data.initiator === null ? null : toSessionAuthContext(parsed.data.initiator),
+            },
       ok: true,
     };
   }

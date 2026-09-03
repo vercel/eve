@@ -3,6 +3,7 @@ import { contextStorage } from "#context/container.js";
 import type { RuntimeTraceContext } from "#protocol/message.js";
 import type {
   InstrumentationParentLineage,
+  InstrumentationPrincipalSummary,
   InstrumentationSessionStartedEvent,
   InstrumentationTraceSeed,
   InstrumentationTurnStartedEvent,
@@ -26,6 +27,8 @@ export interface PrepareTurnTraceContextInput {
       event: InstrumentationTurnStartedEvent,
     ) => Promise<InstrumentationTraceSeed>;
   };
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceSeed;
   readonly rootSessionId: string;
@@ -49,6 +52,7 @@ export async function prepareTurnTraceContext(
         channelAudience: input.channelAudience,
         channelType: input.channelType,
         idempotencyKey: sessionIdempotencyKey(input.sessionId),
+        parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,
         sessionId: input.sessionId,
@@ -64,7 +68,9 @@ export async function prepareTurnTraceContext(
     try {
       prepared = await input.instrumentation.prepareTurnTrace({
         agentName: input.agentName,
+        currentPrincipal: input.currentPrincipal,
         idempotencyKey: turnIdempotencyKey(input.sessionId, input.turnId),
+        initiatorPrincipal: input.initiatorPrincipal,
         parentLineage: input.parentLineage,
         parentTraceContext: input.parentTraceContext,
         rootSessionId: input.rootSessionId,

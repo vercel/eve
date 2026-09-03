@@ -1,4 +1,4 @@
-import type { RunInput, SessionAuthContext } from "#channel/types.js";
+import type { SessionAuthContext } from "#channel/types.js";
 import { ContextContainer, contextStorage } from "#context/container.js";
 import { setChannelContext } from "#execution/channel-context.js";
 import {
@@ -12,13 +12,16 @@ import {
   InitiatorAuthKey,
   ModeKey,
   ParentSessionKey,
+  ParentCallIdKey,
   ParentTraceContextKey,
   ActivityObserverKey,
   ScheduleIdKey,
   SessionCallbackKey,
+  SessionTraceSeedKey,
 } from "#context/keys.js";
 import { BundleKey, type CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
 import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agent-config.js";
+import type { InternalRunInput } from "#execution/internal-run-input.js";
 
 /**
  * Builds the bootstrap {@link ContextContainer} for one run.
@@ -26,7 +29,7 @@ import type { DynamicSubagentAgentConfig } from "#runtime/subagents/dynamic-agen
 export function buildRunContext(input: {
   readonly bundle: CompiledBundle;
   readonly dynamicSubagentAgentConfig?: DynamicSubagentAgentConfig;
-  readonly run: RunInput;
+  readonly run: InternalRunInput;
 }): ContextContainer {
   const { bundle, run } = input;
   const ctx = new ContextContainer();
@@ -49,7 +52,9 @@ export function buildRunContext(input: {
   }
   ctx.set(ModeKey, run.mode);
   ctx.set(AuthKey, auth);
-  ctx.set(InitiatorAuthKey, run.initiatorAuth ?? auth);
+  if (run.initiatorAuth !== undefined) {
+    ctx.set(InitiatorAuthKey, run.initiatorAuth);
+  }
 
   if (input.dynamicSubagentAgentConfig !== undefined) {
     ctx.set(DynamicSubagentAgentConfigKey, input.dynamicSubagentAgentConfig);
@@ -81,10 +86,15 @@ export function buildRunContext(input: {
 
   if (run.parent !== undefined) {
     ctx.set(ParentSessionKey, run.parent);
+    ctx.set(ParentCallIdKey, run.parent.callId);
   }
 
   if (run.parentTraceContext !== undefined) {
     ctx.set(ParentTraceContextKey, run.parentTraceContext);
+  }
+
+  if (run.traceSeed !== undefined) {
+    ctx.set(SessionTraceSeedKey, run.traceSeed);
   }
 
   // `run.limits` deliberately never enters the context: inherited limits ride

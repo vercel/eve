@@ -223,7 +223,7 @@ export async function prepareActionDispatch<PlanEntry>(input: {
     capabilities: ctx.get(CapabilitiesKey),
     channelMetadata: ctx.get(ChannelInstrumentationKey),
     fanoutSize: input.fanoutSize ?? batch.localFanoutSize ?? 0,
-    initiatorAuth: ctx.get(InitiatorAuthKey) ?? null,
+    initiatorAuth: ctx.has(InitiatorAuthKey) ? ctx.get(InitiatorAuthKey) : undefined,
     localDevRequest: ctx.get(LocalDevRequestKey),
     parentSession: ctx.get(ParentSessionKey),
     parentTraceContext: readSessionTraceContext(input.serializedContext, session.sessionId),

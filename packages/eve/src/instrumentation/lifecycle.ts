@@ -264,6 +264,10 @@ export function actionIdempotencyKey(sessionId: string, turnId: string, callId: 
   return `action:${sessionId}:${turnId}:${callId}`;
 }
 
+export function childSessionTraceKey(sessionId: string, turnId: string, callId: string): string {
+  return `child-session:${sessionId}:${turnId}:${callId}`;
+}
+
 export interface InstrumentationStepAttemptStartedEvent {
   readonly type: "step.attempt.started";
   readonly idempotencyKey: string;
@@ -279,6 +283,7 @@ export interface InstrumentationSessionStartedEvent {
   readonly channelType?: string;
   readonly channelAudience?: ChannelAudience;
   readonly idempotencyKey: string;
+  readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
   readonly sessionId: string;
@@ -288,6 +293,20 @@ export interface InstrumentationSessionStartedEvent {
 export type InstrumentationTraceContext = RuntimeTraceContext;
 export interface InstrumentationTraceSeed extends InstrumentationTraceContext {
   readonly decision?: InstrumentationDecision;
+}
+
+export type InstrumentationPrincipalType =
+  | "anonymous"
+  | "app"
+  | "local-dev"
+  | "none"
+  | "other"
+  | "service"
+  | "user";
+
+export interface InstrumentationPrincipalSummary {
+  readonly fingerprint?: string;
+  readonly type: InstrumentationPrincipalType;
 }
 
 /**
@@ -332,6 +351,8 @@ export interface InstrumentationTurnStartedEvent {
   readonly type: "turn.started";
   readonly agentName?: string;
   readonly idempotencyKey: string;
+  readonly currentPrincipal?: InstrumentationPrincipalSummary;
+  readonly initiatorPrincipal?: InstrumentationPrincipalSummary;
   readonly parentLineage?: InstrumentationParentLineage;
   readonly parentTraceContext?: InstrumentationTraceContext;
   readonly rootSessionId: string;
@@ -471,6 +492,8 @@ export interface InstrumentationActionStartedEvent {
   /** Content. Absent unless this provider's trace policy records this direction. */
   readonly input?: unknown;
   readonly kind: InstrumentationActionKind;
+  /** Whether the action is a durable workflow tool that may dispatch nested agents later. */
+  readonly isWorkflowTool?: boolean;
   readonly name: string;
   readonly scope: InstrumentationAttemptScope;
 }

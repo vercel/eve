@@ -18,6 +18,7 @@ import {
   type InstrumentationRuntime,
   type InstrumentationStepScope,
 } from "#instrumentation/runtime.js";
+import { allocateChildSessionTraceSeed } from "#tracing/agent-child-trace-seed.js";
 import { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import { ContextAgentTraceStateStore } from "#tracing/agent-trace-context-store.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
@@ -111,7 +112,8 @@ describe("initializeSessionInstrumentation", () => {
       recordOutputs: true,
     }));
 
-    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+    expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({
       decision: { action: "record", recordInputs: false, recordOutputs: true },
       traceFlags: 1,
     });
@@ -120,13 +122,13 @@ describe("initializeSessionInstrumentation", () => {
   it("retains full capture for a sampled public remote trace", async () => {
     const ctx = initializeRemoteSession(() => true);
 
-    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+    expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({
       decision: { action: "record", recordInputs: true, recordOutputs: true },
       traceFlags: 1,
     });
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
-    expect(ctx.get(ParentTraceContextKey)).not.toHaveProperty("forwardedTracePolicy");
-    expect(ctx.get(SessionTraceSeedKey)?.forwardedTracePolicy).toEqual({
+    expect(ctx.get(ParentTraceContextKey)?.forwardedTracePolicy).toEqual({
       ceiling: { recordInputs: true, recordOutputs: true },
       originAudience: "public",
     });
@@ -173,13 +175,52 @@ describe("initializeSessionInstrumentation", () => {
   it("does not let a forwarded policy override a receiver drop decision", () => {
     const ctx = initializeRemoteSession(() => false);
 
-    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
-      decision: { action: "drop" },
-      traceFlags: 0,
-    });
+    expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({
       decision: { action: "drop" },
       traceFlags: 0,
+    });
+  });
+
+  it("keeps a remote child seed separate from its parent link context", () => {
+    const ctx = createContext("public");
+    registerInstrumentationRuntime({
+      ...createRuntime({ capturesContent: true, publish: vi.fn() }, () => false),
+      idGenerator: new AgentSpanIdGenerator(),
+      prepareSessionTrace: vi.fn().mockResolvedValue(undefined),
+    });
+    const parentTraceContext = {
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: true, recordOutputs: true },
+        originAudience: "public" as const,
+      },
+      isRemote: true,
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    initializeSessionInstrumentation({
+      agentName: "remote-agent",
+      ctx,
+      parentTraceContext,
+      traceSeed: {
+        spanId: "4".repeat(16),
+        traceFlags: 1,
+        traceId: "3".repeat(32),
+      },
+    });
+
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "drop" },
+      spanId: "4".repeat(16),
+      traceFlags: 0,
+      traceId: "3".repeat(32),
+    });
+    expect(ctx.get(ParentTraceContextKey)).toMatchObject({
+      decision: { action: "drop" },
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
     });
   });
 
@@ -193,7 +234,7 @@ describe("initializeSessionInstrumentation", () => {
       },
     );
 
-    expect(ctx.get(SessionTraceSeedKey)?.decision).toEqual({
+    expect(ctx.get(ParentTraceContextKey)?.decision).toEqual({
       action: "record",
       recordInputs: true,
       recordOutputs: false,
@@ -283,7 +324,7 @@ describe("initializeSessionInstrumentation", () => {
         ceiling: previous,
         originAudience: "private",
       });
-      const decision = ctx.get(SessionTraceSeedKey)?.decision;
+      const decision = ctx.get(ParentTraceContextKey)?.decision;
       expect(decision?.action).toBe("record");
       if (decision?.action !== "record") throw new Error("Expected a record decision");
       ceiling = {
@@ -325,10 +366,7 @@ describe("initializeSessionInstrumentation", () => {
       parentTraceContext: ctx.get(ParentTraceContextKey),
     });
 
-    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
-      decision: { action: "drop" },
-      traceFlags: 1,
-    });
+    expect(ctx.get(SessionTraceSeedKey)).toBeUndefined();
     expect(ctx.get(ParentTraceContextKey)).toMatchObject({ traceFlags: 1 });
   });
 });
@@ -770,5 +808,116 @@ describe("initializeSessionInstrumentation", () => {
 
     expect(ctx.get(SessionTraceSeedKey)?.traceFlags).toBe(0);
     expect(samplesTrace).not.toHaveBeenCalled();
+  });
+
+  it("preallocates only distinct replay-stable coordinates for each child dispatch", () => {
+    registerSeedRuntime({});
+    const parentTraceContext = {
+      decision: { action: "record", recordInputs: true, recordOutputs: false } as const,
+      spanId: "2".repeat(16),
+      traceFlags: 1,
+      traceId: "1".repeat(32),
+    };
+    const input = {
+      callId: "call-1",
+      parentTraceContext,
+      sessionId: "parent-session",
+      turnId: "turn-1",
+    };
+
+    const first = allocateChildSessionTraceSeed(input);
+    const replay = allocateChildSessionTraceSeed(input);
+    const sibling = allocateChildSessionTraceSeed({ ...input, callId: "call-2" });
+
+    expect(first).toEqual(replay);
+    expect(first).toMatchObject({ traceFlags: 0 });
+    expect(first).not.toHaveProperty("decision");
+    expect(first?.traceId).not.toBe(parentTraceContext.traceId);
+    expect(sibling?.traceId).not.toBe(first?.traceId);
+  });
+
+  it("preallocates a child trace even when the parent action was not sampled", () => {
+    registerSeedRuntime({});
+
+    const seed = allocateChildSessionTraceSeed({
+      callId: "call-1",
+      sessionId: "parent-session",
+      turnId: "turn-1",
+    });
+
+    expect(seed).toMatchObject({
+      spanId: expect.stringMatching(/^[0-9a-f]{16}$/u),
+      traceFlags: 0,
+      traceId: expect.stringMatching(/^[0-9a-f]{32}$/u),
+    });
+  });
+
+  it("evaluates a preallocated child with its own policy and sampler exactly once", async () => {
+    const tracePolicy = vi.fn(() => ({ emit: true, recordInputs: false, recordOutputs: true }));
+    const samplesTrace = vi.fn(() => true);
+    registerSeedRuntime({ samplesTrace, tracePolicy });
+    const ctx = createContext();
+    const parentTraceContext = {
+      decision: { action: "drop" } as const,
+      spanId: "2".repeat(16),
+      traceFlags: 0,
+      traceId: "1".repeat(32),
+    };
+    const allocated = allocateChildSessionTraceSeed({
+      callId: "call-child",
+      parentTraceContext,
+      sessionId: "parent-session",
+      turnId: "parent-turn",
+    });
+    if (allocated === undefined) throw new Error("expected child trace allocation");
+
+    initializeSessionInstrumentation({
+      agentName: "child-agent",
+      ctx,
+      parentTraceContext,
+      traceSeed: allocated,
+    });
+    const instrumentation = bindSessionInstrumentation({
+      agentName: "child-agent",
+      ctx,
+      rootSessionId: "child-session",
+      sessionId: "child-session",
+    });
+
+    expect(ctx.get(SessionTraceSeedKey)).toEqual({
+      ...allocated,
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      forwardedTracePolicy: undefined,
+      traceFlags: 1,
+    });
+    await readTelemetry(instrumentation);
+    await readTelemetry(instrumentation);
+    expect(tracePolicy).toHaveBeenCalledOnce();
+    expect(samplesTrace).toHaveBeenCalledExactlyOnceWith(allocated.traceId);
+  });
+
+  it("intersects an unsampled parent's forwarded ceiling with the child policy", () => {
+    registerSeedRuntime({
+      samplesTrace: () => true,
+      tracePolicy: () => ({ emit: true, recordInputs: true, recordOutputs: true }),
+    });
+    const ctx = createContext();
+    const traceSeed = {
+      forwardedTracePolicy: {
+        ceiling: { recordInputs: false, recordOutputs: true },
+        originAudience: "private" as const,
+      },
+      spanId: "4".repeat(16),
+      traceFlags: 0,
+      traceId: "3".repeat(32),
+    };
+
+    initializeSessionInstrumentation({ agentName: "child-agent", ctx, traceSeed });
+
+    expect(ctx.get(SessionTraceSeedKey)).toMatchObject({
+      decision: { action: "record", recordInputs: false, recordOutputs: true },
+      forwardedTracePolicy: traceSeed.forwardedTracePolicy,
+      traceFlags: 1,
+    });
   });
 });

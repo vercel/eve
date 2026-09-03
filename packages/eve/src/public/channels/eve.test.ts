@@ -2154,7 +2154,7 @@ describe("eveChannel — forwarded principal", () => {
     expect(handler.send).not.toHaveBeenCalled();
   });
 
-  it("defaults the initiator to the forwarded current principal", async () => {
+  it("records the forwarded creator as the initiator of a root session", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
@@ -2163,7 +2163,25 @@ describe("eveChannel — forwarded principal", () => {
     await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT }));
 
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
-    expect(options.initiatorAuth).toEqual(options.auth);
+    expect(options.initiatorAuth).toEqual({
+      ...FORWARDED_CURRENT,
+      attributes: {
+        ...FORWARDED_CURRENT.attributes,
+        "eve:forwarded-by": ROUTER_CALLER.principalId,
+      },
+    });
+  });
+
+  it("preserves an explicit null forwarded initiator", async () => {
+    const handler = createEveCreateHandler({
+      trustedForwarders: () => true,
+      auth: () => ROUTER_CALLER,
+    });
+
+    await handler.fetch(forwardedRequest({ current: FORWARDED_CURRENT, initiator: null }));
+
+    const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
+    expect(options.initiatorAuth).toBeNull();
   });
 
   it("overwrites a sender-supplied eve:forwarded-by attribute", async () => {
@@ -2205,7 +2223,7 @@ describe("eveChannel — forwarded principal", () => {
     expect(options.auth?.principalId).toBe(FORWARDED_CURRENT.principalId);
   });
 
-  it("keeps the transport principal and omits initiatorAuth without a forwarded body", async () => {
+  it("records the transport principal as the initiator without a forwarded body", async () => {
     const handler = createEveCreateHandler({
       trustedForwarders: () => true,
       auth: () => ROUTER_CALLER,
@@ -2216,7 +2234,38 @@ describe("eveChannel — forwarded principal", () => {
     expect(response.status).toBe(202);
     const options = handler.send.mock.calls[0]?.[1] as MockSendOptions;
     expect(options.auth).toEqual(ROUTER_CALLER);
-    expect(options.initiatorAuth).toBeUndefined();
+    expect(options.initiatorAuth).toEqual(ROUTER_CALLER);
+  });
+
+  it("uses the transport principal as a delegated child creator without forwarding", async () => {
+    const handler = createEveCreateHandler({ auth: () => ROUTER_CALLER });
+
+    const response = await handler.fetch(
+      createJsonMessageRequest({
+        callback: {
+          callId: "call-1",
+          subagentName: "research",
+          token: "parent-token",
+          url: "https://parent.example/eve/v1/callback/parent-token",
+        },
+        invocation: {
+          callId: "call-1",
+          rootSessionId: "root-session",
+          sessionId: "parent-session",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+        message: "hi",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    expect(handler.send).toHaveBeenCalledWith(
+      "hi",
+      expect.objectContaining({
+        auth: ROUTER_CALLER,
+        initiatorAuth: ROUTER_CALLER,
+      }),
+    );
   });
 
   it("replaces only the current principal on a trusted continuation", async () => {

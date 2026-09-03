@@ -166,6 +166,7 @@ describe("wakeTaskAgentRequestParentStep", () => {
       replyTo: "agent-reply",
       request: {
         input: { message: "Find it", target: "research" },
+        instrumentationCallId: "call-1",
         invocationId: "call-1:research",
         kind: "agent-invoke" as const,
       },
@@ -179,9 +180,11 @@ describe("wakeTaskAgentRequestParentStep", () => {
         task: {
           agentRequests: [
             {
+              actionCallId: "call-1",
               replyTo: "agent-reply",
               request: {
                 input: { message: "Find it", target: "research" },
+                instrumentationCallId: "call-1",
                 invocationId: "call-1:research",
                 kind: "agent-invoke",
               },

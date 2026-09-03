@@ -502,9 +502,9 @@ export interface RunInput {
   readonly continuationConflictCommand?: Extract<SessionCommand, { readonly kind: "send" }>;
   /**
    * The original (top-level) caller's auth, forwarded down the delegation
-   * chain so the child's `session.auth.initiator` always resolves back to
-   * whoever started the root session. Defaults to {@link auth} when omitted
-   * (root session behavior).
+   * chain so the child's `session.auth.initiator` resolves back to whoever
+   * started the root session. Authoritative session creators set this to the
+   * effective authenticated creator (including explicit `null`).
    */
   readonly initiatorAuth?: SessionAuthContext | null;
   readonly input: {

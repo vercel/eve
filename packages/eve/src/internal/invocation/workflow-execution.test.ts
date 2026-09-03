@@ -62,6 +62,7 @@ describe("WorkflowAgentInvocationExecution", () => {
         capabilities: { requestInput: true },
         continuationToken: expect.stringMatching(/^invocation:/),
         externalInvocation: expect.objectContaining({ continuationToken: expect.any(String) }),
+        initiatorAuth: auth,
         mode: "task",
       }),
     );
@@ -72,6 +73,20 @@ describe("WorkflowAgentInvocationExecution", () => {
       invocationId: "wrun_invocation",
       status: "working",
     });
+  });
+
+  it("preserves an unauthenticated invocation creator as explicit null", async () => {
+    runsGet.mockResolvedValue(run({ ownerKey: invocationOwnerKey(null), status: "running" }));
+    createSession.mockResolvedValue({
+      events: new ReadableStream(),
+      sessionId: "wrun_invocation",
+    });
+
+    await execution().create({ auth: null, message: "work" });
+
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ auth: null, initiatorAuth: null }),
+    );
   });
 
   it("requires the same authenticated principal for invocation access", async () => {

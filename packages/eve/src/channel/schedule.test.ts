@@ -75,6 +75,7 @@ describe("ScheduleDispatcher", () => {
           input: { message: "Run heartbeat task." },
           mode: "task",
           auth: SCHEDULE_APP_AUTH,
+          initiatorAuth: SCHEDULE_APP_AUTH,
         }),
       );
       expect(SCHEDULE_ADAPTER.kind).toBe(SCHEDULE_ADAPTER_KIND);
@@ -129,6 +130,7 @@ describe("ScheduleDispatcher", () => {
           /^slack:C0123ABC:[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/,
         );
         expect(runInput.auth).toEqual(SCHEDULE_APP_AUTH);
+        expect(runInput.initiatorAuth).toEqual(SCHEDULE_APP_AUTH);
       } finally {
         vi.unstubAllEnvs();
       }

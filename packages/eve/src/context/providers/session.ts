@@ -20,7 +20,7 @@ export const sessionProvider: FrameworkContextProvider<Session> = {
       value: Object.freeze({
         auth: {
           current: currentAuth,
-          initiator: ctx.get(InitiatorAuthKey) ?? currentAuth,
+          initiator: ctx.get(InitiatorAuthKey) ?? null,
         },
         parent: ctx.get(ParentSessionKey),
         sessionId: ctx.require(SessionIdKey),

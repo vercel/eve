@@ -288,6 +288,7 @@ function buildRouteArgs(
             ? undefined
             : `${channelName}:${input.continuationToken}`,
         delivery: createChannelDeliveryMetadata(deliverySource),
+        initiatorAuth: input.initiatorAuth === undefined ? input.auth : input.initiatorAuth,
         requestId,
       }),
   );
