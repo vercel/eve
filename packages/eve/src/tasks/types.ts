@@ -3,7 +3,7 @@ import type {
   SubagentAuthorizationEventHookPayload,
 } from "#channel/types.js";
 import type { WorkflowToolAgentRequest } from "#execution/tools/workflow/messages.js";
-import { jsonValuesEqual, type JsonValue } from "#shared/json.js";
+import { jsonValuesEqual, type JsonObject, type JsonValue } from "#shared/json.js";
 import type { TaskExecutorBinding } from "#tools/task.js";
 
 /** Durable lifecycle status for one unit of background work. */
@@ -77,6 +77,8 @@ export function readTaskInputRequestId(request: TaskInputRequest): string | unde
 interface TaskViewBase {
   readonly taskId: string;
   readonly metadata: TaskMetadata;
+  /** Author-owned durable state, distinct from the framework lifecycle status. */
+  readonly state?: JsonObject;
   /** Private executor state, excluded from model-visible JSON. */
   readonly executor?: { readonly binding?: TaskExecutorBinding };
   /** Retained for accounting, excluded from model-visible JSON. */
@@ -126,6 +128,7 @@ export type TaskCommand =
       readonly usage?: TaskUsage;
     }
   | { readonly kind: "reject-dispatch"; readonly data: JsonValue }
+  | { readonly kind: "set-state"; readonly state: JsonObject }
   | {
       readonly kind: "cancel";
       readonly usage?: TaskUsage;

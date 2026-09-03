@@ -23,11 +23,13 @@ function terminalView(
     | { readonly status: "cancelled" },
 ): TaskView {
   const usage = "usage" in command ? command.usage : undefined;
-  const base: Pick<TaskView, "executor" | "metadata" | "taskId"> & { usage?: TaskUsage } = {
-    executor: view.executor,
-    metadata: view.metadata,
-    taskId: view.taskId,
-  };
+  const base: Pick<TaskView, "executor" | "metadata" | "state" | "taskId"> & { usage?: TaskUsage } =
+    {
+      executor: view.executor,
+      metadata: view.metadata,
+      state: view.state,
+      taskId: view.taskId,
+    };
   if (usage !== undefined) base.usage = usage;
   switch (settled.status) {
     case "completed":
@@ -61,6 +63,18 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
       action: "accepted",
       view: { ...view, executor: { ...view.executor, binding: command.executor } },
     };
+  }
+
+  if (command.kind === "set-state") {
+    if (isTerminalTaskStatus(view.status)) {
+      return {
+        action: "rejected",
+        reason: `Task "${view.taskId}" is already ${view.status}; "set-state" cannot change a terminal task.`,
+        view,
+      };
+    }
+    if (jsonValuesEqual(view.state, command.state)) return { action: "noop", view };
+    return { action: "accepted", view: { ...view, state: command.state } };
   }
 
   if (isTerminalTaskStatus(view.status)) {
@@ -108,6 +122,7 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
           inputRequests: command.inputRequests,
           executor: view.executor,
           metadata: view.metadata,
+          state: view.state,
           status: "input_required",
           taskId: view.taskId,
         },
@@ -133,6 +148,7 @@ export function applyTaskTransition(view: TaskView, command: TaskCommand): TaskT
         view: {
           executor: view.executor,
           metadata: view.metadata,
+          state: view.state,
           status: "working",
           taskId: view.taskId,
         },

@@ -18,6 +18,7 @@ describe("taskViewToJson", () => {
         mode: "remote",
         name: "researcher",
       },
+      state: { progress: 1 },
       status: "completed",
       taskId: "task-1",
       usage: {
@@ -36,6 +37,7 @@ describe("taskViewToJson", () => {
         mode: "remote",
         name: "researcher",
       },
+      state: { progress: 1 },
       status: "completed",
       taskId: "task-1",
     });
