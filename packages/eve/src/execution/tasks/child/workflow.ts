@@ -17,6 +17,7 @@ import {
   createWorkflowBodyRef,
   executeWorkflowBody,
   type WorkflowBodyDefinition,
+  type WorkflowBodyResult,
 } from "#execution/tools/workflow/body.js";
 import {
   deriveWorkflowToolRunOwner,
@@ -95,10 +96,11 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
   let bodyReader:
     | import("#execution/tools/workflow/owner-channels.js").ChannelReader<
         "body",
-        import("#execution/tools/workflow/messages.js").WorkflowToolRunOutcome
+        WorkflowBodyResult
       >
     | undefined;
   let executorSettled = input.workflow === undefined;
+  let pendingBodyResult: WorkflowBodyResult | undefined;
 
   try {
     try {
@@ -110,24 +112,30 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     }
 
     await appendTaskViewStep({ activityObserver: input.activityObserver, view });
-    while (!isFinished()) {
+    while (true) {
+      // Hook persistence does not mean the owner has consumed every report yet.
+      if (pendingBodyResult !== undefined && updateIndex >= pendingBodyResult.reportCount) {
+        executorSettled = true;
+        await applyPayload({
+          command: workflowToolRunOutcomeToTaskCommand({
+            from: createWorkflowBodyRef({ ...input.workflow!, execution: "background" }),
+            result: pendingBodyResult.outcome,
+          }),
+          kind: "task-command",
+        });
+        pendingBodyResult = undefined;
+        if (view.status === "cancelled" && dispatchAcknowledged && !dispatchRejected) {
+          await wakeTaskParentStep({ token: input.parentContinuationToken, view });
+        }
+      }
+      if (isFinished()) break;
       const read = await raceChannelReads(
         bodyReader === undefined ? readers : [...readers, bodyReader],
       );
       if (read.channel === "body") {
-        executorSettled = true;
         bodyReader = undefined;
         if (read.next.done) continue;
-        await applyPayload({
-          command: workflowToolRunOutcomeToTaskCommand({
-            from: createWorkflowBodyRef({ ...input.workflow!, execution: "background" }),
-            result: read.next.value,
-          }),
-          kind: "task-command",
-        });
-        if (view.status === "cancelled" && dispatchAcknowledged && !dispatchRejected) {
-          await wakeTaskParentStep({ token: input.parentContinuationToken, view });
-        }
+        pendingBodyResult = read.next.value;
         continue;
       }
       if (read.next.done) return;
@@ -228,7 +236,12 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
     if (isReady || isRejected) {
       if (isRejected || isTerminalTaskStatus(view.status)) {
         executorSettled = true;
-      } else if (input.workflow !== undefined && bodyReader === undefined && !executorSettled) {
+      } else if (
+        input.workflow !== undefined &&
+        bodyReader === undefined &&
+        pendingBodyResult === undefined &&
+        !executorSettled
+      ) {
         bodyReader = createChannelReader(
           "body",
           awaitBodyResult(
@@ -370,8 +383,8 @@ export async function taskRunWorkflow(input: TaskRunWorkflowInput): Promise<void
 }
 
 async function* awaitBodyResult(
-  result: Promise<import("#execution/tools/workflow/messages.js").WorkflowToolRunOutcome>,
-): AsyncGenerator<import("#execution/tools/workflow/messages.js").WorkflowToolRunOutcome> {
+  result: Promise<WorkflowBodyResult>,
+): AsyncGenerator<WorkflowBodyResult> {
   yield await result;
 }
 

@@ -31,6 +31,11 @@ export interface WorkflowBodyInput extends WorkflowBodyDefinition {
   readonly owner: WorkflowToolRunOwner;
 }
 
+export interface WorkflowBodyResult {
+  readonly outcome: WorkflowToolRunOutcome;
+  readonly reportCount: number;
+}
+
 type WorkflowToolExecute = (
   input: unknown,
   ctx: ToolContext,
@@ -44,10 +49,11 @@ export async function executeWorkflowBody(
     readonly runId?: string;
   },
   signal: AbortSignal,
-): Promise<WorkflowToolRunOutcome> {
+): Promise<WorkflowBodyResult> {
   const from = createWorkflowBodyRef(input);
   const ctx = createWorkflowBodyContext(input, signal);
   attachWorkflowToolRunContext(ctx, { from, owner: input.owner });
+  let reportCount = 0;
 
   try {
     const execute = resolveWorkflowToolExecute(input);
@@ -64,6 +70,7 @@ export async function executeWorkflowBody(
         last = next.value;
         const report: WorkflowToolRunReport = { from, update: next.value };
         await resumeHookStep(input.owner.report, report);
+        reportCount += 1;
         next = await iterator.next();
       }
       output =
@@ -71,16 +78,19 @@ export async function executeWorkflowBody(
         (input.execution === "blocking" ? last : undefined) ??
         null;
     }
-    return { output, status: "completed" };
+    return { outcome: { output, status: "completed" }, reportCount };
   } catch (error) {
     if (signal.aborted) {
       return {
-        reason:
-          signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
-        status: "cancelled",
+        outcome: {
+          reason:
+            signal.reason instanceof Error ? signal.reason.message : String(signal.reason ?? ""),
+          status: "cancelled",
+        },
+        reportCount,
       };
     }
-    return { error: normalizeSerializableError(error), status: "failed" };
+    return { outcome: { error: normalizeSerializableError(error), status: "failed" }, reportCount };
   }
 }
 

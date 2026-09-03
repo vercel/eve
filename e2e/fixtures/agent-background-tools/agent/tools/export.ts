@@ -1,5 +1,5 @@
 import { defineTool } from "eve/tools";
-import { sleep } from "eve/workflow";
+import { sleep } from "workflow";
 import { z } from "zod";
 
 export default defineTool({

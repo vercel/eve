@@ -111,7 +111,10 @@ describe("taskRunWorkflow", () => {
     vi.resetAllMocks();
     mocks.createHook.mockReturnValue({ token: "task-token" });
     mocks.openWorkflowToolRunOwnerChannels.mockReturnValue({ dispose: vi.fn(), readers: [] });
-    mocks.executeWorkflowBody.mockResolvedValue({ output: "done", status: "completed" });
+    mocks.executeWorkflowBody.mockResolvedValue({
+      outcome: { output: "done", status: "completed" },
+      reportCount: 0,
+    });
   });
 
   it("delivers an authored message queued before completion and dispatch acknowledgement", async () => {
@@ -326,14 +329,18 @@ describe("taskRunWorkflow", () => {
       })
       .mockResolvedValueOnce({
         channel: "body",
-        next: { done: false, value: { reason: "cancelled", status: "cancelled" } },
+        next: {
+          done: false,
+          value: { outcome: { reason: "cancelled", status: "cancelled" }, reportCount: 0 },
+        },
       });
     mocks.executeWorkflowBody.mockImplementation(
       async (_input, signal: AbortSignal) =>
         await new Promise((resolve) => {
           signal.addEventListener(
             "abort",
-            () => resolve({ reason: "cancelled", status: "cancelled" }),
+            () =>
+              resolve({ outcome: { reason: "cancelled", status: "cancelled" }, reportCount: 0 }),
             { once: true },
           );
         }),
@@ -361,5 +368,55 @@ describe("taskRunWorkflow", () => {
       token: "parent-token",
       view: expect.objectContaining({ status: "cancelled" }),
     });
+  });
+
+  it("consumes every persisted report before accepting a body's completion", async () => {
+    mocks.raceChannelReads
+      .mockResolvedValueOnce({
+        channel: "commands",
+        next: { done: false, value: { command: { kind: "ready" }, kind: "task-command" } },
+      })
+      .mockResolvedValueOnce({
+        channel: "body",
+        next: {
+          done: false,
+          value: { outcome: { output: "done", status: "completed" }, reportCount: 1 },
+        },
+      })
+      .mockResolvedValueOnce({
+        channel: "report",
+        next: {
+          done: false,
+          value: {
+            from: bufferedAgentRequest.from,
+            update: { kind: "eve:task-message", message: "Review the export" },
+          },
+        },
+      });
+    await taskRunWorkflow({
+      initialView,
+      parentContinuationToken: "parent-token",
+      taskInboxToken: "task-token",
+      workflow: {
+        callId: "call-1",
+        input: {},
+        session: {
+          auth: { current: null, initiator: null },
+          id: "session-1",
+          turn: { id: "turn-1", sequence: 0 },
+        },
+        stepIndex: 0,
+        toolName: "worker",
+        workflowId: "workflow//eve//worker",
+      },
+    });
+    expect(mocks.wakeTaskMessageParentStep).toHaveBeenCalledWith({
+      message: expect.objectContaining({ message: "Review the export" }),
+      taskId: "task-1",
+      token: "parent-token",
+    });
+    expect(mocks.wakeTaskMessageParentStep.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.wakeTaskParentStep.mock.invocationCallOrder[0]!,
+    );
   });
 });
