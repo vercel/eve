@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 
 describe("file-memory Vercel CLI client", () => {
-  it("uses authenticated API reads and the resource connection command", async () => {
+  it("uses authenticated API reads and a Vercel 57-compatible resource connection command", async () => {
     captureVercel
       .mockResolvedValueOnce({
         ok: true,
@@ -114,7 +114,6 @@ describe("file-memory Vercel CLI client", () => {
         "--environment",
         "development",
         "--yes",
-        "--json",
         "--scope",
         "team_acme",
       ],

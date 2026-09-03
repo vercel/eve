@@ -165,7 +165,6 @@ export function createFileMemoryVercelClient(
         prefix,
         ...environments.flatMap((environment) => ["--environment", environment]),
         "--yes",
-        "--json",
         ...scope,
       ];
       await captureMutation(args, "Vercel Blob project connection");
