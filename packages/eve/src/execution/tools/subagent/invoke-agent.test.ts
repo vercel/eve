@@ -153,6 +153,7 @@ describe("background agent invocation routing", () => {
         input: { message: "Find it", outputSchema, target: "research" },
         invocationId: "call-1:agent-reply",
         kind: "agent-invoke",
+        parentActionCallId: "call-1",
       },
     });
   });
@@ -325,6 +326,7 @@ describe("background agent invocation routing", () => {
         input: { message: "Find it", target: "research" },
         invocationId: "call-1:agent-reply",
         kind: "agent-invoke",
+        parentActionCallId: "call-1",
       },
     });
   });

@@ -9,7 +9,6 @@ import {
 import { createLogger, logError } from "#internal/logging.js";
 import type { RuntimeRemoteAgentDispatchRequest } from "#shared/action-types.js";
 import type { CompiledBundle } from "#runtime/sessions/runtime-context-keys.js";
-import type { ChannelAudience } from "#shared/channel-audience.js";
 import type { SubagentParentContext } from "#subagents/invocation.js";
 
 const log = createLogger("execution.subagent-start-remote");
@@ -20,7 +19,6 @@ export async function startRemoteSubagent(input: {
   readonly auth: Parameters<typeof startRemoteAgentSession>[0]["auth"];
   readonly bundle: CompiledBundle;
   readonly callbackBaseUrl: string | undefined;
-  readonly originAudience: ChannelAudience;
   readonly currentSession: RuntimeSession;
   readonly dynamicRemoteAgent?: NonNullable<
     Parameters<typeof resolveRemoteAgentForAction>[0]["dynamicRemoteAgent"]
@@ -87,7 +85,7 @@ export async function startRemoteSubagent(input: {
       action,
       auth: input.auth,
       callbackBaseUrl,
-      originAudience: input.originAudience,
+      originAudience: input.parent.originAudience,
       initiatorAuth: input.initiatorAuth,
       operationId: operation.id,
       parent: input.parent,

@@ -50,6 +50,7 @@ import {
   ChannelInstrumentationKey,
   ConversationIdKey,
   OtelTraceEnabledKey,
+  ParentCallIdKey,
   ParentSessionKey,
   ParentTraceContextKey,
   SessionTraceSeedKey,
@@ -214,12 +215,15 @@ export function bindInstrumentationRuntime(
         ? undefined
         : { ...storedTraceSeed, ...resolvedTraceState };
     const parentTraceContext = context.get(ParentTraceContextKey);
+    const parent = context.get(ParentSessionKey),
+      channel = context.get(ChannelKey);
     return {
-      channel: context.get(ChannelKey),
+      channel,
       context,
       instrumentation: context.get(ChannelInstrumentationKey),
       forwardedTracePolicy: readForwardedTraceAssertion(traceSeed?.forwardedTracePolicy),
-      parent: context.get(ParentSessionKey),
+      parent,
+      parentLineage: resolveParentLineage(parent, channel, context.get(ParentCallIdKey)),
       parentTraceContext,
       traceSeed,
     };
@@ -259,7 +263,7 @@ export function bindInstrumentationRuntime(
         agentName: boundSession.agentName,
         channelAudience: audience,
         channelType: channel?.channelType,
-        parentLineage: resolveParentLineage(sessionContext.parent, sessionContext.channel),
+        parentLineage: sessionContext.parentLineage,
         parentTraceContext: sessionContext.parentTraceContext,
         rootSessionId: sessionContext.parent?.rootSessionId ?? boundSession.rootSessionId,
         sessionId: boundSession.sessionId,
@@ -402,7 +406,7 @@ export function bindInstrumentationRuntime(
                 channelAudience: audience,
                 channelKind: channel?.kind,
                 hooks,
-                parentLineage: resolveParentLineage(sessionContext.parent, sessionContext.channel),
+                parentLineage: sessionContext.parentLineage,
                 parentTraceContext: sessionContext.parentTraceContext,
                 rootSessionId: sessionContext.parent?.rootSessionId,
                 sessionId: boundSession.sessionId,
@@ -666,7 +670,6 @@ export function registerInstrumentationRuntime(
   return runtime;
 }
 
-/** Returns the process instrumentation runtime, when one was installed. */
 export function getInstrumentationRuntime(): InstrumentationRuntime | undefined {
   return globalRuntime[INSTRUMENTATION_RUNTIME_KEY];
 }

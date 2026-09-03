@@ -54,6 +54,7 @@ export function installInstrumentationRuntime(input: {
       idGenerator: otelRuntime.idGenerator,
       recordInputs: input.collected.settings.recordInputs,
       recordOutputs: input.collected.settings.recordOutputs,
+      samplesTrace: otelRuntime.samplesTrace,
       stateStore: new ContextAgentTraceStateStore(),
       tracer: trace.getTracer("eve.agent", input.frameworkVersion),
       tracePolicy: input.collected.settings.tracePolicy,

@@ -56,6 +56,8 @@ Three more fields control what the AI SDK records inside those spans (see the AI
 
 eve records metadata without model or tool inputs and outputs by default. Enable either content category only after reviewing the exporter and its data-retention path.
 
+eve stamps each framework-owned span with `vercel.session_id` and `agent.session.id` set to the current workflow run ID. `gen_ai.conversation.id` contains the root workflow run ID, so parent and child sessions remain queryable as one conversation even though each turn uses a bounded trace. These attributes describe and index a run; they do not control trace parenting or execution.
+
 You are responsible for ensuring any observability or eval provider is approved for the data exported to it.
 
 The third configurable surface, [runtime context events](#runtime-context), attaches per-model-call values to these spans.
@@ -80,7 +82,8 @@ message, context, input-response, and output-schema fields; adapter-specific
 payload fields are never projected.
 
 The built-in OpenTelemetry provider maps each pair to an
-`agent.channel.delivery` consumer span under the durable session window. When
+`agent.channel.delivery` consumer span. When the delivery starts a turn, the
+span begins that activation trace and parents its `invoke_agent` span. When
 `traceChannelRequests: true` creates an inbound HTTP server span, the delivery
 span links to it with `eve.link.type=channel.request` rather than using the
 short-lived request span as its parent.
@@ -238,7 +241,7 @@ These tags power the **Agent Runs** tab in the Vercel dashboard. When you deploy
 
 ## Local traces
 
-Without an `instrumentation.ts`, `eve dev` records spans to disk — one trace per session, with turns, model steps, and tool calls. Read them two ways:
+Without an `instrumentation.ts`, `eve dev` records spans to disk with one bounded trace per turn, including its model steps and tool calls. Read them two ways:
 
 - [`/traces`](dev-tui#logs-and-traces) in the dev TUI: a live trace viewer that replays captured content as a conversation.
 - [`eve traces`](../reference/cli#eve-traces): a span tree in the terminal, `eve traces ls` to list. Works after `eve dev` exits.

@@ -11,11 +11,12 @@ import type { InstrumentationParentLineage } from "#instrumentation/lifecycle.js
 export function resolveParentLineage(
   parent: SessionParent | undefined,
   adapter: { readonly state?: unknown } | undefined,
+  parentCallId?: string,
 ): InstrumentationParentLineage | undefined {
   if (parent === undefined) return undefined;
   const state = adapter?.state;
   return {
-    callId: parent.callId,
+    callId: parentCallId ?? parent.callId,
     sessionId: parent.sessionId,
     subagentName: isSubagentAdapterState(state) ? state.subagentName : undefined,
     turnId: parent.turn.id,

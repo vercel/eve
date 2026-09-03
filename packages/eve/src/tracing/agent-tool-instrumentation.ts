@@ -17,6 +17,7 @@ import type {
 import { actionIdempotencyKey } from "#instrumentation/lifecycle.js";
 import { contentAttribute } from "#tracing/agent-otel-content.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import { withChannelAudience } from "#tracing/channel-audience-context.js";
 import type { AgentSpanIdGenerator } from "#tracing/agent-span-id-generator.js";
 import type { AgentActionContext } from "#tracing/agent-action-instrumentation.js";
@@ -220,6 +221,10 @@ function toolAttributes(event: InstrumentationToolCallStartedEvent): Record<stri
     "gen_ai.tool.name": event.toolName,
     "gen_ai.tool.type": "function",
     ...agentSpanNamingAttributes(`execute_tool ${event.toolName}`, "execute_tool"),
+    ...agentTraceIdentityAttributes({
+      rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+      sessionId: event.scope.sessionId,
+    }),
   };
 }
 

@@ -113,8 +113,10 @@ export async function instrumentChannelDelivery(
       input: deliveryInput,
       parentTraceContext: input.ctx.get(ParentTraceContextKey),
       rootSessionId: input.rootSessionId,
+      sequence: input.sequence,
       sessionId: input.sessionId,
       traceSeed: input.ctx.get(SessionTraceSeedKey),
+      turnId: input.turnId,
       type: "channel.delivery.started",
     });
   }

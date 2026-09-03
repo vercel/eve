@@ -31,13 +31,14 @@ import { createAgentApprovalInstrumentation } from "#tracing/agent-approval-inst
 import { createAgentChannelDeliveryInstrumentation } from "#tracing/agent-channel-delivery-instrumentation.js";
 import { createAgentToolInstrumentation } from "#tracing/agent-tool-instrumentation.js";
 import { agentSpanNamingAttributes } from "#tracing/agent-span-naming.js";
-import { resolveConversationId } from "#tracing/conversation-context.js";
 import { markAgentTraceContext } from "#tracing/agent-trace-context.js";
+import { agentTraceIdentityAttributes } from "#tracing/agent-otel-attributes.js";
 import * as runtimeAttributes from "#tracing/agent-otel-runtime-context.js";
 import {
   readGatewayCost,
   setAgentInvocationUsage,
   setAgentUsage,
+  setGenAiUsage,
 } from "#tracing/agent-otel-usage.js";
 import { createAgentOtelSessionContext } from "#tracing/agent-otel-session-context.js";
 import type { TraceCapturePolicy } from "#tracing/otel-declaration.js";
@@ -84,6 +85,7 @@ export interface AgentOtelInstrumentationInput {
   readonly recordOutputs?: boolean;
   readonly frameworkVersion: string;
   readonly idGenerator: AgentSpanIdGenerator;
+  readonly samplesTrace?: (traceId: string) => boolean;
   readonly stateStore: AgentTraceStateStore;
   readonly tracer: Tracer;
   readonly tracePolicy?: TraceCapturePolicy;
@@ -223,7 +225,6 @@ export function createAgentOtelInstrumentation(
           "agent.step",
           {
             attributes: {
-              "agent.session.id": event.scope.sessionId,
               "agent.framework.name": "eve",
               "agent.framework.version": input.frameworkVersion,
               "agent.step.attempt": event.scope.attemptIndex,
@@ -231,6 +232,10 @@ export function createAgentOtelInstrumentation(
               "agent.turn.id": event.scope.turnId,
               "agent.name": event.scope.functionId,
               ...agentSpanNamingAttributes("agent.step"),
+              ...agentTraceIdentityAttributes({
+                rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+                sessionId: event.scope.sessionId,
+              }),
               ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
             },
             links:
@@ -292,6 +297,7 @@ export function createAgentOtelInstrumentation(
   const onSessionTransition = async (
     event: InstrumentationSessionTransitionEvent,
   ): Promise<void> => {
+    await actions.flushForSessionTransition(event);
     if (event.type === "session.failed" && event.turnId !== undefined) {
       await input.stateStore.updateTurn(event.sessionId, event.turnId, (turn) => ({
         ...turn,
@@ -304,7 +310,19 @@ export function createAgentOtelInstrumentation(
         const session = await input.stateStore.getSession(event.sessionId);
         if (isSampledTrace(turn.context)) {
           const agentName = session?.agentName ?? turn.subagentName;
-          const span = input.idGenerator.withSpanId(turn.context.spanId, () =>
+          const parentContext =
+            turn.parentSpanId === undefined
+              ? withChannelAudience(ROOT_CONTEXT, session?.channelAudience)
+              : withChannelAudience(
+                  contextFromSpanContext({
+                    isRemote: turn.parentIsRemote ?? false,
+                    spanId: turn.parentSpanId,
+                    traceFlags: turn.context.traceFlags,
+                    traceId: turn.context.traceId,
+                  }),
+                  session?.channelAudience,
+                );
+          const startSpan = () =>
             input.tracer.startSpan(
               agentSpanName(agentName),
               {
@@ -313,28 +331,26 @@ export function createAgentOtelInstrumentation(
                   "agent.framework.version": input.frameworkVersion,
                   "agent.name": agentName,
                   ...runtimeAttributes.agentLineageAttributes(turn),
-                  "agent.session.id": event.sessionId,
                   "agent.subagent.name": turn.subagentName,
                   "agent.turn.id": event.turnId,
                   "agent.turn.sequence": turn.sequence,
                   "gen_ai.agent.name": agentName,
-                  "gen_ai.conversation.id": resolveConversationId(event.sessionId),
                   "gen_ai.operation.name": "invoke_agent",
-                  ...agentSpanNamingAttributes(agentSpanName(agentName), "invoke_agent"),
+                  ...agentTraceIdentityAttributes({
+                    rootSessionId: turn.rootSessionId,
+                    sessionId: event.sessionId,
+                  }),
                 },
                 kind: SpanKind.INTERNAL,
+                root: turn.parentSpanId === undefined,
                 startTime: turn.startTimeMs,
               },
-              withChannelAudience(
-                contextFromSpanContext({
-                  isRemote: turn.parentIsRemote ?? false,
-                  spanId: turn.parentSpanId,
-                  traceFlags: turn.context.traceFlags,
-                  traceId: turn.context.traceId,
-                }),
-                session?.channelAudience,
-              ),
-            ),
+              parentContext,
+            );
+          const span = input.idGenerator.withSpanId(turn.context.spanId, () =>
+            turn.parentSpanId === undefined
+              ? input.idGenerator.withTraceId(turn.context.traceId, startSpan)
+              : startSpan(),
           );
           setAgentInvocationUsage(span, turn.modelUsage);
           span.addEvent("turn.started", undefined, turn.startTimeMs);
@@ -380,8 +396,13 @@ export function createAgentOtelInstrumentation(
           "gen_ai.provider.name": event.model.provider,
           "gen_ai.request.model": event.model.modelId,
           ...agentSpanNamingAttributes(modelSpanName(event.model.modelId), "chat"),
+          ...agentTraceIdentityAttributes({
+            rootSessionId: event.scope.rootSessionId ?? event.scope.sessionId,
+            sessionId: event.scope.sessionId,
+          }),
           ...runtimeAttributes.runtimeContextAttributes(event.runtimeContext),
         },
+        kind: SpanKind.CLIENT,
       },
       attempt.context,
     );
@@ -412,7 +433,10 @@ export function createAgentOtelInstrumentation(
       recordError(state.span, event.error);
     } else {
       await recordTurnUsage(event);
-      setAgentUsage(state.span, event.usage);
+      setGenAiUsage(state.span, event.usage);
+      if (event.responseId !== undefined) {
+        state.span.setAttribute("gen_ai.response.id", event.responseId);
+      }
       state.span.setAttribute("gen_ai.response.finish_reasons", [event.finishReason]);
       const attempt = steps.get(event.scope);
       if (attempt !== undefined) setAgentUsage(attempt.span, event.usage);
@@ -507,6 +531,7 @@ export function createAgentOtelInstrumentation(
     ensureSessionContext,
     frameworkVersion: input.frameworkVersion,
     idGenerator: input.idGenerator,
+    prepareTurnTrace,
     recordInputs,
     stateStore: input.stateStore,
     tracer: input.tracer,

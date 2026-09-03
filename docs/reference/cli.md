@@ -308,11 +308,13 @@ Reads the immutable OTLP/JSON segments under `.eve/traces/v1`, so `eve dev` need
 
 Span rows carry inline metrics when the span recorded them — `↑input`/`↓output` token counts, gateway cost, and the tool name for `execute_tool` spans — and the header aggregates models, token totals, cost, and error count across the trace's step spans. `--verbose` expands each span under its tree row: status (with the error message on failures), timing, ids, every attribute (prompts, responses, and tool payloads as transcripts or pretty-printed JSON), and every span event with its offset from span start. `--json` prints the same records as JSON, one object per selected trace.
 
-A local subagent keeps its own session id but records into the parent trace. Its `invoke_agent` span is parented to the dispatching action. The attributes `agent.root_run.id`, `agent.parent_run.id`, and `agent.parent_call.id` identify the root session, immediate parent session, and dispatch call; `agent.subagent.name` labels the child invocation. Either session id resolves to that trace. Remote agents propagate caller trace context over `traceparent` without sharing execution lineage.
+An awaited subagent's first activation continues the caller trace. Its `invoke_agent` span is parented to the action span that dispatched it, so the span tree carries the relationship without duplicate lineage attributes; `agent.subagent.name` remains on the child invocation as a standalone label. Later turns in the child session start fresh activation traces. Remote agents propagate the caller context over `traceparent`.
 
-A durable session keeps one persisted trace context across turns and worker resumptions. Independently replayed attempts can still produce another trace; passing the session id shows every trace it produced, oldest first.
+Each `agent()` call inside an authored workflow has its own caller span, including sequential, parallel, and background calls. The workflow tool keeps its own `agent.action` and `execute_tool` spans.
 
-Every span carries a real duration except `agent.session`: an idle session never closes, so it is recorded as a zero-duration marker and the span tree shows its descendant extent instead. A turn's `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
+A durable session produces one bounded trace per turn. Worker replacements reuse the prepared context for the same turn, while a later turn or an independently replayed attempt starts a fresh trace. Passing the session id shows every trace it produced, oldest first.
+
+Every span carries a real duration. A turn's root `invoke_agent` span is written when the turn settles, so a running turn shows only its steps.
 
 Model and `execute_tool` spans omit their inputs and outputs by default. Set `EVE_TRACES_CONTENT=on` to capture system prompts, prompt messages, and response text for models, plus call arguments and results for tools. Each captured value is capped at 32 KB.
 

@@ -8,7 +8,7 @@ import {
   preserveSerializedAgentTraceState,
   readActionTraceContext,
   readCurrentSessionTraceDecision,
-  readSessionTraceContext,
+  readTurnTraceContext,
 } from "#tracing/agent-trace-context-store.js";
 
 describe("ContextAgentTraceStateStore", () => {
@@ -128,8 +128,8 @@ describe("ContextAgentTraceStateStore", () => {
   });
 });
 
-describe("readSessionTraceContext", () => {
-  it("reads one session's trace context out of a serialized context", async () => {
+describe("readTurnTraceContext", () => {
+  it("reads one active turn's trace context out of a serialized context", async () => {
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
       context.set(SessionTraceSeedKey, {
@@ -144,35 +144,49 @@ describe("readSessionTraceContext", () => {
       });
       new ContextAgentTraceStateStore().setSession("session-1", {
         context: spanContext("1", "2"),
+        decision: { action: "record", recordInputs: true, recordOutputs: false },
         rootSessionId: "session-1",
+      });
+      new ContextAgentTraceStateStore().setTurn("session-1", "turn-1", {
+        context: spanContext("3", "4"),
+        rootSessionId: "session-1",
+        sequence: 0,
+        startTimeMs: 1,
       });
     });
     const serialized = await serializeContext(context);
 
-    expect(readSessionTraceContext(serialized, "session-1")).toEqual({
-      ...spanContext("1", "2"),
+    expect(readTurnTraceContext(serialized, "session-1", "turn-1")).toEqual({
+      ...spanContext("3", "4"),
       decision: { action: "record", recordInputs: true, recordOutputs: false },
       forwardedTracePolicy: {
         ceiling: { recordInputs: true, recordOutputs: false },
         originAudience: "private",
       },
     });
-    expect(readSessionTraceContext(serialized, "session-2")).toBeUndefined();
-    expect(readSessionTraceContext({}, "session-1")).toBeUndefined();
+    expect(readTurnTraceContext(serialized, "session-1", "turn-2")).toBeUndefined();
+    expect(readTurnTraceContext({}, "session-1", "turn-1")).toBeUndefined();
   });
 
-  it("preserves a stored decision when the legacy context has no trace seed", async () => {
+  it("preserves a stored decision when the context has no trace seed", async () => {
     const context = new ContextContainer();
     await contextStorage.run(context, () => {
-      new ContextAgentTraceStateStore().setSession("session-1", {
+      const store = new ContextAgentTraceStateStore();
+      store.setSession("session-1", {
         context: spanContext("1", "2"),
         decision: { action: "record", recordInputs: false, recordOutputs: true },
         rootSessionId: "session-1",
       });
+      store.setTurn("session-1", "turn-1", {
+        context: spanContext("3", "4"),
+        rootSessionId: "session-1",
+        sequence: 0,
+        startTimeMs: 1,
+      });
     });
 
-    expect(readSessionTraceContext(await serializeContext(context), "session-1")).toEqual({
-      ...spanContext("1", "2"),
+    expect(readTurnTraceContext(await serializeContext(context), "session-1", "turn-1")).toEqual({
+      ...spanContext("3", "4"),
       decision: { action: "record", recordInputs: false, recordOutputs: true },
     });
   });
