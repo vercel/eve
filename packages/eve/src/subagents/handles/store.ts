@@ -1,13 +1,14 @@
 import { z } from "#compiled/zod/index.js";
 
 import type { SessionStateMap } from "#harness/types.js";
-import { traceIdSchema } from "#protocol/agent-invocation-trace.js";
+import { isTraceId } from "#protocol/agent-invocation-trace.js";
 
 import { AGENT_HANDLES_STATE_KEY } from "./state-key.js";
 
 export { AGENT_HANDLES_STATE_KEY };
 
 const MAX_STATUS_LENGTH = 120;
+const traceIdSchema = z.string().refine(isTraceId);
 
 /**
  * Stable identity of one delegated child, minted before its start side

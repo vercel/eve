@@ -4,10 +4,10 @@ import {
 } from "#channel/forwarded-principal.js";
 import type { SessionParent } from "#channel/types.js";
 import {
-  createSessionAcceptedResponseSchema,
   traceCoordinatesEqual,
   type AgentInvocationTrace,
 } from "#protocol/agent-invocation-trace.js";
+import { createSessionAcceptedResponseSchema } from "#protocol/agent-invocation-trace-validation.js";
 
 export interface RemoteAgentCreateRequestBody {
   readonly forwardedPrincipal?: ForwardedPrincipal;

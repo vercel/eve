@@ -1,6 +1,5 @@
-import { z } from "#compiled/zod/index.js";
-
 import type { SessionParent, SessionTraceContext } from "#channel/types.js";
+import type { ForwardedTraceAssertion } from "#shared/forwarded-trace-policy.js";
 
 export const AGENT_TRACE_SCHEMA_VERSION = 4 as const;
 export const AGENT_INVOCATION_TRACE_WIRE_VERSION = 1 as const;
@@ -19,48 +18,18 @@ export const AGENT_TRACE_ATTRIBUTES = {
   sessionKind: "agent.session.kind",
 } as const;
 
-export const traceIdSchema = z
-  .string()
-  .regex(/^[0-9a-f]{32}$/u)
-  .refine((value) => !/^0+$/u.test(value));
-export const spanIdSchema = z
-  .string()
-  .regex(/^[0-9a-f]{16}$/u)
-  .refine((value) => !/^0+$/u.test(value));
-export const forwardedTracePolicySchema = z.strictObject({
-  ceiling: z.strictObject({ recordInputs: z.boolean(), recordOutputs: z.boolean() }),
-  originAudience: z.enum(["private", "public", "unknown"]),
-});
+export type TraceCoordinates = {
+  readonly spanId: string;
+  readonly traceFlags: number;
+  readonly traceId: string;
+};
 
-export const traceCoordinatesSchema = z.strictObject({
-  spanId: spanIdSchema,
-  traceFlags: z.number().int().min(0).max(255),
-  traceId: traceIdSchema,
-});
-
-export const sessionParentSchema: z.ZodType<SessionParent> = z.strictObject({
-  callId: z.string().min(1),
-  rootSessionId: z.string().min(1),
-  sessionId: z.string().min(1),
-  turn: z.strictObject({ id: z.string().min(1), sequence: z.number().int().min(0) }),
-});
-
-export const agentInvocationTraceSchema = z.strictObject({
-  forwardedTracePolicy: forwardedTracePolicySchema.optional(),
-  parent: traceCoordinatesSchema.optional(),
-  seed: traceCoordinatesSchema,
-  version: z.literal(AGENT_INVOCATION_TRACE_WIRE_VERSION),
-});
-
-export type AgentInvocationTrace = z.infer<typeof agentInvocationTraceSchema>;
-export type TraceCoordinates = z.infer<typeof traceCoordinatesSchema>;
-
-export const createSessionAcceptedResponseSchema = z.object({
-  ok: z.literal(true),
-  sessionId: z.string().min(1),
-  status: z.literal("accepted"),
-  trace: traceCoordinatesSchema.optional(),
-});
+export type AgentInvocationTrace = {
+  readonly forwardedTracePolicy?: ForwardedTraceAssertion;
+  readonly parent?: TraceCoordinates;
+  readonly seed: TraceCoordinates;
+  readonly version: typeof AGENT_INVOCATION_TRACE_WIRE_VERSION;
+};
 
 export function buildAgentInvocationParent(input: {
   readonly callId: string;
@@ -82,14 +51,21 @@ export function buildAgentInvocationTrace(input: {
   readonly parent?: SessionTraceContext;
   readonly seed: SessionTraceContext;
 }): AgentInvocationTrace {
-  const result: AgentInvocationTrace = {
+  const result: {
+    forwardedTracePolicy?: AgentInvocationTrace["forwardedTracePolicy"];
+    parent?: TraceCoordinates;
+    seed: TraceCoordinates;
+    version: typeof AGENT_INVOCATION_TRACE_WIRE_VERSION;
+  } = {
     seed: traceCoordinates(input.seed),
     version: AGENT_INVOCATION_TRACE_WIRE_VERSION,
   };
   if (input.forwardedTracePolicy !== undefined) {
     result.forwardedTracePolicy = input.forwardedTracePolicy;
   }
-  if (input.parent !== undefined) result.parent = traceCoordinates(input.parent);
+  if (input.parent !== undefined) {
+    result.parent = traceCoordinates(input.parent);
+  }
   return result;
 }
 
@@ -127,6 +103,30 @@ export function traceCoordinatesEqual(left: TraceCoordinates, right: TraceCoordi
     left.traceId === right.traceId &&
     left.spanId === right.spanId &&
     left.traceFlags === right.traceFlags
+  );
+}
+
+export function isTraceId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{32}$/u.test(value) && !/^0+$/u.test(value);
+}
+
+export function isSpanId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{16}$/u.test(value) && !/^0+$/u.test(value);
+}
+
+export function isTraceCoordinates(value: unknown): value is TraceCoordinates {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    keys.length === 3 &&
+    keys.includes("spanId") &&
+    keys.includes("traceFlags") &&
+    keys.includes("traceId") &&
+    isSpanId(Reflect.get(value, "spanId")) &&
+    Number.isInteger(Reflect.get(value, "traceFlags")) &&
+    Reflect.get(value, "traceFlags") >= 0 &&
+    Reflect.get(value, "traceFlags") <= 255 &&
+    isTraceId(Reflect.get(value, "traceId"))
   );
 }
 

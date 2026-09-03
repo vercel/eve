@@ -8,11 +8,11 @@ import type {
   SessionParent,
   TurnPolicy,
 } from "#channel/types.js";
+import type { AgentInvocationTrace } from "#protocol/agent-invocation-trace.js";
 import {
   agentInvocationTraceSchema,
-  type AgentInvocationTrace,
   sessionParentSchema,
-} from "#protocol/agent-invocation-trace.js";
+} from "#protocol/agent-invocation-trace-validation.js";
 import type { Session } from "#channel/session.js";
 import { parseSessionCallback } from "#channel/session-callback.js";
 import {
