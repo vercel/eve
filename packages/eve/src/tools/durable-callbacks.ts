@@ -109,10 +109,28 @@ export function hasUnregisteredDurableDynamicCallbacks(
   metadata: readonly { callbacks: DurableDynamicToolCallbacks; name: string }[],
 ): boolean {
   return metadata.some((entry) =>
-    (Object.keys(entry.callbacks) as DurableDynamicCallbackPhase[]).some(
+    durableCallbackPhases(entry.callbacks).some(
       (phase) => lookupDurableDynamicCallback(entry.name, phase) === undefined,
     ),
   );
+}
+
+function durableCallbackPhases(
+  callbacks: DurableDynamicToolCallbacks,
+): DurableDynamicCallbackPhase[] {
+  const entries: readonly (readonly [
+    DurableDynamicCallbackPhase,
+    DurableDynamicCallbackReference | undefined,
+  ])[] = [
+    ["execute", callbacks.execute],
+    ["activityComplete", callbacks.activity?.complete],
+    ["activityDelta", callbacks.activity?.delta],
+    ["activityStart", callbacks.activity?.start],
+    ["approvalRequest", callbacks.approvalRequest],
+    ["approvalResponse", callbacks.approvalResponse],
+    ["toModelOutput", callbacks.toModelOutput],
+  ];
+  return entries.flatMap(([phase, reference]) => (reference === undefined ? [] : [phase]));
 }
 
 /** Marks a live callback with the descriptor needed to register it at resolve time. */
