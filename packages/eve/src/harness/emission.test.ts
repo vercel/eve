@@ -583,7 +583,7 @@ describe("emitStreamContent action requests", () => {
       [
         "web_search",
         {
-          activity: {
+          label: {
             complete: (_input, output) =>
               `Found ${(output as { results: unknown[] }).results.length}\u0000 final results`,
             delta: (_input, partial) =>
@@ -729,16 +729,15 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
-
-  it("does not fail tool streaming when activity projections throw", async () => {
+  it("does not fail tool streaming when label projections throw", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [
         "build_report",
         {
-          activityResult: () => {
+          resultPresentation: () => {
             throw new Error("result projection failed");
           },
-          activityUpdate: () => {
+          deltaPresentation: () => {
             throw new Error("update projection failed");
           },
           description: "Build a report.",
@@ -840,13 +839,12 @@ describe("emitStreamContent action requests", () => {
     });
   });
 
-
-  it("does not fail tool streaming when activity projections throw", async () => {
+  it("does not fail tool streaming when label projections throw", async () => {
     const tools = new Map<string, HarnessToolDefinition>([
       [
         "build_report",
         {
-          activity: {
+          label: {
             complete: () => {
               throw new Error("result projection failed");
             },

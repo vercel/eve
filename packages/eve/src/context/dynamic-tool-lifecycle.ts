@@ -187,7 +187,7 @@ export function validateDurableDynamicToolCallbacks(
   const unknownPhases = Object.keys(raw).filter(
     (key) =>
       key !== "execute" &&
-      key !== "activity" &&
+      key !== "label" &&
       key !== "approvalKey" &&
       key !== "approvalRequest" &&
       key !== "approvalResponse" &&
@@ -214,25 +214,25 @@ export function validateDurableDynamicToolCallbacks(
     stamped: raw.execute,
     required: true,
   })!;
-  const activityComplete = validateReference({
+  const labelComplete = validateReference({
     name,
     owner,
-    phase: "activityComplete",
-    stamped: raw.activity?.complete,
+    phase: "labelComplete",
+    stamped: raw.label?.complete,
     required: hasLabelComplete,
   });
-  const activityDelta = validateReference({
+  const labelDelta = validateReference({
     name,
     owner,
-    phase: "activityDelta",
-    stamped: raw.activity?.delta,
+    phase: "labelDelta",
+    stamped: raw.label?.delta,
     required: hasLabelDelta,
   });
-  const activityStart = validateReference({
+  const labelStart = validateReference({
     name,
     owner,
-    phase: "activityStart",
-    stamped: raw.activity?.start,
+    phase: "labelStart",
+    stamped: raw.label?.start,
     required: hasLabelStart,
   });
   const approvalKey = validateReference({
@@ -266,7 +266,7 @@ export function validateDurableDynamicToolCallbacks(
 
   const callbacks: {
     execute: DurableDynamicCallbackReference;
-    activity?: {
+    label?: {
       complete?: DurableDynamicCallbackReference;
       delta?: DurableDynamicCallbackReference;
       start?: DurableDynamicCallbackReference;
@@ -276,15 +276,11 @@ export function validateDurableDynamicToolCallbacks(
     approvalResponse?: DurableDynamicCallbackReference;
     toModelOutput?: DurableDynamicCallbackReference;
   } = { execute };
-  if (
-    activityComplete !== undefined ||
-    activityDelta !== undefined ||
-    activityStart !== undefined
-  ) {
-    callbacks.activity = {
-      complete: activityComplete,
-      delta: activityDelta,
-      start: activityStart,
+  if (labelComplete !== undefined || labelDelta !== undefined || labelStart !== undefined) {
+    callbacks.label = {
+      complete: labelComplete,
+      delta: labelDelta,
+      start: labelStart,
     };
   }
   if (approvalKey !== undefined) callbacks.approvalKey = approvalKey;

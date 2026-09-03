@@ -173,7 +173,7 @@ export type ResolvedToolDefinition = Readonly<
      */
     readonly inputSchema: ToolSchema | null;
     /** Presentation projected from tool lifecycle values. */
-    readonly activity?: import("#tools/definition.js").InternalToolActivityDefinition;
+    readonly label?: import("#tools/definition.js").InternalToolLabelDefinition;
     /**
      * Optional validated runtime output schema.
      */

@@ -1536,7 +1536,7 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     expect(approvalFn).toHaveBeenCalledExactlyOnceWith(approvalCtx);
   });
 
-  it("replays activity callbacks", () => {
+  it("replays label callbacks", () => {
     const ctx = createCtx();
     const owner = {
       sessionId: ctx.require(SessionIdKey),
@@ -1547,22 +1547,22 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     registerTestCallback("deploy", "execute", () => ({ ok: true }), owner);
     registerTestCallback(
       "deploy",
-      "activityStart",
+      "labelStart",
       (_closure, input) => `Deploy to ${String((input as { environment: unknown }).environment)}`,
       owner,
     );
     registerTestCallback(
       "deploy",
-      "activityComplete",
+      "labelComplete",
       (_closure, _input, output) => `Deployed to ${String((output as { url: unknown }).url)}`,
     );
-    registerTestCallback("deploy", "activityDelta", (_closure, _input, partial) =>
+    registerTestCallback("deploy", "labelDelta", (_closure, _input, partial) =>
       String((partial as { phase: unknown }).phase),
     );
     ctx.set(TurnDynamicToolMetadataKey, [
       {
         callbacks: {
-          activity: {
+          label: {
             complete: { closure: {} },
             delta: { closure: {} },
             start: { closure: {} },
@@ -1578,11 +1578,11 @@ describe("programmatic dynamic tools (no bundler transform)", () => {
     ]);
 
     const tool = buildDynamicTools(ctx)[0];
-    expect(tool?.activity?.start?.({ environment: "preview" })).toBe("Deploy to preview");
+    expect(tool?.label?.start?.({ environment: "preview" })).toBe("Deploy to preview");
     expect(
-      tool?.activity?.complete?.({ environment: "preview" }, { url: "preview.example.com" }),
+      tool?.label?.complete?.({ environment: "preview" }, { url: "preview.example.com" }),
     ).toBe("Deployed to preview.example.com");
-    expect(tool?.activity?.delta?.({ environment: "preview" }, { phase: "Uploading" })).toBe(
+    expect(tool?.label?.delta?.({ environment: "preview" }, { phase: "Uploading" })).toBe(
       "Uploading",
     );
     clearDurableDynamicCallbacks(owner.sessionId);
