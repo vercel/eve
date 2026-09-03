@@ -26,37 +26,8 @@ changelog:
 
 Preserve the checklist and check only verified items.
 
-## Diff size
-
-Append `### Diff size` after the checklist. It must be the final section and
-account for every changed file exactly once in this order: Docs,
-Implementation, then Tests. Include every category, even when it has no files.
-Each category heading must show its file count, additions, and deletions.
-
-```markdown
-### Diff size
-
-**Docs** — 0 files · `+0 / -0`
-
-Not applicable.
-
-**Implementation** — 1 file · `+6 / -2`
-
-Keeps the missing-directory handling local to the compiler.
-
-**Tests** — 1 file · `+14 / -0`
-
-Covers the regression without broad fixture changes.
-```
-
-Classify files by primary purpose. Reconcile the category totals with the full
-branch diff, and note binary files separately. Explain why each category is
-that size, not only its line count. Call out individual paths or add a concise
-category-local `<details>` block only when a generated, mechanical, fixture, or
-otherwise disproportionate portion needs reviewer context.
-
 ## Publish
 
-Before publishing, confirm the Summary leads with why the change is needed and
-the Diff size totals reconcile with the complete branch diff. Write the body to
-a file, then pass it to `gh pr create` or `gh pr edit` with `--body-file`.
+Before publishing, confirm the Summary leads with why the change is needed.
+Write the body to a file, then pass it to `gh pr create` or `gh pr edit` with
+`--body-file`.
